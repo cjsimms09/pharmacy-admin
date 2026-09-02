@@ -208,13 +208,27 @@ Everything below is calendarized with lead-time alerts (90/60/30/7 days), an own
 
 **Contract replay (renewal / alternative suppliers).** Replay the last 12 months of actual purchase lines (McKesson Connect invoice export — request now) through each candidate contract's terms (cost-plus/minus, generics program, rebate ladder, brand pricing, fees, payment terms) to a net-cost total on the pharmacy's real mix, with sensitivity to brand-shifting and generic share. Scores Cardinal, Cencora, Smith Drug, Morris & Dickson proposals on the same basis and quantifies each tier's value for the McKesson renewal.
 
+### 4.6 Exception-sheet mode (the simpler first version of ordering)
+
+PioneerRx keeps its reorder points, Recommended Order, and wholesaler transmission. The app does not become the ordering system. From the scheduled PioneerRx reports (usage, on-hand, claims, purchases/receiving) plus the McKesson Connect Price/Product Export (manual download, no EDI) it produces a daily **exception sheet**: lines to shift to a secondary (with savings and tier-safety), brand-shift alerts near a tier edge, below-cost "don't buy" items with alternatives, and returns with credit deadlines. Secondary prices come from the **last price actually paid per supplier per NDC** in the receiving data, refreshed with every purchase, optionally sharpened by a periodic price-list export. The buyer acts inside PioneerRx or the supplier's cart. No supplier integration is required; EDI or portal import is added later only for a supplier that justifies it. This mode keeps the rebate-tier math, NDC selection, below-cost detection, returns, and contract replay — the sources of nearly all the value — and gives up only real-time availability, automatic submission, and price discovery on never-bought items.
+
+### 4.7 Claim-to-contract matching (BIN/PCN/Group → contract)
+
+Three layers, cheapest first, feeding one **payer mapping table** with effective dates:
+
+1. **Adjudication response fields.** Include in the daily claims report: Network Reimbursement ID (545-2F), Plan ID (524-FO), Payer ID (568-J7), Basis of Reimbursement Determination (522-FM), and the reimbursement basis amounts the PBM returned. A Network ID maps directly to a line in the PSAO or direct contract; 522-FM says whether MAC, AWP-based, U&C, or contracted rate applied.
+2. **Payment fingerprinting.** Per BIN/PCN/Group/network cluster, compare paid amounts against AWP, NADAC, and each contract's formula; propose the best-fitting contract with a confidence score; owner confirms once; unmapped or changed clusters go to a review queue. Mappings are versioned by effective date because rates change on Jan 1.
+3. **Reference lists.** The PSAO's network-to-BIN/PCN list and the NCPDP processor directory seed the table.
+
+Downstream uses: expected-vs-actual reimbursement, MAC appeal candidates, below-cost fills by plan, contract performance by payer.
+
 ---
 
 ## 5. PioneerRx custom report specifications (patient-free)
 
 These are the reports to build in PioneerRx's report designer and schedule to the swept address. Every one excludes patient name, DOB, address, phone, email, member/cardholder ID, person code, and patient ID. Exact PioneerRx field names will be mapped once we see the designer.
 
-1. **Daily claims** (yesterday's transactions): Rx number, refill number, date filled, date sold, dispensed NDC, quantity, days supply, brand/generic flag, third party name, BIN, PCN, group, claim status (paid/reversed/rejected), authorization/claim reference number, ingredient cost submitted, adjudicated (plan pay), copay, sales tax, acquisition cost, gross profit, DIR estimate.
+1. **Daily claims** (yesterday's transactions): Rx number, refill number, date filled, date sold, dispensed NDC, quantity, days supply, brand/generic flag, third party name, BIN, PCN, group, claim status (paid/reversed/rejected), authorization/claim reference number, ingredient cost submitted, adjudicated (plan pay), copay, sales tax, acquisition cost, gross profit, DIR estimate, Network Reimbursement ID (545-2F), Plan ID (524-FO), Payer ID (568-J7), Basis of Reimbursement Determination (522-FM).
 2. **Daily payment status** (from Third Party Reconciliation): Rx number, refill number, date filled, third party, adjudicated amount, paid amount, payment date, check/EFT trace number, difference, fee/adjustment amounts, reconciliation status.
 3. **Daily usage** (for ordering): dispensed NDC, quantity dispensed, number of fills (aggregated by NDC — no Rx numbers needed).
 4. **Weekly inventory on hand**: NDC, description, on-hand quantity, package size, last cost, average cost, reorder point, max, last dispensed date, preferred supplier, inventory group.
