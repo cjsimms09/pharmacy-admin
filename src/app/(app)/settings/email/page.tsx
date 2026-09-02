@@ -91,8 +91,12 @@ export default async function EmailSettingsPage({ searchParams }: { searchParams
         <Field label={configured ? "Replace app password" : "App password"} hint={configured ? "Leave blank to keep the one already saved." : "The 16-character code from the steps above."}>
           <input name="mail_password" type="password" className="field font-mono" placeholder={configured ? "•••• •••• •••• ••••" : "abcd efgh ijkl mnop"} autoComplete="new-password" />
         </Field>
-        <Field label="Only accept mail from" hint="One address per line. A whole domain works too, like @pioneerrx.com. Anything else is left unread and never stored." className="sm:col-span-2">
-          <textarea name="mail_allowed_senders" className="field font-mono" rows={3} defaultValue={s.mail_allowed_senders} placeholder={"reports@pioneerrx.com\n@mckesson.com"} />
+        <Field
+          label="Only accept mail from (optional)"
+          hint="Leave this empty to accept mail from anyone — right for a mailbox used only for reports. To restrict it later, put one address per line; a whole domain works too, like @pioneerrx.com. Anything not listed is then left unread and never stored."
+          className="sm:col-span-2"
+        >
+          <textarea name="mail_allowed_senders" className="field font-mono" rows={3} defaultValue={s.mail_allowed_senders} placeholder="Empty = accept from anyone" />
         </Field>
         <div className="sm:col-span-2">
           <label className="flex items-center gap-2 text-sm">
@@ -118,6 +122,7 @@ export default async function EmailSettingsPage({ searchParams }: { searchParams
           <dl className="grid gap-2 text-sm sm:grid-cols-2">
             <div><dt className="text-xs uppercase tracking-wide text-ink-2">Automatic checking</dt><dd>{s.mail_enabled === "yes" ? <span className="badge badge-ok">on</span> : <span className="badge badge-muted">off</span>}</dd></div>
             <div><dt className="text-xs uppercase tracking-wide text-ink-2">Last check</dt><dd>{s.mail_last_sweep ? `${s.mail_last_sweep.replace("T", " ").slice(0, 16)} UTC` : "never"}</dd></div>
+            <div><dt className="text-xs uppercase tracking-wide text-ink-2">Accepting mail from</dt><dd>{s.mail_allowed_senders.trim() ? `${s.mail_allowed_senders.split(/[\n,;]+/).filter((x) => x.trim()).length} listed sender(s)` : "anyone"}</dd></div>
             <div className="sm:col-span-2"><dt className="text-xs uppercase tracking-wide text-ink-2">Last result</dt><dd>{s.mail_last_result || "—"}</dd></div>
           </dl>
           <div className="mt-4 flex flex-wrap gap-2">
@@ -131,7 +136,7 @@ export default async function EmailSettingsPage({ searchParams }: { searchParams
       <section className="card max-w-3xl">
         <h2 className="mb-1 font-semibold">What happens to the mail</h2>
         <ul className="ml-5 list-disc space-y-1 text-sm text-ink-2">
-          <li>Only unread messages from an allowed sender are opened. Everything else is left alone.</li>
+          <li>Only unread messages are opened. If you listed allowed senders, everything else is left alone; with the list empty, mail from anyone is accepted.</li>
           <li>Report attachments (PDF, CSV, Excel, text, images) are saved and listed in the Inbox.</li>
           <li>Text reports are checked column by column first. If one looks like a patient name, date of birth, phone, address, or member ID, the file is <b>refused</b> and never stored — you'll see it marked rejected with the column that caused it.</li>
           <li>Processed messages are marked as read in Gmail so the same report is never handled twice.</li>
