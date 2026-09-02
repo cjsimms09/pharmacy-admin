@@ -68,5 +68,10 @@ export function periodFromDue(dueOn: string) {
   return { periodStart: `${y1}-${String(mm1).padStart(2, "0")}-01`, periodEnd: lastDayOfMonth(y, m - 1) };
 }
 
+/** A write-up too short to satisfy the Board — an empty root cause analysis, or a one-line corrective action. */
+export function isThin(rca: string | null, cap: string | null): boolean {
+  return (rca ?? "").trim().length < 400 || (cap ?? "").trim().length < 400;
+}
+
 export const reviewStartDeadline = (reportCreatedOn: string) => addDays(reportCreatedOn, 7);
 export const reviewCompleteDeadline = (reportCreatedOn: string) => addDays(reportCreatedOn, 30);

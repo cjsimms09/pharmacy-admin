@@ -117,8 +117,21 @@ export default async function ImportReviewPage({ params, searchParams }: { param
               <Field label="Corrective action plan" className="sm:col-span-3"><textarea name={`inc_${i}_correctiveActionPlan`} className="field" rows={3} defaultValue={inc.correctiveActionPlan ?? ""} /></Field>
               <Field label="CAP implemented on"><input name={`inc_${i}_capImplementedOn`} type="date" className="field" defaultValue={inc.capImplementedOn ?? ""} /></Field>
               <label className="flex items-start gap-2 text-sm sm:col-span-2">
-                <input type="checkbox" name={`inc_${i}_strengthen`} defaultChecked={(inc.rootCauseAnalysis ?? "").length + (inc.correctiveActionPlan ?? "").length < 600} className="mt-1" />
-                <span>Strengthen the RCA and CAP with Claude when saving <span className="text-xs text-ink-3">(keeps the facts from the scan, expands them to the Board's expectations; the scanned text stays restorable on the incident)</span></span>
+                <input
+                  type="checkbox"
+                  name={`inc_${i}_strengthen`}
+                  defaultChecked={(inc.rootCauseAnalysis ?? "").trim().length < 200 || (inc.correctiveActionPlan ?? "").trim().length < 200}
+                  className="mt-1"
+                />
+                <span>
+                  Have Claude write the full root cause analysis and corrective action plan when saving
+                  <span className="block text-xs text-ink-3">
+                    {(inc.rootCauseAnalysis ?? "").trim().length < 200
+                      ? "This form has no real root cause analysis. Claude works backward from the corrective action and incident type to write one, and flags what you should confirm. "
+                      : "Keeps every fact from the scan and builds the Board's expected structure around it. "}
+                    The scanned wording stays restorable on the incident afterwards.
+                  </span>
+                </span>
               </label>
               <div className="sm:col-span-3">
                 <div className="label">CAP reviews recorded on summaries</div>

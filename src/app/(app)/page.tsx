@@ -5,6 +5,9 @@ import { db, schema } from "@/db";
 import { eq } from "drizzle-orm";
 import { PageHeader, Empty } from "@/components/ui";
 
+// Live compliance status — never serve a cached copy after an action changes it.
+export const dynamic = "force-dynamic";
+
 export default async function Dashboard() {
   const alerts = await computeAlerts();
   const period = nextCqiPeriod();

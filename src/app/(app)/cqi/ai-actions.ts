@@ -9,7 +9,7 @@ import { requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { newId } from "@/lib/crypto";
 import { storeFile } from "@/lib/files";
-import { capsToEvaluate, encodeRxNumbers, periodFromDue } from "@/lib/cqi";
+import { capsToEvaluate, encodeRxNumbers, isThin, periodFromDue } from "@/lib/cqi";
 import { describeError, draftCapEvaluations, extractPacket, writeRcaCap } from "@/lib/ai";
 
 function fail(path: string, msg: string): never {
@@ -113,6 +113,7 @@ export async function applyImport(id: string, fd: FormData) {
 
   // Incidents
   const nInc = Number(fd.get("incident_count") ?? 0);
+  const strengthenFailures: string[] = [];
   let created = 0;
   for (let i = 0; i < nInc; i++) {
     if (!fd.get(`inc_${i}_include`)) continue;
@@ -182,7 +183,9 @@ export async function applyImport(id: string, fd: FormData) {
       try {
         await strengthenIncident(incId, null, user);
       } catch (e) {
-        await audit({ action: "cqi.incident.ai_rca_cap_failed", userId: user.id, userName: user.name, entity: "cqi_incident", entityId: incId, details: describeError(e) });
+        const msg = describeError(e);
+        strengthenFailures.push(`incident #${next}: ${msg}`);
+        await audit({ action: "cqi.incident.ai_rca_cap_failed", userId: user.id, userName: user.name, entity: "cqi_incident", entityId: incId, details: msg });
       }
     }
     created++;
@@ -190,8 +193,12 @@ export async function applyImport(id: string, fd: FormData) {
   await db.update(schema.cqiImports).set({ status: "applied", appliedAt: new Date().toISOString() }).where(eq(schema.cqiImports.id, id));
   await audit({ action: "cqi.import.applied", userId: user.id, userName: user.name, entity: "cqi_import", entityId: id, details: `${created} incident(s), ${summaryIds.size} summary period(s)` });
   revalidatePath("/cqi");
+  revalidatePath("/cqi/incidents");
   revalidatePath("/");
-  redirect(`/cqi?saved=1`);
+  if (strengthenFailures.length > 0) {
+    redirect(`/cqi/incidents?error=${encodeURIComponent(`Records were created, but Claude could not write the analysis for ${strengthenFailures.length} of them: ${strengthenFailures[0]} — open each incident and use “Write with Claude”.`)}`);
+  }
+  redirect(`/cqi/incidents?saved=1`);
 }
 
 export async function discardImport(id: string) {
@@ -260,6 +267,30 @@ export async function restoreBeforeAi(id: string) {
   await audit({ action: "cqi.incident.ai_restore", userId: user.id, userName: user.name, entity: "cqi_incident", entityId: id });
   revalidatePath(`/cqi/incidents/${id}`);
   redirect(`/cqi/incidents/${id}?saved=1`);
+}
+
+/** Rewrites every incident whose analysis is missing or too thin to sign. Used after importing old packets. */
+export async function strengthenThinIncidents() {
+  const user = await requireManager();
+  const here = "/cqi/incidents";
+  const all = await db.query.cqiIncidents.findMany({ orderBy: (i, { desc }) => [desc(i.reportCreatedOn)] });
+  const thin = all.filter((i) => isThin(i.rootCauseAnalysis, i.correctiveActionPlan));
+  if (thin.length === 0) fail(here, "Every incident already has a full root cause analysis and corrective action plan.");
+  let done = 0;
+  const failures: string[] = [];
+  for (const inc of thin.slice(0, 20)) {
+    try {
+      await strengthenIncident(inc.id, null, user);
+      done++;
+    } catch (e) {
+      failures.push(`#${inc.incidentNumber}: ${describeError(e)}`);
+    }
+  }
+  await audit({ action: "cqi.incidents.ai_bulk_strengthen", userId: user.id, userName: user.name, details: `${done} rewritten, ${failures.length} failed` });
+  revalidatePath(here);
+  revalidatePath("/cqi");
+  if (failures.length > 0) fail(here, `Rewrote ${done}. ${failures.length} could not be done: ${failures[0]}`);
+  redirect(`${here}?saved=1&detail=${encodeURIComponent(`Rewrote ${done} incident write-up${done === 1 ? "" : "s"}. Read each one and correct anything that isn't right before signing.`)}`);
 }
 
 /** Draft CAP effectiveness comments for every CAP due on a summary that has no comment yet. */

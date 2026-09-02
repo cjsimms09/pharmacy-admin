@@ -9,6 +9,9 @@ import { DocumentList, UploadForm } from "@/components/documents";
 import { PersonForm } from "../person-form";
 import { addCe, addCredential, deleteCe, deleteCredential, updateCredential, updatePerson } from "../actions";
 
+// Live compliance status — never serve a cached copy after an action changes it.
+export const dynamic = "force-dynamic";
+
 export default async function PersonPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ error?: string; saved?: string; edit?: string }> }) {
   const user = await requireUser();
   const { id } = await params;

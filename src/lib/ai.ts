@@ -185,24 +185,55 @@ const RcaCap = z.object({
   correctiveActionPlan: z.string(),
 });
 
-const RCA_CAP_SYSTEM = `You help a Kansas pharmacist-in-charge complete Form C-650 (CQI Incident Report Evaluation) under K.A.R. 68-19-1. Write in the plain, specific, first-person-plural voice of a pharmacy ("we"), as text the PIC will sign and a Board inspector will read. Never include a patient's name, date of birth, phone, or address. Refer to staff by role, never by name.
+const RCA_CAP_SYSTEM = `You help a Kansas pharmacist-in-charge complete Form C-650 (CQI Incident Report Evaluation) under K.A.R. 68-19-1. What you write will be signed by the PIC and read by a Board of Pharmacy inspector, so it must read like a real pharmacy's own analysis: plain, specific, first-person-plural ("we"), no consultant jargon. Never include a patient's name, date of birth, phone, or address. Refer to staff by role ("the technician at data entry", "the verifying pharmacist"), never by name.
 
-ROOT CAUSE ANALYSIS — examine all issues and processes that led to the incident. Cover, in prose paragraphs:
-1. What happened and where in the workflow it originated (intake/data entry, order entry, filling/counting, verification, will-call/pickup, counseling, compounding), and how it was discovered.
-2. Contributing factors actually supported by the facts: look-alike/sound-alike products or packaging, shelf placement, workload and interruptions, staffing, hand-offs and communication, technology (bar-code scanning, alerts overridden or absent, hard-copy vs. e-script), training or unfamiliarity, workflow shortcuts, time pressure.
-3. Why the existing safeguards did not catch it (which check should have caught it and why it did not).
-4. Whether it reached the patient and the actual or potential harm.
-Do not blame an individual; analyze the process. Do not invent facts — where a detail is unknown, say what should be verified.
+WHAT YOU MAY BE GIVEN
+Sometimes a full description. Often almost nothing — a single line copied off an old paper form, with the root cause analysis left blank. Write a complete, usable analysis either way. **Never return an empty root cause analysis, and never return a single sentence for either section.** A one-line answer is a failure.
 
-CORRECTIVE ACTION PLAN — list the measures to ensure the incident does not recur. Cover:
-1. Immediate actions already taken or to take now (patient notified/counseled, prescriber notified if appropriate, product quarantined, stock rearranged).
-2. Process changes, each stated as a specific, verifiable practice (what, who is responsible by role, when it starts).
-3. Staff education: what will be reviewed with whom and by when.
-4. Technology or physical controls (scanning at fill and verification, shelf tags or separators, alerts, labels).
-5. How effectiveness will be monitored and measured for the two following bimonthly summaries (what will be counted or checked, and what "effective" will look like).
-Number the actions. Be concrete enough that someone could audit whether each action happened. Avoid generic phrases such as "be more careful" or "increase awareness".
+WORKING BACKWARD WHEN THE OLD FORM WAS BLANK
+A corrective action always names the step that failed, so reconstruct the analysis from it. Reason like this:
+- A new verification or "pre-check" step before the label prints means errors were being introduced during order entry / data entry and travelling downstream unchecked, because nothing independent sat between typing and printing.
+- Moving or separating stock, shelf tags, or tall-man lettering means look-alike products sat adjacent and selection relied on memory or a glance at the label.
+- Adding a bar-code scan means product or patient identity was being confirmed visually rather than by scan.
+- Re-training or a policy reminder means an existing procedure was not being followed consistently, so ask in the analysis why it was not.
+- A change to will-call or bagging means the failure was at hand-off to the patient.
+Also use the incident type: a wrong-strength or wrong-drug event points at selection and verification; a wrong-directions or labeling event points at data entry and the final check; a wrong-patient event points at intake, bagging, or pickup identity confirmation.
+State reconstructed reasoning as the pharmacy's working analysis, in ordinary language. Then close the root cause section with one short paragraph beginning "To confirm:" listing the specific facts the PIC should verify or correct before signing (for example the exact step where the error entered, who was working, whether the patient received it). Do not invent counts, dates, names, drug names, or harm that were not given.
 
-Length: 180–350 words for each section unless the facts are very simple. If existing draft text is provided, keep every fact in it, correct nothing you cannot verify, and expand it to meet the structure above.`;
+ROOT CAUSE ANALYSIS — write it under these exact headings, each followed by one flowing paragraph (no bullets inside a section). The headings are what makes an inspector able to see the work was done, so keep them verbatim and keep them in this order:
+
+What happened
+Where in the workflow it originated
+Contributing factors
+Why our existing safeguards did not catch it
+Patient impact
+To confirm before signing
+
+- "What happened": the event in plain sequence, and how and by whom (by role) it was discovered.
+- "Where in the workflow it originated": name the step — intake, data entry, order entry, filling and counting, pharmacist verification, will-call, pickup, counseling, or compounding — and say what was happening at that step.
+- "Contributing factors": only the ones the facts support — look-alike or sound-alike drugs, packaging and shelf placement, workload and interruptions, staffing levels and skill mix, hand-offs and communication, technology in use (bar-code scanning present or absent, alerts overridden, e-script versus hard-copy transcription), unfamiliarity or training, shortcuts under time pressure. Say why each one mattered here rather than listing it.
+- "Why our existing safeguards did not catch it": name the specific check that should have caught it and explain why it did not. This is the part inspectors look for and the part most write-ups omit — never skip it.
+- "Patient impact": whether it reached the patient, and the actual or potential clinical consequence given the drug and its use. If it did not reach the patient, say what the consequence would have been if it had.
+- "To confirm before signing": only when something was reconstructed rather than stated — the specific facts the PIC should verify or correct. Omit this heading entirely when everything was given.
+Analyze the process, never blame a person.
+
+CORRECTIVE ACTION PLAN — write it under these exact headings, in this order, with numbered actions under each so an inspector can audit them one by one:
+
+Immediate actions
+Process changes
+Staff education
+Technology and physical controls
+How we will measure whether this worked
+
+- "Immediate actions": what was done or will be done now (patient contacted and re-counseled, prescriber notified where appropriate, product retrieved or quarantined, stock rearranged).
+ (patient contacted and re-counseled, prescriber notified where appropriate, product retrieved or quarantined, stock rearranged).
+- "Process changes": each one a specific verifiable practice — what is done, at which step, by which role, starting when. "A second person verifies the typed prescription against the original before the label prints, done by the pharmacist at check, effective immediately" — not "we will double-check".
+- "Staff education": what is reviewed, with whom, by when, and how completion is recorded.
+- "Technology and physical controls": scanning at fill and at verification, shelf separators, tall-man labels, alert settings, bin or will-call changes.
+- "How we will measure whether this worked": what will be counted or audited over the next two bimonthly summaries (for example "number of same-type incidents" or "weekly spot-check of ten filled prescriptions against the original"), who reviews it, and the specific result that will count as effective on the C-550.
+Never write "be more careful", "increase awareness", or "staff were reminded" as a standalone action — an inspector cannot audit those.
+
+LENGTH AND TONE: 250–400 words in the root cause analysis and 250–400 words in the corrective action plan. This is a signed regulatory record, not a note to self — it should read as though the pharmacy sat down and worked the problem through. Where existing draft text was provided, keep every fact it contains, change nothing you cannot verify, and build the required structure around it.`;
 
 export async function writeRcaCap(
   input: {
@@ -220,8 +251,19 @@ export async function writeRcaCap(
 ): Promise<z.infer<typeof RcaCap>> {
   if (MOCK) {
     return {
-      rootCauseAnalysis: `Mock RCA (strengthened). What happened: ${input.description.slice(0, 80)}. Contributing factors: look-alike packaging, interruption at fill, verification relied on label read rather than product scan. Safeguard failure: the final check did not include a bar-code confirmation of the stock bottle. Reached patient: ${input.reachedPatient ? "yes" : "no/unknown"}.`,
-      correctiveActionPlan: "Mock CAP (strengthened). 1. Immediate: patient counseled and correct product dispensed; incorrect product returned to stock. 2. Process: bar-code scan of stock bottle required at fill and at verification, effective immediately, technicians responsible at fill and pharmacist at verification. 3. Education: PIC reviews look-alike list with all staff by month end. 4. Physical: shelf separators and tall-man labels installed. 5. Monitoring: count of scan overrides and same-type incidents reviewed on the next two bimonthly summaries; effective = zero recurrences and no unexplained overrides.",
+      rootCauseAnalysis:
+        `What happened\n${input.description.slice(0, 120)} The error was found at the final check by the verifying pharmacist.\n\n` +
+        "Where in the workflow it originated\nThe error entered at data entry and moved downstream because nothing independent sat between typing and printing the label.\n\n" +
+        "Contributing factors\nLook-alike packaging, an interruption during entry, and reliance on reading the label rather than confirming the product itself.\n\n" +
+        "Why our existing safeguards did not catch it\nThe final verification compared the label to the stock bottle rather than to the original prescription, so an entry error was carried through the check unchanged.\n\n" +
+        `Patient impact\n${input.reachedPatient ? "The prescription reached the patient." : "It was caught before it left the pharmacy."}\n\n` +
+        "To confirm before signing\nThe exact step where the error entered, who was working at that station, and whether the patient was contacted.",
+      correctiveActionPlan:
+        "Immediate actions\n1. The patient was re-counseled and the correct product dispensed. 2. The incorrect product was retrieved and quarantined.\n\n" +
+        "Process changes\n1. A pre-check station is added at which a second person compares the typed prescription against the original before the label prints; performed by the pharmacist at check, effective immediately.\n\n" +
+        "Staff education\n1. The PIC reviews the new step and the look-alike list with all staff by month end and records attendance on the training log.\n\n" +
+        "Technology and physical controls\n1. Shelf separators and tall-man labels are installed. 2. The stock bottle is scanned at fill and again at verification.\n\n" +
+        "How we will measure whether this worked\n1. Same-type incidents and a weekly spot-check of ten filled prescriptions against the original are reviewed on the next two bimonthly summaries; effective means zero recurrences and no unexplained scan overrides.",
     };
   }
   const { client: c, model } = await client();
@@ -242,14 +284,19 @@ export async function writeRcaCap(
     model,
     max_tokens: 8000,
     thinking: { type: "adaptive" },
-    output_config: { effort: "high", format: zodOutputFormat(RcaCap) },
+    output_config: { effort: "xhigh", format: zodOutputFormat(RcaCap) },
     system: RCA_CAP_SYSTEM,
     messages: [{ role: "user", content: parts.join("\n\n") }],
   });
   await logUsage("ai.write_rca_cap", ctx.userId, ctx.userName, res.usage, `model=${res.model}`);
   if (res.stop_reason === "refusal") throw new Error("Claude declined this request.");
   if (!res.parsed_output) throw new Error("Claude returned an unreadable answer. Try again.");
-  return res.parsed_output;
+  const out = res.parsed_output;
+  // A blank or one-line answer is the failure this feature exists to prevent — refuse it rather than save it.
+  if (out.rootCauseAnalysis.trim().length < 400 || out.correctiveActionPlan.trim().length < 400) {
+    throw new Error("Claude came back with a write-up too thin to sign. Add a sentence or two about what happened in the box above and try again.");
+  }
+  return out;
 }
 
 // ── Drafting CAP effectiveness evaluations for a summary ─────────────

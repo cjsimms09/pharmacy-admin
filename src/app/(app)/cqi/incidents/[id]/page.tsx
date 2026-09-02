@@ -12,6 +12,9 @@ import { deleteIncident, updateIncident } from "../../actions";
 import { restoreBeforeAi, suggestForIncident } from "../../ai-actions";
 import { hasApiKey } from "@/lib/ai";
 
+// Live compliance status — never serve a cached copy after an action changes it.
+export const dynamic = "force-dynamic";
+
 export default async function IncidentPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ error?: string; saved?: string; ai?: string }> }) {
   await requireManager();
   const { id } = await params;

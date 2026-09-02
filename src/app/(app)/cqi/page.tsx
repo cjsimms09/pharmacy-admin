@@ -8,6 +8,8 @@ import { uploadHistoricalSummary } from "./actions";
 import { reviewCompleteDeadline, reviewStartDeadline } from "@/lib/cqi";
 
 export const metadata = { title: "CQI program" };
+// Live compliance status — never serve a cached copy after an action changes it.
+export const dynamic = "force-dynamic";
 
 export default async function CqiPage({ searchParams }: { searchParams: Promise<{ saved?: string; error?: string }> }) {
   await requireManager();
