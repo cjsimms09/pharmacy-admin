@@ -186,6 +186,18 @@ Everything below is calendarized with lead-time alerts (90/60/30/7 days), an own
 
 ---
 
+### 4.5 Advanced purchasing analyses (added after owner discussion)
+
+**Recommended returns.** For each on-hand item: dollars at risk × probability of non-use before the return window closes, using weekly on-hand/expiry, daily velocity, invoice cost, and each supplier's return policy (window before expiry, restocking fees, non-returnables, reverse-distributor cutoff). Time-aware recommendations ("return now at full credit; partial credit after this date"), with feedback into max on-hand for items returned repeatedly.
+
+**Two-cost purchasing (the rebate game).** Every purchase has an invoice cost and a ratio effect. The engine computes a period-specific *shadow price* on McKesson denominator dollars from month- and quarter-to-date position and projected finish, so a brand bought from a secondary at a small premium is recommended when it protects a tier, and secondaries are cleared for generics when a tier is safely held. Constraints modeled from the contract file: primary-vendor minimum commitments, brand pricing tied to volume, payment terms, promotional windows, timing within the period.
+
+**MAC appeal pipeline.** Detect (paid vs actual invoice acquisition cost and NADAC, with Kansas appeal-window deadlines — statute days to verify), build evidence packets per PBM/PSAO format, produce batch files where the PSAO accepts them (portal submission may remain manual for some PBMs), track status and outcomes, and learn which PBM/drug combinations succeed.
+
+**Contract replay (renewal / alternative suppliers).** Replay the last 12 months of actual purchase lines (McKesson Connect invoice export — request now) through each candidate contract's terms (cost-plus/minus, generics program, rebate ladder, brand pricing, fees, payment terms) to a net-cost total on the pharmacy's real mix, with sensitivity to brand-shifting and generic share. Scores Cardinal, Cencora, Smith Drug, Morris & Dickson proposals on the same basis and quantifies each tier's value for the McKesson renewal.
+
+---
+
 ## 5. PioneerRx custom report specifications (patient-free)
 
 These are the reports to build in PioneerRx's report designer and schedule to the swept address. Every one excludes patient name, DOB, address, phone, email, member/cardholder ID, person code, and patient ID. Exact PioneerRx field names will be mapped once we see the designer.
