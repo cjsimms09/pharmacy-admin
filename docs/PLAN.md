@@ -138,7 +138,19 @@ Design rules: every feed has a **fingerprint** (sender + subject pattern + attac
 3. **Reimbursement-aware buying.** Expected reimbursement per unit (contract formula or NADAC-based estimate) beside acquisition cost; flags **below-cost** items before they're bought and suggests NDC alternatives within the same RxNorm concept that reimburse better.
 4. **Secondary supplier coverage.** Price and availability from suppliers PioneerRx isn't EDI-connected to, via their price files or exports.
 5. **Contract compliance dashboard.** Where we stand against every threshold, projected rebate dollars, what one more $1,000 of OneStop generics is worth this month.
-6. **Output**: a recommended PO per supplier with explanations, exportable as CSV for PioneerRx PO import or the supplier's order-upload format; the buyer confirms in the supplier's own system (we do not automate supplier portals — McKesson's terms prohibit it, and EDI/Data Exchange is the sanctioned path).
+6. **Output**: a recommended PO per supplier with explanations, submitted through the most automated sanctioned route that supplier offers (see "Order submission routes" below). We do not automate supplier portals: McKesson's and Cardinal's terms explicitly prohibit bots and scrapers.
+
+**Order submission routes (research, Sept 2026).** PioneerRx has no purchase-order import (no file, no API, no paste), so PioneerRx is not the channel; orders are placed at the supplier and PioneerRx receives them through the supplier's existing 856/810 flow, which is how every third-party purchasing tool works today. Per supplier:
+
+| Supplier | Most automated route | Fallback | Confirmations back |
+|---|---|---|---|
+| McKesson | EDI 850 from the app (855/856/810/832 back); single-store onboarding to confirm | McKesson Connect Data Exchange **Purchase Order Import** (mapped Excel/delimited file, saved import template; human clicks submit) | 855 fills/shorts/subs; portal Prepare-PO flags; Invoice/Receipt Export |
+| Anda | EDI 850 + 997 (855/856 optional) | Anda Online cart (order-upload format unconfirmed) | 855/856 if enabled; portal status |
+| ParMed (Cardinal) | Cardinal EDI 850/855/856/810/832 if extended to ParMed | Cardinal **APOI** cart import if available to ParMed; portal/app | 855/856/810 or portal |
+| IPC Warehouse | "EDI ordering through PMS" — scope to confirm | order.ipcrx.com upload/cart | portal |
+| IPD | none found | portal cart from the app's pick list | portal |
+
+No supplier offers a public ordering API. Where a supplier only has a portal, the app produces the pick list (or the supplier's upload file where one exists) and the buyer submits it; the app then reconciles what was actually received from the PioneerRx purchases/receiving report and the supplier invoice.
 
 **Contract term schema (rebate)** — the fields the JSON must capture: measurement period (month/quarter), numerator item set definition (e.g. OneStop-eligible NDC list or flag), denominator definition, tier ladder `[ {threshold_ratio, rebate_pct} ]` (non-cumulative), exclusions (drop-ship, returns, credits, specific programs), payout timing and method (credit memo), prompt-pay terms, promotional overlays with date windows and caps, effective dates. IPC Pharmacy Select purchases through McKesson count toward GCR and earn IPC quarterly rebates — modeled as a second contract layered on the same purchases.
 
