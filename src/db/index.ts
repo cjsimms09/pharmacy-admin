@@ -1,10 +1,11 @@
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { createClient } from "@libsql/client";
+import { drizzle } from "drizzle-orm/libsql";
 import fs from "node:fs";
 import path from "node:path";
 import * as schema from "./schema";
 
+// SQLite via libsql: ships prebuilt binaries for Windows/macOS/Linux, so nothing compiles on install.
+// Migrations are applied by `npm run db:migrate` (run automatically by `npm start` and `npm run dev`).
 const dbPath = process.env.DATABASE_PATH ?? "./data/pharmacy-admin.db";
 
 declare global {
@@ -13,18 +14,12 @@ declare global {
 }
 
 function createDb() {
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  const sqlite = new Database(dbPath);
-  sqlite.pragma("journal_mode = WAL");
-  sqlite.pragma("foreign_keys = ON");
-  sqlite.pragma("busy_timeout = 5000");
-  const db = drizzle(sqlite, { schema });
-  // Apply migrations on startup so a fresh clone works with `npm run dev`.
-  const migrationsFolder = path.join(process.cwd(), "drizzle");
-  if (fs.existsSync(migrationsFolder)) {
-    migrate(db, { migrationsFolder });
-  }
-  return db;
+  fs.mkdirSync(path.dirname(path.resolve(dbPath)), { recursive: true });
+  const client = createClient({ url: `file:${path.resolve(dbPath)}` });
+  void client.execute("PRAGMA journal_mode = WAL");
+  void client.execute("PRAGMA foreign_keys = ON");
+  void client.execute("PRAGMA busy_timeout = 5000");
+  return drizzle(client, { schema });
 }
 
 export const db = globalThis.__pharmacyDb ?? createDb();

@@ -2,16 +2,17 @@
 import "dotenv/config";
 import readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
-import Database from "better-sqlite3";
+import path from "node:path";
+import { createClient } from "@libsql/client";
 import bcrypt from "bcryptjs";
 import crypto from "node:crypto";
 
-const dbPath = process.env.DATABASE_PATH ?? "./data/pharmacy-admin.db";
-const sqlite = new Database(dbPath);
+const dbPath = path.resolve(process.env.DATABASE_PATH ?? "./data/pharmacy-admin.db");
+const client = createClient({ url: `file:${dbPath}` });
 
 async function main() {
   const rl = readline.createInterface({ input: stdin, output: stdout });
-  const count = (sqlite.prepare("select count(*) as n from users").get() as { n: number }).n;
+  const count = Number((await client.execute("select count(*) as n from users")).rows[0].n);
   console.log(count === 0 ? "No users yet. Create the owner login." : `${count} user(s) exist. Create another login.`);
   const name = (await rl.question("Full name: ")).trim();
   const username = (await rl.question("Username (lowercase, no spaces): ")).trim().toLowerCase();
@@ -25,9 +26,10 @@ async function main() {
   }
   rl.close();
   const hash = await bcrypt.hash(password, 12);
-  sqlite
-    .prepare("insert into users (id, name, username, password_hash, role, active) values (?, ?, ?, ?, ?, 1)")
-    .run(crypto.randomUUID(), name, username, hash, role);
+  await client.execute({
+    sql: "insert into users (id, name, username, password_hash, role, active) values (?, ?, ?, ?, ?, 1)",
+    args: [crypto.randomUUID(), name, username, hash, role],
+  });
   console.log(`Created ${role} login "${username}".`);
 }
 

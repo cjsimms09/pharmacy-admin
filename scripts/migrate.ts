@@ -1,14 +1,22 @@
 /* Applies pending migrations from ./drizzle to the SQLite database. */
 import "dotenv/config";
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { createClient } from "@libsql/client";
+import { drizzle } from "drizzle-orm/libsql";
+import { migrate } from "drizzle-orm/libsql/migrator";
 import fs from "node:fs";
 import path from "node:path";
 
-const dbPath = process.env.DATABASE_PATH ?? "./data/pharmacy-admin.db";
+const dbPath = path.resolve(process.env.DATABASE_PATH ?? "./data/pharmacy-admin.db");
 fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-const sqlite = new Database(dbPath);
-sqlite.pragma("journal_mode = WAL");
-migrate(drizzle(sqlite), { migrationsFolder: "./drizzle" });
-console.log(`Database ready at ${dbPath}`);
+const client = createClient({ url: `file:${dbPath}` });
+
+async function main() {
+  await client.execute("PRAGMA journal_mode = WAL");
+  await migrate(drizzle(client), { migrationsFolder: "./drizzle" });
+  console.log(`Database ready at ${dbPath}`);
+}
+
+main().catch((e) => {
+  console.error(e.message ?? e);
+  process.exit(1);
+});

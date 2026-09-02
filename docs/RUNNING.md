@@ -24,8 +24,6 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 
 Run it twice and paste one result into `APP_ENCRYPTION_KEY` and the other into `SESSION_SECRET`. **Back up `APP_ENCRYPTION_KEY` somewhere safe** (password manager). It encrypts the prescription numbers in the CQI module; without it they cannot be read.
 
-5. (Windows) If `npm run setup` fails while installing `better-sqlite3`, install the build tools once with `npm install -g windows-build-tools` or install "Desktop development with C++" from the Visual Studio Build Tools installer, then rerun `npm run setup`. Prebuilt binaries exist for Node LTS, so this is rarely needed.
-
 ## Every day
 
 ```bash
@@ -61,7 +59,7 @@ npm run setup
 npm run build && npm start
 ```
 
-Migrations run automatically on start.
+Database migrations run automatically whenever the app starts.
 
 ## Printing Board forms
 

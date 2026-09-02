@@ -15,7 +15,7 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
-  serverExternalPackages: ["better-sqlite3"],
+  serverExternalPackages: ["@libsql/client"],
   experimental: {
     serverActions: { bodySizeLimit: "25mb" },
   },

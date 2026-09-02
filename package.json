@@ -4,9 +4,9 @@
   "private": true,
   "description": "Private pharmacy operations desk (compliance, purchasing, reconciliation)",
   "scripts": {
-    "dev": "next dev",
+    "dev": "npm run db:migrate && next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "npm run db:migrate && next start",
     "typecheck": "tsc --noEmit",
     "lint": "next lint",
     "db:generate": "drizzle-kit generate",
@@ -15,9 +15,9 @@
     "user:create": "tsx scripts/create-user.ts"
   },
   "dependencies": {
+    "@libsql/client": "^0.18.0",
     "@tailwindcss/postcss": "^4.3.3",
     "bcryptjs": "^3.0.3",
-    "better-sqlite3": "^13.0.3",
     "drizzle-orm": "^0.45.2",
     "next": "^15.5.25",
     "react": "^19.2.8",
@@ -26,7 +26,6 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^22.19.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
