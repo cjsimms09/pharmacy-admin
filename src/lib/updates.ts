@@ -28,13 +28,41 @@ export async function currentVersion(): Promise<VersionInfo | null> {
   }
 }
 
-export type UpdateCheck = { ok: true; behind: number; changes: { commit: string; date: string; subject: string }[] } | { ok: false; error: string };
-
-/** Fetches the main branch from GitHub and lists commits not yet installed. */
-export async function checkForUpdates(): Promise<UpdateCheck> {
+/**
+ * The branch this copy follows. Updates are pulled from the same branch the computer is on,
+ * so the pharmacy keeps receiving work whether it lives on main or on a working branch.
+ */
+export async function trackedBranch(): Promise<string> {
   try {
-    await git(["fetch", "origin", "main"], 120_000);
-    const out = await git(["log", "--format=%h%x09%cs%x09%s", "HEAD..origin/main"]);
+    const branch = await git(["rev-parse", "--abbrev-ref", "HEAD"]);
+    if (branch && branch !== "HEAD") return branch;
+  } catch {
+    /* fall through */
+  }
+  return "main";
+}
+
+export type UpdateCheck =
+  | { ok: true; branch: string; behind: number; changes: { commit: string; date: string; subject: string }[] }
+  | { ok: false; error: string };
+
+/** Fetches this copy's branch from GitHub and lists commits not yet installed. */
+export async function checkForUpdates(): Promise<UpdateCheck> {
+  const branch = await trackedBranch();
+  try {
+    await git(["fetch", "origin", branch], 120_000);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/couldn't find remote ref|not found/i.test(msg)) {
+      return { ok: false, error: `This copy is on a branch (“${branch}”) that no longer exists on GitHub. Ask for it to be restored, or reinstall from the main branch.` };
+    }
+    if (/could not read|authentication|403|Permission denied|Could not resolve host/i.test(msg)) {
+      return { ok: false, error: "Could not reach GitHub. Check the computer's internet connection; if it keeps failing, GitHub sign-in may need to be renewed on this computer." };
+    }
+    return { ok: false, error: msg.split("\n")[0] };
+  }
+  try {
+    const out = await git(["log", "--format=%h%x09%cs%x09%s", `HEAD..origin/${branch}`]);
     const changes = out
       .split("\n")
       .filter(Boolean)
@@ -42,11 +70,9 @@ export async function checkForUpdates(): Promise<UpdateCheck> {
         const [commit, date, ...rest] = l.split("\t");
         return { commit, date, subject: rest.join("\t") };
       });
-    return { ok: true, behind: changes.length, changes };
+    return { ok: true, branch, behind: changes.length, changes };
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    if (/could not read|authentication|403|Permission denied/i.test(msg)) return { ok: false, error: "GitHub sign-in is needed on this computer. Open a terminal in the app folder and run: git fetch origin main" };
-    return { ok: false, error: msg.split("\n")[0] };
+    return { ok: false, error: e instanceof Error ? e.message.split("\n")[0] : String(e) };
   }
 }
 

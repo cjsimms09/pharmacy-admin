@@ -32,6 +32,7 @@ export default async function UpdatesPage({ searchParams }: { searchParams: Prom
     <>
       <BackLink href="/settings">Settings</BackLink>
       <PageHeader title="Updates" subtitle="New versions are published to the pharmacy's private GitHub repository. Check here and install with one click." />
+      {version && <p className="mb-4 text-xs text-ink-3">This copy follows the <code>{version.branch}</code> branch and updates from it.</p>}
       {error && <Notice kind="crit">{error}</Notice>}
       {!launcher && <Notice kind="warn">The app was started by hand, so it can't restart itself. Close it and start it with <b>Start Pharmacy Admin</b> (the file in the app folder) to enable one-click updates.</Notice>}
 
@@ -40,7 +41,7 @@ export default async function UpdatesPage({ searchParams }: { searchParams: Prom
         {version ? (
           <p className="text-sm">
             <code>{version.commit}</code> · {version.date} · {version.subject}
-            {version.branch !== "main" && <span className="badge badge-muted ml-2">branch {version.branch}</span>}
+            <span className="badge badge-muted ml-2">{version.branch}</span>
           </p>
         ) : (
           <p className="text-sm text-ink-3">Version information isn't available (Git not found).</p>
@@ -56,7 +57,7 @@ export default async function UpdatesPage({ searchParams }: { searchParams: Prom
             <p className="text-sm">You're up to date.</p>
           ) : (
             <>
-              <h2 className="mb-2 font-semibold">{result.behind} update{result.behind === 1 ? "" : "s"} available</h2>
+              <h2 className="mb-2 font-semibold">{result.behind} update{result.behind === 1 ? "" : "s"} available on {result.branch}</h2>
               <ul className="mb-4 space-y-1 text-sm">
                 {result.changes.map((c) => (
                   <li key={c.commit}><code className="text-xs">{c.commit}</code> <span className="text-ink-3">{c.date}</span> {c.subject}</li>

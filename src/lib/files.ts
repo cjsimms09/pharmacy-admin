@@ -16,11 +16,25 @@ export const ALLOWED_MIME = new Set([
 ]);
 export const MAX_FILE_BYTES = 20 * 1024 * 1024;
 
-export async function storeFile(file: File): Promise<{ storageKey: string; sha256: string; sizeBytes: number; mimeType: string }> {
+/** Report formats accepted from the swept mailbox in addition to the upload types above. */
+export const REPORT_MIME = new Set([
+  "text/csv",
+  "text/plain",
+  "text/tab-separated-values",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/octet-stream",
+]);
+
+export async function storeFile(
+  file: File,
+  opts: { allowReportTypes?: boolean } = {},
+): Promise<{ storageKey: string; sha256: string; sizeBytes: number; mimeType: string }> {
   if (file.size === 0) throw new Error("The file is empty.");
   if (file.size > MAX_FILE_BYTES) throw new Error("File is larger than 20 MB.");
   const mimeType = file.type || "application/octet-stream";
-  if (!ALLOWED_MIME.has(mimeType)) throw new Error(`File type not allowed (${mimeType}). Upload a PDF, image, or Word document.`);
+  const allowed = opts.allowReportTypes ? ALLOWED_MIME.has(mimeType) || REPORT_MIME.has(mimeType) : ALLOWED_MIME.has(mimeType);
+  if (!allowed) throw new Error(`File type not allowed (${mimeType}). Upload a PDF, image, or Word document.`);
   const buf = Buffer.from(await file.arrayBuffer());
   const hash = sha256(buf);
   const key = `${new Date().getUTCFullYear()}/${newId()}`;

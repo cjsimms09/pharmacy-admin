@@ -125,6 +125,7 @@ export const DOCUMENT_CATEGORIES = [
   "cqi_incident",
   "ce_certificate",
   "policy",
+  "report",
   "other",
 ] as const;
 export type DocumentCategory = (typeof DOCUMENT_CATEGORIES)[number];
@@ -145,6 +146,7 @@ export const documents = sqliteTable(
     cqiSummaryId: text("cqi_summary_id"),
     cqiIncidentId: text("cqi_incident_id"),
     csInventoryId: text("cs_inventory_id"),
+    inboxItemId: text("inbox_item_id"),
     effectiveOn: text("effective_on"),
     expiresOn: text("expires_on"),
     notes: text("notes"),
@@ -274,6 +276,25 @@ export const cqiImports = sqliteTable("cqi_imports", {
   createdAt: text("created_at").notNull().default(now()),
   appliedAt: text("applied_at"),
 });
+
+// ── Mailbox sweep (reports emailed to the pharmacy's admin address) ──
+export const inboxItems = sqliteTable(
+  "inbox_items",
+  {
+    id: text("id").primaryKey(),
+    messageId: text("message_id").notNull(), // IMAP message id, so a message is never processed twice
+    receivedAt: text("received_at").notNull(),
+    fromAddress: text("from_address").notNull(),
+    subject: text("subject").notNull().default(""),
+    fileName: text("file_name"),
+    documentId: text("document_id"), // set when the attachment was stored
+    status: text("status", { enum: ["stored", "rejected", "ignored"] }).notNull(),
+    reason: text("reason"), // why rejected or ignored
+    scanned: integer("scanned", { mode: "boolean" }).notNull().default(false),
+    sweptAt: text("swept_at").notNull().default(now()),
+  },
+  (t) => [index("inbox_message_idx").on(t.messageId), index("inbox_swept_idx").on(t.sweptAt)],
+);
 
 // ── Audit ────────────────────────────────────────────────────────────
 export const auditEvents = sqliteTable(

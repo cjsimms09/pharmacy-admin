@@ -21,6 +21,8 @@
     "@tailwindcss/postcss": "^4.3.3",
     "bcryptjs": "^3.0.3",
     "drizzle-orm": "^0.45.2",
+    "imapflow": "^1.7.8",
+    "mailparser": "^3.9.20",
     "next": "^15.5.25",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
@@ -28,6 +30,7 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
+    "@types/mailparser": "^3.4.6",
     "@types/node": "^22.19.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",

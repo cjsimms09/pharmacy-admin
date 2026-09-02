@@ -16,6 +16,14 @@ export const SETTING_KEYS = [
   "pso_expires_on",
   "ai_model",
   "anthropic_api_key_enc", // encrypted with APP_ENCRYPTION_KEY; never rendered
+  "mail_enabled", // "yes" | "no"
+  "mail_host",
+  "mail_port",
+  "mail_user",
+  "mail_password_enc", // app password, encrypted; never rendered
+  "mail_allowed_senders", // one per line
+  "mail_last_sweep",
+  "mail_last_result",
 ] as const;
 export type SettingKey = (typeof SETTING_KEYS)[number];
 export type Settings = Record<SettingKey, string>;
@@ -26,6 +34,8 @@ export async function getSettings(): Promise<Settings> {
   for (const r of rows) if ((SETTING_KEYS as readonly string[]).includes(r.key)) out[r.key as SettingKey] = r.value;
   if (!out.pharmacy_state) out.pharmacy_state = "KS";
   if (!out.ai_model) out.ai_model = "claude-opus-5";
+  if (!out.mail_host) out.mail_host = "imap.gmail.com";
+  if (!out.mail_port) out.mail_port = "993";
   return out;
 }
 

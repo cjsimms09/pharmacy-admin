@@ -86,7 +86,13 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      <PageHeader title="Settings" subtitle="Pharmacy details used on printed Board forms, PSO status, Claude, logins, and updates." actions={<Link href="/settings/updates" className="btn">Updates</Link>} />
+      <PageHeader title="Settings" subtitle="Pharmacy details used on printed Board forms, PSO status, Claude, logins, and updates." actions={
+        <>
+          <Link href="/settings/email" className="btn">Email</Link>
+          <Link href="/settings/network" className="btn">Use from another computer</Link>
+          <Link href="/settings/updates" className="btn">Updates</Link>
+        </>
+      } />
       {saved && <Notice>{ai ? `Connected to Claude (${ai}).` : "Saved."}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
 

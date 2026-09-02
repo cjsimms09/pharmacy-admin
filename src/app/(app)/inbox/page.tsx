@@ -1,0 +1,82 @@
+import Link from "next/link";
+import { desc } from "drizzle-orm";
+import { db, schema } from "@/db";
+import { requireManager } from "@/lib/auth";
+import { getSettings } from "@/lib/settings";
+import { hasMailPassword } from "@/lib/mailbox";
+import { PageHeader, Notice, Empty } from "@/components/ui";
+import { deleteInboxItem, sweepNow } from "./actions";
+
+export const metadata = { title: "Inbox" };
+export const dynamic = "force-dynamic";
+
+export default async function InboxPage({ searchParams }: { searchParams: Promise<{ saved?: string; error?: string; detail?: string }> }) {
+  await requireManager();
+  const { saved, error, detail } = await searchParams;
+  const [s, configured, items] = await Promise.all([
+    getSettings(),
+    hasMailPassword(),
+    db.select().from(schema.inboxItems).orderBy(desc(schema.inboxItems.receivedAt)).limit(200),
+  ]);
+
+  return (
+    <>
+      <PageHeader
+        title="Inbox"
+        subtitle="Reports that arrived by email, and anything that was refused."
+        actions={
+          <>
+            <Link href="/settings/email" className="btn">Email settings</Link>
+            {configured && <form action={sweepNow.bind(null, "inbox")}><button className="btn btn-primary">Check for new mail now</button></form>}
+          </>
+        }
+      />
+      {saved && <Notice>{detail || "Done."}</Notice>}
+      {error && <Notice kind="crit">{error}</Notice>}
+
+      {!configured ? (
+        <Empty>
+          No mailbox connected yet. <Link href="/settings/email" className="text-accent underline">Set one up</Link> so scheduled reports land here on their own.
+        </Empty>
+      ) : items.length === 0 ? (
+        <Empty>Nothing has arrived yet. {s.mail_last_sweep ? `Last checked ${s.mail_last_sweep.replace("T", " ").slice(0, 16)} UTC.` : "Use “Check for new mail now” to look."}</Empty>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-line bg-surface">
+          <table className="table">
+            <thead>
+              <tr><th>Received</th><th>From</th><th>Attachment</th><th>Status</th><th></th></tr>
+            </thead>
+            <tbody>
+              {items.map((i) => (
+                <tr key={i.id}>
+                  <td className="whitespace-nowrap text-xs">{i.receivedAt.replace("T", " ").slice(0, 16)}</td>
+                  <td className="text-xs">
+                    <div className="font-mono">{i.fromAddress}</div>
+                    {i.subject && <div className="text-ink-3">{i.subject}</div>}
+                  </td>
+                  <td className="text-xs">
+                    {i.documentId ? (
+                      <a href={`/files/${i.documentId}`} target="_blank" rel="noreferrer" className="font-medium text-accent hover:underline">{i.fileName}</a>
+                    ) : (
+                      <span className="text-ink-3">{i.fileName ?? "—"}</span>
+                    )}
+                  </td>
+                  <td>
+                    <span className={`badge ${i.status === "stored" ? "badge-ok" : i.status === "rejected" ? "badge-crit" : "badge-muted"}`}>{i.status}</span>
+                    {i.reason && <div className="mt-1 max-w-md text-xs text-ink-2">{i.reason}</div>}
+                    {i.status === "stored" && !i.scanned && <div className="text-xs text-ink-3">Stored without a column check (not a text report).</div>}
+                  </td>
+                  <td>
+                    <form action={deleteInboxItem.bind(null, i.id)}>
+                      <button className="text-xs text-crit hover:underline" type="submit">Delete</button>
+                    </form>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}

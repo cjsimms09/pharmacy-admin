@@ -15,7 +15,7 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
-  serverExternalPackages: ["@libsql/client"],
+  serverExternalPackages: ["@libsql/client", "imapflow", "mailparser"],
   experimental: {
     serverActions: { bodySizeLimit: "25mb" },
   },

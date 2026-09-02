@@ -75,14 +75,14 @@ function build() {
 
 function update() {
   log("Installing update…");
-  const branch = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8", shell: isWin }).stdout.trim();
-  run("git", ["fetch", "origin", "main"]);
+  // Update the branch this copy is on — never switch branches, which could install older code.
+  const branch = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8", shell: isWin }).stdout.trim() || "main";
   // The pharmacy computer never edits source; npm install may touch package-lock.json. Discard such changes.
   run("git", ["checkout", "--", "."]);
-  if (branch !== "main") run("git", ["checkout", "main"]);
-  run("git", ["pull", "--ff-only", "origin", "main"]);
+  run("git", ["fetch", "origin", branch]);
+  run("git", ["merge", "--ff-only", `origin/${branch}`]);
   build();
-  log("Update installed.");
+  log(`Update installed (${branch}).`);
 }
 
 function waitForServer(tries = 120) {
@@ -119,7 +119,7 @@ async function main() {
     if (fs.existsSync(flagFile)) fs.rmSync(flagFile);
     run(npmCmd, ["run", "db:migrate"]);
     log(`Starting on http://localhost:${PORT}`);
-    const child = spawn(process.execPath, [path.join(root, "node_modules", "next", "dist", "bin", "next"), "start", "-p", PORT], {
+    const child = spawn(process.execPath, [path.join(root, "node_modules", "next", "dist", "bin", "next"), "start", "-p", PORT, "-H", "0.0.0.0"], {
       stdio: "inherit",
       env: { ...process.env, PHARMACY_LAUNCHER: "1", PORT },
     });

@@ -61,3 +61,11 @@ Settings → Claude → paste an Anthropic API key (from console.anthropic.com �
 - On a draft summary, **Draft CAP evaluations with Claude** writes the effectiveness comments from what's on record.
 
 Prescription numbers and staff names are redacted from text sent for drafting. Scanned packets are sent as-is (they contain Rx numbers and staff names, never patient identities). Every call is written to the audit log with token counts. Anthropic does not train on API data; a Business Associate Agreement is available from Anthropic on request if you ever want one on file.
+
+## Using it from another computer in the pharmacy
+
+Open **Settings → Use from another computer**. It shows the exact address to type on the other computer (something like `http://192.168.1.20:3000`) and walks through the one-time Windows firewall step. Traffic never leaves the pharmacy's network.
+
+## Getting reports by email
+
+Open **Settings → Email**. Enter the mailbox the reports are sent to and a Google **App password** (the page has step-by-step instructions and a troubleshooting section for when Google hides that option). List which senders are allowed. The app then checks the mailbox every 30 minutes, saves report attachments, and refuses any file whose columns look like patient information. What arrived shows up under **Inbox**.

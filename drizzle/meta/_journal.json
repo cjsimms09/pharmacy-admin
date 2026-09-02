@@ -29,6 +29,13 @@
       "when": 1788383694889,
       "tag": "0003_rca_cap_before_ai",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1788385001958,
+      "tag": "0004_inbox",
+      "breakpoints": true
     }
   ]
 }
