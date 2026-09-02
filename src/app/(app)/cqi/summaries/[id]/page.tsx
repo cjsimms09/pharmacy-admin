@@ -9,11 +9,14 @@ import { INCIDENT_TYPE_LABEL } from "@/lib/labels";
 import { PageHeader, BackLink, Notice, Field } from "@/components/ui";
 import { DocumentList, UploadForm } from "@/components/documents";
 import { deleteSummary, reopenSummary, updateSummary } from "../../actions";
+import { draftEvaluationsForSummary } from "../../ai-actions";
+import { hasApiKey } from "@/lib/ai";
 
-export default async function SummaryPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ error?: string; saved?: string }> }) {
+export default async function SummaryPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ error?: string; saved?: string; ai?: string }> }) {
   await requireManager();
   const { id } = await params;
-  const { error, saved } = await searchParams;
+  const { error, saved, ai } = await searchParams;
+  const aiReady = await hasApiKey();
   const summary = await db.query.cqiSummaries.findFirst({ where: eq(schema.cqiSummaries.id, id) });
   if (!summary) notFound();
   const [incidents, caps, people, docs, reviews] = await Promise.all([
@@ -38,6 +41,7 @@ export default async function SummaryPage({ params, searchParams }: { params: Pr
         subtitle={`Due ${fmt(summary.dueOn)} · ${d >= 0 ? `${d} days left` : `${-d} days overdue`} · ${final ? "Finalized" : "Draft"}`}
         actions={
           <>
+            {aiReady && !final && caps.length > 0 && <form action={draftEvaluationsForSummary.bind(null, id)}><button className="btn">Draft CAP evaluations with Claude</button></form>}
             <Link href={`${here}/print`} className="btn btn-primary">Print C-550</Link>
             {final && <form action={reopenSummary.bind(null, id)}><button className="btn">Reopen</button></form>}
           </>
@@ -45,6 +49,7 @@ export default async function SummaryPage({ params, searchParams }: { params: Pr
       />
       {error && <Notice kind="crit">{error}</Notice>}
       {saved && <Notice>Saved.</Notice>}
+      {ai && <Notice kind="warn">Claude drafted the CAP evaluations below from what's on record (mainly whether the same type of incident recurred). Confirm each "effective" answer and edit the comments before finalizing.</Notice>}
       {incomplete.length > 0 && <Notice kind="warn">{incomplete.length} incident{incomplete.length === 1 ? "" : "s"} in this period still {incomplete.length === 1 ? "has" : "have"} an open review. Complete them so the RCA and CAP appear on the summary.</Notice>}
 
       <form action={updateSummary.bind(null, id)} className="max-w-4xl space-y-6">

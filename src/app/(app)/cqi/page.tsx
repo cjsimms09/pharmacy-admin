@@ -31,6 +31,7 @@ export default async function CqiPage({ searchParams }: { searchParams: Promise<
         subtitle="K.A.R. 68-19-1 · Incident reviews within 7 and 30 days · Bimonthly summary (Form C-550) by the 15th of Feb, Apr, Jun, Aug, Oct, Dec · Kept 5 years."
         actions={
           <>
+            <Link href="/cqi/import" className="btn">Import packets with Claude</Link>
             <Link href="/cqi/incidents" className="btn">Incidents</Link>
             <Link href="/cqi/incidents/new" className="btn btn-primary">Log incident</Link>
           </>
@@ -106,8 +107,8 @@ export default async function CqiPage({ searchParams }: { searchParams: Promise<
       </div>
 
       <section className="card mt-6 max-w-3xl">
-        <h2 className="mb-1 font-semibold">Upload a previous signed summary</h2>
-        <p className="mb-3 text-xs text-ink-3">Scanned C-550 packets (with their C-650s) from before this system. They are kept for the five-year retention period and show up in the list above.</p>
+        <h2 className="mb-1 font-semibold">Upload a previous signed summary (file only)</h2>
+        <p className="mb-3 text-xs text-ink-3">Keeps the scan for the five-year record without reading it. To have the incidents and CAPs pulled out so the next summary builds on them, use <Link href="/cqi/import" className="text-accent underline">Import packets with Claude</Link> instead.</p>
         <form action={uploadHistoricalSummary} className="grid gap-3 sm:grid-cols-3" encType="multipart/form-data">
           <Field label="Which summary">
             <select name="dueOn" className="field" required defaultValue="">

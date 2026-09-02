@@ -9,11 +9,14 @@ import { PageHeader, BackLink, Notice } from "@/components/ui";
 import { DocumentList, UploadForm } from "@/components/documents";
 import { IncidentForm } from "../../incident-form";
 import { deleteIncident, updateIncident } from "../../actions";
+import { suggestForIncident } from "../../ai-actions";
+import { hasApiKey } from "@/lib/ai";
 
-export default async function IncidentPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ error?: string; saved?: string }> }) {
+export default async function IncidentPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ error?: string; saved?: string; ai?: string }> }) {
   await requireManager();
   const { id } = await params;
-  const { error, saved } = await searchParams;
+  const { error, saved, ai } = await searchParams;
+  const aiReady = await hasApiKey();
   const incident = await db.query.cqiIncidents.findFirst({ where: eq(schema.cqiIncidents.id, id) });
   if (!incident) notFound();
   const [people, docs] = await Promise.all([
@@ -30,10 +33,18 @@ export default async function IncidentPage({ params, searchParams }: { params: P
       <PageHeader
         title={`Incident #${incident.incidentNumber}`}
         subtitle={`Report created ${fmt(incident.reportCreatedOn)}`}
-        actions={<Link href={`${here}/print`} className="btn btn-primary">Print C-650</Link>}
+        actions={
+          <>
+            {aiReady && (!incident.rootCauseAnalysis || !incident.correctiveActionPlan) && (
+              <form action={suggestForIncident.bind(null, id)}><button className="btn">Draft RCA &amp; CAP with Claude</button></form>
+            )}
+            <Link href={`${here}/print`} className="btn btn-primary">Print C-650</Link>
+          </>
+        }
       />
       {error && <Notice kind="crit">{error}</Notice>}
       {saved && <Notice>Saved.</Notice>}
+      {ai && <Notice kind="warn">Claude drafted the root cause analysis and corrective action plan below from your description. Read them, edit anything that isn't right, and save. They are yours once you sign the form.</Notice>}
       <div className="mb-4 flex flex-wrap gap-2 text-xs">
         <span className={`badge ${incident.reviewStartedOn ? "badge-ok" : daysUntil(startDue)! < 0 ? "badge-crit" : "badge-warn"}`}>
           {incident.reviewStartedOn ? `Review started ${fmt(incident.reviewStartedOn)}` : `Start review by ${fmt(startDue)}`}

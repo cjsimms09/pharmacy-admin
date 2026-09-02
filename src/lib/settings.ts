@@ -14,6 +14,8 @@ export const SETTING_KEYS = [
   "pso_member", // "yes" | "no"
   "pso_name",
   "pso_expires_on",
+  "ai_model",
+  "anthropic_api_key_enc", // encrypted with APP_ENCRYPTION_KEY; never rendered
 ] as const;
 export type SettingKey = (typeof SETTING_KEYS)[number];
 export type Settings = Record<SettingKey, string>;
@@ -23,6 +25,7 @@ export async function getSettings(): Promise<Settings> {
   const out = Object.fromEntries(SETTING_KEYS.map((k) => [k, ""])) as Settings;
   for (const r of rows) if ((SETTING_KEYS as readonly string[]).includes(r.key)) out[r.key as SettingKey] = r.value;
   if (!out.pharmacy_state) out.pharmacy_state = "KS";
+  if (!out.ai_model) out.ai_model = "claude-opus-5";
   return out;
 }
 

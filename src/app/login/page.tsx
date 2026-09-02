@@ -1,4 +1,6 @@
 import { redirect } from "next/navigation";
+import { sql } from "drizzle-orm";
+import { db, schema } from "@/db";
 import { getCurrentUser, login } from "@/lib/auth";
 
 export const metadata = { title: "Sign in" };
@@ -6,6 +8,7 @@ export const metadata = { title: "Sign in" };
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
   const user = await getCurrentUser();
   if (user) redirect("/");
+  if ((await db.select({ n: sql<number>`count(*)` }).from(schema.users))[0].n === 0) redirect("/setup");
   const { error } = await searchParams;
 
   async function action(formData: FormData) {

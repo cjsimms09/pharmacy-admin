@@ -251,6 +251,18 @@ export const csInventories = sqliteTable(
   (t) => [index("cs_inventories_date_idx").on(t.inventoryDate)],
 );
 
+// ── AI imports of scanned CQI packets ────────────────────────────────
+export const cqiImports = sqliteTable("cqi_imports", {
+  id: text("id").primaryKey(),
+  documentId: text("document_id").notNull(),
+  status: text("status", { enum: ["extracted", "applied", "failed"] }).notNull().default("extracted"),
+  resultJson: text("result_json").notNull().default("{}"),
+  error: text("error"),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull().default(now()),
+  appliedAt: text("applied_at"),
+});
+
 // ── Audit ────────────────────────────────────────────────────────────
 export const auditEvents = sqliteTable(
   "audit_events",

@@ -1,17 +1,20 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { db, schema } from "@/db";
 import { requireManager, createUser } from "@/lib/auth";
 import { getSettings, setSetting, SETTING_KEYS, type SettingKey } from "@/lib/settings";
 import { audit } from "@/lib/audit";
+import { apiKeyHint, clearApiKey, saveApiKey, testConnection, DEFAULT_MODEL } from "@/lib/ai";
 import { PageHeader, Notice, Field } from "@/components/ui";
 
 export const metadata = { title: "Settings" };
 
-export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ saved?: string; error?: string }> }) {
+export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ saved?: string; error?: string; ai?: string }> }) {
   const user = await requireManager();
-  const { saved, error } = await searchParams;
+  const { saved, error, ai } = await searchParams;
   const s = await getSettings();
+  const keyHint = await apiKeyHint();
   const users = await db.query.users.findMany({ orderBy: (u, { asc }) => [asc(u.name)] });
   const people = await db.query.people.findMany({ orderBy: (p, { asc }) => [asc(p.lastName)] });
 
@@ -25,6 +28,39 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     await audit({ action: "settings.update", userId: u.id, userName: u.name });
     revalidatePath("/settings");
     redirect("/settings?saved=1");
+  }
+
+  async function setKey(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const key = String(fd.get("apiKey") ?? "").trim();
+    const model = String(fd.get("ai_model") ?? "").trim() || DEFAULT_MODEL;
+    if (!key.startsWith("sk-ant-") || key.length < 30) redirect("/settings?error=" + encodeURIComponent("That doesn't look like an Anthropic API key (they start with sk-ant-)."));
+    try {
+      await saveApiKey(key);
+    } catch (e) {
+      redirect("/settings?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not store the key."));
+    }
+    await setSetting("ai_model", model);
+    await audit({ action: "ai.key.set", userId: u.id, userName: u.name, details: `model=${model}` });
+    const t = await testConnection();
+    revalidatePath("/settings");
+    redirect(t.ok ? "/settings?saved=1" : "/settings?error=" + encodeURIComponent("Key saved, but the test failed: " + t.error));
+  }
+
+  async function removeKey() {
+    "use server";
+    const u = await requireManager();
+    await clearApiKey();
+    await audit({ action: "ai.key.clear", userId: u.id, userName: u.name });
+    revalidatePath("/settings");
+    redirect("/settings?saved=1");
+  }
+
+  async function testKey() {
+    "use server";
+    const t = await testConnection();
+    redirect(t.ok ? "/settings?saved=1&ai=" + encodeURIComponent(t.model) : "/settings?error=" + encodeURIComponent(t.error));
   }
 
   async function addUser(fd: FormData) {
@@ -49,8 +85,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      <PageHeader title="Settings" subtitle="Pharmacy details used on printed Board forms, PSO status, and logins." />
-      {saved && <Notice>Saved.</Notice>}
+      <PageHeader title="Settings" subtitle="Pharmacy details used on printed Board forms, PSO status, Claude, logins, and updates." actions={<Link href="/settings/updates" className="btn">Updates</Link>} />
+      {saved && <Notice>{ai ? `Connected to Claude (${ai}).` : "Saved."}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
 
       <form action={save} className="card mb-6 grid max-w-3xl gap-4 sm:grid-cols-2">
@@ -76,6 +112,26 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <Field label="PSO membership expires"><input name="pso_expires_on" type="date" className="field" defaultValue={s.pso_expires_on} /></Field>
         <div className="sm:col-span-2"><button className="btn btn-primary">Save</button></div>
       </form>
+
+      <section className="card mb-6 max-w-3xl">
+        <h2 className="mb-1 font-semibold">Claude</h2>
+        <p className="mb-3 text-xs text-ink-3">Used to read scanned CQI packets and draft root cause analyses, corrective action plans, and CAP evaluations for you to review. Get a key at console.anthropic.com → API keys. The key is stored encrypted and never shown again. Prescription numbers and staff names are redacted from text sent for drafting.</p>
+        {keyHint ? (
+          <div className="mb-3 flex flex-wrap items-center gap-3 text-sm">
+            <span className="badge badge-ok">Key on file {keyHint}</span>
+            <span className="text-ink-2">Model: <code>{s.ai_model}</code></span>
+            <form action={testKey}><button className="btn">Test connection</button></form>
+            <form action={removeKey}><button className="btn btn-danger">Remove key</button></form>
+          </div>
+        ) : (
+          <p className="mb-3 text-sm text-warn">No key on file.</p>
+        )}
+        <form action={setKey} className="grid gap-3 sm:grid-cols-3">
+          <Field label={keyHint ? "Replace key" : "API key"} className="sm:col-span-2"><input name="apiKey" type="password" className="field font-mono" placeholder="sk-ant-…" autoComplete="off" required /></Field>
+          <Field label="Model" hint="Leave as is unless told otherwise."><input name="ai_model" className="field font-mono" defaultValue={s.ai_model} /></Field>
+          <div className="sm:col-span-3"><button className="btn btn-primary">Save and test</button></div>
+        </form>
+      </section>
 
       <section className="card max-w-3xl">
         <h2 className="mb-3 font-semibold">Logins</h2>
@@ -116,6 +172,11 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             </form>
           </details>
         )}
+      </section>
+
+      <section className="card mt-6 max-w-3xl">
+        <h2 className="mb-1 font-semibold">Backups</h2>
+        <p className="text-sm text-ink-2">Everything lives in the <code>data</code> folder inside the app folder (database and uploaded files) plus the <code>.env</code> file (encryption keys). Copy both to the pharmacy's backup drive regularly; the app should be closed while copying. Without the <code>.env</code> keys, prescription numbers in the CQI records cannot be read back.</p>
       </section>
     </>
   );

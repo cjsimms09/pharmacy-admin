@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { eq, and, gt } from "drizzle-orm";
 import bcrypt from "bcryptjs";
-import { db, schema } from "@/db";
+import { db, dbReady, schema } from "@/db";
 import { newId, randomToken } from "./crypto";
 import { audit } from "./audit";
 
@@ -14,6 +14,7 @@ export type Role = "owner" | "pic" | "staff";
 export type CurrentUser = { id: string; name: string; username: string; role: Role; personId: string | null };
 
 export async function getCurrentUser(): Promise<CurrentUser | null> {
+  await dbReady;
   const jar = await cookies();
   const token = jar.get(COOKIE)?.value;
   if (!token) return null;
@@ -50,6 +51,7 @@ export async function requireManager(): Promise<CurrentUser> {
 }
 
 export async function login(username: string, password: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  await dbReady;
   const user = await db.query.users.findFirst({ where: eq(schema.users.username, username.trim().toLowerCase()) });
   const hash = user?.passwordHash ?? "$2a$12$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalid";
   const ok = await bcrypt.compare(password, hash);
