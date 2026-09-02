@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ground: #f5f7f6;
+  --color-surface: #ffffff;
+  --color-line: #d8dfdb;
+  --color-ink: #1b2a2a;
+  --color-ink-2: #4b5b5a;
+  --color-ink-3: #74837f;
+  --color-accent: #0e6b5a;
+  --color-accent-soft: #dcefe9;
+  --color-warn: #9a6a0f;
+  --color-warn-soft: #f7ebcf;
+  --color-crit: #a5312a;
+  --color-crit-soft: #f8e0dd;
+  --font-sans: "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+html { color-scheme: light; }
+body { @apply bg-ground text-ink antialiased; }
+
+@layer components {
+  .btn { @apply inline-flex items-center gap-2 rounded-md border border-line bg-surface px-3 py-1.5 text-sm font-medium text-ink hover:bg-ground focus:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50; }
+  .btn-primary { @apply border-accent bg-accent text-white hover:bg-[#0b5a4b]; }
+  .btn-danger { @apply border-crit text-crit hover:bg-crit-soft; }
+  .card { @apply rounded-lg border border-line bg-surface p-5 shadow-[0_1px_2px_rgba(27,42,42,.05)]; }
+  .field { @apply block w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-3 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent; }
+  .label { @apply mb-1 block text-xs font-semibold uppercase tracking-wide text-ink-2; }
+  .hint { @apply mt-1 text-xs text-ink-3; }
+  .badge { @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold; }
+  .badge-ok { @apply bg-accent-soft text-accent; }
+  .badge-warn { @apply bg-warn-soft text-warn; }
+  .badge-crit { @apply bg-crit-soft text-crit; }
+  .badge-muted { @apply bg-ground text-ink-2; }
+  .table { @apply w-full border-collapse text-sm; }
+  .table th { @apply border-b border-line bg-ground px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-ink-2; }
+  .table td { @apply border-b border-line px-3 py-2 align-top; }
+  .table tr:last-child td { @apply border-b-0; }
+}
+
+@media print {
+  .no-print { display: none !important; }
+  body { background: white; }
+}

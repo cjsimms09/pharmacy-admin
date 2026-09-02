@@ -48,3 +48,7 @@ coverage/
 Thumbs.db
 .vscode/
 .idea/
+
+# ── Generated ────────────────────────────────────────────────────────
+next-env.d.ts
+tsconfig.tsbuildinfo
