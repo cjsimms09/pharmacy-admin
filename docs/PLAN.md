@@ -184,19 +184,29 @@ Everything below is calendarized with lead-time alerts (90/60/30/7 days), an own
 
 **Inspection readiness:** a checklist built from the Board's I-02P form and FAQ list of inspectable records (prescriptions, invoices, inventories, POA forms, immunization records incl. training/CPR/protocols, incident reports, CQI documentation, compounding records, signature logs) with a one-click "inspection packet" export.
 
-### 4.4 Payment Reconciliation
+### 4.4 Payment Reconciliation — the three-way match
 
-**Preferred design (Option A — no 835s in our system):** PioneerRx's Third Party Reconciliation module (or its optional Reconciliation Service, or a partner such as Net-Rx/FDS/Inmar) consumes the 835s. A patient-free custom report exports, per claim: adjudicated amount, paid amount, payment date, check/EFT trace number, difference, fee/adjustment amounts, status. The app ingests that daily and does the analysis PioneerRx doesn't surface well:
+**Decision (recommended): the app is the system of record for reconciliation.** It ingests 835 remittances directly, so every claim can be closed against what the payer said and what the bank received; PioneerRx's reconciliation module becomes optional.
 
-- **Aging by payer** (BIN/PCN → PBM): unpaid claims at 30/60/90 days, expected payment dates from each payer's observed cycle, escalation list.
-- **Short-pays and clawbacks**: adjudicated vs paid deltas, DIR/price-concession totals by payer and period, reversals after payment.
-- **Expected vs actual reimbursement** using the PSAO/third-party contract terms (AWP − x% / MAC / dispensing fee / GER) and NADAC as a reference: underpayment candidates and **MAC appeal** lists with the evidence attached.
-- **Below-cost fills** by NDC/payer, feeding the ordering optimizer (buy a different NDC, or flag the plan).
-- **KPIs**: days-to-pay by payer, short-pay rate, reversal rate, DIR as % of revenue, gross margin after DIR by payer.
+**Three sides**
+- **Claims (expected):** the daily claims report gives adjudicated amount per Rx/refill/payer; each becomes an expected payment with an expected date from the payer's observed cycle.
+- **Remittances (835):** enrolled per PBM (directly or via the PSAO) and delivered to an SFTP mailbox the app sweeps. Parsed: BPR (payment total/method), TRN (trace number), CLP (claim reference as submitted, status, charged/paid), CAS (adjustment group and reason codes), SVC, DTM, PLB (provider-level adjustments: DIR fees, clawbacks, recoupments). The ingestion gate drops NM1 patient segments before storage and tokenizes the claim reference. This is the only source that explains *why* an amount differs.
+- **Bank:** deposits with EFT trace numbers from a read-only bank feed or statement export; the 835 TRN matches the deposit trace.
 
-**Option B (later, only if A is insufficient):** ingest 835 files directly from the PSAO/PBM SFTP through the gate. An 835 carries patient names (NM1*QC) and claim IDs; the parser would keep BPR (payment), TRN (trace), CLP (claim: patient-control number = the pharmacy's Rx/refill reference, status, charged/paid), CAS (adjustment group/reason codes), SVC, PLB (provider-level adjustments — where DIR fees and clawbacks appear), and DTM, and would **drop NM1 patient segments before storage** and tokenize CLP01. Kept as a designed-but-unbuilt module.
+**Matching tiers (only failures reach a human):** exact on Rx + refill + payer → amount-and-date for lines missing a reference → batch totals (835 BPR = bank deposit) → exception queue pre-populated with the reason code and a suggested resolution. Tolerance rules auto-close trivial differences. Claim states: paid in full, short-paid (with reason), overpaid, reversed, unpaid/aging, written off. PLB adjustments are allocated to payer and period, and to claims when referenced.
 
----
+**Recording payments:** 835s post themselves; bank deposits post themselves; paper checks and small payers use a one-minute form (payer, check number, date, amount, stub upload) and the app matches to open claims.
+
+**Analytics on top:** aging by payer at 30/60/90 with escalation list; short-pay and clawback totals by payer and period; DIR/price-concession tracking; expected-vs-actual reimbursement from contract terms and NADAC; MAC appeal candidates with evidence; below-cost fills by NDC and payer; KPIs (days-to-pay, short-pay rate, reversal rate, DIR share of revenue, margin after DIR by payer). Accounting export (deposit and adjustment summaries) for the bookkeeper.
+
+### 4.4a NDC selection — "this NDC would have made more"
+
+Recommendation logic depends on the claim's basis of reimbursement (522-FM):
+- **MAC-based:** MAC is per drug, not per NDC, so all equivalents pay about the same; choose the cheapest equivalent NDC net of rebate (tier-aware).
+- **AWP-based:** payment tracks each NDC's AWP; choose the NDC with the best paid-minus-cost using AWP from the PioneerRx item export.
+- **NADAC-based:** per-NDC benchmark; flag only when a gain exists.
+
+Plus an **empirical reimbursement table**: per payer cluster and NDC, what was actually paid per unit over the trailing 90 days. Recommendations read "on this plan, NDC B has paid $X/unit more than NDC A and costs $Y less; estimated gain per fill $Z." Always within the same drug, strength and form, respecting DAW — a pharmacist substitution decision, never a therapeutic one.
 
 ### 4.5 Advanced purchasing analyses (added after owner discussion)
 
@@ -237,6 +247,7 @@ These are the reports to build in PioneerRx's report designer and schedule to th
 7. **Monthly profit by NDC**: NDC, fills, revenue, cost, gross profit, by third party.
 8. **Purchase/receiving** (if EDI 810 invoices post into PioneerRx): invoice number, date, supplier, NDC, quantity, unit cost, extended cost.
 9. **Daily controlled-substance dispensing counts** (aggregate by schedule, no Rx numbers) for the K-TRACS reconciliation check.
+10. **Daily supplier cost by item** (from PioneerRx's stored 832 costs for every EDI-connected wholesaler): NDC, supplier, supplier item number, cost, cost date, package size, unit, AWP, and any availability/discontinued flag. This is the app's primary price feed and requires no supplier integration.
 
 Open item to confirm in PioneerRx: whether Scheduled Reports can email attachments directly, and in which formats; if only a folder drop is supported, a tiny sync agent on the pharmacy PC will forward the folder to the app over a signed channel.
 
