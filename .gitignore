@@ -1,0 +1,50 @@
+# ── Secrets ──────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+secrets/
+
+# ── Real data: never in git ──────────────────────────────────────────
+data/
+uploads/
+private/
+contracts/
+reports/
+remits/
+backups/
+*.835
+*.837
+*.edi
+*.x12
+*.xlsx
+*.xls
+*.csv
+*.tsv
+*.pdf
+*.docx
+*.doc
+*.db
+*.sqlite
+*.sqlite3
+*.dump
+*.sql.gz
+# Synthetic fixtures are the one exception; they live only here:
+!fixtures/**
+
+# ── Build / tooling ──────────────────────────────────────────────────
+node_modules/
+.next/
+dist/
+build/
+coverage/
+.turbo/
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

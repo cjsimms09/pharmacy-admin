@@ -1,0 +1,31 @@
+title = "pharmacy-admin secret scanning"
+
+[extend]
+useDefault = true
+
+# Catch supplier / PBM style credentials the default rules don't know about.
+[[rules]]
+id = "generic-supplier-credential"
+description = "Supplier portal or EDI credential assigned in source"
+regex = '''(?i)(mckesson|anda|parmed|ipc|ipd|pioneerrx|edi|sftp|smtp|imap)[a-z_]*(pass(word)?|secret|token|key)\s*[:=]\s*['"][^'"\s]{6,}['"]'''
+
+[[rules]]
+id = "dea-registration-number"
+description = "DEA registration number literal"
+regex = '''\b[ABCDEFGHJKLMPRSTUX][A-Z9][0-9]{7}\b'''
+
+[[rules]]
+id = "ncpdp-or-npi-literal"
+description = "NPI literal (10 digits starting 1 or 2) assigned in source"
+regex = '''(?i)(npi|ncpdp)\s*[:=]\s*['"]?[12][0-9]{9}['"]?'''
+
+[allowlist]
+paths = [
+  '''fixtures/''',
+  '''docs/''',
+  '''\.gitleaks\.toml$''',
+]
+regexes = [
+  '''EXAMPLE''',
+  '''example\.com''',
+]

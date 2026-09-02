@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./data/**)",
+      "Read(./uploads/**)",
+      "Read(./private/**)",
+      "Read(./contracts/**)",
+      "Read(./reports/**)",
+      "Read(./remits/**)",
+      "Read(./backups/**)",
+      "Read(./secrets/**)",
+      "Read(~/PharmacyPrivate/**)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)"
+    ]
+  }
+}

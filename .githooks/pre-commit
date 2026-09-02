@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Blocks a commit that contains a secret or a real data file.
+# Enable once per clone with:  scripts/setup-hooks.sh
+set -euo pipefail
+
+# 1. Refuse data file types even if someone force-adds them.
+blocked=$(git diff --cached --name-only --diff-filter=ACR | grep -Ei '\.(835|837|edi|x12|xlsx|xls|csv|tsv|pdf|docx?|db|sqlite3?|dump|pem|key|p12|pfx)$' | grep -Ev '^fixtures/' || true)
+if [[ -n "$blocked" ]]; then
+  echo "pre-commit: refusing to commit data/secret files:" >&2
+  echo "$blocked" | sed 's/^/  /' >&2
+  echo "Real data never goes in this repo. Synthetic samples belong under fixtures/." >&2
+  exit 1
+fi
+
+# 2. Secret scan of the staged changes.
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks protect --staged --redact --config .gitleaks.toml
+else
+  echo "pre-commit: gitleaks is not installed; install it (https://github.com/gitleaks/gitleaks#installing) so secrets are caught before they reach git." >&2
+  exit 1
+fi
