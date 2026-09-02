@@ -9,6 +9,68 @@ import { CREDENTIAL_TYPES, PERSON_ROLES } from "@/db/schema";
 import { requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { newId } from "@/lib/crypto";
+import { storeFile } from "@/lib/files";
+import type { DocumentCategory } from "@/db/schema";
+
+/** Default filing category for a document attached to a credential. */
+function categoryFor(type: string): DocumentCategory {
+  if (type.endsWith("_insurance")) return "insurance";
+  if (type === "psao_agreement" || type === "wholesaler_account") return "agreement";
+  if (type === "pharmacy_registration") return "pharmacy_registration";
+  if (type === "dea_registration") return "dea_registration";
+  if (type === "controlled_substance_poa") return "controlled_substance_poa";
+  if (type === "cpr") return "cpr_card";
+  if (type === "immunization_training") return "immunization_training";
+  if (["pharmacist_license", "technician_registration", "intern_registration"].includes(type)) return "license";
+  return "other";
+}
+
+/** Stores an uploaded file (if any) and links it to a credential. Returns an error message on failure. */
+async function attachFile(fd: FormData, opts: { credentialId: string; personId: string | null; type: string; label: string | null; expiresOn: string | null; effectiveOn: string | null; userId: string }): Promise<string | null> {
+  const file = fd.get("file");
+  if (!(file instanceof File) || file.size === 0) return null;
+  try {
+    const stored = await storeFile(file);
+    await db.insert(schema.documents).values({
+      id: newId(),
+      category: categoryFor(opts.type),
+      title: opts.label || CREDENTIAL_TITLES[opts.type] || "Document",
+      fileName: file.name.slice(0, 200),
+      mimeType: stored.mimeType,
+      sizeBytes: stored.sizeBytes,
+      sha256: stored.sha256,
+      storageKey: stored.storageKey,
+      personId: opts.personId,
+      credentialId: opts.credentialId,
+      effectiveOn: opts.effectiveOn,
+      expiresOn: opts.expiresOn,
+      uploadedBy: opts.userId,
+    });
+    return null;
+  } catch (e) {
+    return e instanceof Error ? e.message : "The file could not be saved.";
+  }
+}
+
+const CREDENTIAL_TITLES: Record<string, string> = {
+  pharmacy_registration: "Pharmacy registration",
+  dea_registration: "DEA registration",
+  csos_certificate: "CSOS certificate",
+  kmap_enrollment: "KMAP enrollment",
+  liability_insurance: "Professional liability insurance",
+  property_insurance: "Property / comprehensive insurance",
+  workers_comp_insurance: "Workers' compensation insurance",
+  cyber_insurance: "Cyber liability insurance",
+  business_license: "Business license",
+  sales_tax_permit: "Sales tax permit",
+  psao_agreement: "PSAO agreement",
+  wholesaler_account: "Wholesaler agreement",
+  pharmacist_license: "Pharmacist license",
+  technician_registration: "Technician registration",
+  intern_registration: "Intern registration",
+  cpr: "CPR card",
+  immunization_training: "Immunization training certificate",
+};
 
 const optDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal("")).transform((v) => (v ? v : null));
 const optText = (max = 500) => z.string().trim().max(max).optional().transform((v) => (v ? v : null));
@@ -72,10 +134,11 @@ export async function addCredential(formData: FormData) {
   const { redirectTo, ...data } = parsed.data;
   const id = newId();
   await db.insert(schema.credentials).values({ id, ...data });
+  const fileError = await attachFile(formData, { credentialId: id, personId: data.personId, type: data.type, label: data.label, expiresOn: data.expiresOn, effectiveOn: data.issuedOn, userId: user.id });
   await audit({ action: "credential.create", userId: user.id, userName: user.name, entity: "credential", entityId: id, details: data.type });
   revalidatePath(redirectTo);
   revalidatePath("/");
-  redirect(`${redirectTo}?saved=1`);
+  redirect(fileError ? `${redirectTo}?error=${encodeURIComponent(fileError)}` : `${redirectTo}?saved=1`);
 }
 
 export async function updateCredential(id: string, formData: FormData) {
@@ -84,6 +147,8 @@ export async function updateCredential(id: string, formData: FormData) {
   if (!parsed.success) fail(String(formData.get("redirectTo") ?? "/staff"), "Check the credential form.");
   const { redirectTo, personId: _p, ...data } = parsed.data;
   await db.update(schema.credentials).set({ ...data, updatedAt: new Date().toISOString() }).where(eq(schema.credentials.id, id));
+  const existing = await db.query.credentials.findFirst({ where: eq(schema.credentials.id, id) });
+  await attachFile(formData, { credentialId: id, personId: existing?.personId ?? null, type: data.type, label: data.label, expiresOn: data.expiresOn, effectiveOn: data.issuedOn, userId: user.id });
   await audit({ action: "credential.update", userId: user.id, userName: user.name, entity: "credential", entityId: id });
   revalidatePath(redirectTo);
   revalidatePath("/");

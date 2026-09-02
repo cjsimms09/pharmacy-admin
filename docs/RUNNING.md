@@ -25,6 +25,10 @@ Keep the black window open while you use the app. Closing it stops the app.
 
 The launcher creates the secrets file (`.env`) automatically on first run. **Back it up** together with the `data` folder (Settings → Backups explains).
 
+## Other computers in the pharmacy
+
+Settings → Network shows the address to type on another computer on the same network (something like `http://192.168.1.20:3000`). The first time, right-click **Allow on network** in the app folder and choose "Run as administrator" so Windows lets the connection through. Traffic stays inside the pharmacy's network.
+
 ## Updating
 
 Settings → Updates → **Check for updates** → **Install and restart**. The app pulls the new version from GitHub, rebuilds, and restarts itself in one to three minutes.

@@ -179,38 +179,74 @@ export async function extractPacket(pdf: Buffer, ctx: { userId: string; userName
   return ExtractedPacket.parse(JSON.parse(text));
 }
 
-// ── Drafting RCA / CAP for an incident ───────────────────────────────
-const Suggestion = z.object({
+// ── Writing / strengthening RCA and CAP for an incident ───────────────
+const RcaCap = z.object({
   rootCauseAnalysis: z.string(),
   correctiveActionPlan: z.string(),
 });
 
-export async function suggestRcaCap(
-  input: { type: string; typeOther: string | null; description: string; reachedPatient: boolean | null; priorSimilar: { description: string; correctiveActionPlan: string | null; effective: boolean | null }[] },
+const RCA_CAP_SYSTEM = `You help a Kansas pharmacist-in-charge complete Form C-650 (CQI Incident Report Evaluation) under K.A.R. 68-19-1. Write in the plain, specific, first-person-plural voice of a pharmacy ("we"), as text the PIC will sign and a Board inspector will read. Never include a patient's name, date of birth, phone, or address. Refer to staff by role, never by name.
+
+ROOT CAUSE ANALYSIS — examine all issues and processes that led to the incident. Cover, in prose paragraphs:
+1. What happened and where in the workflow it originated (intake/data entry, order entry, filling/counting, verification, will-call/pickup, counseling, compounding), and how it was discovered.
+2. Contributing factors actually supported by the facts: look-alike/sound-alike products or packaging, shelf placement, workload and interruptions, staffing, hand-offs and communication, technology (bar-code scanning, alerts overridden or absent, hard-copy vs. e-script), training or unfamiliarity, workflow shortcuts, time pressure.
+3. Why the existing safeguards did not catch it (which check should have caught it and why it did not).
+4. Whether it reached the patient and the actual or potential harm.
+Do not blame an individual; analyze the process. Do not invent facts — where a detail is unknown, say what should be verified.
+
+CORRECTIVE ACTION PLAN — list the measures to ensure the incident does not recur. Cover:
+1. Immediate actions already taken or to take now (patient notified/counseled, prescriber notified if appropriate, product quarantined, stock rearranged).
+2. Process changes, each stated as a specific, verifiable practice (what, who is responsible by role, when it starts).
+3. Staff education: what will be reviewed with whom and by when.
+4. Technology or physical controls (scanning at fill and verification, shelf tags or separators, alerts, labels).
+5. How effectiveness will be monitored and measured for the two following bimonthly summaries (what will be counted or checked, and what "effective" will look like).
+Number the actions. Be concrete enough that someone could audit whether each action happened. Avoid generic phrases such as "be more careful" or "increase awareness".
+
+Length: 180–350 words for each section unless the facts are very simple. If existing draft text is provided, keep every fact in it, correct nothing you cannot verify, and expand it to meet the structure above.`;
+
+export async function writeRcaCap(
+  input: {
+    type: string;
+    typeOther: string | null;
+    description: string;
+    reachedPatient: boolean | null;
+    existingRca: string | null;
+    existingCap: string | null;
+    extraContext: string | null;
+    priorSimilar: { description: string; correctiveActionPlan: string | null; effective: boolean | null }[];
+  },
   redactNames: { name: string; role: string }[],
   ctx: { userId: string; userName: string },
-): Promise<z.infer<typeof Suggestion>> {
-  if (MOCK) return { rootCauseAnalysis: "Mock RCA: look-alike packaging and no independent verification step.", correctiveActionPlan: "Mock CAP: add shelf separators and a bar-code verification at fill." };
+): Promise<z.infer<typeof RcaCap>> {
+  if (MOCK) {
+    return {
+      rootCauseAnalysis: `Mock RCA (strengthened). What happened: ${input.description.slice(0, 80)}. Contributing factors: look-alike packaging, interruption at fill, verification relied on label read rather than product scan. Safeguard failure: the final check did not include a bar-code confirmation of the stock bottle. Reached patient: ${input.reachedPatient ? "yes" : "no/unknown"}.`,
+      correctiveActionPlan: "Mock CAP (strengthened). 1. Immediate: patient counseled and correct product dispensed; incorrect product returned to stock. 2. Process: bar-code scan of stock bottle required at fill and at verification, effective immediately, technicians responsible at fill and pharmacist at verification. 3. Education: PIC reviews look-alike list with all staff by month end. 4. Physical: shelf separators and tall-man labels installed. 5. Monitoring: count of scan overrides and same-type incidents reviewed on the next two bimonthly summaries; effective = zero recurrences and no unexplained overrides.",
+    };
+  }
   const { client: c, model } = await client();
   const prior = input.priorSimilar
     .slice(0, 5)
-    .map((p, i) => `Prior incident ${i + 1}: ${redactText(p.description, redactNames)}\n  CAP: ${p.correctiveActionPlan ? redactText(p.correctiveActionPlan, redactNames) : "(none)"}\n  Effective: ${p.effective === true ? "yes" : p.effective === false ? "no" : "not yet evaluated"}`)
+    .map((p, i) => `Prior incident ${i + 1}: ${redactText(p.description, redactNames)}\n  CAP then: ${p.correctiveActionPlan ? redactText(p.correctiveActionPlan, redactNames) : "(none)"}\n  Judged effective: ${p.effective === true ? "yes" : p.effective === false ? "no" : "not yet evaluated"}`)
     .join("\n");
+  const parts = [
+    `Incident type: ${input.type}${input.typeOther ? ` (${input.typeOther})` : ""}`,
+    `Reached the patient: ${input.reachedPatient === true ? "yes" : input.reachedPatient === false ? "no" : "unknown"}`,
+    `What happened: ${redactText(input.description, redactNames)}`,
+    input.extraContext ? `Additional context from the PIC: ${redactText(input.extraContext, redactNames)}` : "",
+    input.existingRca ? `Existing root cause analysis draft (keep its facts, expand it):\n${redactText(input.existingRca, redactNames)}` : "",
+    input.existingCap ? `Existing corrective action plan draft (keep its facts, expand it):\n${redactText(input.existingCap, redactNames)}` : "",
+    prior ? `Similar prior incidents at this pharmacy:\n${prior}` : "",
+  ].filter(Boolean);
   const res = await c.messages.parse({
     model,
-    max_tokens: 4000,
+    max_tokens: 8000,
     thinking: { type: "adaptive" },
-    output_config: { effort: "medium", format: zodOutputFormat(Suggestion) },
-    system:
-      "You help a Kansas pharmacist-in-charge complete Form C-650 for the pharmacy's continuous quality improvement program (K.A.R. 68-19-1). Write a root cause analysis that examines the issues and processes that led to the incident (not blame), and a corrective action plan listing concrete measures to prevent recurrence, in the plain, specific voice a PIC would sign. 3–6 sentences each. If prior similar incidents show a CAP that was not effective, propose something different.",
-    messages: [
-      {
-        role: "user",
-        content: `Incident type: ${input.type}${input.typeOther ? ` (${input.typeOther})` : ""}\nReached the patient: ${input.reachedPatient === true ? "yes" : input.reachedPatient === false ? "no" : "unknown"}\nWhat happened: ${redactText(input.description, redactNames)}\n${prior ? `\nSimilar prior incidents at this pharmacy:\n${prior}` : ""}`,
-      },
-    ],
+    output_config: { effort: "high", format: zodOutputFormat(RcaCap) },
+    system: RCA_CAP_SYSTEM,
+    messages: [{ role: "user", content: parts.join("\n\n") }],
   });
-  await logUsage("ai.suggest_rca_cap", ctx.userId, ctx.userName, res.usage, `model=${res.model}`);
+  await logUsage("ai.write_rca_cap", ctx.userId, ctx.userName, res.usage, `model=${res.model}`);
   if (res.stop_reason === "refusal") throw new Error("Claude declined this request.");
   if (!res.parsed_output) throw new Error("Claude returned an unreadable answer. Try again.");
   return res.parsed_output;

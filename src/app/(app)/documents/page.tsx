@@ -5,7 +5,7 @@ import { daysUntil, fmt } from "@/lib/dates";
 import { CREDENTIAL_LABEL, CREDENTIAL_TYPES_FOR_PHARMACY, CREDENTIAL_HINT } from "@/lib/labels";
 import { PageHeader, Notice, StatusBadge, Field } from "@/components/ui";
 import { DocumentList, UploadForm } from "@/components/documents";
-import { addCredential, deleteCredential } from "../staff/actions";
+import { addCredential, deleteCredential, updateCredential } from "../staff/actions";
 
 export const metadata = { title: "Documents" };
 
@@ -16,9 +16,10 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
     db.query.documents.findMany({ where: isNull(schema.documents.personId), orderBy: (d, { desc }) => [desc(d.uploadedAt)] }),
     db.query.credentials.findMany({ where: isNull(schema.credentials.personId), orderBy: (c, { asc }) => [asc(c.expiresOn)] }),
   ]);
+  const credDocs = (credentialId: string) => docs.filter((d) => d.credentialId === credentialId);
   const here = "/documents";
   const protocols = docs.filter((d) => d.category === "immunization_protocol");
-  const others = docs.filter((d) => d.category !== "immunization_protocol" && !d.csInventoryId);
+  const others = docs.filter((d) => d.category !== "immunization_protocol" && !d.csInventoryId && !d.credentialId);
 
   return (
     <>
@@ -27,11 +28,12 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
       {saved && <Notice>Saved.</Notice>}
 
       <section className="card mb-6">
-        <h2 className="mb-3 font-semibold">Pharmacy registrations</h2>
-        {creds.length === 0 ? <p className="text-sm text-ink-3">Add the pharmacy registration, DEA registration, CSOS certificate, and KMAP enrollment so their renewals are tracked.</p> : (
+        <h2 className="mb-1 font-semibold">Registrations, licenses & insurance</h2>
+        <p className="mb-3 text-xs text-ink-3">Anything with an expiration date: pharmacy registration, DEA, CSOS, KMAP, professional liability and property insurance, business license, PSAO and wholesaler agreements. Attach the document itself and the dashboard will warn you 90, 60, 30 and 7 days before it expires.</p>
+        {creds.length === 0 ? <p className="text-sm text-ink-3">Nothing on file yet. Add your first one below.</p> : (
           <div className="overflow-x-auto">
             <table className="table">
-              <thead><tr><th>Registration</th><th>Number</th><th>Issued</th><th>Expires</th><th>Status</th><th></th></tr></thead>
+              <thead><tr><th>Item</th><th>Number</th><th>Issued</th><th>Expires</th><th>Status</th><th>Document</th><th></th></tr></thead>
               <tbody>
                 {creds.map((c) => (
                   <tr key={c.id}>
@@ -40,16 +42,36 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
                     <td>{fmt(c.issuedOn)}</td>
                     <td>{fmt(c.expiresOn)}</td>
                     <td><StatusBadge days={daysUntil(c.expiresOn)} /></td>
-                    <td><form action={deleteCredential.bind(null, c.id, here)}><button className="text-xs text-crit hover:underline">Delete</button></form></td>
+                    <td className="text-xs">
+                      {credDocs(c.id).length === 0 ? <span className="text-warn">none attached</span> : credDocs(c.id).map((d) => <div key={d.id}><a href={`/files/${d.id}`} target="_blank" rel="noreferrer" className="text-accent hover:underline">{d.fileName}</a></div>)}
+                    </td>
+                    <td>
+                      <details>
+                        <summary className="cursor-pointer text-xs text-accent">Edit</summary>
+                        <form action={updateCredential.bind(null, c.id)} className="mt-2 grid gap-2" encType="multipart/form-data">
+                          <input type="hidden" name="redirectTo" value={here} />
+                          <input type="hidden" name="type" value={c.type} />
+                          <input type="hidden" name="label" value={c.label ?? ""} />
+                          <input name="number" className="field" defaultValue={c.number ?? ""} placeholder="Number" />
+                          <input name="issuer" className="field" defaultValue={c.issuer ?? ""} placeholder="Issuer / carrier" />
+                          <label className="text-xs text-ink-2">Issued<input name="issuedOn" type="date" className="field" defaultValue={c.issuedOn ?? ""} /></label>
+                          <label className="text-xs text-ink-2">Expires<input name="expiresOn" type="date" className="field" defaultValue={c.expiresOn ?? ""} /></label>
+                          <input name="notes" className="field" defaultValue={c.notes ?? ""} placeholder="Notes" />
+                          <label className="text-xs text-ink-2">Attach / replace document<input name="file" type="file" className="field" accept=".pdf,.jpg,.jpeg,.png,.heic,.webp,.doc,.docx" /></label>
+                          <button className="btn btn-primary">Save</button>
+                        </form>
+                        <form action={deleteCredential.bind(null, c.id, here)} className="mt-2"><button className="text-xs text-crit hover:underline">Delete</button></form>
+                      </details>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
-        <details className="mt-4">
-          <summary className="cursor-pointer text-sm font-medium text-accent">Add registration</summary>
-          <form action={addCredential} className="mt-3 grid gap-3 sm:grid-cols-3">
+        <details className="mt-4" open={creds.length === 0}>
+          <summary className="cursor-pointer text-sm font-medium text-accent">Add registration, license, insurance policy or agreement</summary>
+          <form action={addCredential} className="mt-3 grid gap-3 sm:grid-cols-3" encType="multipart/form-data">
             <input type="hidden" name="redirectTo" value={here} />
             <Field label="Type">
               <select name="type" className="field" defaultValue="pharmacy_registration">
@@ -57,12 +79,13 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
               </select>
               <p className="hint">{CREDENTIAL_HINT.pharmacy_registration} {CREDENTIAL_HINT.dea_registration}</p>
             </Field>
-            <Field label="Label (for 'other')"><input name="label" className="field" /></Field>
-            <Field label="Number"><input name="number" className="field" /></Field>
-            <Field label="Issuer"><input name="issuer" className="field" /></Field>
-            <Field label="Issued on"><input name="issuedOn" type="date" className="field" /></Field>
-            <Field label="Expires on"><input name="expiresOn" type="date" className="field" /></Field>
-            <Field label="Notes" className="sm:col-span-3"><input name="notes" className="field" /></Field>
+            <Field label="Name / label" hint="Used as the document title, e.g. “General liability 2026–27”"><input name="label" className="field" /></Field>
+            <Field label="Number" hint="Registration, policy or account number"><input name="number" className="field" /></Field>
+            <Field label="Issuer / carrier"><input name="issuer" className="field" /></Field>
+            <Field label="Issued / effective on"><input name="issuedOn" type="date" className="field" /></Field>
+            <Field label="Expires on" hint="What the dashboard counts down to"><input name="expiresOn" type="date" className="field" /></Field>
+            <Field label="Document" className="sm:col-span-2" hint="PDF, photo or Word file, up to 20 MB"><input name="file" type="file" className="field" accept=".pdf,.jpg,.jpeg,.png,.heic,.webp,.doc,.docx" /></Field>
+            <Field label="Notes"><input name="notes" className="field" /></Field>
             <div className="sm:col-span-3"><button className="btn btn-primary">Add</button></div>
           </form>
         </details>
@@ -81,7 +104,8 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
 
       <section className="card">
         <h2 className="mb-3 font-semibold">Upload a pharmacy document</h2>
-        <UploadForm redirectTo={here} categories={["immunization_protocol", "pharmacy_registration", "dea_registration", "controlled_substance_poa", "cs_inventory", "policy", "other"]} defaultCategory="immunization_protocol" />
+        <p className="mb-3 text-xs text-ink-3">For anything without an expiration date to track. Items that expire belong in the section above so the dashboard can warn you.</p>
+        <UploadForm redirectTo={here} categories={["immunization_protocol", "policy", "agreement", "insurance", "pharmacy_registration", "dea_registration", "controlled_substance_poa", "cs_inventory", "other"]} defaultCategory="immunization_protocol" />
       </section>
     </>
   );

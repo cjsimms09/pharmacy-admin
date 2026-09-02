@@ -10,7 +10,7 @@ import { audit } from "@/lib/audit";
 import { newId } from "@/lib/crypto";
 import { storeFile } from "@/lib/files";
 import { capsToEvaluate, encodeRxNumbers, periodFromDue } from "@/lib/cqi";
-import { describeError, draftCapEvaluations, extractPacket, suggestRcaCap } from "@/lib/ai";
+import { describeError, draftCapEvaluations, extractPacket, writeRcaCap } from "@/lib/ai";
 
 function fail(path: string, msg: string): never {
   redirect(`${path}${path.includes("?") ? "&" : "?"}error=${encodeURIComponent(msg)}`);
@@ -124,12 +124,13 @@ export async function applyImport(id: string, fd: FormData) {
     const incId = newId();
     const employees: { personId: string; reviewedOn: string | null; reviewedByPersonId: string | null }[] = [];
     const unmatched: string[] = [];
-    for (let e = 0; e < 8; e++) {
+    for (let e = 0; e < 10; e++) {
+      const pid = g(`emp_${e}_personId`);
       const name = g(`emp_${e}_name`);
-      if (!name) continue;
-      const p = findPerson(name);
-      if (p) employees.push({ personId: p.id, reviewedOn: g(`emp_${e}_reviewedOn`) || null, reviewedByPersonId: findPerson(g(`emp_${e}_reviewedBy`))?.id ?? null });
-      else unmatched.push(name);
+      const reviewedBy = g(`emp_${e}_reviewedBy`);
+      const p = pid ? people.find((x) => x.id === pid) ?? null : findPerson(name);
+      if (p) employees.push({ personId: p.id, reviewedOn: g(`emp_${e}_reviewedOn`) || null, reviewedByPersonId: (people.find((x) => x.id === reviewedBy) ?? findPerson(reviewedBy))?.id ?? null });
+      else if (name) unmatched.push(name);
     }
     let rxNumbersEnc: string | null = null;
     try {
@@ -146,7 +147,7 @@ export async function applyImport(id: string, fd: FormData) {
       typeOther: g("typeOther") || null,
       description: g("description") || "(imported from scanned packet)",
       rxNumbersEnc,
-      reviewerPersonId: findPerson(g("reviewerName"))?.id ?? null,
+      reviewerPersonId: (people.find((x) => x.id === g("reviewerPersonId")) ?? findPerson(g("reviewerName")))?.id ?? null,
       reviewStartedOn: g("reviewStartedOn") || null,
       reviewCompletedOn: g("reviewCompletedOn") || null,
       employeeReviews: JSON.stringify(employees),
@@ -177,6 +178,13 @@ export async function applyImport(id: string, fd: FormData) {
       if (!sid) continue;
       await db.insert(schema.cqiCapReviews).values({ id: newId(), incidentId: incId, summaryId: sid, reviewNumber: r + 1, effective: eff === "yes" ? true : eff === "no" ? false : null, comments: comments || null });
     }
+    if (fd.get(`inc_${i}_strengthen`)) {
+      try {
+        await strengthenIncident(incId, null, user);
+      } catch (e) {
+        await audit({ action: "cqi.incident.ai_rca_cap_failed", userId: user.id, userName: user.name, entity: "cqi_incident", entityId: incId, details: describeError(e) });
+      }
+    }
     created++;
   }
   await db.update(schema.cqiImports).set({ status: "applied", appliedAt: new Date().toISOString() }).where(eq(schema.cqiImports.id, id));
@@ -193,38 +201,65 @@ export async function discardImport(id: string) {
   redirect("/cqi/import");
 }
 
-/** Fill empty RCA / CAP fields on an incident with a Claude draft. */
-export async function suggestForIncident(id: string) {
-  const user = await requireManager();
-  const here = `/cqi/incidents/${id}`;
-  const inc = await db.query.cqiIncidents.findFirst({ where: eq(schema.cqiIncidents.id, id) });
-  if (!inc) fail("/cqi/incidents", "Incident not found.");
-  if (inc.rootCauseAnalysis && inc.correctiveActionPlan) fail(here, "The RCA and CAP already have text. Clear the one you want redrafted, save, then try again.");
-  const similar = await db.query.cqiIncidents.findMany({ where: and(eq(schema.cqiIncidents.type, inc.type), ne(schema.cqiIncidents.id, id)), orderBy: (i, { desc }) => [desc(i.reportCreatedOn)], limit: 5 });
+async function strengthenIncident(incId: string, extraContext: string | null, user: { id: string; name: string }) {
+  const inc = await db.query.cqiIncidents.findFirst({ where: eq(schema.cqiIncidents.id, incId) });
+  if (!inc) throw new Error("Incident not found.");
+  const similar = await db.query.cqiIncidents.findMany({ where: and(eq(schema.cqiIncidents.type, inc.type), ne(schema.cqiIncidents.id, incId)), orderBy: (i, { desc }) => [desc(i.reportCreatedOn)], limit: 5 });
   const reviews = await db.query.cqiCapReviews.findMany();
   const names = await roleNames();
-  let s;
+  const out = await writeRcaCap(
+    {
+      type: inc.type,
+      typeOther: inc.typeOther,
+      description: inc.description,
+      reachedPatient: inc.reachedPatient,
+      existingRca: inc.rootCauseAnalysis,
+      existingCap: inc.correctiveActionPlan,
+      extraContext,
+      priorSimilar: similar.map((p) => ({ description: p.description, correctiveActionPlan: p.correctiveActionPlan, effective: reviews.filter((r) => r.incidentId === p.id).sort((a, b) => b.reviewNumber - a.reviewNumber)[0]?.effective ?? null })),
+    },
+    names,
+    { userId: user.id, userName: user.name },
+  );
+  await db
+    .update(schema.cqiIncidents)
+    .set({
+      rcaBeforeAi: inc.rootCauseAnalysis,
+      capBeforeAi: inc.correctiveActionPlan,
+      rootCauseAnalysis: out.rootCauseAnalysis,
+      correctiveActionPlan: out.correctiveActionPlan,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(schema.cqiIncidents.id, incId));
+}
+
+/** Write (or strengthen) the RCA and CAP on an incident with Claude. Previous text is kept for restore. */
+export async function suggestForIncident(id: string, fd: FormData) {
+  const user = await requireManager();
+  const here = `/cqi/incidents/${id}`;
+  const extra = String(fd.get("extraContext") ?? "").trim() || null;
   try {
-    s = await suggestRcaCap(
-      {
-        type: inc.type,
-        typeOther: inc.typeOther,
-        description: inc.description,
-        reachedPatient: inc.reachedPatient,
-        priorSimilar: similar.map((p) => ({ description: p.description, correctiveActionPlan: p.correctiveActionPlan, effective: reviews.filter((r) => r.incidentId === p.id).sort((a, b) => b.reviewNumber - a.reviewNumber)[0]?.effective ?? null })),
-      },
-      names,
-      { userId: user.id, userName: user.name },
-    );
+    await strengthenIncident(id, extra, user);
   } catch (e) {
     fail(here, describeError(e));
   }
-  await db
-    .update(schema.cqiIncidents)
-    .set({ rootCauseAnalysis: inc.rootCauseAnalysis || s.rootCauseAnalysis, correctiveActionPlan: inc.correctiveActionPlan || s.correctiveActionPlan, updatedAt: new Date().toISOString() })
-    .where(eq(schema.cqiIncidents.id, id));
+  await audit({ action: "cqi.incident.ai_rca_cap", userId: user.id, userName: user.name, entity: "cqi_incident", entityId: id });
   revalidatePath(here);
   redirect(`${here}?ai=1`);
+}
+
+/** Put back the RCA/CAP text that was there before Claude rewrote it. */
+export async function restoreBeforeAi(id: string) {
+  const user = await requireManager();
+  const inc = await db.query.cqiIncidents.findFirst({ where: eq(schema.cqiIncidents.id, id) });
+  if (!inc) fail("/cqi/incidents", "Incident not found.");
+  await db
+    .update(schema.cqiIncidents)
+    .set({ rootCauseAnalysis: inc.rcaBeforeAi, correctiveActionPlan: inc.capBeforeAi, rcaBeforeAi: null, capBeforeAi: null, updatedAt: new Date().toISOString() })
+    .where(eq(schema.cqiIncidents.id, id));
+  await audit({ action: "cqi.incident.ai_restore", userId: user.id, userName: user.name, entity: "cqi_incident", entityId: id });
+  revalidatePath(`/cqi/incidents/${id}`);
+  redirect(`/cqi/incidents/${id}?saved=1`);
 }
 
 /** Draft CAP effectiveness comments for every CAP due on a summary that has no comment yet. */

@@ -61,6 +61,14 @@ export const CREDENTIAL_TYPES = [
   "kmap_enrollment",
   "npi",
   "ncpdp",
+  "liability_insurance",
+  "property_insurance",
+  "workers_comp_insurance",
+  "cyber_insurance",
+  "business_license",
+  "sales_tax_permit",
+  "psao_agreement",
+  "wholesaler_account",
   "other",
 ] as const;
 export type CredentialType = (typeof CREDENTIAL_TYPES)[number];
@@ -111,6 +119,8 @@ export const DOCUMENT_CATEGORIES = [
   "dea_registration",
   "controlled_substance_poa",
   "cs_inventory",
+  "insurance",
+  "agreement",
   "cqi_summary",
   "cqi_incident",
   "ce_certificate",
@@ -178,6 +188,8 @@ export const cqiIncidents = sqliteTable(
     reviewerPersonId: text("reviewer_person_id"), // PIC or designee who started the review
     employeeReviews: text("employee_reviews").notNull().default("[]"), // JSON [{personId, reviewedOn, reviewedByPersonId}]
     capClosed: integer("cap_closed", { mode: "boolean" }).notNull().default(false), // both C-550 reviews done
+    rcaBeforeAi: text("rca_before_ai"), // previous text kept when Claude rewrites, so it can be restored
+    capBeforeAi: text("cap_before_ai"),
     externalReportRef: text("external_report_ref"), // where the C-650 / full incident report is filed
     createdBy: text("created_by").notNull(),
     createdAt: text("created_at").notNull().default(now()),

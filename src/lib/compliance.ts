@@ -85,6 +85,14 @@ export async function computeAlerts(): Promise<Alert[]> {
     }
   }
 
+  // Documents with their own expiry that aren't tied to a tracked credential
+  const expiringDocs = await db.query.documents.findMany({ where: (d, { isNotNull, isNull, and: and2 }) => and2(isNotNull(d.expiresOn), isNull(d.credentialId)) });
+  for (const d of expiringDocs) {
+    const dd = daysUntil(d.expiresOn);
+    if (dd === null || dd > 90) continue;
+    alerts.push({ level: dd < 0 ? "crit" : dd <= 30 ? "crit" : "warn", title: dd < 0 ? `${d.title} expired` : `${d.title} expires in ${dd} days`, detail: "Document on file", href: d.personId ? `/staff/${d.personId}` : "/documents", dueOn: d.expiresOn! });
+  }
+
   // Controlled substance inventory: Kansas annual, no later than 375 days after the previous one.
   const invs = await db.query.csInventories.findMany({ orderBy: (i, { desc }) => [desc(i.inventoryDate)] });
   const last = invs[0];

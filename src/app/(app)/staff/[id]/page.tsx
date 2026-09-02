@@ -24,6 +24,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
     db.query.ceEntries.findMany({ where: eq(schema.ceEntries.personId, id), orderBy: (c, { desc }) => [desc(c.completedOn)] }),
   ]);
   const here = `/staff/${id}`;
+  const credDocs = (credentialId: string) => docs.filter((d) => d.credentialId === credentialId);
   const license = creds.find((c) => c.type === "pharmacist_license" || c.type === "technician_registration");
   const ceRequired = person.role === "pharmacist" ? 30 : person.role === "technician" ? 20 : 0;
   // CE in the current cycle: entries after the license issue date (or last two years if unknown)
@@ -51,11 +52,12 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
       )}
 
       <section className="card mb-6">
-        <h2 className="mb-3 font-semibold">Licenses, registrations & certifications</h2>
+        <h2 className="mb-1 font-semibold">Licenses, registrations & certifications</h2>
+        <p className="mb-3 text-xs text-ink-3">Add the license, CPR card, immunization training certificate or DEA power of attorney with its expiration date and attach the document itself. Expirations appear on the dashboard 90, 60, 30 and 7 days ahead.</p>
         {creds.length === 0 ? <p className="text-sm text-ink-3">Nothing on file yet.</p> : (
           <div className="overflow-x-auto">
             <table className="table">
-              <thead><tr><th>Credential</th><th>Number</th><th>Issued</th><th>Expires</th><th>Status</th><th></th></tr></thead>
+              <thead><tr><th>Credential</th><th>Number</th><th>Issued</th><th>Expires</th><th>Status</th><th>Document</th><th></th></tr></thead>
               <tbody>
                 {creds.map((c) => (
                   <tr key={c.id}>
@@ -68,6 +70,9 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                     <td>{fmt(c.issuedOn)}</td>
                     <td>{fmt(c.expiresOn)}</td>
                     <td><StatusBadge days={daysUntil(c.expiresOn)} /></td>
+                    <td className="text-xs">
+                      {credDocs(c.id).length === 0 ? <span className="text-warn">none attached</span> : credDocs(c.id).map((d) => <div key={d.id}><a href={`/files/${d.id}`} target="_blank" rel="noreferrer" className="text-accent hover:underline">{d.fileName}</a></div>)}
+                    </td>
                     <td>
                       {canManage && (
                         <details>
@@ -162,7 +167,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
 
 function CredentialForm({ action, redirectTo, personId, cred }: { action: (fd: FormData) => Promise<void>; redirectTo: string; personId?: string; cred?: { type: string; label: string | null; number: string | null; issuer: string | null; issuedOn: string | null; expiresOn: string | null; notes: string | null } }) {
   return (
-    <form action={action} className="mt-3 grid gap-3 sm:grid-cols-3">
+    <form action={action} className="mt-3 grid gap-3 sm:grid-cols-3" encType="multipart/form-data">
       <input type="hidden" name="redirectTo" value={redirectTo} />
       {personId && <input type="hidden" name="personId" value={personId} />}
       <Field label="Type">
@@ -176,7 +181,10 @@ function CredentialForm({ action, redirectTo, personId, cred }: { action: (fd: F
       <Field label="Issuer"><input name="issuer" className="field" placeholder="Kansas Board of Pharmacy, AHA, …" defaultValue={cred?.issuer ?? ""} /></Field>
       <Field label="Issued on"><input name="issuedOn" type="date" className="field" defaultValue={cred?.issuedOn ?? ""} /></Field>
       <Field label="Expires on"><input name="expiresOn" type="date" className="field" defaultValue={cred?.expiresOn ?? ""} /></Field>
-      <Field label="Notes" className="sm:col-span-3"><input name="notes" className="field" defaultValue={cred?.notes ?? ""} /></Field>
+      <Field label={cred ? "Attach / replace document" : "Document"} className="sm:col-span-2" hint="The license card, CPR card, training certificate or protocol. PDF, photo or Word file.">
+        <input name="file" type="file" className="field" accept=".pdf,.jpg,.jpeg,.png,.heic,.webp,.doc,.docx" />
+      </Field>
+      <Field label="Notes"><input name="notes" className="field" defaultValue={cred?.notes ?? ""} /></Field>
       <div className="sm:col-span-3"><button className="btn btn-primary">{cred ? "Save" : "Add"}</button></div>
     </form>
   );

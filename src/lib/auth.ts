@@ -66,7 +66,8 @@ export async function login(username: string, password: string): Promise<{ ok: t
   jar.set(COOKIE, token, {
     httpOnly: true,
     sameSite: "strict",
-    secure: process.env.NODE_ENV === "production" && process.env.INSECURE_COOKIES !== "1",
+    // Local-first deployment is served over plain HTTP on the pharmacy LAN; set COOKIE_SECURE=1 once behind HTTPS.
+    secure: process.env.COOKIE_SECURE === "1",
     path: "/",
     expires,
   });

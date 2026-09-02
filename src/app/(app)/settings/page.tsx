@@ -1,4 +1,5 @@
 import Link from "next/link";
+import os from "node:os";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { db, schema } from "@/db";
@@ -175,9 +176,29 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       </section>
 
       <section className="card mt-6 max-w-3xl">
+        <h2 className="mb-1 font-semibold">Network — other computers in the pharmacy</h2>
+        <p className="mb-2 text-sm text-ink-2">On another computer on the same network, open one of these addresses in the browser:</p>
+        <ul className="mb-2 space-y-1 font-mono text-sm">
+          {lanAddresses().map((a) => <li key={a}>http://{a}:{process.env.PORT ?? "3000"}</li>)}
+          {lanAddresses().length === 0 && <li className="font-sans text-ink-3">No network address found on this computer.</li>}
+        </ul>
+        <p className="text-xs text-ink-3">The first time, Windows must be told to allow it: in the app folder, right-click <b>Allow on network</b> and choose "Run as administrator" (once). Only computers on the pharmacy's own network can reach it; nothing is exposed to the internet. Phone access from outside comes with the hosting step in the plan.</p>
+      </section>
+
+      <section className="card mt-6 max-w-3xl">
         <h2 className="mb-1 font-semibold">Backups</h2>
         <p className="text-sm text-ink-2">Everything lives in the <code>data</code> folder inside the app folder (database and uploaded files) plus the <code>.env</code> file (encryption keys). Copy both to the pharmacy's backup drive regularly; the app should be closed while copying. Without the <code>.env</code> keys, prescription numbers in the CQI records cannot be read back.</p>
       </section>
     </>
   );
+}
+
+function lanAddresses(): string[] {
+  const out: string[] = [];
+  for (const list of Object.values(os.networkInterfaces())) {
+    for (const i of list ?? []) {
+      if (i.family === "IPv4" && !i.internal) out.push(i.address);
+    }
+  }
+  return out;
 }

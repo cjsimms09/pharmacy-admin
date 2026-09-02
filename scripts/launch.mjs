@@ -77,6 +77,8 @@ function update() {
   log("Installing update…");
   const branch = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8", shell: isWin }).stdout.trim();
   run("git", ["fetch", "origin", "main"]);
+  // The pharmacy computer never edits source; npm install may touch package-lock.json. Discard such changes.
+  run("git", ["checkout", "--", "."]);
   if (branch !== "main") run("git", ["checkout", "main"]);
   run("git", ["pull", "--ff-only", "origin", "main"]);
   build();

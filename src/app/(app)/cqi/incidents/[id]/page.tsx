@@ -9,7 +9,7 @@ import { PageHeader, BackLink, Notice } from "@/components/ui";
 import { DocumentList, UploadForm } from "@/components/documents";
 import { IncidentForm } from "../../incident-form";
 import { deleteIncident, updateIncident } from "../../actions";
-import { suggestForIncident } from "../../ai-actions";
+import { restoreBeforeAi, suggestForIncident } from "../../ai-actions";
 import { hasApiKey } from "@/lib/ai";
 
 export default async function IncidentPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ error?: string; saved?: string; ai?: string }> }) {
@@ -33,18 +33,29 @@ export default async function IncidentPage({ params, searchParams }: { params: P
       <PageHeader
         title={`Incident #${incident.incidentNumber}`}
         subtitle={`Report created ${fmt(incident.reportCreatedOn)}`}
-        actions={
-          <>
-            {aiReady && (!incident.rootCauseAnalysis || !incident.correctiveActionPlan) && (
-              <form action={suggestForIncident.bind(null, id)}><button className="btn">Draft RCA &amp; CAP with Claude</button></form>
-            )}
-            <Link href={`${here}/print`} className="btn btn-primary">Print C-650</Link>
-          </>
-        }
+        actions={<Link href={`${here}/print`} className="btn btn-primary">Print C-650</Link>}
       />
       {error && <Notice kind="crit">{error}</Notice>}
       {saved && <Notice>Saved.</Notice>}
-      {ai && <Notice kind="warn">Claude drafted the root cause analysis and corrective action plan below from your description. Read them, edit anything that isn't right, and save. They are yours once you sign the form.</Notice>}
+      {ai && <Notice kind="warn">Claude wrote the root cause analysis and corrective action plan below. Read every line, fix anything that isn't true for your pharmacy, and save. They are yours once you sign the form.</Notice>}
+      {aiReady && (
+        <section className="card mb-4 max-w-4xl">
+          <form action={suggestForIncident.bind(null, id)} className="grid gap-3 sm:grid-cols-3">
+            <div className="sm:col-span-3">
+              <div className="font-semibold">{incident.rootCauseAnalysis || incident.correctiveActionPlan ? "Strengthen the RCA and CAP with Claude" : "Write the RCA and CAP with Claude"}</div>
+              <p className="text-xs text-ink-3">Claude examines the process (where it happened, contributing factors, why safeguards failed, patient impact) and writes numbered, auditable corrective actions with owners, timing, staff education, and how effectiveness will be measured on the next two summaries. Existing text is kept as facts and expanded; the previous version stays one click away.</p>
+            </div>
+            <div className="sm:col-span-2">
+              <label className="label">Anything Claude should know (optional)</label>
+              <textarea name="extraContext" className="field" rows={2} placeholder="e.g. it was a Monday rush; the tech was new; we already moved the stock; prescriber was called" />
+            </div>
+            <div className="flex items-end"><button className="btn btn-primary" type="submit">{incident.rootCauseAnalysis || incident.correctiveActionPlan ? "Strengthen with Claude" : "Write with Claude"}</button></div>
+          </form>
+          {(incident.rcaBeforeAi || incident.capBeforeAi) && (
+            <form action={restoreBeforeAi.bind(null, id)} className="mt-2"><button className="text-xs text-ink-2 underline">Restore the text from before Claude's rewrite</button></form>
+          )}
+        </section>
+      )}
       <div className="mb-4 flex flex-wrap gap-2 text-xs">
         <span className={`badge ${incident.reviewStartedOn ? "badge-ok" : daysUntil(startDue)! < 0 ? "badge-crit" : "badge-warn"}`}>
           {incident.reviewStartedOn ? `Review started ${fmt(incident.reviewStartedOn)}` : `Start review by ${fmt(startDue)}`}
