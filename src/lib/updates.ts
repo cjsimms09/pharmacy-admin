@@ -87,3 +87,14 @@ export function requestUpdateAndRestart() {
   fs.writeFileSync(path.join(dataDir, ".update-requested"), new Date().toISOString());
   setTimeout(() => process.exit(75), 800);
 }
+
+/** The launcher's log from the last update, so a failed rebuild is visible without leaving the app. */
+export function lastUpdateLog(): string | null {
+  try {
+    const dataDir = path.dirname(path.resolve(process.env.DATABASE_PATH ?? "./data/pharmacy-admin.db"));
+    const txt = fs.readFileSync(path.join(dataDir, "update.log"), "utf8").trim();
+    return txt ? txt.split("\n").slice(-60).join("\n") : null;
+  } catch {
+    return null;
+  }
+}

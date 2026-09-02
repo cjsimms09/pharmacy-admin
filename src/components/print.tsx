@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PrintButton } from "./print-button";
 
 /**
  * Page frame that mirrors the Kansas Board of Pharmacy form header so printed output
@@ -21,9 +22,15 @@ export function PrintFrame({
 }) {
   return (
     <div className="mx-auto max-w-[8.5in] bg-white text-black print:max-w-none">
-      <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-2 rounded-md border border-line bg-ground px-3 py-2 text-sm">
-        <Link href={backHref} className="text-ink-2 hover:text-ink">← Back</Link>
-        <span className="text-ink-3">Print with your browser (Ctrl/Cmd + P) to paper or PDF, then sign.</span>
+      <div className="no-print mb-4 rounded-md border border-line bg-ground px-3 py-2 text-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <Link href={backHref} className="text-ink-2 hover:text-ink">← Back</Link>
+          <PrintButton />
+        </div>
+        <p className="mt-2 text-xs text-ink-2">
+          <b>Before you print:</b> in the print box, open <b>More settings</b> and untick <b>Headers and footers</b>. That is what puts the web address and date along the bottom of the page — the Board's form should not have it. Chrome and Edge remember the setting after the first time.
+        </p>
+        <p className="mt-1 text-xs text-ink-3">Set Margins to <b>Default</b> and Scale to <b>100%</b> so the boxes line up with the Board's form. Then print to paper or save as PDF and sign.</p>
       </div>
       <header className="mb-3 flex items-stretch border border-black">
         <div className="flex w-1/5 items-center justify-center border-r border-black px-2 text-center font-serif text-2xl font-bold">Kansas</div>

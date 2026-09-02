@@ -2,6 +2,7 @@ import "server-only";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { addDays, daysUntil, nextCqiPeriod, todayIso } from "./dates";
+import { incidentsInPeriod, incidentsWithStage } from "./cqi";
 import { CREDENTIAL_LABEL } from "./labels";
 
 export type Alert = {
@@ -115,4 +116,85 @@ export function ceRequirement(role: string): { hours: number; label: string; cyc
   if (role === "pharmacist") return { hours: 30, label: "30 hours per biennium incl. 1-hour Board course", cycleEnd: (e) => e };
   if (role === "technician") return { hours: 20, label: "20 hours per two-year period (Nov 1 – Oct 31)", cycleEnd: (e) => e };
   return null;
+}
+
+// ── Dashboard panels ─────────────────────────────────────────────────
+
+export type StaffRow = {
+  id: string;
+  name: string;
+  role: string;
+  isPic: boolean;
+  licenseNumber: string | null;
+  licenseExpires: string | null;
+  cprExpires: string | null;
+  immunizationOnFile: boolean;
+  administersVaccines: boolean;
+  ceHours: number;
+  ceRequired: number;
+  boardCourseDone: boolean;
+};
+
+/** One row per active person: the things that expire, and where CE stands. */
+export async function staffCompliance(): Promise<StaffRow[]> {
+  const [people, creds, ce] = await Promise.all([
+    db.query.people.findMany({ where: eq(schema.people.active, true), orderBy: (p, { asc }) => [asc(p.lastName)] }),
+    db.query.credentials.findMany(),
+    db.query.ceEntries.findMany(),
+  ]);
+  return people.map((p) => {
+    const mine = creds.filter((c) => c.personId === p.id);
+    const license = mine.find((c) => c.type === "pharmacist_license" || c.type === "technician_registration" || c.type === "intern_registration");
+    const cpr = mine.filter((c) => c.type === "cpr").sort((a, b) => (b.expiresOn ?? "").localeCompare(a.expiresOn ?? ""))[0];
+    const cycleStart = license?.issuedOn ?? null;
+    const mineCe = ce.filter((e) => e.personId === p.id && (!cycleStart || e.completedOn >= cycleStart));
+    return {
+      id: p.id,
+      name: `${p.firstName} ${p.lastName}`,
+      role: p.role,
+      isPic: p.isPic,
+      licenseNumber: license?.number ?? null,
+      licenseExpires: license?.expiresOn ?? null,
+      cprExpires: cpr?.expiresOn ?? null,
+      immunizationOnFile: mine.some((c) => c.type === "immunization_training"),
+      administersVaccines: p.administersVaccines,
+      ceHours: mineCe.reduce((s, e) => s + e.hours, 0) / 10,
+      ceRequired: p.role === "pharmacist" ? 30 : p.role === "technician" ? 20 : 0,
+      boardCourseDone: mineCe.some((e) => e.isBoardCourse),
+    };
+  });
+}
+
+export type CqiSnapshot = {
+  label: string;
+  dueOn: string;
+  status: string;
+  summaryId: string | null;
+  incidentCount: number;
+  needingYou: number;
+  drafting: number;
+};
+
+/** The state of the CQI cycle in one line, for the dashboard. */
+export async function cqiSnapshot(): Promise<CqiSnapshot> {
+  const period = nextCqiPeriod();
+  const summary = await db.query.cqiSummaries.findFirst({ where: eq(schema.cqiSummaries.periodStart, period.periodStart) });
+  const rows = await incidentsWithStage();
+  const inPeriod = summary ? await incidentsInPeriod(summary.periodStart, summary.periodEnd) : [];
+  return {
+    label: period.label,
+    dueOn: period.dueOn,
+    status: summary ? summary.status : "not started",
+    summaryId: summary?.id ?? null,
+    incidentCount: inPeriod.length,
+    needingYou: rows.filter((r) => !r.stage.automatic && r.stage.key !== "closed").length,
+    drafting: rows.filter((r) => r.stage.key === "drafting").length,
+  };
+}
+
+/** Date of the last controlled substance inventory and when the next one is due. */
+export async function csInventoryStatus() {
+  const invs = await db.query.csInventories.findMany({ orderBy: (i, { desc }) => [desc(i.inventoryDate)] });
+  const last = invs[0] ?? null;
+  return { last: last?.inventoryDate ?? null, dueOn: last ? addDays(last.inventoryDate, 375) : null, count: invs.length };
 }

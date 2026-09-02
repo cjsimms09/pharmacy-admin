@@ -29,7 +29,11 @@ export default async function SummaryPrintPage({ params }: { params: Promise<{ i
 
   const dueMonth = Number(summary.dueOn.slice(5, 7));
   const year = summary.dueOn.slice(0, 4);
-  const isNull = summary.isNullReport || incidents.length === 0;
+  // A null report means the period had no incidents (K.A.R. 68-19-1(b)(4)). Derive it from what is
+  // actually on record rather than trusting a stored flag: a summary opened while the period was
+  // still empty carries isNullReport=true, and incidents logged afterwards must clear it — otherwise
+  // the form prints with the Null Report box ticked and the Rx column blank.
+  const isNull = incidents.length === 0;
   const pic = people.find((p) => p.id === summary.preparedByPersonId) ?? people.find((p) => p.isPic);
   const picName = pic ? `${pic.firstName} ${pic.lastName}` : "";
   const rxByType = (t: string) => incidents.filter((i) => i.type === t).flatMap((i) => rxNumbersOf(i)).join(", ");

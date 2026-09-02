@@ -33,6 +33,91 @@ function run(cmd, args, opts = {}) {
   if (r.status !== 0) throw new Error(`${cmd} ${args.join(" ")} failed (exit ${r.status})`);
 }
 
+// ── Update progress, visible from the browser ────────────────────────
+// While an update runs the app is down, so the launcher answers on the same port itself and shows
+// what step it is on. Otherwise the browser sits on a dead connection and the update looks frozen.
+const updateLog = path.join(root, "data", "update.log");
+let updateStep = "Starting…";
+
+function step(msg) {
+  updateStep = msg;
+  const line = `${new Date().toLocaleTimeString()}  ${msg}\n`;
+  log(msg);
+  try {
+    fs.appendFileSync(updateLog, line);
+  } catch {
+    /* the log is a convenience, never a reason to fail an update */
+  }
+}
+
+/**
+ * Runs a build step with its output captured to the update log instead of the console.
+ * Inheriting the console on Windows lets a stray click (QuickEdit selection) pause the process —
+ * which is exactly what a frozen update looks like.
+ */
+function runLogged(cmd, args, timeoutMs = 15 * 60_000) {
+  step(`${cmd} ${args.join(" ")}`);
+  const r = spawnSync(cmd, args, { shell: isWin, encoding: "utf8", timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024 });
+  const out = `${r.stdout ?? ""}${r.stderr ?? ""}`.trim();
+  if (out) {
+    try {
+      fs.appendFileSync(updateLog, out.split("\n").slice(-40).join("\n") + "\n");
+    } catch {
+      /* ignore */
+    }
+  }
+  if (r.error && r.error.code === "ETIMEDOUT") throw new Error(`${cmd} ${args.join(" ")} took too long and was stopped.`);
+  if (r.status !== 0) throw new Error(`${cmd} ${args.join(" ")} failed (exit ${r.status})${out ? `:\n${out.split("\n").slice(-8).join("\n")}` : ""}`);
+}
+
+function tailLog(n = 14) {
+  try {
+    return fs.readFileSync(updateLog, "utf8").trim().split("\n").slice(-n).join("\n");
+  } catch {
+    return "";
+  }
+}
+
+function statusPage(finished, error) {
+  const esc = (t) => String(t).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+  const body = error
+    ? `<h1>The update could not be installed</h1><p class=s>${esc(error)}</p><p class=s>The previous version is starting again — nothing was lost. This page will return to the app on its own.</p>`
+    : finished
+      ? "<h1>Update installed</h1><p class=s>Starting the app…</p>"
+      : `<h1>Installing the update…</h1><p class=s>${esc(updateStep)}</p><p class=s>This usually takes one to three minutes. Leave this page open — it returns to the app on its own.</p>`;
+  return `<!doctype html><html><head><meta charset=utf-8><title>Installing update</title><meta http-equiv=refresh content=3>
+<style>body{font:14px system-ui,Segoe UI,sans-serif;margin:0;background:#f7f7f6;color:#1b1b1a;display:flex;min-height:100vh;align-items:center;justify-content:center}
+main{max-width:34rem;padding:2rem;text-align:center}h1{font-size:1.25rem;margin:0 0 .5rem}.s{color:#57564f;margin:.35rem 0}
+pre{text-align:left;background:#fff;border:1px solid #e2e1dc;border-radius:.5rem;padding:.75rem;font-size:11px;overflow:auto;max-height:16rem;white-space:pre-wrap}</style>
+</head><body><main>${body}<pre>${esc(tailLog())}</pre></main></body></html>`;
+}
+
+function startStatusServer() {
+  let finished = false;
+  let error = null;
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+    res.end(statusPage(finished, error));
+  });
+  server.on("error", () => {
+    /* the port may take a moment to free after the app exits; the browser retries anyway */
+  });
+  server.listen(PORT, "0.0.0.0");
+  return {
+    done: () => {
+      finished = true;
+    },
+    failed: (e) => {
+      error = e;
+    },
+    stop: () =>
+      new Promise((resolve) => {
+        server.close(() => resolve());
+        server.closeAllConnections?.();
+      }),
+  };
+}
+
 function ensureEnv() {
   const envPath = path.join(root, ".env");
   if (fs.existsSync(envPath)) {
@@ -67,22 +152,29 @@ function sourceStamp() {
   return `${head}:${lock}`;
 }
 
-function build() {
-  run(npmCmd, ["install", "--no-audit", "--no-fund"]);
-  run(npmCmd, ["run", "build"]);
+function build(logged = false) {
+  const r = logged ? runLogged : run;
+  r(npmCmd, ["install", "--no-audit", "--no-fund"]);
+  r(npmCmd, ["run", "build"]);
   fs.writeFileSync(path.join(root, ".next", "source-stamp"), sourceStamp());
 }
 
 function update() {
-  log("Installing update…");
+  try {
+    fs.writeFileSync(updateLog, "");
+  } catch {
+    /* ignore */
+  }
   // Update the branch this copy is on — never switch branches, which could install older code.
   const branch = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8", shell: isWin }).stdout.trim() || "main";
+  step(`Downloading the latest version (${branch})…`);
   // The pharmacy computer never edits source; npm install may touch package-lock.json. Discard such changes.
-  run("git", ["checkout", "--", "."]);
-  run("git", ["fetch", "origin", branch]);
-  run("git", ["merge", "--ff-only", `origin/${branch}`]);
-  build();
-  log(`Update installed (${branch}).`);
+  runLogged("git", ["checkout", "--", "."], 60_000);
+  runLogged("git", ["fetch", "origin", branch], 5 * 60_000);
+  runLogged("git", ["merge", "--ff-only", `origin/${branch}`], 60_000);
+  step("Rebuilding the app — this is the slow part…");
+  build(true);
+  step(`Update installed (${branch}).`);
 }
 
 function waitForServer(tries = 120) {
@@ -129,11 +221,18 @@ async function main() {
     }
     const code = await new Promise((resolve) => child.on("exit", resolve));
     if (code === UPDATE_EXIT_CODE || fs.existsSync(flagFile)) {
+      const status = startStatusServer();
       try {
         update();
+        status.done();
       } catch (e) {
-        log(`Update failed: ${e.message}. Restarting the current version.`);
+        step(`Update failed: ${e.message}`);
+        status.failed(e.message);
+        log("Restarting the current version — no data was changed.");
       }
+      // Let the browser pick up the final state before the port goes back to the app.
+      await new Promise((r) => setTimeout(r, 3500));
+      await status.stop();
       continue;
     }
     log(`Server stopped (exit ${code}).`);

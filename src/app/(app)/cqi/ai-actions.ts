@@ -1,24 +1,22 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { redirect } from "next/navigation";
-import { and, eq, ne, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { INCIDENT_TYPES } from "@/db/schema";
 import { requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { newId } from "@/lib/crypto";
 import { storeFile } from "@/lib/files";
-import { capsToEvaluate, encodeRxNumbers, isThin, periodFromDue } from "@/lib/cqi";
-import { describeError, draftCapEvaluations, extractPacket, writeRcaCap } from "@/lib/ai";
+import { capsToEvaluate, carriedForward, encodeRxNumbers, incidentsInPeriod, isThin, periodFromDue } from "@/lib/cqi";
+import { todayIso } from "@/lib/dates";
+import { describeError, draftCapEvaluations, extractPacket, hasApiKey } from "@/lib/ai";
+import { roleNames, writeIncidentAnalysis, writeIncidentAnalysisInBackground } from "@/lib/cqi-ai";
 
 function fail(path: string, msg: string): never {
   redirect(`${path}${path.includes("?") ? "&" : "?"}error=${encodeURIComponent(msg)}`);
-}
-
-async function roleNames() {
-  const people = await db.query.people.findMany();
-  return people.map((p) => ({ name: `${p.firstName} ${p.lastName}`, role: p.isPic ? "the PIC" : p.role === "pharmacist" ? "a pharmacist" : p.role === "technician" ? "a technician" : "a staff member" }));
 }
 
 /** Upload a scanned packet, have Claude read it, and store the extraction for review. */
@@ -113,7 +111,7 @@ export async function applyImport(id: string, fd: FormData) {
 
   // Incidents
   const nInc = Number(fd.get("incident_count") ?? 0);
-  const strengthenFailures: string[] = [];
+  const toWrite: string[] = [];
   let created = 0;
   for (let i = 0; i < nInc; i++) {
     if (!fd.get(`inc_${i}_include`)) continue;
@@ -179,14 +177,11 @@ export async function applyImport(id: string, fd: FormData) {
       if (!sid) continue;
       await db.insert(schema.cqiCapReviews).values({ id: newId(), incidentId: incId, summaryId: sid, reviewNumber: r + 1, effective: eff === "yes" ? true : eff === "no" ? false : null, comments: comments || null });
     }
+    // Queue the write-up rather than doing it inside this request: a full analysis takes a minute or
+    // two per incident, and a browser giving up mid-way used to spend the call and show nothing.
     if (fd.get(`inc_${i}_strengthen`)) {
-      try {
-        await strengthenIncident(incId, null, user);
-      } catch (e) {
-        const msg = describeError(e);
-        strengthenFailures.push(`incident #${next}: ${msg}`);
-        await audit({ action: "cqi.incident.ai_rca_cap_failed", userId: user.id, userName: user.name, entity: "cqi_incident", entityId: incId, details: msg });
-      }
+      await db.update(schema.cqiIncidents).set({ aiState: "queued", aiError: null }).where(eq(schema.cqiIncidents.id, incId));
+      toWrite.push(incId);
     }
     created++;
   }
@@ -195,8 +190,11 @@ export async function applyImport(id: string, fd: FormData) {
   revalidatePath("/cqi");
   revalidatePath("/cqi/incidents");
   revalidatePath("/");
-  if (strengthenFailures.length > 0) {
-    redirect(`/cqi/incidents?error=${encodeURIComponent(`Records were created, but Claude could not write the analysis for ${strengthenFailures.length} of them: ${strengthenFailures[0]} — open each incident and use “Write with Claude”.`)}`);
+  if (toWrite.length > 0) {
+    after(async () => {
+      for (const incId of toWrite) await writeIncidentAnalysisInBackground(incId, { id: user.id, name: user.name });
+    });
+    redirect(`/cqi/incidents?drafting=${toWrite.length}`);
   }
   redirect(`/cqi/incidents?saved=1`);
 }
@@ -208,45 +206,13 @@ export async function discardImport(id: string) {
   redirect("/cqi/import");
 }
 
-async function strengthenIncident(incId: string, extraContext: string | null, user: { id: string; name: string }) {
-  const inc = await db.query.cqiIncidents.findFirst({ where: eq(schema.cqiIncidents.id, incId) });
-  if (!inc) throw new Error("Incident not found.");
-  const similar = await db.query.cqiIncidents.findMany({ where: and(eq(schema.cqiIncidents.type, inc.type), ne(schema.cqiIncidents.id, incId)), orderBy: (i, { desc }) => [desc(i.reportCreatedOn)], limit: 5 });
-  const reviews = await db.query.cqiCapReviews.findMany();
-  const names = await roleNames();
-  const out = await writeRcaCap(
-    {
-      type: inc.type,
-      typeOther: inc.typeOther,
-      description: inc.description,
-      reachedPatient: inc.reachedPatient,
-      existingRca: inc.rootCauseAnalysis,
-      existingCap: inc.correctiveActionPlan,
-      extraContext,
-      priorSimilar: similar.map((p) => ({ description: p.description, correctiveActionPlan: p.correctiveActionPlan, effective: reviews.filter((r) => r.incidentId === p.id).sort((a, b) => b.reviewNumber - a.reviewNumber)[0]?.effective ?? null })),
-    },
-    names,
-    { userId: user.id, userName: user.name },
-  );
-  await db
-    .update(schema.cqiIncidents)
-    .set({
-      rcaBeforeAi: inc.rootCauseAnalysis,
-      capBeforeAi: inc.correctiveActionPlan,
-      rootCauseAnalysis: out.rootCauseAnalysis,
-      correctiveActionPlan: out.correctiveActionPlan,
-      updatedAt: new Date().toISOString(),
-    })
-    .where(eq(schema.cqiIncidents.id, incId));
-}
-
 /** Write (or strengthen) the RCA and CAP on an incident with Claude. Previous text is kept for restore. */
 export async function suggestForIncident(id: string, fd: FormData) {
   const user = await requireManager();
   const here = `/cqi/incidents/${id}`;
   const extra = String(fd.get("extraContext") ?? "").trim() || null;
   try {
-    await strengthenIncident(id, extra, user);
+    await writeIncidentAnalysis(id, extra, user);
   } catch (e) {
     fail(here, describeError(e));
   }
@@ -276,37 +242,44 @@ export async function strengthenThinIncidents() {
   const all = await db.query.cqiIncidents.findMany({ orderBy: (i, { desc }) => [desc(i.reportCreatedOn)] });
   const thin = all.filter((i) => isThin(i.rootCauseAnalysis, i.correctiveActionPlan));
   if (thin.length === 0) fail(here, "Every incident already has a full root cause analysis and corrective action plan.");
-  let done = 0;
-  const failures: string[] = [];
-  for (const inc of thin.slice(0, 20)) {
-    try {
-      await strengthenIncident(inc.id, null, user);
-      done++;
-    } catch (e) {
-      failures.push(`#${inc.incidentNumber}: ${describeError(e)}`);
-    }
+  const batch = thin.slice(0, 20);
+  for (const inc of batch) {
+    await db.update(schema.cqiIncidents).set({ aiState: "queued", aiError: null }).where(eq(schema.cqiIncidents.id, inc.id));
   }
-  await audit({ action: "cqi.incidents.ai_bulk_strengthen", userId: user.id, userName: user.name, details: `${done} rewritten, ${failures.length} failed` });
+  await audit({ action: "cqi.incidents.ai_bulk_strengthen", userId: user.id, userName: user.name, details: `${batch.length} queued` });
+  // One at a time in the background — each analysis takes a minute or two and the page must come back now.
+  after(async () => {
+    for (const inc of batch) await writeIncidentAnalysisInBackground(inc.id, { id: user.id, name: user.name });
+  });
   revalidatePath(here);
   revalidatePath("/cqi");
-  if (failures.length > 0) fail(here, `Rewrote ${done}. ${failures.length} could not be done: ${failures[0]}`);
-  redirect(`${here}?saved=1&detail=${encodeURIComponent(`Rewrote ${done} incident write-up${done === 1 ? "" : "s"}. Read each one and correct anything that isn't right before signing.`)}`);
+  redirect(`${here}?drafting=${batch.length}`);
 }
 
 /** Draft CAP effectiveness comments for every CAP due on a summary that has no comment yet. */
 export async function draftEvaluationsForSummary(id: string) {
   const user = await requireManager();
   const here = `/cqi/summaries/${id}`;
+  try {
+    await draftEvaluationsFor(id, user);
+  } catch (e) {
+    fail(here, describeError(e));
+  }
+  revalidatePath(here);
+  redirect(`${here}?ai=1`);
+}
+
+async function draftEvaluationsFor(id: string, user: { id: string; name: string }) {
   const summary = await db.query.cqiSummaries.findFirst({ where: eq(schema.cqiSummaries.id, id) });
-  if (!summary) fail("/cqi", "Summary not found.");
-  if (summary.status === "final") fail(here, "Reopen the summary before drafting.");
+  if (!summary) throw new Error("Summary not found.");
+  if (summary.status === "final") throw new Error("Reopen the summary before drafting.");
   const caps = await capsToEvaluate(summary.periodStart, summary.periodEnd);
   const mine = await db.query.cqiCapReviews.findMany({ where: eq(schema.cqiCapReviews.summaryId, id) });
   const pending = caps.filter(({ incident, nextReviewNumber }) => {
     const existing = mine.find((r) => r.incidentId === incident.id);
     return !(existing && existing.comments) && nextReviewNumber <= 2;
   });
-  if (pending.length === 0) fail(here, "Every corrective action plan on this summary already has an evaluation.");
+  if (pending.length === 0) throw new Error("Every corrective action plan on this summary already has an evaluation.");
   const all = await db.query.cqiIncidents.findMany();
   const inputs = pending.map(({ incident: i, reviews: done, nextReviewNumber }) => ({
     incidentNumber: i.incidentNumber,
@@ -318,12 +291,7 @@ export async function draftEvaluationsForSummary(id: string) {
     recurrencesSince: all.filter((o) => o.id !== i.id && o.type === i.type && i.capImplementedOn && o.reportCreatedOn > i.capImplementedOn && o.reportCreatedOn <= summary.periodEnd).length,
     priorReview: done.filter((r) => r.summaryId !== id)[0] ? { effective: done[0].effective, comments: done[0].comments } : null,
   }));
-  let evals;
-  try {
-    evals = await draftCapEvaluations(inputs, await roleNames(), { userId: user.id, userName: user.name });
-  } catch (e) {
-    fail(here, describeError(e));
-  }
+  const evals = await draftCapEvaluations(inputs, await roleNames(), { userId: user.id, userName: user.name });
   for (const ev of evals) {
     const p = pending.find((x) => x.incident.incidentNumber === ev.incidentNumber);
     if (!p) continue;
@@ -331,6 +299,88 @@ export async function draftEvaluationsForSummary(id: string) {
     if (existing) await db.update(schema.cqiCapReviews).set({ effective: existing.effective ?? ev.effective, comments: ev.comments }).where(eq(schema.cqiCapReviews.id, existing.id));
     else await db.insert(schema.cqiCapReviews).values({ id: newId(), incidentId: p.incident.id, summaryId: id, reviewNumber: p.nextReviewNumber, effective: ev.effective, comments: ev.comments });
   }
+}
+
+/**
+ * Open the pharmacist's review of an incident and have Claude draft the analysis for it.
+ *
+ * K.A.R. 68-19-1 puts the root cause analysis and corrective action inside the pharmacist's review,
+ * which begins within 7 days of the report. So nothing is drafted when an incident is logged — only
+ * here, when the pharmacist starts the review, and always as a draft the pharmacist then adopts.
+ */
+export async function startReview(id: string) {
+  const user = await requireManager();
+  const here = `/cqi/incidents/${id}`;
+  const inc = await db.query.cqiIncidents.findFirst({ where: eq(schema.cqiIncidents.id, id) });
+  if (!inc) fail("/cqi/incidents", "Incident not found.");
+  const reviewer = await reviewerFor(user);
+  const ready = await hasApiKey();
+  await db
+    .update(schema.cqiIncidents)
+    .set({
+      reviewStartedOn: inc.reviewStartedOn ?? todayIso(),
+      reviewerPersonId: inc.reviewerPersonId ?? reviewer,
+      aiState: ready ? "queued" : "idle",
+      aiError: null,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(schema.cqiIncidents.id, id));
+  await audit({ action: "cqi.incident.review_started", userId: user.id, userName: user.name, entity: "cqi_incident", entityId: id });
+  if (ready) after(() => writeIncidentAnalysisInBackground(id, { id: user.id, name: user.name }));
   revalidatePath(here);
-  redirect(`${here}?ai=1`);
+  revalidatePath("/cqi");
+  revalidatePath("/cqi/incidents");
+  redirect(ready ? `${here}?drafting=1` : `${here}?saved=1`);
+}
+
+/**
+ * One button for the whole summary. Starts and drafts every review the period still needs, drafts
+ * the effectiveness evaluations for the corrective action plans due, and leaves everything as a draft
+ * for the PIC to read, correct and sign.
+ */
+export async function prepareSummary(id: string) {
+  const user = await requireManager();
+  const here = `/cqi/summaries/${id}`;
+  const summary = await db.query.cqiSummaries.findFirst({ where: eq(schema.cqiSummaries.id, id) });
+  if (!summary) fail("/cqi", "Summary not found.");
+  if (summary.status === "final") fail(here, "This summary is finalized. Reopen it first.");
+  if (!(await hasApiKey())) fail(here, "Add your Anthropic API key under Settings → Claude to have the summary prepared for you.");
+  const reviewer = await reviewerFor(user);
+
+  // Every incident in the period, plus anything an earlier period left unfinished.
+  const inPeriod = await incidentsInPeriod(summary.periodStart, summary.periodEnd);
+  const carried = await carriedForward(summary.periodStart);
+  const needing = [...inPeriod, ...carried.openReviews, ...carried.thin].filter(
+    (i, idx, arr) => arr.findIndex((x) => x.id === i.id) === idx && (isThin(i.rootCauseAnalysis, i.correctiveActionPlan) || !i.reviewStartedOn),
+  );
+
+  for (const inc of needing) {
+    await db
+      .update(schema.cqiIncidents)
+      .set({ reviewStartedOn: inc.reviewStartedOn ?? todayIso(), reviewerPersonId: inc.reviewerPersonId ?? reviewer, aiState: "queued", aiError: null })
+      .where(eq(schema.cqiIncidents.id, inc.id));
+  }
+  await audit({ action: "cqi.summary.prepare", userId: user.id, userName: user.name, entity: "cqi_summary", entityId: id, details: `${needing.length} review(s) queued` });
+
+  // Draft them one at a time after the page has already come back, then the CAP evaluations.
+  after(async () => {
+    for (const inc of needing) await writeIncidentAnalysisInBackground(inc.id, { id: user.id, name: user.name });
+    try {
+      await draftEvaluationsFor(id, user);
+    } catch {
+      /* the evaluation drafts are a convenience; the PIC can still press the button on the summary */
+    }
+  });
+
+  revalidatePath(here);
+  revalidatePath("/cqi");
+  revalidatePath("/cqi/incidents");
+  redirect(`${here}?preparing=${needing.length}`);
+}
+
+/** The person recorded as conducting the review: the signed-in user if they are staff, otherwise the PIC. */
+async function reviewerFor(user: { personId: string | null }): Promise<string | null> {
+  if (user.personId) return user.personId;
+  const pic = await db.query.people.findFirst({ where: eq(schema.people.isPic, true) });
+  return pic?.id ?? null;
 }

@@ -149,6 +149,8 @@ Extract everything into the structured format. Rules:
 - Incident type must be one of the Board's categories: wrong_drug, incorrect_strength, incorrect_dosage_form, wrong_patient, packaging_labeling_directions (inadequate or incorrect packaging, labeling, or directions), serious_harm, other. Use typeOther for the "Other" text.
 - Dates as YYYY-MM-DD. The summary dueOn is the 15th of the month checked under "Summary type" (February, April, June, August, October, December) with the year given.
 - C-550 "CAP review" blocks record whether a corrective action plan was effective on its first or second review; attach each to the matching incident as a capReview with the summary's dueOn.
+- **Rx numbers.** The C-550 carries a table headed "INCIDENT TYPE SUMMARY" whose right-hand column is "Rx numbers associated with incident type". Those numbers belong on the incident of that type — put them in rxNumbers. This is often the only place an Rx number appears, especially when the C-650 pages were not scanned with the summary, so always read that table and never leave rxNumbers empty when a number is written against the type. A C-650 also carries its own Rx number field; use both, without duplicating.
+- When a packet has a C-550 but no C-650 pages, still create one incident per row of that table that has an Rx number or a corrective action written for it, carrying over the type, the Rx numbers, and any CAP text on the form.
 - Copy root cause analysis and corrective action plan text faithfully; do not invent content. Description should summarize the incident in one or two sentences based on what is written.
 - Never include a patient's name, date of birth, address, or phone number anywhere in the output, even if visible on the scan.`;
 

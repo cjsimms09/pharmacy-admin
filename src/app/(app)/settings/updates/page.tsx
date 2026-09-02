@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { checkForUpdates, currentVersion, launcherActive, requestUpdateAndRestart } from "@/lib/updates";
+import { checkForUpdates, currentVersion, lastUpdateLog, launcherActive, requestUpdateAndRestart } from "@/lib/updates";
 import { PageHeader, BackLink, Notice } from "@/components/ui";
 
 export const metadata = { title: "Updates" };
@@ -12,6 +12,7 @@ export default async function UpdatesPage({ searchParams }: { searchParams: Prom
   const version = await currentVersion();
   const launcher = launcherActive();
   const result = check ? await checkForUpdates() : null;
+  const log = lastUpdateLog();
 
   async function doCheck() {
     "use server";
@@ -48,6 +49,13 @@ export default async function UpdatesPage({ searchParams }: { searchParams: Prom
         )}
         <form action={doCheck} className="mt-3"><button className="btn">Check for updates</button></form>
       </section>
+
+      {log && (
+        <details className="card mb-6 max-w-2xl">
+          <summary className="cursor-pointer text-sm font-medium text-accent">What happened during the last update</summary>
+          <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded bg-ground p-3 text-[11px] text-ink-2">{log}</pre>
+        </details>
+      )}
 
       {result && (
         <section className="card max-w-2xl">

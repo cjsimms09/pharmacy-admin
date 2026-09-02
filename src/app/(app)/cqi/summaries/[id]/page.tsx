@@ -4,31 +4,38 @@ import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requireManager } from "@/lib/auth";
 import { daysUntil, fmt, periodLabel, todayIso } from "@/lib/dates";
-import { capsToEvaluate, incidentsInPeriod, rxNumbersOf } from "@/lib/cqi";
+import { capsToEvaluate, carriedForward, incidentsInPeriod, isThin, rxNumbersOf } from "@/lib/cqi";
+import { AutoRefresh } from "@/components/auto-refresh";
 import { INCIDENT_TYPE_LABEL } from "@/lib/labels";
 import { PageHeader, BackLink, Notice, Field } from "@/components/ui";
 import { DocumentList, UploadForm } from "@/components/documents";
 import { deleteSummary, reopenSummary, updateSummary } from "../../actions";
-import { draftEvaluationsForSummary } from "../../ai-actions";
+import { draftEvaluationsForSummary, prepareSummary } from "../../ai-actions";
 import { hasApiKey } from "@/lib/ai";
 
 // Live compliance status — never serve a cached copy after an action changes it.
 export const dynamic = "force-dynamic";
 
-export default async function SummaryPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ error?: string; saved?: string; ai?: string }> }) {
+export default async function SummaryPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ error?: string; saved?: string; ai?: string; preparing?: string }> }) {
   await requireManager();
   const { id } = await params;
-  const { error, saved, ai } = await searchParams;
+  const { error, saved, ai, preparing } = await searchParams;
   const aiReady = await hasApiKey();
   const summary = await db.query.cqiSummaries.findFirst({ where: eq(schema.cqiSummaries.id, id) });
   if (!summary) notFound();
-  const [incidents, caps, people, docs, reviews] = await Promise.all([
+  const [incidents, caps, people, docs, reviews, carried] = await Promise.all([
     incidentsInPeriod(summary.periodStart, summary.periodEnd),
     capsToEvaluate(summary.periodStart, summary.periodEnd),
     db.query.people.findMany({ orderBy: (p, { asc }) => [asc(p.lastName)] }),
     db.query.documents.findMany({ where: eq(schema.documents.cqiSummaryId, id) }),
     db.query.cqiCapReviews.findMany({ where: eq(schema.cqiCapReviews.summaryId, id) }),
+    carriedForward(summary.periodStart),
   ]);
+  const busy = incidents.filter((i) => i.aiState === "queued");
+  const needsWork = incidents.filter((i) => !i.reviewStartedOn || isThin(i.rootCauseAnalysis, i.correctiveActionPlan));
+  // The C-550 asks for "Rx numbers associated with incident type" — a blank column is the first thing
+  // an inspector notices, and imports from a C-550 alone often miss them.
+  const noRx = incidents.filter((i) => rxNumbersOf(i).length === 0);
   const here = `/cqi/summaries/${id}`;
   const label = periodLabel(summary.periodStart, summary.periodEnd);
   const final = summary.status === "final";
@@ -44,7 +51,10 @@ export default async function SummaryPage({ params, searchParams }: { params: Pr
         subtitle={`Due ${fmt(summary.dueOn)} · ${d >= 0 ? `${d} days left` : `${-d} days overdue`} · ${final ? "Finalized" : "Draft"}`}
         actions={
           <>
-            {aiReady && !final && caps.length > 0 && <form action={draftEvaluationsForSummary.bind(null, id)}><button className="btn">Draft CAP evaluations with Claude</button></form>}
+            {aiReady && !final && (needsWork.length > 0 || caps.length > 0) && (
+              <form action={prepareSummary.bind(null, id)}><button className="btn btn-primary" type="submit">Prepare this summary with Claude</button></form>
+            )}
+            {aiReady && !final && caps.length > 0 && <form action={draftEvaluationsForSummary.bind(null, id)}><button className="btn">Draft CAP evaluations only</button></form>}
             <Link href={`${here}/print`} className="btn btn-primary">Print C-550</Link>
             {final && <form action={reopenSummary.bind(null, id)}><button className="btn">Reopen</button></form>}
           </>
@@ -53,6 +63,33 @@ export default async function SummaryPage({ params, searchParams }: { params: Pr
       {error && <Notice kind="crit">{error}</Notice>}
       {saved && <Notice>Saved.</Notice>}
       {ai && <Notice kind="warn">Claude drafted the CAP evaluations below from what's on record (mainly whether the same type of incident recurred). Confirm each "effective" answer and edit the comments before finalizing.</Notice>}
+      {preparing && (
+        <Notice kind="warn">
+          Preparing the summary: {preparing} review{preparing === "1" ? "" : "s"} opened and being drafted, then the corrective-action evaluations. About a minute each — this page updates on its own. Everything comes back as a draft for you to read, correct and sign.
+        </Notice>
+      )}
+      {busy.length > 0 && (
+        <>
+          <AutoRefresh seconds={12} />
+          <Notice kind="warn">Claude is drafting {busy.length} review{busy.length === 1 ? "" : "s"} ({busy.map((b) => `#${b.incidentNumber}`).join(", ")}).</Notice>
+        </>
+      )}
+      {carried.any && (
+        <section className="card mb-5 border-warn bg-warn-soft">
+          <h2 className="font-semibold">Brought forward onto this summary</h2>
+          <ul className="mt-2 space-y-1 text-sm">
+            {carried.openReviews.map((i) => <li key={`o${i.id}`}><Link href={`/cqi/incidents/${i.id}`} className="text-accent hover:underline">Incident #{i.incidentNumber}</Link> — review still open from an earlier period.</li>)}
+            {carried.thin.map((i) => <li key={`t${i.id}`}><Link href={`/cqi/incidents/${i.id}`} className="text-accent hover:underline">Incident #{i.incidentNumber}</Link> — write-up too thin for the Board.</li>)}
+            {carried.capMissing.map((i) => <li key={`c${i.id}`}><Link href={`/cqi/incidents/${i.id}`} className="text-accent hover:underline">Incident #{i.incidentNumber}</Link> — corrective action has no start date.</li>)}
+            {carried.ineffective.map(({ incident: i, on }) => <li key={`e${i.id}`}><Link href={`/cqi/incidents/${i.id}`} className="text-accent hover:underline">Incident #{i.incidentNumber}</Link> — judged <b>not effective</b> on the {on} summary; needs a stronger plan.</li>)}
+          </ul>
+        </section>
+      )}
+      {noRx.length > 0 && (
+        <Notice kind="warn">
+          {noRx.length === 1 ? "Incident" : "Incidents"} {noRx.map((i) => `#${i.incidentNumber}`).join(", ")} {noRx.length === 1 ? "has" : "have"} no Rx number recorded, so the “Rx numbers associated with incident type” column on the C-550 will print blank. Open {noRx.length === 1 ? "it" : "each one"} and add the prescription number.
+        </Notice>
+      )}
       {incomplete.length > 0 && <Notice kind="warn">{incomplete.length} incident{incomplete.length === 1 ? "" : "s"} in this period still {incomplete.length === 1 ? "has" : "have"} an open review. Complete them so the RCA and CAP appear on the summary.</Notice>}
 
       <form action={updateSummary.bind(null, id)} className="max-w-4xl space-y-6">

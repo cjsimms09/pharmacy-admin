@@ -5,7 +5,8 @@ import { requireManager } from "@/lib/auth";
 import { cqiPeriods, daysUntil, fmt, nextCqiPeriod, periodLabel, todayIso } from "@/lib/dates";
 import { PageHeader, Notice, Field, Empty } from "@/components/ui";
 import { uploadHistoricalSummary } from "./actions";
-import { reviewCompleteDeadline, reviewStartDeadline } from "@/lib/cqi";
+import { carriedForward, ensureCurrentSummary, incidentsWithStage } from "@/lib/cqi";
+import { AutoRefresh } from "@/components/auto-refresh";
 
 export const metadata = { title: "CQI program" };
 // Live compliance status — never serve a cached copy after an action changes it.
@@ -16,13 +17,17 @@ export default async function CqiPage({ searchParams }: { searchParams: Promise<
   const { saved, error } = await searchParams;
   const today = todayIso();
   const next = nextCqiPeriod(today);
-  const [summaries, incidents, docs] = await Promise.all([
+  // The summary for the period now running is opened as soon as it exists, so incidents collect into
+  // it as they are logged and there is never a "start it" step to forget.
+  const { summary: current } = await ensureCurrentSummary();
+  const [summaries, rows, docs, carried] = await Promise.all([
     db.query.cqiSummaries.findMany({ orderBy: (s, { desc }) => [desc(s.periodStart)] }),
-    db.query.cqiIncidents.findMany({ orderBy: (i, { desc }) => [desc(i.reportCreatedOn)] }),
+    incidentsWithStage(),
     db.query.documents.findMany({ where: eq(schema.documents.category, "cqi_summary") }),
+    carriedForward(current.periodStart),
   ]);
-  const current = summaries.find((s) => s.periodStart === next.periodStart);
-  const open = incidents.filter((i) => !i.reviewCompletedOn);
+  const open = rows.filter((r) => !r.stage.automatic && r.stage.key !== "closed");
+  const busy = rows.filter((r) => r.stage.key === "drafting");
   const y = Number(today.slice(0, 4));
   const periodOptions = cqiPeriods(y - 6, y).filter((p) => p.dueOn <= today).reverse();
 
@@ -48,35 +53,51 @@ export default async function CqiPage({ searchParams }: { searchParams: Promise<
             <h2 className="font-semibold">Current summary: {next.label}</h2>
             <p className="text-sm text-ink-2">Due {fmt(next.dueOn)} ({daysUntil(next.dueOn)! >= 0 ? `${daysUntil(next.dueOn)} days left` : `${-daysUntil(next.dueOn)!} days overdue`})</p>
           </div>
-          {current ? (
-            <div className="flex gap-2">
-              <span className={`badge ${current.status === "final" ? "badge-ok" : "badge-warn"}`}>{current.status === "final" ? "Finalized" : "Draft"}</span>
-              <Link href={`/cqi/summaries/${current.id}`} className="btn">Open</Link>
-              <Link href={`/cqi/summaries/${current.id}/print`} className="btn btn-primary">Print C-550</Link>
-            </div>
-          ) : (
-            <Link href={`/cqi/summaries/new?due=${next.dueOn}`} className="btn btn-primary">Start this summary</Link>
-          )}
+          <div className="flex flex-wrap gap-2">
+            <span className={`badge ${current.status === "final" ? "badge-ok" : "badge-warn"}`}>{current.status === "final" ? "Finalized" : "Open and collecting"}</span>
+            <Link href={`/cqi/summaries/${current.id}`} className="btn btn-primary">Open the summary</Link>
+            <Link href={`/cqi/summaries/${current.id}/print`} className="btn">Print C-550</Link>
+          </div>
         </div>
       </section>
 
+      {busy.length > 0 && <AutoRefresh seconds={12} />}
+
+      {carried.any && (
+        <section className="card mb-6 border-warn bg-warn-soft">
+          <h2 className="font-semibold">Carried forward from earlier summaries</h2>
+          <p className="mt-1 text-xs text-ink-2">Nothing here has to be remembered — it is brought onto the current summary automatically until it is finished.</p>
+          <ul className="mt-3 space-y-1 text-sm">
+            {carried.openReviews.map((i) => (
+              <li key={`o${i.id}`}><Link href={`/cqi/incidents/${i.id}`} className="text-accent hover:underline">Incident #{i.incidentNumber}</Link> — review from an earlier period is still open.</li>
+            ))}
+            {carried.thin.map((i) => (
+              <li key={`t${i.id}`}><Link href={`/cqi/incidents/${i.id}`} className="text-accent hover:underline">Incident #{i.incidentNumber}</Link> — the write-up is too thin for the Board.</li>
+            ))}
+            {carried.capMissing.map((i) => (
+              <li key={`c${i.id}`}><Link href={`/cqi/incidents/${i.id}`} className="text-accent hover:underline">Incident #{i.incidentNumber}</Link> — corrective action has no start date, so its effectiveness reviews cannot begin.</li>
+            ))}
+            {carried.ineffective.map(({ incident: i, on }) => (
+              <li key={`e${i.id}`}><Link href={`/cqi/incidents/${i.id}`} className="text-accent hover:underline">Incident #{i.incidentNumber}</Link> — the corrective action was judged <b>not effective</b> on the {on} summary and needs a stronger plan.</li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="card">
-          <h2 className="mb-3 font-semibold">Open incident reviews</h2>
-          {open.length === 0 ? <p className="text-sm text-ink-3">No incidents awaiting review.</p> : (
+          <h2 className="mb-1 font-semibold">What needs you</h2>
+          <p className="mb-3 text-xs text-ink-3">Everything else in the cycle happens on its own.</p>
+          {open.length === 0 ? <p className="text-sm text-ink-3">Nothing. Every incident is either closed or waiting on a summary the site will carry it onto.</p> : (
             <ul className="divide-y divide-line">
-              {open.map((i) => {
-                const startDue = reviewStartDeadline(i.reportCreatedOn);
-                const doneDue = reviewCompleteDeadline(i.reportCreatedOn);
-                return (
-                  <li key={i.id} className="py-2">
-                    <Link href={`/cqi/incidents/${i.id}`} className="font-medium text-accent hover:underline">Incident #{i.incidentNumber}</Link>
-                    <div className="text-xs text-ink-2">
-                      Report created {fmt(i.reportCreatedOn)} · {i.reviewStartedOn ? `review started ${fmt(i.reviewStartedOn)}` : <span className={daysUntil(startDue)! < 0 ? "text-crit" : ""}>start by {fmt(startDue)}</span>} · <span className={daysUntil(doneDue)! < 0 ? "text-crit" : ""}>complete by {fmt(doneDue)}</span>
-                    </div>
-                  </li>
-                );
-              })}
+              {open.map(({ incident: i, stage }) => (
+                <li key={i.id} className="py-2">
+                  <Link href={`/cqi/incidents/${i.id}`} className="font-medium text-accent hover:underline">Incident #{i.incidentNumber}</Link>
+                  <span className={`badge ml-2 ${stage.level === "crit" ? "badge-crit" : "badge-warn"}`}>{stage.label}</span>
+                  <div className="text-xs text-ink-2">{stage.next}</div>
+                  {stage.dueOn && <div className={`text-xs ${daysUntil(stage.dueOn)! < 0 ? "text-crit" : "text-ink-3"}`}>By {fmt(stage.dueOn)}</div>}
+                </li>
+              ))}
             </ul>
           )}
         </section>

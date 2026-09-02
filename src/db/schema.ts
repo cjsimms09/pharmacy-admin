@@ -192,6 +192,10 @@ export const cqiIncidents = sqliteTable(
     capClosed: integer("cap_closed", { mode: "boolean" }).notNull().default(false), // both C-550 reviews done
     rcaBeforeAi: text("rca_before_ai"), // previous text kept when Claude rewrites, so it can be restored
     capBeforeAi: text("cap_before_ai"),
+    // Background write-up: an incident logged at the counter has its RCA and CAP drafted automatically.
+    aiState: text("ai_state", { enum: ["idle", "queued", "done", "failed"] }).notNull().default("idle"),
+    aiError: text("ai_error"),
+    supersedesIncidentId: text("supersedes_incident_id"), // set when a CAP judged ineffective is revised
     externalReportRef: text("external_report_ref"), // where the C-650 / full incident report is filed
     createdBy: text("created_by").notNull(),
     createdAt: text("created_at").notNull().default(now()),
