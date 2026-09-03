@@ -1,7 +1,7 @@
 import "server-only";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "./crypto";
 import { parseCsv, referenceDir } from "./reference";
@@ -124,24 +124,41 @@ export async function loadNadacFiles(): Promise<LoadReport[]> {
   const files = (await fs.readdir(dir)).filter((f) => /\.(csv|txt)$/i.test(f)).sort();
   const reports: LoadReport[] = [];
 
+  // Every price already held, read once.
+  //
+  // The first version of this asked the database whether each row existed and then inserted it
+  // one at a time — sixty thousand round trips for a single weekly file, which made the page
+  // look frozen for several minutes. A CMS file is about thirty thousand rows and the whole set
+  // of keys is a few megabytes, so holding them in memory is the obvious trade.
+  const seen = new Set<string>(
+    (await db.select({ ndc11: schema.nadacPrices.ndc11, effectiveOn: schema.nadacPrices.effectiveOn }).from(schema.nadacPrices))
+      .map((r) => `${r.ndc11}|${r.effectiveOn}`),
+  );
+
   for (const file of files) {
     const text = await fs.readFile(path.join(dir, file), "utf8");
     const parsed = parseNadacCsv(text);
     let added = 0;
     let alreadyHad = 0;
 
-    // Chunked so a 30,000-row file does not hold one transaction open for minutes.
-    for (let i = 0; i < parsed.rows.length; i += 500) {
-      const chunk = parsed.rows.slice(i, i + 500);
-      for (const row of chunk) {
-        const existing = await db.query.nadacPrices.findFirst({
-          where: and(eq(schema.nadacPrices.ndc11, row.ndc11), eq(schema.nadacPrices.effectiveOn, row.effectiveOn)),
-        });
-        if (existing) { alreadyHad++; continue; }
-        await db.insert(schema.nadacPrices).values({ id: newId(), ...row });
-        added++;
-      }
+    // Dedupe within the file as well as against the database. CMS files can repeat an NDC, and
+    // two rows for the same NDC and date are the same price whichever arrives first.
+    const fresh: ParsedNadacRow[] = [];
+    for (const row of parsed.rows) {
+      const key = `${row.ndc11}|${row.effectiveOn}`;
+      if (seen.has(key)) { alreadyHad++; continue; }
+      seen.add(key);
+      fresh.push(row);
     }
+
+    // Multi-row inserts, sized so the statement stays well inside SQLite's variable limit:
+    // eleven columns a row, so 400 rows is about 4,400 bound values against a ceiling of 32,766.
+    for (let i = 0; i < fresh.length; i += 400) {
+      const chunk = fresh.slice(i, i + 400).map((row) => ({ id: newId(), ...row }));
+      await db.insert(schema.nadacPrices).values(chunk);
+      added += chunk.length;
+    }
+
     reports.push({ file, added, alreadyHad, skipped: parsed.skipped, reasons: parsed.reasons, fileAsOf: parsed.fileAsOf });
   }
   return reports;
@@ -159,12 +176,36 @@ export async function nadacClaimCoverage() {
     columns: { id: true, ndc11: true, dateFilled: true, itemName: true, planType: true },
   });
   const withNdc = claims.filter((c) => c.ndc11);
+  if (withNdc.length === 0) {
+    return { claims: claims.length, withNdc: 0, noNdc: claims.length, priced: 0, missing: [] as { ndc11: string; itemName: string | null; claims: number }[] };
+  }
+
+  // Every effective date held for the NDCs we actually dispensed, fetched in one go.
+  //
+  // Asking the database per claim was fine at a few hundred claims and would not have been at a
+  // year of them. The set of NDCs we dispense is small — a couple of hundred — so one query
+  // against those and the rest is arithmetic.
+  const wanted = [...new Set(withNdc.map((c) => c.ndc11!))];
+  const dates = new Map<string, string[]>();
+  for (let i = 0; i < wanted.length; i += 400) {
+    const rows = await db
+      .select({ ndc11: schema.nadacPrices.ndc11, effectiveOn: schema.nadacPrices.effectiveOn })
+      .from(schema.nadacPrices)
+      .where(inArray(schema.nadacPrices.ndc11, wanted.slice(i, i + 400)));
+    for (const r of rows) {
+      const a = dates.get(r.ndc11) ?? [];
+      a.push(r.effectiveOn);
+      dates.set(r.ndc11, a);
+    }
+  }
+
   let priced = 0;
   const missing = new Map<string, { ndc11: string; itemName: string | null; claims: number }>();
-
   for (const c of withNdc) {
-    const hit = await priceInForce(c.ndc11!, c.dateFilled);
-    if (hit) {
+    // In force means the latest effective date on or before the fill — the same rule the pricing
+    // engine applies, so this figure cannot disagree with what pricing will actually do.
+    const inForce = (dates.get(c.ndc11!) ?? []).some((d) => d <= c.dateFilled);
+    if (inForce) {
       priced++;
     } else {
       const e = missing.get(c.ndc11!) ?? { ndc11: c.ndc11!, itemName: c.itemName, claims: 0 };

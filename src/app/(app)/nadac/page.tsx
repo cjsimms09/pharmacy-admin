@@ -142,6 +142,10 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
           <button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Load</button>
         </form>
         <p className="mt-2 text-xs text-ink-3">
+          A CMS weekly file is about thirty thousand rows and takes a couple of seconds. The page will not respond
+          while it works — if you have several weeks to load, do them a few at a time rather than all at once.
+        </p>
+        <p className="mt-2 text-xs text-ink-3">
           Files can also be copied straight into <code>{nadacDir()}</code> and loaded from here.
         </p>
       </section>
