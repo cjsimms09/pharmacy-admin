@@ -9,6 +9,7 @@ const NAV = [
   { href: "/inbox", label: "Inbox" },
   { href: "/cqi", label: "CQI program" },
   { href: "/payers", label: "Payers" },
+  { href: "/claims", label: "Claims" },
   { href: "/inventory", label: "CS inventories" },
   { href: "/settings", label: "Settings" },
   { href: "/audit", label: "Audit log" },

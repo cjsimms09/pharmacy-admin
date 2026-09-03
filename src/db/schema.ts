@@ -636,3 +636,88 @@ export const csDiscrepancies = sqliteTable(
   },
   (t) => [index("cs_discrepancies_date_idx").on(t.discoveredOn), index("cs_discrepancies_drug_idx").on(t.drugName)],
 );
+
+// ── Claims ───────────────────────────────────────────────────────────
+// Dispensing and adjudication detail exported from PioneerRx, matched to the payer that priced
+// it. This is the table everything on the money side reads from: expected reimbursement, MAC
+// appeals, and any filing under the Kansas floor.
+//
+// Money is in cents and quantity in thousandths, both as integers, so nothing drifts. A value
+// the export did not carry is null — never zero. The difference matters: zero is a claim that
+// paid nothing, null is a claim we cannot yet judge, and collapsing them would put unpriceable
+// claims into a schedule as if they were underpayments.
+
+export const claimImports = sqliteTable("claim_imports", {
+  id: text("id").primaryKey(),
+  fileName: text("file_name").notNull(),
+  rowsRead: integer("rows_read").notNull().default(0),
+  claimsAdded: integer("claims_added").notNull().default(0),
+  duplicates: integer("duplicates").notNull().default(0),
+  skipped: integer("skipped").notNull().default(0),
+  /** Why rows were skipped, counted by reason. JSON object. */
+  skipReasons: text("skip_reasons").notNull().default("{}"),
+  /** Columns in the file we did not recognise, so a renamed export is visible immediately. */
+  unmappedColumns: text("unmapped_columns").notNull().default("[]"),
+  periodFrom: text("period_from"),
+  periodTo: text("period_to"),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull().default(now()),
+});
+
+export const claims = sqliteTable(
+  "claims",
+  {
+    id: text("id").primaryKey(),
+    importId: text("import_id").notNull().references(() => claimImports.id, { onDelete: "cascade" }),
+
+    rxNumber: text("rx_number").notNull(),
+    fillNumber: integer("fill_number"),
+    dateFilled: text("date_filled").notNull(),
+
+    ndc11: text("ndc11"),
+    itemName: text("item_name"),
+
+    // ── Which contract priced it ──
+    bin: text("bin"),
+    pcn: text("pcn"),
+    groupNumber: text("group_number"),
+    networkId: text("network_id"),
+    planId: text("plan_id"),
+    planType: text("plan_type"),
+    pharmacyServiceType: text("pharmacy_service_type"),
+    basisOfReimbursement: text("basis_of_reimbursement"),
+    basisOfCostDetermination: text("basis_of_cost_determination"),
+    /** The payer name as the export wrote it. */
+    payerLabel: text("payer_label"),
+    /** Resolved against the BIN listing. Null when the BIN is unknown. */
+    pbmName: text("pbm_name"),
+    /** How the payer was settled: bin, bin_and_name, name, or unresolved. */
+    matchMethod: text("match_method"),
+    /** True when the BIN alone pointed at more than one PBM and the name did not settle it. */
+    payerAmbiguous: integer("payer_ambiguous", { mode: "boolean" }).notNull().default(false),
+
+    // ── Amounts ──
+    quantityThousandths: integer("quantity_thousandths"),
+    quantityUnit: text("quantity_unit"),
+    daysSupply: integer("days_supply"),
+    remitCents: integer("remit_cents"),
+    copayCents: integer("copay_cents"),
+    awpCents: integer("awp_cents"),
+    acquisitionCents: integer("acquisition_cents"),
+    grossProfitCents: integer("gross_profit_cents"),
+    ingredientPaidCents: integer("ingredient_paid_cents"),
+    dispensingFeePaidCents: integer("dispensing_fee_paid_cents"),
+    daw: text("daw"),
+
+    /** Everything the export carried, kept verbatim so a later question needs no re-import. */
+    rawJson: text("raw_json"),
+    createdAt: text("created_at").notNull().default(now()),
+  },
+  (t) => [
+    index("claims_import_idx").on(t.importId),
+    index("claims_pbm_idx").on(t.pbmName),
+    index("claims_bin_idx").on(t.bin),
+    index("claims_date_idx").on(t.dateFilled),
+    index("claims_rx_idx").on(t.rxNumber),
+  ],
+);
