@@ -10,6 +10,7 @@ import { ConfirmButton } from "@/components/confirm-button";
 import type { ClassifiedDocT } from "@/lib/ai";
 import { applyIntake, deleteIntake, dismissIntake, retryIntake } from "../actions";
 import { KindPicker } from "./kind-picker";
+import { DocumentViewer } from "./viewer";
 
 export const dynamic = "force-dynamic";
 
@@ -48,12 +49,28 @@ export default async function IntakeReviewPage({ params, searchParams }: { param
       <PageHeader
         title={r?.title || doc?.fileName || "Document"}
         subtitle={doc ? `${doc.fileName} · ${(doc.sizeBytes / 1024).toFixed(0)} KB` : undefined}
-        actions={doc ? <a href={`/files/${doc.id}`} target="_blank" rel="noreferrer" className="btn">Open the file</a> : undefined}
+        actions={<a href="/intake" className="btn">Add another</a>}
       />
       {error && <Notice kind="crit">{error}</Notice>}
 
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-start">
+        {/* The document, kept beside the form and in view while it is scrolled. */}
+        <div className="lg:sticky lg:top-6">
+          {doc ? (
+            <DocumentViewer src={`/files/${doc.id}`} mimeType={doc.mimeType} fileName={doc.fileName} />
+          ) : (
+            <Notice kind="warn">The file is missing from the vault.</Notice>
+          )}
+          {doc && (
+            <p className="mt-2 text-xs text-ink-3">
+              {doc.fileName} · {(doc.sizeBytes / 1024).toFixed(0)} KB · added {fmt(doc.uploadedAt.slice(0, 10))}
+            </p>
+          )}
+        </div>
+
+        <div className="min-w-0">
       {failed ? (
-        <section className="card max-w-3xl">
+        <section className="card">
           <h2 className="font-semibold text-crit">Claude could not read this one</h2>
           <p className="mt-1 text-sm text-ink-2">{item.error}</p>
           <p className="mt-2 text-sm">The file is safely in the vault either way. Try again, or file it by hand from the page it belongs to.</p>
@@ -70,7 +87,7 @@ export default async function IntakeReviewPage({ params, searchParams }: { param
           {r?.notes && <Notice kind={low ? "warn" : "ok"}>{r.notes}</Notice>}
           {low && <Notice kind="warn">Claude was not confident about this one. Check every field below before filing.</Notice>}
 
-          <form action={applyIntake.bind(null, id)} className="max-w-3xl space-y-5">
+          <form action={applyIntake.bind(null, id)} className="space-y-5">
             <section className="card">
               <h2 className="mb-3 font-semibold">Where does it belong?</h2>
               <KindPicker
@@ -156,9 +173,12 @@ export default async function IntakeReviewPage({ params, searchParams }: { param
         </>
       )}
 
-      {doc && (
-        <p className="mt-6 text-xs text-ink-3">Added {fmt(doc.uploadedAt.slice(0, 10))}. The file itself is already stored — filing it only decides where it appears.</p>
-      )}
+        </div>
+      </div>
+
+      <p className="mt-6 text-xs text-ink-3">
+        The file is already stored safely. Filing it only decides where it appears and what dates it drives.
+      </p>
     </>
   );
 }

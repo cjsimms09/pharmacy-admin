@@ -25,10 +25,18 @@ export async function dropFiles(fd: FormData) {
   const user = await requireManager();
   const files = fd.getAll("files").filter((f): f is File => f instanceof File && f.size > 0);
   if (files.length === 0) fail("/intake", "Choose at least one file to add.");
-  if (!(await hasApiKey())) fail("/intake", "Add your Anthropic API key under Settings → Claude so dropped files can be read and sorted for you.");
+  if (!(await hasApiKey())) fail("/intake", "Add your Anthropic API key under Settings → Connections so dropped files can be read and sorted for you.");
 
   const people = await db.query.people.findMany({ where: eq(schema.people.active, true) });
   const names = people.map((p) => `${p.firstName} ${p.lastName}`);
+
+  // Optional hints, for a stack that shares an answer. They override what Claude reads rather
+  // than being fed to it: the person filing knows whose stack this is, and a model reading a
+  // faded surname off a phone photo does not. Everything else still comes from the document.
+  const hintPersonId = String(fd.get("hintPersonId") ?? "").trim() || null;
+  const hintCredentialType = String(fd.get("hintCredentialType") ?? "").trim() || null;
+  const hinted = people.find((p) => p.id === hintPersonId) ?? null;
+
   const ids: string[] = [];
 
   for (const file of files) {
@@ -58,7 +66,12 @@ export async function dropFiles(fd: FormData) {
         userId: user.id,
         userName: user.name,
       });
-      await db.update(schema.intakeItems).set({ resultJson: JSON.stringify(result) }).where(eq(schema.intakeItems.id, intakeId));
+      const withHints = {
+        ...result,
+        ...(hinted ? { kind: result.kind === "unknown" ? "person_credential" : result.kind, personName: `${hinted.firstName} ${hinted.lastName}` } : {}),
+        ...(hintCredentialType ? { credentialType: hintCredentialType, kind: "person_credential" } : {}),
+      };
+      await db.update(schema.intakeItems).set({ resultJson: JSON.stringify(withHints) }).where(eq(schema.intakeItems.id, intakeId));
     } catch (e) {
       await db.update(schema.intakeItems).set({ status: "failed", error: describeError(e) }).where(eq(schema.intakeItems.id, intakeId));
     }

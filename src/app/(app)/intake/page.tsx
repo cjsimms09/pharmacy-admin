@@ -3,7 +3,9 @@ import { db, schema } from "@/db";
 import { eq } from "drizzle-orm";
 import { requireManager } from "@/lib/auth";
 import { fmt } from "@/lib/dates";
-import { PageHeader, Notice, Empty } from "@/components/ui";
+import { PageHeader, Notice, Empty, Field } from "@/components/ui";
+import { CREDENTIAL_TYPES } from "@/db/schema";
+import { CREDENTIAL_LABEL } from "@/lib/labels";
 import { hasApiKey, type ClassifiedDocT } from "@/lib/ai";
 import { dropFiles } from "./actions";
 import { DropZone } from "./drop-zone";
@@ -14,10 +16,11 @@ export const dynamic = "force-dynamic";
 export default async function IntakePage({ searchParams }: { searchParams: Promise<{ error?: string; saved?: string; done?: string }> }) {
   await requireManager();
   const { error, saved, done } = await searchParams;
-  const [items, docs, aiReady] = await Promise.all([
+  const [items, docs, aiReady, people] = await Promise.all([
     db.query.intakeItems.findMany({ orderBy: (i, { desc }) => [desc(i.createdAt)], limit: 60 }),
     db.query.documents.findMany(),
     hasApiKey(),
+    db.query.people.findMany({ where: eq(schema.people.active, true), orderBy: (p, { asc }) => [asc(p.lastName)] }),
   ]);
   const pending = items.filter((i) => i.status === "extracted");
   const failed = items.filter((i) => i.status === "failed");
@@ -34,7 +37,7 @@ export default async function IntakePage({ searchParams }: { searchParams: Promi
 
       {!aiReady && (
         <Notice kind="warn">
-          Add your Anthropic API key under <Link href="/settings/ai" className="underline">Settings → Claude</Link> to have dropped files read and sorted. Until then, upload documents from the page they belong to.
+          Add your Anthropic API key under <Link href="/settings/connections" className="underline">Settings → Connections</Link> to have dropped files read and sorted. Until then, upload documents from the page they belong to.
         </Notice>
       )}
 
@@ -42,6 +45,32 @@ export default async function IntakePage({ searchParams }: { searchParams: Promi
         <section className="card mb-6">
           <form action={dropFiles} encType="multipart/form-data" className="flex flex-col gap-3">
             <DropZone />
+
+            {/*
+              Optional, and only worth filling in for a stack that shares an answer — one person's
+              renewals, or a set of the same certificate. Claude works both out from the document
+              itself; saying it here just saves correcting the same field on every file.
+            */}
+            <details>
+              <summary className="cursor-pointer text-xs text-ink-3">
+                Tell Claude what these are, if they all share an answer (optional)
+              </summary>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <Field label="Whose are they?" hint="Leave blank to let each document say.">
+                  <select name="hintPersonId" className="field" defaultValue="">
+                    <option value="">— read it off each document —</option>
+                    {people.map((p) => <option key={p.id} value={p.id}>{p.firstName} {p.lastName}</option>)}
+                  </select>
+                </Field>
+                <Field label="What are they?" hint="Leave blank to let each document say.">
+                  <select name="hintCredentialType" className="field" defaultValue="">
+                    <option value="">— read it off each document —</option>
+                    {CREDENTIAL_TYPES.map((t) => <option key={t} value={t}>{CREDENTIAL_LABEL[t]}</option>)}
+                  </select>
+                </Field>
+              </div>
+            </details>
+
             <div className="flex flex-wrap items-center gap-3">
               <button className="btn btn-primary" type="submit">Read and sort</button>
               <span className="text-xs text-ink-3">PDFs and photos. Several at once is fine — about half a minute each.</span>
