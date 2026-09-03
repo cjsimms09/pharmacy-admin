@@ -103,7 +103,7 @@ export default async function Dashboard() {
 
       <section className="card mb-6">
         <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="font-semibold">Staff, licenses and continuing education</h2>
+          <h2 className="font-semibold">Staff and licenses</h2>
           <Link href="/staff" className="text-sm text-accent hover:underline">Manage staff →</Link>
         </div>
         {staff.length === 0 ? (
@@ -112,7 +112,7 @@ export default async function Dashboard() {
           <div className="overflow-x-auto">
             <table className="table">
               <thead>
-                <tr><th>Name</th><th>Licence / registration</th><th>Expires</th><th>CPR</th><th>Immunization</th><th>CE this cycle</th></tr>
+                <tr><th>Name</th><th>Licence / registration</th><th>Expires</th><th>CPR</th><th>Immunization</th></tr>
               </thead>
               <tbody>
                 {staff.map((p) => <StaffLine key={p.id} p={p} />)}
@@ -132,7 +132,6 @@ export default async function Dashboard() {
 }
 
 function StaffLine({ p }: { p: StaffRow }) {
-  const ceShort = p.ceRequired > 0 && p.ceHours < p.ceRequired;
   return (
     <tr>
       <td>
@@ -144,14 +143,6 @@ function StaffLine({ p }: { p: StaffRow }) {
       <td>{p.cprExpires ? <Expiry iso={p.cprExpires} /> : p.administersVaccines ? <span className="badge badge-crit">required</span> : <span className="text-xs text-ink-3">—</span>}</td>
       <td className="text-xs">
         {p.immunizationOnFile ? <span className="badge badge-ok">on file</span> : p.administersVaccines ? <span className="badge badge-crit">missing</span> : <span className="text-ink-3">—</span>}
-      </td>
-      <td className="text-xs">
-        {p.ceRequired === 0 ? <span className="text-ink-3">—</span> : (
-          <>
-            <span className={`badge ${ceShort ? "badge-warn" : "badge-ok"}`}>{p.ceHours.toFixed(1)} / {p.ceRequired} h</span>
-            {p.role === "pharmacist" && !p.boardCourseDone && <span className="badge badge-warn ml-1">Board course</span>}
-          </>
-        )}
       </td>
     </tr>
   );

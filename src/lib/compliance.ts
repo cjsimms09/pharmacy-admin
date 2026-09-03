@@ -129,24 +129,26 @@ export type StaffRow = {
   cprExpires: string | null;
   immunizationOnFile: boolean;
   administersVaccines: boolean;
-  ceHours: number;
-  ceRequired: number;
-  boardCourseDone: boolean;
 };
 
-/** One row per active person: the things that expire, and where CE stands. */
+/**
+ * One row per active person: the credentials that expire.
+ *
+ * Continuing education is deliberately not here. Kansas pharmacist CE is reported through CPE
+ * Monitor and the Board's own e-Profile, which is the authoritative record; a second tally kept
+ * here would only ever be a worse copy of it, and a wrong hour count on a dashboard is worse
+ * than no hour count. Technician CE is the technician's own responsibility and is not tracked
+ * for them at all.
+ */
 export async function staffCompliance(): Promise<StaffRow[]> {
-  const [people, creds, ce] = await Promise.all([
+  const [people, creds] = await Promise.all([
     db.query.people.findMany({ where: eq(schema.people.active, true), orderBy: (p, { asc }) => [asc(p.lastName)] }),
     db.query.credentials.findMany(),
-    db.query.ceEntries.findMany(),
   ]);
   return people.map((p) => {
     const mine = creds.filter((c) => c.personId === p.id);
     const license = mine.find((c) => c.type === "pharmacist_license" || c.type === "technician_registration" || c.type === "intern_registration");
     const cpr = mine.filter((c) => c.type === "cpr").sort((a, b) => (b.expiresOn ?? "").localeCompare(a.expiresOn ?? ""))[0];
-    const cycleStart = license?.issuedOn ?? null;
-    const mineCe = ce.filter((e) => e.personId === p.id && (!cycleStart || e.completedOn >= cycleStart));
     return {
       id: p.id,
       name: `${p.firstName} ${p.lastName}`,
@@ -157,9 +159,6 @@ export async function staffCompliance(): Promise<StaffRow[]> {
       cprExpires: cpr?.expiresOn ?? null,
       immunizationOnFile: mine.some((c) => c.type === "immunization_training"),
       administersVaccines: p.administersVaccines,
-      ceHours: mineCe.reduce((s, e) => s + e.hours, 0) / 10,
-      ceRequired: p.role === "pharmacist" ? 30 : p.role === "technician" ? 20 : 0,
-      boardCourseDone: mineCe.some((e) => e.isBoardCourse),
     };
   });
 }
