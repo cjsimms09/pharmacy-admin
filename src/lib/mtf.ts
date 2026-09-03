@@ -114,20 +114,51 @@ export async function testMtf(): Promise<MtfResult> {
   const to = new Date();
   const from = new Date(to.getTime() - 90 * 24 * 60 * 60 * 1000);
   const iso = (d: Date) => d.toISOString().slice(0, 10);
-  const s = await cli(["search835", `--date=${iso(from)}`, `--toDate=${iso(to)}`], 120_000);
+  // Verbose on the test specifically. It is the one command run to diagnose rather than to get
+  // work done, so the extra detail is the entire point of running it.
+  const s = await cli(["search835", `--date=${iso(from)}`, `--toDate=${iso(to)}`, "--verbose"], 120_000);
+
+  const diagnostic = [check.out, check.err, s.out, s.err].filter(Boolean).join("\n").trim();
 
   if (!s.ok) {
-    const err = s.err.toLowerCase();
-    if (err.includes("unauthor") || err.includes("forbidden") || err.includes("invalid") || err.includes("401") || err.includes("403")) {
+    const err = `${s.err}\n${s.out}`.toLowerCase();
+
+    if (err.includes("unauthor") || err.includes("401")) {
       return {
         ok: false,
         message:
-          "The MTF tool ran, but the key was rejected. Generate a new key in the portal (Developer Tools → " +
-          "API key → Generate) and paste it in again — note that generating a new key cancels the old one.",
-        output: s.err,
+          "The tool reached MTF, but the key was rejected. Generate a new key in the portal " +
+          "(Developer Tools → API key → Generate) and paste it in again. Generating a new key cancels the old one.",
+        output: diagnostic,
       };
     }
-    return { ok: false, message: s.err || "The search failed.", output: s.out };
+
+    if (err.includes("forbidden") || err.includes("403") || err.includes("access denied")) {
+      return {
+        ok: false,
+        message:
+          "The key was accepted but this account is not permitted to use the developer tools. In MTF that is a " +
+          "role question rather than a key question — the account needs dispensing entity access. Ask your MTF " +
+          "Access Manager to grant it.",
+        output: diagnostic,
+      };
+    }
+
+    if (err.includes("404") || err.includes("not found")) {
+      return {
+        ok: false,
+        message:
+          "MTF answered 404. That means the tool reached CMS and CMS had nothing to return at that address, so " +
+          "the key itself is probably fine. Two things cause it, and the raw output below usually says which: " +
+          "either this pharmacy has no payee profile set up in MTF yet — check Developer Tools shows a Payee ID " +
+          "and a remit profile, because without one there is no mailbox to search — or the installed tool is an " +
+          "older version calling an endpoint CMS has retired, which a re-download from Developer Tools fixes. " +
+          "If the raw output names a URL, that tells us which of the two it is.",
+        output: diagnostic,
+      };
+    }
+
+    return { ok: false, message: s.err || s.out || "The search failed.", output: diagnostic };
   }
 
   const found = countFiles(s.out);
@@ -138,7 +169,7 @@ export async function testMtf(): Promise<MtfResult> {
       found > 0
         ? `Connected. ${found} 835 file${found === 1 ? "" : "s"} available in the last 90 days.`
         : "Connected, and the key works. CMS has published no 835 files for us in the last 90 days, which is a normal result if no MFP refunds have been issued yet.",
-    output: s.out,
+    output: diagnostic,
   };
 }
 
