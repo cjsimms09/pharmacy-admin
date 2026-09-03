@@ -5,7 +5,7 @@ import { and, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { monthSummary, availableMonths, f } from "@/lib/imonnit";
+import { monthSummary, availableMonths, syncReadings, hasCredentials, f } from "@/lib/imonnit";
 import { periodLabel } from "@/lib/periods";
 import { newId } from "@/lib/crypto";
 import { PageHeader, Notice, BackLink, Empty } from "@/components/ui";
@@ -27,7 +27,7 @@ export default async function TempLogPage({
   const { sensorId, period } = await params;
   const { ok, error, all } = await searchParams;
 
-  const [summary, months, readings, notes] = await Promise.all([
+  const [summary, months, readings, notes, connected] = await Promise.all([
     monthSummary(sensorId, period),
     availableMonths(sensorId),
     db.query.tempReadings.findMany({
@@ -38,6 +38,7 @@ export default async function TempLogPage({
       where: and(eq(schema.tempNotes.sensorId, sensorId), eq(schema.tempNotes.periodKey, period)),
       orderBy: (n, { asc }) => [asc(n.createdAt)],
     }),
+    hasCredentials(),
   ]);
   if (!summary) notFound();
 
@@ -53,6 +54,28 @@ export default async function TempLogPage({
     for (let k = Math.max(0, i - 2); k <= Math.min(readings.length - 1, i + 2); k++) interesting.add(readings[k].id);
   });
   const listed = all === "1" ? readings : readings.filter((r) => interesting.has(r.id));
+
+  /**
+   * Fetches this one month for this one sensor.
+   *
+   * The routine sync resumes from the last reading a sensor holds, which is right for keeping up
+   * and useless for filling a hole behind it: a sensor added later, or one that missed a run,
+   * stays permanently short of a month everything else has. This asks for the month itself.
+   * Re-running it is harmless — a reading is keyed on the sensor and the instant it was taken.
+   */
+  async function backfillMonth() {
+    "use server";
+    const u = await requireManager();
+    const [y, m] = period.split("-").map(Number);
+    if (!y || !m) redirect(`/temps/${sensorId}/${period}?error=` + encodeURIComponent("That is not a month."));
+    const from = `${period}-01`;
+    const to = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+    const r = await syncReadings({ sensorIds: [sensorId], fromIso: from, toIso: to });
+    await audit({ action: "temp.backfill", userId: u.id, userName: u.name, details: `${sensorId} ${period}` });
+    revalidatePath(`/temps/${sensorId}/${period}`);
+    revalidatePath("/temps");
+    redirect(`/temps/${sensorId}/${period}?${r.readingsAdded > 0 ? "ok" : "error"}=` + encodeURIComponent(r.message));
+  }
 
   async function addNote(fd: FormData) {
     "use server";
@@ -97,14 +120,28 @@ export default async function TempLogPage({
       <PageHeader
         title={`${summary.sensorName} — ${periodLabel(period)}`}
         subtitle={`Acceptable range ${f(summary.rangeMin)} to ${f(summary.rangeMax)}.`}
-        actions={<Link href={`/temps/${sensorId}/${period}/print`} className="btn">Print this month</Link>}
+        actions={
+          <>
+            {connected && (
+              <form action={backfillMonth}>
+                <button className="btn">Pull this month from iMonnit</button>
+              </form>
+            )}
+            <Link href={`/temps/${sensorId}/${period}/print`} className="btn">Print this month</Link>
+          </>
+        }
       />
 
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
 
       {summary.readings === 0 ? (
-        <Empty>No readings for this month.</Empty>
+        <Empty>
+          No readings for this month.
+          {connected
+            ? " The routine sync only ever moves forward from the last reading a sensor holds, so a month behind that stays empty until it is asked for. Use “Pull this month from iMonnit” above."
+            : " No iMonnit key is stored, so nothing is being pulled automatically."}
+        </Empty>
       ) : (
         <>
           <div className="my-4 grid grid-cols-2 gap-3 sm:grid-cols-4">

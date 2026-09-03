@@ -153,6 +153,64 @@ async function witnessed(seedKey: string, periods: string[], cadence: Obligation
   }
 }
 
+/** A seeded duty nobody has said yes or no to yet. */
+export type Unanswered = {
+  obligationId: string;
+  seedKey: string | null;
+  title: string;
+  detail: string | null;
+  citation: string | null;
+  cadence: ObligationCadence;
+};
+
+/**
+ * The duties that are still questions.
+ *
+ * These ship switched on because leaving out a rule that does apply is the expensive mistake and
+ * leaving in one that does not is a two-second answer. But only if the answer is actually
+ * offered — an item that says "confirm whether this applies" with nothing to click is worse than
+ * either, because it cannot be cleared and so it trains the PIC to ignore the whole list.
+ */
+export async function unansweredObligations(): Promise<Unanswered[]> {
+  await ensureObligations();
+  const rows = (await db.query.obligations.findMany()).filter((o) => o.active && o.needsConfirmation);
+  return rows
+    .map((o) => ({ obligationId: o.id, seedKey: o.seedKey, title: o.title, detail: o.detail, citation: o.citation, cadence: o.cadence }))
+    .sort((a, b) => a.title.localeCompare(b.title));
+}
+
+/**
+ * Answers one of them.
+ *
+ * "Yes" starts the clock from today rather than from whenever the site was first opened: a duty
+ * that has just been confirmed cannot sensibly be counted late for months in which nobody knew it was
+ * theirs. "No" switches it off and records why, so the register can show an inspector that it was
+ * considered and dismissed on a date rather than simply absent.
+ */
+export async function answerObligation(
+  obligationId: string,
+  applies: boolean,
+  user: { id: string; name: string },
+): Promise<{ title: string }> {
+  const o = await db.query.obligations.findFirst({ where: eq(schema.obligations.id, obligationId) });
+  if (!o) throw new Error("That duty no longer exists.");
+  const today = todayIso();
+  await db
+    .update(schema.obligations)
+    .set({
+      needsConfirmation: false,
+      active: applies,
+      confirmedOn: today,
+      confirmedBy: user.name,
+      lastNotes: applies
+        ? `${user.name} confirmed on ${today} that this applies to this pharmacy.`
+        : `${user.name} recorded on ${today} that this does not apply to this pharmacy.`,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(schema.obligations.id, obligationId));
+  return { title: o.title };
+}
+
 /** Everything outstanding, worst first. */
 export async function openItems(): Promise<OpenItem[]> {
   await ensureObligations();
@@ -165,7 +223,15 @@ export async function openItems(): Promise<OpenItem[]> {
 
   for (const o of obligations) {
     if (o.cadence === "as_needed") continue;
-    const periods = periodsBetween(o.cadence, start, today);
+    // Seeded duties that may not apply here at all — an emergency kit, vaccine storage — are a
+    // question until someone answers it. Counting periods against an unanswered question produces
+    // a screen full of failures for things the pharmacy may not even do, which is exactly the
+    // noise that makes a compliance screen stop being read. They are offered separately, once.
+    if (o.needsConfirmation) continue;
+    // A duty confirmed as ours in March is not judged on January. Counting from the confirmation
+    // where there is one is the difference between a real gap and a retrospective one.
+    const from = o.confirmedOn && o.confirmedOn > start ? o.confirmedOn : start;
+    const periods = periodsBetween(o.cadence, from, today);
     if (periods.length === 0) continue;
 
     const closure = o.seedKey ? CLOSURES[o.seedKey] : undefined;
@@ -258,7 +324,7 @@ export async function attest(
 
 /** The one-line answer: is the pharmacy clean, and if not, by how much. */
 export async function complianceSummary() {
-  const items = await openItems();
+  const [items, unanswered] = await Promise.all([openItems(), unansweredObligations()]);
   const missed = items.filter((i) => i.state === "missed");
   const partial = items.filter((i) => i.state === "partial");
   const openNow = items.filter((i) => i.state === "open");
@@ -269,6 +335,7 @@ export async function complianceSummary() {
     partial,
     openNow,
     quick,
+    unanswered,
     all: items,
     minutesOutstanding: items.reduce((n, i) => n + (i.minutes ?? 0), 0),
   };

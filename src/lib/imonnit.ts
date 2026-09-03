@@ -236,11 +236,26 @@ export async function discoverSensors(): Promise<{ ok: boolean; message: string;
  * than becoming a permanent hole in the log. Duplicates are impossible: a reading is keyed on the
  * sensor and the instant it was taken.
  */
-export async function syncReadings(opts: { fromIso?: string; sinceDays?: number } = {}): Promise<SyncReport> {
-  const sensors = (await db.query.tempSensors.findMany()).filter((s) => s.tracked);
+export async function syncReadings(
+  opts: { fromIso?: string; toIso?: string; sinceDays?: number; sensorIds?: string[] } = {},
+): Promise<SyncReport> {
+  const all = (await db.query.tempSensors.findMany()).filter((s) => s.tracked);
+  // A named sensor is someone asking for one sensor's history on purpose — usually because that
+  // one has a hole in a month the others do not. Resuming from the last reading held can never
+  // fill a hole behind it, which is how one sensor ends up with August and another does not.
+  const sensors = opts.sensorIds?.length ? all.filter((s) => opts.sensorIds!.includes(s.id)) : all;
   if (sensors.length === 0) {
-    return { ok: false, message: "No sensors are being tracked yet.", sensorsSeen: 0, readingsAdded: 0, skipped: 0, via: null };
+    return {
+      ok: false,
+      message: opts.sensorIds?.length ? "That sensor is not being tracked." : "No sensors are being tracked yet.",
+      sensorsSeen: 0,
+      readingsAdded: 0,
+      skipped: 0,
+      via: null,
+    };
   }
+  // An explicit end, or now. Asking beyond now returns nothing and wastes a round trip.
+  const until = opts.toIso ? Math.min(Date.parse(`${opts.toIso}T23:59:59Z`), Date.now()) : Date.now();
 
   let added = 0;
   let skipped = 0;
@@ -268,8 +283,8 @@ export async function syncReadings(opts: { fromIso?: string; sinceDays?: number 
     // readings a month, and asking for a year in one call is how a request times out and comes
     // back as "no data" rather than as an error.
     const stamp = (d: Date) => d.toISOString().slice(0, 19).replace("T", " ");
-    for (let start = new Date(from); start < new Date() && !failedWindow; ) {
-      const end = new Date(Math.min(start.getTime() + 31 * 86_400_000, Date.now()));
+    for (let start = new Date(from); start.getTime() < until && !failedWindow; ) {
+      const end = new Date(Math.min(start.getTime() + 31 * 86_400_000, until));
       const r = await call("SensorDataMessages", {
         sensorID: sensor.externalId,
         fromDate: stamp(start),

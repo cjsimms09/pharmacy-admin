@@ -5,7 +5,8 @@ import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { complianceSummary, attest, type OpenItem } from "@/lib/compliance-status";
+import { complianceSummary, type OpenItem, type Unanswered } from "@/lib/compliance-status";
+import { attestAction, answerAction } from "../_actions/compliance";
 import { periodLabel } from "@/lib/periods";
 import { dueList } from "@/lib/due";
 import { assignTraining, recordGroupTraining } from "@/lib/training-assignments";
@@ -35,24 +36,6 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
   const shown = needsAction;
   const notYetDue = summary.openNow;
   const clean = needsAction.length === 0 && people.length === 0;
-
-  async function doAttest(fd: FormData) {
-    "use server";
-    const u = await requireManager();
-    const id = String(fd.get("obligationId") ?? "");
-    const periodKey = String(fd.get("periodKey") ?? "");
-    const statement = String(fd.get("statement") ?? "");
-    try {
-      await attest(id, periodKey, statement, u);
-      await audit({ action: "compliance.attest", userId: u.id, userName: u.name, details: `${id} ${periodKey}` });
-      revalidatePath("/compliance");
-      revalidatePath("/");
-      redirect("/compliance?ok=" + encodeURIComponent(`Recorded for ${periodLabel(periodKey)}.`));
-    } catch (e) {
-      if (e && typeof e === "object" && "digest" in e) throw e;
-      redirect("/compliance?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not record that."));
-    }
-  }
 
   async function assignFromList(fd: FormData) {
     "use server";
@@ -160,7 +143,7 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
 
           <div className="space-y-3">
             {shown.map((i) => (
-              <Item key={`${i.obligationId}-${i.periodKey}`} i={i} attestAction={doAttest} fileAction={fileEvidence} />
+              <Item key={`${i.obligationId}-${i.periodKey}`} i={i} attestAction={attestAction} fileAction={fileEvidence} />
             ))}
 
             {people.map((p) => (
@@ -221,6 +204,23 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
         </>
       )}
 
+      {summary.unanswered.length > 0 && (
+        <section className="mt-8 rounded-lg border border-line bg-surface p-4">
+          <h2 className="text-sm font-semibold">Does this apply here?</h2>
+          <p className="mt-1 text-xs text-ink-3">
+            {summary.unanswered.length} duty{summary.unanswered.length === 1 ? "" : " duties"} shipped switched on because
+            leaving out a rule that does apply is the expensive mistake. Answer once and it is settled — a &ldquo;no&rdquo;
+            is recorded with today&rsquo;s date and your name, so the register shows it was considered rather than missed.
+            Nothing here is counting against you in the meantime.
+          </p>
+          <div className="mt-3 space-y-2">
+            {summary.unanswered.map((q) => (
+              <Question key={q.obligationId} q={q} action={answerAction} />
+            ))}
+          </div>
+        </section>
+      )}
+
       {notYetDue.length > 0 && (
         <details className="mt-8" open={all === "1"}>
           <summary className="cursor-pointer text-sm text-ink-2">
@@ -232,7 +232,7 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
           </p>
           <div className="mt-3 space-y-3">
             {notYetDue.map((i) => (
-              <Item key={`${i.obligationId}-${i.periodKey}`} i={i} attestAction={doAttest} fileAction={fileEvidence} />
+              <Item key={`${i.obligationId}-${i.periodKey}`} i={i} attestAction={attestAction} fileAction={fileEvidence} />
             ))}
           </div>
         </details>
@@ -285,6 +285,7 @@ function Item({
           <input type="hidden" name="obligationId" value={i.obligationId} />
           <input type="hidden" name="periodKey" value={i.periodKey} />
           <input type="hidden" name="statement" value={i.statement} />
+          <input type="hidden" name="back" value="/compliance" />
           <p className="rounded-md border border-line bg-ground p-3 text-sm italic text-ink-2">&ldquo;{i.statement}&rdquo;</p>
           <div className="mt-2 flex items-center gap-3">
             <button className="rounded-md bg-ink px-3 py-1.5 text-sm text-white">Confirm and record</button>
@@ -316,6 +317,36 @@ function Item({
       {i.kind === "renewal" && i.href && (
         <Link href={i.href} className="mt-3 inline-block rounded-md bg-ink px-3 py-1.5 text-sm text-white">Open</Link>
       )}
+    </article>
+  );
+}
+
+/**
+ * One duty that is still a question, with both answers on it.
+ *
+ * Two buttons, not a checkbox: "not applicable" is a decision a PIC should be able to point at
+ * later, and a thing that quietly disappears when unticked cannot be pointed at.
+ */
+function Question({ q, action }: { q: Unanswered; action: (fd: FormData) => Promise<void> }) {
+  return (
+    <article className="rounded-md border border-line bg-ground p-3">
+      <h3 className="text-sm font-medium">{q.title}</h3>
+      {q.detail && <p className="mt-0.5 text-xs text-ink-2">{q.detail}</p>}
+      {q.citation && <p className="mt-0.5 text-xs text-ink-3">{q.citation}</p>}
+      <div className="mt-2 flex flex-wrap gap-2">
+        <form action={action}>
+          <input type="hidden" name="obligationId" value={q.obligationId} />
+          <input type="hidden" name="applies" value="yes" />
+          <input type="hidden" name="back" value="/compliance" />
+          <button className="btn btn-primary">Yes, we do this</button>
+        </form>
+        <form action={action}>
+          <input type="hidden" name="obligationId" value={q.obligationId} />
+          <input type="hidden" name="applies" value="no" />
+          <input type="hidden" name="back" value="/compliance" />
+          <button className="btn">Not us — switch it off</button>
+        </form>
+      </div>
     </article>
   );
 }

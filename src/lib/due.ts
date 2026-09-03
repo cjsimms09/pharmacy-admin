@@ -3,7 +3,6 @@ import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { todayIso, daysBetween } from "./dates";
 import { CREDENTIAL_LABEL, TRAINING_LABEL, PERSON_ROLE_LABEL } from "./labels";
-import { ensureObligations } from "./obligations";
 import type { CredentialType, TrainingType } from "@/db/schema";
 
 /**
@@ -17,9 +16,15 @@ import type { CredentialType, TrainingType } from "@/db/schema";
  *
  * Each item carries what to do about it and where to go, because a list that says "OSHA
  * bloodborne — overdue" and nothing else still leaves the work of remembering what that means.
+ *
+ * Recurring pharmacy duties are deliberately not here. They are period-shaped rather than
+ * date-shaped — a monthly duty is not "due in 14 days", it is either covered for the month or it
+ * is not — and compliance-status.ts is the one thing that decides that. Having both answer the
+ * question is what put the temperature log on the dashboard as "due in 12 days" while the
+ * compliance screen, correctly, said nothing was outstanding at all.
  */
 
-export type DueKind = "credential" | "training" | "obligation";
+export type DueKind = "credential" | "training";
 
 export type DueItem = {
   id: string;
@@ -44,7 +49,7 @@ export type DueItem = {
 };
 
 /** How much warning each kind of thing needs. A licence renewal takes longer than a training. */
-const HORIZON: Record<DueKind, number> = { credential: 60, training: 30, obligation: 30 };
+const HORIZON: Record<DueKind, number> = { credential: 60, training: 30 };
 
 function severityOf(daysLeft: number | null, kind: DueKind): DueItem["severity"] {
   if (daysLeft === null) return "no_date";
@@ -109,13 +114,11 @@ function credentialApplies(type: CredentialType, person: { administersVaccines: 
  * satisfied, because an absent record looks identical to a compliant one if you only check dates.
  */
 export async function dueList(opts: { horizonDays?: number } = {}): Promise<DueItem[]> {
-  await ensureObligations();
   const today = todayIso();
-  const [people, creds, trainings, obligations] = await Promise.all([
+  const [people, creds, trainings] = await Promise.all([
     db.query.people.findMany({ where: eq(schema.people.active, true) }),
     db.query.credentials.findMany(),
     db.query.trainings.findMany(),
-    db.query.obligations.findMany({ where: eq(schema.obligations.active, true) }),
   ]);
 
   const items: DueItem[] = [];
@@ -248,23 +251,6 @@ export async function dueList(opts: { horizonDays?: number } = {}): Promise<DueI
       dueOn: c.expiresOn,
       action: `Renew and file the replacement.`,
       href: `/documents`,
-    });
-  }
-
-  // ── Recurring obligations ──
-  for (const o of obligations) {
-    push({
-      id: `obl-${o.id}`,
-      kind: "obligation",
-      title: o.title,
-      personName: null,
-      personId: null,
-      citation: o.citation,
-      dueOn: o.dueOn,
-      action: o.needsConfirmation
-        ? `Confirm whether this applies to this pharmacy. Switch it off if it does not.`
-        : o.detail ?? "Complete and sign off.",
-      href: `/compliance`,
     });
   }
 

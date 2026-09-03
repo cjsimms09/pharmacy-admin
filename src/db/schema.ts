@@ -262,6 +262,16 @@ export const obligations = sqliteTable(
     active: integer("active", { mode: "boolean" }).notNull().default(true),
     /** Set when the pharmacy has not confirmed the rule applies to them (e.g. compounding, shipping). */
     needsConfirmation: integer("needs_confirmation", { mode: "boolean" }).notNull().default(false),
+    /**
+     * When someone answered that question, and who.
+     *
+     * Kept because both answers are worth showing an inspector. "Yes, and here is every period
+     * since" is the obvious one; "no, and here is the date we decided that" is the one that turns
+     * an absent record from a hole into a decision. It is also where period counting starts for a
+     * duty confirmed late, so confirming something in March does not manufacture two missed months.
+     */
+    confirmedOn: text("confirmed_on"),
+    confirmedBy: text("confirmed_by"),
     createdAt: text("created_at").notNull().default(now()),
     updatedAt: text("updated_at").notNull().default(now()),
   },

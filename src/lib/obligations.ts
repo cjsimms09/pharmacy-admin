@@ -455,9 +455,46 @@ export function nextDueAfter(cadence: ObligationCadence, completedOn: string, fi
  * touched — completions, due dates, and whether it has been switched off all stay exactly as
  * they are. Only the definition catches up.
  */
+/**
+ * Serialises the seeding.
+ *
+ * The compliance page loads its two data sources together, and both of them ensure the seeds
+ * exist. Two concurrent runs each found a duty missing and each inserted it, which is how the
+ * temperature log appeared twice with two different descriptions. One promise, shared.
+ */
+let seeding: Promise<{ created: number; refreshed: number }> | null = null;
+
 export async function ensureObligations() {
+  if (seeding) return seeding;
+  seeding = seedOnce().finally(() => {
+    seeding = null;
+  });
+  return seeding;
+}
+
+async function seedOnce() {
   const existing = await db.query.obligations.findMany();
-  const bySeed = new Map(existing.map((o) => [o.seedKey, o]).filter(([k]) => k) as [string, typeof existing[number]][]);
+
+  // Clean up any duplicate the race already created. The one with history is kept, and any
+  // completions filed against the other are moved onto it rather than lost.
+  const bySeedKey = new Map<string, typeof existing>();
+  for (const o of existing) {
+    if (!o.seedKey) continue;
+    bySeedKey.set(o.seedKey, [...(bySeedKey.get(o.seedKey) ?? []), o]);
+  }
+  for (const [key, rows] of bySeedKey) {
+    if (rows.length < 2) continue;
+    const completions = await db.query.obligationCompletions.findMany();
+    const score = (o: (typeof rows)[number]) => completions.filter((c) => c.obligationId === o.id).length;
+    const keep = [...rows].sort((a, b) => score(b) - score(a) || a.createdAt.localeCompare(b.createdAt))[0];
+    for (const dead of rows.filter((r) => r.id !== keep.id)) {
+      await db.update(schema.obligationCompletions).set({ obligationId: keep.id }).where(eq(schema.obligationCompletions.obligationId, dead.id));
+      await db.delete(schema.obligations).where(eq(schema.obligations.id, dead.id));
+    }
+    void key;
+  }
+  const fresh = await db.query.obligations.findMany();
+  const bySeed = new Map(fresh.map((o) => [o.seedKey, o]).filter(([k]) => k) as [string, (typeof fresh)[number]][]);
   const today = todayIso();
   let created = 0;
   let refreshed = 0;
