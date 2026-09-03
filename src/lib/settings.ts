@@ -11,6 +11,12 @@ export const SETTING_KEYS = [
   "pharmacy_zip",
   "pharmacy_county",
   "pharmacy_phone",
+  "pharmacy_npi",
+  "pharmacy_ncpdp", // NCPDP / NABP provider number
+  "pharmacy_dea",
+  "pharmacy_chain_code", // PSAO-assigned; gates which rate exhibit governs a claim
+  "psao_name", // Pharmacy Services Administrative Organization — not the PSO below
+  "psao_member_id",
   "pso_member", // "yes" | "no"
   "pso_name",
   "pso_expires_on",

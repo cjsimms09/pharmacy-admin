@@ -108,7 +108,29 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <Field label="County"><input name="pharmacy_county" className="field" defaultValue={s.pharmacy_county} /></Field>
         </div>
         <Field label="Phone"><input name="pharmacy_phone" className="field" defaultValue={s.pharmacy_phone} /></Field>
+
+        <h2 className="mt-2 font-semibold sm:col-span-2">Identifiers</h2>
+        <p className="-mt-2 text-xs text-ink-3 sm:col-span-2">
+          These go on every MAC appeal and are how a paid claim is matched back to the contract that governs it.
+        </p>
+        <Field label="NPI"><input name="pharmacy_npi" className="field font-mono" defaultValue={s.pharmacy_npi} /></Field>
+        <Field label="NCPDP / NABP number"><input name="pharmacy_ncpdp" className="field font-mono" defaultValue={s.pharmacy_ncpdp} /></Field>
+        <Field label="DEA registration"><input name="pharmacy_dea" className="field font-mono" defaultValue={s.pharmacy_dea} /></Field>
+        <Field
+          label="Chain code"
+          hint="Assigned by your PSAO — often 605 or 630. Rate exhibits are headed “Chain Codes 605 & 630” and only govern pharmacies whose code is listed, so an expected reimbursement computed against the wrong one is wrong."
+        >
+          <input name="pharmacy_chain_code" className="field font-mono" defaultValue={s.pharmacy_chain_code} />
+        </Field>
+        <Field label="PSAO" hint="Your contracting organisation — e.g. Health Mart Atlas. Not the same as the Patient Safety Organization below.">
+          <input name="psao_name" className="field" defaultValue={s.psao_name} />
+        </Field>
+        <Field label="PSAO member number"><input name="psao_member_id" className="field font-mono" defaultValue={s.psao_member_id} /></Field>
+
         <h2 className="mt-2 font-semibold sm:col-span-2">Patient Safety Organization</h2>
+        <p className="-mt-2 text-xs text-ink-3 sm:col-span-2">
+          A PSO under the federal patient safety rules — separate from the PSAO above, despite the name.
+        </p>
         <Field label="Actively reporting to a PSO?" hint="If yes, RCA and CAP are not required per incident (K.A.R. 68-19-1); keep the membership record 5 years.">
           <select name="pso_member" className="field" defaultValue={s.pso_member || "no"}>
             <option value="no">No</option>
