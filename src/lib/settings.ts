@@ -30,6 +30,8 @@ export const SETTING_KEYS = [
   // The address staff reach the site on. A training link is useless without it.
   "public_base_url",
   "training_reminders_last",
+  "cqi_automation_last",
+  "cqi_automation_result",
   // One line per training: the type, then "=", then the link staff are sent to.
   "training_materials",
   // NADAC is published weekly by CMS, free and without a key. These control the automatic pull.

@@ -135,6 +135,7 @@ export async function register() {
     await whenIdle("nadac", nadacTick);
     await whenIdle("technician-list", technicianListTick);
     await whenIdle("temperatures", tempTick);
+    await whenIdle("cqi", cqiTick);
   };
 
   /**
@@ -155,6 +156,35 @@ export async function register() {
       await setSetting("imonnit_last_sync", new Date().toISOString());
     } catch {
       // Recorded on the Temperatures page.
+    }
+  };
+
+  /**
+   * Runs the CQI cycle forward.
+   *
+   * Twice a day is plenty: the deadlines it serves are measured in days, and drafting an analysis
+   * takes a minute or two of the shared connection.
+   */
+  const cqiTick = async () => {
+    try {
+      const { getSettings, setSetting } = await import("./lib/settings");
+      const s = await getSettings();
+      const last = s.cqi_automation_last ? Date.parse(s.cqi_automation_last) : 0;
+      if (Number.isFinite(last) && Date.now() - last < 11 * 60 * 60 * 1000) return;
+      const { runCqiAutomation } = await import("./lib/cqi-auto");
+      const r = await runCqiAutomation();
+      await setSetting("cqi_automation_last", new Date().toISOString());
+      await setSetting(
+        "cqi_automation_result",
+        [
+          r.reviewsStarted ? `${r.reviewsStarted} review(s) opened` : "",
+          r.drafted ? `${r.drafted} analysis drafted` : "",
+          r.attached ? `${r.attached} item(s) attached to the summary` : "",
+          r.skipped ?? "",
+        ].filter(Boolean).join(". ") || "Nothing to do.",
+      );
+    } catch {
+      // Shown on the CQI page; never allowed to stop the app.
     }
   };
 
