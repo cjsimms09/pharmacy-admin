@@ -721,3 +721,54 @@ export const claims = sqliteTable(
     index("claims_rx_idx").on(t.rxNumber),
   ],
 );
+
+// ── Plan register ────────────────────────────────────────────────────
+// One row per benefit plan we bill, and the single question that decides whether the Kansas
+// floor reaches it: is this plan preempted by ERISA.
+//
+// Nothing else in the system answers that. The claim carries a plan type from PioneerRx, but
+// that field is descriptive rather than legal — Medicare contract numbers turn up on claims
+// labelled "Standard", and a discount card looks like commercial insurance from the outside.
+// So the determination is made once per plan by a person, recorded with its evidence, and every
+// claim on that plan inherits it.
+//
+// Default is "unknown", and unknown never files. A plan nobody has looked at is a reason to
+// investigate, not a reason to assume.
+
+export const PLAN_CLASSES = [
+  "commercial_fully_insured", // state-regulated insurer — the Kansas floor applies
+  "commercial_self_funded",   // ERISA plan — preempted, out of reach
+  "governmental",             // city, county, school district, state — not an ERISA plan, floor applies
+  "church_plan",              // exempt from ERISA by election — floor applies
+  "medicare",                 // Part D or MA-PD — federally preempted
+  "medicaid",                 // governed separately
+  "workers_comp",             // priced by a different scheme entirely
+  "discount_card",            // not insurance at all; no plan to regulate
+  "unknown",                  // not yet determined. Never files.
+] as const;
+export type PlanClass = (typeof PLAN_CLASSES)[number];
+
+export const planGroups = sqliteTable(
+  "plan_groups",
+  {
+    id: text("id").primaryKey(),
+    /** The natural key of a plan on a claim: who processes it and under which group. */
+    bin: text("bin"),
+    groupNumber: text("group_number"),
+    /** The payer name as the claims wrote it, for recognising the row. */
+    payerLabel: text("payer_label"),
+    pbmName: text("pbm_name"),
+    /** The employer or plan sponsor, once identified. What a Form 5500 search is run against. */
+    sponsorName: text("sponsor_name"),
+    classification: text("classification", { enum: PLAN_CLASSES }).notNull().default("unknown"),
+    /** How it was established — a Form 5500 filing, the plan document, a call. Required to file. */
+    basis: text("basis"),
+    sourceUrl: text("source_url"),
+    decidedBy: text("decided_by"),
+    decidedOn: text("decided_on"),
+    notes: text("notes"),
+    createdAt: text("created_at").notNull().default(now()),
+    updatedAt: text("updated_at").notNull().default(now()),
+  },
+  (t) => [index("plan_groups_key_idx").on(t.bin, t.groupNumber), index("plan_groups_class_idx").on(t.classification)],
+);
