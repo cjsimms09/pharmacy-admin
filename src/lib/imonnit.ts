@@ -153,6 +153,30 @@ export function toTenthsF(raw: unknown, unitHint?: unknown): number | null {
 
 export const f = (tenths: number) => `${(tenths / 10).toFixed(1)}°F`;
 
+/**
+ * Reads the date iMonnit actually sends.
+ *
+ * It is ASP.NET's JSON date: "/Date(1788449766000)/", milliseconds since the epoch, sometimes
+ * with a trailing offset like "+0000". Handed to Date() as-is it produces Invalid Date, which is
+ * why every reading was being skipped — the call worked, the rows arrived, and each one was
+ * discarded for having an unreadable timestamp.
+ *
+ * Plain ISO and "YYYY-MM-DD HH:MM:SS" are accepted too, so a different account shape still works.
+ */
+export function parseMonnitDate(raw: unknown): string | null {
+  const s = String(raw ?? "").trim();
+  if (!s) return null;
+
+  const dotnet = /^\/?Date\((-?\d+)([+-]\d{4})?\)\/?$/.exec(s);
+  if (dotnet) {
+    const d = new Date(Number(dotnet[1]));
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  }
+
+  const d = new Date(s.includes("T") ? s : `${s.replace(" ", "T")}Z`);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
 /** Local calendar month of an instant, which is how a log is read and printed. */
 export function periodOf(iso: string): string {
   const d = new Date(iso);
@@ -259,19 +283,16 @@ export async function syncReadings(opts: { fromIso?: string; sinceDays?: number 
       via ??= r.via;
 
       for (const row of resultsOf(r.data)) {
-        const when = String(pick(row, "MessageDate", "messageDate", "Date", "Timestamp") ?? "").trim();
-        let takenAt = "";
-        try {
-          const d = new Date(when.includes("T") ? when : `${when.replace(" ", "T")}Z`);
-          takenAt = Number.isNaN(d.getTime()) ? "" : d.toISOString();
-        } catch {
-          takenAt = "";
-        }
+        const takenAt = parseMonnitDate(pick(row, "MessageDate", "messageDate", "Date", "Timestamp")) ?? "";
         if (!takenAt) { skipped++; continue; }
         if (existing.has(takenAt)) continue;
 
-        const value = pick(row, "PlotValue", "DataValue", "Value", "plotValue", "dataValue");
-        const tenths = toTenthsF(value, pick(row, "DataType", "Unit", "dataType", "MetricName"));
+        // PlotValue is the display figure and PlotLabels names its unit. Data and DataValues hold
+        // the raw sensor reading, which on these sensors is Celsius — reading that one as
+        // Fahrenheit would record a vaccine fridge at 6.4 degrees and call it in range.
+        const value = pick(row, "PlotValue", "PlotValues", "plotValue", "Value");
+        const unit = pick(row, "PlotLabels", "PlotLabel", "DataType", "DataTypes", "Unit", "MetricName");
+        const tenths = toTenthsF(value, unit);
         if (tenths === null) { skipped++; continue; }
 
         existing.add(takenAt);
@@ -342,15 +363,16 @@ export async function diagnose(): Promise<{ ok: boolean; message: string; sample
   }
 
   const first = rows[0];
-  const parsedDate = pick(first, "MessageDate", "messageDate", "Date", "Timestamp");
-  const parsedValue = pick(first, "PlotValue", "DataValue", "Value", "plotValue", "dataValue");
-  const parsedUnit = pick(first, "DataType", "Unit", "dataType", "MetricName");
+  const rawDate = pick(first, "MessageDate", "messageDate", "Date", "Timestamp");
+  const parsedDate = parseMonnitDate(rawDate);
+  const parsedValue = pick(first, "PlotValue", "PlotValues", "plotValue", "Value");
+  const parsedUnit = pick(first, "PlotLabels", "PlotLabel", "DataType", "DataTypes", "Unit", "MetricName");
 
   return {
     ok: true,
     message:
       `Answered via ${r.via}. ${rows.length} row(s) in the last week for "${sensor.name}". ` +
-      `Date field found: ${parsedDate === undefined ? "NONE" : String(parsedDate)}. ` +
+      `Date: ${String(rawDate ?? "NONE")} -> ${parsedDate ?? "UNREADABLE"}. ` +
       `Value field found: ${parsedValue === undefined ? "NONE" : String(parsedValue)}. ` +
       `Unit hint: ${parsedUnit === undefined ? "none" : String(parsedUnit)}. ` +
       `Converted: ${toTenthsF(parsedValue, parsedUnit) === null ? "FAILED" : f(toTenthsF(parsedValue, parsedUnit)!)}.`,
