@@ -486,3 +486,114 @@ export const auditEvents = sqliteTable(
   },
   (t) => [index("audit_at_idx").on(t.at)],
 );
+
+// ── PBM reference (Health Mart Atlas contracting resources) ──────────
+// Collected from the HMA PBM Contract Resources portal. This is the layer that turns a BIN on a
+// claim into everything we know about the payer behind it: what the network pays, who to appeal
+// to, and where the money comes from. Every row carries its source URL, because a rate asserted
+// without a citation is not usable in an appeal.
+//
+// Names differ between the HMA BIN listing and the network/appeal tables, so each row stores a
+// canonical name resolved at import time alongside the label the source actually used. Lookups
+// join on the canonical name; the source label is kept so a figure can be traced back.
+
+/** One row per network per line of business: what the contract says it pays. */
+export const networkRates = sqliteTable(
+  "network_rates",
+  {
+    id: text("id").primaryKey(),
+    pbmName: text("pbm_name").notNull(),
+    sourceLabel: text("source_label").notNull(),
+    lineOfBusiness: text("line_of_business").notNull(),
+    network: text("network").notNull(),
+    effectiveDate: text("effective_date"),
+    status: text("status"),
+    daysSupply: text("days_supply"),
+    /** Rate expressions as published, e.g. "AWP-18.75% + $0.75". Never parsed into a number here. */
+    brandRate: text("brand_rate"),
+    genericRate: text("generic_rate"),
+    berGuardrail: text("ber_guardrail"),
+    gerGuardrail: text("ger_guardrail"),
+    notes: text("notes"),
+    sourceUrl: text("source_url"),
+    loadedAt: text("loaded_at").notNull().default(now()),
+  },
+  (t) => [index("network_rates_pbm_idx").on(t.pbmName), index("network_rates_lob_idx").on(t.lineOfBusiness)],
+);
+
+/** How a MAC appeal reaches this PBM, and on whose clock. */
+export const macAppealTerms = sqliteTable(
+  "mac_appeal_terms",
+  {
+    id: text("id").primaryKey(),
+    pbmName: text("pbm_name").notNull(),
+    sourceLabel: text("source_label").notNull(),
+    submissionChannel: text("submission_channel"),
+    submissionTarget: text("submission_target"),
+    appealWindowDays: integer("appeal_window_days"),
+    windowBasis: text("window_basis"),
+    requiredFields: text("required_fields"),
+    invoiceRequired: text("invoice_required"),
+    responseSlaDays: integer("response_sla_days"),
+    adjustmentRetroactive: text("adjustment_retroactive"),
+    escalationContact: text("escalation_contact"),
+    notes: text("notes"),
+    sourceUrl: text("source_url"),
+    loadedAt: text("loaded_at").notNull().default(now()),
+  },
+  (t) => [index("mac_appeal_terms_pbm_idx").on(t.pbmName)],
+);
+
+/** Whether the money comes through HMA central pay or direct, and where the remittance lives. */
+export const paymentRouting = sqliteTable(
+  "payment_routing",
+  {
+    id: text("id").primaryKey(),
+    pbmName: text("pbm_name").notNull(),
+    sourceLabel: text("source_label").notNull(),
+    paysVia: text("pays_via"),
+    paymentMethod: text("payment_method"),
+    remittanceSource: text("remittance_source"),
+    paymentCycle: text("payment_cycle"),
+    onContractListing: text("on_contract_listing"),
+    notes: text("notes"),
+    sourceUrl: text("source_url"),
+    loadedAt: text("loaded_at").notNull().default(now()),
+  },
+  (t) => [index("payment_routing_pbm_idx").on(t.pbmName)],
+);
+
+/** Help desks, MAC mailboxes, credentialing, portals. */
+export const pbmContacts = sqliteTable(
+  "pbm_contacts",
+  {
+    id: text("id").primaryKey(),
+    pbmName: text("pbm_name").notNull(),
+    sourceLabel: text("source_label").notNull(),
+    contactType: text("contact_type").notNull(),
+    phone: text("phone"),
+    email: text("email"),
+    portalUrl: text("portal_url"),
+    notes: text("notes"),
+    sourceUrl: text("source_url"),
+    loadedAt: text("loaded_at").notNull().default(now()),
+  },
+  (t) => [index("pbm_contacts_pbm_idx").on(t.pbmName)],
+);
+
+/** The HMA PBM communications feed — rate changes and network notices, newest first. */
+export const pbmCommunications = sqliteTable(
+  "pbm_communications",
+  {
+    id: text("id").primaryKey(),
+    pbmName: text("pbm_name"),
+    sourceLabel: text("source_label"),
+    publishedDate: text("published_date").notNull(),
+    subject: text("subject").notNull(),
+    type: text("type"),
+    url: text("url"),
+    sourceUrl: text("source_url"),
+    loadedAt: text("loaded_at").notNull().default(now()),
+  },
+  (t) => [index("pbm_communications_date_idx").on(t.publishedDate), index("pbm_communications_pbm_idx").on(t.pbmName)],
+);

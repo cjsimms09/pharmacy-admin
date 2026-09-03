@@ -30,6 +30,16 @@ export const SETTING_KEYS = [
   "mail_allowed_senders", // one per line
   "mail_last_sweep",
   "mail_last_result",
+  // ── Medicare Transaction Facilitator (MTF) ──
+  // CMS's channel for Maximum Fair Price refunds under the Inflation Reduction Act. The key is
+  // generated in the MTF portal's Developer Tools and is single-use in the sense that generating
+  // a new one cancels the old, so it is stored encrypted and never rendered back.
+  "mtf_api_key_enc",
+  "mtf_payee_id",
+  "mtf_download_dir",
+  "mtf_cli_path",
+  "mtf_last_pull",
+  "mtf_last_result",
 ] as const;
 export type SettingKey = (typeof SETTING_KEYS)[number];
 export type Settings = Record<SettingKey, string>;
