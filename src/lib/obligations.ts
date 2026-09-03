@@ -145,13 +145,19 @@ export const CLOSURES: Record<string, Closure> = {
 
   // ── Satisfied by something the site already holds ────────────────
   cs_annual_inventory: { kind: "witnessed", witness: "A controlled substance inventory recorded under CS inventories." },
-  technician_list: { kind: "witnessed", witness: "The technician list printed from Staff." },
+  technician_list: {
+    kind: "witnessed",
+    witness: "A list is generated and filed automatically at the end of each month. Nothing to do.",
+  },
   cqi_program_document: { kind: "witnessed", witness: "A CQI programme review recorded in the training register." },
   fwa_training: { kind: "witnessed", witness: "Fraud, waste and abuse training recorded for every active member of staff." },
   hipaa_training: { kind: "witnessed", witness: "HIPAA training recorded for every active member of staff." },
   osha_bloodborne: { kind: "witnessed", witness: "Bloodborne pathogens training recorded for every active member of staff." },
   osha_hazcom: { kind: "witnessed", witness: "Hazard communication training recorded for every active member of staff." },
-  immunization_protocol_review: { kind: "witnessed", witness: "A current immunization protocol on file for every immunizer." },
+  immunization_protocol_review: {
+    kind: "witnessed",
+    witness: "A current immunization protocol on file for every immunizer. Upload each one on the person\u2019s page with its expiry; there is no separate training to record.",
+  },
   backup_restore_test: { kind: "witnessed", witness: "A backup taken and verified under Settings → Backups." },
   exclusion_screening: {
     kind: "attest",
@@ -190,9 +196,9 @@ export const OBLIGATION_SEEDS: ObligationSeed[] = [
   {
     key: "technician_list",
     title: "Refresh and file the pharmacy technician list (Form C-900)",
-    detail: "The PIC maintains a current list of every registered technician working at the pharmacy and produces it on inspection. Print it from Staff → Technician list after any hire or departure.",
+    detail: "Generated and filed automatically at the end of every month, recording who was on staff and what their registration said at the time. Nothing to do unless a technician has no registration number recorded.",
     citation: "K.S.A. 65-1663(i)",
-    cadence: "quarterly",
+    cadence: "monthly",
     firstDueInDays: 14,
   },
   {

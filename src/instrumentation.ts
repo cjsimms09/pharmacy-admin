@@ -133,6 +133,17 @@ export async function register() {
     await whenIdle("backup", backupTick);
     await whenIdle("reminders", reminderTick);
     await whenIdle("nadac", nadacTick);
+    await whenIdle("technician-list", technicianListTick);
+  };
+
+  /** Files the technician list for any whole month that does not have one. */
+  const technicianListTick = async () => {
+    try {
+      const { fileDueSnapshots } = await import("./lib/technician-list");
+      await fileDueSnapshots();
+    } catch {
+      // Nothing here may stop the app; the compliance screen shows any month still missing.
+    }
   };
 
   setTimeout(() => {

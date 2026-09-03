@@ -8,6 +8,9 @@ import { audit } from "@/lib/audit";
 import { complianceSummary, attest, type OpenItem } from "@/lib/compliance-status";
 import { periodLabel } from "@/lib/periods";
 import { dueList } from "@/lib/due";
+import { assignTraining } from "@/lib/training-assignments";
+import { TRAINING_LABEL } from "@/lib/labels";
+import type { TrainingType } from "@/db/schema";
 import { fmt, todayIso } from "@/lib/dates";
 import { storeFile } from "@/lib/files";
 import { newId } from "@/lib/crypto";
@@ -43,6 +46,24 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
     } catch (e) {
       if (e && typeof e === "object" && "digest" in e) throw e;
       redirect("/compliance?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not record that."));
+    }
+  }
+
+  async function assignFromList(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const type = String(fd.get("trainingType") ?? "") as TrainingType;
+    const ids = String(fd.get("personIds") ?? "").split(",").filter(Boolean);
+    try {
+      const r = await assignTraining(ids, type, {}, u);
+      await audit({ action: "training.assign", userId: u.id, userName: u.name, details: `${type} to ${ids.length}` });
+      revalidatePath("/compliance");
+      const bits = [`${TRAINING_LABEL[type]}: ${r.emailed} link${r.emailed === 1 ? "" : "s"} sent`];
+      if (r.problems.length) bits.push(r.problems.join(" "));
+      redirect("/compliance?ok=" + encodeURIComponent(bits.join(". ")));
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/compliance?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not assign that."));
     }
   }
 
@@ -123,16 +144,34 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
             {people.map((p) => (
               <article key={p.id} className="rounded-lg border border-line bg-surface p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
+                  <div className="min-w-0">
                     <h3 className="text-sm font-semibold">{p.title}</h3>
-                    <p className="mt-0.5 text-sm text-ink-2">{p.action}</p>
+                    {/* For a training this is what the training actually covers, which is the
+                        question anyone asks first when a requirement they did not set appears. */}
+                    {p.citation && <p className="mt-0.5 text-xs text-ink-3">{p.citation}</p>}
+                    <p className="mt-1 text-sm text-ink-2">{p.action}</p>
                   </div>
-                  <div className="flex items-center gap-2 whitespace-nowrap">
-                    <Badge state={p.severity === "overdue" ? "missed" : p.severity === "no_date" ? "partial" : "open"}>
-                      {p.daysLeft === null ? "nothing on file" : p.daysLeft < 0 ? `${Math.abs(p.daysLeft)} days late` : `${p.daysLeft} days`}
-                    </Badge>
+                  <Badge state={p.severity === "overdue" ? "missed" : p.severity === "no_date" ? "partial" : "open"}>
+                    {p.daysLeft === null ? "nothing on file" : p.daysLeft < 0 ? `${Math.abs(p.daysLeft)} days late` : `${p.daysLeft} days`}
+                  </Badge>
+                </div>
+
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  {p.trainingType && p.personIds && p.personIds.length > 0 ? (
+                    <>
+                      <form action={assignFromList}>
+                        <input type="hidden" name="trainingType" value={p.trainingType} />
+                        <input type="hidden" name="personIds" value={p.personIds.join(",")} />
+                        <button className="rounded-md bg-ink px-3 py-1.5 text-sm text-white">
+                          Send it to {p.personIds.length === 1 ? "them" : `all ${p.personIds.length}`}
+                        </button>
+                      </form>
+                      <Link href={p.href} className="text-sm underline">or record it myself</Link>
+                      <span className="text-xs text-ink-3">They get a link, complete it, and sign. Nothing more for you to do.</span>
+                    </>
+                  ) : (
                     <Link href={p.href} className="rounded-md bg-ink px-3 py-1.5 text-sm text-white">Open</Link>
-                  </div>
+                  )}
                 </div>
               </article>
             ))}

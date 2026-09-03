@@ -38,6 +38,9 @@ export type DueItem = {
   /** What to actually do, in a sentence. */
   action: string;
   href: string;
+  /** Set on a training row, so it can be assigned straight from the list. */
+  trainingType?: TrainingType;
+  personIds?: string[];
 };
 
 /** How much warning each kind of thing needs. A licence renewal takes longer than a training. */
@@ -56,14 +59,37 @@ function severityOf(daysLeft: number | null, kind: DueKind): DueItem["severity"]
  * Anything not listed here is recorded but not chased — a one-off certificate does not lapse and
  * a reminder about it is noise that trains people to ignore the list.
  */
-export const TRAINING_CADENCE: Partial<Record<TrainingType, { months: number; why: string }>> = {
-  fwa_general_compliance: { months: 12, why: "Annual, required of everyone who touches a Medicare or Medicaid claim." },
-  hipaa_privacy_security: { months: 12, why: "Annual refresher, plus on hire and whenever the workflow changes." },
-  osha_bloodborne: { months: 12, why: "Annual, required wherever there is reasonably anticipated exposure." },
-  osha_hazard_communication: { months: 12, why: "On hire and whenever a new hazard is introduced; reviewed annually." },
-  controlled_substance_diversion: { months: 12, why: "Annual awareness training for everyone handling controlled substances." },
-  immunization_protocol_review: { months: 12, why: "Each immunizer reviews and re-signs the protocol annually." },
-  cqi_program_review: { months: 12, why: "The written CQI programme is read and signed off annually." },
+export const TRAINING_CADENCE: Partial<Record<TrainingType, { months: number; why: string; what: string }>> = {
+  fwa_general_compliance: {
+    months: 12,
+    why: "Annual, required of everyone who touches a Medicare or Medicaid claim.",
+    what: "Fraud, waste and abuse plus general compliance. What counts as fraud, the duty to report it, and that reporting it cannot be held against you.",
+  },
+  hipaa_privacy_security: {
+    months: 12,
+    why: "Annual refresher, plus on hire and whenever the workflow changes.",
+    what: "Patient privacy: what may be said, to whom, and what to do the moment something is disclosed that should not have been.",
+  },
+  osha_bloodborne: {
+    months: 12,
+    why: "Annual, required wherever there is reasonably anticipated exposure.",
+    what: "Needlestick and blood exposure: the precautions, and exactly what to do and who to tell if someone is exposed.",
+  },
+  osha_hazard_communication: {
+    months: 12,
+    why: "On hire and whenever a new hazard is introduced; reviewed annually.",
+    what: "The hazardous chemicals kept here, where the safety data sheets are, and how to read a label.",
+  },
+  controlled_substance_diversion: {
+    months: 12,
+    why: "Annual awareness training for everyone handling controlled substances.",
+    what: "Spotting diversion — by staff, prescribers or patients — and how to raise it. Not a legal requirement in Kansas, but the first thing asked about after a loss.",
+  },
+  cqi_program_review: {
+    months: 12,
+    why: "The written CQI programme is read and signed off annually.",
+    what: "Everyone reads the pharmacy's written quality programme and confirms they know how to report an error and that reporting is expected of them.",
+  },
 };
 
 /** Credentials that are only required of some people, and the condition that makes them required. */
@@ -156,41 +182,54 @@ export async function dueList(opts: { horizonDays?: number } = {}): Promise<DueI
       });
     }
 
-    // ── Trainings ──
-    for (const [type, cadence] of Object.entries(TRAINING_CADENCE) as [TrainingType, { months: number; why: string }][]) {
-      if (type === "immunization_protocol_review" && !p.administersVaccines) continue;
-      const label = TRAINING_LABEL[type];
+  }
+
+  // ── Trainings ────────────────────────────────────────────────────
+  //
+  // One row per requirement, not one per person. Four technicians missing the same training is
+  // one thing to arrange, and listing it four times with no button on any of them is how a
+  // screen stops being read. The people are carried on the item so it can be assigned to all of
+  // them in a single click.
+  for (const [type, cadence] of Object.entries(TRAINING_CADENCE) as [TrainingType, { months: number; why: string; what: string }][]) {
+    const applies = people.filter((p) => type !== "immunization_protocol_review" || p.administersVaccines);
+    if (applies.length === 0) continue;
+    const label = TRAINING_LABEL[type];
+
+    const outstanding: { person: (typeof people)[number]; due: string | null; last: string | null }[] = [];
+    for (const p of applies) {
       const last = trainings
         .filter((t) => t.personId === p.id && t.type === type)
         .sort((a, b) => b.completedOn.localeCompare(a.completedOn))[0];
-
       if (!last) {
-        push({
-          id: `train-never-${p.id}-${type}`,
-          kind: "training",
-          title: `${label} — never recorded`,
-          personName: name,
-          personId: p.id,
-          citation: cadence.why,
-          dueOn: null,
-          action: `${name} has no ${label.toLowerCase()} on record. Assign it, then file the certificate.`,
-          href: `/compliance/training?person=${p.id}`,
-        });
+        outstanding.push({ person: p, due: null, last: null });
         continue;
       }
       const due = last.expiresOn ?? addMonths(last.completedOn, cadence.months);
-      push({
-        id: `train-${last.id}`,
-        kind: "training",
-        title: `${label} — ${name}`,
-        personName: name,
-        personId: p.id,
-        citation: cadence.why,
-        dueOn: due,
-        action: `Last completed ${last.completedOn}. Assign the refresher and file the certificate.`,
-        href: `/compliance/training?person=${p.id}`,
-      });
+      if (daysBetween(today, due) <= HORIZON.training) outstanding.push({ person: p, due, last: last.completedOn });
     }
+    if (outstanding.length === 0) continue;
+
+    const never = outstanding.filter((o) => o.due === null);
+    // The soonest deadline among those that have one drives the whole row.
+    const dated = outstanding.map((o) => o.due).filter(Boolean).sort() as string[];
+    const names = outstanding.map((o) => `${o.person.firstName} ${o.person.lastName}`);
+
+    push({
+      id: `train-${type}`,
+      kind: "training",
+      title: `${label} — ${outstanding.length === applies.length ? "everyone" : names.join(", ")}`,
+      personName: null,
+      personId: null,
+      trainingType: type,
+      personIds: outstanding.map((o) => o.person.id),
+      citation: cadence.what,
+      dueOn: dated[0] ?? null,
+      action:
+        never.length === outstanding.length
+          ? `Never recorded for ${names.length === 1 ? names[0] : `${names.length} people`}. Assign it and each gets a link to complete and sign.`
+          : `Due again for ${names.join(", ")}. Assign it and each gets a link to complete and sign.`,
+      href: `/compliance/training`,
+    });
   }
 
   // ── Pharmacy-level credentials (no person attached) ──

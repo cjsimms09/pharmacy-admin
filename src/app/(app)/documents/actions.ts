@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import { requireManager } from "@/lib/auth";
@@ -26,6 +26,18 @@ const uploadSchema = z.object({
 });
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * Which credential a document category is evidence of.
+ *
+ * The distinction between "a file" and "a thing that expires" is one the software cares about
+ * and nobody using it does. Uploading a CPR card is the act of recording a CPR card.
+ */
+const CREDENTIAL_FOR_CATEGORY: Record<string, "cpr" | "immunization_training" | "immunization_protocol" | undefined> = {
+  cpr_card: "cpr",
+  immunization_training: "immunization_training",
+  immunization_protocol: "immunization_protocol",
+};
 
 export async function uploadDocument(formData: FormData): Promise<ActionResult> {
   const user = await requireManager();
@@ -55,6 +67,37 @@ export async function uploadDocument(formData: FormData): Promise<ActionResult> 
       notes: d.notes,
       uploadedBy: user.id,
     });
+    // A document uploaded against a person is evidence of something that expires, and the
+    // expiry is what the compliance screen watches. Without this the pharmacist uploads a CPR
+    // card, sees the file appear, and is still told there is no CPR card on file — which is
+    // exactly what happened.
+    if (d.personId && CREDENTIAL_FOR_CATEGORY[d.category]) {
+      const type = CREDENTIAL_FOR_CATEGORY[d.category]!;
+      const held = await db.query.credentials.findFirst({
+        where: and(eq(schema.credentials.personId, d.personId), eq(schema.credentials.type, type)),
+      });
+      if (held) {
+        // Only fill gaps. A date already entered by hand is not overwritten by a later upload.
+        await db.update(schema.credentials).set({
+          expiresOn: held.expiresOn ?? d.expiresOn,
+          issuedOn: held.issuedOn ?? d.effectiveOn,
+          updatedAt: new Date().toISOString(),
+        }).where(eq(schema.credentials.id, held.id));
+        await db.update(schema.documents).set({ credentialId: held.id }).where(eq(schema.documents.id, id));
+      } else {
+        const credId = newId();
+        await db.insert(schema.credentials).values({
+          id: credId,
+          personId: d.personId,
+          type,
+          issuedOn: d.effectiveOn,
+          expiresOn: d.expiresOn,
+          notes: d.notes,
+        });
+        await db.update(schema.documents).set({ credentialId: credId }).where(eq(schema.documents.id, id));
+      }
+    }
+
     await audit({ action: "document.upload", userId: user.id, userName: user.name, entity: "document", entityId: id, details: `${d.category}: ${d.title}` });
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Upload failed." };

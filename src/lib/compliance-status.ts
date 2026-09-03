@@ -77,6 +77,18 @@ async function witnessed(seedKey: string, periods: string[], cadence: Obligation
       for (const i of await db.query.csInventories.findMany()) bump(i.inventoryDate);
       return { counts, missing: "No controlled substance inventory has been recorded for this period." };
     }
+    case "technician_list": {
+      // Filed by the site itself, so the completion rows are the evidence and there is nothing
+      // else to look at. Counted here only so the duty reads as closing itself rather than as
+      // something the PIC forgot.
+      const o = await db.query.obligations.findFirst({ where: eq(schema.obligations.seedKey, "technician_list") });
+      if (o) {
+        for (const c of await db.query.obligationCompletions.findMany({ where: eq(schema.obligationCompletions.obligationId, o.id) })) {
+          if (c.periodKey && counts.has(c.periodKey)) counts.set(c.periodKey, 1);
+        }
+      }
+      return { counts, missing: "This month's list is filed once the month ends." };
+    }
     case "backup_restore_test": {
       const s = await db.query.settings.findFirst({ where: eq(schema.settings.key, "backup_last_run") });
       bump(s?.value ?? null);
