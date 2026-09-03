@@ -440,27 +440,6 @@ export const contractDocs = sqliteTable(
   (t) => [index("contract_docs_pbm_idx").on(t.pbmName), index("contract_docs_priority_idx").on(t.priority)],
 );
 
-/** Outstanding balance by payer BIN, from the PSAO's open-claims report. */
-export const claimsAging = sqliteTable(
-  "claims_aging",
-  {
-    id: text("id").primaryKey(),
-    asOf: text("as_of").notNull(),
-    payerName: text("payer_name").notNull(),
-    bin: text("bin").notNull(),
-    d0_30: real("d0_30").notNull().default(0),
-    d31_60: real("d31_60").notNull().default(0),
-    d61_90: real("d61_90").notNull().default(0),
-    d91_120: real("d91_120").notNull().default(0),
-    d121_150: real("d121_150").notNull().default(0),
-    d151_180: real("d151_180").notNull().default(0),
-    over180: real("over_180").notNull().default(0),
-    totalOut: real("total_out").notNull().default(0),
-    loadedAt: text("loaded_at").notNull().default(now()),
-  },
-  (t) => [index("claims_aging_bin_idx").on(t.bin), index("claims_aging_asof_idx").on(t.asOf)],
-);
-
 // ── Audit ────────────────────────────────────────────────────────────
 export const auditEvents = sqliteTable(
   "audit_events",

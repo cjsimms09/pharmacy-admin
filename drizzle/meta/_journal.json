@@ -57,6 +57,13 @@
       "when": 1788398878636,
       "tag": "0007_payer_reference",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1788399821797,
+      "tag": "0008_drop_claims_aging",
+      "breakpoints": true
     }
   ]
 }

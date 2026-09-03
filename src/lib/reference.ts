@@ -73,12 +73,12 @@ const num = (v: string | undefined) => {
   return Number.isFinite(n) ? n : 0;
 };
 
-export type ImportSummary = { bins: number; docs: number; aging: number; agingAsOf: string | null; skipped: string[] };
+export type ImportSummary = { bins: number; docs: number; skipped: string[] };
 
 /** Reads every reference file present and replaces what it covers. Safe to re-run. */
 export async function importReference(): Promise<ImportSummary> {
   const dir = referenceDir();
-  const out: ImportSummary = { bins: 0, docs: 0, aging: 0, agingAsOf: null, skipped: [] };
+  const out: ImportSummary = { bins: 0, docs: 0, skipped: [] };
 
   // ── BIN crosswalk ────────────────────────────────────────────────
   const binCsv = await readIfPresent(dir, ["bin_crosswalk"]);
@@ -143,34 +143,6 @@ export async function importReference(): Promise<ImportSummary> {
       out.docs++;
     }
   } else out.skipped.push("contract_index.csv");
-
-  // ── Open claims aging ────────────────────────────────────────────
-  const agingCsv = await readIfPresent(dir, ["openclaims", "claims_aging", "aging"]);
-  if (agingCsv) {
-    const rows = parseCsv(agingCsv);
-    const asOf = new Date().toISOString().slice(0, 10);
-    await db.delete(schema.claimsAging);
-    for (const r of rows) {
-      const payer = (r["Payer name"] || r.payer_name || "").trim();
-      if (!payer || payer === "_Totals") continue;
-      await db.insert(schema.claimsAging).values({
-        id: newId(),
-        asOf,
-        payerName: payer,
-        bin: (r["BIN number"] || r.bin || "").trim(),
-        d0_30: num(r["0 - 30 days"]),
-        d31_60: num(r["31 - 60 days"]),
-        d61_90: num(r["61 - 90 days"]),
-        d91_120: num(r["91 - 120 days"]),
-        d121_150: num(r["121 - 150 days"]),
-        d151_180: num(r["151 - 180 days"]),
-        over180: num(r["Over 180 days"]),
-        totalOut: num(r["Total out"]),
-      });
-      out.aging++;
-    }
-    out.agingAsOf = asOf;
-  } else out.skipped.push("open claims aging");
 
   return out;
 }
@@ -280,37 +252,10 @@ export async function contractStatus() {
   };
 }
 
-/** Outstanding balance joined to the PBM each BIN belongs to. */
-export async function agingByPbm() {
-  const [aging, bins] = await Promise.all([db.query.claimsAging.findMany(), db.query.payerBins.findMany()]);
-  const pbmOf = new Map<string, string[]>();
-  for (const b of bins) {
-    const l = pbmOf.get(b.bin) ?? [];
-    if (!l.includes(b.pbmName)) l.push(b.pbmName);
-    pbmOf.set(b.bin, l);
-  }
-  const roll = new Map<string, { total: number; over180: number; bins: Set<string>; mapped: boolean }>();
-  for (const a of aging) {
-    const names = pbmOf.get(a.bin);
-    const targets = names && names.length ? names : [a.payerName];
-    for (const t of targets) {
-      const e = roll.get(t) ?? { total: 0, over180: 0, bins: new Set<string>(), mapped: Boolean(names?.length) };
-      e.total += a.totalOut / targets.length;
-      e.over180 += a.over180 / targets.length;
-      e.bins.add(a.bin);
-      roll.set(t, e);
-    }
-  }
-  return [...roll.entries()]
-    .map(([pbm, v]) => ({ pbm, total: v.total, over180: v.over180, bins: v.bins.size, mapped: v.mapped }))
-    .sort((a, b) => b.total - a.total);
-}
-
 export async function referenceCounts() {
-  const [b, d, a] = await Promise.all([
+  const [b, d] = await Promise.all([
     db.select({ n: sql<number>`count(*)` }).from(schema.payerBins),
     db.select({ n: sql<number>`count(*)` }).from(schema.contractDocs),
-    db.select({ n: sql<number>`count(*)` }).from(schema.claimsAging),
   ]);
-  return { bins: b[0].n, docs: d[0].n, aging: a[0].n };
+  return { bins: b[0].n, docs: d[0].n };
 }
