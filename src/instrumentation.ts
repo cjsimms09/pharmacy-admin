@@ -53,12 +53,37 @@ export async function register() {
     }
   };
 
+  /**
+   * Chases outstanding training once a day.
+   *
+   * One reminder a week per person while it is outstanding, then four and it stops emailing and
+   * becomes the PIC's problem instead. Past that point it is a management conversation, and
+   * another copy in the inbox is not going to have it.
+   */
+  const reminderTick = async () => {
+    try {
+      const { getSettings } = await import("./lib/settings");
+      const s = await getSettings();
+      if (!s.mail_user || !s.mail_password_enc) return;
+      const last = s.training_reminders_last ? Date.parse(s.training_reminders_last) : 0;
+      if (Number.isFinite(last) && Date.now() - last < 20 * 60 * 60 * 1000) return;
+      const { sendReminders } = await import("./lib/training-assignments");
+      await sendReminders();
+      const { setSetting } = await import("./lib/settings");
+      await setSetting("training_reminders_last", new Date().toISOString());
+    } catch {
+      // Recorded on the training page; never allowed to stop the app.
+    }
+  };
+
   setTimeout(() => {
     void tick();
     void backupTick();
+    void reminderTick();
     setInterval(() => {
       void tick();
       void backupTick();
+      void reminderTick();
     }, EVERY_MS).unref?.();
   }, START_DELAY_MS).unref?.();
 }

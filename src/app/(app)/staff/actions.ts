@@ -83,6 +83,10 @@ const personSchema = z.object({
   title: optText(100),
   isPic: bool,
   administersVaccines: bool,
+  // Where training links and reminders go. Staff are not on the pharmacy network, so without
+  // this the whole self-service loop falls back to the PIC chasing people in person.
+  email: z.string().trim().email().optional().or(z.literal("")).transform((v) => (v ? v : null)),
+  mobile: optText(40),
   active: bool,
   hiredOn: optDate,
   endedOn: optDate,

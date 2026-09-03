@@ -27,6 +27,9 @@ export const SETTING_KEYS = [
   "mail_port",
   "mail_user",
   "mail_password_enc", // app password, encrypted; never rendered
+  // The address staff reach the site on. A training link is useless without it.
+  "public_base_url",
+  "training_reminders_last",
   "mail_allowed_senders", // one per line
   "mail_auto_import", // "yes" | "no" — load recognised reports rather than only filing them
   "mail_supplier_rules", // one per line: a sender or subject fragment, then "=", then a supplier name

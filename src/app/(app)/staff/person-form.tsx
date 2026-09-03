@@ -9,6 +9,8 @@ type Person = {
   title: string | null;
   isPic: boolean;
   administersVaccines: boolean;
+  email: string | null;
+  mobile: string | null;
   active: boolean;
   hiredOn: string | null;
   endedOn: string | null;
@@ -28,6 +30,10 @@ export function PersonForm({ action, person, submitLabel }: { action: (fd: FormD
       <Field label="Title (optional)" hint="e.g. Pharmacist-in-Charge, Certified Technician">
         <input name="title" className="field" defaultValue={person?.title ?? ""} />
       </Field>
+      <Field label="Email" hint="Where training links and reminders are sent. Without one they have to be chased by hand.">
+        <input name="email" type="email" inputMode="email" className="field" defaultValue={person?.email ?? ""} placeholder="name@example.com" />
+      </Field>
+      <Field label="Mobile (optional)"><input name="mobile" type="tel" inputMode="tel" className="field" defaultValue={person?.mobile ?? ""} /></Field>
       <Field label="Hired on"><input name="hiredOn" type="date" className="field" defaultValue={person?.hiredOn ?? ""} /></Field>
       <Field label="Employment ended on" hint="Notify the Board within 30 days of any change (K.A.R. 68-7-25)">
         <input name="endedOn" type="date" className="field" defaultValue={person?.endedOn ?? ""} />

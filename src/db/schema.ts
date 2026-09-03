@@ -39,6 +39,9 @@ export const people = sqliteTable("people", {
   role: text("role", { enum: PERSON_ROLES }).notNull(),
   title: text("title"), // e.g. "Pharmacist-in-Charge", "Certified Technician"
   isPic: integer("is_pic", { mode: "boolean" }).notNull().default(false),
+  /** Where training links and reminders are sent. Staff are not on the pharmacy network. */
+  email: text("email"),
+  mobile: text("mobile"),
   administersVaccines: integer("administers_vaccines", { mode: "boolean" }).notNull().default(false),
   active: integer("active", { mode: "boolean" }).notNull().default(true),
   hiredOn: text("hired_on"),
@@ -862,5 +865,56 @@ export const supplierItems = sqliteTable(
     index("supplier_items_ndc_idx").on(t.ndc11),
     index("supplier_items_key_idx").on(t.productKey),
     index("supplier_items_supplier_idx").on(t.supplier),
+  ],
+);
+
+
+// ── Training assignments ─────────────────────────────────────────────
+// The loop that turns "I should get everyone through FWA training" into evidence.
+//
+// Staff are not on the pharmacy network and should not need a login, so an assignment carries a
+// long random token and reaches them as a link. They open it, work through the material, type
+// their name and attest. The site records the exact words they agreed to, when, and from where.
+//
+// Under the ESIGN Act and the Kansas UETA that is a valid electronic signature: there is intent
+// to sign, the signature is attached to the record it relates to, and the record is retained and
+// reproducible. It is stronger evidence than a paper roster, because a roster records that
+// someone wrote their name and nothing about what they were agreeing to.
+
+export const trainingAssignments = sqliteTable(
+  "training_assignments",
+  {
+    id: text("id").primaryKey(),
+    personId: text("person_id").notNull().references(() => people.id, { onDelete: "cascade" }),
+    type: text("type", { enum: TRAINING_TYPES }).notNull(),
+    /** Secret in the link. Long enough that guessing one is not a route in. */
+    token: text("token").notNull().unique(),
+    assignedOn: text("assigned_on").notNull(),
+    dueOn: text("due_on").notNull(),
+    /** Where the material lives, if it is not being read on the page itself. */
+    materialUrl: text("material_url"),
+    /** The wording the person is asked to agree to. Stored per assignment so a later change
+     *  to the template can never rewrite what somebody already signed. */
+    statement: text("statement").notNull(),
+
+    completedAt: text("completed_at"),
+    /** Typed by the person. Compared against their name on file, but not required to match —
+     *  a maiden name or a nickname is not a reason to reject a signature. */
+    signedName: text("signed_name"),
+    signedIp: text("signed_ip"),
+    signedAgent: text("signed_agent"),
+    /** Set when the completion produced a trainings row, so it is never double-counted. */
+    trainingId: text("training_id"),
+
+    remindersSent: integer("reminders_sent").notNull().default(0),
+    lastReminderAt: text("last_reminder_at"),
+    sentAt: text("sent_at"),
+    sendError: text("send_error"),
+    createdBy: text("created_by").notNull(),
+    createdAt: text("created_at").notNull().default(now()),
+  },
+  (t) => [
+    index("training_assignments_person_idx").on(t.personId),
+    index("training_assignments_due_idx").on(t.dueOn),
   ],
 );

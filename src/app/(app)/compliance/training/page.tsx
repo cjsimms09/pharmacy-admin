@@ -12,6 +12,8 @@ import { todayIso, fmt, daysUntil } from "@/lib/dates";
 import { storeFile } from "@/lib/files";
 import { newId } from "@/lib/crypto";
 import { PageHeader, Notice, BackLink, Empty } from "@/components/ui";
+import { assignTraining, openAssignments, STATEMENTS, linkFor } from "@/lib/training-assignments";
+import { canSend } from "@/lib/send-mail";
 
 export const metadata = { title: "Training register" };
 export const dynamic = "force-dynamic";
@@ -19,12 +21,34 @@ export const dynamic = "force-dynamic";
 export default async function TrainingPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string; person?: string }> }) {
   await requireUser();
   const { ok, error } = await searchParams;
-  const [people, trainings] = await Promise.all([
+  const [assignments, mailReady, people, trainings] = await Promise.all([
+    openAssignments(),
+    canSend(),
     db.query.people.findMany({ where: eq(schema.people.active, true), orderBy: (p, { asc }) => [asc(p.lastName)] }),
     db.query.trainings.findMany({ orderBy: (t, { desc }) => [desc(t.completedOn)] }),
   ]);
+  const outstanding = assignments.filter((a) => !a.completedAt);
 
   const required = (Object.keys(TRAINING_CADENCE) as TrainingType[]);
+
+  async function assign(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const type = String(fd.get("type") ?? "") as TrainingType;
+    const ids = fd.getAll("personIds").map(String).filter(Boolean);
+    if (ids.length === 0) redirect("/compliance/training?error=" + encodeURIComponent("Pick at least one person."));
+    try {
+      const r = await assignTraining(ids, type, { dueOn: String(fd.get("dueOn") ?? "") || undefined, materialUrl: String(fd.get("materialUrl") ?? "").trim() || null }, u);
+      await audit({ action: "training.assign", userId: u.id, userName: u.name, details: `${type} to ${ids.length}` });
+      revalidatePath("/compliance/training");
+      const bits = [`${r.assigned} assigned, ${r.emailed} emailed`];
+      if (r.problems.length) bits.push(r.problems.join(" "));
+      redirect("/compliance/training?ok=" + encodeURIComponent(bits.join(". ")));
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/compliance/training?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not assign that."));
+    }
+  }
 
   async function record(fd: FormData) {
     "use server";
@@ -127,8 +151,84 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
             </table>
           </div>
 
+          {/* ── Assign, so the person does it and signs it themselves ── */}
           <section className="mt-8 rounded-lg border border-line bg-surface p-4">
-            <h2 className="text-sm font-semibold">Record a completion</h2>
+            <h2 className="text-sm font-semibold">Assign training</h2>
+            <p className="mt-1 text-xs text-ink-3">
+              Each person gets a link by email. They work through it, read what they are confirming, and type their
+              name. That signature — with the time, the device and the exact wording — is the record. It is stronger
+              evidence than you entering it on their behalf, because it comes from them.
+            </p>
+            {!mailReady && (
+              <Notice kind="warn">
+                Email is not set up, so links cannot be sent. Settings → Email first.
+              </Notice>
+            )}
+            <form action={assign} className="mt-3 space-y-3">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <label className="text-xs text-ink-3">
+                  Training
+                  <select name="type" className="field">
+                    {TRAINING_TYPES.filter((t) => STATEMENTS[t]).map((t) => (
+                      <option key={t} value={t}>{TRAINING_LABEL[t]}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-xs text-ink-3">
+                  Due by
+                  <input type="date" name="dueOn" className="field" />
+                </label>
+                <label className="text-xs text-ink-3">
+                  Link to the material (optional)
+                  <input name="materialUrl" className="field" placeholder="https://..." />
+                </label>
+              </div>
+              <fieldset>
+                <legend className="text-xs text-ink-3">Who</legend>
+                <div className="mt-1 flex flex-wrap gap-3">
+                  {people.map((p) => (
+                    <label key={p.id} className="flex items-center gap-1.5 text-sm">
+                      <input type="checkbox" name="personIds" value={p.id} defaultChecked />
+                      {p.firstName} {p.lastName}
+                      {!p.email && <span className="text-xs text-warn">no email</span>}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+              <button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Assign and send</button>
+            </form>
+          </section>
+
+          {outstanding.length > 0 && (
+            <>
+              <h2 className="mt-8 text-sm font-semibold">Waiting on staff</h2>
+              <ul className="mt-2 divide-y divide-line rounded-lg border border-line bg-surface text-sm">
+                {outstanding.map((a) => (
+                  <li key={a.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+                    <div>
+                      <b>{a.person ? `${a.person.firstName} ${a.person.lastName}` : "—"}</b> · {TRAINING_LABEL[a.type]}
+                      <div className="text-xs text-ink-3">
+                        due {fmt(a.dueOn)}
+                        {a.sentAt ? ` · sent ${fmt(a.sentAt.slice(0, 10))}` : " · not sent"}
+                        {a.remindersSent > 0 && ` · ${a.remindersSent} reminder${a.remindersSent === 1 ? "" : "s"}`}
+                        {a.sendError && <span className="text-warn"> · {a.sendError}</span>}
+                      </div>
+                    </div>
+                    <span className={`badge ${daysUntil(a.dueOn)! < 0 ? "badge-crit" : "badge-warn"}`}>
+                      {daysUntil(a.dueOn)! < 0 ? `${Math.abs(daysUntil(a.dueOn)!)}d late` : `${daysUntil(a.dueOn)}d`}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+
+          <section className="mt-8 rounded-lg border border-line bg-surface p-4">
+            <h2 className="text-sm font-semibold">Record a completion yourself</h2>
+            <p className="mt-1 text-xs text-ink-3">
+              For training done on paper or elsewhere. Upload the certificate — a completion with no evidence behind
+              it is worth very little at inspection.
+            </p>
             <form action={record} className="mt-3 grid gap-3 sm:grid-cols-2">
               <label className="text-xs text-ink-3">
                 Person
