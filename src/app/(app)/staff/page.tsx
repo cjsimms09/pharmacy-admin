@@ -24,7 +24,8 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
         subtitle="Every licensee and registrant, their credentials, and when each expires."
         actions={
           <>
-            <Link href="/staff/technician-list" className="btn">Print technician list (C-900)</Link>
+            <Link href="/staff/rotations" className="btn">Rotations</Link>
+            <Link href="/staff/technician-list" className="btn">Technician list (C-900)</Link>
             {canManage && <Link href="/staff/new" className="btn btn-primary">Add staff member</Link>}
           </>
         }

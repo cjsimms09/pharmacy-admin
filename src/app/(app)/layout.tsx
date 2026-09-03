@@ -14,9 +14,14 @@ import { noteRequest } from "@/lib/activity";
 const NAV = [
   { href: "/", label: "Today" },
   { href: "/compliance", label: "Compliance" },
+  // The question every other screen is ultimately answering. Near the top because it is what
+  // gets opened on a bad morning, and because a PIC who checks it on a quiet afternoon never has
+  // a bad morning.
+  { href: "/inspection", label: "Inspection" },
   { href: "/cqi", label: "CQI program" },
   { href: "/staff", label: "Staff" },
   { href: "/documents", label: "Documents" },
+  { href: "/agreements", label: "Agreements" },
   // Where emailed reports land — temperature logs among them, so it belongs in the daily path.
   { href: "/inbox", label: "Inbox" },
   { href: "/temps", label: "Temperatures" },

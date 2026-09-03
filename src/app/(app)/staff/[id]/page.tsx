@@ -46,11 +46,11 @@ export default async function PersonPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; saved?: string; edit?: string; add?: string }>;
+  searchParams: Promise<{ error?: string; saved?: string; edit?: string; add?: string; fix?: string }>;
 }) {
   const user = await requireUser();
   const { id } = await params;
-  const { error, saved, edit, add } = await searchParams;
+  const { error, saved, edit, add, fix } = await searchParams;
   if (user.role === "staff" && user.personId !== id) redirect("/staff");
   const canManage = user.role !== "staff";
 
@@ -83,6 +83,7 @@ export default async function PersonPage({
   }).length;
 
   const extras = creds.filter((c) => !required.includes(c.type) || creds.filter((x) => x.type === c.type).length > 1);
+  const fixing = fix ? creds.find((c) => c.id === fix) : undefined;
 
   const license = heldFor(person.role === "pharmacist" ? "pharmacist_license" : "technician_registration");
   const ceRequired = person.role === "pharmacist" ? 30 : person.role === "technician" ? 20 : 0;
@@ -211,7 +212,14 @@ export default async function PersonPage({
                     <td className="whitespace-nowrap">
                       {canManage &&
                         (held ? (
-                          <Link href={`${here}?add=${type}`} className="btn btn-sm">Replace</Link>
+                          <>
+                            {/* Two different jobs. Editing corrects what is already on file — a
+                                mistyped number, a missing expiry date, the document nobody
+                                attached. Renewing files the new card and keeps the old one, which
+                                is what an inspector asking "and before that?" wants to see. */}
+                            <Link href={`${here}?fix=${held.id}`} className="btn btn-sm">Edit</Link>
+                            <Link href={`${here}?add=${type}`} className="btn btn-sm ml-1">Renew</Link>
+                          </>
                         ) : (
                           <Link href={`${here}?add=${type}`} className="btn btn-sm btn-primary">Add</Link>
                         ))}
@@ -225,9 +233,27 @@ export default async function PersonPage({
 
         {canManage && (
           <div className="mt-4 border-t border-line pt-4">
-            {add ? (
+            {fixing ? (
               <>
-                <h3>Add {CREDENTIAL_LABEL[add as CredentialType] ?? "credential"}</h3>
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <h3>Edit {CREDENTIAL_LABEL[fixing.type]}</h3>
+                  <Link href={here} className="text-sm text-ink-2 hover:text-ink">Cancel</Link>
+                </div>
+                <p className="mt-1 text-xs text-ink-3">
+                  Changes the record that is already here. To file a renewal without losing the old one, use Renew
+                  instead — the history is what answers &ldquo;and before that?&rdquo;.
+                </p>
+                <CredentialForm action={updateCredential.bind(null, fixing.id)} redirectTo={here} cred={fixing} />
+                <form action={deleteCredential.bind(null, fixing.id, here)} className="mt-2">
+                  <button className="text-xs text-crit hover:underline">Delete this record entirely</button>
+                </form>
+              </>
+            ) : add ? (
+              <>
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <h3>Add {CREDENTIAL_LABEL[add as CredentialType] ?? "credential"}</h3>
+                  <Link href={here} className="text-sm text-ink-2 hover:text-ink">Cancel</Link>
+                </div>
                 <CredentialForm action={addCredential} redirectTo={here} personId={id} defaultType={add as CredentialType} />
               </>
             ) : (
@@ -257,16 +283,8 @@ export default async function PersonPage({
                     <td className="whitespace-nowrap text-xs">{fmt(c.issuedOn)}</td>
                     <td className="whitespace-nowrap text-xs">{c.noExpiry ? "does not expire" : fmt(c.expiresOn)}</td>
                     <td>{c.noExpiry ? <span className="badge badge-ok">no expiry</span> : <StatusBadge days={daysUntil(c.expiresOn)} iso={c.expiresOn} />}</td>
-                    <td>
-                      {canManage && (
-                        <details>
-                          <summary className="cursor-pointer text-xs text-accent">Edit</summary>
-                          <CredentialForm action={updateCredential.bind(null, c.id)} redirectTo={here} cred={c} />
-                          <form action={deleteCredential.bind(null, c.id, here)} className="mt-2">
-                            <button className="text-xs text-crit hover:underline">Delete</button>
-                          </form>
-                        </details>
-                      )}
+                    <td className="whitespace-nowrap">
+                      {canManage && <Link href={`${here}?fix=${c.id}`} className="btn btn-sm">Edit</Link>}
                     </td>
                   </tr>
                 ))}

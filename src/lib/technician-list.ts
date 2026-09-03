@@ -146,3 +146,17 @@ export async function snapshotFor(periodKey: string): Promise<TechnicianSnapshot
     return null;
   }
 }
+
+/** Every month that has a filed list, newest first. */
+export async function filedMonths(): Promise<string[]> {
+  const obligation = await db.query.obligations.findFirst({ where: eq(schema.obligations.seedKey, "technician_list") });
+  if (!obligation) return [];
+  const rows = await db.query.obligationCompletions.findMany({
+    where: eq(schema.obligationCompletions.obligationId, obligation.id),
+  });
+  return rows
+    .map((r) => r.periodKey)
+    .filter((k): k is string => Boolean(k))
+    .sort()
+    .reverse();
+}

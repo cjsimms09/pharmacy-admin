@@ -88,6 +88,18 @@ export const CREDENTIAL_TYPES = [
   // protocol does.
   "immunization_protocol",
   "controlled_substance_poa",
+  /**
+   * What a student on rotation has to produce before their first shift.
+   *
+   * Taken from what the affiliation agreement actually obliges each side to do, rather than from
+   * a guess: the school provides these and tells the student to hand them over on request, which
+   * means the pharmacy is the party holding nothing unless it asks. A student who works a five
+   * week rotation and leaves no record behind is the gap nobody notices until an inspector asks
+   * who was on the bench in July.
+   */
+  "immunization_record",
+  "tb_screening",
+  "background_check",
   "pharmacy_registration",
   "dea_registration",
   "csos_certificate",

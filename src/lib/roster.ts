@@ -57,21 +57,102 @@ export type RotationRow = {
   daysLeft: number | null;
   /** What has to be on file before their first shift, and what is missing. */
   missing: string[];
+  /** Split, because the two halves are chased in opposite directions. */
+  oursToDo: string[];
+  toAskFor: string[];
   ready: boolean;
 };
 
 /**
  * What a student must have on file before they touch a prescription.
  *
- * Deliberately shorter than the staff list. A five-week student does not owe a full annual
- * training cycle, and pretending otherwise means nobody completes any of it. These four are what
- * the Board and HIPAA actually require of someone working here, however briefly.
+ * Taken from the affiliation agreement rather than guessed at. The agreement makes the school
+ * responsible for arranging almost all of this — the intern licence, BLS, immunisations, TB
+ * screening, the OIG and SAM exclusion checks, the malpractice cover — and then makes the student
+ * responsible for producing it "upon request from Experiential Site". Which means the pharmacy is
+ * the party holding nothing at all unless it asks, every time, for every student.
+ *
+ * The two the pharmacy itself owes are at the end: a site-specific orientation covering HIPAA and
+ * this pharmacy's own procedures, and bloodborne pathogens, both of which the agreement puts
+ * squarely on the site rather than the school.
+ *
+ * The exclusion check is the one worth being blunt about. An excluded person working here is the
+ * pharmacy's civil monetary penalty for every claim submitted while they were on the bench, not
+ * the school's.
  */
-const ROTATION_REQUIREMENTS: { key: string; label: string; kind: "credential" | "training"; type: string }[] = [
-  { key: "registration", label: "Kansas intern registration", kind: "credential", type: "intern_registration" },
-  { key: "cpr", label: "CPR certification", kind: "credential", type: "cpr" },
-  { key: "immunization", label: "Immunization training certificate", kind: "credential", type: "immunization_training" },
-  { key: "hipaa", label: "HIPAA training", kind: "training", type: "hipaa_privacy_security" },
+const ROTATION_REQUIREMENTS: {
+  key: string;
+  label: string;
+  why: string;
+  kind: "credential" | "training";
+  type: string;
+  /** Who is meant to produce it, so a missing one is chased in the right direction. */
+  from: "school" | "student" | "pharmacy";
+}[] = [
+  {
+    key: "registration",
+    label: "Kansas intern registration",
+    why: "The agreement says a student may not begin until the intern licence is presented to the preceptor.",
+    kind: "credential",
+    type: "intern_registration",
+    from: "student",
+  },
+  {
+    key: "cpr",
+    label: "CPR / BLS certification",
+    why: "Provided by the school as BLS Healthcare Provider.",
+    kind: "credential",
+    type: "cpr",
+    from: "school",
+  },
+  {
+    key: "immunization_record",
+    label: "Immunization record",
+    why: "Two MMR, Td/Tdap in date, hepatitis B series with a titer, and varicella immunity.",
+    kind: "credential",
+    type: "immunization_record",
+    from: "student",
+  },
+  {
+    key: "tb",
+    label: "TB screening",
+    why: "Within the previous year, or documented treatment or a negative chest x-ray.",
+    kind: "credential",
+    type: "tb_screening",
+    from: "student",
+  },
+  {
+    key: "background",
+    label: "Background and exclusion checks",
+    why: "OIG LEIE, SAM, criminal and sex offender registry. An excluded person working here is this pharmacy's penalty, not the school's.",
+    kind: "credential",
+    type: "background_check",
+    from: "school",
+  },
+  {
+    key: "insurance",
+    label: "Professional liability cover",
+    why: "$1,000,000 per incident and $3,000,000 aggregate, arranged by the school and shown on request.",
+    kind: "credential",
+    type: "liability_insurance",
+    from: "school",
+  },
+  {
+    key: "hipaa",
+    label: "Site-specific HIPAA orientation",
+    why: "The agreement puts this on the pharmacy, not the school — our policies, our procedures, our workflow.",
+    kind: "training",
+    type: "hipaa_privacy_security",
+    from: "pharmacy",
+  },
+  {
+    key: "bbp",
+    label: "Bloodborne pathogens",
+    why: "Ours to deliver for anyone working here with reasonably anticipated exposure.",
+    kind: "training",
+    type: "osha_bloodborne",
+    from: "pharmacy",
+  },
 ];
 
 export async function rotations(): Promise<RotationRow[]> {
@@ -85,15 +166,17 @@ export async function rotations(): Promise<RotationRow[]> {
   return people
     .filter((p) => p.engagement === "rotation")
     .map((p) => {
-      const missing = ROTATION_REQUIREMENTS.filter((r) => {
+      const outstanding = ROTATION_REQUIREMENTS.filter((r) => {
         if (r.kind === "credential") {
           const held = creds.find((c) => c.personId === p.id && c.type === r.type);
           if (!held) return true;
-          // Expired before they even start is the same as not having it.
-          return Boolean(held.expiresOn && p.endsOn && held.expiresOn < p.endsOn && !held.noExpiry);
+          // Lapsing before the rotation ends is the same as not having it: the last week of the
+          // placement is still a week of somebody working here without it.
+          return Boolean(!held.noExpiry && held.expiresOn && p.endsOn && held.expiresOn < p.endsOn);
         }
         return !trainings.some((t) => t.personId === p.id && t.type === r.type);
-      }).map((r) => r.label);
+      });
+      const missing = outstanding.map((r) => r.label);
 
       return {
         id: p.id,
@@ -106,6 +189,8 @@ export async function rotations(): Promise<RotationRow[]> {
         daysUntilStart: p.startsOn ? daysBetween(today, p.startsOn) : null,
         daysLeft: p.endsOn ? daysBetween(today, p.endsOn) : null,
         missing,
+        oursToDo: outstanding.filter((r) => r.from === "pharmacy").map((r) => r.label),
+        toAskFor: outstanding.filter((r) => r.from !== "pharmacy").map((r) => r.label),
         ready: missing.length === 0,
       };
     });
