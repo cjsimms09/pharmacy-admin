@@ -5,12 +5,14 @@ import { audit } from "@/lib/audit";
 import { planRegister, registerProgress, syncPlanGroups, classifyPlan, CLASS_INFO } from "@/lib/plans";
 import { PLAN_CLASSES, type PlanClass } from "@/db/schema";
 import { formatCents } from "@/lib/money";
+import { requireReimbursement } from "@/lib/features";
 import { PageHeader, Notice, Empty } from "@/components/ui";
 
 export const metadata = { title: "Plans" };
 export const dynamic = "force-dynamic";
 
 export default async function PlansPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string; show?: string }> }) {
+  await requireReimbursement();
   await requireUser();
   const { ok, error, show } = await searchParams;
   const [rows, progress] = await Promise.all([planRegister(), registerProgress()]);

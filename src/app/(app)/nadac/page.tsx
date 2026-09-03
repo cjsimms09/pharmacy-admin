@@ -5,12 +5,14 @@ import { revalidatePath } from "next/cache";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { loadNadacFiles, nadacCoverage, nadacClaimCoverage, nadacDir } from "@/lib/nadac";
+import { requireReimbursement } from "@/lib/features";
 import { PageHeader, Notice, Empty } from "@/components/ui";
 
 export const metadata = { title: "NADAC" };
 export const dynamic = "force-dynamic";
 
 export default async function NadacPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
+  await requireReimbursement();
   await requireUser();
   const { ok, error } = await searchParams;
   const cov = await nadacCoverage();

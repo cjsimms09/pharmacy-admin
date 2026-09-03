@@ -5,12 +5,14 @@ import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { importClaims, claimFlags, claimsByPayer, claimImports } from "@/lib/claims";
 import { formatCents } from "@/lib/money";
+import { requireReimbursement } from "@/lib/features";
 import { PageHeader, Notice, Empty } from "@/components/ui";
 
 export const metadata = { title: "Claims" };
 export const dynamic = "force-dynamic";
 
 export default async function ClaimsPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
+  await requireReimbursement();
   await requireUser();
   const { ok, error } = await searchParams;
   const [flags, byPayer, imports] = await Promise.all([claimFlags(), claimsByPayer(), claimImports()]);

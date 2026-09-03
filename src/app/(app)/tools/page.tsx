@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
+import { requireReimbursement } from "@/lib/features";
 import { PageHeader } from "@/components/ui";
 
 export const metadata = { title: "Tools" };
@@ -22,6 +23,7 @@ const TOOLS = [
 ];
 
 export default async function ToolsPage() {
+  await requireReimbursement();
   await requireUser();
   return (
     <>

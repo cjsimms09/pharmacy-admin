@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireUser, logout } from "@/lib/auth";
+import { reimbursementEnabled } from "@/lib/features";
 
 /**
  * What a pharmacist-in-charge needs to hand every day, and nothing else.
@@ -16,12 +17,13 @@ const NAV = [
   { href: "/staff", label: "Staff" },
   { href: "/documents", label: "Documents" },
   { href: "/inventory", label: "CS inventories" },
-  { href: "/tools", label: "Tools" },
   { href: "/settings", label: "Settings" },
 ];
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
+  const showTools = await reimbursementEnabled();
+  const nav = showTools ? [...NAV.slice(0, -1), { href: "/tools", label: "Tools" }, NAV[NAV.length - 1]] : NAV;
 
   async function signOut() {
     "use server";
@@ -37,7 +39,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <div className="mt-0.5 text-xs text-ink-3">Compliance desk</div>
         </div>
         <nav className="flex gap-1 overflow-x-auto px-2 pb-2 md:flex-col md:pb-0">
-          {NAV.map((n) => (
+          {nav.map((n) => (
             <Link key={n.href} href={n.href} className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-ink-2 hover:bg-ground hover:text-ink">
               {n.label}
             </Link>

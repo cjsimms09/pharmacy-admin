@@ -4,6 +4,7 @@ import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { importSupplierCatalog, purchasingOpportunities, supplierSummary } from "@/lib/suppliers";
 import { formatCents } from "@/lib/money";
+import { requireReimbursement } from "@/lib/features";
 import { PageHeader, Notice, Empty, Field } from "@/components/ui";
 
 export const metadata = { title: "Purchasing" };
@@ -13,6 +14,7 @@ export const dynamic = "force-dynamic";
 const perUnit = (micros: number | null) => (micros === null ? "—" : `$${(micros / 1_000_000).toFixed(5)}`);
 
 export default async function PurchasingPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
+  await requireReimbursement();
   await requireUser();
   const { ok, error } = await searchParams;
   const [opps, summary] = await Promise.all([purchasingOpportunities(), supplierSummary()]);

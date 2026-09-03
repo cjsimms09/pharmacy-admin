@@ -30,6 +30,9 @@ export const SETTING_KEYS = [
   "mail_allowed_senders", // one per line
   "mail_auto_import", // "yes" | "no" — load recognised reports rather than only filing them
   "mail_supplier_rules", // one per line: a sender or subject fragment, then "=", then a supplier name
+  // Off by default. The reimbursement side is built and tested but waiting on data that has to
+  // come from outside, and half-working pages in the daily path are a daily irritation.
+  "feature_reimbursement", // "yes" | "no"
   "backup_destination",
   "backup_enabled", // "yes" | "no"
   "backup_keep", // how many archives to keep

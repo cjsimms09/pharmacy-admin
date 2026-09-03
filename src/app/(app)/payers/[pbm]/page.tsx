@@ -2,11 +2,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { pbmProfile } from "@/lib/reference";
+import { requireReimbursement } from "@/lib/features";
 import { PageHeader, BackLink, Empty } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
 export default async function PayerPage({ params }: { params: Promise<{ pbm: string }> }) {
+  await requireReimbursement();
   await requireUser();
   const { pbm } = await params;
   const name = decodeURIComponent(pbm);

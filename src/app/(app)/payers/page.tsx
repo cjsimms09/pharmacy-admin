@@ -4,12 +4,14 @@ import { revalidatePath } from "next/cache";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { importReference, referenceCounts, pbmDirectory, lookupBin, scanContracts } from "@/lib/reference";
+import { requireReimbursement } from "@/lib/features";
 import { PageHeader, Notice, Empty } from "@/components/ui";
 
 export const metadata = { title: "Payers" };
 export const dynamic = "force-dynamic";
 
 export default async function PayersPage({ searchParams }: { searchParams: Promise<{ bin?: string; q?: string; imported?: string; error?: string }> }) {
+  await requireReimbursement();
   await requireUser();
   const { bin, q, imported, error } = await searchParams;
   const counts = await referenceCounts();

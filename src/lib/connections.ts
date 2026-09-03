@@ -54,7 +54,9 @@ export const CONNECTIONS: Connection[] = [
 
 export async function connectionState() {
   const s = await getSettings();
-  return CONNECTIONS.map((c) => ({
+  // The MTF key belongs to the reimbursement work; no reason to show it while that is off.
+  const shown = s.feature_reimbursement === "yes" ? CONNECTIONS : CONNECTIONS.filter((c) => c.id !== "mtf");
+  return shown.map((c) => ({
     ...c,
     hint: hintFor(s[c.secretKey]),
     values: Object.fromEntries(c.fields.map((f) => [f.key, s[f.key] ?? ""])) as Record<string, string>,
