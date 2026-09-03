@@ -113,6 +113,12 @@ export default async function ConnectionsPage({ searchParams }: { searchParams: 
               </div>
             </form>
 
+            {c.id === "mtf" && (
+              <p className="mt-3 text-xs">
+                <a href="/remits/mtf" className="underline">Test the connection and download 835 files →</a>
+              </p>
+            )}
+
             {c.hint && (
               <form action={remove} className="mt-2">
                 <input type="hidden" name="id" value={c.id} />

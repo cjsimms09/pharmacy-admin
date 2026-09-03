@@ -119,6 +119,7 @@ export const DOCUMENT_CATEGORIES = [
   "dea_registration",
   "controlled_substance_poa",
   "cs_inventory",
+  "cs_discrepancy",
   "insurance",
   "agreement",
   "cqi_summary",
@@ -596,4 +597,42 @@ export const pbmCommunications = sqliteTable(
     loadedAt: text("loaded_at").notNull().default(now()),
   },
   (t) => [index("pbm_communications_date_idx").on(t.publishedDate), index("pbm_communications_pbm_idx").on(t.pbmName)],
+);
+
+// ── Inventory discrepancy log ────────────────────────────────────────
+// A count that did not come out right, written down while it is fresh.
+//
+// This is not a DEA 106 and not a CQI incident. Kansas does not require this log, and nothing
+// here files itself anywhere — it is kept because a pattern across months is worth seeing, and
+// because a discrepancy that was reasoned through at the time reads very differently to an
+// inspector than one reconstructed a year later.
+//
+// The quantity is stored in thousandths so a 0.5 mL or half-tablet count is exact. Expected and
+// counted are both kept rather than only the difference, so the arithmetic can be re-checked.
+export const csDiscrepancies = sqliteTable(
+  "cs_discrepancies",
+  {
+    id: text("id").primaryKey(),
+    discoveredOn: text("discovered_on").notNull(),
+    drugName: text("drug_name").notNull(),
+    ndc11: text("ndc11"),
+    strength: text("strength"),
+    schedule: text("schedule", { enum: ["CII", "CIII", "CIV", "CV", "non_controlled", "unknown"] }).notNull().default("unknown"),
+    /** Counts x 1,000. Expected and counted are kept separately; the difference is derived. */
+    expectedThousandths: integer("expected_thousandths"),
+    countedThousandths: integer("counted_thousandths"),
+    unit: text("unit").notNull().default("EA"),
+    /** What happened, in the PIC's own words. The reason this log exists. */
+    narrative: text("narrative").notNull(),
+    /** What was concluded, if anything. Blank while it is still open. */
+    resolution: text("resolution"),
+    resolvedOn: text("resolved_on"),
+    /** Linked when a discrepancy turned out to warrant one; usually null. */
+    csInventoryId: text("cs_inventory_id"),
+    reportedToDea: integer("reported_to_dea", { mode: "boolean" }).notNull().default(false),
+    createdBy: text("created_by").notNull(),
+    createdAt: text("created_at").notNull().default(now()),
+    updatedAt: text("updated_at").notNull().default(now()),
+  },
+  (t) => [index("cs_discrepancies_date_idx").on(t.discoveredOn), index("cs_discrepancies_drug_idx").on(t.drugName)],
 );

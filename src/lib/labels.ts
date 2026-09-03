@@ -86,6 +86,7 @@ export const DOCUMENT_CATEGORY_LABEL: Record<DocumentCategory, string> = {
   dea_registration: "DEA registration",
   controlled_substance_poa: "DEA power of attorney",
   cs_inventory: "Controlled substance inventory",
+  cs_discrepancy: "Inventory discrepancy",
   insurance: "Insurance policy / certificate",
   agreement: "Agreement / contract",
   cqi_summary: "CQI bimonthly summary (C-550)",
