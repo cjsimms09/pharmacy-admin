@@ -2,7 +2,7 @@ import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
-import { INCIDENT_TYPES } from "@/db/schema";
+import { CREDENTIAL_TYPES, DOCUMENT_CATEGORIES, INCIDENT_TYPES, TRAINING_TYPES } from "@/db/schema";
 import { getSettings, setSetting } from "./settings";
 import { decryptText, encryptText } from "./crypto";
 import { audit } from "./audit";
@@ -357,4 +357,102 @@ function mockPacket(): ExtractedPacketT {
     ],
     notes: "Mock extraction.",
   };
+}
+
+// ── Document intake: read anything dropped in and work out what it is ─
+export const ClassifiedDoc = z.object({
+  /** What kind of record this belongs to. */
+  kind: z.enum(["person_credential", "person_training", "person_ce", "pharmacy_credential", "cqi_incident", "cqi_summary", "cs_inventory", "policy", "report", "unknown"]),
+  /** Best-guess document category for the file vault. */
+  category: z.enum(DOCUMENT_CATEGORIES),
+  /** A short title a person would recognise, e.g. "CPR card — American Heart Association". */
+  title: z.string(),
+  /** Name of the person it belongs to, exactly as printed. Null for pharmacy-level documents. */
+  personName: z.string().nullable(),
+  credentialType: z.enum(CREDENTIAL_TYPES).nullable(),
+  trainingType: z.enum(TRAINING_TYPES).nullable(),
+  /** Licence, registration, certificate or DEA number printed on it. */
+  number: z.string().nullable(),
+  issuer: z.string().nullable(),
+  issuedOn: z.string().nullable(),
+  expiresOn: z.string().nullable(),
+  /** CE only. */
+  ceHours: z.number().nullable(),
+  ceAcpeNumber: z.string().nullable(),
+  isBoardCourse: z.boolean().nullable(),
+  /** How sure you are, 0 to 1. Below 0.6 the pharmacy is asked to confirm everything. */
+  confidence: z.number(),
+  /** What you could not read, what you inferred, and anything the PIC should check. */
+  notes: z.string().nullable(),
+});
+export type ClassifiedDocT = z.infer<typeof ClassifiedDoc>;
+
+const CLASSIFY_SYSTEM = `You sort documents for a Kansas independent pharmacy's compliance file. Someone drops in a scan or photo — a licence, a CPR card, an immunization training certificate, a CE certificate, a fraud-waste-and-abuse training completion, a DEA registration, an insurance certificate, a signed CQI form, an inventory sheet, a policy — and you work out what it is, whose it is, and the dates that matter.
+
+Rules:
+- Read the dates carefully and return them as YYYY-MM-DD. Cards often print "MM/YYYY" for an expiry: use the last day of that month. American Heart Association CPR cards print an issue date and expire two years later at the end of that month; if only the issue date is printed, compute the expiry and say so in notes.
+- Kansas pharmacist licences and pharmacy registrations expire 30 June; technician registrations expire 31 October. If a scan shows a renewal year but no day, use those dates and note it.
+- personName is the person the document belongs to, copied exactly as printed, or null when it belongs to the pharmacy rather than a person (pharmacy registration, DEA registration, insurance, policies, CQI forms, inventories).
+- credentialType applies to licences, registrations, cards and certificates that expire. trainingType applies to annual workforce training: fraud/waste/abuse and general compliance (fwa_general_compliance), HIPAA privacy and security, OSHA bloodborne pathogens, OSHA hazard communication, controlled substance diversion, immunization protocol review, CQI program review. Set only the one that fits and leave the other null.
+- Continuing education certificates are kind "person_ce": pull the hours and the ACPE/UAN number. A UAN whose provider segment marks it as the Kansas Board's own required course means isBoardCourse true.
+- If the scan is unreadable, or it is something else entirely, return kind "unknown" with your best category and explain in notes. Never guess a licence number or a date you cannot see — return null and say so.
+- Never copy a patient's name, date of birth, address, phone number or member ID into any field, even if the document shows one. If the document is patient-specific rather than a pharmacy record, say so in notes and return kind "unknown".
+- Write notes in plain language for a pharmacist, not for a developer.`;
+
+/** Reads a dropped document and proposes where it belongs. Nothing is saved until the PIC confirms. */
+export async function classifyDocument(
+  file: { buffer: Buffer; mimeType: string; fileName: string },
+  knownPeople: string[],
+  ctx: { userId: string; userName: string },
+): Promise<ClassifiedDocT> {
+  if (MOCK) {
+    return {
+      kind: "person_credential",
+      category: "cpr_card",
+      title: `Mock classification of ${file.fileName}`,
+      personName: knownPeople[0] ?? null,
+      credentialType: "cpr",
+      trainingType: null,
+      number: "C-123456",
+      issuer: "American Heart Association",
+      issuedOn: "2026-03-01",
+      expiresOn: "2028-03-31",
+      ceHours: null,
+      ceAcpeNumber: null,
+      isBoardCourse: null,
+      confidence: 0.9,
+      notes: "Mock mode: no document was read.",
+    };
+  }
+  const { client: c, model } = await client();
+  const isPdf = file.mimeType === "application/pdf";
+  const isImage = file.mimeType.startsWith("image/");
+  if (!isPdf && !isImage) throw new Error("Claude can read PDFs and photos. For a Word file, save it as a PDF first, or file it by hand.");
+  const data = file.buffer.toString("base64");
+  const block: Anthropic.ContentBlockParam = isPdf
+    ? { type: "document", source: { type: "base64", media_type: "application/pdf", data } }
+    : { type: "image", source: { type: "base64", media_type: file.mimeType as "image/jpeg" | "image/png" | "image/webp" | "image/gif", data } };
+  const res = await c.messages.parse({
+    model,
+    max_tokens: 6000,
+    thinking: { type: "adaptive" },
+    output_config: { effort: "high", format: zodOutputFormat(ClassifiedDoc) },
+    system: CLASSIFY_SYSTEM,
+    messages: [
+      {
+        role: "user",
+        content: [
+          block,
+          {
+            type: "text" as const,
+            text: `File name: ${file.fileName}\nPeople on staff at this pharmacy: ${knownPeople.length ? knownPeople.join(", ") : "(none recorded yet)"}\n\nWork out what this document is and where it belongs.`,
+          },
+        ],
+      },
+    ],
+  });
+  await logUsage("ai.classify_document", ctx.userId, ctx.userName, res.usage, `model=${res.model} ${file.fileName}`);
+  if (res.stop_reason === "refusal") throw new Error("Claude declined to read this document.");
+  if (!res.parsed_output) throw new Error("Claude could not read this document. Try a clearer scan, or file it by hand.");
+  return res.parsed_output;
 }

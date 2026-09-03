@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, index } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 const now = () => sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`;
@@ -156,6 +156,99 @@ export const documents = sqliteTable(
   (t) => [index("documents_person_idx").on(t.personId), index("documents_category_idx").on(t.category)],
 );
 
+// ── Workforce training (annual, per person) ──────────────────────────
+// Separate from credentials because these recur on a fixed cycle and are tracked as a matrix of
+// people against years — "who has done this year's FWA training" is the question that gets asked.
+export const TRAINING_TYPES = [
+  "fwa_general_compliance",
+  "hipaa_privacy_security",
+  "osha_bloodborne",
+  "osha_hazard_communication",
+  "controlled_substance_diversion",
+  "immunization_protocol_review",
+  "cqi_program_review",
+  "other",
+] as const;
+export type TrainingType = (typeof TRAINING_TYPES)[number];
+
+export const trainings = sqliteTable(
+  "trainings",
+  {
+    id: text("id").primaryKey(),
+    personId: text("person_id").notNull().references(() => people.id, { onDelete: "cascade" }),
+    type: text("type", { enum: TRAINING_TYPES }).notNull(),
+    label: text("label"), // free text for "other"
+    completedOn: text("completed_on").notNull(),
+    /** The compliance year this satisfies — usually the calendar year of completion. */
+    cycleYear: integer("cycle_year").notNull(),
+    expiresOn: text("expires_on"), // next due; defaults to a year after completion
+    provider: text("provider"),
+    minutes: integer("minutes"),
+    documentId: text("document_id"),
+    notes: text("notes"),
+    createdBy: text("created_by").notNull(),
+    createdAt: text("created_at").notNull().default(now()),
+  },
+  (t) => [index("trainings_person_idx").on(t.personId), index("trainings_cycle_idx").on(t.cycleYear)],
+);
+
+// ── Recurring pharmacy obligations (the compliance calendar) ─────────
+// One row per standing duty. Seeded with the Kansas and federal calendar on first run; the PIC can
+// add, edit or switch off any of them, because no two pharmacies carry exactly the same set.
+export const OBLIGATION_CADENCES = ["monthly", "quarterly", "annual", "biennial", "triennial", "as_needed"] as const;
+export type ObligationCadence = (typeof OBLIGATION_CADENCES)[number];
+
+export const obligations = sqliteTable(
+  "obligations",
+  {
+    id: text("id").primaryKey(),
+    /** Stable key for the seeded ones, so a later release can update wording without duplicating. */
+    seedKey: text("seed_key"),
+    title: text("title").notNull(),
+    detail: text("detail"),
+    citation: text("citation"), // the rule this comes from
+    cadence: text("cadence", { enum: OBLIGATION_CADENCES }).notNull(),
+    dueOn: text("due_on"), // next occurrence
+    lastCompletedOn: text("last_completed_on"),
+    lastCompletedBy: text("last_completed_by"),
+    lastNotes: text("last_notes"),
+    documentId: text("document_id"), // evidence for the most recent completion
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    /** Set when the pharmacy has not confirmed the rule applies to them (e.g. compounding, shipping). */
+    needsConfirmation: integer("needs_confirmation", { mode: "boolean" }).notNull().default(false),
+    createdAt: text("created_at").notNull().default(now()),
+    updatedAt: text("updated_at").notNull().default(now()),
+  },
+  (t) => [index("obligations_due_idx").on(t.dueOn)],
+);
+
+/** Every time an obligation is signed off, so there is a history rather than just a last date. */
+export const obligationCompletions = sqliteTable(
+  "obligation_completions",
+  {
+    id: text("id").primaryKey(),
+    obligationId: text("obligation_id").notNull().references(() => obligations.id, { onDelete: "cascade" }),
+    completedOn: text("completed_on").notNull(),
+    completedBy: text("completed_by").notNull(),
+    notes: text("notes"),
+    documentId: text("document_id"),
+    createdAt: text("created_at").notNull().default(now()),
+  },
+  (t) => [index("obligation_completions_idx").on(t.obligationId)],
+);
+
+// ── Document intake (drop anything, Claude files it) ─────────────────
+export const intakeItems = sqliteTable("intake_items", {
+  id: text("id").primaryKey(),
+  documentId: text("document_id").notNull(),
+  status: text("status", { enum: ["extracted", "applied", "failed", "discarded"] }).notNull().default("extracted"),
+  resultJson: text("result_json").notNull().default("{}"),
+  error: text("error"),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull().default(now()),
+  appliedAt: text("applied_at"),
+});
+
 // ── CQI (K.A.R. 68-19-1) ─────────────────────────────────────────────
 // Incident types exactly as listed on Kansas Board forms C-550 / C-650 (rev. 2025).
 export const INCIDENT_TYPES = [
@@ -298,6 +391,74 @@ export const inboxItems = sqliteTable(
     sweptAt: text("swept_at").notNull().default(now()),
   },
   (t) => [index("inbox_message_idx").on(t.messageId), index("inbox_swept_idx").on(t.sweptAt)],
+);
+
+// ── Payer reference data (the claim → contract routing layer) ────────
+// Loaded from CSVs dropped in data/reference/. Plain lookup tables, no AI: this is what lets
+// a claim carrying a BIN be resolved to the PBM and the agreement that governs it.
+
+export const payerBins = sqliteTable(
+  "payer_bins",
+  {
+    id: text("id").primaryKey(),
+    bin: text("bin").notNull(),
+    pbmName: text("pbm_name").notNull(),
+    subNetwork: text("sub_network"),
+    linesOfBusiness: text("lines_of_business"),
+    aliases: text("aliases"),
+    helpDesk: text("help_desk"),
+    macContact: text("mac_contact"),
+    notes: text("notes"),
+    /** True when this BIN appears under more than one PBM — never resolve on BIN alone. */
+    collides: integer("collides", { mode: "boolean" }).notNull().default(false),
+    loadedAt: text("loaded_at").notNull().default(now()),
+  },
+  (t) => [index("payer_bins_bin_idx").on(t.bin), index("payer_bins_pbm_idx").on(t.pbmName)],
+);
+
+/** Every document known to exist, whether or not its file has arrived. Drives the checklist. */
+export const contractDocs = sqliteTable(
+  "contract_docs",
+  {
+    id: text("id").primaryKey(),
+    pbmName: text("pbm_name").notNull(),
+    documentName: text("document_name").notNull(),
+    documentType: text("document_type"),
+    effectiveYear: integer("effective_year"),
+    /** Set when the PDF has been found in data/contracts/. */
+    fileName: text("file_name"),
+    sizeBytes: integer("size_bytes"),
+    sha256: text("sha256"),
+    matchedBy: text("matched_by", { enum: ["manifest", "filename", "manual", "unmatched"] }),
+    /** Whether this one is in the priority set worth extracting. */
+    priority: integer("priority", { mode: "boolean" }).notNull().default(false),
+    extractionState: text("extraction_state", { enum: ["none", "queued", "done", "failed"] }).notNull().default("none"),
+    extractionJson: text("extraction_json"),
+    extractionError: text("extraction_error"),
+    loadedAt: text("loaded_at").notNull().default(now()),
+  },
+  (t) => [index("contract_docs_pbm_idx").on(t.pbmName), index("contract_docs_priority_idx").on(t.priority)],
+);
+
+/** Outstanding balance by payer BIN, from the PSAO's open-claims report. */
+export const claimsAging = sqliteTable(
+  "claims_aging",
+  {
+    id: text("id").primaryKey(),
+    asOf: text("as_of").notNull(),
+    payerName: text("payer_name").notNull(),
+    bin: text("bin").notNull(),
+    d0_30: real("d0_30").notNull().default(0),
+    d31_60: real("d31_60").notNull().default(0),
+    d61_90: real("d61_90").notNull().default(0),
+    d91_120: real("d91_120").notNull().default(0),
+    d121_150: real("d121_150").notNull().default(0),
+    d151_180: real("d151_180").notNull().default(0),
+    over180: real("over_180").notNull().default(0),
+    totalOut: real("total_out").notNull().default(0),
+    loadedAt: text("loaded_at").notNull().default(now()),
+  },
+  (t) => [index("claims_aging_bin_idx").on(t.bin), index("claims_aging_asof_idx").on(t.asOf)],
 );
 
 // ── Audit ────────────────────────────────────────────────────────────

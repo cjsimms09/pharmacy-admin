@@ -1,4 +1,4 @@
-import type { CredentialType, DocumentCategory, IncidentType, PersonRole } from "@/db/schema";
+import type { CredentialType, DocumentCategory, IncidentType, PersonRole, TrainingType } from "@/db/schema";
 
 export const PERSON_ROLE_LABEL: Record<PersonRole, string> = {
   pharmacist: "Pharmacist",
@@ -104,4 +104,15 @@ export const INCIDENT_TYPE_LABEL: Record<IncidentType, string> = {
   packaging_labeling_directions: "Inadequate or incorrect packaging, labeling, or directions",
   serious_harm: "Actual or potential serious harm to patient",
   other: "Other",
+};
+
+export const TRAINING_LABEL: Record<TrainingType, string> = {
+  fwa_general_compliance: "Fraud, waste & abuse + general compliance (annual)",
+  hipaa_privacy_security: "HIPAA privacy & security",
+  osha_bloodborne: "OSHA bloodborne pathogens",
+  osha_hazard_communication: "OSHA hazard communication",
+  controlled_substance_diversion: "Controlled substance diversion awareness",
+  immunization_protocol_review: "Immunization protocol review",
+  cqi_program_review: "CQI program review",
+  other: "Other training",
 };
