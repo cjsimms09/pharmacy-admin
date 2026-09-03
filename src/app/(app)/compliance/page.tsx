@@ -5,215 +5,232 @@ import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { dueList, type DueItem } from "@/lib/due";
-import { obligationsWithStatus, completeObligation } from "@/lib/obligations";
-import { todayIso, fmt } from "@/lib/dates";
+import { complianceSummary, attest, type OpenItem } from "@/lib/compliance-status";
+import { periodLabel } from "@/lib/periods";
+import { dueList } from "@/lib/due";
+import { fmt, todayIso } from "@/lib/dates";
 import { storeFile } from "@/lib/files";
 import { newId } from "@/lib/crypto";
-import { PageHeader, Notice, Empty } from "@/components/ui";
+import { PageHeader, Notice } from "@/components/ui";
 
 export const metadata = { title: "Compliance" };
 export const dynamic = "force-dynamic";
 
-export default async function CompliancePage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string; show?: string }> }) {
-  await requireUser();
-  const { ok, error, show } = await searchParams;
-  const [items, obligations] = await Promise.all([dueList({ horizonDays: show === "all" ? 3650 : 120 }), obligationsWithStatus()]);
+export default async function CompliancePage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string; all?: string }> }) {
+  const user = await requireUser();
+  const { ok, error, all } = await searchParams;
+  const [summary, expiring] = await Promise.all([complianceSummary(), dueList({ horizonDays: 60 })]);
 
-  const overdue = items.filter((i) => i.severity === "overdue");
-  const soon = items.filter((i) => i.severity === "due_soon");
-  const missing = items.filter((i) => i.severity === "no_date");
-  const later = items.filter((i) => i.severity === "upcoming");
+  // Credentials and training are their own thing; only what is actually late or missing belongs
+  // on this screen, and everything else waits until it is close enough to matter.
+  const people = expiring.filter((e) => e.severity === "overdue" || e.severity === "no_date" || (e.daysLeft ?? 999) <= 45);
+  const needsAction = [...summary.missed, ...summary.partial, ...summary.openNow];
+  const shown = all === "1" ? needsAction : needsAction.filter((i) => i.state !== "open" || (i.minutes ?? 99) <= 15);
+  const clean = needsAction.length === 0 && people.length === 0;
 
-  async function signOff(fd: FormData) {
+  async function doAttest(fd: FormData) {
     "use server";
     const u = await requireManager();
-    const id = String(fd.get("id") ?? "");
-    const completedOn = String(fd.get("completedOn") ?? "") || todayIso();
-    const notes = String(fd.get("notes") ?? "").trim() || null;
-
-    let documentId: string | null = null;
-    const file = fd.get("file");
-    if (file instanceof File && file.size > 0) {
-      const stored = await storeFile(file, { allowReportTypes: true });
-      documentId = newId();
-      const o = await db.query.obligations.findFirst({ where: eq(schema.obligations.id, id) });
-      await db.insert(schema.documents).values({
-        id: documentId,
-        category: "policy",
-        title: `${o?.title ?? "Compliance"} — ${completedOn}`,
-        fileName: file.name,
-        mimeType: stored.mimeType,
-        sizeBytes: stored.sizeBytes,
-        sha256: stored.sha256,
-        storageKey: stored.storageKey,
-        effectiveOn: completedOn,
-        uploadedBy: u.id,
-      });
-    }
-
+    const id = String(fd.get("obligationId") ?? "");
+    const periodKey = String(fd.get("periodKey") ?? "");
+    const statement = String(fd.get("statement") ?? "");
     try {
-      await completeObligation(id, completedOn, u.name, notes, documentId);
-      await audit({ action: "obligation.complete", userId: u.id, userName: u.name, details: id });
+      await attest(id, periodKey, statement, u);
+      await audit({ action: "compliance.attest", userId: u.id, userName: u.name, details: `${id} ${periodKey}` });
       revalidatePath("/compliance");
-      redirect("/compliance?ok=" + encodeURIComponent("Signed off."));
+      revalidatePath("/");
+      redirect("/compliance?ok=" + encodeURIComponent(`Recorded for ${periodLabel(periodKey)}.`));
     } catch (e) {
       if (e && typeof e === "object" && "digest" in e) throw e;
       redirect("/compliance?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not record that."));
     }
   }
 
-  async function switchOff(fd: FormData) {
+  async function fileEvidence(fd: FormData) {
     "use server";
     const u = await requireManager();
-    const id = String(fd.get("id") ?? "");
-    await db.update(schema.obligations).set({ active: false, needsConfirmation: false, updatedAt: new Date().toISOString() }).where(eq(schema.obligations.id, id));
-    await audit({ action: "obligation.disable", userId: u.id, userName: u.name, details: id });
+    const id = String(fd.get("obligationId") ?? "");
+    const periodKey = String(fd.get("periodKey") ?? "");
+    const file = fd.get("file");
+    if (!(file instanceof File) || file.size === 0) redirect("/compliance?error=" + encodeURIComponent("Choose a file."));
+    const o = await db.query.obligations.findFirst({ where: eq(schema.obligations.id, id) });
+    const stored = await storeFile(file, { allowReportTypes: true });
+    const docId = newId();
+    await db.insert(schema.documents).values({
+      id: docId,
+      category: "policy",
+      title: `${o?.title ?? "Compliance"} — ${periodLabel(periodKey)}`,
+      fileName: file.name,
+      mimeType: stored.mimeType,
+      sizeBytes: stored.sizeBytes,
+      sha256: stored.sha256,
+      storageKey: stored.storageKey,
+      effectiveOn: todayIso(),
+      uploadedBy: u.id,
+    });
+    await db.insert(schema.obligationCompletions).values({
+      id: newId(),
+      obligationId: id,
+      periodKey,
+      completedOn: todayIso(),
+      completedBy: u.name,
+      statement: `${file.name} filed as evidence for ${periodLabel(periodKey)}.`,
+      documentId: docId,
+    });
+    await audit({ action: "compliance.evidence", userId: u.id, userName: u.name, details: `${id} ${periodKey} ${file.name}` });
     revalidatePath("/compliance");
-    redirect("/compliance?ok=" + encodeURIComponent("Switched off. It will not be chased again."));
+    redirect("/compliance?ok=" + encodeURIComponent(`Filed for ${periodLabel(periodKey)}.`));
   }
 
   return (
     <>
       <PageHeader
         title="Compliance"
-        subtitle="Everything the pharmacy owes — licences, training and recurring duties — in one list, worst first."
-        actions={<Link href="/compliance/training" className="btn">Training register</Link>}
+        subtitle={
+          clean
+            ? "Nothing outstanding."
+            : `${needsAction.length + people.length} thing${needsAction.length + people.length === 1 ? "" : "s"} need you.`
+        }
+        actions={<Link href="/compliance/register" className="btn">Full register</Link>}
       />
 
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
 
-      <div className="my-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat label="Overdue" value={String(overdue.length)} tone={overdue.length ? "crit" : "ok"} />
-        <Stat label="Due soon" value={String(soon.length)} tone={soon.length ? "warn" : "ok"} />
-        <Stat label="Nothing on file" value={String(missing.length)} tone={missing.length ? "warn" : "ok"} />
-        <Stat label="Later" value={String(later.length)} />
-      </div>
-
-      <Section title="Overdue" items={overdue} empty="Nothing is overdue." />
-      <Section title="Due in the next 120 days" items={soon} empty="Nothing falls due soon." />
-      <Section
-        title="No record, or no date"
-        items={missing}
-        empty="Every requirement has a record and a date."
-        note="These are the ones that pass a date check while being the least compliant: a requirement with no record at all, or a record whose expiry nobody entered."
-      />
-
-      {show === "all" ? (
-        <Section title="Everything else" items={later} empty="Nothing further scheduled." />
-      ) : (
-        later.length > 0 && (
-          <p className="mt-4 text-sm">
-            <Link href="/compliance?show=all" className="underline">Show the {later.length} further out</Link>
+      {clean ? (
+        <section className="rounded-lg border border-emerald-300 bg-emerald-50 p-6">
+          <h2 className="text-lg font-semibold text-emerald-900">You are clean.</h2>
+          <p className="mt-1 text-sm text-emerald-900">
+            Every period is covered, every licence is current, and nothing is due in the next 45 days. The register
+            holds the detail if you need to show someone.
           </p>
-        )
+        </section>
+      ) : (
+        <>
+          {summary.missed.length > 0 && (
+            <p className="mb-4 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900">
+              <b>{summary.missed.length} period{summary.missed.length === 1 ? "" : "s"} went by without being covered.</b>{" "}
+              Those do not become fine because a later one was done — they are what an inspector finds. Closing one now
+              records the date it was actually done, which is honest and still better than a gap.
+            </p>
+          )}
+
+          <div className="space-y-3">
+            {shown.map((i) => (
+              <Item key={`${i.obligationId}-${i.periodKey}`} i={i} attestAction={doAttest} fileAction={fileEvidence} />
+            ))}
+
+            {people.map((p) => (
+              <article key={p.id} className="rounded-lg border border-line bg-surface p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold">{p.title}</h3>
+                    <p className="mt-0.5 text-sm text-ink-2">{p.action}</p>
+                  </div>
+                  <div className="flex items-center gap-2 whitespace-nowrap">
+                    <Badge state={p.severity === "overdue" ? "missed" : p.severity === "no_date" ? "partial" : "open"}>
+                      {p.daysLeft === null ? "nothing on file" : p.daysLeft < 0 ? `${Math.abs(p.daysLeft)} days late` : `${p.daysLeft} days`}
+                    </Badge>
+                    <Link href={p.href} className="rounded-md bg-ink px-3 py-1.5 text-sm text-white">Open</Link>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+
+          {shown.length < needsAction.length && (
+            <p className="mt-4 text-sm">
+              <Link href="/compliance?all=1" className="underline">
+                Show {needsAction.length - shown.length} more that are not due yet
+              </Link>
+            </p>
+          )}
+        </>
       )}
 
-      {/* ── Sign-off ── */}
-      <h2 className="mt-10 text-base font-semibold">Recurring duties</h2>
-      <p className="mb-3 text-xs text-ink-3">
-        Signing one off records who did it and when, files the evidence, and schedules the next one automatically.
+      <p className="mt-8 text-xs text-ink-3">
+        Signed in as {user.name}. Every attestation records who made it, when, and the exact words agreed to.
       </p>
-      <div className="space-y-3">
-        {obligations.map(({ obligation: o, overdue: isLate }) => (
-          <div key={o.id} className={`rounded-lg border p-4 ${isLate ? "border-red-300 bg-red-50" : "border-line bg-surface"}`}>
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <div>
-                <h3 className="text-sm font-semibold">{o.title}</h3>
-                {o.citation && <div className="text-xs text-ink-3">{o.citation}</div>}
-              </div>
-              <div className="text-right text-xs">
-                <div className={isLate ? "font-medium text-red-700" : ""}>{o.dueOn ? `Due ${fmt(o.dueOn)}` : "As needed"}</div>
-                <div className="text-ink-3 capitalize">{o.cadence.replace(/_/g, " ")}</div>
-              </div>
-            </div>
-            {o.detail && <p className="mt-2 text-sm text-ink-2">{o.detail}</p>}
-            {o.lastCompletedOn && (
-              <p className="mt-1 text-xs text-ink-3">Last done {fmt(o.lastCompletedOn)} by {o.lastCompletedBy}.</p>
-            )}
-            {o.needsConfirmation && (
-              <Notice kind="warn">
-                Seeded as a question, not a deadline — confirm whether this applies to this pharmacy before treating it
-                as due.
-              </Notice>
-            )}
-
-            <details className="mt-3">
-              <summary className="cursor-pointer text-sm underline">Sign off</summary>
-              <form action={signOff} className="mt-3 grid gap-3 sm:grid-cols-2">
-                <input type="hidden" name="id" value={o.id} />
-                <label className="text-xs text-ink-3">
-                  Date completed
-                  <input type="date" name="completedOn" defaultValue={todayIso()} className="mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm text-ink" />
-                </label>
-                <label className="text-xs text-ink-3">
-                  Evidence (optional)
-                  <input type="file" name="file" className="mt-1 w-full text-sm text-ink" />
-                </label>
-                <label className="text-xs text-ink-3 sm:col-span-2">
-                  Notes
-                  <input name="notes" placeholder="What was done, and anything worth remembering next time" className="mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm text-ink" />
-                </label>
-                <div className="sm:col-span-2">
-                  <button className="rounded-md bg-ink px-3 py-1.5 text-sm text-white">Record</button>
-                </div>
-              </form>
-            </details>
-
-            <form action={switchOff} className="mt-2">
-              <input type="hidden" name="id" value={o.id} />
-              <button className="text-xs text-ink-3 underline hover:text-ink">This does not apply to us — stop chasing it</button>
-            </form>
-          </div>
-        ))}
-      </div>
     </>
   );
 }
 
-function Section({ title, items, empty, note }: { title: string; items: DueItem[]; empty: string; note?: string }) {
+/**
+ * One outstanding thing, with its closure attached.
+ *
+ * The action lives on the item rather than behind a link, because the whole point is that a
+ * thirty-second duty should take thirty seconds. Sending someone to another page to tick
+ * something is how a five-minute job becomes one that waits a fortnight.
+ */
+function Item({
+  i,
+  attestAction,
+  fileAction,
+}: {
+  i: OpenItem;
+  attestAction: (fd: FormData) => Promise<void>;
+  fileAction: (fd: FormData) => Promise<void>;
+}) {
+  const border = i.state === "missed" ? "border-red-300 bg-red-50" : i.state === "partial" ? "border-amber-300 bg-amber-50" : "border-line bg-surface";
   return (
-    <section className="mt-6">
-      <h2 className="text-sm font-semibold">{title}</h2>
-      {note && <p className="mb-2 mt-1 text-xs text-ink-3">{note}</p>}
-      {items.length === 0 ? (
-        <div className="mt-2"><Empty>{empty}</Empty></div>
-      ) : (
-        <ul className="mt-2 divide-y divide-line rounded-lg border border-line bg-surface">
-          {items.map((i) => (
-            <li key={i.id} className="flex flex-wrap items-start justify-between gap-3 px-3 py-2.5">
-              <div className="min-w-0">
-                <Link href={i.href} className="text-sm font-medium underline">{i.title}</Link>
-                <div className="mt-0.5 text-xs text-ink-3">{i.action}</div>
-                {i.citation && <div className="text-xs text-ink-3">{i.citation}</div>}
-              </div>
-              <div className="whitespace-nowrap text-right text-xs">
-                {i.dueOn ? (
-                  <>
-                    <div className={i.severity === "overdue" ? "font-medium text-red-700" : ""}>
-                      {i.daysLeft !== null && i.daysLeft < 0 ? `${Math.abs(i.daysLeft)} days late` : `${i.daysLeft} days`}
-                    </div>
-                    <div className="text-ink-3">{fmt(i.dueOn)}</div>
-                  </>
-                ) : (
-                  <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-900">no date</span>
-                )}
-              </div>
-            </li>
-          ))}
-        </ul>
+    <article className={`rounded-lg border p-4 ${border}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold">{i.title}</h3>
+          <div className="mt-0.5 text-xs text-ink-3">
+            {i.periodLabel}
+            {i.expected > 1 && ` · ${i.have} of ${i.expected} filed`}
+            {i.minutes !== null && ` · about ${i.minutes} min`}
+            {i.citation && ` · ${i.citation}`}
+          </div>
+        </div>
+        <Badge state={i.state}>
+          {i.state === "missed" ? `${i.daysLate} days late` : i.state === "partial" ? "part done" : `due ${fmt(i.dueOn)}`}
+        </Badge>
+      </div>
+
+      {/* ── attest: one button, and the sentence it records shown first ── */}
+      {i.kind === "attest" && i.statement && (
+        <form action={attestAction} className="mt-3">
+          <input type="hidden" name="obligationId" value={i.obligationId} />
+          <input type="hidden" name="periodKey" value={i.periodKey} />
+          <input type="hidden" name="statement" value={i.statement} />
+          <p className="rounded-md border border-line bg-ground p-3 text-sm italic text-ink-2">&ldquo;{i.statement}&rdquo;</p>
+          <div className="mt-2 flex items-center gap-3">
+            <button className="rounded-md bg-ink px-3 py-1.5 text-sm text-white">Confirm and record</button>
+            <span className="text-xs text-ink-3">Recorded word for word, with your name and today&rsquo;s date.</span>
+          </div>
+        </form>
       )}
-    </section>
+
+      {/* ── evidence: upload where it stands ── */}
+      {i.kind === "evidence" && (
+        <form action={fileAction} className="mt-3 flex flex-wrap items-center gap-2">
+          <input type="hidden" name="obligationId" value={i.obligationId} />
+          <input type="hidden" name="periodKey" value={i.periodKey} />
+          <input type="file" name="file" className="text-sm" />
+          <button className="rounded-md bg-ink px-3 py-1.5 text-sm text-white">File it</button>
+          {i.detail && <span className="w-full text-xs text-ink-3">{i.detail}</span>}
+        </form>
+      )}
+
+      {/* ── witnessed: nothing to tick, only somewhere to go ── */}
+      {i.kind === "witnessed" && (
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          {i.missing && <span className="text-sm text-ink-2">{i.missing}</span>}
+          {i.href && <Link href={i.href} className="rounded-md bg-ink px-3 py-1.5 text-sm text-white">Go and do it</Link>}
+          <span className="text-xs text-ink-3">This closes itself once done — there is nothing here to tick.</span>
+        </div>
+      )}
+
+      {i.kind === "renewal" && i.href && (
+        <Link href={i.href} className="mt-3 inline-block rounded-md bg-ink px-3 py-1.5 text-sm text-white">Open</Link>
+      )}
+    </article>
   );
 }
 
-function Stat({ label, value, tone }: { label: string; value: string; tone?: "warn" | "ok" | "crit" }) {
-  const c = tone === "crit" ? "border-red-300 bg-red-50" : tone === "warn" ? "border-amber-300 bg-amber-50" : tone === "ok" ? "border-emerald-300 bg-emerald-50" : "border-line bg-surface";
-  return (
-    <div className={`rounded-lg border p-3 ${c}`}>
-      <div className="text-xl font-semibold tabular-nums">{value}</div>
-      <div className="text-xs text-ink-3">{label}</div>
-    </div>
-  );
+function Badge({ state, children }: { state: "missed" | "partial" | "open" | "satisfied"; children: React.ReactNode }) {
+  const c = state === "missed" ? "bg-red-100 text-red-800" : state === "partial" ? "bg-amber-100 text-amber-900" : "bg-ground text-ink-2";
+  return <span className={`whitespace-nowrap rounded px-2 py-1 text-xs font-medium ${c}`}>{children}</span>;
 }

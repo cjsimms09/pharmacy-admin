@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "./crypto";
 import { addDays, todayIso } from "./dates";
-import type { ObligationCadence } from "@/db/schema";
+import type { ObligationCadence, ObligationKind } from "@/db/schema";
 
 /**
  * The standing duties of a pharmacist-in-charge in Kansas, plus the federal ones that come with
@@ -29,6 +29,141 @@ export type ObligationSeed = {
   /** Otherwise, days from first setup until the first one is due. */
   firstDueInDays?: number;
   needsConfirmation?: boolean;
+};
+
+
+/**
+ * How each duty is closed, and what is recorded when it is.
+ *
+ * Kept as one table rather than spread through the seeds, because the interesting question about
+ * this whole module is "what does the PIC actually have to do", and that should be answerable by
+ * reading one screen of code.
+ *
+ * The attestation wording matters more than it looks. A tick in a box records that someone
+ * clicked. A sentence naming the period, the system checked and the result is something an
+ * inspector can read three years later and a PIC can stand behind — and it costs the same single
+ * click. {period} and {date} are substituted when it is recorded.
+ */
+export type Closure = {
+  kind: ObligationKind;
+  /** Only for attest: what is recorded when the PIC confirms. */
+  statement?: string;
+  /** Only for witnessed: what in the site satisfies it, in words. */
+  witness?: string;
+  /** How many pieces of evidence a period needs. */
+  perPeriod?: number;
+  /** Roughly how long it takes, so a PIC can tell a 30-second job from a Sunday afternoon. */
+  minutes?: number;
+};
+
+export const CLOSURES: Record<string, Closure> = {
+  // ── Confirmed by the PIC, done outside the site ──────────────────
+  ktracs_submission_check: {
+    kind: "attest",
+    minutes: 5,
+    statement:
+      "On {date} I signed in to K-TRACS and reviewed the submission status for {period}. All controlled substance " +
+      "dispensings for that period had been submitted, and any error file was corrected and resubmitted.",
+  },
+  cs_records_review: {
+    kind: "attest",
+    minutes: 45,
+    statement:
+      "On {date} I reconciled controlled substance receipts against dispensings for {period}. Invoices, 222 forms and " +
+      "CSOS records were compared against the dispensing record, and any difference was investigated and logged.",
+  },
+  self_inspection: {
+    kind: "attest",
+    minutes: 90,
+    statement:
+      "On {date} I walked the pharmacy against the Kansas Board of Pharmacy inspection criteria for {period}. " +
+      "Findings were recorded and anything requiring correction was actioned.",
+  },
+  dscsa_trading_partners: {
+    kind: "attest",
+    minutes: 20,
+    statement:
+      "On {date} I confirmed for {period} that every supplier we purchase from is a DSCSA authorized trading partner, " +
+      "verified their licence or registration status, and confirmed transaction information is being received and retained.",
+  },
+  npp_review: {
+    kind: "attest",
+    minutes: 10,
+    statement:
+      "On {date} I confirmed for {period} that the Notice of Privacy Practices on display and offered to patients is " +
+      "the current version, and that it is posted where patients can see it.",
+  },
+  emergency_kit_check: {
+    kind: "attest",
+    minutes: 10,
+    statement:
+      "On {date} I checked the emergency kit for {period}. Epinephrine was present and in date, and the equipment " +
+      "required to manage an adverse reaction was present and usable.",
+  },
+  records_retention_review: {
+    kind: "attest",
+    minutes: 30,
+    statement:
+      "On {date} I reviewed record retention for {period}: prescription records, CQI records, controlled substance " +
+      "records and DSCSA transaction records are being kept for their required periods and are retrievable.",
+  },
+  disaster_plan_review: {
+    kind: "attest",
+    minutes: 30,
+    statement:
+      "On {date} I reviewed the emergency and continuity plan for {period}, confirmed contact details and procedures " +
+      "are current, and confirmed staff know where to find it.",
+  },
+  baa_register: {
+    kind: "attest",
+    minutes: 30,
+    statement:
+      "On {date} I reviewed the business associate register for {period}. Every vendor with access to protected " +
+      "health information has a current signed agreement on file.",
+  },
+  vaccine_storage_review: {
+    kind: "attest",
+    minutes: 20,
+    statement:
+      "On {date} I reviewed vaccine storage for {period}: the data logger is within its calibration period, " +
+      "temperature records are complete, and the excursion procedure is current and understood.",
+  },
+  pic_change_notice: {
+    kind: "attest",
+    minutes: 15,
+    statement: "On {date} I notified the Kansas Board of Pharmacy of the change of pharmacist-in-charge.",
+  },
+  part_d_attestation: {
+    kind: "evidence",
+    minutes: 15,
+  },
+  medicaid_revalidation: { kind: "evidence", minutes: 30 },
+  hipaa_risk_analysis: { kind: "evidence", minutes: 120 },
+
+  // ── Satisfied by something the site already holds ────────────────
+  cs_annual_inventory: { kind: "witnessed", witness: "A controlled substance inventory recorded under CS inventories." },
+  technician_list: { kind: "witnessed", witness: "The technician list printed from Staff." },
+  cqi_program_document: { kind: "witnessed", witness: "A CQI programme review recorded in the training register." },
+  fwa_training: { kind: "witnessed", witness: "Fraud, waste and abuse training recorded for every active member of staff." },
+  hipaa_training: { kind: "witnessed", witness: "HIPAA training recorded for every active member of staff." },
+  osha_bloodborne: { kind: "witnessed", witness: "Bloodborne pathogens training recorded for every active member of staff." },
+  osha_hazcom: { kind: "witnessed", witness: "Hazard communication training recorded for every active member of staff." },
+  immunization_protocol_review: { kind: "witnessed", witness: "A current immunization protocol on file for every immunizer." },
+  backup_restore_test: { kind: "witnessed", witness: "A backup taken and verified under Settings → Backups." },
+  exclusion_screening: {
+    kind: "attest",
+    minutes: 5,
+    statement:
+      "On {date} I screened every member of staff against the OIG List of Excluded Individuals and Entities and the " +
+      "SAM exclusions list for {period}. No member of staff appeared on either list.",
+  },
+
+  // ── Satisfied only by a document arriving ────────────────────────
+  temperature_logs: { kind: "evidence", perPeriod: 2, minutes: 2 },
+
+  // ── Renewals, driven by an expiry date ───────────────────────────
+  ks_pharmacy_registration: { kind: "renewal", minutes: 20 },
+  dea_registration: { kind: "renewal", minutes: 30 },
 };
 
 export const OBLIGATION_SEEDS: ObligationSeed[] = [
@@ -206,6 +341,16 @@ export const OBLIGATION_SEEDS: ObligationSeed[] = [
 
   // ── Cold chain and immunizing ─────────────────────────────────────
   {
+    key: "temperature_logs",
+    title: "File the refrigerator and freezer temperature logs",
+    detail:
+      "Two logs a month, one per unit. They are emailed in and file themselves; this only appears when a month is short. " +
+      "Continuous records are what a VFC visit or a vaccine excursion investigation asks for first.",
+    citation: "CDC Vaccine Storage and Handling Toolkit · VFC programme requirements",
+    cadence: "monthly",
+    firstDueInDays: 30,
+  },
+  {
     key: "vaccine_storage_review",
     title: "Review vaccine storage: logger calibration, temperature records and the excursion plan",
     detail: "Certified data logger with a current calibration certificate, temperature recorded as the programme requires, and a written plan for what happens when a reading falls out of range. Applies if you stock vaccines.",
@@ -298,6 +443,7 @@ export async function ensureObligations() {
         : seed.fixedDate
           ? firstFixedDue(today, seed.fixedDate)
           : addDays(today, seed.firstDueInDays ?? 30);
+    const c = CLOSURES[seed.key] ?? { kind: "attest" as const };
     await db.insert(schema.obligations).values({
       id: newId(),
       seedKey: seed.key,
@@ -305,6 +451,10 @@ export async function ensureObligations() {
       detail: seed.detail,
       citation: seed.citation,
       cadence: seed.cadence,
+      kind: c.kind,
+      expectedPerPeriod: c.perPeriod ?? 1,
+      attestationTemplate: c.statement ?? null,
+      witnessSource: c.witness ?? null,
       dueOn,
       needsConfirmation: seed.needsConfirmation ?? false,
     });

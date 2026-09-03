@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { cqiSnapshot, csInventoryStatus, staffCompliance, type StaffRow } from "@/lib/compliance";
 import { dueSummary, type DueItem } from "@/lib/due";
+import { complianceSummary } from "@/lib/compliance-status";
 import { daysUntil, fmt } from "@/lib/dates";
 import { db, schema } from "@/db";
 import { eq } from "drizzle-orm";
@@ -11,8 +12,9 @@ import { PERSON_ROLE_LABEL } from "@/lib/labels";
 export const dynamic = "force-dynamic";
 
 export default async function Dashboard() {
-  const [due, staff, cqi, cs, docs, unread] = await Promise.all([
+  const [due, compliance, staff, cqi, cs, docs, unread] = await Promise.all([
     dueSummary(),
+    complianceSummary(),
     staffCompliance(),
     cqiSnapshot(),
     csInventoryStatus(),
@@ -20,6 +22,8 @@ export default async function Dashboard() {
     db.query.inboxItems.findMany({ where: eq(schema.inboxItems.status, "stored"), orderBy: (i, { desc }) => [desc(i.sweptAt)], limit: 25 }),
   ]);
 
+  const needsYou = due.overdue.length + due.noDate.length + compliance.missed.length + compliance.partial.length;
+  const allClear = needsYou === 0 && due.dueSoon.length === 0;
   const crit = due.overdue;
   const soon = due.dueSoon;
   const missing = due.noDate;
@@ -33,7 +37,31 @@ export default async function Dashboard() {
 
   return (
     <>
-      <PageHeader title="Dashboard" subtitle="Everything with a deadline, soonest first." />
+      <PageHeader title="Today" subtitle={allClear ? "Nothing needs you." : `${needsYou} thing${needsYou === 1 ? "" : "s"} need you.`} />
+
+      {allClear && (
+        <section className="mb-6 rounded-lg border border-emerald-300 bg-emerald-50 p-6">
+          <h2 className="text-lg font-semibold text-emerald-900">You are clean.</h2>
+          <p className="mt-1 text-sm text-emerald-900">
+            Every compliance period is covered and nothing expires in the next thirty days.
+          </p>
+        </section>
+      )}
+
+      {!allClear && (compliance.missed.length > 0 || compliance.quick.length > 0) && (
+        <section className="card mb-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="font-semibold">Compliance</h2>
+              <p className="text-sm text-ink-2">
+                {compliance.missed.length > 0 && <>{compliance.missed.length} period{compliance.missed.length === 1 ? "" : "s"} not covered. </>}
+                {compliance.quick.length > 0 && <>{compliance.quick.length} can be closed in under ten minutes each.</>}
+              </p>
+            </div>
+            <Link href="/compliance" className="btn btn-primary">Close them out</Link>
+          </div>
+        </section>
+      )}
 
       <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat

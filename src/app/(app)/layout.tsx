@@ -2,22 +2,22 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireUser, logout } from "@/lib/auth";
 
+/**
+ * What a pharmacist-in-charge needs to hand every day, and nothing else.
+ *
+ * The money side — payers, claims, plans, NADAC, purchasing — is real work in progress but it is
+ * not usable yet, and six menu items that do nothing are six small irritations every single day.
+ * They live under Tools until they earn a place here.
+ */
 const NAV = [
-  { href: "/", label: "Dashboard" },
-  { href: "/staff", label: "Staff & licenses" },
-  { href: "/documents", label: "Documents" },
-  { href: "/inbox", label: "Inbox" },
+  { href: "/", label: "Today" },
   { href: "/compliance", label: "Compliance" },
   { href: "/cqi", label: "CQI program" },
-  { href: "/payers", label: "Payers" },
-  { href: "/claims", label: "Claims" },
-  { href: "/reports", label: "Report check" },
-  { href: "/plans", label: "Plans" },
-  { href: "/purchasing", label: "Purchasing" },
-  { href: "/nadac", label: "NADAC" },
+  { href: "/staff", label: "Staff" },
+  { href: "/documents", label: "Documents" },
   { href: "/inventory", label: "CS inventories" },
+  { href: "/tools", label: "Tools" },
   { href: "/settings", label: "Settings" },
-  { href: "/audit", label: "Audit log" },
 ];
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {

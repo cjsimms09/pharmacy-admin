@@ -204,6 +204,24 @@ export const trainings = sqliteTable(
 export const OBLIGATION_CADENCES = ["monthly", "quarterly", "annual", "biennial", "triennial", "as_needed"] as const;
 export type ObligationCadence = (typeof OBLIGATION_CADENCES)[number];
 
+/**
+ * How a duty is closed out. This is the difference between a compliance list and a compliance
+ * tool: each kind needs a different action from the PIC, and three of them need nothing at all.
+ *
+ *   attest     Done outside the site — a portal checked, a walk-through completed. The PIC
+ *              confirms it and the site records a specific, dated statement of what was
+ *              confirmed. One click, but the evidence is a sentence an inspector can read, not
+ *              a tick in a box.
+ *   evidence   Not done until a document exists. A temperature log, a signed attestation, a
+ *              renewed certificate. Arrives by email or is uploaded.
+ *   witnessed  The site saw it happen. A CQI summary finalised here, an inventory recorded here,
+ *              a training filed here. Closes itself — asking the PIC to confirm something the
+ *              software watched them do is the software making them prove things to it.
+ *   renewal    Driven by a credential's expiry date rather than by a period.
+ */
+export const OBLIGATION_KINDS = ["attest", "evidence", "witnessed", "renewal"] as const;
+export type ObligationKind = (typeof OBLIGATION_KINDS)[number];
+
 export const obligations = sqliteTable(
   "obligations",
   {
@@ -214,6 +232,16 @@ export const obligations = sqliteTable(
     detail: text("detail"),
     citation: text("citation"), // the rule this comes from
     cadence: text("cadence", { enum: OBLIGATION_CADENCES }).notNull(),
+    kind: text("kind", { enum: OBLIGATION_KINDS }).notNull().default("attest"),
+    /** How many separate pieces of evidence a period needs. Two temperature logs a month, say. */
+    expectedPerPeriod: integer("expected_per_period").notNull().default(1),
+    /**
+     * The sentence recorded when the PIC attests. {period} and {date} are filled in, so the
+     * record says what was actually confirmed rather than that a box was ticked.
+     */
+    attestationTemplate: text("attestation_template"),
+    /** For witnessed duties: what in the site satisfies it. */
+    witnessSource: text("witness_source"),
     dueOn: text("due_on"), // next occurrence
     lastCompletedOn: text("last_completed_on"),
     lastCompletedBy: text("last_completed_by"),
@@ -234,8 +262,12 @@ export const obligationCompletions = sqliteTable(
   {
     id: text("id").primaryKey(),
     obligationId: text("obligation_id").notNull().references(() => obligations.id, { onDelete: "cascade" }),
+    /** Which period this satisfies: "2026-08", "2026-Q3", "2026". */
+    periodKey: text("period_key"),
     completedOn: text("completed_on").notNull(),
     completedBy: text("completed_by").notNull(),
+    /** The attestation as recorded. This is the evidence, not the row's existence. */
+    statement: text("statement"),
     notes: text("notes"),
     documentId: text("document_id"),
     createdAt: text("created_at").notNull().default(now()),
