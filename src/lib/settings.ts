@@ -30,6 +30,8 @@ export const SETTING_KEYS = [
   // The address staff reach the site on. A training link is useless without it.
   "public_base_url",
   "training_reminders_last",
+  // One line per training: the type, then "=", then the link staff are sent to.
+  "training_materials",
   "mail_allowed_senders", // one per line
   "mail_auto_import", // "yes" | "no" — load recognised reports rather than only filing them
   "mail_supplier_rules", // one per line: a sender or subject fragment, then "=", then a supplier name

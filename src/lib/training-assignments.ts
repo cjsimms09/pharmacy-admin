@@ -58,6 +58,36 @@ export const STATEMENTS: Partial<Record<TrainingType, string>> = {
     "if a patient has an adverse reaction, including when to use epinephrine and when to call for help.",
 };
 
+/**
+ * Where the material for each training lives.
+ *
+ * Held as a setting rather than hard-coded, for a reason worth stating: a link that has gone
+ * stale is worse than no link. CMS reorganises its training pages, a PSAO moves its portal, and
+ * a course that quietly 404s in a compliance email produces staff who cannot do the training and
+ * a PIC who does not find out until someone asks. The pharmacy pastes what it actually uses, and
+ * owns it.
+ *
+ * One line per training: the type, then "=", then the address.
+ */
+export function parseMaterials(raw: string): Partial<Record<TrainingType, string>> {
+  const out: Partial<Record<TrainingType, string>> = {};
+  for (const line of (raw ?? "").split("\n")) {
+    const t = line.trim();
+    if (!t || t.startsWith("#")) continue;
+    const i = t.indexOf("=");
+    if (i < 0) continue;
+    const key = t.slice(0, i).trim() as TrainingType;
+    const url = t.slice(i + 1).trim();
+    if (key && /^https?:\/\//i.test(url)) out[key] = url;
+  }
+  return out;
+}
+
+export async function materialFor(type: TrainingType): Promise<string | null> {
+  const s = await getSettings();
+  return parseMaterials(s.training_materials ?? "")[type] ?? null;
+}
+
 export type AssignResult = { assigned: number; emailed: number; problems: string[] };
 
 /** Creates assignments and emails the links. */
@@ -93,7 +123,8 @@ export async function assignTraining(
         token: randomToken(24),
         assignedOn: today,
         dueOn,
-        materialUrl: opts.materialUrl ?? null,
+        // The link given for this run, else whatever the pharmacy has set as its standard.
+        materialUrl: opts.materialUrl ?? (await materialFor(type)),
         statement,
         createdBy: user.name,
       });

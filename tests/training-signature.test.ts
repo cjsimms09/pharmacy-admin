@@ -49,3 +49,33 @@ describe("attestation wording", () => {
     assert.match(STATEMENTS.cqi_program_review!, /rather than held against me/i);
   });
 });
+
+import { parseMaterials } from "../src/lib/training-assignments";
+
+/**
+ * A bad link in a compliance email is worse than none: staff cannot do the training and the PIC
+ * does not find out until somebody asks. So anything that is not plainly a web address is
+ * dropped rather than sent.
+ */
+describe("training material links", () => {
+  test("reads the lines a person would write", () => {
+    const m = parseMaterials("fwa_general_compliance = https://example.org/fwa\nhipaa_privacy_security=https://example.org/hipaa");
+    assert.equal(m.fwa_general_compliance, "https://example.org/fwa");
+    assert.equal(m.hipaa_privacy_security, "https://example.org/hipaa");
+  });
+
+  test("blank lines and comments are skipped", () => {
+    assert.deepEqual(parseMaterials("\n# the CMS one\n\n"), {});
+  });
+
+  test("anything that is not a web address is dropped, not passed through", () => {
+    // "ask Sarah" in an email as though it were a link is exactly the failure to avoid.
+    assert.deepEqual(parseMaterials("fwa_general_compliance = ask Sarah"), {});
+    assert.deepEqual(parseMaterials("fwa_general_compliance = www.example.org"), {});
+    assert.deepEqual(parseMaterials("fwa_general_compliance = javascript:alert(1)"), {});
+  });
+
+  test("a line with no separator is ignored", () => {
+    assert.deepEqual(parseMaterials("https://example.org/fwa"), {});
+  });
+});

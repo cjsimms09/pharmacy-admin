@@ -88,6 +88,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     <>
       <PageHeader title="Settings" subtitle="Pharmacy details used on printed Board forms, PSO status, Claude, logins, and updates." actions={
         <>
+          <Link href="/settings/training" className="btn">Training material</Link>
           <Link href="/settings/features" className="btn">Extra sections</Link>
           <Link href="/settings/backups" className="btn">Backups</Link>
           <Link href="/settings/connections" className="btn">Connections &amp; API keys</Link>
