@@ -22,6 +22,7 @@ import {
 import { REPLY_PHRASE } from "@/lib/training-replies";
 import { courseFor } from "@/lib/courses";
 import { canSend } from "@/lib/send-mail";
+import { PickControls, PickGroup } from "@/components/pick-controls";
 import { onSiteToday } from "@/lib/roster";
 
 export const metadata = { title: "Training" };
@@ -262,7 +263,8 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
         <Card
           title="Who needs what"
           count={`${toSend} to send`}
-          subtitle="Anything due and not yet sent is ticked. Something already sent is not ticked again — tick it only to send a duplicate. Click a column heading to read the course and see exactly what gets attached to their email."
+          subtitle="Nothing is ticked to start with — unticking twenty-eight boxes to send two is worse than ticking two. Use the buttons, or the “all” link on any row or column. Click a column heading to read the course itself and see exactly what gets attached to their email."
+          actions={<PickControls dueCount={toSend} />}
           className="mb-6"
         >
           <div className="overflow-x-auto">
@@ -272,13 +274,16 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
                   <th>Person</th>
                   {REQUIRED.map((t) => (
                     <th key={t} className="whitespace-nowrap" title={TRAINING_LABEL[t]}>
-                      {courseFor(t) ? (
-                        <Link href={`/compliance/training/course/${t}`} className="text-accent hover:underline">
-                          {TRAINING_SHORT[t]}
-                        </Link>
-                      ) : (
-                        TRAINING_SHORT[t]
-                      )}
+                      <div>
+                        {courseFor(t) ? (
+                          <Link href={`/compliance/training/course/${t}`} className="text-accent hover:underline">
+                            {TRAINING_SHORT[t]}
+                          </Link>
+                        ) : (
+                          TRAINING_SHORT[t]
+                        )}
+                      </div>
+                      <PickGroup match={{ type: t }} label="all" />
                     </th>
                   ))}
                 </tr>
@@ -293,6 +298,8 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
                       <div className="text-xs text-ink-3">
                         {PERSON_ROLE_LABEL[p.role as keyof typeof PERSON_ROLE_LABEL] ?? p.role}
                         {!p.email && <span className="text-crit"> · no email on file</span>}
+                        {" · "}
+                        <PickGroup match={{ person: p.id }} label="tick all" />
                       </div>
                     </td>
                     {REQUIRED.map((t) => {
@@ -316,12 +323,28 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
                                 )}
                               </div>
                               <label className="mt-1 flex items-center gap-1 text-[11px] text-ink-3">
-                                <input type="checkbox" name="pick" value={`${p.id}|${t}`} /> resend
+                                <input
+                                  type="checkbox"
+                                  name="pick"
+                                  value={`${p.id}|${t}`}
+                                  data-pick=""
+                                  data-person={p.id}
+                                  data-type={t}
+                                />{" "}
+                                resend
                               </label>
                             </div>
                           ) : st.due ? (
                             <label className="flex cursor-pointer items-center gap-1.5">
-                              <input type="checkbox" name="pick" value={`${p.id}|${t}`} defaultChecked />
+                              <input
+                                type="checkbox"
+                                name="pick"
+                                value={`${p.id}|${t}`}
+                                data-pick=""
+                                data-person={p.id}
+                                data-type={t}
+                                data-due="1"
+                              />
                               <span className={`badge ${st.tone}`}>{st.label}</span>
                             </label>
                           ) : (
@@ -340,9 +363,7 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
               Due by
               <input type="date" name="dueOn" defaultValue={addMonths(today, 1)} className="field ml-2 w-auto" />
             </label>
-            <button className="btn btn-primary" disabled={!mailReady}>
-              Send {toSend > 0 ? `the ${toSend} ticked` : "what is ticked"}
-            </button>
+            <button className="btn btn-primary" disabled={!mailReady}>Send what is ticked</button>
             <p className="text-xs text-ink-3">
               One email per person covering everything ticked for them, with the course attached. They complete it on
               their phone, or reply to the email.

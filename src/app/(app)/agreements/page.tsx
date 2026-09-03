@@ -170,7 +170,7 @@ export default async function AgreementsPage({
                       )}
                     </td>
                     <td className="whitespace-nowrap">
-                      <Link href={`/agreements?edit=${r.id}`} className="btn btn-sm">Edit</Link>
+                      <Link href={`/agreements?edit=${r.id}#agreement-form`} className="btn btn-sm">Edit</Link>
                     </td>
                   </tr>
                 ))}
@@ -180,7 +180,7 @@ export default async function AgreementsPage({
         </Card>
       )}
 
-      <Card title={editing ? `Edit ${editing.name}` : "Add an agreement"}>
+      <Card id="agreement-form" title={editing ? `Edit ${editing.name}` : "Add an agreement"} className="scroll-mt-4">
         <form action={save} className="grid gap-3 sm:grid-cols-2" encType="multipart/form-data">
           {editing && <input type="hidden" name="id" value={editing.id} />}
           <Field label="Who" hint="The vendor, school or partner.">

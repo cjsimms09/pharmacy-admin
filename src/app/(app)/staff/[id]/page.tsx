@@ -25,6 +25,7 @@ import {
   updatePerson,
   endEmploymentAction,
   reinstateAction,
+  markSighted,
 } from "../actions";
 import type { CredentialType } from "@/db/schema";
 
@@ -160,12 +161,14 @@ export default async function PersonPage({
 
       {/* ── What they must hold ─────────────────────────────────────── */}
       <Card
+        id="credentials"
         title="Required credentials"
         count={`${required.length - gaps} of ${required.length} in order`}
         subtitle={
-          person.administersVaccines
-            ? "This person administers vaccines, so CPR, immunization training and a signed protocol are required as well as their licence."
-            : "Turn on “administers vaccines” under Edit details if that changes — CPR, immunization training and a signed protocol are then required too."
+          (person.administersVaccines
+            ? "This person administers vaccines, so CPR, immunization training and a signed protocol are required as well as their licence. "
+            : "Turn on “administers vaccines” under Edit details if that changes — CPR, immunization training and a signed protocol are then required too. ") +
+          "Put in the expiry date and press “I have seen it” to record a card you have physically checked; the record says it was sighted and that no document is attached, which an inspector can tell apart from a scan."
         }
         className="mb-6"
       >
@@ -209,7 +212,7 @@ export default async function PersonPage({
                         <span className="text-ink-3">none attached</span>
                       )}
                     </td>
-                    <td className="whitespace-nowrap">
+                    <td className="whitespace-nowrap align-top">
                       {canManage &&
                         (held ? (
                           <>
@@ -217,11 +220,32 @@ export default async function PersonPage({
                                 mistyped number, a missing expiry date, the document nobody
                                 attached. Renewing files the new card and keeps the old one, which
                                 is what an inspector asking "and before that?" wants to see. */}
-                            <Link href={`${here}?fix=${held.id}`} className="btn btn-sm">Edit</Link>
-                            <Link href={`${here}?add=${type}`} className="btn btn-sm ml-1">Renew</Link>
+                            <Link href={`${here}?fix=${held.id}#credential-form`} className="btn btn-sm">Edit</Link>
+                            <Link href={`${here}?add=${type}#credential-form`} className="btn btn-sm ml-1">Renew</Link>
                           </>
                         ) : (
-                          <Link href={`${here}?add=${type}`} className="btn btn-sm btn-primary">Add</Link>
+                          <div className="space-y-1.5">
+                            <Link href={`${here}?add=${type}#credential-form`} className="btn btn-sm btn-primary block text-center">
+                              Add with document
+                            </Link>
+                            {/* The short path, for the card that was put on the counter and was
+                                current. The alternative to this is not a fuller record — it is no
+                                record, which is the state this whole page exists to prevent. */}
+                            <form action={markSighted} className="flex flex-wrap items-center gap-1">
+                              <input type="hidden" name="personId" value={id} />
+                              <input type="hidden" name="type" value={type} />
+                              <input
+                                name="expiresOn"
+                                type="date"
+                                className="field w-auto px-1.5 py-1 text-xs"
+                                aria-label={`Expiry date for ${CREDENTIAL_LABEL[type]}`}
+                              />
+                              <button className="btn btn-sm">I have seen it</button>
+                              <label className="flex items-center gap-1 text-[11px] text-ink-3">
+                                <input type="checkbox" name="noExpiry" /> no expiry
+                              </label>
+                            </form>
+                          </div>
                         ))}
                     </td>
                   </tr>
@@ -232,7 +256,7 @@ export default async function PersonPage({
         </div>
 
         {canManage && (
-          <div className="mt-4 border-t border-line pt-4">
+          <div id="credential-form" className="mt-4 scroll-mt-4 border-t border-line pt-4">
             {fixing ? (
               <>
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -284,7 +308,7 @@ export default async function PersonPage({
                     <td className="whitespace-nowrap text-xs">{c.noExpiry ? "does not expire" : fmt(c.expiresOn)}</td>
                     <td>{c.noExpiry ? <span className="badge badge-ok">no expiry</span> : <StatusBadge days={daysUntil(c.expiresOn)} iso={c.expiresOn} />}</td>
                     <td className="whitespace-nowrap">
-                      {canManage && <Link href={`${here}?fix=${c.id}`} className="btn btn-sm">Edit</Link>}
+                      {canManage && <Link href={`${here}?fix=${c.id}#credential-form`} className="btn btn-sm">Edit</Link>}
                     </td>
                   </tr>
                 ))}

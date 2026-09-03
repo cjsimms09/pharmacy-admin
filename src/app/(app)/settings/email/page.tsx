@@ -3,7 +3,8 @@ import { requireManager } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
 import { hasMailPassword } from "@/lib/mailbox";
 import { PageHeader, BackLink, Notice, Field } from "@/components/ui";
-import { removeMailPassword, saveMailSettings, sweepNow, testMailSettings } from "@/app/(app)/inbox/actions";
+import { removeMailPassword, saveMailSettings, saveSendingServer, sweepNow, testMailSettings, sendTestMail } from "@/app/(app)/inbox/actions";
+import { smtpTargets } from "@/lib/send-mail";
 
 export const metadata = { title: "Email" };
 export const dynamic = "force-dynamic";
@@ -157,12 +158,56 @@ export default async function EmailSettingsPage({ searchParams }: { searchParams
             <div className="sm:col-span-2"><dt className="text-xs uppercase tracking-wide text-ink-2">Last result</dt><dd>{s.mail_last_result || "—"}</dd></div>
           </dl>
           <div className="mt-4 flex flex-wrap gap-2">
-            <form action={testMailSettings}><button className="btn">Test connection</button></form>
+            <form action={testMailSettings}><button className="btn">Test reading</button></form>
             <form action={sweepNow.bind(null, "settings")}><button className="btn btn-primary">Check for new mail now</button></form>
             <form action={removeMailPassword}><button className="btn btn-danger">Remove password</button></form>
           </div>
         </section>
       )}
+
+      <section className="card mb-6 max-w-3xl">
+          <h2 className="mb-1 font-semibold">Sending</h2>
+          <p className="mb-3 text-sm text-ink-2">
+            Reading a mailbox and sending from it are different servers on different ports, so one working says nothing
+            about the other. Send yourself a test: if it arrives, training links and reminders will reach people. If it
+            does not, the exact reason each server gave appears here rather than the email simply never turning up.
+          </p>
+          {!configured && (
+            <p className="mb-3 rounded-md bg-warn-soft px-3 py-2 text-sm text-warn">
+              No app password is saved yet, so nothing can be sent. Fill in the mailbox above first.
+            </p>
+          )}
+          <form action={sendTestMail} className="flex flex-wrap items-end gap-2">
+            <Field label="Send a test to" className="min-w-64 flex-1">
+              <input name="to" type="email" className="field" defaultValue={s.mail_user} placeholder="you@example.com" />
+            </Field>
+            <button className="btn btn-primary" disabled={!configured}>Send it</button>
+          </form>
+          <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <dt className="text-xs uppercase tracking-wide text-ink-2">Last send</dt>
+              <dd className="break-words">{s.mail_last_send_result || "Nothing has been sent yet."}</dd>
+            </div>
+            <div className="sm:col-span-2">
+              <dt className="text-xs uppercase tracking-wide text-ink-2">Will try, in this order</dt>
+              <dd className="font-mono text-xs">
+                {smtpTargets(s).map((t) => `${t.host}:${t.port}`).join("  ·  ") || "nothing — set the address first"}
+              </dd>
+            </div>
+          </dl>
+          <details className="mt-3">
+            <summary className="cursor-pointer text-sm font-medium text-accent">Set the sending server by hand</summary>
+            <form action={saveSendingServer} className="mt-3 grid gap-3 sm:grid-cols-2">
+              <Field label="SMTP server" hint="Only needed if the list above is wrong. Gmail is smtp.gmail.com; Office 365 is smtp.office365.com.">
+                <input name="mail_smtp_host" className="field font-mono" defaultValue={s.mail_smtp_host} placeholder="smtp.gmail.com" />
+              </Field>
+              <Field label="Port" hint="465 for SSL, 587 for STARTTLS.">
+                <input name="mail_smtp_port" className="field font-mono" defaultValue={s.mail_smtp_port} placeholder="465" />
+              </Field>
+              <div className="sm:col-span-2"><button className="btn">Save the sending server</button></div>
+            </form>
+          </details>
+      </section>
 
       <section className="card max-w-3xl">
         <h2 className="mb-1 font-semibold">What happens to the mail</h2>

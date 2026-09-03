@@ -57,6 +57,12 @@ export const SETTING_KEYS = [
   "backup_last_run",
   "backup_last_result",
   "mail_last_sweep",
+  // Sending is not the same server as reading, and a pharmacy that cannot test it cannot tell a
+  // failed send from one that was never attempted.
+  "mail_smtp_host",
+  "mail_smtp_port",
+  "mail_smtp_working",
+  "mail_last_send_result",
   "mail_last_result",
   // ── Medicare Transaction Facilitator (MTF) ──
   // CMS's channel for Maximum Fair Price refunds under the Inflation Reduction Act. The key is

@@ -7,6 +7,7 @@ import { db, schema } from "@/db";
 import { DOCUMENT_CATEGORIES } from "@/db/schema";
 import { newId } from "@/lib/crypto";
 import { requireManager } from "@/lib/auth";
+import { sendTestEmail } from "@/lib/send-mail";
 import { audit } from "@/lib/audit";
 import { deleteFile } from "@/lib/files";
 import { setSetting } from "@/lib/settings";
@@ -50,6 +51,29 @@ export async function saveMailSettings(fd: FormData) {
   redirect(t.ok ? `${here}?saved=1&detail=${encodeURIComponent(t.detail)}` : `${here}?error=${encodeURIComponent("Settings saved, but the connection test failed: " + t.error)}`);
 }
 
+/**
+ * The sending server, on its own.
+ *
+ * A separate action rather than a second use of saveMailSettings, because that one reads every
+ * field off the form and writes it — so a small form carrying two fields would silently blank the
+ * address, the allowed senders and the supplier rules. A form that quietly erases settings it
+ * does not mention is the kind of bug nobody notices until the mailbox stops being swept.
+ */
+export async function saveSendingServer(fd: FormData) {
+  const user = await requireManager();
+  const here = "/settings/email";
+  const host = String(fd.get("mail_smtp_host") ?? "").trim();
+  const port = String(fd.get("mail_smtp_port") ?? "").trim();
+  if (port && !/^\d{2,5}$/.test(port)) fail(here, "The port should be a number — 465 for SSL, 587 for STARTTLS.");
+  await setSetting("mail_smtp_host", host);
+  await setSetting("mail_smtp_port", port);
+  // Whatever combination worked before may no longer be the one to prefer.
+  await setSetting("mail_smtp_working", "");
+  await audit({ action: "mail.smtp.update", userId: user.id, userName: user.name, details: `${host}:${port}` });
+  revalidatePath(here);
+  redirect(`${here}?saved=1&detail=${encodeURIComponent(host ? `Sending server set to ${host}${port ? `:${port}` : ""}. Send a test to check it.` : "Sending server cleared — the site will work it out from the address again.")}`);
+}
+
 export async function removeMailPassword() {
   const user = await requireManager();
   await clearMailPassword();
@@ -63,6 +87,26 @@ export async function testMailSettings() {
   await requireManager();
   const t = await testMailbox();
   redirect(t.ok ? `/settings/email?saved=1&detail=${encodeURIComponent(t.detail)}` : `/settings/email?error=${encodeURIComponent(t.error)}`);
+}
+
+/**
+ * Actually sends something, which nothing here could do before.
+ *
+ * Reading a mailbox and sending from it are different servers with different ports, and the site
+ * could test only the first. So a training email that never arrived looked exactly like one that
+ * was never attempted — which is the single worst failure mode for a feature whose whole job is
+ * to reach people.
+ */
+export async function sendTestMail(formData: FormData) {
+  await requireManager();
+  const to = String(formData.get("to") ?? "");
+  const r = await sendTestEmail(to);
+  revalidatePath("/settings/email");
+  redirect(
+    r.ok
+      ? `/settings/email?saved=1&detail=${encodeURIComponent(`Sent to ${to} via ${r.via}. If it does not appear within a minute or two, check the spam folder — a first message from a new sender often lands there.`)}`
+      : `/settings/email?error=${encodeURIComponent(r.error)}`,
+  );
 }
 
 export async function sweepNow(from: "inbox" | "settings" = "inbox") {

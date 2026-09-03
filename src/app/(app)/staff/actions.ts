@@ -11,7 +11,7 @@ import { audit } from "@/lib/audit";
 import { newId } from "@/lib/crypto";
 import { storeFile } from "@/lib/files";
 import { endEmployment, reinstate } from "@/lib/offboarding";
-import type { DocumentCategory } from "@/db/schema";
+import type { DocumentCategory, CredentialType } from "@/db/schema";
 
 /** Default filing category for a document attached to a credential. */
 function categoryFor(type: string): DocumentCategory {
@@ -255,4 +255,49 @@ export async function reinstateAction(formData: FormData) {
     if (e && typeof e === "object" && "digest" in e) throw e;
     redirect(`/staff/${id}?error=` + encodeURIComponent(e instanceof Error ? e.message : "Could not record that."));
   }
+}
+
+/**
+ * Records a credential the pharmacist-in-charge has physically seen.
+ *
+ * The full form asks for a number, an issuer, two dates and the document, and most of the time
+ * what actually happened is that somebody put a card on the counter and it was current. Forcing
+ * the long form on that means either a fabricated number or — far more often — nothing recorded
+ * at all, and nothing recorded is the state this whole site exists to prevent.
+ *
+ * So this is the short path, and it is honest about being short: the record says it was sighted,
+ * by whom, on what date, and that no document was attached. An inspector can tell that apart from
+ * a scanned card at a glance, which is the point. The expiry date is still required, because a
+ * credential with no date is the one thing worse than no credential — it passes every check while
+ * telling you nothing.
+ */
+export async function markSighted(formData: FormData) {
+  const user = await requireManager();
+  const personId = String(formData.get("personId") ?? "");
+  const type = String(formData.get("type") ?? "") as CredentialType;
+  const expiresOn = String(formData.get("expiresOn") ?? "").trim();
+  const noExpiry = formData.get("noExpiry") === "on";
+  const number = String(formData.get("number") ?? "").trim() || null;
+  const here = `/staff/${personId}`;
+
+  if (!personId || !type) fail(here, "Pick a person and a credential.");
+  if (!noExpiry && !expiresOn) {
+    fail(here, "Put in the expiry date, or tick that it does not expire. A credential with no date passes every check while telling you nothing.");
+  }
+  if (expiresOn && !/^\d{4}-\d{2}-\d{2}$/.test(expiresOn)) fail(here, "That is not a date.");
+
+  await db.insert(schema.credentials).values({
+    id: newId(),
+    personId,
+    type,
+    number,
+    expiresOn: noExpiry ? null : expiresOn,
+    noExpiry,
+    notes: `Sighted by ${user.name} on ${new Date().toISOString().slice(0, 10)}. The document itself was not attached.`,
+  });
+  await audit({ action: "credential.sighted", userId: user.id, userName: user.name, entity: "person", entityId: personId, details: type });
+  revalidatePath(here);
+  revalidatePath("/staff");
+  revalidatePath("/");
+  redirect(`${here}?saved=` + encodeURIComponent("Recorded as sighted. Attach the document when you have it — the record says it is not attached until you do."));
 }
