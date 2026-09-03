@@ -91,6 +91,13 @@ export const credentials = sqliteTable(
     issuer: text("issuer"),
     issuedOn: text("issued_on"),
     expiresOn: text("expires_on"),
+    /**
+     * Deliberately has no expiry — a certificate that does not lapse, a diploma, a one-off
+     * training. Kept apart from a blank date, because a blank date means nobody entered one and
+     * that is the thing worth chasing. Saying so is a decision; leaving it empty is an omission,
+     * and a screen that cannot tell them apart nags forever about the first kind.
+     */
+    noExpiry: integer("no_expiry", { mode: "boolean" }).notNull().default(false),
     notes: text("notes"),
     createdAt: text("created_at").notNull().default(now()),
     updatedAt: text("updated_at").notNull().default(now()),
@@ -158,6 +165,8 @@ export const documents = sqliteTable(
     inboxItemId: text("inbox_item_id"),
     effectiveOn: text("effective_on"),
     expiresOn: text("expires_on"),
+    /** Stated as not expiring, rather than simply left blank. */
+    noExpiry: integer("no_expiry", { mode: "boolean" }).notNull().default(false),
     notes: text("notes"),
     uploadedBy: text("uploaded_by").notNull(),
     uploadedAt: text("uploaded_at").notNull().default(now()),

@@ -127,6 +127,7 @@ const credentialSchema = z.object({
   issuer: optText(100),
   issuedOn: optDate,
   expiresOn: optDate,
+  noExpiry: bool,
   notes: optText(1000),
   redirectTo: z.string().default("/staff"),
 });

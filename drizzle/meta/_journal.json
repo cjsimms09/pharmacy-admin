@@ -141,6 +141,20 @@
       "when": 1788463768636,
       "tag": "0019_glorious_dragon_lord",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1788468546867,
+      "tag": "0020_foamy_doorman",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1788468611068,
+      "tag": "0021_mighty_salo",
+      "breakpoints": true
     }
   ]
 }

@@ -100,6 +100,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
                           <input name="number" placeholder="Number (optional)" className="field text-xs" />
                           <label className="text-xs text-ink-3">Issued<input name="issuedOn" type="date" className="field text-xs" /></label>
                           <label className="text-xs text-ink-3">Expires<input name="expiresOn" type="date" className="field text-xs" /></label>
+                          <label className="flex items-center gap-1 text-xs"><input type="checkbox" name="noExpiry" /> Does not expire</label>
                           <button className="btn btn-primary text-xs" type="submit">File it</button>
                         </form>
                       </details>

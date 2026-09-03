@@ -168,7 +168,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
   );
 }
 
-function CredentialForm({ action, redirectTo, personId, cred }: { action: (fd: FormData) => Promise<void>; redirectTo: string; personId?: string; cred?: { type: string; label: string | null; number: string | null; issuer: string | null; issuedOn: string | null; expiresOn: string | null; notes: string | null } }) {
+function CredentialForm({ action, redirectTo, personId, cred }: { action: (fd: FormData) => Promise<void>; redirectTo: string; personId?: string; cred?: { type: string; label: string | null; number: string | null; issuer: string | null; issuedOn: string | null; expiresOn: string | null; noExpiry: boolean; notes: string | null } }) {
   return (
     <form action={action} className="mt-3 grid gap-3 sm:grid-cols-3" encType="multipart/form-data">
       <input type="hidden" name="redirectTo" value={redirectTo} />
@@ -183,7 +183,13 @@ function CredentialForm({ action, redirectTo, personId, cred }: { action: (fd: F
       <Field label="Number"><input name="number" className="field" defaultValue={cred?.number ?? ""} /></Field>
       <Field label="Issuer"><input name="issuer" className="field" placeholder="Kansas Board of Pharmacy, AHA, …" defaultValue={cred?.issuer ?? ""} /></Field>
       <Field label="Issued on"><input name="issuedOn" type="date" className="field" defaultValue={cred?.issuedOn ?? ""} /></Field>
-      <Field label="Expires on"><input name="expiresOn" type="date" className="field" defaultValue={cred?.expiresOn ?? ""} /></Field>
+      <Field label="Expires on" hint="Leave blank and tick below if it does not expire.">
+        <input name="expiresOn" type="date" className="field" defaultValue={cred?.expiresOn ?? ""} />
+        <label className="mt-1 flex items-center gap-2 text-xs">
+          <input type="checkbox" name="noExpiry" defaultChecked={cred?.noExpiry ?? false} />
+          This does not expire
+        </label>
+      </Field>
       <Field label={cred ? "Attach / replace document" : "Document"} className="sm:col-span-2" hint="The license card, CPR card, training certificate or protocol. PDF, photo or Word file.">
         <input name="file" type="file" className="field" accept=".pdf,.jpg,.jpeg,.png,.heic,.heif,.webp,.gif,.bmp,.tif,.tiff,.doc,.docx,.rtf,image/*" />
       </Field>

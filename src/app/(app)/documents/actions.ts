@@ -21,6 +21,7 @@ const uploadSchema = z.object({
   cqiIncidentId: z.string().optional().transform((v) => (v ? v : null)),
   effectiveOn: optDate,
   expiresOn: optDate,
+  noExpiry: z.string().optional().transform((v) => v === "on" || v === "true"),
   notes: z.string().trim().max(2000).optional().transform((v) => (v ? v : null)),
   redirectTo: z.string().optional(),
 });
@@ -64,6 +65,7 @@ export async function uploadDocument(formData: FormData): Promise<ActionResult> 
       cqiIncidentId: d.cqiIncidentId,
       effectiveOn: d.effectiveOn,
       expiresOn: d.expiresOn,
+      noExpiry: d.noExpiry,
       notes: d.notes,
       uploadedBy: user.id,
     });
@@ -81,6 +83,7 @@ export async function uploadDocument(formData: FormData): Promise<ActionResult> 
         await db.update(schema.credentials).set({
           expiresOn: held.expiresOn ?? d.expiresOn,
           issuedOn: held.issuedOn ?? d.effectiveOn,
+          noExpiry: held.noExpiry || d.noExpiry,
           updatedAt: new Date().toISOString(),
         }).where(eq(schema.credentials.id, held.id));
         await db.update(schema.documents).set({ credentialId: held.id }).where(eq(schema.documents.id, id));
@@ -92,6 +95,7 @@ export async function uploadDocument(formData: FormData): Promise<ActionResult> 
           type,
           issuedOn: d.effectiveOn,
           expiresOn: d.expiresOn,
+          noExpiry: d.noExpiry,
           notes: d.notes,
         });
         await db.update(schema.documents).set({ credentialId: credId }).where(eq(schema.documents.id, id));

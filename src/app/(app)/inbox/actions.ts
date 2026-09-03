@@ -112,6 +112,7 @@ export async function fileInboxItem(fd: FormData) {
   const personId = String(fd.get("personId") ?? "");
   const category = String(fd.get("category") ?? "") as (typeof DOCUMENT_CATEGORIES)[number];
   const expiresOn = String(fd.get("expiresOn") ?? "").trim() || null;
+  const noExpiry = fd.get("noExpiry") !== null;
   const issuedOn = String(fd.get("issuedOn") ?? "").trim() || null;
   const number = String(fd.get("number") ?? "").trim() || null;
 
@@ -148,18 +149,19 @@ export async function fileInboxItem(fd: FormData) {
           expiresOn: expiresOn ?? held.expiresOn,
           issuedOn: issuedOn ?? held.issuedOn,
           number: number ?? held.number,
+          noExpiry: held.noExpiry || noExpiry,
           updatedAt: new Date().toISOString(),
         })
         .where(eq(schema.credentials.id, held.id));
     } else {
       credentialId = newId();
-      await db.insert(schema.credentials).values({ id: credentialId, personId, type: credType, number, issuedOn, expiresOn });
+      await db.insert(schema.credentials).values({ id: credentialId, personId, type: credType, number, issuedOn, expiresOn, noExpiry });
     }
   }
 
   await db
     .update(schema.documents)
-    .set({ personId, category, credentialId, expiresOn, effectiveOn: issuedOn })
+    .set({ personId, category, credentialId, expiresOn, noExpiry, effectiveOn: issuedOn })
     .where(eq(schema.documents.id, item.documentId));
 
   await audit({ action: "inbox.file", userId: user.id, userName: user.name, details: `${category} for ${personId}` });

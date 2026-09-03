@@ -106,6 +106,9 @@ export function UploadForm({
       </Field>
       <Field label="Expires on">
         <input name="expiresOn" type="date" className="field" />
+        <label className="mt-1 flex items-center gap-2 text-xs">
+          <input type="checkbox" name="noExpiry" /> This does not expire
+        </label>
       </Field>
       <Field label="File" hint="PDF, image, or Word document · up to 20 MB">
         <input name="file" type="file" className="field" required accept=".pdf,.jpg,.jpeg,.png,.heic,.heif,.webp,.gif,.bmp,.tif,.tiff,.doc,.docx,.rtf,image/*" />

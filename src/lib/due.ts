@@ -153,8 +153,12 @@ export async function dueList(opts: { horizonDays?: number } = {}): Promise<DueI
         });
         continue;
       }
-      // A one-off certificate that genuinely does not expire is not chased.
+      // Said to have no expiry: a decision, and the end of the matter.
+      if (held.noExpiry) continue;
+
       if (!held.expiresOn) {
+        // A certificate of this kind genuinely does not lapse, so silence is right even when
+        // nobody said so explicitly.
         if (type === "immunization_training") continue;
         push({
           id: `cred-nodate-${held.id}`,
@@ -164,7 +168,7 @@ export async function dueList(opts: { horizonDays?: number } = {}): Promise<DueI
           personId: p.id,
           citation: null,
           dueOn: null,
-          action: `${name}'s ${label.toLowerCase()} is on file but carries no expiry date, so nothing can tell you when it lapses.`,
+          action: `${name}'s ${label.toLowerCase()} is on file but carries no expiry date, so nothing can tell you when it lapses. Add the date, or tick "this does not expire" on it.`,
           href: `/staff/${p.id}`,
         });
         continue;
