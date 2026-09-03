@@ -44,6 +44,21 @@ export const people = sqliteTable("people", {
   mobile: text("mobile"),
   administersVaccines: integer("administers_vaccines", { mode: "boolean" }).notNull().default(false),
   active: integer("active", { mode: "boolean" }).notNull().default(true),
+  /**
+   * Employed, or here for a fixed spell.
+   *
+   * A KU P4 on a five-week rotation is not staff and is not a former employee either. Treating
+   * them as staff means the dashboard chases them for annual training they will never owe and
+   * keeps doing so after they have gone; marking them inactive when they leave loses the fact
+   * that they were here in June, which is exactly what an inspector asks about a June incident.
+   * So they are their own kind of person, with the dates they were actually present.
+   */
+  engagement: text("engagement", { enum: ["staff", "rotation"] }).notNull().default("staff"),
+  /** For a rotation: the window they are on site. Outside it they are retained but not chased. */
+  startsOn: text("starts_on"),
+  endsOn: text("ends_on"),
+  /** Who they are here from — the school, the employer of record. */
+  affiliation: text("affiliation"),
   hiredOn: text("hired_on"),
   endedOn: text("ended_on"),
   /**
@@ -308,6 +323,40 @@ export const obligationCompletions = sqliteTable(
     createdAt: text("created_at").notNull().default(now()),
   },
   (t) => [index("obligation_completions_idx").on(t.obligationId)],
+);
+
+/**
+ * Business associate agreements.
+ *
+ * HIPAA requires one with every vendor that touches protected health information, and the thing
+ * that goes wrong is never that nobody signed one — it is that nobody can find it, or it expired
+ * three years ago and the relationship carried on. So they are tracked like any other expiring
+ * obligation rather than living in a folder, and the annual BAA review closes itself off this
+ * table instead of asking the PIC to assert something from memory.
+ */
+export const businessAssociates = sqliteTable(
+  "business_associates",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    /** What they do that gives them access — "software", "shredding", "billing", "rotations". */
+    service: text("service"),
+    contactName: text("contact_name"),
+    contactEmail: text("contact_email"),
+    signedOn: text("signed_on"),
+    /** Many BAAs are evergreen. Said so explicitly rather than left blank. */
+    expiresOn: text("expires_on"),
+    noExpiry: integer("no_expiry", { mode: "boolean" }).notNull().default(false),
+    /** The agreement itself. */
+    documentId: text("document_id"),
+    /** Set when the relationship has ended; the agreement is kept for its retention period. */
+    endedOn: text("ended_on"),
+    notes: text("notes"),
+    createdBy: text("created_by").notNull(),
+    createdAt: text("created_at").notNull().default(now()),
+    updatedAt: text("updated_at").notNull().default(now()),
+  },
+  (t) => [index("business_associates_expires_idx").on(t.expiresOn)],
 );
 
 // ── Document intake (drop anything, Claude files it) ─────────────────

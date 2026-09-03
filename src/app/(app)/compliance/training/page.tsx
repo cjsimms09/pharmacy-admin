@@ -6,12 +6,12 @@ import { db, schema } from "@/db";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { TRAINING_CADENCE, addMonths } from "@/lib/due";
-import { TRAINING_LABEL, PERSON_ROLE_LABEL } from "@/lib/labels";
+import { TRAINING_LABEL, TRAINING_SHORT, PERSON_ROLE_LABEL } from "@/lib/labels";
 import { type TrainingType } from "@/db/schema";
 import { todayIso, fmt, daysUntil } from "@/lib/dates";
 import { storeFile } from "@/lib/files";
 import { newId } from "@/lib/crypto";
-import { PageHeader, Notice, BackLink, Empty } from "@/components/ui";
+import { PageHeader, Notice, Empty, Card, Figure } from "@/components/ui";
 import {
   assignTraining,
   sendOutstanding,
@@ -22,6 +22,7 @@ import {
 import { REPLY_PHRASE } from "@/lib/training-replies";
 import { courseFor } from "@/lib/courses";
 import { canSend } from "@/lib/send-mail";
+import { onSiteToday } from "@/lib/roster";
 
 export const metadata = { title: "Training" };
 export const dynamic = "force-dynamic";
@@ -44,7 +45,7 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
   const [assignments, mailReady, people, trainings] = await Promise.all([
     openAssignments(),
     canSend(),
-    db.query.people.findMany({ where: eq(schema.people.active, true), orderBy: (p, { asc }) => [asc(p.lastName)] }),
+    onSiteToday(),
     db.query.trainings.findMany({ orderBy: (t, { desc }) => [desc(t.completedOn)] }),
   ]);
   const outstanding = assignments.filter((a) => !a.completedAt);
@@ -54,19 +55,38 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
   const done = assignments.filter((a) => a.completedAt && a.trainingId);
   const today = todayIso();
 
-  /** Where each person stands on each requirement, and whether it should be ticked by default. */
+  /**
+   * Where one person stands on one requirement.
+   *
+   * Four states, and the distinction that matters most is between "they owe this" and "they owe
+   * this and I have already sent it" — the whole question when looking at this grid is what is
+   * left to do, and a screen that cannot tell you what you already sent makes you send it twice.
+   */
   const state = (personId: string, type: TrainingType) => {
     const last = trainings.filter((x) => x.personId === personId && x.type === type)[0];
     const open = outstanding.find((a) => a.personId === personId && a.type === type);
-    if (!last) return { label: "never", tone: "badge-crit", due: true, open: Boolean(open) };
+    const sent = open
+      ? {
+          on: open.sentAt ? fmt(open.sentAt.slice(0, 10)) : null,
+          reminders: open.remindersSent,
+          error: open.sendError,
+          code: open.replyCode,
+        }
+      : null;
+
+    if (!last) return { label: "never", tone: "badge-crit", due: true, sent };
     const dueOn = last.expiresOn ?? addMonths(last.completedOn, TRAINING_CADENCE[type]?.months ?? 12);
     const left = daysUntil(dueOn)!;
-    if (left < 0) return { label: `${-left}d late`, tone: "badge-crit", due: true, open: Boolean(open) };
-    if (left <= 45) return { label: dueOn.slice(5), tone: "badge-warn", due: true, open: Boolean(open) };
-    return { label: dueOn.slice(5), tone: "badge-ok", due: false, open: Boolean(open) };
+    if (left < 0) return { label: `${-left}d late`, tone: "badge-crit", due: true, sent };
+    if (left <= 45) return { label: `due ${dueOn.slice(5)}`, tone: "badge-warn", due: true, sent };
+    return { label: dueOn.slice(5), tone: "badge-ok", due: false, sent };
   };
 
-  const owed = people.reduce((n, p) => n + REQUIRED.filter((t) => state(p.id, t).due).length, 0);
+  const cells = people.flatMap((p) => REQUIRED.map((t) => ({ p, t, st: state(p.id, t) })));
+  const owed = cells.filter((c) => c.st.due).length;
+  const awaiting = cells.filter((c) => c.st.sent).length;
+  const toSend = cells.filter((c) => c.st.due && !c.st.sent).length;
+  const noEmail = people.filter((p) => !p.email).length;
 
   // ── actions ─────────────────────────────────────────────────────
   async function send(fd: FormData) {
@@ -191,8 +211,7 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
   if (people.length === 0) {
     return (
       <>
-        <BackLink href="/compliance">Compliance</BackLink>
-        <PageHeader title="Training" />
+        <PageHeader back={{ href: "/compliance", label: "Compliance" }} title="Training" />
         <Empty>No active staff. <Link href="/staff/new" className="underline">Add someone first.</Link></Empty>
       </>
     );
@@ -200,8 +219,8 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      <BackLink href="/compliance">Compliance</BackLink>
       <PageHeader
+        back={{ href: "/compliance", label: "Compliance" }}
         title="Training"
         subtitle={
           owed === 0
@@ -211,7 +230,7 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
         actions={
           outstanding.length > 0 ? (
             <form action={chase}>
-              <button className="btn">Chase everyone outstanding</button>
+              <button className="btn">Chase all {outstanding.length} outstanding</button>
             </form>
           ) : undefined
         }
@@ -226,29 +245,39 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
         </Notice>
       )}
 
+      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Figure value={toSend} label="Still to send" sub={toSend === 0 ? "Nothing waiting to go out" : "Ticked below and ready"} tone={toSend === 0 ? "ok" : "crit"} />
+        <Figure value={awaiting} label="Sent, not back" sub={awaiting === 0 ? "Nobody owes you a reply" : "Chased weekly on their own"} tone={awaiting === 0 ? "ok" : "warn"} />
+        <Figure value={done.length} label="Completed" sub="Each has a certificate" tone="ok" />
+        <Figure
+          value={noEmail}
+          label="Missing an email"
+          sub={noEmail === 0 ? "Everyone can be reached" : "They cannot be sent anything"}
+          tone={noEmail === 0 ? "ok" : "crit"}
+        />
+      </div>
+
       {/* ── Tick and send. The grid that shows the gap is the grid that closes it. ── */}
       <form action={send}>
-        <section className="card mb-6">
-          <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-            <h2 className="font-semibold">Who needs what</h2>
-            <p className="text-xs text-ink-3">
-              Everything due or overdue is ticked. Untick anything you do not want to send. Click a column heading to
-              read the course itself and see exactly what gets attached to their email.
-            </p>
-          </div>
+        <Card
+          title="Who needs what"
+          count={`${toSend} to send`}
+          subtitle="Anything due and not yet sent is ticked. Something already sent is not ticked again — tick it only to send a duplicate. Click a column heading to read the course and see exactly what gets attached to their email."
+          className="mb-6"
+        >
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-ground text-left text-xs uppercase tracking-wide text-ink-3">
+            <table className="table">
+              <thead>
                 <tr>
-                  <th className="px-3 py-2">Person</th>
+                  <th>Person</th>
                   {REQUIRED.map((t) => (
-                    <th key={t} className="px-2 py-2" title={TRAINING_LABEL[t]}>
+                    <th key={t} className="whitespace-nowrap" title={TRAINING_LABEL[t]}>
                       {courseFor(t) ? (
                         <Link href={`/compliance/training/course/${t}`} className="text-accent hover:underline">
-                          {courseFor(t)!.title.split(" ").slice(0, 2).join(" ")}
+                          {TRAINING_SHORT[t]}
                         </Link>
                       ) : (
-                        TRAINING_LABEL[t]
+                        TRAINING_SHORT[t]
                       )}
                     </th>
                   ))}
@@ -256,8 +285,8 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
               </thead>
               <tbody>
                 {people.map((p) => (
-                  <tr key={p.id} className="border-t border-line align-top">
-                    <td className="px-3 py-2 whitespace-nowrap">
+                  <tr key={p.id} className="align-top">
+                    <td className="whitespace-nowrap">
                       <Link href={`/staff/${p.id}`} className="font-medium text-accent hover:underline">
                         {p.firstName} {p.lastName}
                       </Link>
@@ -268,13 +297,36 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
                     </td>
                     {REQUIRED.map((t) => {
                       const st = state(p.id, t);
+                      // Three visually distinct states, because the only question asked of this
+                      // grid is what is left to do: current, owed and not yet sent, owed and
+                      // waiting on them.
                       return (
-                        <td key={t} className="px-2 py-2">
-                          <label className="flex items-center gap-1.5">
-                            <input type="checkbox" name="pick" value={`${p.id}|${t}`} defaultChecked={st.due && !st.open} />
-                            <span className={`badge ${st.tone} whitespace-nowrap`}>{st.label}</span>
-                          </label>
-                          {st.open && <div className="mt-0.5 text-[11px] text-ink-3">already sent</div>}
+                        <td key={t}>
+                          {st.sent ? (
+                            <div>
+                              <span className="badge badge-muted">sent{st.sent.on ? ` ${st.sent.on}` : ""}</span>
+                              <div className="mt-1 text-[11px] leading-tight text-ink-3">
+                                {st.sent.error ? (
+                                  <span className="text-crit">{st.sent.error}</span>
+                                ) : (
+                                  <>
+                                    {st.sent.reminders > 0 ? `${st.sent.reminders} reminder${st.sent.reminders === 1 ? "" : "s"}` : "awaiting them"}
+                                    {st.sent.code && <span className="ml-1 font-mono">{st.sent.code}</span>}
+                                  </>
+                                )}
+                              </div>
+                              <label className="mt-1 flex items-center gap-1 text-[11px] text-ink-3">
+                                <input type="checkbox" name="pick" value={`${p.id}|${t}`} /> resend
+                              </label>
+                            </div>
+                          ) : st.due ? (
+                            <label className="flex cursor-pointer items-center gap-1.5">
+                              <input type="checkbox" name="pick" value={`${p.id}|${t}`} defaultChecked />
+                              <span className={`badge ${st.tone}`}>{st.label}</span>
+                            </label>
+                          ) : (
+                            <span className={`badge ${st.tone}`} title="Current — nothing to do">{st.label}</span>
+                          )}
                         </td>
                       );
                     })}
@@ -288,12 +340,15 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
               Due by
               <input type="date" name="dueOn" defaultValue={addMonths(today, 1)} className="field ml-2 w-auto" />
             </label>
-            <button className="btn btn-primary" disabled={!mailReady}>Send it</button>
+            <button className="btn btn-primary" disabled={!mailReady}>
+              Send {toSend > 0 ? `the ${toSend} ticked` : "what is ticked"}
+            </button>
             <p className="text-xs text-ink-3">
-              One email per person, covering everything ticked for them. They can complete it on their phone.
+              One email per person covering everything ticked for them, with the course attached. They complete it on
+              their phone, or reply to the email.
             </p>
           </div>
-        </section>
+        </Card>
       </form>
 
       {/* ── What is out and not back ── */}

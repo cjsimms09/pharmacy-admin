@@ -1,6 +1,7 @@
 import "server-only";
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
+import { onSiteToday } from "./roster";
 import { todayIso, daysBetween } from "./dates";
 import { CREDENTIAL_LABEL, TRAINING_LABEL, PERSON_ROLE_LABEL } from "./labels";
 import type { CredentialType, TrainingType } from "@/db/schema";
@@ -116,7 +117,7 @@ function credentialApplies(type: CredentialType, person: { administersVaccines: 
 export async function dueList(opts: { horizonDays?: number } = {}): Promise<DueItem[]> {
   const today = todayIso();
   const [people, creds, trainings] = await Promise.all([
-    db.query.people.findMany({ where: eq(schema.people.active, true) }),
+    onSiteToday(),
     db.query.credentials.findMany(),
     db.query.trainings.findMany(),
   ]);
@@ -127,7 +128,16 @@ export async function dueList(opts: { horizonDays?: number } = {}): Promise<DueI
     items.push({ ...i, daysLeft, severity: severityOf(daysLeft, i.kind) });
   };
 
-  // ── Credentials ──
+  // ── Credentials ───────────────────────────────────────────────────
+  //
+  // Grouped by requirement rather than by person, for the same reason trainings are: three
+  // people with no immunization protocol on file is one thing to go and do, and listing it three
+  // times under three headings that read identically is how a screen stops being read. The
+  // exception is a credential that exists and is expiring — there the date and the person are
+  // the whole content, and there are rarely many of them.
+  const missing = new Map<CredentialType, string[]>();
+  const undated = new Map<CredentialType, { name: string; id: string }[]>();
+
   for (const p of people) {
     const name = `${p.firstName} ${p.lastName}`;
     const mine = creds.filter((c) => c.personId === p.id);
@@ -141,19 +151,9 @@ export async function dueList(opts: { horizonDays?: number } = {}): Promise<DueI
     for (const type of required) {
       if (!credentialApplies(type, p)) continue;
       const held = mine.filter((c) => c.type === type).sort((a, b) => (b.expiresOn ?? "").localeCompare(a.expiresOn ?? ""))[0];
-      const label = CREDENTIAL_LABEL[type];
+
       if (!held) {
-        push({
-          id: `cred-missing-${p.id}-${type}`,
-          kind: "credential",
-          title: `${label} — nothing on file`,
-          personName: name,
-          personId: p.id,
-          citation: null,
-          dueOn: null,
-          action: `No ${label.toLowerCase()} is recorded for ${name}. Upload it, or mark them as not administering vaccines if that is why.`,
-          href: `/staff/${p.id}`,
-        });
+        missing.set(type, [...(missing.get(type) ?? []), name]);
         continue;
       }
       // Said to have no expiry: a decision, and the end of the matter.
@@ -163,32 +163,54 @@ export async function dueList(opts: { horizonDays?: number } = {}): Promise<DueI
         // A certificate of this kind genuinely does not lapse, so silence is right even when
         // nobody said so explicitly.
         if (type === "immunization_training") continue;
-        push({
-          id: `cred-nodate-${held.id}`,
-          kind: "credential",
-          title: `${label} — no expiry recorded`,
-          personName: name,
-          personId: p.id,
-          citation: null,
-          dueOn: null,
-          action: `${name}'s ${label.toLowerCase()} is on file but carries no expiry date, so nothing can tell you when it lapses. Add the date, or tick "this does not expire" on it.`,
-          href: `/staff/${p.id}`,
-        });
+        undated.set(type, [...(undated.get(type) ?? []), { name, id: p.id }]);
         continue;
       }
       push({
         id: `cred-${held.id}`,
         kind: "credential",
-        title: `${label} — ${name}`,
+        title: `${CREDENTIAL_LABEL[type]} — ${name}`,
         personName: name,
         personId: p.id,
         citation: null,
         dueOn: held.expiresOn,
-        action: `Renew and upload the new ${label.toLowerCase()}.`,
+        action: `Renew it and upload the replacement.`,
         href: `/staff/${p.id}`,
       });
     }
+  }
 
+  for (const [type, names] of missing) {
+    push({
+      id: `cred-missing-${type}`,
+      kind: "credential",
+      title: `${CREDENTIAL_LABEL[type]} — nothing on file for ${names.length === 1 ? names[0] : `${names.length} people`}`,
+      personName: names.length === 1 ? names[0] : null,
+      personId: null,
+      citation: null,
+      dueOn: null,
+      action:
+        names.length === 1
+          ? `Upload it, or mark ${names[0]} as not administering vaccines if that is why.`
+          : `${names.join(", ")}. Upload each one, or mark anyone who does not administer vaccines as such.`,
+      href: `/staff`,
+    });
+  }
+
+  for (const [type, who] of undated) {
+    push({
+      id: `cred-nodate-${type}`,
+      kind: "credential",
+      title: `${CREDENTIAL_LABEL[type]} — no expiry date recorded`,
+      personName: who.length === 1 ? who[0].name : null,
+      personId: who.length === 1 ? who[0].id : null,
+      citation: null,
+      dueOn: null,
+      action:
+        `On file for ${who.map((w) => w.name).join(", ")} but carrying no expiry date, so nothing can tell you when ` +
+        `it lapses. Add the date, or tick "this does not expire".`,
+      href: who.length === 1 ? `/staff/${who[0].id}` : `/staff`,
+    });
   }
 
   // ── Trainings ────────────────────────────────────────────────────
@@ -224,7 +246,7 @@ export async function dueList(opts: { horizonDays?: number } = {}): Promise<DueI
     push({
       id: `train-${type}`,
       kind: "training",
-      title: `${label} — ${outstanding.length === applies.length ? "everyone" : names.join(", ")}`,
+      title: `${label} — ${outstanding.length === applies.length ? `everyone (${names.length})` : names.length <= 2 ? names.join(" and ") : `${names.length} people`}`,
       personName: null,
       personId: null,
       trainingType: type,
@@ -233,8 +255,8 @@ export async function dueList(opts: { horizonDays?: number } = {}): Promise<DueI
       dueOn: dated[0] ?? null,
       action:
         never.length === outstanding.length
-          ? `Never recorded for ${names.length === 1 ? names[0] : `${names.length} people`}. Assign it and each gets a link to complete and sign.`
-          : `Due again for ${names.join(", ")}. Assign it and each gets a link to complete and sign.`,
+          ? `Never recorded for ${names.join(", ")}. Send it and each gets the course and a link to sign.`
+          : `Due again for ${names.join(", ")}. Send it and each gets the course and a link to sign.`,
       href: `/compliance/training`,
     });
   }

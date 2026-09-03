@@ -2,6 +2,7 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "./crypto";
+import { onSiteToday } from "./roster";
 import { todayIso } from "./dates";
 import { ensureObligations, CLOSURES } from "./obligations";
 import { periodsBetween, periodKeyFor, periodLabel, periodEnds, stateOf, type PeriodState } from "./periods";
@@ -115,7 +116,7 @@ async function witnessed(seedKey: string, periods: string[], cadence: Obligation
         osha_hazcom: "osha_hazard_communication",
         cqi_program_document: "cqi_program_review",
       }[seedKey]!;
-      const people = await db.query.people.findMany({ where: eq(schema.people.active, true) });
+      const people = await onSiteToday();
       const trainings = await db.query.trainings.findMany();
       // A period counts only when every active person has it — one person short is the whole
       // duty unmet, because that is how it would be judged.
@@ -136,7 +137,7 @@ async function witnessed(seedKey: string, periods: string[], cadence: Obligation
       };
     }
     case "immunization_protocol_review": {
-      const people = await db.query.people.findMany({ where: eq(schema.people.active, true) });
+      const people = await onSiteToday();
       const immunizers = people.filter((p) => p.administersVaccines);
       const creds = await db.query.credentials.findMany();
       for (const p of periods) {

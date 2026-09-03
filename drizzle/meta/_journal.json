@@ -190,6 +190,13 @@
       "when": 1788471643251,
       "tag": "0026_regular_silver_fox",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "6",
+      "when": 1788475163142,
+      "tag": "0027_nice_loa",
+      "breakpoints": true
     }
   ]
 }

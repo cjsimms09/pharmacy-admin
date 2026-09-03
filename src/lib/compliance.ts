@@ -1,6 +1,7 @@
 import "server-only";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { db, schema } from "@/db";
+import { onSiteToday } from "./roster";
 import { addDays, daysUntil, nextCqiPeriod, todayIso } from "./dates";
 import { currentCqiObligation, incidentsInPeriod, incidentsWithStage } from "./cqi";
 import { CREDENTIAL_LABEL } from "./labels";
@@ -47,7 +48,7 @@ export async function computeAlerts(): Promise<Alert[]> {
   }
 
   // Vaccinators without a current CPR card or immunization training
-  const vaccinators = await db.query.people.findMany({ where: and(eq(schema.people.administersVaccines, true), eq(schema.people.active, true)) });
+  const vaccinators = (await onSiteToday()).filter((p) => p.administersVaccines);
   for (const p of vaccinators) {
     const pc = creds.filter((c) => c.personId === p.id);
     const cpr = pc.find((c) => c.type === "cpr" && (daysUntil(c.expiresOn) ?? -1) >= 0);

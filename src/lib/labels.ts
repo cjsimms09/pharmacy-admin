@@ -39,10 +39,27 @@ export const CREDENTIAL_TYPES_FOR_PERSON: CredentialType[] = [
   "intern_registration",
   "cpr",
   "immunization_training",
+  // The signed protocol each immunizer works under. It was missing from this list, which meant
+  // the dashboard demanded it of every immunizer and the staff page offered no way to record it —
+  // an alert with no possible action behind it, which is worse than no alert.
+  "immunization_protocol",
   "controlled_substance_poa",
   "npi",
   "other",
 ];
+
+/**
+ * What each role must hold, and what only applies to people who immunize.
+ *
+ * Kept here rather than derived on each screen so the staff page, the dashboard grid and the due
+ * list cannot disagree about what somebody needs — which is how a requirement ends up chased in
+ * one place and invisible in another.
+ */
+export function requiredCredentials(role: PersonRole, administersVaccines: boolean): CredentialType[] {
+  const licence: CredentialType =
+    role === "pharmacist" ? "pharmacist_license" : role === "technician" ? "technician_registration" : "intern_registration";
+  return administersVaccines ? [licence, "cpr", "immunization_training", "immunization_protocol"] : [licence];
+}
 export const CREDENTIAL_TYPES_FOR_PHARMACY: CredentialType[] = [
   "pharmacy_registration",
   "dea_registration",
@@ -67,7 +84,9 @@ export const CREDENTIAL_HINT: Partial<Record<CredentialType, string>> = {
   technician_registration: "Renews every two years by October 31. 20 CE hours per period. No grace period.",
   intern_registration: "Expires six years from issuance.",
   cpr: "Required for anyone administering vaccines (K.S.A. 65-1635a). Track the card's expiration.",
-  immunization_training: "ACPE or Board-approved immunization training; keep the certificate on file. The pharmacy's physician-signed protocol goes under Documents.",
+  immunization_training: "ACPE or Board-approved immunization training. Does not expire — tick \"this does not expire\" and attach the certificate.",
+  immunization_protocol: "The physician-signed protocol this person immunizes under. Reviewed and re-signed annually; record the date it was signed and the date it runs to.",
+  controlled_substance_poa: "DEA power of attorney to sign 222 forms and order controlled substances.",
   pharmacy_registration: "Renews annually by June 30.",
   dea_registration: "Renews every three years. The CSOS certificate expires with it.",
   csos_certificate: "Expires with the DEA registration; a new key pair is required on renewal.",
@@ -106,6 +125,24 @@ export const INCIDENT_TYPE_LABEL: Record<IncidentType, string> = {
   wrong_patient: "Wrong patient",
   packaging_labeling_directions: "Inadequate or incorrect packaging, labeling, or directions",
   serious_harm: "Actual or potential serious harm to patient",
+  other: "Other",
+};
+
+/**
+ * Column-heading versions of the training names.
+ *
+ * Separate from the full labels because a grid has ten columns and a heading that wraps to three
+ * lines, or gets machine-truncated to "The pharmacy's", tells the reader nothing. The full name
+ * is still there on hover and everywhere there is room for it.
+ */
+export const TRAINING_SHORT: Record<TrainingType, string> = {
+  fwa_general_compliance: "FWA",
+  hipaa_privacy_security: "HIPAA",
+  osha_bloodborne: "BBP",
+  osha_hazard_communication: "HazCom",
+  controlled_substance_diversion: "Diversion",
+  immunization_protocol_review: "Protocol",
+  cqi_program_review: "CQI",
   other: "Other",
 };
 

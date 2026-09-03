@@ -19,23 +19,66 @@
 html { color-scheme: light; }
 body { @apply bg-ground text-ink antialiased; }
 
+/*
+  Type scale.
+
+  The site had one size — 13px grey — for a page title, a lapsed licence and a note about a
+  background job, so nothing could be more important than anything else and the eye had nowhere
+  to land. These four steps are the whole hierarchy: a page has one h1, a section has an h2, a
+  thing inside a section has an h3, and everything else is body or a caption. Nothing is styled
+  ad hoc.
+*/
+@layer base {
+  h1 { @apply text-3xl font-bold tracking-tight text-ink; }
+  h2 { @apply text-lg font-semibold text-ink; }
+  h3 { @apply text-sm font-semibold text-ink; }
+}
+
 @layer components {
-  .btn { @apply inline-flex items-center gap-2 rounded-md border border-line bg-surface px-3 py-1.5 text-sm font-medium text-ink hover:bg-ground focus:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50; }
-  .btn-primary { @apply border-accent bg-accent text-white hover:bg-[#0b5a4b]; }
+  /* ── controls ───────────────────────────────────────────────── */
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-md border border-line bg-surface px-3.5 py-2 text-sm font-medium text-ink transition-colors hover:border-ink-3 hover:bg-ground focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-40; }
+  .btn-primary { @apply border-accent bg-accent text-white hover:border-[#0b5a4b] hover:bg-[#0b5a4b]; }
   .btn-danger { @apply border-crit text-crit hover:bg-crit-soft; }
-  .card { @apply rounded-lg border border-line bg-surface p-5 shadow-[0_1px_2px_rgba(27,42,42,.05)]; }
+  .btn-sm { @apply px-2.5 py-1 text-xs; }
+
+  /* ── surfaces ───────────────────────────────────────────────── */
+  .card { @apply rounded-xl border border-line bg-surface p-5 shadow-[0_1px_2px_rgba(27,42,42,.04)]; }
+  /*
+    A card's header. Title on the left, actions on the right, a hairline under it — so a section
+    reads as a section at a glance rather than as more text in the same column.
+  */
+  .card-head { @apply -mx-5 -mt-5 mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-3.5; }
+  .card-sub { @apply -mt-3 mb-4 text-sm text-ink-2; }
+
+  /* ── form ───────────────────────────────────────────────────── */
   .field { @apply block w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-3 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent; }
   .label { @apply mb-1 block text-xs font-semibold uppercase tracking-wide text-ink-2; }
   .hint { @apply mt-1 text-xs text-ink-3; }
-  .badge { @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold; }
+
+  /* ── status ─────────────────────────────────────────────────── */
+  .badge { @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold whitespace-nowrap; }
   .badge-ok { @apply bg-accent-soft text-accent; }
   .badge-warn { @apply bg-warn-soft text-warn; }
   .badge-crit { @apply bg-crit-soft text-crit; }
   .badge-muted { @apply bg-ground text-ink-2; }
+
+  /* ── tables ─────────────────────────────────────────────────── */
   .table { @apply w-full border-collapse text-sm; }
-  .table th { @apply border-b border-line bg-ground px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-ink-2; }
-  .table td { @apply border-b border-line px-3 py-2 align-top; }
-  .table tr:last-child td { @apply border-b-0; }
+  .table th { @apply border-b border-line px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-3; }
+  .table td { @apply border-b border-line px-3 py-2.5 align-middle; }
+  .table tbody tr:last-child td { @apply border-b-0; }
+  .table tbody tr { @apply transition-colors hover:bg-ground/70; }
+  .table .num { @apply text-right tabular-nums; }
+
+  /*
+    A list where each item is one thing needing attention. Rows rather than cards, because ten
+    cards is a scroll and ten rows is a glance, and the hover makes it obvious the whole row is
+    the target rather than the four-word link inside it.
+  */
+  .rows { @apply divide-y divide-line; }
+  .row { @apply -mx-5 flex flex-wrap items-start justify-between gap-3 px-5 py-3 transition-colors hover:bg-ground/70; }
+  .row-title { @apply text-sm font-medium text-ink; }
+  .row-why { @apply mt-0.5 text-xs leading-relaxed text-ink-2; }
 }
 
 @page {

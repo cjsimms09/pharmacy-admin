@@ -6,6 +6,8 @@ import { requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { attest, answerObligation } from "@/lib/compliance-status";
 import { periodLabel } from "@/lib/periods";
+import { assignTraining, sendOutstanding } from "@/lib/training-assignments";
+import type { TrainingType } from "@/db/schema";
 
 /**
  * The two compliance actions, in one place.
@@ -69,5 +71,57 @@ export async function answerAction(fd: FormData) {
   } catch (e) {
     if (e && typeof e === "object" && "digest" in e) throw e;
     redirect(`${back}?error=` + encodeURIComponent(e instanceof Error ? e.message : "Could not record that."));
+  }
+}
+
+/**
+ * Sends, or re-sends, one person's training from wherever they are being looked at.
+ *
+ * The point of this living here rather than only on the training screen is that the grid which
+ * shows the gap should be the thing that closes it. Being sent to another page to act on
+ * something already on screen is the friction that turns a thirty-second job into one that waits
+ * a fortnight — which is why the same gaps kept reappearing week after week.
+ *
+ * Re-sending is deliberately the same call. It reuses the assignment that already exists, so the
+ * person's link and reply code do not change, nothing they have already done is reset, and a
+ * follow-up is genuinely a follow-up rather than a second thing to do.
+ */
+export async function sendTrainingAction(fd: FormData) {
+  const u = await requireManager();
+  const back = backTo(fd);
+  const personId = String(fd.get("personId") ?? "");
+  const type = String(fd.get("trainingType") ?? "") as TrainingType;
+  const followUp = String(fd.get("followUp") ?? "") === "1";
+  try {
+    if (followUp) {
+      const r = await sendOutstanding([personId]);
+      await audit({ action: "training.followup", userId: u.id, userName: u.name, details: `${personId} ${type}` });
+      revalidatePath("/");
+      revalidatePath("/compliance/training");
+      redirect(
+        `${back}?${r.problems.length ? "error" : "ok"}=` +
+          encodeURIComponent(
+            r.emailed > 0
+              ? `Follow-up sent — one email covering everything they still owe. ${r.problems.join(" ")}`.trim()
+              : r.problems.join(" ") || "Nothing outstanding to follow up on.",
+          ),
+      );
+    }
+    const r = await assignTraining([personId], type, {}, u);
+    await audit({ action: "training.assign", userId: u.id, userName: u.name, details: `${type} to ${personId}` });
+    revalidatePath("/");
+    revalidatePath("/compliance/training");
+    revalidatePath(`/staff/${personId}`);
+    redirect(
+      `${back}?${r.problems.length ? "error" : "ok"}=` +
+        encodeURIComponent(
+          r.emailed > 0
+            ? `Sent. They get one email covering everything they owe, with the course attached. ${r.problems.join(" ")}`.trim()
+            : r.problems.join(" ") || "Assigned, but nothing could be emailed.",
+        ),
+    );
+  } catch (e) {
+    if (e && typeof e === "object" && "digest" in e) throw e;
+    redirect(`${back}?error=` + encodeURIComponent(e instanceof Error ? e.message : "Could not send that."));
   }
 }

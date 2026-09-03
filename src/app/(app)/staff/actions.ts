@@ -89,6 +89,13 @@ const personSchema = z.object({
   email: z.string().trim().email().optional().or(z.literal("")).transform((v) => (v ? v : null)),
   mobile: optText(40),
   active: bool,
+  // Employed, or here for a fixed spell. A rotation carries its own window; outside it the
+  // person is retained but not chased, which is the only way a five-week student can be tracked
+  // properly without permanently occupying the dashboard.
+  engagement: z.enum(["staff", "rotation"]).default("staff"),
+  affiliation: optText(200),
+  startsOn: optDate,
+  endsOn: optDate,
   hiredOn: optDate,
   endedOn: optDate,
   notes: optText(2000),

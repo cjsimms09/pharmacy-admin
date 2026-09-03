@@ -1,8 +1,10 @@
 import "server-only";
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
+import { onSiteToday } from "./roster";
 import { todayIso, daysBetween } from "./dates";
 import { addMonths, TRAINING_CADENCE } from "./due";
+import { TRAINING_SHORT } from "./labels";
 import type { CredentialType, TrainingType } from "@/db/schema";
 
 /**
@@ -27,6 +29,22 @@ export type Cell = {
   label: string;
   /** The whole story, on hover. */
   title: string;
+  /**
+   * For a training column: what can be done about it from right here.
+   *
+   * The grid is where the gap is seen, so the grid is where it should be closed. Sending someone
+   * to another screen to act on something they are already looking at is the friction that turns
+   * a thirty-second job into one that waits a fortnight — and it is why the same gaps kept
+   * reappearing week after week.
+   */
+  action?: {
+    trainingType: TrainingType;
+    personId: string;
+    /** Set once a link has gone out and is still outstanding. */
+    sentOn: string | null;
+    reminders: number;
+    sendError: string | null;
+  };
 };
 
 export type MatrixColumn = {
@@ -62,19 +80,19 @@ const SOON_CREDENTIAL = 60;
 const SOON_TRAINING = 30;
 
 const CREDENTIAL_COLUMNS: { key: string; type: CredentialType; short: string; label: string; immunizersOnly?: boolean }[] = [
-  { key: "license", type: "pharmacist_license", short: "License", label: "Kansas license or registration" },
+  { key: "license", type: "pharmacist_license", short: "Licence", label: "Kansas licence or registration" },
   { key: "cpr", type: "cpr", short: "CPR", label: "CPR certification", immunizersOnly: true },
-  { key: "imm_training", type: "immunization_training", short: "Imm. training", label: "Immunization training", immunizersOnly: true },
+  { key: "imm_training", type: "immunization_training", short: "Imm trng", label: "Immunization training", immunizersOnly: true },
   { key: "imm_protocol", type: "immunization_protocol", short: "Protocol", label: "Signed immunization protocol", immunizersOnly: true },
 ];
 
 const TRAINING_COLUMNS: { key: string; type: TrainingType; short: string }[] = [
-  { key: "hipaa", type: "hipaa_privacy_security", short: "HIPAA" },
-  { key: "fwa", type: "fwa_general_compliance", short: "FWA" },
-  { key: "bbp", type: "osha_bloodborne", short: "Bloodborne" },
-  { key: "hazcom", type: "osha_hazard_communication", short: "HazCom" },
-  { key: "diversion", type: "controlled_substance_diversion", short: "Diversion" },
-  { key: "cqi", type: "cqi_program_review", short: "CQI program" },
+  { key: "hipaa", type: "hipaa_privacy_security", short: TRAINING_SHORT.hipaa_privacy_security },
+  { key: "fwa", type: "fwa_general_compliance", short: TRAINING_SHORT.fwa_general_compliance },
+  { key: "bbp", type: "osha_bloodborne", short: TRAINING_SHORT.osha_bloodborne },
+  { key: "hazcom", type: "osha_hazard_communication", short: TRAINING_SHORT.osha_hazard_communication },
+  { key: "diversion", type: "controlled_substance_diversion", short: TRAINING_SHORT.controlled_substance_diversion },
+  { key: "cqi", type: "cqi_program_review", short: TRAINING_SHORT.cqi_program_review },
 ];
 
 export function matrixColumns(): MatrixColumn[] {
@@ -103,11 +121,13 @@ function dated(iso: string | null, soonDays: number, what: string): Cell {
 }
 
 export async function staffMatrix(): Promise<StaffMatrix> {
-  const [people, creds, trainings] = await Promise.all([
-    db.query.people.findMany({ where: eq(schema.people.active, true), orderBy: (p, { asc }) => [asc(p.lastName)] }),
+  const [people, creds, trainings, assignments] = await Promise.all([
+    onSiteToday(),
     db.query.credentials.findMany(),
     db.query.trainings.findMany(),
+    db.query.trainingAssignments.findMany(),
   ]);
+  const open = assignments.filter((a) => !a.completedAt);
 
   const columns = matrixColumns();
   const rows: MatrixRow[] = people.map((p) => {
@@ -151,17 +171,42 @@ export async function staffMatrix(): Promise<StaffMatrix> {
         .filter((t) => t.personId === p.id && t.type === col.type)
         .sort((a, b) => b.completedOn.localeCompare(a.completedOn))[0];
 
+      const sent = open.find((a) => a.personId === p.id && a.type === col.type);
+      const action = {
+        trainingType: col.type,
+        personId: p.id,
+        sentOn: sent?.sentAt?.slice(0, 10) ?? null,
+        reminders: sent?.remindersSent ?? 0,
+        sendError: sent?.sendError ?? null,
+      };
+
       if (!last) {
-        cells[col.key] = { state: "missing", label: "never", title: `${p.firstName} has never completed ${col.short}.` };
+        cells[col.key] = {
+          state: "missing",
+          label: "never",
+          title: `${p.firstName} has never completed ${col.short}.`,
+          action,
+        };
         continue;
       }
       const due = last.expiresOn ?? (cadence ? addMonths(last.completedOn, cadence.months) : null);
       if (!due) {
-        cells[col.key] = { state: "ok", label: last.completedOn.slice(2, 7), title: `Completed ${last.completedOn}. This one does not repeat.` };
+        cells[col.key] = {
+          state: "ok",
+          label: last.completedOn.slice(2, 7),
+          title: `Completed ${last.completedOn}. This one does not repeat.`,
+        };
         continue;
       }
       const cell = dated(due, SOON_TRAINING, col.short);
-      cells[col.key] = { ...cell, title: `${cell.title} Last completed ${last.completedOn}.` };
+      cells[col.key] = {
+        ...cell,
+        title: `${cell.title} Last completed ${last.completedOn}.`,
+        // Only offer to send it where there is something to send. A current training does not
+        // need a button, and a row of buttons that mostly do nothing is how a row of buttons
+        // stops being read.
+        action: cell.state === "ok" ? undefined : action,
+      };
     }
 
     const gaps = columns.filter((c) => cells[c.key].state === "missing" || cells[c.key].state === "late").length;

@@ -12,6 +12,10 @@ type Person = {
   email: string | null;
   mobile: string | null;
   active: boolean;
+  engagement: string;
+  affiliation: string | null;
+  startsOn: string | null;
+  endsOn: string | null;
   hiredOn: string | null;
   endedOn: string | null;
   notes: string | null;
@@ -34,6 +38,24 @@ export function PersonForm({ action, person, submitLabel }: { action: (fd: FormD
         <input name="email" type="email" inputMode="email" className="field" defaultValue={person?.email ?? ""} placeholder="name@example.com" />
       </Field>
       <Field label="Mobile (optional)"><input name="mobile" type="tel" inputMode="tel" className="field" defaultValue={person?.mobile ?? ""} /></Field>
+      <Field
+        label="Here as"
+        hint="A rotation student is chased only while they are on site, and their file is kept afterwards."
+      >
+        <select name="engagement" className="field" defaultValue={person?.engagement ?? "staff"}>
+          <option value="staff">Employed staff</option>
+          <option value="rotation">Student or rotation — here for a fixed spell</option>
+        </select>
+      </Field>
+      <Field label="Here from (school or employer)" hint="e.g. KU School of Pharmacy. Only for rotations.">
+        <input name="affiliation" className="field" defaultValue={person?.affiliation ?? ""} placeholder="KU School of Pharmacy" />
+      </Field>
+      <Field label="Rotation starts" hint="They appear on the compliance screens from this date.">
+        <input name="startsOn" type="date" className="field" defaultValue={person?.startsOn ?? ""} />
+      </Field>
+      <Field label="Rotation ends" hint="After this date they stop being chased, and everything on file is kept.">
+        <input name="endsOn" type="date" className="field" defaultValue={person?.endsOn ?? ""} />
+      </Field>
       <Field label="Hired on"><input name="hiredOn" type="date" className="field" defaultValue={person?.hiredOn ?? ""} /></Field>
       <Field label="Employment ended on" hint="Notify the Board within 30 days of any change (K.A.R. 68-7-25)">
         <input name="endedOn" type="date" className="field" defaultValue={person?.endedOn ?? ""} />

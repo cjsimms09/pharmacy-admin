@@ -35,7 +35,9 @@ describe("the due list respects it", () => {
 
   test("the check comes before the missing-date warning, not after", () => {
     // The other order would flag it and then skip it, which is no better than not skipping.
-    assert.ok(due.indexOf("held.noExpiry") < due.indexOf("no expiry recorded"));
+    // Anchored on the branch that records a missing date rather than on its wording, so
+    // rephrasing the message cannot quietly turn this into a test of nothing.
+    assert.ok(due.indexOf("held.noExpiry") < due.indexOf("undated.set("));
   });
 
   test("the warning tells you both ways out of it", () => {
