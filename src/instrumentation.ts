@@ -1,6 +1,12 @@
 /**
- * Runs once when the server starts. Schedules the automatic mailbox check so reports arrive
- * without anyone clicking anything. Only active in the Node.js runtime of a running server.
+ * Runs once when the server starts.
+ *
+ * Two recurring jobs: the mailbox check, so reports arrive without anyone clicking anything, and
+ * the daily backup. Both are wrapped so a failure records itself and never takes the app down —
+ * a pharmacy that cannot open its compliance records because a mail server was unreachable would
+ * be a worse outcome than either job missing a turn.
+ *
+ * Only active in the Node.js runtime of a running server.
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
@@ -21,8 +27,38 @@ export async function register() {
     }
   };
 
+  /**
+   * Backs up at most once a day.
+   *
+   * Checked on the same half-hourly beat rather than scheduled for a fixed hour, because this
+   * runs on a pharmacy computer that is switched off overnight — a 2am job would simply never
+   * happen. Instead it takes one whenever a day has passed since the last, which on a machine
+   * used every day means shortly after it is turned on.
+   */
+  const backupTick = async () => {
+    try {
+      const { getSettings } = await import("./lib/settings");
+      const s = await getSettings();
+      if (s.backup_enabled !== "yes") return;
+
+      const last = s.backup_last_run ? Date.parse(s.backup_last_run) : 0;
+      if (Number.isFinite(last) && Date.now() - last < 20 * 60 * 60 * 1000) return;
+
+      const { runBackup, backupStatus, pruneBackups } = await import("./lib/backup");
+      const status = await backupStatus();
+      const r = await runBackup(status.destination);
+      if (r.ok) await pruneBackups(status.destination, status.keepCount);
+    } catch {
+      // The outcome is recorded in settings and shown on the backups page.
+    }
+  };
+
   setTimeout(() => {
     void tick();
-    setInterval(() => void tick(), EVERY_MS).unref?.();
+    void backupTick();
+    setInterval(() => {
+      void tick();
+      void backupTick();
+    }, EVERY_MS).unref?.();
   }, START_DELAY_MS).unref?.();
 }

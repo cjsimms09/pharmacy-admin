@@ -30,6 +30,11 @@ export const SETTING_KEYS = [
   "mail_allowed_senders", // one per line
   "mail_auto_import", // "yes" | "no" — load recognised reports rather than only filing them
   "mail_supplier_rules", // one per line: a sender or subject fragment, then "=", then a supplier name
+  "backup_destination",
+  "backup_enabled", // "yes" | "no"
+  "backup_keep", // how many archives to keep
+  "backup_last_run",
+  "backup_last_result",
   "mail_last_sweep",
   "mail_last_result",
   // ── Medicare Transaction Facilitator (MTF) ──

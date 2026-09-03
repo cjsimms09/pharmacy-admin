@@ -1,0 +1,280 @@
+import "server-only";
+import fs from "node:fs/promises";
+import path from "node:path";
+import os from "node:os";
+import { createClient } from "@libsql/client";
+import { db, schema } from "@/db";
+import { createZip } from "./zip";
+import { unzip } from "./xlsx";
+import { sha256 } from "./crypto";
+import { getSettings, setSetting } from "./settings";
+
+/**
+ * Backups.
+ *
+ * Everything else in this application is worthless if the machine it runs on dies, so this is
+ * held to a different standard than the rest. Four rules shape it.
+ *
+ * A backup is not a backup until it has been read back. Copying a file that is being written to
+ * produces an archive that looks fine and restores to nothing, so the database is copied with
+ * SQLite's own VACUUM INTO — which takes a consistent snapshot of a live database — and the
+ * finished archive is then re-opened, its tables counted, and the counts compared against the
+ * source. An archive that fails that check is deleted rather than kept, because a bad backup
+ * sitting next to good ones is worse than no backup: it is the one you will reach for.
+ *
+ * A backup on the same disk dies with the disk. The destination is a folder the pharmacy
+ * chooses, and the page says plainly that a folder on the same machine is not enough.
+ *
+ * A backup readable only by this application is a hostage. The archive is an ordinary ZIP
+ * containing an ordinary SQLite file, both openable by anything.
+ *
+ * And the encryption key is deliberately NOT in the archive. If it were, the backup would carry
+ * both the locked box and its key, and every copy of it — on a USB stick, in a cloud folder —
+ * would be a complete set of credentials. It is shown once, on screen, to be written down and
+ * kept somewhere else.
+ */
+
+const dataDir = () => path.dirname(path.resolve(process.env.DATABASE_PATH ?? "./data/pharmacy-admin.db"));
+const dbPath = () => path.resolve(process.env.DATABASE_PATH ?? "./data/pharmacy-admin.db");
+const filesDir = () => path.join(dataDir(), "files");
+
+export type BackupResult = {
+  ok: boolean;
+  file: string;
+  sizeBytes: number;
+  documents: number;
+  tables: number;
+  rows: number;
+  verified: boolean;
+  message: string;
+};
+
+/** Every file under a directory, as archive-relative paths. */
+async function walk(dir: string, base = dir): Promise<{ name: string; full: string }[]> {
+  let entries: import("node:fs").Dirent[];
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const out: { name: string; full: string }[] = [];
+  for (const e of entries) {
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) out.push(...(await walk(full, base)));
+    else out.push({ name: path.relative(base, full).split(path.sep).join("/"), full });
+  }
+  return out;
+}
+
+/** Row counts per table, which is what verification compares. */
+async function tableCounts(url: string): Promise<Record<string, number>> {
+  const c = createClient({ url });
+  try {
+    const t = await c.execute("select name from sqlite_master where type='table' and name not like 'sqlite_%'");
+    const out: Record<string, number> = {};
+    for (const row of t.rows) {
+      const name = String(row.name);
+      const n = await c.execute(`select count(*) as n from "${name}"`);
+      out[name] = Number(n.rows[0].n);
+    }
+    return out;
+  } finally {
+    c.close();
+  }
+}
+
+/**
+ * Takes a backup and proves it before returning.
+ *
+ * The database snapshot goes through VACUUM INTO rather than a file copy: the app may be
+ * mid-write, and a copied SQLite file caught mid-transaction restores to a corrupt database that
+ * gives no warning until the day it is needed.
+ */
+export async function runBackup(destination: string): Promise<BackupResult> {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const fileName = `pharmacy-admin-backup-${stamp}.zip`;
+  const dest = path.resolve(destination);
+  await fs.mkdir(dest, { recursive: true });
+
+  const tmp = path.join(os.tmpdir(), `pa-snapshot-${stamp}.db`);
+  await fs.rm(tmp, { force: true });
+
+  const live = createClient({ url: `file:${dbPath()}` });
+  try {
+    // SQLite's own consistent snapshot of a database that may be being written to.
+    await live.execute(`VACUUM INTO '${tmp.replace(/'/g, "''")}'`);
+  } finally {
+    live.close();
+  }
+
+  const sourceCounts = await tableCounts(`file:${dbPath()}`);
+  const snapshot = await fs.readFile(tmp);
+
+  const docs = await walk(filesDir());
+  const files: { name: string; data: Buffer }[] = [
+    { name: "pharmacy-admin.db", data: snapshot },
+  ];
+  for (const d of docs) files.push({ name: `files/${d.name}`, data: await fs.readFile(d.full) });
+
+  const manifest = {
+    takenAt: new Date().toISOString(),
+    application: "Pharmacy Admin Desk",
+    databaseSha256: sha256(snapshot),
+    documents: docs.length,
+    tables: Object.keys(sourceCounts).length,
+    rows: Object.values(sourceCounts).reduce((a, b) => a + b, 0),
+    counts: sourceCounts,
+    restore:
+      "This is an ordinary ZIP file. To restore: stop the application, replace data/pharmacy-admin.db " +
+      "with pharmacy-admin.db from this archive, replace the data/files folder with the files folder " +
+      "from this archive, then start the application. The APP_ENCRYPTION_KEY from the .env file is NOT " +
+      "in this archive and must be restored separately, or the stored API keys and mail password will " +
+      "not be readable.",
+  };
+  files.push({ name: "MANIFEST.json", data: Buffer.from(JSON.stringify(manifest, null, 2)) });
+  files.push({ name: "HOW-TO-RESTORE.txt", data: Buffer.from(restoreInstructions(manifest)) });
+
+  const archive = createZip(files);
+  const outPath = path.join(dest, fileName);
+  await fs.writeFile(outPath, archive);
+
+  // ── Verify ──────────────────────────────────────────────────────
+  // Read the archive back off disk — not the buffer still in memory, which would prove nothing
+  // about what was actually written — open the database inside it, and compare the counts.
+  let verified = false;
+  let message = "";
+  const check = path.join(os.tmpdir(), `pa-verify-${stamp}.db`);
+  try {
+    const readBack = unzip(await fs.readFile(outPath));
+    const inner = readBack.get("pharmacy-admin.db");
+    if (!inner) throw new Error("the database is not in the archive");
+    if (sha256(inner) !== manifest.databaseSha256) throw new Error("the database in the archive does not match what was snapshotted");
+    await fs.writeFile(check, inner);
+    const restored = await tableCounts(`file:${check}`);
+
+    const differences = Object.entries(sourceCounts).filter(([t, n]) => restored[t] !== n);
+    if (differences.length > 0) throw new Error(`row counts differ on ${differences.map(([t]) => t).join(", ")}`);
+
+    const missingDocs = docs.filter((d) => !readBack.has(`files/${d.name}`));
+    if (missingDocs.length > 0) throw new Error(`${missingDocs.length} uploaded file(s) missing from the archive`);
+
+    verified = true;
+    message = `Backed up and verified: ${manifest.tables} tables, ${manifest.rows.toLocaleString()} rows, ${docs.length} uploaded file${docs.length === 1 ? "" : "s"}.`;
+  } catch (e) {
+    // A backup that cannot be read back is deleted. One that sits alongside good ones is worse
+    // than none, because it is the one that gets reached for.
+    await fs.rm(outPath, { force: true });
+    message = `Backup failed verification and was deleted: ${e instanceof Error ? e.message : String(e)}`;
+  } finally {
+    await fs.rm(tmp, { force: true });
+    await fs.rm(check, { force: true });
+  }
+
+  await setSetting("backup_last_run", new Date().toISOString());
+  await setSetting("backup_last_result", message);
+
+  return {
+    ok: verified,
+    file: verified ? outPath : "",
+    sizeBytes: archive.length,
+    documents: docs.length,
+    tables: manifest.tables,
+    rows: manifest.rows,
+    verified,
+    message,
+  };
+}
+
+function restoreInstructions(m: { takenAt: string; documents: number; rows: number }): string {
+  return [
+    "RESTORING THIS BACKUP",
+    "=====================",
+    "",
+    `Taken: ${m.takenAt}`,
+    `Contains: the full database (${m.rows.toLocaleString()} rows) and ${m.documents} uploaded file(s).`,
+    "",
+    "This is an ordinary ZIP file. You do not need the Pharmacy Admin application to open it,",
+    "and the database inside is an ordinary SQLite file that many free tools can read.",
+    "",
+    "TO RESTORE",
+    "----------",
+    "1. Close the Pharmacy Admin application completely.",
+    "2. Find the application's data folder. It contains pharmacy-admin.db and a files folder.",
+    "3. Rename the existing data folder to data-old, so nothing is lost if the restore is wrong.",
+    "4. Create a new empty data folder.",
+    "5. From this archive, copy pharmacy-admin.db into it.",
+    "6. From this archive, copy the whole files folder into it.",
+    "7. Start the application.",
+    "",
+    "THE ENCRYPTION KEY",
+    "------------------",
+    "The API keys and mail password stored in the application are encrypted with a key kept in",
+    "the .env file, called APP_ENCRYPTION_KEY. That key is deliberately NOT in this archive: if",
+    "it were, anyone holding this file would have both the locked box and its key.",
+    "",
+    "If you are restoring onto the same machine, the key is already in place and nothing more is",
+    "needed. If you are restoring onto a new machine, put the saved APP_ENCRYPTION_KEY into the",
+    ".env file first. Without it everything still works, but the stored API keys and mail",
+    "password have to be entered again.",
+    "",
+    "WHAT IS IN HERE",
+    "---------------",
+    "Patient-identifying information is not stored by this application, but the database does",
+    "contain staff records, prescription numbers and business information. Treat this file as",
+    "confidential.",
+  ].join("\n");
+}
+
+export type BackupStatus = {
+  destination: string;
+  lastRun: string | null;
+  lastResult: string | null;
+  enabled: boolean;
+  keepCount: number;
+  onSameDisk: boolean;
+  existing: { name: string; sizeBytes: number; takenAt: string }[];
+};
+
+export async function backupStatus(): Promise<BackupStatus> {
+  const s = await getSettings();
+  const destination = s.backup_destination?.trim() || path.join(dataDir(), "backups");
+  let existing: BackupStatus["existing"] = [];
+  try {
+    const names = (await fs.readdir(destination)).filter((n) => /^pharmacy-admin-backup-.*\.zip$/.test(n)).sort().reverse();
+    existing = await Promise.all(
+      names.map(async (name) => {
+        const st = await fs.stat(path.join(destination, name));
+        return { name, sizeBytes: st.size, takenAt: st.mtime.toISOString() };
+      }),
+    );
+  } catch {
+    existing = [];
+  }
+  return {
+    destination,
+    lastRun: s.backup_last_run || null,
+    lastResult: s.backup_last_result || null,
+    enabled: s.backup_enabled === "yes",
+    keepCount: Number(s.backup_keep) || 14,
+    // A destination inside the application's own data folder shares the disk it is protecting against.
+    onSameDisk: path.resolve(destination).startsWith(path.resolve(dataDir())),
+    existing,
+  };
+}
+
+/** Deletes the oldest archives beyond the number to keep. Never touches anything else. */
+export async function pruneBackups(destination: string, keep: number): Promise<number> {
+  const names = (await fs.readdir(destination).catch(() => []))
+    .filter((n) => /^pharmacy-admin-backup-.*\.zip$/.test(n))
+    .sort()
+    .reverse();
+  const doomed = names.slice(Math.max(1, keep));
+  for (const n of doomed) await fs.rm(path.join(destination, n), { force: true });
+  return doomed.length;
+}
+
+/** The key that must be kept somewhere other than the backup. */
+export function encryptionKey(): string | null {
+  const raw = process.env.APP_ENCRYPTION_KEY;
+  return raw && !raw.startsWith("EXAMPLE") ? raw : null;
+}
