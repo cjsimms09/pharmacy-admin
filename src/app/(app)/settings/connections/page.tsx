@@ -29,9 +29,10 @@ export default async function ConnectionsPage({ searchParams }: { searchParams: 
     }
 
     const secret = String(fd.get("secret") ?? "").trim();
-    if (secret) {
+    const secret2 = String(fd.get("secret2") ?? "").trim();
+    if (secret || secret2) {
       try {
-        await saveSecret(id, secret);
+        await saveSecret(id, secret, secret2);
       } catch (e) {
         redirect("/settings/connections?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not store that."));
       }
@@ -70,10 +71,14 @@ export default async function ConnectionsPage({ searchParams }: { searchParams: 
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <h2 className="text-base font-semibold">{c.name}</h2>
               <span className="text-xs">
-                {c.hint ? (
-                  <span className="rounded bg-emerald-50 px-2 py-0.5 text-emerald-800">Key stored · {c.hint}</span>
+                {c.hint && (!c.secondSecretKey || c.secondHint) ? (
+                  <span className="rounded bg-emerald-50 px-2 py-0.5 text-emerald-800">
+                    Stored · {c.hint}{c.secondHint ? ` · ${c.secondHint}` : ""}
+                  </span>
+                ) : c.hint || c.secondHint ? (
+                  <span className="rounded bg-amber-50 px-2 py-0.5 text-amber-900">Only half stored — both parts are needed</span>
                 ) : (
-                  <span className="rounded bg-amber-50 px-2 py-0.5 text-amber-900">No key stored</span>
+                  <span className="rounded bg-amber-50 px-2 py-0.5 text-amber-900">Nothing stored</span>
                 )}
               </span>
             </div>
@@ -85,17 +90,32 @@ export default async function ConnectionsPage({ searchParams }: { searchParams: 
             <form action={save} className="mt-3 space-y-3">
               <input type="hidden" name="id" value={c.id} />
               <Field
-                label={c.hint ? "Replace the key" : "API key"}
-                hint={c.hint ? "Leave blank to keep the key already stored." : undefined}
+                label={c.hint ? `Replace the ${(c.secretLabel ?? "key").toLowerCase()}` : (c.secretLabel ?? "API key")}
+                hint={c.hint ? "Leave blank to keep the one already stored." : undefined}
               >
                 <input
                   name="secret"
                   type="password"
                   autoComplete="off"
-                  placeholder={c.hint ? "•••••••• (unchanged)" : "Paste the key"}
+                  placeholder={c.hint ? "•••••••• (unchanged)" : "Paste it here"}
                   className="w-full rounded-md border border-line px-3 py-2 text-sm"
                 />
               </Field>
+
+              {c.secondSecretKey && (
+                <Field
+                  label={c.secondHint ? `Replace the ${(c.secondSecretLabel ?? "secret").toLowerCase()}` : (c.secondSecretLabel ?? "Secret")}
+                  hint={c.secondHint ? "Leave blank to keep the one already stored." : "Both parts are needed."}
+                >
+                  <input
+                    name="secret2"
+                    type="password"
+                    autoComplete="off"
+                    placeholder={c.secondHint ? "•••••••• (unchanged)" : "Paste it here"}
+                    className="w-full rounded-md border border-line px-3 py-2 text-sm"
+                  />
+                </Field>
+              )}
 
               {c.fields.map((f) => (
                 <Field key={f.key} label={f.label} hint={f.hint}>
@@ -112,6 +132,12 @@ export default async function ConnectionsPage({ searchParams }: { searchParams: 
                 <button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Save</button>
               </div>
             </form>
+
+            {c.more && (
+              <p className="mt-3 text-xs">
+                <a href={c.more.href} className="underline">{c.more.label} &rarr;</a>
+              </p>
+            )}
 
             {c.id === "mtf" && (
               <p className="mt-3 text-xs">

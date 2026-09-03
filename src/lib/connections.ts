@@ -12,12 +12,19 @@ import { getSettings, setSetting, type SettingKey } from "./settings";
  */
 
 export type Connection = {
-  id: "anthropic" | "mtf" | "mail";
+  id: "anthropic" | "mtf" | "mail" | "imonnit";
   name: string;
   what: string;
   /** Where the credential is obtained, in words the person fetching it can follow. */
   where: string;
   secretKey: SettingKey;
+  /** Label for the secret, when "API key" is not what the service calls it. */
+  secretLabel?: string;
+  /** Some services issue a pair. iMonnit gives a key ID and a secret, and both are needed. */
+  secondSecretKey?: SettingKey;
+  secondSecretLabel?: string;
+  /** Where the rest of the setup for this service lives, when it is not on this page. */
+  more?: { href: string; label: string };
   /** Plain (non-secret) settings that belong with it. */
   fields: { key: SettingKey; label: string; hint?: string; placeholder?: string }[];
   /** Rejects an obviously wrong paste before it is stored. */
@@ -33,6 +40,24 @@ export const CONNECTIONS: Connection[] = [
     secretKey: "anthropic_api_key_enc",
     fields: [{ key: "ai_model", label: "Model", placeholder: "claude-opus-5" }],
     validate: (v) => (v.startsWith("sk-ant-") && v.length >= 30 ? null : "Anthropic keys start with sk-ant-."),
+  },
+  {
+    id: "imonnit",
+    name: "iMonnit temperature sensors",
+    what:
+      "Pulls refrigerator and freezer readings so a month can be printed, explained and signed here rather than in " +
+      "the vendor's portal.",
+    where:
+      "In iMonnit, under your account settings, generate an API key. It comes as two parts — a key ID and a secret " +
+      "— and both are needed.",
+    secretKey: "imonnit_key_id_enc",
+    secretLabel: "API Key ID",
+    secondSecretKey: "imonnit_secret_enc",
+    secondSecretLabel: "API Secret Key",
+    fields: [
+      { key: "imonnit_base_url", label: "Address", hint: "Leave blank unless Monnit have told you otherwise.", placeholder: "https://www.imonnit.com/json" },
+    ],
+    more: { href: "/temps", label: "Choose which sensors to log" },
   },
   {
     id: "mtf",
@@ -55,10 +80,13 @@ export const CONNECTIONS: Connection[] = [
 export async function connectionState() {
   const s = await getSettings();
   // The MTF key belongs to the reimbursement work; no reason to show it while that is off.
+  // MTF belongs to the reimbursement work and hides with it. Everything else is compliance and
+  // stays: a key you cannot find a home for is a key that ends up in a text file.
   const shown = s.feature_reimbursement === "yes" ? CONNECTIONS : CONNECTIONS.filter((c) => c.id !== "mtf");
   return shown.map((c) => ({
     ...c,
     hint: hintFor(s[c.secretKey]),
+    secondHint: c.secondSecretKey ? hintFor(s[c.secondSecretKey]) : null,
     values: Object.fromEntries(c.fields.map((f) => [f.key, s[f.key] ?? ""])) as Record<string, string>,
   }));
 }
@@ -74,11 +102,27 @@ function hintFor(stored: string | undefined): string | null {
   }
 }
 
-export async function saveSecret(id: Connection["id"], value: string): Promise<void> {
+export async function saveSecret(id: Connection["id"], value: string, second?: string): Promise<void> {
   const c = CONNECTIONS.find((x) => x.id === id);
   if (!c) throw new Error(`Unknown connection ${id}`);
   const v = value.trim();
-  if (!v) throw new Error("Nothing to save.");
+  const v2 = (second ?? "").trim();
+
+  // A paired credential is only useful whole. Storing half of it would leave the service looking
+  // configured and failing on every call, which is the least helpful of the possible states.
+  if (c.secondSecretKey) {
+    const s = await getSettings();
+    const haveFirst = Boolean(s[c.secretKey]);
+    const haveSecond = Boolean(s[c.secondSecretKey]);
+    if ((!v && !haveFirst) || (!v2 && !haveSecond)) {
+      throw new Error(`Both the ${c.secretLabel ?? "key"} and the ${c.secondSecretLabel ?? "secret"} are needed.`);
+    }
+    if (v2) await setSetting(c.secondSecretKey, encryptText(v2));
+    if (!v) return;
+  } else if (!v) {
+    throw new Error("Nothing to save.");
+  }
+
   const bad = c.validate?.(v);
   if (bad) throw new Error(bad);
   await setSetting(c.secretKey, encryptText(v));
@@ -91,6 +135,7 @@ export async function clearSecret(id: Connection["id"]): Promise<void> {
   const c = CONNECTIONS.find((x) => x.id === id);
   if (!c) throw new Error(`Unknown connection ${id}`);
   await setSetting(c.secretKey, "");
+  if (c.secondSecretKey) await setSetting(c.secondSecretKey, "");
   if (id === "mtf") await setSetting("mtf_key_set_on", "");
 }
 
