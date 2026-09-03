@@ -131,7 +131,10 @@ export const CLOSURES: Record<string, Closure> = {
   pic_change_notice: {
     kind: "attest",
     minutes: 15,
-    statement: "On {date} I notified the Kansas Board of Pharmacy of the change of pharmacist-in-charge.",
+    statement:
+      "On {date} I notified the Kansas Board of Pharmacy of the change of pharmacist-in-charge, within the period " +
+      "the Board allows. The outgoing and incoming pharmacists-in-charge were named, a controlled substance " +
+      "inventory was taken at the change, and the pharmacy registration record now shows the correct person.",
   },
   part_d_attestation: {
     kind: "evidence",
@@ -430,36 +433,72 @@ export function nextDueAfter(cadence: ObligationCadence, completedOn: string, fi
 }
 
 /** Creates any seeded obligation that isn't on file yet. Safe to call on every page load. */
+/**
+ * Creates any duty the pharmacy does not yet have, and brings the ones it does have up to date.
+ *
+ * The second half matters as much as the first, and its absence was a real bug: a pharmacy that
+ * started using the site before attestation wording existed had duties with no wording, and the
+ * confirm button simply did not appear. There was no way to tell from the screen — the duty was
+ * listed, it just could not be closed.
+ *
+ * So every seeded row is refreshed against the current definition on each run: how it is closed,
+ * what it says, what is recorded when it is attested. Nothing about the pharmacy's own history is
+ * touched — completions, due dates, and whether it has been switched off all stay exactly as
+ * they are. Only the definition catches up.
+ */
 export async function ensureObligations() {
   const existing = await db.query.obligations.findMany();
-  const have = new Set(existing.map((o) => o.seedKey).filter(Boolean));
-  const missing = OBLIGATION_SEEDS.filter((s) => !have.has(s.key));
-  if (missing.length === 0) return { created: 0 };
+  const bySeed = new Map(existing.map((o) => [o.seedKey, o]).filter(([k]) => k) as [string, typeof existing[number]][]);
   const today = todayIso();
-  for (const seed of missing) {
-    const dueOn =
-      seed.cadence === "as_needed"
-        ? null
-        : seed.fixedDate
-          ? firstFixedDue(today, seed.fixedDate)
-          : addDays(today, seed.firstDueInDays ?? 30);
+  let created = 0;
+  let refreshed = 0;
+
+  for (const seed of OBLIGATION_SEEDS) {
     const c = CLOSURES[seed.key] ?? { kind: "attest" as const };
-    await db.insert(schema.obligations).values({
-      id: newId(),
-      seedKey: seed.key,
+    const current = bySeed.get(seed.key);
+
+    if (!current) {
+      const dueOn =
+        seed.cadence === "as_needed"
+          ? null
+          : seed.fixedDate
+            ? firstFixedDue(today, seed.fixedDate)
+            : addDays(today, seed.firstDueInDays ?? 30);
+      await db.insert(schema.obligations).values({
+        id: newId(),
+        seedKey: seed.key,
+        title: seed.title,
+        detail: seed.detail,
+        citation: seed.citation,
+        cadence: seed.cadence,
+        kind: c.kind,
+        expectedPerPeriod: c.perPeriod ?? 1,
+        attestationTemplate: c.statement ?? null,
+        witnessSource: c.witness ?? null,
+        dueOn,
+        needsConfirmation: seed.needsConfirmation ?? false,
+      });
+      created++;
+      continue;
+    }
+
+    const wanted = {
       title: seed.title,
-      detail: seed.detail,
-      citation: seed.citation,
+      detail: seed.detail ?? null,
+      citation: seed.citation ?? null,
       cadence: seed.cadence,
       kind: c.kind,
       expectedPerPeriod: c.perPeriod ?? 1,
       attestationTemplate: c.statement ?? null,
       witnessSource: c.witness ?? null,
-      dueOn,
-      needsConfirmation: seed.needsConfirmation ?? false,
-    });
+    };
+    const stale = (Object.keys(wanted) as (keyof typeof wanted)[]).some((k) => current[k] !== wanted[k]);
+    if (!stale) continue;
+
+    await db.update(schema.obligations).set({ ...wanted, updatedAt: new Date().toISOString() }).where(eq(schema.obligations.id, current.id));
+    refreshed++;
   }
-  return { created: missing.length };
+  return { created, refreshed };
 }
 
 function firstFixedDue(today: string, fixed: { month: number; day: number }): string {
