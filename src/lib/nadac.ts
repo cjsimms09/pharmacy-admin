@@ -147,6 +147,40 @@ export async function loadNadacFiles(): Promise<LoadReport[]> {
   return reports;
 }
 
+/**
+ * How many of our own claims could actually be priced against what is loaded.
+ *
+ * Coverage in the abstract is not the useful number — a file with 30,000 NDCs is meaningless if
+ * it misses the twelve we dispensed. This counts the claims we hold that have a NADAC in force
+ * on their own fill date, which is the only figure that says whether the floor can be applied.
+ */
+export async function nadacClaimCoverage() {
+  const claims = await db.query.claims.findMany({
+    columns: { id: true, ndc11: true, dateFilled: true, itemName: true, planType: true },
+  });
+  const withNdc = claims.filter((c) => c.ndc11);
+  let priced = 0;
+  const missing = new Map<string, { ndc11: string; itemName: string | null; claims: number }>();
+
+  for (const c of withNdc) {
+    const hit = await priceInForce(c.ndc11!, c.dateFilled);
+    if (hit) {
+      priced++;
+    } else {
+      const e = missing.get(c.ndc11!) ?? { ndc11: c.ndc11!, itemName: c.itemName, claims: 0 };
+      e.claims++;
+      missing.set(c.ndc11!, e);
+    }
+  }
+  return {
+    claims: claims.length,
+    withNdc: withNdc.length,
+    noNdc: claims.length - withNdc.length,
+    priced,
+    missing: [...missing.values()].sort((a, b) => b.claims - a.claims),
+  };
+}
+
 /** What is loaded, and whether it actually covers the period we need to price. */
 export async function nadacCoverage() {
   const [agg] = await db
