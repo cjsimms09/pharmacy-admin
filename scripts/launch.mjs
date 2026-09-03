@@ -136,6 +136,61 @@ function ensureEnv() {
   log("Created .env with fresh keys. Back up the APP_ENCRYPTION_KEY line (Settings → Backup shows how).");
 }
 
+/**
+ * The folders the pharmacy drops files into. Created here rather than committed, because
+ * everything under data/ is git-ignored on purpose — real documents never reach the repository.
+ * Each gets a short README so the folder explains itself when it is opened in Explorer.
+ */
+function ensureFolders() {
+  const folders = [
+    [
+      "contracts",
+      [
+        "CONTRACTS",
+        "",
+        "Put PBM and payer contract PDFs in here — base agreements, amendments,",
+        "rate exhibits, fee schedules.",
+        "",
+        "Keep download_manifest.csv alongside them if you have one: portals often",
+        "assign useless filenames, and the manifest is what maps them back to the",
+        "real document names.",
+        "",
+        "Nothing in this folder is ever committed to the repository or sent anywhere",
+        "except to Claude for reading, and only when you ask for that.",
+      ],
+    ],
+    [
+      "remits",
+      [
+        "REMITTANCE FILES",
+        "",
+        "Put remittance advice in here — 835 files, payer CSV exports, PDF remits.",
+        "Apollo and MTF remits arrive separately from the rest; they belong here too.",
+        "",
+        "Patient details in these files are dropped as they are read. Only prescription",
+        "numbers, dates, amounts, reason codes and trace numbers are stored.",
+      ],
+    ],
+    [
+      "reference",
+      [
+        "REFERENCE DATA",
+        "",
+        "Put the lookup tables in here — BIN crosswalk, contract index, PBM listing,",
+        "open-claims aging, bank exports.",
+        "",
+        "These are the tables that let a claim be matched to the contract that governs it.",
+      ],
+    ],
+  ];
+  for (const [name, lines] of folders) {
+    const dir = path.join(root, "data", name);
+    fs.mkdirSync(dir, { recursive: true });
+    const readme = path.join(dir, "README.txt");
+    if (!fs.existsSync(readme)) fs.writeFileSync(readme, lines.join("\r\n") + "\r\n");
+  }
+}
+
 function needsBuild() {
   const buildId = path.join(root, ".next", "BUILD_ID");
   if (!fs.existsSync(buildId)) return true;
@@ -204,6 +259,7 @@ function openBrowser() {
 
 async function main() {
   fs.mkdirSync(path.join(root, "data"), { recursive: true });
+  ensureFolders();
   ensureEnv();
   if (!fs.existsSync(path.join(root, "node_modules")) || needsBuild()) build();
   let first = true;
