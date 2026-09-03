@@ -1,4 +1,6 @@
 import "server-only";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { eq } from "drizzle-orm";
@@ -6,6 +8,10 @@ import { db, schema } from "@/db";
 import { getSettings, setSetting } from "./settings";
 import { decryptText, encryptText, newId } from "./crypto";
 import { storeFile, ALLOWED_MIME, MAX_FILE_BYTES } from "./files";
+import { classify, parseSupplierRules, supplierFor } from "./autoroute";
+import { importClaims } from "./claims";
+import { importSupplierCatalog } from "./suppliers";
+import { loadNadacFiles, nadacDir } from "./nadac";
 import { gateFile } from "./phi-gate";
 import { audit } from "./audit";
 
@@ -101,13 +107,13 @@ export function describeMailError(e: unknown): string {
   return msg.split("\n")[0];
 }
 
-export type SweepResult = { stored: number; rejected: number; ignored: number; errors: string[] };
+export type SweepResult = { stored: number; rejected: number; ignored: number; imported: number; errors: string[] };
 
 /** Reads new mail, stores allowed attachments, and records everything it saw. */
 export async function sweepMailbox(ctx: { userId: string | null; userName: string | null }): Promise<SweepResult> {
   const s = await getSettings();
   const allowed = allowedSendersOf(s.mail_allowed_senders);
-  const result: SweepResult = { stored: 0, rejected: 0, ignored: 0, errors: [] };
+  const result: SweepResult = { stored: 0, rejected: 0, ignored: 0, imported: 0, errors: [] };
   let client: ImapFlow | null = null;
   try {
     client = await connect();
@@ -192,6 +198,49 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
               notes: `Received by email from ${from}`,
               uploadedBy: ctx.userId ?? "mailbox-sweep",
             });
+            // ── Auto-import ────────────────────────────────────────
+            // The attachment is filed as a document either way. If it is also recognisable as a
+            // report the site knows how to read, load it now so a scheduled report becomes
+            // usable without anyone opening it. Anything unrecognised, or any failure, leaves
+            // the document exactly as it was — the fallback is the behaviour we already had.
+            let routedAs: string | null = null;
+            let routeResult: string | null = null;
+            if ((s.mail_auto_import ?? "").toLowerCase() === "yes") {
+              const cls = classify(fileName, buf);
+              routedAs = cls.kind;
+              try {
+                if (cls.kind === "claims") {
+                  const r = await importClaims(buf, fileName, ctx.userId ?? "mailbox-sweep");
+                  routeResult = `${r.claimsAdded} claims added, ${r.duplicates} already held, ${r.skipped} skipped`;
+                  result.imported++;
+                } else if (cls.kind === "supplier_catalog") {
+                  const supplier = supplierFor(parseSupplierRules(s.mail_supplier_rules ?? ""), from, subject);
+                  if (!supplier) {
+                    routeResult =
+                      "Recognised as a supplier price file, but no rule says which supplier it came from. " +
+                      "Add one in Settings → Email, then load it from Purchasing.";
+                  } else {
+                    const r = await importSupplierCatalog(buf, fileName, supplier, ctx.userId ?? "mailbox-sweep");
+                    routeResult = `${supplier}: ${r.itemsAdded} new, ${r.itemsUpdated} updated, ${r.skipped} skipped`;
+                    result.imported++;
+                  }
+                } else if (cls.kind === "nadac") {
+                  const dir = nadacDir();
+                  await fs.mkdir(dir, { recursive: true });
+                  await fs.writeFile(path.join(dir, path.basename(fileName).replace(/[^A-Za-z0-9._-]/g, "_")), buf);
+                  const reports = await loadNadacFiles();
+                  const added = reports.reduce((n, r) => n + r.added, 0);
+                  routeResult = `${added.toLocaleString()} NADAC prices added`;
+                  result.imported++;
+                } else {
+                  routeResult = cls.why;
+                }
+              } catch (e) {
+                // A failed import must not lose the document or stop the sweep.
+                routeResult = `Filed, but could not be loaded: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`;
+              }
+            }
+
             await db.insert(schema.inboxItems).values({
               id: itemId,
               messageId: `${messageId}#${fileName}`,
@@ -203,6 +252,8 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
               status: "stored",
               scanned: gate.scanned,
               reason: gate.note ?? null,
+              routedAs,
+              routeResult,
             });
             result.stored++;
           }

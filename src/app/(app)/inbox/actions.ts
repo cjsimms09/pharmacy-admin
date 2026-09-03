@@ -22,6 +22,8 @@ export async function saveMailSettings(fd: FormData) {
   const port = String(fd.get("mail_port") ?? "").trim() || "993";
   const senders = String(fd.get("mail_allowed_senders") ?? "").trim();
   const enabled = fd.get("mail_enabled") ? "yes" : "no";
+  const autoImport = fd.get("mail_auto_import") ? "yes" : "no";
+  const supplierRules = String(fd.get("mail_supplier_rules") ?? "").trim();
   const password = String(fd.get("mail_password") ?? "").trim();
 
   if (user_ && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(user_)) fail(here, "Enter the full email address, for example wwfrxadmin@gmail.com.");
@@ -30,6 +32,8 @@ export async function saveMailSettings(fd: FormData) {
   await setSetting("mail_port", port);
   await setSetting("mail_allowed_senders", senders);
   await setSetting("mail_enabled", enabled);
+  await setSetting("mail_auto_import", autoImport);
+  await setSetting("mail_supplier_rules", supplierRules);
   if (password) {
     if (password.replace(/\s+/g, "").length < 12) fail(here, "The app password should be the 16-character code Google gives you (spaces are fine).");
     try {

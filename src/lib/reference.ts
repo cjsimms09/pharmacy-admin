@@ -28,8 +28,13 @@ export const referenceDir = () => path.join(dataDir(), "reference");
 export const shippedReferenceDir = () => path.join(process.cwd(), "reference-data");
 export const contractsDir = () => path.join(dataDir(), "contracts");
 
-/** Minimal CSV reader: handles quoted fields, embedded commas and newlines, and a BOM. */
-export function parseCsv(text: string): Record<string, string>[] {
+/**
+ * Minimal CSV reader, at the row level.
+ *
+ * Exposed separately because a file has to be recognisable by its header even when it carries no
+ * data rows — a scheduled report covering a quiet day is still that report.
+ */
+export function parseCsvRows(text: string): string[][] {
   const src = text.replace(/^﻿/, "");
   const rows: string[][] = [];
   let row: string[] = [];
@@ -61,7 +66,12 @@ export function parseCsv(text: string): Record<string, string>[] {
     row.push(field);
     rows.push(row);
   }
-  const [head, ...body] = rows.filter((r) => r.some((v) => v.trim() !== ""));
+  return rows;
+}
+
+/** The same reader, keyed by the header row. */
+export function parseCsv(text: string): Record<string, string>[] {
+  const [head, ...body] = parseCsvRows(text).filter((r) => r.some((v) => v.trim() !== ""));
   if (!head) return [];
   return body.map((r) => Object.fromEntries(head.map((h, i) => [h.trim(), (r[i] ?? "").trim()])));
 }

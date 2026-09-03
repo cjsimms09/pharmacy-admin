@@ -104,6 +104,37 @@ export default async function EmailSettingsPage({ searchParams }: { searchParams
             Check this mailbox automatically every 30 minutes while the app is running
           </label>
         </div>
+
+        <div className="sm:col-span-2">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" name="mail_auto_import" value="yes" defaultChecked={s.mail_auto_import === "yes"} />
+            Load recognised reports automatically, not just file them
+          </label>
+          <p className="mt-1 text-xs text-ink-3">
+            With this on, a claims export, a supplier price file or a NADAC file that arrives by email is loaded the
+            moment it lands, so a scheduled report is usable without anyone opening it. Recognition is done by reading
+            the file&rsquo;s own column headings rather than trusting its name, and anything not recognised is filed as
+            a document exactly as before. The inbox says what each attachment was taken for and what happened.
+          </p>
+        </div>
+
+        <Field
+          label="Which supplier a price file came from"
+          hint={
+            "One rule per line, written as: something that appears in the sender or subject, then =, then the supplier name. " +
+            "A price file with no matching rule is filed but not loaded — prices under the wrong supplier would make the " +
+            "purchasing comparison quietly wrong, and a spreadsheet gives no way to tell."
+          }
+          className="sm:col-span-2"
+        >
+          <textarea
+            name="mail_supplier_rules"
+            className="field font-mono"
+            rows={4}
+            defaultValue={s.mail_supplier_rules}
+            placeholder={"mckesson.com = McKesson\norders@topsecondary = Top Rx\nweekly price file = Value Drug"}
+          />
+        </Field>
         <details className="sm:col-span-2">
           <summary className="cursor-pointer text-xs text-ink-3">Mail server settings (only change these if you're not using Gmail)</summary>
           <div className="mt-2 grid gap-3 sm:grid-cols-2">

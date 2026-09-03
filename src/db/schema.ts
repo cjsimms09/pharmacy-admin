@@ -392,6 +392,9 @@ export const inboxItems = sqliteTable(
     documentId: text("document_id"), // set when the attachment was stored
     status: text("status", { enum: ["stored", "rejected", "ignored"] }).notNull(),
     reason: text("reason"), // why rejected or ignored
+    /** What the sweep recognised the attachment as, and what happened when it was loaded. */
+    routedAs: text("routed_as"),
+    routeResult: text("route_result"),
     scanned: integer("scanned", { mode: "boolean" }).notNull().default(false),
     sweptAt: text("swept_at").notNull().default(now()),
   },

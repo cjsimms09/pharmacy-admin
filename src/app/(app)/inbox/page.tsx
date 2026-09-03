@@ -65,6 +65,15 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
                     <span className={`badge ${i.status === "stored" ? "badge-ok" : i.status === "rejected" ? "badge-crit" : "badge-muted"}`}>{i.status}</span>
                     {i.reason && <div className="mt-1 max-w-md text-xs text-ink-2">{i.reason}</div>}
                     {i.status === "stored" && !i.scanned && <div className="text-xs text-ink-3">Stored without a column check (not a text report).</div>}
+                    {i.routedAs && i.routedAs !== "unrecognised" && (
+                      <div className="mt-1 text-xs">
+                        <span className="badge badge-ok">loaded as {i.routedAs.replace(/_/g, " ")}</span>
+                        {i.routeResult && <div className="mt-0.5 max-w-md text-ink-2">{i.routeResult}</div>}
+                      </div>
+                    )}
+                    {i.routedAs === "unrecognised" && (
+                      <div className="mt-1 max-w-md text-xs text-ink-3">Filed only — {i.routeResult}</div>
+                    )}
                   </td>
                   <td>
                     <form action={deleteInboxItem.bind(null, i.id)}>
