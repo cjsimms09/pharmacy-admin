@@ -440,6 +440,37 @@ export const contractDocs = sqliteTable(
   (t) => [index("contract_docs_pbm_idx").on(t.pbmName), index("contract_docs_priority_idx").on(t.priority)],
 );
 
+// ── NADAC (National Average Drug Acquisition Cost) ───────────────────
+// Published weekly by CMS, free and public. Under the Kansas Consumer Prescription Protection
+// and Accountability Act (SB 20, effective 1 July 2026) it is the reimbursement floor for
+// commercial plans not preempted by ERISA, so this is the benchmark an underpayment is proved
+// against. One row per NDC per effective date: a claim must be priced against the figure in
+// force on its fill date, never the current one.
+export const nadacPrices = sqliteTable(
+  "nadac_prices",
+  {
+    id: text("id").primaryKey(),
+    ndc11: text("ndc11").notNull(),
+    description: text("description"),
+    /** Dollars x 1,000,000. CMS publishes five decimals and every one of them matters. */
+    unitMicros: integer("unit_micros").notNull(),
+    /** EA, ML or GM. A quantity in the wrong unit produces a confidently wrong number. */
+    pricingUnit: text("pricing_unit").notNull(),
+    effectiveOn: text("effective_on").notNull(),
+    /** B or G, CMS's brand/generic classification for rate setting. */
+    classification: text("classification"),
+    otc: integer("otc", { mode: "boolean" }).notNull().default(false),
+    explanationCode: text("explanation_code"),
+    /** The "As of Date" of the CMS file this row came from — cited in a complaint. */
+    fileAsOf: text("file_as_of").notNull(),
+    loadedAt: text("loaded_at").notNull().default(now()),
+  },
+  (t) => [
+    index("nadac_ndc_eff_idx").on(t.ndc11, t.effectiveOn),
+    index("nadac_file_idx").on(t.fileAsOf),
+  ],
+);
+
 // ── Audit ────────────────────────────────────────────────────────────
 export const auditEvents = sqliteTable(
   "audit_events",
