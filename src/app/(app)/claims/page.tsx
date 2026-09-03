@@ -69,13 +69,23 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
             <Stat label="Claims held" value={flags.total.toLocaleString()} />
             <Stat label="Dispensed at a loss" value={String(flags.belowCost.length)} tone={flags.belowCost.length ? "warn" : undefined} sub={formatCents(flags.belowCostTotalCents)} />
             <Stat
-              label="Commercial under $10.50"
+              label="In-scope under $10.50"
               value={String(flags.underFee.length)}
               tone={flags.underFee.length ? "warn" : undefined}
               sub={`${formatCents(flags.underFeeShortfallCents)} short`}
             />
             <Stat label="Cannot be priced" value={String(flags.unpriceable)} tone={flags.unpriceable ? "warn" : undefined} sub="no quantity" />
           </div>
+
+          {flags.undetermined > 0 && (
+            <Notice kind="warn">
+              {flags.undetermined} of {flags.total} claims are on plans nobody has classified yet, and{" "}
+              {flags.underFeeUndetermined} of those received less than $10.50
+              {flags.underFeeUndetermined > 0 && ` — ${formatCents(flags.underFeeUndeterminedShortfallCents)} that may or may not be owed`}.
+              A low payment is only a shortfall on a plan the Kansas floor reaches; on a cash discount programme it is
+              simply the price. Settle them in <a href="/plans" className="underline">Plans</a>.
+            </Notice>
+          )}
 
           {flags.unpriceable > 0 && (
             <Notice kind="warn">

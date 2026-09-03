@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { PlanClass } from "@/db/schema";
 import { newId } from "./crypto";
-import { receivedCents } from "./claims";
+import { receivedCents } from "./money";
 import type { PlanScope } from "./reimbursement-rules";
 
 /**

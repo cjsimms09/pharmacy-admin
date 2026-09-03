@@ -2,10 +2,11 @@ import "server-only";
 import { sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "./crypto";
-import { parseCents, parseQuantityThousandths, isPricingUnit } from "./money";
+import { parseCents, parseQuantityThousandths, isPricingUnit, receivedCents } from "./money";
 import { readSheetAsObjects, excelSerialToIso } from "./xlsx";
 import { parseCsv, buildPbmResolver } from "./reference";
 import { SB20_MIN_DISPENSING_FEE_CENTS } from "./reimbursement-rules";
+import { CLASS_INFO, planKey } from "./plans";
 
 /**
  * Loading a PioneerRx export and attaching every claim to the payer that priced it.
@@ -268,12 +269,6 @@ export function resolvePayer(
   return { pbmName: null, method: "unresolved", ambiguous: false };
 }
 
-/** Total actually received on a claim: what the payer remitted plus what the patient paid. */
-export function receivedCents(remitCents: number | null, copayCents: number | null): number | null {
-  if (remitCents === null && copayCents === null) return null;
-  return (remitCents ?? 0) + (copayCents ?? 0);
-}
-
 /**
  * Claims worth looking at first, and why.
  *
@@ -289,25 +284,48 @@ export async function claimFlags() {
   });
 
   const belowCost = rows.filter((c) => c.grossProfitCents !== null && c.grossProfitCents < 0);
-  const commercial = rows.filter((c) => (c.planType ?? "").toLowerCase().includes("standard"));
-  const underFee = commercial.filter((c) => {
-    const got = receivedCents(c.remitCents, c.copayCents);
-    return got !== null && got < SB20_MIN_DISPENSING_FEE_CENTS;
+
+  // Which claims are candidates for the statutory floor is a question about the plan, not about
+  // the claim. PioneerRx's plan type cannot answer it: a cash discount programme adjudicates as
+  // "Standard" and a low payment on one is correct, not a shortfall. So the register decides,
+  // and a plan nobody has classified is held back rather than counted either way.
+  const groups = await db.query.planGroups.findMany();
+  const byKey = new Map(groups.map((g) => [planKey(g.bin, g.groupNumber), g.classification]));
+  const classOf = (c: { bin: string | null; groupNumber: string | null }) => byKey.get(planKey(c.bin, c.groupNumber));
+
+  const inScope = rows.filter((c) => {
+    const cls = classOf(c);
+    return cls !== undefined && CLASS_INFO[cls].inScope;
   });
+  const undetermined = rows.filter((c) => {
+    const cls = classOf(c);
+    return cls === undefined || cls === "unknown";
+  });
+
+  const under = (xs: typeof rows) =>
+    xs.filter((c) => {
+      const got = receivedCents(c.remitCents, c.copayCents);
+      return got !== null && got < SB20_MIN_DISPENSING_FEE_CENTS;
+    });
+  const underFee = under(inScope);
+  const underFeeUndetermined = under(undetermined);
 
   const sum = (xs: { grossProfitCents: number | null }[]) =>
     xs.reduce((s, x) => s + (x.grossProfitCents ?? 0), 0);
+
+  const shortfall = (xs: typeof rows) =>
+    xs.reduce((s, c) => s + (SB20_MIN_DISPENSING_FEE_CENTS - (receivedCents(c.remitCents, c.copayCents) ?? 0)), 0);
 
   return {
     total: rows.length,
     belowCost,
     belowCostTotalCents: sum(belowCost),
-    commercial: commercial.length,
+    inScope: inScope.length,
+    undetermined: undetermined.length,
+    underFeeUndetermined: underFeeUndetermined.length,
+    underFeeUndeterminedShortfallCents: shortfall(underFeeUndetermined),
     underFee,
-    underFeeShortfallCents: underFee.reduce((s, c) => {
-      const got = receivedCents(c.remitCents, c.copayCents) ?? 0;
-      return s + (SB20_MIN_DISPENSING_FEE_CENTS - got);
-    }, 0),
+    underFeeShortfallCents: shortfall(underFee),
     unpriceable: rows.filter((c) => c.quantityThousandths === null).length,
     // Two different problems, needing two different actions. A BIN shared by several PBMs is
     // settled by reading the PCN or network off the claim. A BIN absent from the listing means

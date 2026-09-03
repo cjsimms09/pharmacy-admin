@@ -94,3 +94,14 @@ export type PricingUnit = (typeof PRICING_UNITS)[number];
 export function isPricingUnit(v: string): v is PricingUnit {
   return (PRICING_UNITS as readonly string[]).includes(v.trim().toUpperCase());
 }
+
+/**
+ * What a claim actually brought in: the payer's remittance plus what the patient paid.
+ *
+ * Both missing is null rather than zero — a claim nobody has paid is not the same as a claim
+ * paid nothing, and only the second is evidence of an underpayment.
+ */
+export function receivedCents(remitCents: number | null, copayCents: number | null): number | null {
+  if (remitCents === null && copayCents === null) return null;
+  return (remitCents ?? 0) + (copayCents ?? 0);
+}

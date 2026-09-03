@@ -1,6 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { mapColumns, parseClaimDate, normalizeClaimNdc, resolvePayer, receivedCents } from "../src/lib/claims";
+import { mapColumns, parseClaimDate, normalizeClaimNdc, resolvePayer } from "../src/lib/claims";
+import { receivedCents } from "../src/lib/money";
 import { excelSerialToIso, columnIndex } from "../src/lib/xlsx";
 
 /**
