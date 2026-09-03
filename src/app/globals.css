@@ -38,7 +38,55 @@ body { @apply bg-ground text-ink antialiased; }
   .table tr:last-child td { @apply border-b-0; }
 }
 
+@page {
+  size: Letter;
+  margin: 0.5in 0.55in;
+}
+
 @media print {
   .no-print { display: none !important; }
+
+  /*
+    Board forms are signed and filed, so they have to paginate like a form rather than like a web
+    page. Three rules do most of the work: a labelled block never splits across a page, a heading
+    never sits alone at the foot of one, and a table that does run over repeats its header so the
+    second page is still readable on its own.
+  */
+  .print-block,
+  .print-block * {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  table { break-inside: auto; page-break-inside: auto; }
+  thead { display: table-header-group; }
+  tfoot { display: table-footer-group; }
+  tr, td, th { break-inside: avoid; page-break-inside: avoid; }
+
+  h1, h2, h3, .print-heading {
+    break-after: avoid;
+    page-break-after: avoid;
+    break-inside: avoid;
+  }
+
+  /* The signature block is the point of the form; it must never be orphaned onto its own page. */
+  .print-signature {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    break-before: avoid;
+    page-break-before: avoid;
+  }
+
+  /* Long free text — a root cause analysis or corrective action — may flow, but not leave a
+     single line stranded at either end of a page. */
+  .print-prose {
+    orphans: 3;
+    widows: 3;
+  }
+
+  .print-page-break { break-before: page; page-break-before: always; }
+
+  /* Backgrounds and rules are part of the Board's layout, not decoration. */
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   body { background: white; }
 }

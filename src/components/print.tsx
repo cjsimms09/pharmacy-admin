@@ -32,7 +32,7 @@ export function PrintFrame({
         </p>
         <p className="mt-1 text-xs text-ink-3">Set Margins to <b>Default</b> and Scale to <b>100%</b> so the boxes line up with the Board's form. Then print to paper or save as PDF and sign.</p>
       </div>
-      <header className="mb-3 flex items-stretch border border-black">
+      <header className="print-block mb-3 flex items-stretch border border-black">
         <div className="flex w-1/5 items-center justify-center border-r border-black px-2 text-center font-serif text-2xl font-bold">Kansas</div>
         <div className="flex-1 px-2 py-1 text-center text-[11px] leading-tight">
           <div className="text-sm font-bold">STATE BOARD OF PHARMACY</div>
@@ -57,7 +57,7 @@ export function PrintFrame({
 
 export function SignatureLine({ dateLabel = "DATE" }: { dateLabel?: string }) {
   return (
-    <div className="mt-8 grid grid-cols-3 gap-6 text-[9px]">
+    <div className="print-signature mt-8 grid grid-cols-3 gap-6 text-[9px]">
       <div className="border-t border-black pt-1">SIGNATURE</div>
       <div className="border-t border-black pt-1">PRINTED NAME</div>
       <div className="border-t border-black pt-1">{dateLabel}</div>

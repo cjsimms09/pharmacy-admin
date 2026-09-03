@@ -62,7 +62,7 @@ export default async function SummaryPrintPage({ params }: { params: Promise<{ i
         <p className="px-2 pb-1 text-[11px]">K.A.R. 68-19-1 requires the PIC to complete a summary and communicate the information to all pharmacy personnel no later February 15, April 15, June 15, August 15, October 15, and December 15 each year.</p>
       </div>
 
-      <div className="mb-1 text-sm font-bold">FACILITY INFORMATION</div>
+      <div className="print-heading mb-1 text-sm font-bold">FACILITY INFORMATION</div>
       <table className="mb-3 w-full border-collapse">
         <tbody>
           <tr><Cell label="Facility Name" className="w-1/2">{s.pharmacy_name}</Cell><Cell label="Facility Registration Number">{s.pharmacy_registration_number}</Cell></tr>
@@ -70,7 +70,7 @@ export default async function SummaryPrintPage({ params }: { params: Promise<{ i
         </tbody>
       </table>
 
-      <div className="mb-1 text-sm font-bold">SUMMARY TYPE <span className="text-[10px] font-normal">(Indicate which Bimonthly Summary this represents)</span></div>
+      <div className="print-heading mb-1 text-sm font-bold">SUMMARY TYPE <span className="text-[10px] font-normal">(Indicate which Bimonthly Summary this represents)</span></div>
       <div className="mb-2 grid grid-cols-3 gap-x-4 text-[11px]">
         <div>{[[2, "February"], [4, "April"], [6, "June"]].map(([m, name]) => <div key={m}><Check on={dueMonth === m} />{name}</div>)}</div>
         <div>{[[8, "August"], [10, "October"], [12, "December"]].map(([m, name]) => <div key={m}><Check on={dueMonth === m} />{name}</div>)}</div>
@@ -84,7 +84,7 @@ export default async function SummaryPrintPage({ params }: { params: Promise<{ i
         states the position rather than leaving an inspector to infer it.
       */}
       {isNull && caps.length > 0 && (
-        <div className="mb-3 border border-black px-2 py-1 text-[10px]">
+        <div className="print-block mb-3 border border-black px-2 py-1 text-[10px]">
           No new quality-related events occurred during this reporting period. The corrective action
           plan{caps.length === 1 ? "" : "s"} evaluated below {caps.length === 1 ? "arises" : "arise"} from
           incident{caps.length === 1 ? "" : "s"} {caps.map(({ incident }) => `#${incident.incidentNumber}`).join(", ")} reported
@@ -93,8 +93,8 @@ export default async function SummaryPrintPage({ params }: { params: Promise<{ i
         </div>
       )}
 
-      <div className="mb-1 text-sm font-bold">INCIDENT TYPE SUMMARY <span className="text-[10px] font-normal">(attach additional page if needed)</span></div>
-      <table className="mb-3 w-full border-collapse text-[11px]">
+      <div className="print-heading mb-1 text-sm font-bold">INCIDENT TYPE SUMMARY <span className="text-[10px] font-normal">(attach additional page if needed)</span></div>
+      <table className="print-block mb-3 w-full border-collapse text-[11px]">
         <thead><tr><th className="w-[45%] border border-black px-2 py-0.5 text-center">Incident type</th><th className="border border-black px-2 py-0.5 text-center">Rx numbers associated with incident type</th></tr></thead>
         <tbody>
           {INCIDENT_TYPES.filter((t) => t !== "other").map((t) => (

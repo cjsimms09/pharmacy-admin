@@ -39,7 +39,7 @@ export default async function IncidentPrintPage({ params }: { params: Promise<{ 
         <div className="bg-neutral-300 px-2 py-0.5 text-sm font-bold">INSTRUCTIONS</div>
         <p className="px-2 py-1 text-[11px]">Maintain all completed CQI Incident Report Evaluation forms (C-650) with corresponding CQI Bimonthly Summary form (C-550).</p>
       </div>
-      <div className="mb-1 text-sm font-bold">INCIDENT INFORMATION</div>
+      <div className="print-heading mb-1 text-sm font-bold">INCIDENT INFORMATION</div>
       <table className="mb-4 w-full border-collapse">
         <tbody>
           <tr><Cell label="Facility Name" className="w-1/2">{s.pharmacy_name}</Cell><Cell label="Facility Registration Number">{s.pharmacy_registration_number}</Cell></tr>
@@ -55,7 +55,7 @@ export default async function IncidentPrintPage({ params }: { params: Promise<{ 
         </tbody>
       </table>
 
-      <div className="mb-1 text-sm font-bold">PHARMACY PERSONNEL INVOLVED <span className="text-[10px] font-normal">(Attach additional pages if needed.)</span></div>
+      <div className="print-heading mb-1 text-sm font-bold">PHARMACY PERSONNEL INVOLVED <span className="text-[10px] font-normal">(Attach additional pages if needed.)</span></div>
       <table className="mb-4 w-full border-collapse text-[11px]">
         <thead>
           <tr>
@@ -77,7 +77,7 @@ export default async function IncidentPrintPage({ params }: { params: Promise<{ 
         </tbody>
       </table>
 
-      <div className="mb-1 text-sm font-bold">PSO EXEMPTION</div>
+      <div className="print-heading mb-1 text-sm font-bold">PSO EXEMPTION</div>
       <div className="mb-4 text-[11px]">
         <Check on={s.pso_member === "yes"} />Yes <Check on={s.pso_member !== "yes"} />No <b>Do you actively participate in a Patient Safety Organization (PSO)?</b>
         <div className="ml-6">If yes, Name of PSO: {s.pso_member === "yes" ? s.pso_name : "______________________"} Membership Expiration Date: {s.pso_member === "yes" ? fmt(s.pso_expires_on) : "______________"}</div>
@@ -91,14 +91,14 @@ export default async function IncidentPrintPage({ params }: { params: Promise<{ 
       <div className="mt-4 text-[10px] text-neutral-700">Page 1 of 2</div>
 
       <div className="break-before-page pt-6" />
-      <div className="mb-1 text-sm font-bold">PRESCRIPTION INFORMATION</div>
+      <div className="print-heading mb-1 text-sm font-bold">PRESCRIPTION INFORMATION</div>
       <table className="mb-4 w-full border-collapse"><tbody><tr><Cell label="Prescription number" className="w-1/2">{rx}</Cell><Cell label="Date incident report created">{fmt(inc.reportCreatedOn)}</Cell></tr></tbody></table>
       <div className="text-sm font-bold">ROOT CAUSE ANALYSIS (RCA)</div>
       <p className="mb-1 text-[11px]">Examine all issues and processes that led to the incident. Attach additional pages, if necessary.</p>
-      <div className="mb-4 min-h-[2.6in] whitespace-pre-wrap border border-black px-2 py-1 text-[11px]">{s.pso_member === "yes" && !inc.rootCauseAnalysis ? "Not required — active PSO member." : inc.rootCauseAnalysis}</div>
+      <div className="print-prose mb-4 min-h-[2.6in] whitespace-pre-wrap border border-black px-2 py-1 text-[11px]">{s.pso_member === "yes" && !inc.rootCauseAnalysis ? "Not required — active PSO member." : inc.rootCauseAnalysis}</div>
       <div className="text-sm font-bold">CORRECTIVE ACTION PLAN (CAP)</div>
       <p className="mb-1 text-[11px]">List measures to be taken to ensure incident doesn’t recur. Attach additional pages, if necessary.</p>
-      <div className="mb-4 min-h-[2.6in] whitespace-pre-wrap border border-black px-2 py-1 text-[11px]">{s.pso_member === "yes" && !inc.correctiveActionPlan ? "Not required — active PSO member." : inc.correctiveActionPlan}</div>
+      <div className="print-prose mb-4 min-h-[2.6in] whitespace-pre-wrap border border-black px-2 py-1 text-[11px]">{s.pso_member === "yes" && !inc.correctiveActionPlan ? "Not required — active PSO member." : inc.correctiveActionPlan}</div>
       <div className="text-sm font-bold">PIC CERTIFICATION</div>
       <p className="text-[11px] italic">The information contained in this form is true, correct, and complete to the best of my knowledge.</p>
       <div className="grid grid-cols-3 gap-6 text-[11px]"><div></div><div className="pt-6">{picName}</div><div className="pt-6">{fmt(inc.reviewCompletedOn)}</div></div>
