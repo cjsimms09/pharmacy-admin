@@ -11,6 +11,7 @@ const NAV = [
   { href: "/cqi", label: "CQI program" },
   { href: "/payers", label: "Payers" },
   { href: "/claims", label: "Claims" },
+  { href: "/reports", label: "Report check" },
   { href: "/plans", label: "Plans" },
   { href: "/purchasing", label: "Purchasing" },
   { href: "/nadac", label: "NADAC" },
