@@ -230,12 +230,30 @@ export function countFiles(out: string): number {
   return names ? new Set(names.map((n) => n.toLowerCase())).size : 0;
 }
 
+/**
+ * How long the stored key has left.
+ *
+ * CMS expires MTF API keys 90 days after generation and gives no notice. A scheduled pull would
+ * simply start failing. Counted from when the key was pasted in, which is the closest date we
+ * have — if it was generated some days earlier, the real deadline is earlier still, so this
+ * errs toward warning too early rather than too late.
+ */
+export function keyDaysLeft(setOn: string | null, today = new Date().toISOString().slice(0, 10)): number | null {
+  if (!setOn) return null;
+  const ms = Date.parse(`${setOn}T00:00:00Z`);
+  const now = Date.parse(`${today}T00:00:00Z`);
+  if (Number.isNaN(ms) || Number.isNaN(now)) return null;
+  return 90 - Math.floor((now - ms) / 86_400_000);
+}
+
 /** What the MTF page shows about the last run. */
 export async function mtfStatus() {
   const s = await getSettings();
   const dir = await downloadDir().catch(() => mtfDir());
   return {
     hasKey: Boolean(s.mtf_api_key_enc),
+    keySetOn: s.mtf_key_set_on || null,
+    keyDaysLeft: keyDaysLeft(s.mtf_key_set_on || null),
     payeeId: s.mtf_payee_id || null,
     dir,
     files: await listFiles(dir),

@@ -80,12 +80,16 @@ export async function saveSecret(id: Connection["id"], value: string): Promise<v
   const bad = c.validate?.(v);
   if (bad) throw new Error(bad);
   await setSetting(c.secretKey, encryptText(v));
+  // MTF keys expire 90 days after generation and the portal gives no warning. Stamping the date
+  // here is the only way the pharmacy finds out before a scheduled pull starts failing.
+  if (id === "mtf") await setSetting("mtf_key_set_on", new Date().toISOString().slice(0, 10));
 }
 
 export async function clearSecret(id: Connection["id"]): Promise<void> {
   const c = CONNECTIONS.find((x) => x.id === id);
   if (!c) throw new Error(`Unknown connection ${id}`);
   await setSetting(c.secretKey, "");
+  if (id === "mtf") await setSetting("mtf_key_set_on", "");
 }
 
 /** Decrypts a stored secret for use on the server. Never send the result to the browser. */

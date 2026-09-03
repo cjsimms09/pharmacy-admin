@@ -36,3 +36,31 @@ describe("countFiles", () => {
     assert.equal(countFiles("2 files found: a.835, b.835, c.835"), 2);
   });
 });
+
+import { keyDaysLeft } from "../src/lib/mtf";
+
+/**
+ * CMS expires MTF keys 90 days after generation with no notice, so a scheduled pull would just
+ * start failing. The count is deliberately measured from when the key was pasted in — if it was
+ * generated earlier the real deadline is earlier, so this warns too early rather than too late.
+ */
+describe("keyDaysLeft", () => {
+  test("counts down from 90 days", () => {
+    assert.equal(keyDaysLeft("2026-09-01", "2026-09-01"), 90);
+    assert.equal(keyDaysLeft("2026-09-01", "2026-09-16"), 75);
+  });
+
+  test("the day it lapses is zero, not one", () => {
+    assert.equal(keyDaysLeft("2026-09-01", "2026-11-30"), 0);
+  });
+
+  test("goes negative once expired, so an expired key cannot read as fine", () => {
+    assert.ok(keyDaysLeft("2026-09-01", "2026-12-10")! < 0);
+  });
+
+  test("no stored date means no claim about expiry", () => {
+    assert.equal(keyDaysLeft(null), null);
+    assert.equal(keyDaysLeft(""), null);
+    assert.equal(keyDaysLeft("not a date"), null);
+  });
+});

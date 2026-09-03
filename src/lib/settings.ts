@@ -35,6 +35,7 @@ export const SETTING_KEYS = [
   // generated in the MTF portal's Developer Tools and is single-use in the sense that generating
   // a new one cancels the old, so it is stored encrypted and never rendered back.
   "mtf_api_key_enc",
+  "mtf_key_set_on", // MTF keys expire 90 days after generation; this is what makes that visible
   "mtf_payee_id",
   "mtf_download_dir",
   "mtf_cli_path",
