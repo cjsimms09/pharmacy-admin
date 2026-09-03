@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { computeAlerts, cqiSnapshot, csInventoryStatus, staffCompliance, type StaffRow } from "@/lib/compliance";
+import { cqiSnapshot, csInventoryStatus, staffCompliance, type StaffRow } from "@/lib/compliance";
+import { dueSummary, type DueItem } from "@/lib/due";
 import { daysUntil, fmt } from "@/lib/dates";
 import { db, schema } from "@/db";
 import { eq } from "drizzle-orm";
@@ -10,8 +11,8 @@ import { PERSON_ROLE_LABEL } from "@/lib/labels";
 export const dynamic = "force-dynamic";
 
 export default async function Dashboard() {
-  const [alerts, staff, cqi, cs, docs, unread] = await Promise.all([
-    computeAlerts(),
+  const [due, staff, cqi, cs, docs, unread] = await Promise.all([
+    dueSummary(),
     staffCompliance(),
     cqiSnapshot(),
     csInventoryStatus(),
@@ -19,9 +20,9 @@ export default async function Dashboard() {
     db.query.inboxItems.findMany({ where: eq(schema.inboxItems.status, "stored"), orderBy: (i, { desc }) => [desc(i.sweptAt)], limit: 25 }),
   ]);
 
-  const crit = alerts.filter((a) => a.level === "crit");
-  const soon = alerts.filter((a) => a.level === "warn");
-  const later = alerts.filter((a) => a.level === "info");
+  const crit = due.overdue;
+  const soon = due.dueSoon;
+  const missing = due.noDate;
   const cqiDays = daysUntil(cqi.dueOn)!;
   // A finalized summary is never late, whatever the due date says.
   const cqiFiled = cqi.status === "final";
@@ -40,9 +41,9 @@ export default async function Dashboard() {
           value={String(crit.length)}
           tone={crit.length > 0 ? "crit" : "ok"}
           sub={crit.length === 0 ? "Nothing overdue" : "Past a deadline"}
-          href="#act-now"
+          href="/compliance"
         />
-        <Stat label="Due within 30 days" value={String(soon.length)} tone={soon.length > 0 ? "warn" : "ok"} sub="Licenses, reviews, filings" href="#due-soon" />
+        <Stat label="Due soon" value={String(soon.length)} tone={soon.length > 0 ? "warn" : "ok"} sub="Licences, training, recurring duties" href="/compliance" />
         <Stat
           label={`CQI summary · ${cqi.label}`}
           value={cqiFiled ? "Filed" : cqiDays >= 0 ? `${cqiDays}d` : `${-cqiDays}d late`}
@@ -91,13 +92,24 @@ export default async function Dashboard() {
         </section>
       )}
 
-      {alerts.length === 0 ? (
-        <Empty>Nothing needs attention. Add staff and their licenses to start tracking expirations.</Empty>
+      {missing.length > 0 && (
+        <section className="card mb-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm">
+              <b>{missing.length}</b> requirement{missing.length === 1 ? " has" : "s have"} no record on file, or a
+              record carrying no expiry date. These pass a date check while being the least compliant things here.
+            </p>
+            <Link href="/compliance" className="btn">Open compliance</Link>
+          </div>
+        </section>
+      )}
+
+      {crit.length === 0 && soon.length === 0 && missing.length === 0 ? (
+        <Empty>Nothing needs attention. Add staff and their licences to start tracking expirations.</Empty>
       ) : (
         <div className="mb-6 space-y-5">
-          <AlertGroup id="act-now" title="Act now — past a deadline" items={crit} tone="crit" />
-          <AlertGroup id="due-soon" title="Due within 30 days" items={soon} tone="warn" />
-          <AlertGroup id="later" title="Coming up — 30 to 90 days out" items={later} tone="info" />
+          <DueGroup id="act-now" title="Overdue" items={crit} tone="crit" />
+          <DueGroup id="due-soon" title="Due soon" items={soon} tone="warn" />
         </div>
       )}
 
@@ -171,26 +183,39 @@ function Stat({ label, value, href, sub, tone }: { label: string; value: string;
   );
 }
 
-function AlertGroup({ id, title, items, tone }: { id: string; title: string; items: { title: string; detail: string; href: string; dueOn?: string }[]; tone: "crit" | "warn" | "info" }) {
+/**
+ * One band of the due list.
+ *
+ * A licence, a training and a recurring duty all render the same, because from where the PIC
+ * stands they are the same kind of thing: something that needs doing by a date. Keeping them in
+ * separate places is what made three of them easy to miss.
+ */
+function DueGroup({ id, title, items, tone }: { id: string; title: string; items: DueItem[]; tone: "crit" | "warn" }) {
   if (items.length === 0) return null;
-  const dot = tone === "crit" ? "bg-crit" : tone === "warn" ? "bg-warn" : "bg-accent";
   return (
-    <section id={id}>
-      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-ink-2">{title} <span className="text-ink-3">({items.length})</span></h2>
-      <ul className="divide-y divide-line overflow-hidden rounded-lg border border-line bg-surface">
-        {items.map((a, i) => (
-          <li key={i}>
-            <Link href={a.href} className="flex items-start gap-3 px-4 py-3 hover:bg-ground">
-              <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dot}`} />
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium">{a.title}</div>
-                <div className="text-xs text-ink-2">{a.detail}</div>
-              </div>
-              {a.dueOn && <div className="shrink-0 text-xs text-ink-3">{fmt(a.dueOn)}</div>}
-            </Link>
+    <section id={id} className="card">
+      <div className="mb-2 flex items-baseline justify-between gap-2">
+        <h2 className="font-semibold">{title}</h2>
+        <Link href="/compliance" className="text-sm text-accent hover:underline">All compliance &rarr;</Link>
+      </div>
+      <ul className="divide-y divide-line">
+        {items.slice(0, 12).map((i) => (
+          <li key={i.id} className="flex flex-wrap items-start justify-between gap-3 py-2">
+            <div className="min-w-0">
+              <Link href={i.href} className="text-sm font-medium text-accent hover:underline">{i.title}</Link>
+              <div className="text-xs text-ink-3">{i.action}</div>
+            </div>
+            <span className={`badge ${tone === "crit" ? "badge-crit" : "badge-warn"} whitespace-nowrap`}>
+              {i.daysLeft === null ? "no date" : i.daysLeft < 0 ? `${Math.abs(i.daysLeft)}d late` : `${i.daysLeft}d`}
+            </span>
           </li>
         ))}
       </ul>
+      {items.length > 12 && (
+        <p className="mt-2 text-xs text-ink-3">
+          <Link href="/compliance" className="underline">and {items.length - 12} more</Link>
+        </p>
+      )}
     </section>
   );
 }

@@ -54,6 +54,10 @@ export const CREDENTIAL_TYPES = [
   "intern_registration",
   "cpr",
   "immunization_training",
+  // The written protocol each immunizer works under. Reviewed and re-signed annually, and
+  // separate from the one-off training certificate: the certificate does not expire, the
+  // protocol does.
+  "immunization_protocol",
   "controlled_substance_poa",
   "pharmacy_registration",
   "dea_registration",

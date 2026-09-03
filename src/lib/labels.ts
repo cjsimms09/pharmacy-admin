@@ -12,6 +12,7 @@ export const CREDENTIAL_LABEL: Record<CredentialType, string> = {
   technician_registration: "Kansas technician registration",
   intern_registration: "Kansas intern registration",
   cpr: "CPR certification",
+  immunization_protocol: "Immunization protocol",
   immunization_training: "Immunization training (ACPE / Board-approved)",
   controlled_substance_poa: "DEA power of attorney",
   pharmacy_registration: "Kansas pharmacy registration",
