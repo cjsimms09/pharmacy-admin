@@ -17,6 +17,8 @@ const NAV = [
   { href: "/cqi", label: "CQI program" },
   { href: "/staff", label: "Staff" },
   { href: "/documents", label: "Documents" },
+  // Where emailed reports land — temperature logs among them, so it belongs in the daily path.
+  { href: "/inbox", label: "Inbox" },
   { href: "/inventory", label: "CS inventories" },
   { href: "/settings", label: "Settings" },
 ];

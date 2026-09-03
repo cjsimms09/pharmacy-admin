@@ -108,7 +108,7 @@ export function UploadForm({
         <input name="expiresOn" type="date" className="field" />
       </Field>
       <Field label="File" hint="PDF, image, or Word document · up to 20 MB">
-        <input name="file" type="file" className="field" required accept=".pdf,.jpg,.jpeg,.png,.heic,.webp,.doc,.docx" />
+        <input name="file" type="file" className="field" required accept=".pdf,.jpg,.jpeg,.png,.heic,.heif,.webp,.gif,.bmp,.tif,.tiff,.doc,.docx,.rtf,image/*" />
       </Field>
       <Field label="Notes" className="sm:col-span-3">
         <input name="notes" className="field" placeholder="Optional" />

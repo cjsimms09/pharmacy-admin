@@ -185,7 +185,7 @@ function CredentialForm({ action, redirectTo, personId, cred }: { action: (fd: F
       <Field label="Issued on"><input name="issuedOn" type="date" className="field" defaultValue={cred?.issuedOn ?? ""} /></Field>
       <Field label="Expires on"><input name="expiresOn" type="date" className="field" defaultValue={cred?.expiresOn ?? ""} /></Field>
       <Field label={cred ? "Attach / replace document" : "Document"} className="sm:col-span-2" hint="The license card, CPR card, training certificate or protocol. PDF, photo or Word file.">
-        <input name="file" type="file" className="field" accept=".pdf,.jpg,.jpeg,.png,.heic,.webp,.doc,.docx" />
+        <input name="file" type="file" className="field" accept=".pdf,.jpg,.jpeg,.png,.heic,.heif,.webp,.gif,.bmp,.tif,.tiff,.doc,.docx,.rtf,image/*" />
       </Field>
       <Field label="Notes"><input name="notes" className="field" defaultValue={cred?.notes ?? ""} /></Field>
       <div className="sm:col-span-3"><button className="btn btn-primary">{cred ? "Save" : "Add"}</button></div>
