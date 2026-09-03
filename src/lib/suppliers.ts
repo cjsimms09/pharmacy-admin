@@ -1,5 +1,5 @@
 import "server-only";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "./crypto";
 import { parseCents, parseUnitMicros, parseQuantityThousandths, formatCents } from "./money";
@@ -109,13 +109,14 @@ export async function importSupplierCatalog(
     id: importId, supplier, fileName, rowsRead: rows.length, createdBy: userId,
   });
 
-  const existing = await db.query.supplierItems.findMany({
-    where: eq(schema.supplierItems.supplier, supplier),
-    columns: { id: true, ndc11: true },
-  });
-  const byNdc = new Map(existing.map((e) => [e.ndc11, e.id]));
-
+  // Rows are gathered first and written in bulk. Doing it one price at a time meant a large
+  // catalogue held the serialized connection for minutes, which is minutes of stopped site.
+  const rows2: (typeof schema.supplierItems.$inferInsert)[] = [];
   let added = 0, updated = 0, unkeyable = 0, pricedOn: string | null = null;
+
+  const before = new Set(
+    (await db.query.supplierItems.findMany({ where: eq(schema.supplierItems.supplier, supplier), columns: { ndc11: true } })).map((e) => e.ndc11),
+  );
 
   for (const r of rows) {
     const g = (f: FieldName) => (map[f] ? r[map[f]!] : undefined);
@@ -132,7 +133,9 @@ export async function importSupplierCatalog(
     const date = parseClaimDate(g("pricedOn"));
     if (date && !pricedOn) pricedOn = date;
 
-    const values = {
+    if (before.has(ndc11)) updated++; else added++;
+    rows2.push({
+      id: newId(),
       supplier,
       ndc11,
       description,
@@ -146,18 +149,18 @@ export async function importSupplierCatalog(
       pricedOn: date,
       importId,
       updatedAt: new Date().toISOString(),
-    };
-
-    const id = byNdc.get(ndc11);
-    if (id) {
-      await db.update(schema.supplierItems).set(values).where(eq(schema.supplierItems.id, id));
-      updated++;
-    } else {
-      await db.insert(schema.supplierItems).values({ id: newId(), ...values });
-      byNdc.set(ndc11, "seen");
-      added++;
-    }
+    });
   }
+
+  // Replace only the NDCs this file covers. A partial price list must not delete everything else
+  // we hold for that supplier, and a repriced line must not end up stored twice.
+  const covered = [...new Set(rows2.map((r) => r.ndc11))];
+  for (let i = 0; i < covered.length; i += 300) {
+    await db
+      .delete(schema.supplierItems)
+      .where(and(eq(schema.supplierItems.supplier, supplier), inArray(schema.supplierItems.ndc11, covered.slice(i, i + 300))));
+  }
+  for (let i = 0; i < rows2.length; i += 300) await db.insert(schema.supplierItems).values(rows2.slice(i, i + 300));
 
   const skipped = Object.values(skipReasons).reduce((a, b) => a + b, 0);
   await db.update(schema.supplierImports).set({

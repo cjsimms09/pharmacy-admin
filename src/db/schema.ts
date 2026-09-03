@@ -918,3 +918,77 @@ export const trainingAssignments = sqliteTable(
     index("training_assignments_due_idx").on(t.dueOn),
   ],
 );
+
+// ── Temperature monitoring ───────────────────────────────────────────
+// Readings pulled from iMonnit, kept here so the pharmacy owns its own record.
+//
+// The reason to store rather than link out: a VFC visit or an excursion investigation asks for a
+// continuous record over a period, and a vendor portal is a place you can be locked out of, that
+// prunes history, and that nobody can print a clean month from. Once the readings are here they
+// can be printed, annotated and kept for as long as the rule asks.
+//
+// Temperatures are stored in tenths of a degree Fahrenheit as integers. A vaccine fridge range is
+// 36 to 46 F and a tenth is the resolution that matters; floating point has no place in a record
+// somebody may have to defend.
+
+export const tempSensors = sqliteTable(
+  "temp_sensors",
+  {
+    id: text("id").primaryKey(),
+    /** The sensor's ID in iMonnit. */
+    externalId: text("external_id").notNull().unique(),
+    /** What iMonnit calls it. */
+    externalName: text("external_name"),
+    /** What the pharmacy calls it — this is what appears on a printed log. */
+    name: text("name").notNull(),
+    kind: text("kind", { enum: ["refrigerator", "freezer", "room", "other"] }).notNull().default("refrigerator"),
+    /** Only tracked sensors are polled and logged. Most of an account is not the pharmacy's. */
+    tracked: integer("tracked", { mode: "boolean" }).notNull().default(false),
+    /** The acceptable range, in tenths of a degree F. Outside it is an excursion. */
+    minTenthsF: integer("min_tenths_f").notNull().default(360),
+    maxTenthsF: integer("max_tenths_f").notNull().default(460),
+    lastReadingAt: text("last_reading_at"),
+    lastSyncAt: text("last_sync_at"),
+    createdAt: text("created_at").notNull().default(now()),
+    updatedAt: text("updated_at").notNull().default(now()),
+  },
+  (t) => [index("temp_sensors_tracked_idx").on(t.tracked)],
+);
+
+export const tempReadings = sqliteTable(
+  "temp_readings",
+  {
+    id: text("id").primaryKey(),
+    sensorId: text("sensor_id").notNull().references(() => tempSensors.id, { onDelete: "cascade" }),
+    /** UTC instant the sensor reported. Unique per sensor, so re-polling never duplicates. */
+    takenAt: text("taken_at").notNull(),
+    /** Local calendar month, so a month's log is one indexed lookup rather than a scan. */
+    periodKey: text("period_key").notNull(),
+    valueTenthsF: integer("value_tenths_f").notNull(),
+    /** True when it sat outside the sensor's range at the moment it was taken. */
+    excursion: integer("excursion", { mode: "boolean" }).notNull().default(false),
+    createdAt: text("created_at").notNull().default(now()),
+  },
+  (t) => [
+    index("temp_readings_sensor_period_idx").on(t.sensorId, t.periodKey),
+    index("temp_readings_taken_idx").on(t.sensorId, t.takenAt),
+  ],
+);
+
+/** What the PIC wrote about an excursion, or about a month as a whole. */
+export const tempNotes = sqliteTable(
+  "temp_notes",
+  {
+    id: text("id").primaryKey(),
+    sensorId: text("sensor_id").notNull().references(() => tempSensors.id, { onDelete: "cascade" }),
+    periodKey: text("period_key").notNull(),
+    /** Set when the note is about one specific reading rather than the month. */
+    readingId: text("reading_id"),
+    note: text("note").notNull(),
+    /** Signed off when the month has been reviewed — what turns a data dump into a record. */
+    reviewed: integer("reviewed", { mode: "boolean" }).notNull().default(false),
+    writtenBy: text("written_by").notNull(),
+    createdAt: text("created_at").notNull().default(now()),
+  },
+  (t) => [index("temp_notes_sensor_period_idx").on(t.sensorId, t.periodKey)],
+);

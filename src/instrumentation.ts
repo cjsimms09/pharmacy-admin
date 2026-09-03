@@ -14,6 +14,31 @@ export async function register() {
 
   const EVERY_MS = 30 * 60 * 1000;
   const START_DELAY_MS = 60 * 1000; // let the server settle before the first check
+  /** Nothing served for this long means it is safe to take the connection for a while. */
+  const IDLE_SECONDS = 90;
+
+  /**
+   * One heavy job at a time, and only when nobody is using the site.
+   *
+   * The connection is serialized, so a job that takes a minute stops the site for a minute.
+   * Waiting for a gap costs nothing — a backup taken ninety seconds after the last page load is
+   * worth exactly what one taken during it is worth, and the pharmacy computer is idle almost
+   * all day.
+   */
+  let busy = false;
+  const whenIdle = async (name: string, job: () => Promise<void>) => {
+    if (busy) return;
+    const { isIdle } = await import("./lib/activity");
+    if (!isIdle(IDLE_SECONDS)) return;
+    busy = true;
+    try {
+      await job();
+    } catch {
+      // Every job records its own outcome. None may take the app down.
+    } finally {
+      busy = false;
+    }
+  };
 
   const tick = async () => {
     try {
@@ -97,16 +122,21 @@ export async function register() {
     }
   };
 
+  /**
+   * Runs the jobs in turn, each waiting for a gap.
+   *
+   * Sequential rather than together: four jobs starting at once on one connection is the same
+   * stall as one long job, and there is no hurry about any of them.
+   */
+  const runAll = async () => {
+    await whenIdle("mail", tick);
+    await whenIdle("backup", backupTick);
+    await whenIdle("reminders", reminderTick);
+    await whenIdle("nadac", nadacTick);
+  };
+
   setTimeout(() => {
-    void tick();
-    void backupTick();
-    void reminderTick();
-    void nadacTick();
-    setInterval(() => {
-      void tick();
-      void backupTick();
-      void reminderTick();
-      void nadacTick();
-    }, EVERY_MS).unref?.();
+    void runAll();
+    setInterval(() => void runAll(), EVERY_MS).unref?.();
   }, START_DELAY_MS).unref?.();
 }

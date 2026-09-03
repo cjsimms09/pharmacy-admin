@@ -37,6 +37,12 @@ export const SETTING_KEYS = [
   "nadac_source_url",
   "nadac_last_fetch",
   "nadac_last_result",
+  // ── iMonnit temperature monitoring ──
+  "imonnit_key_id_enc",
+  "imonnit_secret_enc",
+  "imonnit_base_url",
+  "imonnit_last_sync",
+  "imonnit_last_result",
   "mail_allowed_senders", // one per line
   "mail_auto_import", // "yes" | "no" — load recognised reports rather than only filing them
   "mail_supplier_rules", // one per line: a sender or subject fragment, then "=", then a supplier name

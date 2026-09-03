@@ -141,6 +141,7 @@ export async function importClaims(file: Buffer, fileName: string, userId: strin
 
   let added = 0;
   let duplicates = 0;
+  const pending: (typeof schema.claims.$inferInsert)[] = [];
   let from: string | null = null;
   let to: string | null = null;
 
@@ -178,7 +179,7 @@ export async function importClaims(file: Buffer, fileName: string, userId: strin
 
     const unitRaw = (g("quantityUnit") ?? "").trim().toUpperCase();
 
-    await db.insert(schema.claims).values({
+    pending.push({
       id: newId(),
       importId,
       rxNumber,
@@ -213,7 +214,15 @@ export async function importClaims(file: Buffer, fileName: string, userId: strin
       rawJson: JSON.stringify(r),
     });
     added++;
+
+    // Batched: one statement per claim made a year of history take minutes, and the connection
+    // is serialized, so those were minutes with the whole site stopped.
+    if (pending.length >= 300) {
+      await db.insert(schema.claims).values(pending);
+      pending.length = 0;
+    }
   }
+  if (pending.length > 0) await db.insert(schema.claims).values(pending);
 
   const skipped = Object.values(skipReasons).reduce((a, b) => a + b, 0);
   await db.update(schema.claimImports).set({

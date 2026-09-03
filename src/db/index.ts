@@ -19,9 +19,17 @@ function createDb() {
   // means the PRAGMAs below apply to every query and SQLITE_BUSY cannot occur within the process.
   const client = createClient({ url: `file:${path.resolve(dbPath)}`, concurrency: 1 });
   const ready = (async () => {
-    await client.execute("PRAGMA busy_timeout = 5000");
+    await client.execute("PRAGMA busy_timeout = 15000");
     await client.execute("PRAGMA journal_mode = WAL");
     await client.execute("PRAGMA foreign_keys = ON");
+    // Safe in WAL: a crash can lose the last commits but cannot corrupt the database, and this
+    // is the difference between a bulk load taking seconds and taking minutes. The backup is
+    // what protects against loss, not fsync on every write.
+    await client.execute("PRAGMA synchronous = NORMAL");
+    await client.execute("PRAGMA temp_store = MEMORY");
+    // ~64 MB of page cache. Trivial on any machine this runs on, and it keeps the working set
+    // in memory instead of going back to disk for every compliance query.
+    await client.execute("PRAGMA cache_size = -64000");
   })();
   return { db: drizzle(client, { schema }), ready };
 }

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireUser, logout } from "@/lib/auth";
 import { reimbursementEnabled } from "@/lib/features";
+import { noteRequest } from "@/lib/activity";
 
 /**
  * What a pharmacist-in-charge needs to hand every day, and nothing else.
@@ -21,6 +22,7 @@ const NAV = [
 ];
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
+  noteRequest();
   const user = await requireUser();
   const showTools = await reimbursementEnabled();
   const nav = showTools ? [...NAV.slice(0, -1), { href: "/tools", label: "Tools" }, NAV[NAV.length - 1]] : NAV;

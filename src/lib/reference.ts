@@ -361,11 +361,12 @@ export async function importReference(): Promise<ImportSummary> {
       counts.get(bin)!.add((r.pbm_name || "").trim());
     }
     await db.delete(schema.payerBins);
+    const binRows: (typeof schema.payerBins.$inferInsert)[] = [];
     for (const r of rows) {
       const bin = (r.bin || "").trim();
       if (!bin) continue;
       const help = r.help_desk || null;
-      await db.insert(schema.payerBins).values({
+      binRows.push({
         id: newId(),
         bin,
         pbmName: (r.pbm_name || "").trim() || "(unnamed)",
@@ -380,6 +381,7 @@ export async function importReference(): Promise<ImportSummary> {
       });
       out.bins++;
     }
+    for (let i = 0; i < binRows.length; i += 300) await db.insert(schema.payerBins).values(binRows.slice(i, i + 300));
   } else out.skipped.push("bin_crosswalk.csv");
 
   // ── PBM name resolver ────────────────────────────────────────────
@@ -401,12 +403,13 @@ export async function importReference(): Promise<ImportSummary> {
     const existing = await db.query.contractDocs.findMany();
     const seen = new Map(existing.filter((d) => d.fileName).map((d) => [`${d.pbmName}|${d.documentName}`, d]));
     await db.delete(schema.contractDocs);
+    const docRows: (typeof schema.contractDocs.$inferInsert)[] = [];
     for (const r of rows) {
       const pbm = canonical((r.pbm || "").trim());
       const name = (r.document_name || "").trim();
       if (!name) continue;
       const prev = seen.get(`${pbm}|${name}`);
-      await db.insert(schema.contractDocs).values({
+      docRows.push({
         id: newId(),
         pbmName: pbm || "(unlabelled)",
         documentName: name,
@@ -422,16 +425,18 @@ export async function importReference(): Promise<ImportSummary> {
       });
       out.docs++;
     }
+    for (let i = 0; i < docRows.length; i += 300) await db.insert(schema.contractDocs).values(docRows.slice(i, i + 300));
   } else out.skipped.push("contract_index.csv");
 
   // ── Network rates ────────────────────────────────────────────────
   const ratesCsv = await readReference(["network_participation", "network_rates"]);
   if (ratesCsv) {
     await db.delete(schema.networkRates);
+    const rateRows: (typeof schema.networkRates.$inferInsert)[] = [];
     for (const r of parseCsv(ratesCsv)) {
       const label = (r.pbm || "").trim();
       if (!label) continue;
-      await db.insert(schema.networkRates).values({
+      rateRows.push({
         id: newId(),
         pbmName: canonical(label),
         sourceLabel: label,
@@ -449,16 +454,18 @@ export async function importReference(): Promise<ImportSummary> {
       });
       out.rates++;
     }
+    for (let i = 0; i < rateRows.length; i += 300) await db.insert(schema.networkRates).values(rateRows.slice(i, i + 300));
   } else out.skipped.push("network_participation.csv");
 
   // ── MAC appeal terms ─────────────────────────────────────────────
   const macCsv = await readReference(["mac_appeals"]);
   if (macCsv) {
     await db.delete(schema.macAppealTerms);
+    const macRows: (typeof schema.macAppealTerms.$inferInsert)[] = [];
     for (const r of parseCsv(macCsv)) {
       const label = (r.pbm || "").trim();
       if (!label) continue;
-      await db.insert(schema.macAppealTerms).values({
+      macRows.push({
         id: newId(),
         pbmName: canonical(label),
         sourceLabel: label,
@@ -476,16 +483,18 @@ export async function importReference(): Promise<ImportSummary> {
       });
       out.appeals++;
     }
+    for (let i = 0; i < macRows.length; i += 300) await db.insert(schema.macAppealTerms).values(macRows.slice(i, i + 300));
   } else out.skipped.push("mac_appeals.csv");
 
   // ── Payment routing ──────────────────────────────────────────────
   const payCsv = await readReference(["payment_routing"]);
   if (payCsv) {
     await db.delete(schema.paymentRouting);
+    const payRows: (typeof schema.paymentRouting.$inferInsert)[] = [];
     for (const r of parseCsv(payCsv)) {
       const label = (r.pbm || "").trim();
       if (!label) continue;
-      await db.insert(schema.paymentRouting).values({
+      payRows.push({
         id: newId(),
         pbmName: canonical(label),
         sourceLabel: label,
@@ -499,16 +508,18 @@ export async function importReference(): Promise<ImportSummary> {
       });
       out.routing++;
     }
+    for (let i = 0; i < payRows.length; i += 300) await db.insert(schema.paymentRouting).values(payRows.slice(i, i + 300));
   } else out.skipped.push("payment_routing.csv");
 
   // ── Contacts ─────────────────────────────────────────────────────
   const contactCsv = await readReference(["pbm_contacts"]);
   if (contactCsv) {
     await db.delete(schema.pbmContacts);
+    const contactRows: (typeof schema.pbmContacts.$inferInsert)[] = [];
     for (const r of parseCsv(contactCsv)) {
       const label = (r.pbm || "").trim();
       if (!label) continue;
-      await db.insert(schema.pbmContacts).values({
+      contactRows.push({
         id: newId(),
         pbmName: canonical(label),
         sourceLabel: label,
@@ -521,18 +532,20 @@ export async function importReference(): Promise<ImportSummary> {
       });
       out.contacts++;
     }
+    for (let i = 0; i < contactRows.length; i += 300) await db.insert(schema.pbmContacts).values(contactRows.slice(i, i + 300));
   } else out.skipped.push("pbm_contacts.csv");
 
   // ── Communications feed ──────────────────────────────────────────
   const commsCsv = await readReference(["communications_index"]);
   if (commsCsv) {
     await db.delete(schema.pbmCommunications);
+    const commRows: (typeof schema.pbmCommunications.$inferInsert)[] = [];
     for (const r of parseCsv(commsCsv)) {
       const date = clean(r.published_date);
       const subject = clean(r.subject);
       if (!date || !subject) continue;
       const label = (r.pbm || "").trim();
-      await db.insert(schema.pbmCommunications).values({
+      commRows.push({
         id: newId(),
         pbmName: label ? canonical(label) : null,
         sourceLabel: label || null,
@@ -544,6 +557,7 @@ export async function importReference(): Promise<ImportSummary> {
       });
       out.communications++;
     }
+    for (let i = 0; i < commRows.length; i += 300) await db.insert(schema.pbmCommunications).values(commRows.slice(i, i + 300));
   } else out.skipped.push("communications_index.csv");
 
   out.unresolvedPbms = resolver.unresolved();
