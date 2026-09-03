@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { hasCredentials, saveCredentials, clearCredentials, discoverSensors, syncReadings, trackedSensors, monthSummary, availableMonths, f } from "@/lib/imonnit";
+import { hasCredentials, saveCredentials, clearCredentials, discoverSensors, syncReadings, trackedSensors, monthSummary, availableMonths, diagnose, f } from "@/lib/imonnit";
 import { getSettings, setSetting } from "@/lib/settings";
 import { periodLabel } from "@/lib/periods";
 import { PageHeader, Notice, Empty, Field } from "@/components/ui";
@@ -13,9 +13,9 @@ import { PageHeader, Notice, Empty, Field } from "@/components/ui";
 export const metadata = { title: "Temperatures" };
 export const dynamic = "force-dynamic";
 
-export default async function TempsPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
+export default async function TempsPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string; raw?: string }> }) {
   await requireUser();
-  const { ok, error } = await searchParams;
+  const { ok, error, raw } = await searchParams;
   const [connected, sensors, s] = await Promise.all([hasCredentials(), trackedSensors(), getSettings()]);
   const tracked = sensors.filter((x) => x.tracked);
 
@@ -69,6 +69,16 @@ export default async function TempsPage({ searchParams }: { searchParams: Promis
     await audit({ action: "imonnit.sync", userId: u.id, userName: u.name, details: r.message.slice(0, 200) });
     revalidatePath("/temps");
     redirect(`/temps?${r.ok ? "ok" : "error"}=` + encodeURIComponent(r.message));
+  }
+
+  async function showRaw() {
+    "use server";
+    const u = await requireManager();
+    const d = await diagnose();
+    await audit({ action: "imonnit.diagnose", userId: u.id, userName: u.name, details: d.message.slice(0, 200) });
+    const q = new URLSearchParams({ [d.ok ? "ok" : "error"]: d.message });
+    if (d.sample) q.set("raw", d.sample);
+    redirect("/temps?" + q.toString());
   }
 
   async function backfill(fd: FormData) {
@@ -201,6 +211,22 @@ export default async function TempsPage({ searchParams }: { searchParams: Promis
           </p>
           {s.imonnit_last_sync && (
             <p className="mt-2 text-xs text-ink-3">Last checked {new Date(s.imonnit_last_sync).toLocaleString()} — {s.imonnit_last_result}</p>
+          )}
+
+          <form action={showRaw} className="mt-2">
+            <button className="text-xs text-ink-3 underline hover:text-ink">
+              Show exactly what iMonnit sent
+            </button>
+          </form>
+          {raw && (
+            <details className="mt-2 rounded-lg border border-line bg-surface p-3" open>
+              <summary className="cursor-pointer text-sm font-medium">What iMonnit sent</summary>
+              <p className="mt-1 text-xs text-ink-3">
+                If readings are being skipped, this says why: the field names here are what the account actually
+                returns, and they differ between iMonnit versions.
+              </p>
+              <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words text-xs text-ink-2">{raw}</pre>
+            </details>
           )}
 
           {/* ── Which sensors matter ── */}

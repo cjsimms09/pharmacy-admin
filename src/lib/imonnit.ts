@@ -311,6 +311,53 @@ export async function syncReadings(opts: { fromIso?: string; sinceDays?: number 
   return { ok: problems.length === 0, message, sensorsSeen: sensors.length, readingsAdded: added, skipped, via };
 }
 
+/**
+ * Shows what iMonnit actually returns, so a parsing failure can be fixed rather than guessed at.
+ *
+ * "12 readings could not be read" says the connection works and the shape does not match what
+ * was expected — which is a five-minute fix given the field names, and unfixable without them.
+ * Values are shown as they arrive because a temperature is not a secret; the credentials never
+ * appear here.
+ */
+export async function diagnose(): Promise<{ ok: boolean; message: string; sample: string }> {
+  const sensors = (await db.query.tempSensors.findMany()).filter((s) => s.tracked);
+  const sensor = sensors[0] ?? (await db.query.tempSensors.findMany())[0];
+  if (!sensor) return { ok: false, message: "No sensors are known yet — look for sensors first.", sample: "" };
+
+  const from = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 19).replace("T", " ");
+  const to = new Date().toISOString().slice(0, 19).replace("T", " ");
+  const r = await call("SensorDataMessages", { sensorID: sensor.externalId, fromDate: from, toDate: to });
+  if (!r.ok) return { ok: false, message: r.error, sample: "" };
+
+  const rows = resultsOf(r.data);
+  if (rows.length === 0) {
+    // The wrapper matters as much as the rows: if the result is not under a key we look for,
+    // every reading is invisible even though the call succeeded.
+    const shape = r.data && typeof r.data === "object" ? Object.keys(r.data as object).join(", ") : typeof r.data;
+    return {
+      ok: false,
+      message: `Answered via ${r.via}, but no rows were found in the reply. Top-level keys: ${shape || "none"}.`,
+      sample: JSON.stringify(r.data, null, 2).slice(0, 3000),
+    };
+  }
+
+  const first = rows[0];
+  const parsedDate = pick(first, "MessageDate", "messageDate", "Date", "Timestamp");
+  const parsedValue = pick(first, "PlotValue", "DataValue", "Value", "plotValue", "dataValue");
+  const parsedUnit = pick(first, "DataType", "Unit", "dataType", "MetricName");
+
+  return {
+    ok: true,
+    message:
+      `Answered via ${r.via}. ${rows.length} row(s) in the last week for "${sensor.name}". ` +
+      `Date field found: ${parsedDate === undefined ? "NONE" : String(parsedDate)}. ` +
+      `Value field found: ${parsedValue === undefined ? "NONE" : String(parsedValue)}. ` +
+      `Unit hint: ${parsedUnit === undefined ? "none" : String(parsedUnit)}. ` +
+      `Converted: ${toTenthsF(parsedValue, parsedUnit) === null ? "FAILED" : f(toTenthsF(parsedValue, parsedUnit)!)}.`,
+    sample: JSON.stringify(rows.slice(0, 2), null, 2).slice(0, 3000),
+  };
+}
+
 export type MonthSummary = {
   sensorId: string;
   sensorName: string;
