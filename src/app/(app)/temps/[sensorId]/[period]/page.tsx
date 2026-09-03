@@ -123,9 +123,12 @@ export default async function TempLogPage({
         actions={
           <>
             {connected && (
-              <form action={backfillMonth}>
-                <button className="btn">Pull this month from iMonnit</button>
-              </form>
+              <>
+                <form action={backfillMonth}>
+                  <button className="btn">Pull this month from iMonnit</button>
+                </form>
+                <Link href={`/temps/${sensorId}/${period}/check`} className="btn">Ask what iMonnit holds</Link>
+              </>
             )}
             <Link href={`/temps/${sensorId}/${period}/print`} className="btn">Print this month</Link>
           </>

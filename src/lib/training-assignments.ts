@@ -5,7 +5,11 @@ import { newId, randomToken } from "./crypto";
 import { todayIso, daysBetween, fmt } from "./dates";
 import { addMonths, TRAINING_CADENCE } from "./due";
 import { TRAINING_LABEL } from "./labels";
-import { getSettings } from "./settings";
+import { courseFor } from "./courses";
+import { makeReplyCode } from "./training-replies";
+import { packetText, packetFileName, courseVersion } from "./course-packet";
+import { subjectFor, textFor, htmlFor, type EmailContext } from "./training-email";
+import { getSettings, setSetting } from "./settings";
 import { sendMail } from "./send-mail";
 import type { TrainingType } from "@/db/schema";
 
@@ -94,7 +98,7 @@ export type AssignResult = { assigned: number; emailed: number; problems: string
 export async function assignTraining(
   personIds: string[],
   type: TrainingType,
-  opts: { dueOn?: string; materialUrl?: string | null },
+  opts: { dueOn?: string; materialUrl?: string | null; email?: boolean },
   user: { id: string; name: string },
 ): Promise<AssignResult> {
   const people = await db.query.people.findMany();
@@ -121,6 +125,7 @@ export async function assignTraining(
         personId: id,
         type,
         token: randomToken(24),
+        replyCode: makeReplyCode(),
         assignedOn: today,
         dueOn,
         // The link given for this run, else whatever the pharmacy has set as its standard.
@@ -131,47 +136,129 @@ export async function assignTraining(
       out.assigned++;
     }
 
-    const row = await db.query.trainingAssignments.findFirst({ where: eq(schema.trainingAssignments.id, assignmentId) });
-    if (!row) continue;
+  }
 
-    if (!person.email) {
-      out.problems.push(`${person.firstName} ${person.lastName} has no email address on file.`);
-      continue;
-    }
-    const sent = await email(row.token, person.email, `${person.firstName} ${person.lastName}`, type, dueOn);
-    if (sent.ok) {
-      await db.update(schema.trainingAssignments).set({ sentAt: new Date().toISOString(), sendError: null }).where(eq(schema.trainingAssignments.id, assignmentId));
-      out.emailed++;
-    } else {
-      await db.update(schema.trainingAssignments).set({ sendError: sent.error }).where(eq(schema.trainingAssignments.id, assignmentId));
-      out.problems.push(`Could not email ${person.firstName}: ${sent.error}`);
-    }
+  // One email per person, covering everything they owe. Three emails for three trainings is how
+  // all three get ignored, and it is the complaint every member of staff has about compliance
+  // software. Assigning several trainings at once therefore creates them all first and sends
+  // once — pass email: false and call sendOutstanding yourself when doing that.
+  if (opts.email !== false) {
+    const sent = await sendOutstanding(personIds);
+    out.emailed = sent.emailed;
+    out.problems.push(...sent.problems);
   }
   return out;
 }
 
-async function email(token: string, to: string, name: string, type: TrainingType, dueOn: string) {
+export type SendResult = { emailed: number; problems: string[] };
+
+/**
+ * Emails each person everything they currently owe, in one message.
+ *
+ * Safe to run again: it reuses the assignment that already exists, so re-sending does not create
+ * a second link or a second reply code, and does not reset anything the person has already done.
+ */
+export async function sendOutstanding(personIds?: string[]): Promise<SendResult> {
+  const out: SendResult = { emailed: 0, problems: [] };
+  const open = await db.query.trainingAssignments.findMany({ where: isNull(schema.trainingAssignments.completedAt) });
+  const people = await db.query.people.findMany();
+
+  const byPerson = new Map<string, typeof open>();
+  for (const a of open) {
+    if (personIds && !personIds.includes(a.personId)) continue;
+    byPerson.set(a.personId, [...(byPerson.get(a.personId) ?? []), a]);
+  }
+
+  for (const [personId, items] of byPerson) {
+    const person = people.find((p) => p.id === personId);
+    if (!person) continue;
+    if (!person.email) {
+      out.problems.push(`${person.firstName} ${person.lastName} has no email address on file.`);
+      continue;
+    }
+    const r = await emailPerson(person, items);
+    const now = new Date().toISOString();
+    for (const a of items) {
+      const course = courseFor(a.type);
+      await db
+        .update(schema.trainingAssignments)
+        .set(
+          r.ok
+            ? {
+                sentAt: now,
+                sendError: null,
+                // What was actually delivered, and when. The certificate names this version, so
+                // a course edited later cannot retroactively claim to be the one they sat.
+                materialVersion: course ? courseVersion(course) : null,
+                materialSentAt: course ? now : null,
+              }
+            : { sendError: r.error },
+        )
+        .where(eq(schema.trainingAssignments.id, a.id));
+    }
+    if (r.ok) out.emailed++;
+    else out.problems.push(`Could not email ${person.firstName}: ${r.error}`);
+  }
+  return out;
+}
+
+/**
+ * The email itself.
+ *
+ * Two ways to complete are offered, in the order of how good the resulting record is. The link is
+ * first because it produces the stronger evidence — a typed signature, a timestamp, a device, and
+ * a comprehension check that had to be passed. The reply is second because people reply to
+ * emails, and a system that only works when everyone behaves as it prefers does not work.
+ *
+ * The material travels with it. An email linking to a course proves the pharmacy asked; an email
+ * carrying the course proves the pharmacy provided it, and only the second is training.
+ */
+async function emailPerson(
+  person: { firstName: string; lastName: string; email: string | null },
+  items: { type: TrainingType; token: string; replyCode: string | null; dueOn: string }[],
+  opts: { reminder?: boolean } = {},
+) {
   const s = await getSettings();
-  const base = (s.pharmacy_name || "the pharmacy").trim();
-  const url = await linkFor(token);
-  return sendMail(
-    to,
-    `${TRAINING_LABEL[type]} — due ${fmt(dueOn)}`,
-    [
-      `${name},`,
-      "",
-      `Your annual ${TRAINING_LABEL[type].toLowerCase()} is due by ${fmt(dueOn)}.`,
-      "",
-      "Open this link, work through it, and sign at the bottom. It takes a few minutes and you do",
-      "not need a password:",
-      "",
-      url,
-      "",
-      "The link is personal to you — please do not forward it.",
-      "",
-      base,
-    ].join("\n"),
-  );
+  const pharmacy = (s.pharmacy_name || "the pharmacy").trim();
+  const address =
+    [s.pharmacy_address, [s.pharmacy_city, s.pharmacy_state].filter(Boolean).join(", "), s.pharmacy_zip]
+      .filter(Boolean)
+      .join(" · ") || null;
+  const pic = (await db.query.people.findMany()).find((p) => p.isPic);
+
+  const ctx: EmailContext = {
+    firstName: person.firstName,
+    pharmacy,
+    address,
+    phone: s.pharmacy_phone || null,
+    picName: pic ? `${pic.firstName} ${pic.lastName}` : null,
+    today: todayIso(),
+    reminder: Boolean(opts.reminder),
+    items: await Promise.all(
+      items.map(async (i) => {
+        const course = courseFor(i.type);
+        return {
+          type: i.type,
+          title: course?.title ?? TRAINING_LABEL[i.type],
+          minutes: course?.minutes ?? null,
+          dueOn: i.dueOn,
+          url: await linkFor(i.token),
+          replyCode: i.replyCode,
+        };
+      }),
+    ),
+  };
+
+  const attachments = items
+    .map((i) => courseFor(i.type))
+    .filter((c): c is NonNullable<typeof c> => Boolean(c))
+    .map((course) => ({
+      filename: packetFileName(course),
+      content: packetText(course, pharmacy),
+      contentType: "text/plain; charset=utf-8",
+    }));
+
+  return sendMail(person.email!, subjectFor(ctx), textFor(ctx), attachments, htmlFor(ctx));
 }
 
 /**
@@ -187,7 +274,13 @@ export async function linkFor(token: string): Promise<string> {
   return `${base || "http://localhost:3000"}/t/${token}`;
 }
 
-/** Reminders: one a week while it is outstanding, then the PIC is told rather than the person. */
+/**
+ * Reminders: one a week while anything is outstanding, then the PIC is told rather than the person.
+ *
+ * Grouped per person for the same reason the first email is: somebody with three trainings open
+ * should get one reminder a week, not three, and three is how a reminder becomes something the
+ * mail client filters.
+ */
 export async function sendReminders(): Promise<{ reminded: number; escalated: string[] }> {
   const today = todayIso();
   const open = await db.query.trainingAssignments.findMany({ where: isNull(schema.trainingAssignments.completedAt) });
@@ -195,60 +288,124 @@ export async function sendReminders(): Promise<{ reminded: number; escalated: st
   let reminded = 0;
   const escalated: string[] = [];
 
-  for (const a of open) {
-    const person = people.find((p) => p.id === a.personId);
-    if (!person?.email) continue;
-    const since = a.lastReminderAt ? daysBetween(a.lastReminderAt.slice(0, 10), today) : 99;
-    if (since < 7) continue;
+  const byPerson = new Map<string, typeof open>();
+  for (const a of open) byPerson.set(a.personId, [...(byPerson.get(a.personId) ?? []), a]);
 
-    const late = daysBetween(a.dueOn, today);
-    // Four reminders is enough. Past that it is a management problem, not a mail problem, and
-    // the PIC needs to know rather than the inbox getting another copy.
-    if (late > 0 && a.remindersSent >= 4) {
-      escalated.push(`${person.firstName} ${person.lastName} — ${TRAINING_LABEL[a.type]}, ${late} days late`);
-      continue;
+  for (const [personId, items] of byPerson) {
+    const person = people.find((p) => p.id === personId);
+    if (!person?.email) continue;
+
+    // Four reminders is enough. Past that it is a management problem rather than a mail problem,
+    // and the PIC needs to know rather than the person getting another copy.
+    const spent = items.filter((a) => daysBetween(a.dueOn, today) > 0 && a.remindersSent >= 4);
+    for (const a of spent) {
+      escalated.push(`${person.firstName} ${person.lastName} — ${TRAINING_LABEL[a.type]}, ${daysBetween(a.dueOn, today)} days late`);
     }
-    const url = await linkFor(a.token);
-    const r = await sendMail(
-      person.email,
-      late > 0 ? `Overdue: ${TRAINING_LABEL[a.type]}` : `Reminder: ${TRAINING_LABEL[a.type]}`,
-      [
-        `${person.firstName},`,
-        "",
-        late > 0
-          ? `Your ${TRAINING_LABEL[a.type].toLowerCase()} was due on ${fmt(a.dueOn)} and is ${late} days overdue.`
-          : `Your ${TRAINING_LABEL[a.type].toLowerCase()} is due by ${fmt(a.dueOn)}.`,
-        "",
-        url,
-      ].join("\n"),
-    );
+    const chase = items.filter((a) => !spent.includes(a));
+    if (chase.length === 0) continue;
+
+    // A week since the last reminder for any of them. Sending one email means one clock.
+    const lastAt = chase.map((a) => a.lastReminderAt).filter(Boolean).sort().pop();
+    if (lastAt && daysBetween(lastAt.slice(0, 10), today) < 7) continue;
+
+    const r = await emailPerson(person, chase, { reminder: true });
     if (r.ok) {
-      await db
-        .update(schema.trainingAssignments)
-        .set({ remindersSent: a.remindersSent + 1, lastReminderAt: new Date().toISOString() })
-        .where(eq(schema.trainingAssignments.id, a.id));
+      const now = new Date().toISOString();
+      for (const a of chase) {
+        await db
+          .update(schema.trainingAssignments)
+          .set({ remindersSent: a.remindersSent + 1, lastReminderAt: now })
+          .where(eq(schema.trainingAssignments.id, a.id));
+      }
       reminded++;
     }
   }
+
+  if (escalated.length > 0) await tellThePic(escalated);
+  await setSetting("training_reminders_last", new Date().toISOString());
   return { reminded, escalated };
 }
 
+/** Once the reminders are spent, the PIC hears about it instead. */
+async function tellThePic(escalated: string[]) {
+  const people = await db.query.people.findMany();
+  const pic = people.find((p) => p.isPic);
+  if (!pic?.email) return;
+  await sendMail(
+    pic.email,
+    `${escalated.length} training${escalated.length === 1 ? "" : "s"} still outstanding after four reminders`,
+    [
+      "These have been chased weekly and are still not done. Reminders have stopped, because at this",
+      "point another email is not what is missing.",
+      "",
+      ...escalated.map((e) => `— ${e}`),
+      "",
+      "You can record that you delivered the training yourself from the training screen, which is a",
+      "real record and says plainly that it was you rather than them who signed.",
+    ].join("\n"),
+  );
+}
+
 /**
- * Records a completion from the person themselves.
+ * A member of staff completing their training and signing for it.
  *
- * Writes the training row the register reads, so a self-signed completion and one entered by the
- * PIC are the same kind of record downstream — the difference is in the evidence attached, not
- * in whether it counts.
+ * The comprehension check is graded before anything is written. A wrong answer is not a failure
+ * to be recorded — it is a page to send them back to, with the reason. Nothing is stored until
+ * every answer is right, so there is no such thing here as a training record with a failed quiz
+ * behind it, and no incentive for anyone to guess their way past one.
  */
+export type SignInput = {
+  signedName: string;
+  /** One answer index per question, in order. Null where nothing was chosen. */
+  answers: (number | null)[];
+  /** Only asked where the standard requires it — bloodborne pathogens. */
+  liveQuestions: boolean;
+};
+
+export type SignResult =
+  | { ok: true; label: string; trainingId: string }
+  | { ok: false; error: string; wrong?: { index: number; why: string }[] };
+
 export async function completeAssignment(
   token: string,
-  signedName: string,
+  input: SignInput,
   meta: { ip: string | null; agent: string | null },
-): Promise<{ ok: true; label: string } | { ok: false; error: string }> {
+): Promise<SignResult> {
   const a = await db.query.trainingAssignments.findFirst({ where: eq(schema.trainingAssignments.token, token) });
   if (!a) return { ok: false, error: "This link is not valid." };
   if (a.completedAt) return { ok: false, error: "This has already been signed." };
-  if (signedName.trim().length < 3) return { ok: false, error: "Please type your full name." };
+
+  const course = courseFor(a.type);
+  const signedName = input.signedName.trim();
+
+  const wrong: { index: number; why: string }[] = [];
+  if (course) {
+    course.questions.forEach((q, i) => {
+      if (input.answers[i] !== q.answer) wrong.push({ index: i, why: q.why });
+    });
+    if (wrong.length > 0) {
+      return {
+        ok: false,
+        error:
+          wrong.length === course.questions.length
+            ? "None of those were right. Have another look — the reason is under each one."
+            : `${wrong.length} of ${course.questions.length} were not right. The reason is under each one — have another go.`,
+        wrong,
+      };
+    }
+    if (course.liveQuestionsRequired && !input.liveQuestions) {
+      return {
+        ok: false,
+        error:
+          "Tick the box confirming you were offered the chance to ask questions. The bloodborne pathogens standard " +
+          "requires it and the record does not count without it.",
+      };
+    }
+  }
+
+  // Last, because being told your name is too short after answering everything correctly is
+  // irritating, and being told it before you have started is worse.
+  if (signedName.length < 3) return { ok: false, error: "Please type your full name." };
 
   const today = todayIso();
   const months = TRAINING_CADENCE[a.type]?.months;
@@ -260,22 +417,27 @@ export async function completeAssignment(
     completedOn: today,
     cycleYear: Number(today.slice(0, 4)),
     expiresOn: months ? addMonths(today, months) : null,
-    provider: "Signed online",
+    provider: course ? "The pharmacy's own course, signed online" : "Signed online",
+    minutes: course?.minutes ?? null,
     notes: a.statement,
-    createdBy: signedName.trim(),
+    createdBy: signedName,
   });
   await db
     .update(schema.trainingAssignments)
     .set({
       completedAt: new Date().toISOString(),
-      signedName: signedName.trim(),
+      signedName,
       signedIp: meta.ip,
       signedAgent: meta.agent,
       trainingId,
+      completedVia: "signed",
+      quizCorrect: course ? course.questions.length : null,
+      quizTotal: course ? course.questions.length : null,
+      liveQuestionsAcknowledged: Boolean(course?.liveQuestionsRequired && input.liveQuestions),
     })
     .where(eq(schema.trainingAssignments.id, a.id));
 
-  return { ok: true, label: TRAINING_LABEL[a.type] };
+  return { ok: true, label: TRAINING_LABEL[a.type], trainingId };
 }
 
 /**
@@ -303,6 +465,7 @@ export async function recordGroupTraining(
   const on = opts.completedOn || todayIso();
   const names = people.map((p) => `${p.firstName} ${p.lastName}`);
   const months = TRAINING_CADENCE[type]?.months;
+  const course = courseFor(type);
   const how = (opts.how ?? "").trim();
 
   const statement =
@@ -312,17 +475,34 @@ export async function recordGroupTraining(
     ` Recorded by me as pharmacist-in-charge; they did not sign individually.`;
 
   for (const p of people) {
+    const trainingId = newId();
     await db.insert(schema.trainings).values({
-      id: newId(),
+      id: trainingId,
       personId: p.id,
       type,
       completedOn: on,
       cycleYear: Number(on.slice(0, 4)),
       expiresOn: months ? addMonths(on, months) : null,
       provider: "In-house, attested by the PIC",
+      minutes: course?.minutes ?? null,
       notes: statement,
       createdBy: user.name,
     });
+    // Close any outstanding link for the same thing, so nobody is chased for training they
+    // have already sat through in the room.
+    const open = await db.query.trainingAssignments.findFirst({
+      where: and(
+        eq(schema.trainingAssignments.personId, p.id),
+        eq(schema.trainingAssignments.type, type),
+        isNull(schema.trainingAssignments.completedAt),
+      ),
+    });
+    if (open) {
+      await db
+        .update(schema.trainingAssignments)
+        .set({ completedAt: new Date().toISOString(), signedName: null, trainingId, completedVia: "pic_recorded" })
+        .where(eq(schema.trainingAssignments.id, open.id));
+    }
   }
   return { recorded: people.length, names };
 }

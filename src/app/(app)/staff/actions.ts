@@ -10,6 +10,7 @@ import { requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { newId } from "@/lib/crypto";
 import { storeFile } from "@/lib/files";
+import { endEmployment, reinstate } from "@/lib/offboarding";
 import type { DocumentCategory } from "@/db/schema";
 
 /** Default filing category for a document attached to a credential. */
@@ -199,4 +200,52 @@ export async function deleteCe(id: string, personId: string) {
   await audit({ action: "ce.delete", userId: user.id, userName: user.name, entity: "ce", entityId: id });
   revalidatePath(`/staff/${personId}`);
   redirect(`/staff/${personId}`);
+}
+
+/**
+ * Records that somebody has left.
+ *
+ * Nothing is deleted and the wording on the screen says so, because the reason people delete
+ * former employees is that they assume the alternative is clutter. It is not: the file has to be
+ * producible for years and the person simply stops appearing in the places that ask staff to do
+ * things.
+ */
+export async function endEmploymentAction(formData: FormData) {
+  const user = await requireManager();
+  const id = String(formData.get("personId") ?? "");
+  try {
+    const r = await endEmployment(
+      id,
+      { endedOn: String(formData.get("endedOn") ?? ""), reason: String(formData.get("reason") ?? "") },
+      user,
+    );
+    await audit({ action: "person.ended", userId: user.id, userName: user.name, details: `${id} ${formData.get("endedOn")}` });
+    revalidatePath(`/staff/${id}`);
+    revalidatePath("/staff");
+    revalidatePath("/");
+    const bits = [`${r.name} is recorded as having left. Their whole file is kept and searchable.`];
+    if (r.assignmentsCancelled > 0) {
+      bits.push(`${r.assignmentsCancelled} outstanding training link${r.assignmentsCancelled === 1 ? "" : "s"} cancelled, so no more reminders go to them.`);
+    }
+    redirect(`/staff/${id}?saved=` + encodeURIComponent(bits.join(" ")));
+  } catch (e) {
+    if (e && typeof e === "object" && "digest" in e) throw e;
+    redirect(`/staff/${id}?error=` + encodeURIComponent(e instanceof Error ? e.message : "Could not record that."));
+  }
+}
+
+export async function reinstateAction(formData: FormData) {
+  const user = await requireManager();
+  const id = String(formData.get("personId") ?? "");
+  try {
+    const r = await reinstate(id, user);
+    await audit({ action: "person.reinstated", userId: user.id, userName: user.name, details: id });
+    revalidatePath(`/staff/${id}`);
+    revalidatePath("/staff");
+    revalidatePath("/");
+    redirect(`/staff/${id}?saved=` + encodeURIComponent(`${r.name} is active again. Check their licence and training dates — some may have lapsed while they were away.`));
+  } catch (e) {
+    if (e && typeof e === "object" && "digest" in e) throw e;
+    redirect(`/staff/${id}?error=` + encodeURIComponent(e instanceof Error ? e.message : "Could not record that."));
+  }
 }

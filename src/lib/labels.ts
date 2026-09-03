@@ -93,6 +93,7 @@ export const DOCUMENT_CATEGORY_LABEL: Record<DocumentCategory, string> = {
   cqi_summary: "CQI bimonthly summary (C-550)",
   cqi_incident: "CQI incident report / evaluation (C-650)",
   ce_certificate: "CE certificate",
+  training_record: "Training record / attestation",
   policy: "Policy / procedure",
   report: "Report received by email",
   other: "Other",

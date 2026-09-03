@@ -7,18 +7,38 @@ import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { TRAINING_CADENCE, addMonths } from "@/lib/due";
 import { TRAINING_LABEL, PERSON_ROLE_LABEL } from "@/lib/labels";
-import { TRAINING_TYPES, type TrainingType } from "@/db/schema";
+import { type TrainingType } from "@/db/schema";
 import { todayIso, fmt, daysUntil } from "@/lib/dates";
 import { storeFile } from "@/lib/files";
 import { newId } from "@/lib/crypto";
 import { PageHeader, Notice, BackLink, Empty } from "@/components/ui";
-import { assignTraining, openAssignments, STATEMENTS, linkFor } from "@/lib/training-assignments";
+import {
+  assignTraining,
+  sendOutstanding,
+  openAssignments,
+  recordGroupTraining,
+  linkFor,
+} from "@/lib/training-assignments";
+import { REPLY_PHRASE } from "@/lib/training-replies";
+import { courseFor } from "@/lib/courses";
 import { canSend } from "@/lib/send-mail";
 
-export const metadata = { title: "Training register" };
+export const metadata = { title: "Training" };
 export const dynamic = "force-dynamic";
 
-export default async function TrainingPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string; person?: string }> }) {
+/**
+ * One screen for the whole of training.
+ *
+ * The previous version was a register — it told you the state of the world and left you to go
+ * somewhere else to change it. That is the pattern that makes a compliance system take ten
+ * clicks and three guesses to do one thing. Here the grid that shows who owes what is the same
+ * grid you tick to send it, the outstanding list carries the buttons that chase or close it, and
+ * the certificates are on the same page as the completions they belong to.
+ */
+
+const REQUIRED = Object.keys(TRAINING_CADENCE) as TrainingType[];
+
+export default async function TrainingPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
   await requireUser();
   const { ok, error } = await searchParams;
   const [assignments, mailReady, people, trainings] = await Promise.all([
@@ -28,25 +48,95 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
     db.query.trainings.findMany({ orderBy: (t, { desc }) => [desc(t.completedOn)] }),
   ]);
   const outstanding = assignments.filter((a) => !a.completedAt);
+  // Resolved up front: linkFor reads a setting, and awaiting inside the table would mean one
+  // lookup per row inside JSX, which is not allowed and would be wasteful if it were.
+  const links = new Map(await Promise.all(outstanding.map(async (a) => [a.id, await linkFor(a.token)] as const)));
+  const done = assignments.filter((a) => a.completedAt && a.trainingId);
+  const today = todayIso();
 
-  const required = (Object.keys(TRAINING_CADENCE) as TrainingType[]);
+  /** Where each person stands on each requirement, and whether it should be ticked by default. */
+  const state = (personId: string, type: TrainingType) => {
+    const last = trainings.filter((x) => x.personId === personId && x.type === type)[0];
+    const open = outstanding.find((a) => a.personId === personId && a.type === type);
+    if (!last) return { label: "never", tone: "badge-crit", due: true, open: Boolean(open) };
+    const dueOn = last.expiresOn ?? addMonths(last.completedOn, TRAINING_CADENCE[type]?.months ?? 12);
+    const left = daysUntil(dueOn)!;
+    if (left < 0) return { label: `${-left}d late`, tone: "badge-crit", due: true, open: Boolean(open) };
+    if (left <= 45) return { label: dueOn.slice(5), tone: "badge-warn", due: true, open: Boolean(open) };
+    return { label: dueOn.slice(5), tone: "badge-ok", due: false, open: Boolean(open) };
+  };
 
-  async function assign(fd: FormData) {
+  const owed = people.reduce((n, p) => n + REQUIRED.filter((t) => state(p.id, t).due).length, 0);
+
+  // ── actions ─────────────────────────────────────────────────────
+  async function send(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const picks = fd.getAll("pick").map(String).filter(Boolean);
+    if (picks.length === 0) {
+      redirect("/compliance/training?error=" + encodeURIComponent("Nothing was ticked."));
+    }
+    const dueOn = String(fd.get("dueOn") ?? "") || undefined;
+    const byType = new Map<TrainingType, string[]>();
+    for (const p of picks) {
+      const [personId, type] = p.split("|");
+      if (!personId || !type) continue;
+      byType.set(type as TrainingType, [...(byType.get(type as TrainingType) ?? []), personId]);
+    }
+    try {
+      let assigned = 0;
+      const problems: string[] = [];
+      // Create every assignment first, then send once per person. Otherwise somebody with three
+      // trainings gets three emails, and three emails is how all three get ignored.
+      for (const [type, ids] of byType) {
+        const r = await assignTraining(ids, type, { dueOn, email: false }, u);
+        assigned += r.assigned;
+        problems.push(...r.problems);
+      }
+      const everyone = [...new Set(picks.map((p) => p.split("|")[0]))];
+      const sent = await sendOutstanding(everyone);
+      problems.push(...sent.problems);
+      await audit({ action: "training.assign", userId: u.id, userName: u.name, details: `${picks.length} picks` });
+      revalidatePath("/compliance/training");
+      revalidatePath("/compliance");
+      revalidatePath("/");
+      const bits = [
+        `${assigned} assigned. ${sent.emailed} ${sent.emailed === 1 ? "person" : "people"} emailed — one email each, covering everything they owe.`,
+      ];
+      if (problems.length) bits.push(problems.join(" "));
+      redirect("/compliance/training?ok=" + encodeURIComponent(bits.join(" ")));
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/compliance/training?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not send that."));
+    }
+  }
+
+  async function chase(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const personId = String(fd.get("personId") ?? "");
+    const r = await sendOutstanding(personId ? [personId] : undefined);
+    await audit({ action: "training.resend", userId: u.id, userName: u.name, details: personId || "everyone" });
+    revalidatePath("/compliance/training");
+    const msg = r.emailed > 0 ? `Sent again to ${r.emailed} ${r.emailed === 1 ? "person" : "people"}.` : "Nothing to send.";
+    redirect(`/compliance/training?${r.problems.length ? "error" : "ok"}=` + encodeURIComponent([msg, ...r.problems].join(" ")));
+  }
+
+  async function attestGroup(fd: FormData) {
     "use server";
     const u = await requireManager();
     const type = String(fd.get("type") ?? "") as TrainingType;
     const ids = fd.getAll("personIds").map(String).filter(Boolean);
-    if (ids.length === 0) redirect("/compliance/training?error=" + encodeURIComponent("Pick at least one person."));
     try {
-      const r = await assignTraining(ids, type, { dueOn: String(fd.get("dueOn") ?? "") || undefined, materialUrl: String(fd.get("materialUrl") ?? "").trim() || null }, u);
-      await audit({ action: "training.assign", userId: u.id, userName: u.name, details: `${type} to ${ids.length}` });
+      const r = await recordGroupTraining(ids, type, u, { how: String(fd.get("how") ?? "") });
+      await audit({ action: "training.attest", userId: u.id, userName: u.name, details: `${type} for ${r.recorded}` });
       revalidatePath("/compliance/training");
-      const bits = [`${r.assigned} assigned, ${r.emailed} emailed`];
-      if (r.problems.length) bits.push(r.problems.join(" "));
-      redirect("/compliance/training?ok=" + encodeURIComponent(bits.join(". ")));
+      revalidatePath("/compliance");
+      revalidatePath("/");
+      redirect("/compliance/training?ok=" + encodeURIComponent(`Recorded for ${r.names.join(", ")}.`));
     } catch (e) {
       if (e && typeof e === "object" && "digest" in e) throw e;
-      redirect("/compliance/training?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not assign that."));
+      redirect("/compliance/training?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not record that."));
     }
   }
 
@@ -66,7 +156,7 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
       documentId = newId();
       await db.insert(schema.documents).values({
         id: documentId,
-        category: "ce_certificate",
+        category: "training_record",
         title: `${TRAINING_LABEL[type]} — ${completedOn}`,
         fileName: file.name,
         mimeType: stored.mimeType,
@@ -89,66 +179,102 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
       expiresOn: months ? addMonths(completedOn, months) : null,
       provider,
       documentId,
-      createdBy: u.id,
+      createdBy: u.name,
     });
     await audit({ action: "training.record", userId: u.id, userName: u.name, details: `${type} for ${personId} on ${completedOn}` });
     revalidatePath("/compliance/training");
     revalidatePath("/compliance");
+    revalidatePath("/");
     redirect("/compliance/training?ok=" + encodeURIComponent("Recorded."));
+  }
+
+  if (people.length === 0) {
+    return (
+      <>
+        <BackLink href="/compliance">Compliance</BackLink>
+        <PageHeader title="Training" />
+        <Empty>No active staff. <Link href="/staff/new" className="underline">Add someone first.</Link></Empty>
+      </>
+    );
   }
 
   return (
     <>
       <BackLink href="/compliance">Compliance</BackLink>
       <PageHeader
-        title="Training register"
-        subtitle="Who has completed what, and when it next falls due. One row per person, one column per requirement."
+        title="Training"
+        subtitle={
+          owed === 0
+            ? "Everyone is current on everything."
+            : `${owed} training${owed === 1 ? "" : "s"} due or overdue across ${people.length} ${people.length === 1 ? "person" : "people"}.`
+        }
+        actions={
+          outstanding.length > 0 ? (
+            <form action={chase}>
+              <button className="btn">Chase everyone outstanding</button>
+            </form>
+          ) : undefined
+        }
       />
 
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
+      {!mailReady && (
+        <Notice kind="warn">
+          Email is not set up, so nothing can be sent. <Link href="/settings/email" className="underline">Set it up</Link> —
+          until then, the only route is recording training you delivered yourself.
+        </Notice>
+      )}
 
-      {people.length === 0 ? (
-        <Empty>No active staff. <Link href="/staff/new" className="underline">Add someone first.</Link></Empty>
-      ) : (
-        <>
-          <div className="mt-4 overflow-x-auto rounded-lg border border-line">
+      {/* ── Tick and send. The grid that shows the gap is the grid that closes it. ── */}
+      <form action={send}>
+        <section className="card mb-6">
+          <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="font-semibold">Who needs what</h2>
+            <p className="text-xs text-ink-3">
+              Everything due or overdue is ticked. Untick anything you do not want to send. Click a column heading to
+              read the course itself and see exactly what gets attached to their email.
+            </p>
+          </div>
+          <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-ground text-left text-xs uppercase tracking-wide text-ink-3">
                 <tr>
                   <th className="px-3 py-2">Person</th>
-                  {required.map((t) => <th key={t} className="px-3 py-2">{TRAINING_LABEL[t]}</th>)}
+                  {REQUIRED.map((t) => (
+                    <th key={t} className="px-2 py-2" title={TRAINING_LABEL[t]}>
+                      {courseFor(t) ? (
+                        <Link href={`/compliance/training/course/${t}`} className="text-accent hover:underline">
+                          {courseFor(t)!.title.split(" ").slice(0, 2).join(" ")}
+                        </Link>
+                      ) : (
+                        TRAINING_LABEL[t]
+                      )}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
                 {people.map((p) => (
                   <tr key={p.id} className="border-t border-line align-top">
-                    <td className="px-3 py-2">
-                      <Link href={`/staff/${p.id}`} className="font-medium underline">{p.firstName} {p.lastName}</Link>
-                      <div className="text-xs text-ink-3">{PERSON_ROLE_LABEL[p.role as keyof typeof PERSON_ROLE_LABEL] ?? p.role}</div>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      <Link href={`/staff/${p.id}`} className="font-medium text-accent hover:underline">
+                        {p.firstName} {p.lastName}
+                      </Link>
+                      <div className="text-xs text-ink-3">
+                        {PERSON_ROLE_LABEL[p.role as keyof typeof PERSON_ROLE_LABEL] ?? p.role}
+                        {!p.email && <span className="text-crit"> · no email on file</span>}
+                      </div>
                     </td>
-                    {required.map((t) => {
-                      if (t === "immunization_protocol_review" && !p.administersVaccines) {
-                        return <td key={t} className="px-3 py-2 text-xs text-ink-3">n/a</td>;
-                      }
-                      const last = trainings.filter((x) => x.personId === p.id && x.type === t)[0];
-                      if (!last) return <td key={t} className="px-3 py-2"><span className="rounded bg-red-100 px-1.5 py-0.5 text-xs text-red-800">never</span></td>;
-                      const due = last.expiresOn;
-                      const left = due ? daysUntil(due) : null;
-                      const tone = left === null ? "bg-ground text-ink-3" : left < 0 ? "bg-red-100 text-red-800" : left <= 30 ? "bg-amber-100 text-amber-900" : "bg-emerald-100 text-emerald-800";
+                    {REQUIRED.map((t) => {
+                      const st = state(p.id, t);
                       return (
-                        <td key={t} className="px-3 py-2">
-                          <span className={`rounded px-1.5 py-0.5 text-xs ${tone}`}>
-                            {left === null ? "done" : left < 0 ? `${Math.abs(left)}d late` : `${left}d`}
-                          </span>
-                          <div className="mt-0.5 text-xs text-ink-3">
-                            {fmt(last.completedOn)}
-                            {/* Who stood behind the record. A signature from the person is
-                                stronger than the PIC's word for it, and both are legitimate, so
-                                the difference is shown rather than hidden. */}
-                            {last.provider === "Signed online" && <span className="ml-1 text-emerald-700">signed</span>}
-                            {last.provider?.startsWith("In-house") && <span className="ml-1">PIC attested</span>}
-                          </div>
+                        <td key={t} className="px-2 py-2">
+                          <label className="flex items-center gap-1.5">
+                            <input type="checkbox" name="pick" value={`${p.id}|${t}`} defaultChecked={st.due && !st.open} />
+                            <span className={`badge ${st.tone} whitespace-nowrap`}>{st.label}</span>
+                          </label>
+                          {st.open && <div className="mt-0.5 text-[11px] text-ink-3">already sent</div>}
                         </td>
                       );
                     })}
@@ -157,134 +283,181 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
               </tbody>
             </table>
           </div>
-
-          {/* ── Assign, so the person does it and signs it themselves ── */}
-          <section className="mt-8 rounded-lg border border-line bg-surface p-4">
-            <h2 className="text-sm font-semibold">Assign training</h2>
-            <p className="mt-1 text-xs text-ink-3">
-              Each person gets a link by email. They work through it, read what they are confirming, and type their
-              name. That signature — with the time, the device and the exact wording — is the record. It is stronger
-              evidence than you entering it on their behalf, because it comes from them.
+          <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-line pt-4">
+            <label className="text-sm">
+              Due by
+              <input type="date" name="dueOn" defaultValue={addMonths(today, 1)} className="field ml-2 w-auto" />
+            </label>
+            <button className="btn btn-primary" disabled={!mailReady}>Send it</button>
+            <p className="text-xs text-ink-3">
+              One email per person, covering everything ticked for them. They can complete it on their phone.
             </p>
-            {!mailReady && (
-              <Notice kind="warn">
-                Email is not set up, so links cannot be sent. Settings → Email first.
-              </Notice>
-            )}
-            <form action={assign} className="mt-3 space-y-3">
-              <div className="grid gap-3 sm:grid-cols-3">
-                <label className="text-xs text-ink-3">
-                  Training
-                  <select name="type" className="field">
-                    {TRAINING_TYPES.filter((t) => STATEMENTS[t]).map((t) => (
-                      <option key={t} value={t}>{TRAINING_LABEL[t]}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="text-xs text-ink-3">
-                  Due by
-                  <input type="date" name="dueOn" className="field" />
-                </label>
-                <label className="text-xs text-ink-3">
-                  Link to the material (optional)
-                  <input name="materialUrl" className="field" placeholder="https://..." />
-                </label>
-              </div>
-              <fieldset>
-                <legend className="text-xs text-ink-3">Who</legend>
-                <div className="mt-1 flex flex-wrap gap-3">
+          </div>
+        </section>
+      </form>
+
+      {/* ── What is out and not back ── */}
+      {outstanding.length > 0 && (
+        <section className="card mb-6">
+          <h2 className="mb-3 font-semibold">Sent and waiting ({outstanding.length})</h2>
+          <div className="overflow-x-auto">
+            <table className="table">
+              <thead>
+                <tr><th>Person</th><th>Training</th><th>Due</th><th>Sent</th><th>Reply code</th><th>Link</th></tr>
+              </thead>
+              <tbody>
+                {outstanding.map((a) => (
+                  <tr key={a.id}>
+                    <td className="whitespace-nowrap">{a.person ? `${a.person.firstName} ${a.person.lastName}` : "—"}</td>
+                    <td>{TRAINING_LABEL[a.type]}</td>
+                    <td className="whitespace-nowrap">
+                      {fmt(a.dueOn)}
+                      {a.dueOn < today && <span className="badge badge-crit ml-2">late</span>}
+                    </td>
+                    <td className="whitespace-nowrap text-xs text-ink-2">
+                      {a.sentAt ? fmt(a.sentAt.slice(0, 10)) : <span className="text-crit">not sent</span>}
+                      {a.remindersSent > 0 && ` · ${a.remindersSent} reminder${a.remindersSent === 1 ? "" : "s"}`}
+                      {a.sendError && <div className="text-crit">{a.sendError}</div>}
+                    </td>
+                    <td className="font-mono text-xs">{a.replyCode ?? "—"}</td>
+                    <td className="text-xs">
+                      <a href={links.get(a.id)} className="text-accent hover:underline" target="_blank" rel="noreferrer">open</a>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 text-xs text-ink-3">
+            Reminders go out weekly on their own and stop after four, at which point you are emailed instead — another
+            email is not what is missing by then.
+          </p>
+        </section>
+      )}
+
+      {/* ── The two other ways it gets done ── */}
+      <section className="card mb-6">
+        <h2 className="font-semibold">If they did it another way</h2>
+        <div className="mt-3 grid gap-4 lg:grid-cols-2">
+          <details className="rounded-md border border-line bg-ground p-3">
+            <summary className="cursor-pointer text-sm font-medium">I trained them myself</summary>
+            <form action={attestGroup} className="mt-3 space-y-3">
+              <label className="block text-sm">
+                Training
+                <select name="type" className="field mt-1">
+                  {REQUIRED.map((t) => <option key={t} value={t}>{TRAINING_LABEL[t]}</option>)}
+                </select>
+              </label>
+              <fieldset className="text-sm">
+                <legend className="mb-1">Who was there</legend>
+                <div className="space-y-1">
                   {people.map((p) => (
-                    <label key={p.id} className="flex items-center gap-1.5 text-sm">
-                      <input type="checkbox" name="personIds" value={p.id} defaultChecked />
+                    <label key={p.id} className="flex items-center gap-2">
+                      <input type="checkbox" name="personIds" value={p.id} />
                       {p.firstName} {p.lastName}
-                      {!p.email && <span className="text-xs text-warn">no email</span>}
                     </label>
                   ))}
                 </div>
               </fieldset>
-              <button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Assign and send</button>
+              <input name="how" placeholder="How it was done — a staff meeting, one to one, the vendor's slides" className="field" />
+              <p className="text-xs text-ink-3">
+                This records that you delivered it and that each of them understood it — in those words, and that they
+                did not sign individually. An inspector can tell the two kinds of record apart, which is what keeps
+                both of them worth having.
+              </p>
+              <button className="btn">Record it</button>
             </form>
-          </section>
+          </details>
 
-          {outstanding.length > 0 && (
-            <>
-              <h2 className="mt-8 text-sm font-semibold">Waiting on staff</h2>
-              <ul className="mt-2 divide-y divide-line rounded-lg border border-line bg-surface text-sm">
-                {outstanding.map((a) => (
-                  <li key={a.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
-                    <div>
-                      <b>{a.person ? `${a.person.firstName} ${a.person.lastName}` : "—"}</b> · {TRAINING_LABEL[a.type]}
-                      <div className="text-xs text-ink-3">
-                        due {fmt(a.dueOn)}
-                        {a.sentAt ? ` · sent ${fmt(a.sentAt.slice(0, 10))}` : " · not sent"}
-                        {a.remindersSent > 0 && ` · ${a.remindersSent} reminder${a.remindersSent === 1 ? "" : "s"}`}
-                        {a.sendError && <span className="text-warn"> · {a.sendError}</span>}
-                      </div>
-                    </div>
-                    <span className={`badge ${daysUntil(a.dueOn)! < 0 ? "badge-crit" : "badge-warn"}`}>
-                      {daysUntil(a.dueOn)! < 0 ? `${Math.abs(daysUntil(a.dueOn)!)}d late` : `${daysUntil(a.dueOn)}d`}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-
-          <section className="mt-8 rounded-lg border border-line bg-surface p-4">
-            <h2 className="text-sm font-semibold">Record a completion yourself</h2>
-            <p className="mt-1 text-xs text-ink-3">
-              For training done on paper or elsewhere. Upload the certificate — a completion with no evidence behind
-              it is worth very little at inspection.
-            </p>
-            <form action={record} className="mt-3 grid gap-3 sm:grid-cols-2">
-              <label className="text-xs text-ink-3">
+          <details className="rounded-md border border-line bg-ground p-3">
+            <summary className="cursor-pointer text-sm font-medium">They did an outside course — file the certificate</summary>
+            <form action={record} className="mt-3 space-y-3">
+              <label className="block text-sm">
                 Person
-                <select name="personId" className="mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm text-ink">
+                <select name="personId" className="field mt-1">
                   {people.map((p) => <option key={p.id} value={p.id}>{p.firstName} {p.lastName}</option>)}
                 </select>
               </label>
-              <label className="text-xs text-ink-3">
+              <label className="block text-sm">
                 Training
-                <select name="type" className="mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm text-ink">
-                  {TRAINING_TYPES.map((t) => <option key={t} value={t}>{TRAINING_LABEL[t]}</option>)}
+                <select name="type" className="field mt-1">
+                  {REQUIRED.map((t) => <option key={t} value={t}>{TRAINING_LABEL[t]}</option>)}
                 </select>
               </label>
-              <label className="text-xs text-ink-3">
-                Date completed
-                <input type="date" name="completedOn" defaultValue={todayIso()} className="mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm text-ink" />
-              </label>
-              <label className="text-xs text-ink-3">
-                Provider
-                <input name="provider" placeholder="e.g. Pharmacist's Letter, HMA, in-house" className="mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm text-ink" />
-              </label>
-              <label className="text-xs text-ink-3 sm:col-span-2">
-                Certificate
-                <input type="file" name="file" className="mt-1 w-full text-sm text-ink" />
-              </label>
-              <div className="sm:col-span-2">
-                <button className="rounded-md bg-ink px-3 py-1.5 text-sm text-white">Record</button>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block text-sm">
+                  Completed on
+                  <input type="date" name="completedOn" defaultValue={today} className="field mt-1" />
+                </label>
+                <label className="block text-sm">
+                  Provider
+                  <input name="provider" placeholder="CMS, the PSAO, a vendor" className="field mt-1" />
+                </label>
               </div>
+              <label className="block text-sm">
+                Their certificate
+                <input type="file" name="file" className="field mt-1" />
+              </label>
+              <button className="btn">File it</button>
             </form>
-            <p className="mt-2 text-xs text-ink-3">
-              The next due date is set automatically from the requirement&rsquo;s cadence. Uploading the certificate
-              files it against that person at the same time — a completion with no evidence is worth very little at
-              inspection.
-            </p>
-          </section>
+          </details>
+        </div>
+      </section>
 
-          <section className="mt-6 rounded-lg border border-line bg-surface p-4 text-sm">
-            <h2 className="text-sm font-semibold">What is chased, and why</h2>
-            <ul className="mt-2 space-y-1 text-ink-2">
-              {(Object.entries(TRAINING_CADENCE) as [TrainingType, { months: number; why: string }][]).map(([t, c]) => (
-                <li key={t}><b>{TRAINING_LABEL[t]}</b> — every {c.months} months. {c.why}</li>
-              ))}
-            </ul>
-            <p className="mt-2 text-xs text-ink-3">
-              Anything else can still be recorded and filed, but is not chased: a one-off certificate does not lapse,
-              and reminders about things that never expire train people to ignore the list.
-            </p>
-          </section>
-        </>
+      {/* ── How the email reply route works, stated once, where it is relevant ── */}
+      <section className="card mb-6">
+        <h2 className="font-semibold">Replying by email counts</h2>
+        <p className="mt-1 text-sm text-ink-2">
+          Every training email carries a code. If someone replies from their own address with the words{" "}
+          <b>{REPLY_PHRASE}</b> and that code, the site files the reply as their attestation, records the training and
+          produces their certificate — no action needed from you. One reply can close several at once, because quoting
+          the original brings all the codes with it.
+        </p>
+        <p className="mt-2 text-xs text-ink-3">
+          The link is the better record: it captures a typed signature, the time, the device, and that they answered
+          the questions correctly. A reply records that they told you they did it, and the certificate says so on its
+          face. Both are real; they are not identical, and a file where every record claims to be the stronger kind is
+          the one that gets picked apart.
+        </p>
+      </section>
+
+      {/* ── Certificates ── */}
+      {done.length > 0 && (
+        <section className="card">
+          <h2 className="mb-3 font-semibold">Completed</h2>
+          <div className="overflow-x-auto">
+            <table className="table">
+              <thead><tr><th>Person</th><th>Training</th><th>Completed</th><th>How</th><th>Certificate</th></tr></thead>
+              <tbody>
+                {done.slice(0, 40).map((a) => (
+                  <tr key={a.id}>
+                    <td className="whitespace-nowrap">{a.person ? `${a.person.firstName} ${a.person.lastName}` : "—"}</td>
+                    <td>{TRAINING_LABEL[a.type]}</td>
+                    <td className="whitespace-nowrap">{fmt(a.completedAt!.slice(0, 10))}</td>
+                    <td className="text-xs text-ink-2">
+                      {a.completedVia === "email_reply"
+                        ? `Email reply${a.replyFromAddress ? ` from ${a.replyFromAddress}` : ""}`
+                        : a.completedVia === "pic_recorded"
+                          ? "Recorded by the PIC"
+                          : `Signed${a.quizTotal ? ` · ${a.quizCorrect}/${a.quizTotal} correct` : ""}`}
+                    </td>
+                    <td>
+                      <Link href={`/certificates/${a.trainingId}`} className="text-accent hover:underline">open</Link>
+                      {a.replyDocumentId && (
+                        <>
+                          {" · "}
+                          <a href={`/files/${a.replyDocumentId}`} className="text-accent hover:underline" target="_blank" rel="noreferrer">
+                            the reply
+                          </a>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
       )}
     </>
   );

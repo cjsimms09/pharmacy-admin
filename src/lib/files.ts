@@ -101,3 +101,23 @@ export async function deleteFile(storageKey: string): Promise<void> {
   if (storageKey.includes("..")) throw new Error("Invalid key");
   await fs.rm(path.join(filesDir(), storageKey), { force: true });
 }
+
+/**
+ * Stores text the site generated or received, rather than a file somebody uploaded.
+ *
+ * Kept separate from storeFile on purpose. storeFile exists to be suspicious of what a browser
+ * hands it; this is for content that never came from a browser — an emailed attestation captured
+ * verbatim, a generated log. The allow-list would refuse it for the wrong reason, and loosening
+ * the allow-list to let it through would weaken the check that matters.
+ */
+export async function storeRawText(text: string): Promise<{ storageKey: string; sha256: string; sizeBytes: number; mimeType: string }> {
+  const buf = Buffer.from(text, "utf8");
+  if (buf.byteLength > MAX_FILE_BYTES) throw new Error("That message is larger than 20 MB.");
+  // Same layout as an upload, so one route serves everything and nothing has to know where a
+  // particular document came from.
+  const key = `${new Date().getUTCFullYear()}/${newId()}`;
+  const full = path.join(filesDir(), key);
+  await fs.mkdir(path.dirname(full), { recursive: true });
+  await fs.writeFile(full, buf, { mode: 0o600 });
+  return { storageKey: key, sha256: sha256(buf), sizeBytes: buf.byteLength, mimeType: "text/plain" };
+}

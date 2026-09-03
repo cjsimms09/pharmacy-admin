@@ -15,6 +15,7 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
   const creds = await db.query.credentials.findMany();
   const shown = people.filter((p) => (all ? true : p.active) && (user.role === "staff" ? p.id === user.personId : true));
   const canManage = user.role !== "staff";
+  const former = people.filter((p) => !p.active).length;
 
   return (
     <>
@@ -53,7 +54,7 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
                       <div className="text-xs text-ink-3">
                         {p.isPic && <span className="badge badge-ok mr-1">PIC</span>}
                         {p.administersVaccines && <span className="badge badge-muted mr-1">vaccinator</span>}
-                        {!p.active && <span className="badge badge-muted">inactive</span>}
+                        {!p.active && <span className="badge badge-muted">left {fmt(p.endedOn)}</span>}
                         {p.title}
                       </div>
                     </td>
@@ -79,7 +80,14 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
         </div>
       )}
       <p className="mt-3 text-xs text-ink-3">
-        {all ? <Link href="/staff" className="underline">Hide inactive</Link> : <Link href="/staff?all=1" className="underline">Show inactive staff</Link>}
+        {all ? (
+          <Link href="/staff" className="underline">Hide former staff</Link>
+        ) : (
+          <Link href="/staff?all=1" className="underline">
+            Show former staff{former > 0 ? ` (${former})` : ""}
+          </Link>
+        )}
+        {" — nobody is ever deleted. A former employee's licences, training records and signed attestations stay on their page and stay searchable for as long as the retention rules require."}
       </p>
     </>
   );

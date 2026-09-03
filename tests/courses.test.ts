@@ -1,0 +1,140 @@
+import { test, describe } from "node:test";
+import assert from "node:assert/strict";
+import { COURSES, courseFor } from "../src/lib/courses";
+import { packetText, courseVersion, packetFileName } from "../src/lib/course-packet";
+import type { TrainingType } from "../src/db/schema";
+import { TRAINING_CADENCE } from "../src/lib/due";
+import { STATEMENTS } from "../src/lib/training-assignments";
+
+/**
+ * These are the checks that stop the training from being decorative.
+ *
+ * The failure mode is not a crash. It is a course that ships with a quiz whose answer index is
+ * off by one, or a training everyone is chased for annually with no material behind it — both of
+ * which produce a full set of green certificates attesting to nothing, and neither of which is
+ * visible from the screen.
+ */
+describe("courses", () => {
+  const entries = Object.entries(COURSES) as [TrainingType, NonNullable<ReturnType<typeof courseFor>>][];
+
+  test("every course is reachable by its own type", () => {
+    for (const [type, course] of entries) {
+      assert.equal(course.type, type, `${type} is filed under the wrong key`);
+      assert.equal(courseFor(type)?.title, course.title);
+    }
+  });
+
+  test("every answer index points at a real option", () => {
+    for (const [type, course] of entries) {
+      course.questions.forEach((q, i) => {
+        assert.ok(
+          q.answer >= 0 && q.answer < q.options.length,
+          `${type} question ${i + 1} answers option ${q.answer} of ${q.options.length}`,
+        );
+      });
+    }
+  });
+
+  test("no question has duplicate options", () => {
+    // Two identical options mean one of them is right and marked wrong, and the person who reads
+    // carefully is the one who fails.
+    for (const [type, course] of entries) {
+      course.questions.forEach((q, i) => {
+        assert.equal(new Set(q.options).size, q.options.length, `${type} question ${i + 1} repeats an option`);
+      });
+    }
+  });
+
+  test("every course has substance rather than a heading", () => {
+    for (const [type, course] of entries) {
+      assert.ok(course.sections.length >= 3, `${type} has only ${course.sections.length} sections`);
+      assert.ok(course.questions.length >= 3, `${type} has only ${course.questions.length} questions`);
+      assert.ok(course.authority.length > 40, `${type} does not say what it satisfies`);
+      for (const s of course.sections) {
+        assert.ok(s.body.length > 0, `${type} section "${s.heading}" is empty`);
+        for (const p of s.body) assert.ok(p.length > 20, `${type} has a stub paragraph: "${p}"`);
+      }
+    }
+  });
+
+  test("every wrong answer is explained", () => {
+    // The explanation is the only teaching that happens at the moment somebody is actually paying
+    // attention. A blank one turns a comprehension check into a guessing game.
+    for (const [type, course] of entries) {
+      course.questions.forEach((q, i) => {
+        assert.ok(q.why.length > 40, `${type} question ${i + 1} has no real explanation`);
+      });
+    }
+  });
+
+  test("bloodborne is the one that needs live questions, and says so", () => {
+    assert.equal(COURSES.osha_bloodborne?.liveQuestionsRequired, true);
+    assert.match(String(COURSES.osha_bloodborne?.authority), /1910\.1030/);
+    // Nothing else claims it, because claiming it would mean asking staff to tick a box for a
+    // requirement that does not exist.
+    for (const [type, course] of entries) {
+      if (type !== "osha_bloodborne") {
+        assert.notEqual(course.liveQuestionsRequired, true, `${type} should not require live questions`);
+      }
+    }
+  });
+
+  test("everything chased annually has either a course or a stated reason not to", () => {
+    // The one exception is the immunization protocol review: the material is the pharmacy's own
+    // signed protocol, which cannot live in the software.
+    for (const type of Object.keys(TRAINING_CADENCE) as TrainingType[]) {
+      if (type === "immunization_protocol_review") continue;
+      assert.ok(courseFor(type), `${type} is chased annually with no material behind it`);
+    }
+  });
+
+  test("every course has attestation wording to sign", () => {
+    for (const [type] of entries) {
+      assert.ok(STATEMENTS[type], `${type} has a course but nothing to sign`);
+    }
+  });
+});
+
+describe("the packet", () => {
+  test("carries the questions and their answers", () => {
+    const c = COURSES.hipaa_privacy_security!;
+    const text = packetText(c, "West Wichita Family Pharmacy");
+    assert.match(text, /WEST WICHITA FAMILY PHARMACY/);
+    assert.match(text, /CHECK YOUR UNDERSTANDING/);
+    assert.match(text, /ANSWERS/);
+    // The packet is hard-wrapped, so compare on the words rather than the line breaks.
+    const flat = text.replace(/\s+/g, " ");
+    for (const q of c.questions) {
+      assert.ok(flat.includes(q.q.replace(/\s+/g, " ")), `a question is missing from the packet: ${q.q}`);
+      for (const o of q.options) {
+        assert.ok(flat.includes(o.replace(/\s+/g, " ")), `an option is missing from the packet: ${o}`);
+      }
+    }
+  });
+
+  test("wraps to something printable", () => {
+    const text = packetText(COURSES.fwa_general_compliance!, "A Pharmacy");
+    for (const line of text.split("\n")) {
+      assert.ok(line.length <= 80, `a line is ${line.length} characters: ${line.slice(0, 40)}…`);
+    }
+  });
+
+  test("the version changes when the content does, and not otherwise", () => {
+    const c = COURSES.hipaa_privacy_security!;
+    assert.equal(courseVersion(c), courseVersion(c), "the version is not stable");
+    const edited = { ...c, sections: [...c.sections, { heading: "Extra", body: ["Something new."] }] };
+    assert.notEqual(courseVersion(c), courseVersion(edited), "an edit did not change the version");
+  });
+
+  test("the version is short enough to compare by eye", () => {
+    for (const c of Object.values(COURSES)) {
+      assert.ok(courseVersion(c!).length <= 9, `version ${courseVersion(c!)} is too long to read off a certificate`);
+    }
+  });
+
+  test("the file name is safe and names the version", () => {
+    const name = packetFileName(COURSES.osha_bloodborne!);
+    assert.match(name, /^[a-z0-9-]+-v[A-Z0-9]+\.txt$/);
+    assert.ok(name.includes(courseVersion(COURSES.osha_bloodborne!)));
+  });
+});

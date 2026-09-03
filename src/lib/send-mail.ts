@@ -18,7 +18,22 @@ export async function canSend(): Promise<boolean> {
   return Boolean(s.mail_user && s.mail_password_enc);
 }
 
-export async function sendMail(to: string, subject: string, text: string): Promise<SendResult> {
+/**
+ * Something sent with the message.
+ *
+ * Training packets go out this way, which is the point: an email that says "do your HIPAA
+ * training" and links to a page proves the pharmacy asked. An email carrying the material proves
+ * the pharmacy provided it, and that is the difference between a training record and training.
+ */
+export type Attachment = { filename: string; content: string | Buffer; contentType?: string };
+
+export async function sendMail(
+  to: string,
+  subject: string,
+  text: string,
+  attachments: Attachment[] = [],
+  html?: string,
+): Promise<SendResult> {
   const s = await getSettings();
   if (!s.mail_user || !s.mail_password_enc) {
     return { ok: false, error: "Email is not set up yet. Settings → Email." };
@@ -39,7 +54,17 @@ export async function sendMail(to: string, subject: string, text: string): Promi
       secure: true,
       auth: { user: s.mail_user, pass: password },
     });
-    await transport.sendMail({ from: s.mail_user, to, subject, text });
+    // Both parts, always, when an HTML version exists: the plain text is what a phone's
+    // notification preview shows and what survives a client that blocks markup, and an email
+    // whose fallback is empty looks broken in exactly the situations where it matters most.
+    await transport.sendMail({
+      from: s.mail_user,
+      to,
+      subject,
+      text,
+      html,
+      attachments: attachments.length ? attachments : undefined,
+    });
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message.split("\n")[0] : String(e) };

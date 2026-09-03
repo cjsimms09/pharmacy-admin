@@ -14,6 +14,7 @@ import { importSupplierCatalog } from "./suppliers";
 import { loadNadacFiles, nadacDir } from "./nadac";
 import { gateFile } from "./phi-gate";
 import { audit } from "./audit";
+import { matchTrainingReplies, completeByEmailReply } from "./training-replies";
 
 /**
  * Sweeps the pharmacy's admin mailbox for scheduled reports.
@@ -133,6 +134,46 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
 
           const already = await db.query.inboxItems.findFirst({ where: eq(schema.inboxItems.messageId, messageId) });
           if (already) continue;
+
+          // A member of staff replying to their own training email is not a report sender and
+          // will not be on the allowed list. Check it first, and match on the code *and* the
+          // address so a forwarded code from somebody else cannot close somebody's training.
+          const trainingMatches = await matchTrainingReplies({
+            from,
+            subject,
+            text: `${parsed.text ?? ""}\n${parsed.html ? String(parsed.html).replace(/<[^>]+>/g, " ") : ""}`,
+          });
+          if (trainingMatches.length > 0) {
+            const closed: string[] = [];
+            for (const m of trainingMatches) {
+              try {
+                const done = await completeByEmailReply(m.assignmentId, {
+                  from,
+                  subject,
+                  text: parsed.text ?? "",
+                  receivedAt,
+                  raw: msg.source.toString("utf8"),
+                });
+                closed.push(`${done.label} for ${done.personName}`);
+              } catch (e) {
+                result.errors.push(`Training reply from ${from}: ${e instanceof Error ? e.message : String(e)}`);
+              }
+            }
+            if (closed.length > 0) {
+              await db.insert(schema.inboxItems).values({
+                id: newId(),
+                messageId,
+                receivedAt,
+                fromAddress: from,
+                subject,
+                status: "stored",
+                reason: `Training attestation recorded — ${closed.join("; ")}. The reply itself is filed as the evidence.`,
+              });
+              result.stored++;
+            }
+            await client.messageFlagsAdd(String(uid), ["\\Seen"], { uid: true });
+            continue;
+          }
 
           if (allowed.length > 0 && !senderAllowed(from, allowed)) {
             await db.insert(schema.inboxItems).values({

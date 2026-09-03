@@ -46,6 +46,17 @@ export const people = sqliteTable("people", {
   active: integer("active", { mode: "boolean" }).notNull().default(true),
   hiredOn: text("hired_on"),
   endedOn: text("ended_on"),
+  /**
+   * Why they left, and who recorded it.
+   *
+   * Somebody leaving is not a reason to lose their file. Their training records, their licence
+   * history and their signed attestations all still have to be producible for years afterwards —
+   * an inspector asking about a dispensing error from two years ago does not care that the
+   * technician involved has moved on. So nobody is ever deleted; they are ended, on a date, with
+   * a reason, and everything attached to them stays exactly where it is.
+   */
+  endedReason: text("ended_reason"),
+  endedBy: text("ended_by"),
   notes: text("notes"),
   createdAt: text("created_at").notNull().default(now()),
   updatedAt: text("updated_at").notNull().default(now()),
@@ -139,6 +150,8 @@ export const DOCUMENT_CATEGORIES = [
   "cqi_summary",
   "cqi_incident",
   "ce_certificate",
+  /** A completed training: a certificate, or the emailed attestation that stands for one. */
+  "training_record",
   "policy",
   "report",
   "other",
@@ -908,6 +921,14 @@ export const trainingAssignments = sqliteTable(
     type: text("type", { enum: TRAINING_TYPES }).notNull(),
     /** Secret in the link. Long enough that guessing one is not a route in. */
     token: text("token").notNull().unique(),
+    /**
+     * Short code carried in the email subject, so a reply can be matched back to this assignment.
+     *
+     * Not a secret and not treated as one — matching a reply requires the code *and* the sending
+     * address to be the person's own. It exists because "Re: your training" with no code is
+     * unmatchable when someone has three trainings outstanding.
+     */
+    replyCode: text("reply_code"),
     assignedOn: text("assigned_on").notNull(),
     dueOn: text("due_on").notNull(),
     /** Where the material lives, if it is not being read on the page itself. */
@@ -924,6 +945,45 @@ export const trainingAssignments = sqliteTable(
     signedAgent: text("signed_agent"),
     /** Set when the completion produced a trainings row, so it is never double-counted. */
     trainingId: text("training_id"),
+
+    /**
+     * The comprehension check.
+     *
+     * A record that someone read a page is weaker than one that says they answered questions
+     * about it correctly, and the difference costs the person about ninety seconds. Stored as
+     * the score rather than as a pass flag so the certificate can state it plainly.
+     */
+    quizCorrect: integer("quiz_correct"),
+    quizTotal: integer("quiz_total"),
+    /**
+     * Bloodborne pathogens training requires an opportunity for interactive questions and
+     * answers with a knowledgeable person — 29 CFR 1910.1030(g)(2)(vii). A web page is not that
+     * person, so the page names the PIC and this records that the opportunity was given and
+     * acknowledged. Without it the training does not meet the standard, however good the content.
+     */
+    liveQuestionsAcknowledged: integer("live_questions_acknowledged", { mode: "boolean" }).notNull().default(false),
+
+    /**
+     * How the completion arrived: signed on the page, or asserted in an email reply.
+     *
+     * These are not equally strong and the certificate says which. A signed page carries a typed
+     * name, a timestamp, a device and a passed comprehension check; an email reply carries a
+     * From header, which is asserted by the sender's mail system rather than proven. The reply
+     * is worth accepting — it is how people actually respond — but recording it as though
+     * somebody sat the course is how a training file stops being believed.
+     */
+    completedVia: text("completed_via", { enum: ["signed", "email_reply", "pic_recorded"] }),
+    /** The reply itself, filed as evidence. */
+    replyDocumentId: text("reply_document_id"),
+    replyFromAddress: text("reply_from_address"),
+    /**
+     * The version of the course material actually sent to this person.
+     *
+     * Stamped on the certificate. Without it a certificate says a person was trained and leaves
+     * the pharmacy unable to say on what — and a course edited since is not the course they sat.
+     */
+    materialVersion: text("material_version"),
+    materialSentAt: text("material_sent_at"),
 
     remindersSent: integer("reminders_sent").notNull().default(0),
     lastReminderAt: text("last_reminder_at"),

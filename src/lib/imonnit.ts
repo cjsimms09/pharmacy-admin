@@ -355,13 +355,21 @@ export async function syncReadings(
  * Values are shown as they arrive because a temperature is not a secret; the credentials never
  * appear here.
  */
-export async function diagnose(): Promise<{ ok: boolean; message: string; sample: string }> {
-  const sensors = (await db.query.tempSensors.findMany()).filter((s) => s.tracked);
-  const sensor = sensors[0] ?? (await db.query.tempSensors.findMany())[0];
+export async function diagnose(
+  opts: { sensorId?: string; fromIso?: string; toIso?: string } = {},
+): Promise<{ ok: boolean; message: string; sample: string }> {
+  const known = await db.query.tempSensors.findMany();
+  const sensor = opts.sensorId
+    ? known.find((x) => x.id === opts.sensorId)
+    : known.filter((s) => s.tracked)[0] ?? known[0];
   if (!sensor) return { ok: false, message: "No sensors are known yet — look for sensors first.", sample: "" };
 
-  const from = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 19).replace("T", " ");
-  const to = new Date().toISOString().slice(0, 19).replace("T", " ");
+  // A specific window is someone asking about a specific hole. Anything else looks at last week.
+  const from = (opts.fromIso ? new Date(`${opts.fromIso}T00:00:00Z`) : new Date(Date.now() - 7 * 86_400_000))
+    .toISOString()
+    .slice(0, 19)
+    .replace("T", " ");
+  const to = (opts.toIso ? new Date(`${opts.toIso}T23:59:59Z`) : new Date()).toISOString().slice(0, 19).replace("T", " ");
   const r = await call("SensorDataMessages", { sensorID: sensor.externalId, fromDate: from, toDate: to });
   if (!r.ok) return { ok: false, message: r.error, sample: "" };
 
@@ -372,7 +380,11 @@ export async function diagnose(): Promise<{ ok: boolean; message: string; sample
     const shape = r.data && typeof r.data === "object" ? Object.keys(r.data as object).join(", ") : typeof r.data;
     return {
       ok: false,
-      message: `Answered via ${r.via}, but no rows were found in the reply. Top-level keys: ${shape || "none"}.`,
+      message:
+        `Answered via ${r.via}, but no rows came back for "${sensor.name}" (iMonnit sensor ${sensor.externalId}) ` +
+        `between ${from} and ${to}. Top-level keys in the reply: ${shape || "none"}. ` +
+        `An empty reply for a window this specific means the account itself holds nothing for that sensor then — ` +
+        `either it was not reporting, or the account's history does not reach back that far. It is not a parsing problem.`,
       sample: JSON.stringify(r.data, null, 2).slice(0, 3000),
     };
   }
@@ -386,7 +398,8 @@ export async function diagnose(): Promise<{ ok: boolean; message: string; sample
   return {
     ok: true,
     message:
-      `Answered via ${r.via}. ${rows.length} row(s) in the last week for "${sensor.name}". ` +
+      `Answered via ${r.via}. ${rows.length} row(s) for "${sensor.name}" (iMonnit sensor ${sensor.externalId}) ` +
+      `between ${from} and ${to}. ` +
       `Date: ${String(rawDate ?? "NONE")} -> ${parsedDate ?? "UNREADABLE"}. ` +
       `Value field found: ${parsedValue === undefined ? "NONE" : String(parsedValue)}. ` +
       `Unit hint: ${parsedUnit === undefined ? "none" : String(parsedUnit)}. ` +

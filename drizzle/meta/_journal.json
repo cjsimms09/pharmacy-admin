@@ -162,6 +162,34 @@
       "when": 1788470013970,
       "tag": "0022_powerful_cassandra_nova",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1788470513791,
+      "tag": "0023_slimy_dexter_bennett",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1788470859209,
+      "tag": "0024_pink_captain_midlands",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1788471124836,
+      "tag": "0025_outstanding_wolfpack",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1788471643251,
+      "tag": "0026_regular_silver_fox",
+      "breakpoints": true
     }
   ]
 }

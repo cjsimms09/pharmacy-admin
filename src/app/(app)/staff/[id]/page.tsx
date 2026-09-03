@@ -3,11 +3,13 @@ import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requireUser } from "@/lib/auth";
 import { daysUntil, fmt } from "@/lib/dates";
-import { CREDENTIAL_HINT, CREDENTIAL_LABEL, CREDENTIAL_TYPES_FOR_PERSON, PERSON_ROLE_LABEL } from "@/lib/labels";
+import { CREDENTIAL_HINT, CREDENTIAL_LABEL, CREDENTIAL_TYPES_FOR_PERSON, PERSON_ROLE_LABEL, TRAINING_LABEL } from "@/lib/labels";
+import Link from "next/link";
 import { PageHeader, BackLink, Notice, StatusBadge, Field } from "@/components/ui";
 import { DocumentList, UploadForm } from "@/components/documents";
 import { PersonForm } from "../person-form";
-import { addCe, addCredential, deleteCe, deleteCredential, updateCredential, updatePerson } from "../actions";
+import { addCe, addCredential, deleteCe, deleteCredential, updateCredential, updatePerson, endEmploymentAction, reinstateAction } from "../actions";
+import { retentionFor } from "@/lib/offboarding";
 
 // Live compliance status — never serve a cached copy after an action changes it.
 export const dynamic = "force-dynamic";
@@ -21,11 +23,14 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
 
   const person = await db.query.people.findFirst({ where: eq(schema.people.id, id) });
   if (!person) notFound();
-  const [creds, docs, ce] = await Promise.all([
+  const [creds, docs, ce, retention, trainings] = await Promise.all([
     db.query.credentials.findMany({ where: eq(schema.credentials.personId, id), orderBy: (c, { asc }) => [asc(c.expiresOn)] }),
     db.query.documents.findMany({ where: eq(schema.documents.personId, id), orderBy: (d, { desc }) => [desc(d.uploadedAt)] }),
     db.query.ceEntries.findMany({ where: eq(schema.ceEntries.personId, id), orderBy: (c, { desc }) => [desc(c.completedOn)] }),
+    retentionFor(id),
+    db.query.trainings.findMany({ where: eq(schema.trainings.personId, id), orderBy: (t, { desc }) => [desc(t.completedOn)] }),
   ]);
+  const assignments = await db.query.trainingAssignments.findMany({ where: eq(schema.trainingAssignments.personId, id) });
   const here = `/staff/${id}`;
   const credDocs = (credentialId: string) => docs.filter((d) => d.credentialId === credentialId);
   const license = creds.find((c) => c.type === "pharmacist_license" || c.type === "technician_registration");
@@ -164,6 +169,114 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
           </details>
         )}
       </section>
+
+      {/* ── Training ──────────────────────────────────────────────────
+          Here as well as on the training screen, because this page is where anyone looks when
+          asked "show me this person's file" — and a certificate nobody can find is not proof of
+          anything. */}
+      <section className="card mb-6">
+        <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="font-semibold">Training</h2>
+          <Link href="/compliance/training" className="text-sm text-accent hover:underline">Assign training →</Link>
+        </div>
+        {trainings.length === 0 ? (
+          <p className="text-sm text-ink-3">Nothing recorded yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="table">
+              <thead><tr><th>Training</th><th>Completed</th><th>Next due</th><th>How</th><th>Certificate</th></tr></thead>
+              <tbody>
+                {trainings.map((t) => {
+                  const a = assignments.find((x) => x.trainingId === t.id);
+                  return (
+                    <tr key={t.id}>
+                      <td>{TRAINING_LABEL[t.type]}</td>
+                      <td className="whitespace-nowrap">{fmt(t.completedOn)}</td>
+                      <td className="whitespace-nowrap">
+                        {t.expiresOn ? <><StatusBadge days={daysUntil(t.expiresOn)} /> <span className="text-xs text-ink-2">{fmt(t.expiresOn)}</span></> : <span className="text-xs text-ink-3">does not repeat</span>}
+                      </td>
+                      <td className="text-xs text-ink-2">
+                        {a?.completedVia === "email_reply"
+                          ? `Email reply${a.replyFromAddress ? ` from ${a.replyFromAddress}` : ""}`
+                          : a?.completedVia === "pic_recorded"
+                            ? "Recorded by the PIC"
+                            : a?.completedVia === "signed"
+                              ? `Signed${a.quizTotal ? ` · ${a.quizCorrect}/${a.quizTotal} correct` : ""}`
+                              : t.provider ?? "—"}
+                      </td>
+                      <td className="text-xs">
+                        <Link href={`/certificates/${t.id}`} className="text-accent hover:underline">open</Link>
+                        {t.documentId && (
+                          <>
+                            {" · "}
+                            <a href={`/files/${t.documentId}`} target="_blank" rel="noreferrer" className="text-accent hover:underline">the evidence</a>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {/* ── Employment ────────────────────────────────────────────────
+          Kept at the bottom, and worded to say what actually happens. The reason people delete a
+          former employee is that they assume the alternative is clutter; it is not, and the file
+          has to be producible for years after they have gone. */}
+      {canManage && (
+        <section className="card mb-6">
+          <h2 className="mb-1 font-semibold">Employment</h2>
+          {person.active ? (
+            <>
+              <p className="mb-3 text-xs text-ink-3">
+                {person.hiredOn ? `Started ${fmt(person.hiredOn)}. ` : ""}
+                Recording someone as having left keeps everything on this page — {retention.credentials} credential
+                {retention.credentials === 1 ? "" : "s"}, {retention.trainings} training record
+                {retention.trainings === 1 ? "" : "s"}, {retention.signedAttestations} signed attestation
+                {retention.signedAttestations === 1 ? "" : "s"} and {retention.documents} document
+                {retention.documents === 1 ? "" : "s"} — exactly where it is. Nothing is deleted. What changes is that
+                they stop counting as staff who owe training, and the site stops emailing them.
+              </p>
+              <details>
+                <summary className="cursor-pointer text-sm underline">Record that they have left</summary>
+                <form action={endEmploymentAction} className="mt-3 grid max-w-2xl gap-3 sm:grid-cols-2">
+                  <input type="hidden" name="personId" value={id} />
+                  <Field label="Last day worked" hint="Retention is counted from this date.">
+                    <input name="endedOn" type="date" className="field" defaultValue={new Date().toISOString().slice(0, 10)} />
+                  </Field>
+                  <Field label="Reason" hint="Optional, and kept on the record. 'Resigned', 'moved out of state', 'end of contract'.">
+                    <input name="reason" className="field" />
+                  </Field>
+                  <div className="sm:col-span-2">
+                    <button className="btn">Record that {person.firstName} has left</button>
+                  </div>
+                </form>
+              </details>
+            </>
+          ) : (
+            <>
+              <p className="text-sm">
+                Left {fmt(person.endedOn)}{person.endedReason ? ` — ${person.endedReason}` : ""}
+                {person.endedBy ? ` · recorded by ${person.endedBy}` : ""}.
+              </p>
+              <p className="mt-2 text-xs text-ink-3">
+                The whole file is kept and this page stays exactly as it is. Keep it until at least{" "}
+                <b>{fmt(retention.keepUntil)}</b>, which is the latest date any of the rules below allows.
+              </p>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-ink-3">
+                {retention.reasons.map((r) => <li key={r}>{r}</li>)}
+              </ul>
+              <form action={reinstateAction} className="mt-3">
+                <input type="hidden" name="personId" value={id} />
+                <button className="btn">They are back — make active again</button>
+              </form>
+            </>
+          )}
+        </section>
+      )}
     </>
   );
 }
