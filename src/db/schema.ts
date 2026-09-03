@@ -772,3 +772,55 @@ export const planGroups = sqliteTable(
   },
   (t) => [index("plan_groups_key_idx").on(t.bin, t.groupNumber), index("plan_groups_class_idx").on(t.classification)],
 );
+
+// ── Supplier catalogues ──────────────────────────────────────────────
+// What each wholesaler currently charges for an NDC. The other half of the margin question: a
+// MAC is set per molecule, so reimbursement barely moves between manufacturers and acquisition
+// cost is the lever.
+//
+// Prices are per dispensing unit in micros (1e-6 of a dollar), because a tablet at $0.00241
+// rounds to nothing in cents and a 90-count would then price at zero.
+
+export const supplierImports = sqliteTable("supplier_imports", {
+  id: text("id").primaryKey(),
+  supplier: text("supplier").notNull(),
+  fileName: text("file_name").notNull(),
+  rowsRead: integer("rows_read").notNull().default(0),
+  itemsAdded: integer("items_added").notNull().default(0),
+  itemsUpdated: integer("items_updated").notNull().default(0),
+  skipped: integer("skipped").notNull().default(0),
+  skipReasons: text("skip_reasons").notNull().default("{}"),
+  unmappedColumns: text("unmapped_columns").notNull().default("[]"),
+  pricedOn: text("priced_on"),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull().default(now()),
+});
+
+export const supplierItems = sqliteTable(
+  "supplier_items",
+  {
+    id: text("id").primaryKey(),
+    supplier: text("supplier").notNull(),
+    ndc11: text("ndc11").notNull(),
+    description: text("description"),
+    /** Derived from the description so items can be compared across suppliers and against claims. */
+    productKey: text("product_key"),
+    manufacturer: text("manufacturer"),
+    packSize: text("pack_size"),
+    /** Cost per dispensing unit, in millionths of a dollar. */
+    unitCostMicros: integer("unit_cost_micros"),
+    /** Cost of the whole package, in cents. */
+    packCostCents: integer("pack_cost_cents"),
+    /** Whether this line sits on a purchasing contract — buying off it can cost rebate tiers. */
+    contractFlag: text("contract_flag"),
+    availability: text("availability"),
+    pricedOn: text("priced_on"),
+    importId: text("import_id").notNull(),
+    updatedAt: text("updated_at").notNull().default(now()),
+  },
+  (t) => [
+    index("supplier_items_ndc_idx").on(t.ndc11),
+    index("supplier_items_key_idx").on(t.productKey),
+    index("supplier_items_supplier_idx").on(t.supplier),
+  ],
+);

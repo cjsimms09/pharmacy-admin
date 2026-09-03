@@ -11,6 +11,7 @@ const NAV = [
   { href: "/payers", label: "Payers" },
   { href: "/claims", label: "Claims" },
   { href: "/plans", label: "Plans" },
+  { href: "/purchasing", label: "Purchasing" },
   { href: "/nadac", label: "NADAC" },
   { href: "/inventory", label: "CS inventories" },
   { href: "/settings", label: "Settings" },
