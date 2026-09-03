@@ -8,7 +8,7 @@ import { audit } from "@/lib/audit";
 import { complianceSummary, attest, type OpenItem } from "@/lib/compliance-status";
 import { periodLabel } from "@/lib/periods";
 import { dueList } from "@/lib/due";
-import { assignTraining } from "@/lib/training-assignments";
+import { assignTraining, recordGroupTraining } from "@/lib/training-assignments";
 import { TRAINING_LABEL } from "@/lib/labels";
 import type { TrainingType } from "@/db/schema";
 import { fmt, todayIso } from "@/lib/dates";
@@ -27,8 +27,13 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
   // Credentials and training are their own thing; only what is actually late or missing belongs
   // on this screen, and everything else waits until it is close enough to matter.
   const people = expiring.filter((e) => e.severity === "overdue" || e.severity === "no_date" || (e.daysLeft ?? 999) <= 45);
-  const needsAction = [...summary.missed, ...summary.partial, ...summary.openNow];
-  const shown = all === "1" ? needsAction : needsAction.filter((i) => i.state !== "open" || (i.minutes ?? 99) <= 15);
+  // Only what is actually late. A duty for the month we are still in is not overdue and must not
+  // be shown as though it were — being told on the third of the month that the month is not
+  // finished is how a screen earns the right to be ignored. The current period is offered
+  // separately, quietly, for anyone who wants to get ahead.
+  const needsAction = [...summary.missed, ...summary.partial];
+  const shown = needsAction;
+  const notYetDue = summary.openNow;
   const clean = needsAction.length === 0 && people.length === 0;
 
   async function doAttest(fd: FormData) {
@@ -64,6 +69,23 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
     } catch (e) {
       if (e && typeof e === "object" && "digest" in e) throw e;
       redirect("/compliance?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not assign that."));
+    }
+  }
+
+  async function attestTraining(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const type = String(fd.get("trainingType") ?? "") as TrainingType;
+    const ids = String(fd.get("personIds") ?? "").split(",").filter(Boolean);
+    try {
+      const r = await recordGroupTraining(ids, type, u, { how: String(fd.get("how") ?? "") });
+      await audit({ action: "training.attest", userId: u.id, userName: u.name, details: `${type} for ${r.recorded}` });
+      revalidatePath("/compliance");
+      revalidatePath("/compliance/training");
+      redirect("/compliance?ok=" + encodeURIComponent(`Recorded for ${r.names.join(", ")}.`));
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/compliance?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not record that."));
     }
   }
 
@@ -166,8 +188,26 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
                           Send it to {p.personIds.length === 1 ? "them" : `all ${p.personIds.length}`}
                         </button>
                       </form>
-                      <Link href={p.href} className="text-sm underline">or record it myself</Link>
-                      <span className="text-xs text-ink-3">They get a link, complete it, and sign. Nothing more for you to do.</span>
+                      <details className="w-full">
+                        <summary className="cursor-pointer text-sm underline">or I trained them myself</summary>
+                        <form action={attestTraining} className="mt-2 rounded-md border border-line bg-ground p-3">
+                          <input type="hidden" name="trainingType" value={p.trainingType} />
+                          <input type="hidden" name="personIds" value={p.personIds.join(",")} />
+                          <p className="text-xs text-ink-2">
+                            Records that you delivered this and that each of them understood it. It says so in those
+                            words, and that they did not sign individually — an inspector can tell the two kinds of
+                            record apart, which is what keeps both of them worth having.
+                          </p>
+                          <input
+                            name="how"
+                            placeholder="Optional: how it was done — a staff meeting, one to one, the vendor's slides"
+                            className="mt-2 w-full rounded-md border border-line px-2 py-1.5 text-sm"
+                          />
+                          <button className="mt-2 rounded-md bg-ink px-3 py-1.5 text-sm text-white">
+                            Record it for {p.personIds.length === 1 ? "them" : `all ${p.personIds.length}`}
+                          </button>
+                        </form>
+                      </details>
                     </>
                   ) : (
                     <Link href={p.href} className="rounded-md bg-ink px-3 py-1.5 text-sm text-white">Open</Link>
@@ -177,14 +217,25 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
             ))}
           </div>
 
-          {shown.length < needsAction.length && (
-            <p className="mt-4 text-sm">
-              <Link href="/compliance?all=1" className="underline">
-                Show {needsAction.length - shown.length} more that are not due yet
-              </Link>
-            </p>
-          )}
+
         </>
+      )}
+
+      {notYetDue.length > 0 && (
+        <details className="mt-8" open={all === "1"}>
+          <summary className="cursor-pointer text-sm text-ink-2">
+            {notYetDue.length} thing{notYetDue.length === 1 ? "" : "s"} for the current period — not due yet
+          </summary>
+          <p className="mt-1 text-xs text-ink-3">
+            These become due when the period ends. Nothing here is late, and nothing here will be counted against you
+            until then — but a five-minute job is often easier done now than remembered later.
+          </p>
+          <div className="mt-3 space-y-3">
+            {notYetDue.map((i) => (
+              <Item key={`${i.obligationId}-${i.periodKey}`} i={i} attestAction={doAttest} fileAction={fileEvidence} />
+            ))}
+          </div>
+        </details>
       )}
 
       <p className="mt-8 text-xs text-ink-3">

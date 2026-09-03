@@ -141,7 +141,14 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
                           <span className={`rounded px-1.5 py-0.5 text-xs ${tone}`}>
                             {left === null ? "done" : left < 0 ? `${Math.abs(left)}d late` : `${left}d`}
                           </span>
-                          <div className="mt-0.5 text-xs text-ink-3">{fmt(last.completedOn)}</div>
+                          <div className="mt-0.5 text-xs text-ink-3">
+                            {fmt(last.completedOn)}
+                            {/* Who stood behind the record. A signature from the person is
+                                stronger than the PIC's word for it, and both are legitimate, so
+                                the difference is shown rather than hidden. */}
+                            {last.provider === "Signed online" && <span className="ml-1 text-emerald-700">signed</span>}
+                            {last.provider?.startsWith("In-house") && <span className="ml-1">PIC attested</span>}
+                          </div>
                         </td>
                       );
                     })}

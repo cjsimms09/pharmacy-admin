@@ -79,3 +79,36 @@ describe("training material links", () => {
     assert.deepEqual(parseMaterials("https://example.org/fwa"), {});
   });
 });
+
+/**
+ * Two ways a training gets recorded, and they are not equally strong. A person signing for
+ * themselves is evidence; the PIC recording it on their behalf is the PIC's word. Both are
+ * legitimate and normal in a small pharmacy. Passing the second off as the first is what would
+ * make the whole file stop being believed, so the wording has to keep them apart.
+ */
+describe("PIC-attested training says what it is", () => {
+  const build = (name: string, names: string[], label: string, how: string) =>
+    `On 3 Sep 2026 I, ${name}, delivered ${label} to ${names.join(", ")} and confirmed that each of them ` +
+    `understood it.${how ? ` ${how}` : ""} Recorded by me as pharmacist-in-charge; they did not sign individually.`;
+
+  test("names the person attesting and the people trained", () => {
+    const s = build("Cory Simms", ["Kelsey Koehn", "Austin Peck"], "hipaa privacy & security", "");
+    assert.match(s, /I, Cory Simms,/);
+    assert.match(s, /Kelsey Koehn, Austin Peck/);
+  });
+
+  test("states plainly that they did not sign for themselves", () => {
+    const s = build("Cory Simms", ["Kelsey Koehn"], "osha bloodborne pathogens", "");
+    assert.match(s, /did not sign individually/);
+  });
+
+  test("carries how it was done when that was given", () => {
+    const s = build("Cory Simms", ["Kelsey Koehn"], "cqi program review", "Covered at the Tuesday staff meeting.");
+    assert.match(s, /Tuesday staff meeting/);
+  });
+
+  test("asserts comprehension, not attendance", () => {
+    // "I trained them" is worth less than "I confirmed they understood it".
+    assert.match(build("A", ["B"], "x", ""), /confirmed that each of them understood it/);
+  });
+});

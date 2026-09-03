@@ -278,6 +278,55 @@ export async function completeAssignment(
   return { ok: true, label: TRAINING_LABEL[a.type] };
 }
 
+/**
+ * The pharmacist-in-charge recording training they delivered themselves.
+ *
+ * Most training in a small pharmacy happens in the room: the PIC walks everyone through it on a
+ * quiet afternoon. Insisting on individual links for that would mean either sending links nobody
+ * needs or, more likely, the training happening and never being recorded at all.
+ *
+ * So this records it, and is careful to record what actually happened. The statement names the
+ * PIC as the person attesting, names who was trained, and says plainly that they did not sign
+ * individually. An inspector can then tell the two kinds of record apart at a glance, which is
+ * the point — a PIC attestation is real evidence and weaker evidence, and dressing it up as the
+ * stronger kind is how a whole file stops being believed.
+ */
+export async function recordGroupTraining(
+  personIds: string[],
+  type: TrainingType,
+  user: { id: string; name: string },
+  opts: { completedOn?: string; how?: string } = {},
+): Promise<{ recorded: number; names: string[] }> {
+  const people = (await db.query.people.findMany()).filter((p) => personIds.includes(p.id));
+  if (people.length === 0) throw new Error("Nobody was selected.");
+
+  const on = opts.completedOn || todayIso();
+  const names = people.map((p) => `${p.firstName} ${p.lastName}`);
+  const months = TRAINING_CADENCE[type]?.months;
+  const how = (opts.how ?? "").trim();
+
+  const statement =
+    `On ${fmt(on)} I, ${user.name}, delivered ${TRAINING_LABEL[type].toLowerCase()} to ${names.join(", ")} ` +
+    `and confirmed that each of them understood it.` +
+    (how ? ` ${how}` : "") +
+    ` Recorded by me as pharmacist-in-charge; they did not sign individually.`;
+
+  for (const p of people) {
+    await db.insert(schema.trainings).values({
+      id: newId(),
+      personId: p.id,
+      type,
+      completedOn: on,
+      cycleYear: Number(on.slice(0, 4)),
+      expiresOn: months ? addMonths(on, months) : null,
+      provider: "In-house, attested by the PIC",
+      notes: statement,
+      createdBy: user.name,
+    });
+  }
+  return { recorded: people.length, names };
+}
+
 export async function assignmentByToken(token: string) {
   const a = await db.query.trainingAssignments.findFirst({ where: eq(schema.trainingAssignments.token, token) });
   if (!a) return null;
