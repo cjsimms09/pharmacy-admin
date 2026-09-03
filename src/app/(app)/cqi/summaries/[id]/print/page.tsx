@@ -76,7 +76,22 @@ export default async function SummaryPrintPage({ params }: { params: Promise<{ i
         <div>{[[8, "August"], [10, "October"], [12, "December"]].map(([m, name]) => <div key={m}><Check on={dueMonth === m} />{name}</div>)}</div>
         <div>Year: <u>{year}</u></div>
       </div>
-      <div className="mb-3 text-[11px]"><Check on={isNull} /><b>Null Report</b>: Check this box if this summary is being filed as a null report under K.A.R. 68-19-1(b)(4).</div>
+      <div className="mb-1 text-[11px]"><Check on={isNull} /><b>Null Report</b>: Check this box if this summary is being filed as a null report under K.A.R. 68-19-1(b)(4).</div>
+      {/*
+        A null report says no new quality-related event occurred in the period. It does not end the
+        evaluation of corrective actions from earlier periods, which run on their own four-month
+        schedule. Printed together with no explanation the two read as a contradiction, so the form
+        states the position rather than leaving an inspector to infer it.
+      */}
+      {isNull && caps.length > 0 && (
+        <div className="mb-3 border border-black px-2 py-1 text-[10px]">
+          No new quality-related events occurred during this reporting period. The corrective action
+          plan{caps.length === 1 ? "" : "s"} evaluated below {caps.length === 1 ? "arises" : "arise"} from
+          incident{caps.length === 1 ? "" : "s"} {caps.map(({ incident }) => `#${incident.incidentNumber}`).join(", ")} reported
+          in {caps.length === 1 ? "an earlier period" : "earlier periods"}, and {caps.length === 1 ? "remains" : "remain"} under
+          review as required by K.A.R. 68-19-1.
+        </div>
+      )}
 
       <div className="mb-1 text-sm font-bold">INCIDENT TYPE SUMMARY <span className="text-[10px] font-normal">(attach additional page if needed)</span></div>
       <table className="mb-3 w-full border-collapse text-[11px]">
