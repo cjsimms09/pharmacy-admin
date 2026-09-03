@@ -71,6 +71,18 @@ export default async function TempsPage({ searchParams }: { searchParams: Promis
     redirect(`/temps?${r.ok ? "ok" : "error"}=` + encodeURIComponent(r.message));
   }
 
+  async function backfill(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const fromIso = String(fd.get("fromIso") ?? "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fromIso)) redirect("/temps?error=" + encodeURIComponent("Pick a date to start from."));
+    const r = await syncReadings({ fromIso });
+    await audit({ action: "imonnit.backfill", userId: u.id, userName: u.name, details: `from ${fromIso}: ${r.message}`.slice(0, 200) });
+    revalidatePath("/temps");
+    revalidatePath("/compliance");
+    redirect(`/temps?${r.ok ? "ok" : "error"}=` + encodeURIComponent(r.message));
+  }
+
   async function saveSensors(fd: FormData) {
     "use server";
     const u = await requireManager();
@@ -170,10 +182,23 @@ export default async function TempsPage({ searchParams }: { searchParams: Promis
             </div>
           )}
 
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-end gap-3">
             <form action={pull}><button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Fetch new readings</button></form>
             <form action={refresh}><button className="rounded-md border border-line px-3 py-2 text-sm hover:bg-ground">Look for new sensors</button></form>
+            <form action={backfill} className="flex items-end gap-2">
+              <label className="text-xs text-ink-3">
+                Or go back and collect history from
+                <input type="date" name="fromIso" className="field" defaultValue={`${now.getFullYear()}-01-01`} />
+              </label>
+              <button className="rounded-md border border-line px-3 py-2 text-sm hover:bg-ground">Fetch history</button>
+            </form>
           </div>
+          <p className="mt-2 text-xs text-ink-3">
+            History is asked for a month at a time, so a long range is slow but does not time out. Readings already
+            held are recognised and not stored twice, so this is safe to run again. How far back anything exists
+            depends on how long your iMonnit plan keeps it — if a range comes back empty, that is the limit rather
+            than a fault here.
+          </p>
           {s.imonnit_last_sync && (
             <p className="mt-2 text-xs text-ink-3">Last checked {new Date(s.imonnit_last_sync).toLocaleString()} — {s.imonnit_last_result}</p>
           )}

@@ -212,7 +212,7 @@ export async function discoverSensors(): Promise<{ ok: boolean; message: string;
  * than becoming a permanent hole in the log. Duplicates are impossible: a reading is keyed on the
  * sensor and the instant it was taken.
  */
-export async function syncReadings(sinceDays = 40): Promise<SyncReport> {
+export async function syncReadings(opts: { fromIso?: string; sinceDays?: number } = {}): Promise<SyncReport> {
   const sensors = (await db.query.tempSensors.findMany()).filter((s) => s.tracked);
   if (sensors.length === 0) {
     return { ok: false, message: "No sensors are being tracked yet.", sensorsSeen: 0, readingsAdded: 0, skipped: 0, via: null };
@@ -224,49 +224,68 @@ export async function syncReadings(sinceDays = 40): Promise<SyncReport> {
   const problems: string[] = [];
 
   for (const sensor of sensors) {
-    const from = sensor.lastReadingAt
-      ? new Date(Date.parse(sensor.lastReadingAt) - 36 * 60 * 60 * 1000)
-      : new Date(Date.now() - sinceDays * 86_400_000);
+    // Where to start. An explicit date wins — that is someone asking for history on purpose.
+    // Otherwise resume a day and a half before the last reading held, so a missed run leaves no
+    // permanent hole, and fall back to a first-time window when there is nothing yet.
+    const from = opts.fromIso
+      ? new Date(`${opts.fromIso}T00:00:00Z`)
+      : sensor.lastReadingAt
+        ? new Date(Date.parse(sensor.lastReadingAt) - 36 * 60 * 60 * 1000)
+        : new Date(Date.now() - (opts.sinceDays ?? 40) * 86_400_000);
 
-    const r = await call("SensorDataMessages", {
-      sensorID: sensor.externalId,
-      fromDate: from.toISOString().slice(0, 19).replace("T", " "),
-      toDate: new Date().toISOString().slice(0, 19).replace("T", " "),
-    });
-    if (!r.ok) {
-      problems.push(`${sensor.name}: ${r.error}`);
-      continue;
-    }
-    via ??= r.via;
-
-    const rows = resultsOf(r.data);
     const existing = new Set(
       (await db.query.tempReadings.findMany({ where: eq(schema.tempReadings.sensorId, sensor.id), columns: { takenAt: true } })).map((x) => x.takenAt),
     );
-
     const fresh: (typeof schema.tempReadings.$inferInsert)[] = [];
     let latest = sensor.lastReadingAt;
+    let failedWindow = false;
 
-    for (const row of rows) {
-      const when = String(pick(row, "MessageDate", "messageDate", "Date", "Timestamp") ?? "").trim();
-      const takenAt = when ? new Date(when.includes("T") ? when : when.replace(" ", "T") + "Z").toISOString() : "";
-      if (!takenAt || takenAt === "Invalid Date") { skipped++; continue; }
-      if (existing.has(takenAt)) continue;
-
-      const value = pick(row, "PlotValue", "DataValue", "Value", "plotValue", "dataValue");
-      const tenths = toTenthsF(value, pick(row, "DataType", "Unit", "dataType", "MetricName"));
-      if (tenths === null) { skipped++; continue; }
-
-      existing.add(takenAt);
-      fresh.push({
-        id: newId(),
-        sensorId: sensor.id,
-        takenAt,
-        periodKey: periodOf(takenAt),
-        valueTenthsF: tenths,
-        excursion: tenths < sensor.minTenthsF || tenths > sensor.maxTenthsF,
+    // A month at a time. A sensor reporting every five minutes produces roughly nine thousand
+    // readings a month, and asking for a year in one call is how a request times out and comes
+    // back as "no data" rather than as an error.
+    const stamp = (d: Date) => d.toISOString().slice(0, 19).replace("T", " ");
+    for (let start = new Date(from); start < new Date() && !failedWindow; ) {
+      const end = new Date(Math.min(start.getTime() + 31 * 86_400_000, Date.now()));
+      const r = await call("SensorDataMessages", {
+        sensorID: sensor.externalId,
+        fromDate: stamp(start),
+        toDate: stamp(end),
       });
-      if (!latest || takenAt > latest) latest = takenAt;
+      if (!r.ok) {
+        problems.push(`${sensor.name}: ${r.error}`);
+        failedWindow = true;
+        break;
+      }
+      via ??= r.via;
+
+      for (const row of resultsOf(r.data)) {
+        const when = String(pick(row, "MessageDate", "messageDate", "Date", "Timestamp") ?? "").trim();
+        let takenAt = "";
+        try {
+          const d = new Date(when.includes("T") ? when : `${when.replace(" ", "T")}Z`);
+          takenAt = Number.isNaN(d.getTime()) ? "" : d.toISOString();
+        } catch {
+          takenAt = "";
+        }
+        if (!takenAt) { skipped++; continue; }
+        if (existing.has(takenAt)) continue;
+
+        const value = pick(row, "PlotValue", "DataValue", "Value", "plotValue", "dataValue");
+        const tenths = toTenthsF(value, pick(row, "DataType", "Unit", "dataType", "MetricName"));
+        if (tenths === null) { skipped++; continue; }
+
+        existing.add(takenAt);
+        fresh.push({
+          id: newId(),
+          sensorId: sensor.id,
+          takenAt,
+          periodKey: periodOf(takenAt),
+          valueTenthsF: tenths,
+          excursion: tenths < sensor.minTenthsF || tenths > sensor.maxTenthsF,
+        });
+        if (!latest || takenAt > latest) latest = takenAt;
+      }
+      start = new Date(end.getTime() + 1000);
     }
 
     for (let i = 0; i < fresh.length; i += 400) {
@@ -285,7 +304,7 @@ export async function syncReadings(sinceDays = 40): Promise<SyncReport> {
       ? `${added} reading${added === 1 ? "" : "s"} added, but: ${problems.join("; ")}`
       : added > 0
         ? `${added.toLocaleString()} new reading${added === 1 ? "" : "s"} across ${sensors.length} sensor${sensors.length === 1 ? "" : "s"}.${skipped ? ` ${skipped} could not be read and were skipped.` : ""}`
-        : `Up to date — nothing new since the last check.${skipped ? ` ${skipped} could not be read.` : ""}`;
+        : `Nothing new.${opts.fromIso ? " iMonnit returned no readings for that range — check how far back your account keeps them." : ""}${skipped ? ` ${skipped} could not be read.` : ""}`;
 
   await setSetting("imonnit_last_sync", new Date().toISOString());
   await setSetting("imonnit_last_result", message);
