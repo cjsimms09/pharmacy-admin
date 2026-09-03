@@ -19,6 +19,7 @@ const NAV = [
   { href: "/documents", label: "Documents" },
   // Where emailed reports land — temperature logs among them, so it belongs in the daily path.
   { href: "/inbox", label: "Inbox" },
+  { href: "/temps", label: "Temperatures" },
   { href: "/inventory", label: "CS inventories" },
   { href: "/settings", label: "Settings" },
 ];

@@ -2,8 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
+import { DOCUMENT_CATEGORIES } from "@/db/schema";
+import { newId } from "@/lib/crypto";
 import { requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { deleteFile } from "@/lib/files";
@@ -93,4 +95,77 @@ export async function deleteInboxItem(id: string) {
   await audit({ action: "inbox.delete", userId: user.id, userName: user.name, entity: "inbox_item", entityId: id, details: item.fileName ?? item.subject });
   revalidatePath("/inbox");
   redirect("/inbox");
+}
+
+/**
+ * Files an emailed document against a person.
+ *
+ * A technician emails her CPR card and it lands here as an attachment with no owner. Everything
+ * needed to make it count — whose it is, what it is, when it expires — is knowable only to the
+ * person reading the email, so this is where it gets attached. It also creates the credential,
+ * for the same reason uploading a card does: the distinction between a file and a thing that
+ * expires is one the software cares about and nobody using it does.
+ */
+export async function fileInboxItem(fd: FormData) {
+  const user = await requireManager();
+  const itemId = String(fd.get("itemId") ?? "");
+  const personId = String(fd.get("personId") ?? "");
+  const category = String(fd.get("category") ?? "") as (typeof DOCUMENT_CATEGORIES)[number];
+  const expiresOn = String(fd.get("expiresOn") ?? "").trim() || null;
+  const issuedOn = String(fd.get("issuedOn") ?? "").trim() || null;
+  const number = String(fd.get("number") ?? "").trim() || null;
+
+  const item = await db.query.inboxItems.findFirst({ where: eq(schema.inboxItems.id, itemId) });
+  if (!item?.documentId) fail("/inbox", "That attachment is no longer here.");
+  if (!personId) fail("/inbox", "Choose whose document it is.");
+
+  const CRED: Record<string, "cpr" | "immunization_training" | "immunization_protocol" | "pharmacist_license" | "technician_registration" | undefined> = {
+    cpr_card: "cpr",
+    immunization_training: "immunization_training",
+    immunization_protocol: "immunization_protocol",
+  };
+  const person = await db.query.people.findFirst({ where: eq(schema.people.id, personId) });
+  const credType =
+    CRED[category] ??
+    (category === "license"
+      ? person?.role === "technician"
+        ? "technician_registration"
+        : "pharmacist_license"
+      : undefined);
+
+  let credentialId: string | null = null;
+  if (credType) {
+    const held = await db.query.credentials.findFirst({
+      where: and(eq(schema.credentials.personId, personId), eq(schema.credentials.type, credType)),
+    });
+    if (held) {
+      credentialId = held.id;
+      await db
+        .update(schema.credentials)
+        .set({
+          // Newer paperwork wins on dates — that is the point of sending it in — but a number
+          // already recorded is not replaced by a blank one.
+          expiresOn: expiresOn ?? held.expiresOn,
+          issuedOn: issuedOn ?? held.issuedOn,
+          number: number ?? held.number,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(schema.credentials.id, held.id));
+    } else {
+      credentialId = newId();
+      await db.insert(schema.credentials).values({ id: credentialId, personId, type: credType, number, issuedOn, expiresOn });
+    }
+  }
+
+  await db
+    .update(schema.documents)
+    .set({ personId, category, credentialId, expiresOn, effectiveOn: issuedOn })
+    .where(eq(schema.documents.id, item.documentId));
+
+  await audit({ action: "inbox.file", userId: user.id, userName: user.name, details: `${category} for ${personId}` });
+  revalidatePath("/inbox");
+  revalidatePath(`/staff/${personId}`);
+  revalidatePath("/compliance");
+  revalidatePath("/");
+  redirect("/inbox?saved=1");
 }

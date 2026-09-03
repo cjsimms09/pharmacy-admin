@@ -1,11 +1,11 @@
 import Link from "next/link";
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requireManager } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
 import { hasMailPassword } from "@/lib/mailbox";
 import { PageHeader, Notice, Empty } from "@/components/ui";
-import { deleteInboxItem, sweepNow } from "./actions";
+import { fileInboxItem, deleteInboxItem, sweepNow } from "./actions";
 
 export const metadata = { title: "Inbox" };
 export const dynamic = "force-dynamic";
@@ -13,10 +13,11 @@ export const dynamic = "force-dynamic";
 export default async function InboxPage({ searchParams }: { searchParams: Promise<{ saved?: string; error?: string; detail?: string }> }) {
   await requireManager();
   const { saved, error, detail } = await searchParams;
-  const [s, configured, items] = await Promise.all([
+  const [s, configured, items, people] = await Promise.all([
     getSettings(),
     hasMailPassword(),
     db.select().from(schema.inboxItems).orderBy(desc(schema.inboxItems.receivedAt)).limit(200),
+    db.query.people.findMany({ where: eq(schema.people.active, true), orderBy: (p, { asc }) => [asc(p.lastName)] }),
   ]);
 
   return (
@@ -76,6 +77,33 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
                     )}
                   </td>
                   <td>
+                    {/* An emailed CPR card is useless sitting here. This is where it becomes a
+                        record: whose it is, what it is, and when it expires are all known to the
+                        person reading the email and to nobody else. */}
+                    {i.documentId && people.length > 0 && (
+                      <details className="mb-2">
+                        <summary className="cursor-pointer text-xs text-accent hover:underline">File to a person</summary>
+                        <form action={fileInboxItem} className="mt-2 grid gap-2">
+                          <input type="hidden" name="itemId" value={i.id} />
+                          <select name="personId" className="field text-xs">
+                            <option value="">Whose is it?</option>
+                            {people.map((p) => <option key={p.id} value={p.id}>{p.firstName} {p.lastName}</option>)}
+                          </select>
+                          <select name="category" defaultValue="cpr_card" className="field text-xs">
+                            <option value="cpr_card">CPR card</option>
+                            <option value="license">Licence or registration</option>
+                            <option value="immunization_training">Immunization training</option>
+                            <option value="immunization_protocol">Immunization protocol</option>
+                            <option value="ce_certificate">Certificate</option>
+                            <option value="other">Something else</option>
+                          </select>
+                          <input name="number" placeholder="Number (optional)" className="field text-xs" />
+                          <label className="text-xs text-ink-3">Issued<input name="issuedOn" type="date" className="field text-xs" /></label>
+                          <label className="text-xs text-ink-3">Expires<input name="expiresOn" type="date" className="field text-xs" /></label>
+                          <button className="btn btn-primary text-xs" type="submit">File it</button>
+                        </form>
+                      </details>
+                    )}
                     <form action={deleteInboxItem.bind(null, i.id)}>
                       <button className="text-xs text-crit hover:underline" type="submit">Delete</button>
                     </form>

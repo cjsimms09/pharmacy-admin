@@ -168,7 +168,10 @@ export const CLOSURES: Record<string, Closure> = {
   },
 
   // ── Satisfied only by a document arriving ────────────────────────
-  temperature_logs: { kind: "evidence", perPeriod: 2, minutes: 2 },
+  temperature_logs: {
+    kind: "witnessed",
+    witness: "Readings pulled from iMonnit, every excursion explained, and the month signed off under Temperatures.",
+  },
 
   // ── Renewals, driven by an expiry date ───────────────────────────
   ks_pharmacy_registration: { kind: "renewal", minutes: 20 },
@@ -353,8 +356,8 @@ export const OBLIGATION_SEEDS: ObligationSeed[] = [
     key: "temperature_logs",
     title: "File the refrigerator and freezer temperature logs",
     detail:
-      "Two logs a month, one per unit. They are emailed in and file themselves; this only appears when a month is short. " +
-      "Continuous records are what a VFC visit or a vaccine excursion investigation asks for first.",
+      "Readings come from the sensors automatically. A month counts once every out-of-range reading has an explanation " +
+      "against it and the month has been signed off — numbers on their own are not a log.",
     citation: "CDC Vaccine Storage and Handling Toolkit · VFC programme requirements",
     cadence: "monthly",
     firstDueInDays: 30,

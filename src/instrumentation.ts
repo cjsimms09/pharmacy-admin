@@ -134,6 +134,28 @@ export async function register() {
     await whenIdle("reminders", reminderTick);
     await whenIdle("nadac", nadacTick);
     await whenIdle("technician-list", technicianListTick);
+    await whenIdle("temperatures", tempTick);
+  };
+
+  /**
+   * Pulls temperature readings.
+   *
+   * Hourly rather than on the half-hourly beat: sensors report every few minutes, and a gap of
+   * an hour in when they are collected is invisible in a monthly log.
+   */
+  const tempTick = async () => {
+    try {
+      const { hasCredentials, syncReadings } = await import("./lib/imonnit");
+      if (!(await hasCredentials())) return;
+      const { getSettings, setSetting } = await import("./lib/settings");
+      const s = await getSettings();
+      const last = s.imonnit_last_sync ? Date.parse(s.imonnit_last_sync) : 0;
+      if (Number.isFinite(last) && Date.now() - last < 55 * 60 * 1000) return;
+      await syncReadings();
+      await setSetting("imonnit_last_sync", new Date().toISOString());
+    } catch {
+      // Recorded on the Temperatures page.
+    }
   };
 
   /** Files the technician list for any whole month that does not have one. */

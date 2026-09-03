@@ -77,6 +77,15 @@ async function witnessed(seedKey: string, periods: string[], cadence: Obligation
       for (const i of await db.query.csInventories.findMany()) bump(i.inventoryDate);
       return { counts, missing: "No controlled substance inventory has been recorded for this period." };
     }
+    case "temperature_logs": {
+      const { monthsSatisfied } = await import("./imonnit");
+      for (const [p, okMonth] of await monthsSatisfied(periods)) if (okMonth) counts.set(p, 1);
+      return {
+        counts,
+        missing:
+          "Readings, an explanation against every out-of-range one, and the month signed off. Open Temperatures.",
+      };
+    }
     case "technician_list": {
       // Filed by the site itself, so the completion rows are the evidence and there is nothing
       // else to look at. Counted here only so the duty reads as closing itself rather than as
