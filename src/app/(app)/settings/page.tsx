@@ -118,7 +118,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <Field label="DEA registration"><input name="pharmacy_dea" className="field font-mono" defaultValue={s.pharmacy_dea} /></Field>
         <Field
           label="Chain code"
-          hint="Assigned by your PSAO — often 605 or 630. Rate exhibits are headed “Chain Codes 605 & 630” and only govern pharmacies whose code is listed, so an expected reimbursement computed against the wrong one is wrong."
+          hint="The code your PSAO contracts under with each PBM — not your own number. Nearly every rate exhibit covers both 605 and 630, so it rarely changes a rate; a few networks are split by code, and those are the ones where it matters. Leave blank if your PSAO has not told you."
         >
           <input name="pharmacy_chain_code" className="field font-mono" defaultValue={s.pharmacy_chain_code} />
         </Field>
