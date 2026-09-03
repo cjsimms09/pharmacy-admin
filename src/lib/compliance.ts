@@ -2,7 +2,7 @@ import "server-only";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { addDays, daysUntil, nextCqiPeriod, todayIso } from "./dates";
-import { incidentsInPeriod, incidentsWithStage } from "./cqi";
+import { currentCqiObligation, incidentsInPeriod, incidentsWithStage } from "./cqi";
 import { CREDENTIAL_LABEL } from "./labels";
 
 export type Alert = {
@@ -57,8 +57,7 @@ export async function computeAlerts(): Promise<Alert[]> {
   }
 
   // CQI summary due
-  const period = nextCqiPeriod(today);
-  const existing = await db.query.cqiSummaries.findFirst({ where: eq(schema.cqiSummaries.periodStart, period.periodStart) });
+  const { period, summary: existing } = await currentCqiObligation();
   const d = daysUntil(period.dueOn)!;
   if (!existing || existing.status !== "final") {
     const level = d < 0 ? "crit" : d <= 14 ? "warn" : "info";
@@ -177,8 +176,7 @@ export type CqiSnapshot = {
 
 /** The state of the CQI cycle in one line, for the dashboard. */
 export async function cqiSnapshot(): Promise<CqiSnapshot> {
-  const period = nextCqiPeriod();
-  const summary = await db.query.cqiSummaries.findFirst({ where: eq(schema.cqiSummaries.periodStart, period.periodStart) });
+  const { period, summary } = await currentCqiObligation();
   const rows = await incidentsWithStage();
   const inPeriod = summary ? await incidentsInPeriod(summary.periodStart, summary.periodEnd) : [];
   return {

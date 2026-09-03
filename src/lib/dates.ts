@@ -87,3 +87,11 @@ export function periodLabel(periodStart: string, periodEnd: string): string {
   const [y2, m2] = periodEnd.split("-").map(Number);
   return y1 === y2 ? `${monthName(m1)}–${monthName(m2)} ${y2}` : `${monthName(m1)} ${y1}–${monthName(m2)} ${y2}`;
 }
+
+/** The bimonthly period immediately after the one starting on `periodStart`. */
+export function cqiPeriodAfter(periodStart: string) {
+  const y = Number(periodStart.slice(0, 4));
+  const all = cqiPeriods(y - 1, y + 2);
+  const i = all.findIndex((p) => p.periodStart === periodStart);
+  return i >= 0 && i + 1 < all.length ? all[i + 1] : null;
+}

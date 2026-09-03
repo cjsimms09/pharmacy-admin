@@ -1,7 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { incidentStage, isThin, reviewCompleteDeadline, reviewStartDeadline } from "../src/lib/cqi-rules";
-import { addDays, todayIso } from "../src/lib/dates";
+import { addDays, cqiPeriodAfter, todayIso } from "../src/lib/dates";
 
 const full = "x".repeat(500);
 type Inc = Parameters<typeof incidentStage>[0];
@@ -143,5 +143,20 @@ describe("overdue deadlines escalate", () => {
     const s = stage({ reportCreatedOn: addDays(todayIso(), -40), reviewStartedOn: addDays(todayIso(), -35) });
     assert.equal(s.key, "review_open");
     assert.equal(s.level, "crit");
+  });
+});
+
+describe("cqiPeriodAfter — advancing past a filed summary", () => {
+  test("steps to the next bimonthly period", () => {
+    assert.equal(cqiPeriodAfter("2026-06-01")!.dueOn, "2026-10-15");
+    assert.equal(cqiPeriodAfter("2026-06-01")!.periodStart, "2026-08-01");
+  });
+  test("crosses the year boundary", () => {
+    const next = cqiPeriodAfter("2026-10-01")!;
+    assert.equal(next.periodStart, "2026-12-01");
+    assert.equal(next.dueOn, "2027-02-15");
+  });
+  test("an unknown period start returns null rather than guessing", () => {
+    assert.equal(cqiPeriodAfter("2026-07-15"), null);
   });
 });

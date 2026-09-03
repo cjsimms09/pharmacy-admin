@@ -23,6 +23,8 @@ export default async function Dashboard() {
   const soon = alerts.filter((a) => a.level === "warn");
   const later = alerts.filter((a) => a.level === "info");
   const cqiDays = daysUntil(cqi.dueOn)!;
+  // A finalized summary is never late, whatever the due date says.
+  const cqiFiled = cqi.status === "final";
   const csDays = cs.dueOn ? daysUntil(cs.dueOn) : null;
   // "New" in the swept mailbox means arrived in the last week — there is no read/unread flag.
   const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
@@ -43,9 +45,13 @@ export default async function Dashboard() {
         <Stat label="Due within 30 days" value={String(soon.length)} tone={soon.length > 0 ? "warn" : "ok"} sub="Licenses, reviews, filings" href="#due-soon" />
         <Stat
           label={`CQI summary · ${cqi.label}`}
-          value={cqiDays >= 0 ? `${cqiDays}d` : `${-cqiDays}d late`}
-          tone={cqiDays < 0 ? "crit" : cqiDays <= 14 ? "warn" : "ok"}
-          sub={`Due ${fmt(cqi.dueOn)} · ${cqi.incidentCount} incident${cqi.incidentCount === 1 ? "" : "s"} · ${cqi.status}`}
+          value={cqiFiled ? "Filed" : cqiDays >= 0 ? `${cqiDays}d` : `${-cqiDays}d late`}
+          tone={cqiFiled ? "ok" : cqiDays < 0 ? "crit" : cqiDays <= 14 ? "warn" : "ok"}
+          sub={
+            cqiFiled
+              ? `Finalized · next due ${fmt(cqi.dueOn)}`
+              : `Due ${fmt(cqi.dueOn)} · ${cqi.incidentCount} incident${cqi.incidentCount === 1 ? "" : "s"} · ${cqi.status}`
+          }
           href={cqi.summaryId ? `/cqi/summaries/${cqi.summaryId}` : "/cqi"}
         />
         <Stat

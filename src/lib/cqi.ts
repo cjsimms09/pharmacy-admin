@@ -2,7 +2,7 @@ import "server-only";
 import { and, eq, gte, lte } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { decryptText, encryptText, newId } from "./crypto";
-import { lastDayOfMonth, nextCqiPeriod, periodLabel, todayIso } from "./dates";
+import { cqiPeriodAfter, lastDayOfMonth, nextCqiPeriod, periodLabel, todayIso } from "./dates";
 import { incidentStage, isThin } from "./cqi-rules";
 
 export function rxNumbersOf(inc: { rxNumbersEnc: string | null }): string[] {
@@ -84,11 +84,32 @@ export async function incidentsWithStage() {
 }
 
 /**
+ * The summary obligation actually outstanding.
+ *
+ * nextCqiPeriod answers "which period is due about now", which keeps pointing at a period for
+ * six weeks after its due date. Once that summary is finalized it is no longer an obligation, so
+ * this walks forward to the first period that has not been filed. Without it a finalized summary
+ * goes on being reported as overdue, which is both wrong and the fastest way to teach someone to
+ * ignore the dashboard.
+ */
+export async function currentCqiObligation() {
+  let period = nextCqiPeriod();
+  for (let guard = 0; guard < 12; guard++) {
+    const summary = await db.query.cqiSummaries.findFirst({ where: eq(schema.cqiSummaries.periodStart, period.periodStart) });
+    if (!summary || summary.status !== "final") return { period, summary: summary ?? null };
+    const next = cqiPeriodAfter(period.periodStart);
+    if (!next) return { period, summary };
+    period = next;
+  }
+  return { period, summary: null };
+}
+
+/**
  * Make sure a draft summary exists for the period now due, so the next one is always already open and
  * collecting. Idempotent: returns the existing summary when there is one.
  */
 export async function ensureCurrentSummary() {
-  const period = nextCqiPeriod();
+  const { period } = await currentCqiObligation();
   const existing = await db.query.cqiSummaries.findFirst({ where: eq(schema.cqiSummaries.periodStart, period.periodStart) });
   if (existing) {
     // Keep the null-report flag honest as incidents are logged into an already-open period.
