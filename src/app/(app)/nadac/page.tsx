@@ -5,6 +5,8 @@ import { revalidatePath } from "next/cache";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { loadNadacFiles, nadacCoverage, nadacClaimCoverage, nadacDir } from "@/lib/nadac";
+import { fetchNadac } from "@/lib/nadac-fetch";
+import { getSettings, setSetting } from "@/lib/settings";
 import { requireReimbursement } from "@/lib/features";
 import { PageHeader, Notice, Empty } from "@/components/ui";
 
@@ -15,8 +17,28 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
   await requireReimbursement();
   await requireUser();
   const { ok, error } = await searchParams;
+  const s = await getSettings();
   const cov = await nadacCoverage();
   const claimCov = cov.prices > 0 ? await nadacClaimCoverage() : null;
+
+  async function pullNow() {
+    "use server";
+    const u = await requireManager();
+    const r = await fetchNadac();
+    await audit({ action: "nadac.fetch", userId: u.id, userName: u.name, details: r.message.slice(0, 200) });
+    revalidatePath("/nadac");
+    redirect(`/nadac?${r.ok ? "ok" : "error"}=` + encodeURIComponent(r.message));
+  }
+
+  async function saveAuto(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    await setSetting("nadac_auto", fd.get("auto") ? "yes" : "no");
+    await setSetting("nadac_source_url", String(fd.get("sourceUrl") ?? "").trim());
+    await audit({ action: "nadac.settings", userId: u.id, userName: u.name });
+    revalidatePath("/nadac");
+    redirect("/nadac?ok=" + encodeURIComponent("Saved."));
+  }
 
   async function upload(fd: FormData) {
     "use server";
@@ -69,8 +91,40 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
         </Notice>
       )}
 
+      {/* ── Automatic ── */}
       <section className="my-4 rounded-lg border border-line bg-surface p-4">
-        <h2 className="text-sm font-semibold">Where to get it</h2>
+        <h2 className="text-sm font-semibold">Fetch it automatically</h2>
+        <p className="mt-1 text-sm text-ink-2">
+          NADAC is free and public and needs no account. CMS publishes weekly, on a Wednesday, so this checks a couple
+          of times a week and does nothing when there is nothing new.
+        </p>
+        <p className="mt-1 text-xs text-ink-3">
+          Worth leaving on even while the reimbursement pages are switched off: each weekly file carries only the
+          prices in force that week, so a month with this off is a month of history to reconstruct later.
+        </p>
+        <form action={saveAuto} className="mt-3 space-y-3">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" name="auto" defaultChecked={s.nadac_auto === "yes"} />
+            Keep NADAC up to date automatically
+          </label>
+          <label className="block text-xs text-ink-3">
+            Address to download from (leave blank unless CMS has moved it)
+            <input name="sourceUrl" defaultValue={s.nadac_source_url} placeholder="https://download.medicaid.gov/…" className="field font-mono text-xs" />
+          </label>
+          <button className="rounded-md border border-line px-3 py-2 text-sm hover:bg-ground">Save</button>
+        </form>
+        <form action={pullNow} className="mt-3 border-t border-line pt-3">
+          <button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Fetch now</button>
+          {s.nadac_last_fetch && (
+            <p className="mt-2 text-xs text-ink-3">
+              Last checked {new Date(s.nadac_last_fetch).toLocaleString()} — {s.nadac_last_result}
+            </p>
+          )}
+        </form>
+      </section>
+
+      <section className="my-4 rounded-lg border border-line bg-surface p-4">
+        <h2 className="text-sm font-semibold">Or load files by hand</h2>
         <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-ink-2">
           <li>
             Go to <code>data.medicaid.gov</code> and search for <b>NADAC (National Average Drug Acquisition Cost)</b>.

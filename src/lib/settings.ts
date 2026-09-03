@@ -32,6 +32,11 @@ export const SETTING_KEYS = [
   "training_reminders_last",
   // One line per training: the type, then "=", then the link staff are sent to.
   "training_materials",
+  // NADAC is published weekly by CMS, free and without a key. These control the automatic pull.
+  "nadac_auto", // "yes" | "no"
+  "nadac_source_url",
+  "nadac_last_fetch",
+  "nadac_last_result",
   "mail_allowed_senders", // one per line
   "mail_auto_import", // "yes" | "no" — load recognised reports rather than only filing them
   "mail_supplier_rules", // one per line: a sender or subject fragment, then "=", then a supplier name

@@ -76,14 +76,37 @@ export async function register() {
     }
   };
 
+  /**
+   * Pulls NADAC from CMS.
+   *
+   * Runs whether or not the reimbursement pages are switched on, and deliberately so: each weekly
+   * file carries only the prices in force that week, so a month with the collection off is a
+   * month of history that has to be reconstructed file by file later. It is free, it is one
+   * download, and having it already there is the whole point.
+   */
+  const nadacTick = async () => {
+    try {
+      const { getSettings } = await import("./lib/settings");
+      const s = await getSettings();
+      if (s.nadac_auto !== "yes") return;
+      const { fetchDue, fetchNadac } = await import("./lib/nadac-fetch");
+      if (!fetchDue(s.nadac_last_fetch || null)) return;
+      await fetchNadac();
+    } catch {
+      // The outcome is recorded in settings and shown on the NADAC page.
+    }
+  };
+
   setTimeout(() => {
     void tick();
     void backupTick();
     void reminderTick();
+    void nadacTick();
     setInterval(() => {
       void tick();
       void backupTick();
       void reminderTick();
+      void nadacTick();
     }, EVERY_MS).unref?.();
   }, START_DELAY_MS).unref?.();
 }
