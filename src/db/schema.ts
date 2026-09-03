@@ -151,6 +151,7 @@ export const documents = sqliteTable(
     cqiSummaryId: text("cqi_summary_id"),
     cqiIncidentId: text("cqi_incident_id"),
     csInventoryId: text("cs_inventory_id"),
+    csDiscrepancyId: text("cs_discrepancy_id"),
     inboxItemId: text("inbox_item_id"),
     effectiveOn: text("effective_on"),
     expiresOn: text("expires_on"),
