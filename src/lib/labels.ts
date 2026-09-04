@@ -131,6 +131,7 @@ export const DOCUMENT_CATEGORY_LABEL: Record<DocumentCategory, string> = {
   invoice_schedule_2: "Supplier invoice — Schedule II",
   invoice_schedule_3_5: "Supplier invoice — Schedule III-V",
   invoice: "Supplier invoice — no controlled substances",
+  driver_invoice: "Delivery driver invoice",
   cs_discrepancy: "Inventory discrepancy",
   insurance: "Insurance policy / certificate",
   agreement: "Agreement / contract",

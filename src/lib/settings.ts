@@ -89,6 +89,15 @@ export const SETTING_KEYS = [
    * ordering mistake, and is invisible otherwise.
    */
   "supplier_expected_schedule",
+  // ── The delivery driver's monthly invoice ──
+  "driver_name",
+  "driver_bill_to",
+  "driver_invoice_to",
+  "driver_rate_cents",
+  "driver_payment_terms",
+  "driver_invoice_auto",
+  "driver_invoice_last_check",
+  "driver_invoice_last_result",
   "manual_audit_last",
   "manual_audit_result",
   "manual_audit_auto",

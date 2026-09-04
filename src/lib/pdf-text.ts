@@ -26,7 +26,7 @@ import zlib from "node:zlib";
  * marking next to the wrong item, which is the one mistake that matters here.
  */
 const TOKENS =
-  /\/([A-Za-z0-9_.+-]+)\s+[\d.]+\s+Tf|([\d.-]+)\s+([\d.-]+)\s+Td|(?:<([0-9A-Fa-f\s]+)>|\(((?:[^()\\]|\\.)*)\))\s*Tj/g;
+  /\/([A-Za-z0-9_.+-]+)\s+[\d.]+\s+Tf|([\d.-]+)\s+([\d.-]+)\s+Td|(?:[\d.-]+\s+){4}([\d.-]+)\s+([\d.-]+)\s+Tm|(?:<([0-9A-Fa-f\s]+)>|\(((?:[^()\\]|\\.)*)\))\s*Tj/g;
 
 function inflate(chunk: Buffer): string | null {
   try {
@@ -182,7 +182,7 @@ export function pdfText(buf: Buffer): string {
     const raw = buf.subarray(start, end);
     const text = inflate(raw) ?? raw.toString("latin1");
     i = end + 9;
-    if (!text.includes("Td")) continue;
+    if (!text.includes("Td") && !text.includes("Tm")) continue;
 
     // Fragments keyed by their line, to a tenth of a point. Anything printed on the same baseline
     // is the same row of the table.
@@ -198,16 +198,24 @@ export function pdfText(buf: Buffer): string {
         font = fonts.get(m[1]);
         continue;
       }
+      // Td offsets and a Tm text matrix are two ways of saying the same thing, and generators
+      // pick one or the other with no pattern. A reader that knows only Td silently returns an
+      // empty page for half the PDFs it is given — including the ones this system writes itself.
       if (m[2] !== undefined && m[3] !== undefined) {
         x = Number.parseFloat(m[2]);
         y = Number.parseFloat(m[3]);
         continue;
       }
+      if (m[4] !== undefined && m[5] !== undefined) {
+        x = Number.parseFloat(m[4]);
+        y = Number.parseFloat(m[5]);
+        continue;
+      }
       if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
 
-      const bytes = m[4]
-        ? Buffer.from(m[4].replace(/\s+/g, ""), "hex")
-        : Buffer.from(unescape(m[5] ?? ""), "latin1");
+      const bytes = m[6]
+        ? Buffer.from(m[6].replace(/\s+/g, ""), "hex")
+        : Buffer.from(unescape(m[7] ?? ""), "latin1");
       if (bytes.length === 0) continue;
 
       // A subset font renumbers its glyphs, so the bytes are indexes rather than letters and the

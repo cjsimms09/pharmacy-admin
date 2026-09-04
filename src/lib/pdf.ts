@@ -101,6 +101,19 @@ export function textPdf(title: string, lines: PdfLine[]): Buffer {
   if (current.length) pages.push(current);
   if (pages.length === 0) pages.push([]);
 
+  return assemble(title, pages.map((ops) => ops.join("\n")));
+}
+
+/**
+ * Turns finished page content streams into a file.
+ *
+ * Objects are written in order and their byte offsets recorded, because a PDF's cross-reference
+ * table is a list of exactly where each object starts — get one offset wrong and readers refuse
+ * the whole file. Shared by the plain text documents and the laid-out ones, so there is only one
+ * place that can get the offsets wrong.
+ */
+function assemble(title: string, streams: string[]): Buffer {
+  const pages = streams.length > 0 ? streams : [""];
   const objects: string[] = [];
   const pageIds = pages.map((_, i) => 4 + i * 2);
 
@@ -108,12 +121,11 @@ export function textPdf(title: string, lines: PdfLine[]): Buffer {
   objects[2] = `<< /Type /Pages /Count ${pages.length} /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] >>`;
   objects[3] = `<< /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >> /F2 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >> >> >>`;
 
-  pages.forEach((ops, i) => {
+  pages.forEach((stream, i) => {
     const pageId = pageIds[i];
     const contentId = pageId + 1;
     objects[pageId] =
       `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Resources 3 0 R /Contents ${contentId} 0 R >>`;
-    const stream = ops.join("\n");
     objects[contentId] = `<< /Length ${Buffer.byteLength(stream, "latin1")} >>\nstream\n${stream}\nendstream`;
   });
 
@@ -134,4 +146,56 @@ export function textPdf(title: string, lines: PdfLine[]): Buffer {
   out += `trailer\n<< /Size ${objects.length} /Root 1 0 R /Info ${infoId} 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
 
   return Buffer.from(out, "latin1");
+}
+
+/**
+ * A laid-out page, for the few documents that are not a wall of prose.
+ *
+ * An invoice is a table with money right-aligned under a rule. Left-aligned lines cannot express
+ * that, and something a pharmacy sends to somebody else's accounts department should look like a
+ * document rather than like a printout — it is read by a person who has never seen this system
+ * and whose only impression of it is the page in front of them.
+ *
+ * Still deliberately small: text at a point, a rule, a filled box. Enough to set an invoice, and
+ * not the beginning of a layout engine.
+ */
+export type Draw =
+  | {
+      kind: "text";
+      x: number;
+      y: number;
+      text: string;
+      size?: number;
+      bold?: boolean;
+      /** Right and centre are measured from x, which is then the right edge or the centre. */
+      align?: "left" | "right" | "center";
+      /** 0 is black, 1 is white. */
+      grey?: number;
+    }
+  | { kind: "rule"; x1: number; x2: number; y: number; weight?: number; grey?: number }
+  | { kind: "rect"; x: number; y: number; w: number; h: number; grey?: number };
+
+export const PAGE = { width: PAGE_W, height: PAGE_H, margin: MARGIN } as const;
+
+/** How wide a string will be, for right-aligning money and truncating a long description. */
+export const textWidth = widthOf;
+
+function op(d: Draw): string {
+  if (d.kind === "rule") {
+    const g = (d.grey ?? 0).toFixed(2);
+    return `q ${g} G ${(d.weight ?? 0.75).toFixed(2)} w ${d.x1.toFixed(2)} ${d.y.toFixed(2)} m ${d.x2.toFixed(2)} ${d.y.toFixed(2)} l S Q`;
+  }
+  if (d.kind === "rect") {
+    const g = (d.grey ?? 0.92).toFixed(2);
+    return `q ${g} g ${d.x.toFixed(2)} ${d.y.toFixed(2)} ${d.w.toFixed(2)} ${d.h.toFixed(2)} re f Q`;
+  }
+  const size = d.size ?? SIZE;
+  const w = widthOf(d.text, size);
+  const x = d.align === "right" ? d.x - w : d.align === "center" ? d.x - w / 2 : d.x;
+  const g = (d.grey ?? 0).toFixed(2);
+  return `BT ${g} g ${d.bold ? "/F2" : "/F1"} ${size} Tf 1 0 0 1 ${x.toFixed(2)} ${d.y.toFixed(2)} Tm (${escapeText(d.text)}) Tj ET`;
+}
+
+export function drawnPdf(title: string, pages: Draw[][]): Buffer {
+  return assemble(title, pages.map((page) => page.map(op).join("\n")));
 }

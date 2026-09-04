@@ -159,6 +159,7 @@ export async function register() {
     await whenIdle("digest", digestTick);
     await whenIdle("updates", updateTick);
     await whenIdle("manual-audit", manualAuditTick);
+    await whenIdle("deliveries", deliveryTick);
   };
 
   /**
@@ -272,6 +273,31 @@ export async function register() {
       await runManualAudit({ id: "system", name: "Annual audit" }, { limit: 4 });
     } catch {
       // The outcome is recorded in settings and shown on the manual page.
+    }
+  };
+
+  /**
+   * Sends a finished delivery month that has not gone out.
+   *
+   * The invoice normally goes at the moment the last weekday is entered, which is the right time
+   * and needs no job at all. This is for the two ways that misses: the mail server was down that
+   * afternoon, or the last day was entered and something threw. Once a day is enough — the driver
+   * is not waiting on the hour.
+   */
+  const deliveryTick = async () => {
+    try {
+      const { getSettings, setSetting } = await import("./lib/settings");
+      const s = await getSettings();
+      if (s.driver_invoice_auto === "no") return;
+      if (!s.driver_invoice_to || !s.mail_user || !s.mail_password_enc) return;
+      const last = s.driver_invoice_last_check ? Date.parse(s.driver_invoice_last_check) : 0;
+      if (Number.isFinite(last) && Date.now() - last < 20 * 60 * 60 * 1000) return;
+      const { catchUpInvoices } = await import("./lib/deliveries");
+      const done = await catchUpInvoices({ name: "Automatic" });
+      await setSetting("driver_invoice_last_check", new Date().toISOString());
+      if (done.length) await setSetting("driver_invoice_last_result", done.join(" "));
+    } catch {
+      // Shown on the Deliveries page either way; never allowed to stop the app.
     }
   };
 

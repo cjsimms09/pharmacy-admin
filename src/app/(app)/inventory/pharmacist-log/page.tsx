@@ -60,6 +60,17 @@ export default async function PharmacistLogPage({
       revised=""
       backHref="/inventory"
     >
+      {/*
+        Printed to fit the binder it lives in.
+        
+        The log book is 8.5 by 6 inches and the statement is taped inside its front cover, so a
+        Letter page is not something to trim afterwards — it is the wrong shape to start with. The
+        page box is set to half-letter, which every printer offers, and the statement is drawn
+        inside a cut line so it can be trimmed to size and taped in whatever the paper it came out
+        on. Everything is a point or two smaller to suit.
+      */}
+      <style>{`@page { size: 8.5in 5.5in; margin: 0.3in; }`}</style>
+
       <div className="no-print mb-4 space-y-2">
         <div className="flex flex-wrap gap-1.5">
           <Link href={`/inventory/pharmacist-log?year=${useYear}`} className={`btn btn-sm ${showSheet ? "" : "btn-primary"}`}>
@@ -70,71 +81,83 @@ export default async function PharmacistLogPage({
           </Link>
         </div>
         <p className="text-xs text-ink-3">
-          A new log book each year arrives blank. Print the statement, paste it inside the front cover, and the book
-          becomes the record 21 CFR 1306.22(f) asks for. Verify the wording against the current regulation before you
-          rely on it — this is reproduced here so you have it to hand, not as legal advice.
+          A new log book each year arrives blank. Print the statement, cut along the dashed line, tape it inside the
+          front cover, and the book becomes the record 21 CFR 1306.22(f) asks for. Verify the wording against the
+          current regulation before you rely on it — this is reproduced here so you have it to hand, not as legal
+          advice.
+        </p>
+        <p className="text-xs text-ink-3">
+          <b>It prints to fit the 8.5 by 6 inch book.</b> In the print box choose <b>Statement</b> or{" "}
+          <b>Half Letter (8.5 × 5.5)</b> if your printer offers it, and set Scale to 100%. On ordinary Letter paper it
+          still comes out the right size — cut along the dashed line.
         </p>
       </div>
 
       {!showSheet ? (
         <>
-          <div className="mb-4">
-            <p className="text-lg font-bold">{pharmacy}</p>
-            <p className="text-xs">
+          <div className="mb-2">
+            <p className="text-base font-bold">{pharmacy}</p>
+            <p className="text-[10px]">
               {[s.pharmacy_address, [s.pharmacy_city, s.pharmacy_state].filter(Boolean).join(", "), s.pharmacy_zip]
                 .filter(Boolean)
                 .join(" · ")}
             </p>
-            <p className="text-xs">
+            <p className="text-[10px]">
               {s.pharmacy_registration_number ? `Kansas pharmacy registration ${s.pharmacy_registration_number}` : ""}
               {s.pharmacy_dea ? ` · DEA registration ${s.pharmacy_dea}` : ""}
             </p>
           </div>
 
           {/* ── The thing that gets pasted in ── */}
-          <div className="print-block border-2 border-black p-4">
-            <p className="text-center text-sm font-bold uppercase tracking-wide">
+          {/* The piece that is actually taped in. Dashed, so the scissors have somewhere to go. */}
+          <div className="print-block border-2 border-dashed border-black p-3">
+            <p className="text-center text-[12px] font-bold uppercase tracking-wide">
               Daily review of controlled substance refill information
             </p>
-            <p className="mt-1 text-center text-[11px]">
+            <p className="mt-0.5 text-center text-[9px]">
               {pharmacy}
               {s.pharmacy_dea ? ` · DEA ${s.pharmacy_dea}` : ""} · Log book for {useYear}
             </p>
 
-            <p className="mt-4 text-[12px] leading-relaxed">
+            <p className="mt-2.5 text-[10px] leading-snug">
               This pharmacy uses an automated data processing system for the storage and retrieval of prescription
               refill information for controlled substances in Schedules III and IV. In place of a daily hard-copy
               printout, this bound log book is maintained under 21 CFR 1306.22(f).
             </p>
 
-            <p className="mt-3 text-[12px] font-semibold">By signing below on any given day, the pharmacist states:</p>
+            <p className="mt-2 text-[10px] font-semibold">By signing below on any given day, the pharmacist states:</p>
 
-            <p className="mt-2 border-l-4 border-black pl-3 text-[12px] italic leading-relaxed">
+            <p className="mt-1.5 border-l-4 border-black pl-2 text-[10.5px] italic leading-snug">
               &ldquo;I have reviewed the controlled substance refill information entered into the automated data
               processing system of this pharmacy on the date shown, and I attest that it is correct as shown.&rdquo;
             </p>
 
-            <p className="mt-3 text-[11px] leading-relaxed">
+            <p className="mt-2 text-[9.5px] leading-snug">
               Each pharmacist involved in dispensing these refills signs for the day on which that dispensing occurred.
               The signature is made in the same manner as the pharmacist would sign a check or other legal document —
               a full or standard signature, not initials.
             </p>
 
-            <p className="mt-3 text-[11px] leading-relaxed">
+            <p className="mt-2 text-[9.5px] leading-snug">
               This log book is kept at the pharmacy, is available for inspection and copying by authorized officials,
               and is retained for at least five years, which is the Kansas retention period and longer than the two
               years federal law requires.
             </p>
 
-            <div className="mt-6 border-t border-black pt-3">
-              <p className="text-[11px]">
+            <div className="mt-3 border-t border-black pt-2">
+              <p className="text-[9.5px]">
                 Placed in this log book on ____________________ by ____________________________________,
                 pharmacist-in-charge.
               </p>
             </div>
           </div>
 
-          <div className="print-block mt-4 border border-black p-3 text-[10px] leading-relaxed">
+          {/*
+            Screen only. This explains the choice to the pharmacist-in-charge; it is not part of
+            the statement, and on a page cut to fit a binder every line that is not the statement
+            is a line taking room from it.
+          */}
+          <div className="no-print mt-4 rounded-md border border-line bg-ground p-3 text-[11px] leading-relaxed">
             <p className="font-bold">Why this is here</p>
             <p className="mt-1">
               21 CFR 1306.22(f) gives a pharmacy running an automated system two ways to keep Schedule III and IV
@@ -158,19 +181,19 @@ export default async function PharmacistLogPage({
         </>
       ) : (
         <>
-          <div className="mb-3">
-            <p className="text-lg font-bold">{pharmacy}</p>
-            <p className="text-xs">
+          <div className="mb-2">
+            <p className="text-base font-bold">{pharmacy}</p>
+            <p className="text-[10px]">
               Daily review of controlled substance refill information — {monthName}
               {s.pharmacy_dea ? ` · DEA ${s.pharmacy_dea}` : ""}
             </p>
-            <p className="mt-1 text-[10px]">
+            <p className="mt-1 text-[8.5px] leading-snug">
               By signing, the pharmacist attests that the controlled substance refill information entered into this
               pharmacy&rsquo;s automated system on that date has been reviewed and is correct as shown. 21 CFR
               1306.22(f). Sign as you would a check or legal document, not with initials.
             </p>
           </div>
-          <table className="w-full border-collapse text-[11px]">
+          <table className="w-full border-collapse text-[9px]">
             <thead>
               <tr>
                 <th className="w-16 border border-black px-2 py-1 text-left">Date</th>
@@ -182,17 +205,17 @@ export default async function PharmacistLogPage({
             <tbody>
               {Array.from({ length: daysInMonth }, (_, i) => (
                 <tr key={i}>
-                  <td className="h-7 border border-black px-2 py-0.5">
+                  <td className="h-[19px] border border-black px-1.5 py-0">
                     {String(mm).padStart(2, "0")}/{String(i + 1).padStart(2, "0")}
                   </td>
-                  <td className="border border-black px-2 py-0.5" />
-                  <td className="border border-black px-2 py-0.5" />
-                  <td className="border border-black px-2 py-0.5" />
+                  <td className="border border-black px-1.5 py-0" />
+                  <td className="border border-black px-1.5 py-0" />
+                  <td className="border border-black px-1.5 py-0" />
                 </tr>
               ))}
             </tbody>
           </table>
-          <p className="mt-2 text-[10px]">
+          <p className="mt-1.5 text-[8.5px]">
             A day on which the pharmacy was closed should say so rather than be left blank — a run of empty rows is
             indistinguishable from a run of days nobody reviewed.
           </p>

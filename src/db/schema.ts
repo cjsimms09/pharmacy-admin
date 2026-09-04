@@ -241,6 +241,8 @@ export const DOCUMENT_CATEGORIES = [
   "invoice_schedule_2",
   "invoice_schedule_3_5",
   "invoice",
+  /** The delivery driver's monthly invoice, as it was sent. */
+  "driver_invoice",
   "insurance",
   "agreement",
   "cqi_summary",
@@ -674,6 +676,80 @@ export const invoiceForwards = sqliteTable(
     error: text("error"),
   },
   (t) => [index("invoice_forwards_sent_idx").on(t.sentAt)],
+);
+
+/**
+ * The driver's day, one row per weekday.
+ *
+ * The pharmacy's delivery driver is paid a flat rate for each run: every prescription delivery,
+ * and the mail trip that happens on every weekday. He invoiced by keeping a spreadsheet, which
+ * meant the count for a Tuesday three weeks ago existed only in somebody's memory by the time the
+ * invoice was written.
+ *
+ * A row exists for a weekday once somebody has said what happened on it — including a day when
+ * nothing happened, which is recorded as zero rather than left blank. That distinction is the
+ * whole mechanism: a month is finished when every weekday has an answer, and "no answer yet" and
+ * "no deliveries that day" must not look the same or the invoice goes out short.
+ */
+export const deliveryDays = sqliteTable(
+  "delivery_days",
+  {
+    id: text("id").primaryKey(),
+    /** The day itself, ISO. One row per date, enforced. */
+    onDate: text("on_date").notNull().unique(),
+    deliveries: integer("deliveries").notNull().default(0),
+    /** Normally one per weekday, but a closed day has none and an odd day may have two. */
+    mailTrips: integer("mail_trips").notNull().default(1),
+    /** Why a day was zero — a holiday, snow, the pharmacy shut. Prints on nothing; explains later. */
+    note: text("note"),
+    enteredBy: text("entered_by").notNull(),
+    enteredAt: text("entered_at").notNull().default(now()),
+    updatedBy: text("updated_by"),
+    updatedAt: text("updated_at"),
+  },
+  (t) => [index("delivery_days_date_idx").on(t.onDate)],
+);
+
+export const DRIVER_INVOICE_STATUS = ["draft", "sent", "failed", "superseded"] as const;
+export type DriverInvoiceStatus = (typeof DRIVER_INVOICE_STATUS)[number];
+
+/**
+ * One invoice per month, kept for ever.
+ *
+ * Kept rather than regenerated, and that is deliberate. What was sent is a fact about a payment
+ * somebody made, so the totals, the rate, the invoice number and the day-by-day breakdown are all
+ * frozen into the row and the PDF is filed as a document. Regenerating it later from the day
+ * rows would quietly rewrite history the first time a day was corrected.
+ *
+ * A month whose days change after the invoice went is not edited. The sent invoice is marked
+ * superseded and a new one is raised, because that is what the person paying it needs to see.
+ */
+export const driverInvoices = sqliteTable(
+  "driver_invoices",
+  {
+    id: text("id").primaryKey(),
+    /** YYYY-MM. */
+    month: text("month").notNull(),
+    /** Random, unique, and fixed once issued. */
+    invoiceNumber: text("invoice_number").notNull(),
+    driverName: text("driver_name").notNull(),
+    /** Frozen at issue: a rate change next year must not alter what was billed last year. */
+    rateCents: integer("rate_cents").notNull(),
+    deliveries: integer("deliveries").notNull().default(0),
+    mailTrips: integer("mail_trips").notNull().default(0),
+    totalCents: integer("total_cents").notNull().default(0),
+    /** The day-by-day breakdown as it stood, so the invoice can be reproduced exactly. */
+    linesJson: text("lines_json").notNull().default("[]"),
+    status: text("status", { enum: DRIVER_INVOICE_STATUS }).notNull().default("draft"),
+    sentTo: text("sent_to"),
+    sentAt: text("sent_at"),
+    sendError: text("send_error"),
+    /** The filed PDF, so what was sent can be produced rather than described. */
+    documentId: text("document_id"),
+    issuedBy: text("issued_by").notNull(),
+    createdAt: text("created_at").notNull().default(now()),
+  },
+  (t) => [index("driver_invoices_month_idx").on(t.month)],
 );
 
 // ── Document intake (drop anything, Claude files it) ─────────────────

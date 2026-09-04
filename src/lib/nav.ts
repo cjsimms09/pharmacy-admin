@@ -76,6 +76,7 @@ export const NAV: NavGroup[] = [
     blurb: "What the pharmacy can produce on request, and where each of it lives.",
     items: [
       { href: "/forms", label: "Forms", blurb: "Every form this pharmacy uses, and what each records" },
+      { href: "/deliveries", label: "Deliveries", blurb: "The driver's month, and the invoice that sends itself" },
       { href: "/agreements", label: "Agreements", blurb: "Business associates and everyone else with access" },
       { href: "/compliance/attestations", label: "Attestations", blurb: "Every standing duty confirmed, in the wording used" },
       { href: "/inbox", label: "Inbox", blurb: "Reports that arrived by email and what was made of them" },
