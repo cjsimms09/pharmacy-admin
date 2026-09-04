@@ -89,12 +89,14 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
         }
       : null;
 
-    if (!last) return { label: "never", tone: "badge-crit", due: true, sent };
+    // The certificate is the evidence behind the badge, and the badge is where somebody looks.
+    const certificate = last ? `/certificates/${last.id}` : null;
+    if (!last) return { label: "never", tone: "badge-crit", due: true, sent, certificate };
     const dueOn = last.expiresOn ?? addMonths(last.completedOn, TRAINING_CADENCE[type]?.months ?? 12);
     const left = daysUntil(dueOn)!;
-    if (left < 0) return { label: `${-left}d late`, tone: "badge-crit", due: true, sent };
-    if (left <= 45) return { label: `due ${dueOn.slice(5)}`, tone: "badge-warn", due: true, sent };
-    return { label: dueOn.slice(5), tone: "badge-ok", due: false, sent };
+    if (left < 0) return { label: `${-left}d late`, tone: "badge-crit", due: true, sent, certificate };
+    if (left <= 45) return { label: `due ${dueOn.slice(5)}`, tone: "badge-warn", due: true, sent, certificate };
+    return { label: dueOn.slice(5), tone: "badge-ok", due: false, sent, certificate };
   };
 
   const cells = people.flatMap((p) => REQUIRED.map((t) => ({ p, t, st: state(p.id, t) })));
@@ -476,8 +478,20 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
                                 data-type={t}
                                 data-due="1"
                               />
-                              <span className={`badge ${st.tone}`}>{st.label}</span>
+                              {st.certificate ? (
+                                <Link href={st.certificate} className={`badge ${st.tone} hover:underline`} title="Opens the certificate">{st.label}</Link>
+                              ) : (
+                                <span className={`badge ${st.tone}`}>{st.label}</span>
+                              )}
                             </label>
+                          ) : st.certificate ? (
+                            <Link
+                              href={st.certificate}
+                              className={`badge ${st.tone} hover:underline`}
+                              title="Current — opens the certificate"
+                            >
+                              {st.label}
+                            </Link>
                           ) : (
                             <span className={`badge ${st.tone}`} title="Current — nothing to do">{st.label}</span>
                           )}

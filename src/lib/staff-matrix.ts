@@ -37,6 +37,15 @@ export type Cell = {
    * a thirty-second job into one that waits a fortnight — and it is why the same gaps kept
    * reappearing week after week.
    */
+  /**
+   * Where the evidence behind this cell lives.
+   *
+   * A grid that shows a training as done and cannot show you the certificate is a grid you have to
+   * leave in order to trust it — and an inspector asking "show me" is the only reason the grid
+   * exists. A completed training goes to its certificate; a credential goes to the record it was
+   * read from.
+   */
+  href?: string;
   action?: {
     trainingType: TrainingType;
     personId: string;
@@ -163,7 +172,7 @@ export async function staffMatrix(): Promise<StaffMatrix> {
         };
         continue;
       }
-      cells[col.key] = dated(held.expiresOn, SOON_CREDENTIAL, col.label);
+      cells[col.key] = { ...dated(held.expiresOn, SOON_CREDENTIAL, col.label), href: `/staff/${p.id}#credential-form` };
     }
 
     for (const col of TRAINING_COLUMNS) {
@@ -195,14 +204,16 @@ export async function staffMatrix(): Promise<StaffMatrix> {
         cells[col.key] = {
           state: "ok",
           label: last.completedOn.slice(2, 7),
-          title: `Completed ${last.completedOn}. This one does not repeat.`,
+          title: `Completed ${last.completedOn}. This one does not repeat. Opens the certificate.`,
+          href: `/certificates/${last.id}`,
         };
         continue;
       }
       const cell = dated(due, SOON_TRAINING, col.short);
       cells[col.key] = {
         ...cell,
-        title: `${cell.title} Last completed ${last.completedOn}.`,
+        title: `${cell.title} Last completed ${last.completedOn}. Opens the certificate.`,
+        href: `/certificates/${last.id}`,
         // Only offer to send it where there is something to send. A current training does not
         // need a button, and a row of buttons that mostly do nothing is how a row of buttons
         // stops being read.

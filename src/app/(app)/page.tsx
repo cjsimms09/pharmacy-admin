@@ -575,7 +575,21 @@ function CellBadge({ cell }: { cell: Cell }) {
   if (cell.state === "na") return <span className="text-xs text-ink-3" title={cell.title}>—</span>;
   const cls =
     cell.state === "missing" || cell.state === "late" ? "badge-crit" : cell.state === "soon" ? "badge-warn" : "badge-ok";
-  const badge = <span className={`badge ${cls}`} title={cell.title}>{cell.label}</span>;
+  /*
+   * The badge is the link to its own evidence.
+   *
+   * "It says they did it" and "here is the certificate" are different claims, and the second is the
+   * only one worth anything with an inspector in the room. Where the cell has something behind
+   * it — a certificate for a completed training, the record a credential was read from — the cell
+   * opens it, so the grid can be trusted without leaving the grid.
+   */
+  const badge = cell.href ? (
+    <Link href={cell.href} className={`badge ${cls} hover:underline`} title={cell.title}>
+      {cell.label}
+    </Link>
+  ) : (
+    <span className={`badge ${cls}`} title={cell.title}>{cell.label}</span>
+  );
   if (!cell.action) return badge;
 
   const { trainingType, personId, sentOn, reminders, sendError } = cell.action;
