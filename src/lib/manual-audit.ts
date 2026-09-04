@@ -267,11 +267,52 @@ export async function runManualAudit(
   return out;
 }
 
+/**
+ * The findings that are this pharmacy's to act on.
+ *
+ * Not everything the reviewer once said. The employment half of this handbook is maintained by the
+ * medical practice next door — the pharmacy is bound by it but does not write it — and the audit
+ * has excluded that chapter from being read for some time. What it did not do was filter the
+ * findings raised before the chapter was marked, so nine sections the pharmacist cannot edit sat
+ * at the top of his list telling him to rewrite them. A list of work somebody else has to do is
+ * worse than no list: it is read once, found to be undoable, and then not read again.
+ */
 export async function openFindings(): Promise<Finding[]> {
-  return db.query.manualFindings.findMany({
-    where: and(isNull(schema.manualFindings.appliedAt), isNull(schema.manualFindings.dismissedAt)),
-    orderBy: (f, { asc: a }) => [a(f.severity), a(f.createdAt)],
-  });
+  const [rows, mine] = await Promise.all([
+    db.query.manualFindings.findMany({
+      where: and(isNull(schema.manualFindings.appliedAt), isNull(schema.manualFindings.dismissedAt)),
+      orderBy: (f, { asc: a }) => [a(f.severity), a(f.createdAt)],
+    }),
+    auditable(),
+  ]);
+  const ours = new Set(mine.map((s) => s.id));
+  return rows.filter((f) => ours.has(f.sectionId));
+}
+
+/**
+ * Findings in the chapters somebody else maintains, kept rather than discarded.
+ *
+ * They are not the pharmacy's to fix and must not sit on his list. They are still worth having:
+ * "your handbook gives termination decisions to Administration or Physicians and never terminates
+ * the departing person's access to protected health information" is a real thing to hand to the
+ * practice that writes it, and it came from reading their text against the rules.
+ */
+export async function findingsForOthers(): Promise<{ manager: string; findings: Finding[] }[]> {
+  const [rows, all] = await Promise.all([
+    db.query.manualFindings.findMany({
+      where: and(isNull(schema.manualFindings.appliedAt), isNull(schema.manualFindings.dismissedAt)),
+      orderBy: (f, { asc: a }) => [a(f.severity), a(f.createdAt)],
+    }),
+    allSections(),
+  ]);
+  const managerOf = new Map(all.filter((s) => s.managedBy).map((s) => [s.id, s.managedBy!]));
+  const by = new Map<string, Finding[]>();
+  for (const f of rows) {
+    const manager = managerOf.get(f.sectionId);
+    if (!manager) continue;
+    by.set(manager, [...(by.get(manager) ?? []), f]);
+  }
+  return [...by.entries()].map(([manager, findings]) => ({ manager, findings }));
 }
 
 /**
@@ -544,7 +585,10 @@ export async function rereadBlockedSections(user: { name: string }): Promise<{ s
     where: and(isNull(schema.manualFindings.appliedAt), isNull(schema.manualFindings.dismissedAt)),
   });
   // No suggested text is the marker: the reviewer had a finding and could not write the fix.
-  const blocked = open.filter((f) => !f.suggestedBody.trim());
+  // Only ours. openFindings already filters, but this reads the table directly and a section the
+  // practice maintains must never be put back in the queue by anything.
+  const ours = new Set((await auditable()).map((s) => s.id));
+  const blocked = open.filter((f) => !f.suggestedBody.trim() && ours.has(f.sectionId));
   const sectionIds = [...new Set(blocked.map((f) => f.sectionId))];
 
   for (const id of sectionIds) {
@@ -568,8 +612,5 @@ export async function rereadBlockedSections(user: { name: string }): Promise<{ s
 
 /** How many findings are open only because a fact about the pharmacy was missing. */
 export async function blockedOnFacts(): Promise<number> {
-  const open = await db.query.manualFindings.findMany({
-    where: and(isNull(schema.manualFindings.appliedAt), isNull(schema.manualFindings.dismissedAt)),
-  });
-  return open.filter((f) => !f.suggestedBody.trim()).length;
+  return (await openFindings()).filter((f) => !f.suggestedBody.trim()).length;
 }

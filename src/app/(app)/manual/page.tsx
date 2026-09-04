@@ -29,6 +29,7 @@ import {
   auditFailures,
   rereadBlockedSections,
   blockedOnFacts,
+  findingsForOthers,
   openFindings,
   runManualAudit,
   applyFinding,
@@ -100,6 +101,7 @@ export default async function ManualPage({
     namedRoles(),
     blockedOnFacts(),
   ]);
+  const theirs = await findingsForOthers();
   const sections = outline(rows);
   const pharmacy = s.pharmacy_name || "This pharmacy";
 
@@ -1060,6 +1062,56 @@ export default async function ManualPage({
               </div>
             )}
           </Card>
+
+
+          {/*
+            What the review found in somebody else's chapters.
+
+            The employment half of this handbook belongs to the medical practice. The pharmacy is
+            bound by it and does not write it, so these are not on the pharmacist's list — a list of
+            work he cannot do is read once, found to be undoable, and then not read again.
+
+            They are not thrown away either. "Your termination procedure never terminates the
+            departing person's access to protected health information" is a real thing to hand to
+            the people who maintain it, and it came out of reading their text against the rules.
+          */}
+          {theirs.map((group) => (
+            <details key={group.manager} className="mt-6">
+              <summary className="cursor-pointer text-sm font-medium text-accent hover:underline">
+                {group.findings.length} finding{group.findings.length === 1 ? "" : "s"} in the chapters{" "}
+                {group.manager} maintains — not yours to fix
+              </summary>
+              <Card className="mt-2">
+                <p className="card-sub">
+                  This pharmacy is bound by these sections but does not write them, so none of this is on your list
+                  above and nothing here will be changed by any button on this page. It is worth passing on: it came
+                  from reading their text against Kansas, DEA, HIPAA and OSHA requirements, and two of these are
+                  findings against the practice rather than against you.
+                </p>
+                <ul className="rows mt-2">
+                  {group.findings.slice(0, 20).map((f) => (
+                    <li key={f.id} className="py-2">
+                      <div className="flex flex-wrap items-baseline gap-2">
+                        <span className={`badge ${f.severity === "blocking" ? "badge-crit" : "badge-warn"}`}>
+                          {f.severity === "blocking" ? "would be written up" : "worth raising"}
+                        </span>
+                        <span className="text-sm font-medium">{f.sectionTitle}</span>
+                      </div>
+                      <p className="mt-0.5 text-xs text-ink-2">{f.what}</p>
+                      <p className="mt-0.5 text-xs text-ink-3">{f.why}</p>
+                    </li>
+                  ))}
+                </ul>
+                {group.findings.length > 20 && (
+                  <p className="mt-2 text-xs text-ink-3">and {group.findings.length - 20} more.</p>
+                )}
+                <p className="mt-3 text-xs text-ink-3">
+                  Print this page to hand it over, or copy the section names and what was found. Nothing here is
+                  counted against the pharmacy anywhere in this site.
+                </p>
+              </Card>
+            </details>
+          ))}
 
           {/* ── The findings, where there are any ─────────────────────── */}
           {findings.length > 0 && (
