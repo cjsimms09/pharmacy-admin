@@ -608,11 +608,19 @@ export async function reviewPolicy(
   const TOO_LONG_TO_REWRITE = 9_000;
   const longSection = input.body.length > TOO_LONG_TO_REWRITE;
 
-  const res = await c.messages.parse({
-    model,
-    // Generous enough to carry findings and a full rewrite of an ordinary section. The old limit
-    // of 4,000 was the failure above.
-    max_tokens: 12_000,
+  /*
+   * One retry, because a structured answer that fails to parse usually parses the second time.
+   *
+   * Two sections of this pharmacy's manual failed every pass, and neither was long enough to have
+   * been cut off — so truncation was not the cause, and a single retry would have quietly fixed
+   * whatever was. Retrying once is cheap; a section that can never be read costs the whole queue.
+   */
+  const ask = async () =>
+    c.messages.parse({
+      model,
+      // Generous enough to carry findings and a full rewrite of an ordinary section. The old
+      // limit of 4,000 truncated the long ones, which is a separate failure of the same shape.
+      max_tokens: 12_000,
     system:
       "You audit sections of an independent Kansas community pharmacy's policy and procedure manual against Kansas " +
       "Board of Pharmacy regulations (K.S.A. 65-16xx, K.A.R. 68-x), DEA requirements (21 CFR 1300-1317), HIPAA " +
@@ -645,25 +653,35 @@ export async function reviewPolicy(
           `Current text:\n${input.body || "(empty)"}`,
       },
     ],
-    output_config: { format: zodOutputFormat(PolicyReview) },
-  });
+      output_config: { format: zodOutputFormat(PolicyReview) },
+    });
+
+  let res = await ask();
+  // A truncated answer will truncate again; anything else is worth one more go.
+  if (!res.parsed_output && res.stop_reason !== "max_tokens" && res.stop_reason !== "refusal") {
+    res = await ask();
+  }
 
   /*
-   * Say what actually went wrong.
+   * Say what actually went wrong, and name the reason the API gave.
    *
-   * "Claude returned an unreadable answer" was the message for every failure here, including the
-   * one that was really "the answer did not fit". A pharmacist reading that has nothing to act on
-   * and no reason to believe pressing again will help — and on a truncated answer it will not.
+   * "Claude returned an unreadable answer" was the message for every failure here, which told the
+   * pharmacist nothing and told whoever had to fix it less. Two sections failed every pass and
+   * neither was long enough to have been cut off, so the cause was something this message was
+   * hiding. It carries the stop reason now, so the next one diagnoses itself.
    */
   if (!res.parsed_output) {
     if (res.stop_reason === "max_tokens") {
       throw new Error(
-        `The review of “${input.title}” did not fit in one answer. The section is ${Math.round(input.body.length / 5)} words; ` +
+        `The review of “${input.title}” did not fit in one answer. The section is about ${Math.round(input.body.length / 5)} words; ` +
           "split it into smaller sections and each part will read on its own.",
       );
     }
     if (res.stop_reason === "refusal") throw new Error(`Claude declined to review “${input.title}”.`);
-    throw new Error(`Claude returned an answer that could not be read for “${input.title}”. Try again.`);
+    throw new Error(
+      `The review of “${input.title}” came back in a form this site could not read, twice ` +
+        `(the API stopped with: ${res.stop_reason ?? "no reason given"}). The rest of the manual is unaffected.`,
+    );
   }
   await logUsage("ai.policy.review", ctx.userId, ctx.userName, res.usage, input.title.slice(0, 120));
   return res.parsed_output;
