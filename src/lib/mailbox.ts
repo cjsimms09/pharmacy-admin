@@ -15,6 +15,7 @@ import { loadNadacFiles, nadacDir } from "./nadac";
 import { gateFile } from "./phi-gate";
 import { audit } from "./audit";
 import { matchTrainingReplies, completeByEmailReply } from "./training-replies";
+import { isBounce, parseBounce, describeBounce } from "./bounces";
 
 /**
  * Sweeps the pharmacy's admin mailbox for scheduled reports.
@@ -134,6 +135,57 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
 
           const already = await db.query.inboxItems.findFirst({ where: eq(schema.inboxItems.messageId, messageId) });
           if (already) continue;
+
+          /*
+           * A bounce is checked before anything else.
+           *
+           * It comes from mailer-daemon, which is not on the allowed-senders list, so it used to
+           * be filed as "ignored" and never seen — the one message that knows why a training
+           * email never arrived, discarded, while the screen went on saying the email was sent.
+           *
+           * It also quotes the original message back, reply code and all, so leaving it to fall
+           * through to the training-reply matcher is asking for trouble.
+           */
+          const headerBlock = msg.source.toString("utf8").split(/\r?\n\r?\n/)[0] ?? "";
+          const bodyText = `${parsed.text ?? ""}\n${parsed.html ? String(parsed.html).replace(/<[^>]+>/g, " ") : ""}`;
+          if (isBounce({ from, subject, text: bodyText, headers: headerBlock })) {
+            const b = parseBounce({ from, subject, text: bodyText });
+            const note = describeBounce(b);
+            let attached = "";
+            if (b.recipient) {
+              const person = (await db.query.people.findMany()).find(
+                (x) => (x.email ?? "").toLowerCase() === b.recipient,
+              );
+              if (person) {
+                // Mark what they were owed as undelivered, so it shows against them rather than
+                // only in a mailbox nobody reads.
+                const open = await db.query.trainingAssignments.findMany({
+                  where: eq(schema.trainingAssignments.personId, person.id),
+                });
+                for (const a of open.filter((x) => !x.completedAt)) {
+                  await db
+                    .update(schema.trainingAssignments)
+                    .set({ sendError: note, sentAt: b.permanent ? null : a.sentAt })
+                    .where(eq(schema.trainingAssignments.id, a.id));
+                }
+                attached = ` Marked against ${person.firstName} ${person.lastName}.`;
+              } else {
+                attached = " No member of staff has that address on file.";
+              }
+            }
+            await db.insert(schema.inboxItems).values({
+              id: newId(),
+              messageId,
+              receivedAt,
+              fromAddress: from || "(unknown)",
+              subject,
+              status: "stored",
+              reason: `Delivery failure. ${note}${attached}`,
+            });
+            result.stored++;
+            await client.messageFlagsAdd(String(uid), ["\\Seen"], { uid: true });
+            continue;
+          }
 
           // A member of staff replying to their own training email is not a report sender and
           // will not be on the allowed list. Check it first, and match on the code *and* the

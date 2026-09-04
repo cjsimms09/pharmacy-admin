@@ -102,7 +102,7 @@ export async function sendTrainingAction(fd: FormData) {
         `${back}?${r.problems.length ? "error" : "ok"}=` +
           encodeURIComponent(
             r.emailed > 0
-              ? `Follow-up sent — one email covering everything they still owe. ${r.problems.join(" ")}`.trim()
+              ? `Follow-up accepted for delivery to ${r.delivered.join(", ")} — one email covering everything they still owe. If it does not arrive, any bounce that comes back is read automatically and will appear against them. ${r.problems.join(" ")}`.trim()
               : r.problems.join(" ") || "Nothing outstanding to follow up on.",
           ),
       );
@@ -116,7 +116,7 @@ export async function sendTrainingAction(fd: FormData) {
       `${back}?${r.problems.length ? "error" : "ok"}=` +
         encodeURIComponent(
           r.emailed > 0
-            ? `Sent. They get one email covering everything they owe, with the course attached. ${r.problems.join(" ")}`.trim()
+            ? `Accepted for delivery to ${r.delivered.join(", ")} — one email covering everything they owe, with the course attached. That is the mail server taking it, not the person receiving it; if it bounces, the report is read automatically and will appear against them. ${r.problems.join(" ")}`.trim()
             : r.problems.join(" ") || "Assigned, but nothing could be emailed.",
         ),
     );

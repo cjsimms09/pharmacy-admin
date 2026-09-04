@@ -283,6 +283,7 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
         actions={
           <>
             <Link href="/compliance/training/records" className="btn">Print the training file</Link>
+            <Link href="/compliance/training/handout" className="btn">Hand it over on paper</Link>
             {outstanding.length > 0 && (
               <form action={chase}>
                 <button className="btn">Chase all {outstanding.length} outstanding</button>
@@ -313,11 +314,20 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
         </Notice>
       )}
 
-      {mail.configured && (
-        <form action={testSend} className="mb-4">
-          <button className="btn btn-sm">Send a test to me, so I know it works</button>
-        </form>
-      )}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        {mail.configured && (
+          <form action={testSend}>
+            <button className="btn btn-sm">Send a test to me, so I know it works</button>
+          </form>
+        )}
+        <Link href="/compliance/training/handout" className="btn btn-sm">
+          Hand it over on paper instead
+        </Link>
+        <span className="text-xs text-ink-3">
+          Email is the convenient route, not the only one — the link and the code work however the person gets them,
+          and the certificate is produced the same way.
+        </span>
+      </div>
 
       <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Figure value={toSend} label="Still to send" sub={toSend === 0 ? "Nothing waiting to go out" : "Ticked below and ready"} tone={toSend === 0 ? "ok" : "crit"} />

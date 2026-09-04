@@ -64,7 +64,7 @@ export default async function NewHirePage({
         encodeURIComponent(
           r.problems.length
             ? r.problems.join(" ")
-            : `${outstanding.length} trainings sent to ${p.person.email} in one email. They reply with the code in it, and the certificate is generated and filed here.`,
+            : `${outstanding.length} trainings accepted for delivery to ${p.person.email} in one email — that is the mail server taking it, not ${p.person.firstName} receiving it. They reply with the code in it, and the certificate is generated and filed here. If it bounces, the report is read automatically and appears against them.`,
         ),
     );
   }

@@ -99,7 +99,7 @@ export async function materialFor(type: TrainingType): Promise<string | null> {
   return parseMaterials(s.training_materials ?? "")[type] ?? null;
 }
 
-export type AssignResult = { assigned: number; emailed: number; problems: string[] };
+export type AssignResult = { assigned: number; emailed: number; problems: string[]; delivered: string[] };
 
 /** Creates assignments and emails the links. */
 export async function assignTraining(
@@ -114,7 +114,7 @@ export async function assignTraining(
 
   const today = todayIso();
   const dueOn = opts.dueOn || addMonths(today, 1);
-  const out: AssignResult = { assigned: 0, emailed: 0, problems: [] };
+  const out: AssignResult = { assigned: 0, emailed: 0, problems: [], delivered: [] };
 
   for (const id of personIds) {
     const person = people.find((p) => p.id === id);
@@ -154,11 +154,17 @@ export async function assignTraining(
     const sent = await sendOutstanding(personIds);
     out.emailed = sent.emailed;
     out.problems.push(...sent.problems);
+    out.delivered.push(...sent.delivered);
   }
   return out;
 }
 
-export type SendResult = { emailed: number; problems: string[] };
+export type SendResult = {
+  emailed: number;
+  problems: string[];
+  /** Who each message was addressed to — accepted for delivery, which is not the same as arrived. */
+  delivered: string[];
+};
 
 /**
  * Emails each person everything they currently owe, in one message.
@@ -167,7 +173,7 @@ export type SendResult = { emailed: number; problems: string[] };
  * a second link or a second reply code, and does not reset anything the person has already done.
  */
 export async function sendOutstanding(personIds?: string[]): Promise<SendResult> {
-  const out: SendResult = { emailed: 0, problems: [] };
+  const out: SendResult = { emailed: 0, problems: [], delivered: [] };
   const open = await db.query.trainingAssignments.findMany({ where: isNull(schema.trainingAssignments.completedAt) });
   const people = await db.query.people.findMany();
 
@@ -206,6 +212,10 @@ export async function sendOutstanding(personIds?: string[]): Promise<SendResult>
     }
     if (r.ok) {
       out.emailed++;
+      // Named, always. The commonest reason an email "sends" and never arrives is that the address
+      // on file is wrong — a typo, or a placeholder nobody replaced — and seeing it written out is
+      // the entire diagnosis.
+      out.delivered.push(`${person.firstName} ${person.lastName} <${person.email}>`);
       // Delivered, but not intact. Silently dropping the course packet would leave the pharmacy
       // believing it had emailed the training material when it had emailed a link to it.
       if (r.degraded) out.problems.push(`${person.firstName}: ${r.degraded}`);
