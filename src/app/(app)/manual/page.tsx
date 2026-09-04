@@ -40,11 +40,17 @@ import { manualJob, startPutRight, runPutRight, isRunning, isStale, summarise, a
 import { acknowledgementBoard, settleVersions } from "@/lib/manual-acknowledgement";
 import { estimateSentence } from "@/lib/ai-spend";
 import { pharmacyFacts, namedRoles } from "@/lib/pharmacy-facts";
-import { fmt } from "@/lib/dates";
+import { fmt, todayIso } from "@/lib/dates";
 import { PageHeader, Card, Figure, Notice, Field, Empty } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import { JobPanel } from "@/components/job-panel";
 import { after } from "next/server";
+
+/** Same day next year, for saying plainly when a section just read comes round again. */
+function nextYear(): string {
+  const [y, m, d] = todayIso().split("-").map(Number);
+  return `${y + 1}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Policy manual" };
@@ -827,11 +833,38 @@ export default async function ManualPage({
               </div>
             )}
 
-            <p className="mt-3 text-xs text-ink-3">
-              {audit_.current} of {audit_.total} sections have been read against Kansas, DEA, HIPAA and OSHA
-              requirements within the last year, a few at a time on their own.
-              {audit_.lastResult ? ` Last pass: ${audit_.lastResult}` : ""}
-            </p>
+            {/*
+              What a press actually does, said on the page.
+
+              Three questions were asked about this button in one breath: does pressing it again
+              check the same things, why do so many sections say unchecked, and does it have to be
+              pressed until the manual is finished. All three have good answers and none of them
+              were anywhere on the screen — the progress line gave a fraction and left the rest to
+              be guessed at.
+            */}
+            <div className="mt-3 space-y-1 text-xs text-ink-3">
+              <p>
+                <b className="text-ink-2">{audit_.current} of {audit_.total}</b> sections have been read against
+                Kansas, DEA, HIPAA and OSHA requirements within the last year.
+                {audit_.due > 0 ? ` ${audit_.due} still to read.` : " Nothing is outstanding."}
+              </p>
+              {audit_.due > 0 && (
+                <>
+                  <p>
+                    Pressing it again never re-reads a section it has already read — a section is due once a year, and
+                    one read today is not due again until {fmt(nextYear())}. Each press works through up to 40
+                    of them, or eight minutes&rsquo; worth, whichever comes first.
+                  </p>
+                  <p>
+                    <b className="text-ink-2">You do not have to keep pressing it.</b> The same reading happens on its
+                    own while nobody is using the site — about eight sections every half hour — so {audit_.due} left is
+                    roughly {Math.max(1, Math.round(audit_.due / 16))} hour{Math.max(1, Math.round(audit_.due / 16)) === 1 ? "" : "s"} of
+                    the computer being switched on and idle. The button is for when you would rather not wait.
+                  </p>
+                </>
+              )}
+              {audit_.lastResult && <p>Last pass: {audit_.lastResult}</p>}
+            </div>
 
             {/*
               Sections that cannot be read, named rather than left to stall the queue.
