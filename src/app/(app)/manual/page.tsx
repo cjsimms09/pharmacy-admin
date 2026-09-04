@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { getSettings } from "@/lib/settings";
-import { hasApiKey, draftPolicy } from "@/lib/ai";
+import { hasApiKey, draftPolicy, describeError } from "@/lib/ai";
 import {
   allSections,
   outline,
@@ -22,7 +22,7 @@ import {
   setChapterManager,
   managers,
 } from "@/lib/manual-store";
-import { policies, FORMS, appendixReference } from "@/lib/manual";
+import { policies, FORMS, appendixReference, suggestForm } from "@/lib/manual";
 import { fmt } from "@/lib/dates";
 import { PageHeader, Card, Figure, Notice, Field } from "@/components/ui";
 
@@ -171,6 +171,105 @@ export default async function ManualPage({
       if (e && typeof e === "object" && "digest" in e) throw e;
       redirect("/manual?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not remove that."));
     }
+  }
+
+  /**
+   * Every empty heading, closed in one press.
+   *
+   * The gaps list showed ten headings promising a form or a policy and delivering nothing, and
+   * offered a dropdown and a text editor per row. That is ten decisions and ten pieces of writing,
+   * which is why it had been ten gaps for as long as anyone could remember — the work was real and
+   * the button only started it.
+   *
+   * Two different jobs, so two different treatments. A heading naming a form this system produces
+   * gets the appendix reference, immediately and with no model involved: that is a fact about this
+   * site, not a judgement. A heading naming a policy the pharmacy has to have and does not gets a
+   * draft written against what this pharmacy actually is and what this system actually does.
+   *
+   * The drafts are marked as drafted by Claude in the section's own byline and are not recorded as
+   * reviewed, so they appear in the annual review list until a person has read them. A policy
+   * nobody has read is not a policy — but it is a great deal closer to one than a blank page under
+   * a heading that promises it.
+   */
+  async function fillGaps() {
+    "use server";
+    const u = await requireManager();
+    const rows = await allSections();
+    const empty = gaps(rows);
+    if (empty.length === 0) redirect("/manual?ok=" + encodeURIComponent("Nothing is empty."));
+
+    const set = await getSettings();
+    const pharmacy = set.pharmacy_name || "This pharmacy";
+    const p = policies(pharmacy);
+    const context =
+      `${pharmacy} in ${set.pharmacy_city || "Wichita"}, ${set.pharmacy_state || "KS"}. ` +
+      "Independent community pharmacy. Immunizes. Performs simple non-sterile non-hazardous compounding only. " +
+      "Dispenses controlled substances. Takes pharmacy students on rotation.";
+    const siteDoes = p.map((x) => `${x.title}: ${x.text[0]}`).join("\n");
+    const canDraft = await hasApiKey();
+
+    let pointed = 0;
+    let drafted = 0;
+    const problems: string[] = [];
+
+    for (const x of empty) {
+      const form = suggestForm(x.title);
+      if (form) {
+        try {
+          await saveSection(x.id, { body: appendixReference(form.name) }, u);
+          pointed++;
+        } catch (e) {
+          problems.push(`${x.title}: ${e instanceof Error ? e.message : "could not be filled in"}`);
+        }
+        continue;
+      }
+      if (!canDraft) continue;
+      try {
+        const r = await draftPolicy(
+          {
+            title: x.title,
+            body: "",
+            instruction:
+              "This heading is in the pharmacy's policy manual and has nothing under it. Write the policy it " +
+              "promises, for an independent Kansas community pharmacy, covering what a Board inspector would " +
+              "look for. Describe only what this pharmacy can actually be held to. Where a detail is specific to " +
+              "this pharmacy and you do not have it, raise it as a concern rather than inventing it.",
+            context,
+            siteDoes,
+          },
+          { userId: u.id, userName: u.name },
+        );
+        // The byline says who wrote it. A manual that cannot tell you which of its policies a
+        // model drafted is one nobody can review properly.
+        await saveSection(x.id, { body: r.body }, { name: `${u.name} — drafted by Claude, not yet reviewed` });
+        drafted++;
+      } catch (e) {
+        problems.push(`${x.title}: ${describeError(e)}`);
+      }
+    }
+
+    await audit({
+      action: "manual.fill_gaps",
+      userId: u.id,
+      userName: u.name,
+      details: `${pointed} pointed at a form, ${drafted} drafted`,
+    });
+    revalidatePath("/manual");
+
+    const said = [
+      pointed ? `${pointed} heading${pointed === 1 ? "" : "s"} now point${pointed === 1 ? "s" : ""} at the form this site produces` : "",
+      drafted ? `${drafted} ${drafted === 1 ? "policy was" : "policies were"} drafted by Claude` : "",
+      !canDraft && empty.length > pointed
+        ? `${empty.length - pointed} need writing and there is no Anthropic API key stored, so nothing could be drafted`
+        : "",
+    ].filter(Boolean).join(". ");
+    const tail = drafted
+      ? " Read every drafted one before the manual is printed — they are marked as drafted and unreviewed until you do."
+      : "";
+    redirect(
+      `/manual?${problems.length ? "error" : "ok"}=` +
+        encodeURIComponent(`${said || "Nothing could be filled in"}.${tail} ${problems.join(" ")}`.trim()),
+    );
   }
 
   /**
@@ -446,28 +545,64 @@ export default async function ManualPage({
               count={empty.length}
               subtitle="An inspector who reads to the back of a manual and finds ten promised forms and no forms has learned something about the rest of it. Chapter headings are not counted here — only headings that promise a policy and deliver none."
               className="mb-6"
+              actions={
+                /*
+                  One press for all of it.
+                  
+                  A dropdown and an editor per row is ten decisions and ten pieces of writing, which
+                  is why these had been open for as long as anyone could remember: the work was
+                  real and the row only started it. Here, a heading naming a form this site produces
+                  gets the reference outright, and the rest get a draft to read.
+                */
+                <form action={fillGaps}>
+                  <button className="btn btn-sm btn-primary">Close all {empty.length}</button>
+                </form>
+              }
             >
               <ul className="rows">
-                {empty.map((x) => (
-                  <li key={x.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
-                    <span className="text-sm font-medium"><span className="mr-2 text-ink-3">{x.number}</span>{x.title}</span>
-                    <form action={pointAtAppendix} className="flex flex-wrap items-center gap-1.5">
-                      <input type="hidden" name="id" value={x.id} />
-                      <select name="form" required className="field max-w-[22rem] py-1 text-xs" defaultValue="">
-                        <option value="" disabled>Is this a form the site produces?</option>
-                        {FORMS.map((f) => <option key={f.name} value={f.name}>{f.name}</option>)}
-                      </select>
-                      <button className="btn btn-sm">Point at the appendix</button>
-                      <Link href={`/manual?edit=${x.id}#${x.id}`} className="btn btn-sm btn-primary">Write it myself</Link>
-                    </form>
-                  </li>
-                ))}
+                {empty.map((x) => {
+                  const guess = suggestForm(x.title);
+                  return (
+                    <li key={x.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                      <span className="text-sm font-medium">
+                        <span className="mr-2 text-ink-3">{x.number}</span>{x.title}
+                        {guess ? (
+                          <span className="ml-2 text-xs font-normal text-ink-3">
+                            looks like the {guess.name.toLowerCase()}
+                          </span>
+                        ) : (
+                          <span className="ml-2 text-xs font-normal text-ink-3">no form matches — needs writing</span>
+                        )}
+                      </span>
+                      <form action={pointAtAppendix} className="flex flex-wrap items-center gap-1.5">
+                        <input type="hidden" name="id" value={x.id} />
+                        {/*
+                          The match is proposed rather than hunted for.
+                          
+                          A pharmacist looking at "Medication Incident Form" scanned twelve formal
+                          names, saw nothing called that, and concluded the site could not do it. It
+                          could — under the Board's name for the same document. Naming the Board's
+                          form is right on a printed form and wrong in a picker, so the picker now
+                          opens on the answer and the full list stays behind it.
+                        */}
+                        <select name="form" required className="field max-w-[22rem] py-1 text-xs" defaultValue={guess?.name ?? ""}>
+                          <option value="" disabled>Is this a form the site produces?</option>
+                          {FORMS.map((f) => <option key={f.name} value={f.name}>{f.name}</option>)}
+                        </select>
+                        <button className="btn btn-sm">Point at the appendix</button>
+                        <Link href={`/manual?edit=${x.id}#${x.id}`} className="btn btn-sm btn-primary">Write it myself</Link>
+                      </form>
+                    </li>
+                  );
+                })}
               </ul>
               <p className="mt-2 text-xs text-ink-3">
-                Ten headings promising forms, with no forms behind them, is the single thing in this manual an inspector
-                is most likely to notice. Where the heading names something this system produces, pick it and the
-                heading gets a sentence saying where the current version comes from — which is both shorter and true for
-                longer than a blank copy pasted into a manual.
+                Headings promising forms, with no forms behind them, are the single thing in this manual an inspector is
+                most likely to notice. Where the heading names something this system produces, the picker opens on it
+                and the heading gets a sentence saying where the current version comes from — shorter, and true for
+                longer, than a blank copy pasted into a manual. Where nothing matches, Claude drafts the policy against
+                what this pharmacy is and what this system does, and it stays marked as drafted and unreviewed until you
+                have read it. {aiReady ? "Closing all of them takes a few minutes." : "Drafting needs an Anthropic API key in Settings; without one, only the form references are filled in."}
               </p>
             </Card>
           )}

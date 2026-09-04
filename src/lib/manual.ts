@@ -45,6 +45,15 @@ export type ManualForm = {
   where: string;
   /** The rule it exists to satisfy. */
   authority: string;
+  /**
+   * The other names this form goes by, so a manual heading can be matched to it.
+   *
+   * A pharmacist looked at a heading called "Medication Incident Form", read a dropdown offering
+   * "CQI bimonthly summary (Form C-550) and incident evaluation (Form C-650)", and reasonably
+   * concluded the site could not do it. It could — under a name only the Board uses. The formal
+   * name is right on a printed form and wrong in a picker, and rather than choose, both are kept.
+   */
+  aliases?: string[];
 };
 
 export type ManualPolicy = {
@@ -71,6 +80,7 @@ export const FORMS: ManualForm[] = [
     ],
     where: "Staff → Technician list",
     authority: "K.S.A. 65-1663(i); K.A.R. 68-5-16.",
+    aliases: ["technician list", "pharmacy technician list", "technician register"],
   },
   {
     name: "CQI bimonthly summary (Form C-550) and incident evaluation (Form C-650)",
@@ -87,6 +97,7 @@ export const FORMS: ManualForm[] = [
     ],
     where: "CQI program → the period → Print",
     authority: "K.A.R. 68-19-1.",
+    aliases: ["medication incident", "incident form", "incident report", "quality related event", "medication error", "cqi"],
   },
   {
     name: "Controlled substance inventory (Form C-250)",
@@ -102,6 +113,7 @@ export const FORMS: ManualForm[] = [
     ],
     where: "CS inventories → the inventory → C-250",
     authority: "K.A.R. 68-20-16; 21 CFR 1304.11.",
+    aliases: ["controlled substance inventory", "biennial inventory", "annual inventory", "c-250"],
   },
   {
     name: "Daily pharmacist log statement and signature sheet",
@@ -116,6 +128,7 @@ export const FORMS: ManualForm[] = [
     ],
     where: "CS inventories → Daily log statement",
     authority: "21 CFR 1306.22(f).",
+    aliases: ["daily pharmacist log", "pharmacist log", "refill statement"],
   },
   {
     name: "Power of attorney for DEA order forms, and notice of revocation",
@@ -132,6 +145,7 @@ export const FORMS: ManualForm[] = [
     ],
     where: "CS inventories → Power of attorney",
     authority: "21 CFR 1305.05.",
+    aliases: ["power of attorney", "poa", "form 222"],
   },
   {
     name: "Training certificates and the workforce training file",
@@ -149,6 +163,7 @@ export const FORMS: ManualForm[] = [
     ],
     where: "Compliance → Training → Records",
     authority: "45 CFR 164.530(b); 42 CFR 422.503; 29 CFR 1910.1030(g)(2).",
+    aliases: ["technician training", "training certificate", "workforce training", "staff training"],
   },
   {
     name: "Policy and procedure acknowledgement",
@@ -163,6 +178,7 @@ export const FORMS: ManualForm[] = [
     ],
     where: "Compliance → Training",
     authority: "K.A.R. 68-19-1; 45 CFR 164.530(i).",
+    aliases: ["policy and procedure acknowledgement", "policy acknowledgement", "manual acknowledgement", "employee acknowledgement"],
   },
   {
     name: "Self-inspection checklist and record",
@@ -220,6 +236,7 @@ export const FORMS: ManualForm[] = [
     ],
     where: "Agreements",
     authority: "45 CFR 164.502(e); 164.308(b).",
+    aliases: ["business associate register", "ba register"],
   },
   {
     name: "Inspection readiness pack",
@@ -235,7 +252,135 @@ export const FORMS: ManualForm[] = [
     where: "Inspection",
     authority: "K.A.R. 68-7-11; 21 CFR 1304.",
   },
+  {
+    name: "Immunization protocol, signed by the authorising physician",
+    purpose:
+      "The written protocol under which a named pharmacist, intern or technician administers vaccines as the agent of the authorising physician.",
+    href: "/staff",
+    cadence: "Produced per person, populated from their record, and valid for two years from signature.",
+    fields: [
+      "The pharmacy, its address and the authorising physician",
+      "The individual authorised, their role, licence or registration number",
+      "Their immunization training certificate and CPR certification, with its expiry",
+      "The vaccines covered and the ages they may be given to",
+      "The emergency anaphylaxis protocol, including epinephrine dosing",
+      "Signature and date blocks for the physician and the individual",
+    ],
+    where: "Staff -> the person -> Immunization protocol",
+    authority: "K.S.A. 65-1635a.",
+    aliases: ["vaccine protocol", "immunization protocol", "immunisation protocol", "protocol physician"],
+  },
+  {
+    name: "Vaccine screening, consent and administration record",
+    purpose:
+      "The screening questions asked before a dose, the patient's consent, and what was actually administered, on one sheet.",
+    href: "/forms/vaccine-administration",
+    cadence: "Printed blank and completed at the point of vaccination; filed in the patient's record.",
+    fields: [
+      "Patient, date of birth, address and primary care provider",
+      "The standard pre-vaccination screening questions and the answers given",
+      "The pharmacist's decision where any answer was yes or unsure",
+      "Consent, including that the VIS was given and the registry will be told",
+      "Vaccine, manufacturer, lot, expiry, dose, route, site, VIS date and time",
+      "Who administered it, their signature and registration number",
+      "What to do if a reaction occurs, and a place to record one",
+    ],
+    where: "Records -> Forms -> Vaccine administration record",
+    authority: "K.S.A. 65-1635a; 42 U.S.C. 300aa-26 (VIS).",
+    aliases: ["vaccine administration record", "immunization record", "var", "vaccine record"],
+  },
+  {
+    name: "Acknowledgement of receipt of the Notice of Privacy Practices",
+    purpose:
+      "The patient's acknowledgement that they were given the pharmacy's privacy notice — or, where it was not obtained, the record of the effort made.",
+    href: "/forms/privacy-acknowledgement",
+    cadence: "Printed blank, signed at first service, filed in the patient's record and kept six years.",
+    fields: [
+      "What the patient is acknowledging, in the notice's own terms",
+      "Patient or personal representative signature, printed name and date",
+      "Where a representative signs: their relationship and authority",
+      "Where it was not obtained: which of the recognised reasons applied",
+      "The staff member's account of the effort made, signed and dated",
+    ],
+    where: "Records -> Forms -> Privacy acknowledgement",
+    authority: "45 CFR 164.520(c)(2)(ii); 45 CFR 164.530(j).",
+    aliases: ["hipaa form", "privacy practices", "notice of privacy practices", "npp", "hipaa acknowledgement"],
+  },
+  {
+    name: "Medicare Prescription Drug Coverage and Your Rights (Form CMS-10147)",
+    purpose:
+      "CMS's standardised point-of-sale notice, given to a Part D patient whenever their prescription cannot be filled under their plan.",
+    href: "/forms/medicare-rights",
+    cadence: "Printed and handed over at the point of sale; also displayed in the pharmacy.",
+    fields: [
+      "The patient's right to request a coverage determination or an exception",
+      "The three grounds on which an exception may be requested",
+      "How to contact the plan, and how to ask for a fast decision",
+      "The Medicare helpline and TTY numbers",
+      "This pharmacy's name and phone number",
+    ],
+    where: "Records -> Forms -> Medicare rights notice",
+    authority: "42 CFR 423.562(a)(3); CMS Medicare Prescription Drug Benefit Manual.",
+    aliases: [
+      "medicare prescription drug coverage and your rights",
+      "medicare rights",
+      "part d notice",
+      "cms-10147",
+    ],
+  },
+  {
+    name: "Business associate agreement",
+    purpose:
+      "The contract required before anyone outside the pharmacy handles protected health information on its behalf.",
+    href: "/forms/business-associate-agreement",
+    cadence: "Printed and signed in duplicate when a business associate is engaged; recorded in the register.",
+    fields: [
+      "The parties, and the service the business associate performs",
+      "Permitted uses and disclosures, and the prohibition on any other",
+      "Safeguards, including the Security Rule obligations for electronic information",
+      "Reporting of any impermissible use, security incident or breach, within ten days",
+      "Flow-down to subcontractors",
+      "Individual rights: access, amendment and accounting of disclosures",
+      "Availability of records to the Secretary",
+      "Term, termination for breach, and return or destruction of information",
+      "Signature blocks for both parties",
+    ],
+    where: "Records -> Forms -> Business associate agreement",
+    authority: "45 CFR 164.504(e); 45 CFR 164.308(b).",
+    aliases: ["business associate agreement", "baa", "business associate contract"],
+  },
 ];
+
+/**
+ * Which form a manual heading is probably naming.
+ *
+ * The picker used to be twelve formal names and no help, and a pharmacist looking at a heading
+ * called "Medication Incident Form" scanned it, saw "CQI bimonthly summary (Form C-550) and
+ * incident evaluation (Form C-650)", and concluded the site could not do it. It could. The Board's
+ * name for a form and the name the pharmacy's own manual uses for the same form are different
+ * words for one document, and asking somebody to make that translation twelve times is how a
+ * working feature reads as a broken one.
+ *
+ * Matching is deliberately conservative — a whole alias has to appear in the heading, or the
+ * heading in the alias. A confident wrong suggestion is worse than none here, because what it
+ * writes is a statement in a document an inspector holds the pharmacy to.
+ */
+export function suggestForm(headingTitle: string): ManualForm | null {
+  const h = headingTitle.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  if (!h) return null;
+  let best: { form: ManualForm; score: number } | null = null;
+  for (const f of FORMS) {
+    for (const raw of [f.name, ...(f.aliases ?? [])]) {
+      const a = raw.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      if (!a) continue;
+      // Length is the score: "incident" matching inside a longer alias is a weaker signal than
+      // "medication incident" matching, and the longest agreement should win.
+      const hit = h.includes(a) || (a.includes(h) && h.length >= 6);
+      if (hit && (!best || a.length > best.score)) best = { form: f, score: a.length };
+    }
+  }
+  return best?.form ?? null;
+}
 
 /**
  * The sentence a manual heading gets when the form it names is one this system produces.
