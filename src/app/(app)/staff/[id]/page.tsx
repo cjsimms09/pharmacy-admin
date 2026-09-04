@@ -355,6 +355,7 @@ export default async function PersonPage({
 
       {/* ── Training and certificates ───────────────────────────────── */}
       <Card
+        id="training"
         title="Training"
         count={trainings.length}
         actions={<Link href="/compliance/training" className="btn btn-sm">Send training</Link>}

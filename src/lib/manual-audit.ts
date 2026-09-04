@@ -122,9 +122,13 @@ export type AuditRun = { audited: number; findings: number; remaining: number; p
  */
 export async function runManualAudit(
   user: { id: string; name: string },
-  opts: { limit?: number } = {},
+  opts: { limit?: number; deadline?: number } = {},
 ): Promise<AuditRun> {
   const limit = Math.max(1, Math.min(opts.limit ?? 4, 40));
+  // A wall clock as well as a count. A model call that takes a minute turns a batch of five into
+  // five minutes, and a request that long is indistinguishable from a frozen site to the person
+  // waiting on it.
+  const deadline = opts.deadline ?? Date.now() + 90_000;
   const rows = await due(limit);
   const out: AuditRun = { audited: 0, findings: 0, remaining: 0, problems: [] };
   if (rows.length === 0) {
@@ -142,6 +146,7 @@ export async function runManualAudit(
   const now = new Date().toISOString();
 
   for (const sec of rows) {
+    if (Date.now() > deadline) break;
     // The one case that needs no model: an empty heading naming a form this site produces.
     if (!sec.body.trim()) {
       const form = suggestForm(sec.title);
@@ -275,7 +280,10 @@ export type PutRightResult = {
   markersRemoved: number;
   audited: number;
   raised: number;
+  /** Sections still to be read against the rules after this press. */
   remaining: number;
+  /** Empty headings still to be written after this press. */
+  stillEmpty: number;
   problems: string[];
 };
 
@@ -300,7 +308,35 @@ export type PutRightResult = {
  * missing and correct what the site itself generated. Changing existing prose is a separate,
  * explicit act.
  */
-export async function putRight(user: { id: string; name: string }, opts: { auditLimit?: number } = {}): Promise<PutRightResult> {
+export async function putRight(
+  user: { id: string; name: string },
+  opts: { auditLimit?: number; draftLimit?: number; budgetMs?: number } = {},
+): Promise<PutRightResult> {
+  /*
+   * Bounded, because a press has to finish while somebody is looking at it.
+   *
+   * The first version did everything: up to nineteen drafts and twenty-five audits in a single
+   * request. That is forty-odd model calls, ten minutes or more, and a browser that gives up long
+   * before the server does — so the button appeared to do nothing at all, which is the worst
+   * possible failure for the one button the page is built around.
+   *
+   * A press now does a minute of work and says exactly what is left. Pressing again continues,
+   * and the background job continues on its own regardless, so nothing depends on anybody
+   * pressing it a second time.
+   */
+  const auditLimit = opts.auditLimit ?? 5;
+  const draftLimit = opts.draftLimit ?? 5;
+  /*
+   * A hard stop, in seconds rather than in items.
+   *
+   * The count alone was not enough. The site appeared to freeze after this button was pressed,
+   * because a request holding the connection for ten minutes is a frozen site as far as anybody
+   * watching is concerned. Counting items assumes each one takes a predictable time; a clock does
+   * not have to assume anything. Whatever is finished is saved as it goes, so stopping early
+   * loses nothing and the next press picks up where this one left off.
+   */
+  const deadline = Date.now() + (opts.budgetMs ?? 75_000);
+
   const out: PutRightResult = {
     regenerated: 0,
     pointed: 0,
@@ -309,6 +345,7 @@ export async function putRight(user: { id: string; name: string }, opts: { audit
     audited: 0,
     raised: 0,
     remaining: 0,
+    stillEmpty: 0,
     problems: [],
   };
 
@@ -331,7 +368,11 @@ export async function putRight(user: { id: string; name: string }, opts: { audit
   const canDraft = await hasApiKey();
 
   const { gaps } = await import("./manual-store");
-  for (const g of gaps(await allSections())) {
+  const empty = gaps(await allSections());
+  // Pointing at a form costs nothing, so all of those are done. Drafting costs a model call
+  // each, so those are the ones that are rationed.
+  let draftsLeft = draftLimit;
+  for (const g of empty) {
     const form = suggestForm(g.title);
     if (form) {
       try {
@@ -343,6 +384,8 @@ export async function putRight(user: { id: string; name: string }, opts: { audit
       continue;
     }
     if (!canDraft) continue;
+    if (draftsLeft <= 0 || Date.now() > deadline) continue;
+    draftsLeft--;
     try {
       const { draftPolicy } = await import("./ai");
       const r = await draftPolicy(
@@ -374,9 +417,11 @@ export async function putRight(user: { id: string; name: string }, opts: { audit
     out.problems.push(`The footnote markers could not be removed: ${describeError(e)}`);
   }
 
+  out.stillEmpty = gaps(await allSections()).length;
+
   // ── 5. Read what is due against the requirements ──
   if (canDraft) {
-    const r = await runManualAudit(user, { limit: opts.auditLimit ?? 25 });
+    const r = await runManualAudit(user, { limit: auditLimit, deadline });
     out.audited = r.audited;
     out.raised = r.findings;
     out.remaining = r.remaining;

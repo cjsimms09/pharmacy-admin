@@ -7,6 +7,8 @@ import { CREDENTIAL_LABEL, PERSON_ROLE_LABEL } from "@/lib/labels";
 import { PageHeader, Empty, StatusBadge, Notice } from "@/components/ui";
 import { endEmploymentAction, reinstateAction } from "./actions";
 import { todayIso } from "@/lib/dates";
+import { trainingsFor } from "@/lib/onboarding";
+import { TRAINING_CADENCE, addMonths } from "@/lib/due";
 
 export const metadata = { title: "Staff & licenses" };
 
@@ -15,6 +17,15 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
   const { all, saved, error } = await searchParams;
   const people = await db.query.people.findMany({ orderBy: (p, { asc }) => [asc(p.lastName), asc(p.firstName)] });
   const creds = await db.query.credentials.findMany();
+  /*
+   * Training belongs on the list of people, not only inside each person.
+   *
+   * The pharmacist-in-charge asked whether the policy-and-procedure acknowledgement needed adding
+   * to the staff list. It was already tracked — a training, in the new-hire pack, on the
+   * dashboard grid, renewing every year — but it was not visible here, and a thing you cannot see
+   * from the screen you are on is a thing you assume does not exist.
+   */
+  const trainings = await db.query.trainings.findMany();
   const shown = people.filter((p) => (all ? true : p.active) && (user.role === "staff" ? p.id === user.personId : true));
   const canManage = user.role !== "staff";
   const former = people.filter((p) => !p.active).length;
@@ -45,6 +56,7 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
                 <th>Name</th>
                 <th>Role</th>
                 <th>Credentials</th>
+                <th>Training</th>
                 <th>Next expiration</th>
                 {canManage && <th>Actions</th>}
               </tr>
@@ -54,6 +66,23 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
                 const pc = creds.filter((c) => c.personId === p.id);
                 const withDates = pc.filter((c) => c.expiresOn).sort((a, b) => a.expiresOn!.localeCompare(b.expiresOn!));
                 const next = withDates[0];
+
+                const owed = trainingsFor({ administersVaccines: p.administersVaccines });
+                const mine = trainings.filter((t) => t.personId === p.id);
+                const today = todayIso();
+                const done = owed.filter((type) => {
+                  const last = mine
+                    .filter((t) => t.type === type)
+                    .sort((a, b) => b.completedOn.localeCompare(a.completedOn))[0];
+                  if (!last) return false;
+                  const cadence = TRAINING_CADENCE[type];
+                  const expires = last.expiresOn ?? (cadence ? addMonths(last.completedOn, cadence.months) : null);
+                  return !expires || expires >= today;
+                });
+                const manual = mine
+                  .filter((t) => t.type === "policy_manual_acknowledgement")
+                  .sort((a, b) => b.completedOn.localeCompare(a.completedOn))[0];
+
                 return (
                   <tr key={p.id} className={p.active ? "" : "opacity-60"}>
                     <td>
@@ -68,6 +97,27 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
                     <td>{PERSON_ROLE_LABEL[p.role]}</td>
                     <td className="text-xs text-ink-2">
                       {pc.length === 0 ? <span className="text-crit">none on file</span> : pc.map((c) => <div key={c.id}>{c.type === "other" && c.label ? c.label : CREDENTIAL_LABEL[c.type]}{c.number ? ` · ${c.number}` : ""}</div>)}
+                    </td>
+                    <td className="whitespace-nowrap text-xs">
+                      {/*
+                        The manual acknowledgement is named rather than counted, because it is the
+                        one an inspector asks for by name and the one the manual itself promises
+                        every employee has signed.
+                      */}
+                      <Link
+                        href={`/staff/${p.id}#training`}
+                        className={done.length === owed.length ? "text-ink-2 hover:underline" : "text-crit hover:underline"}
+                      >
+                        {done.length} of {owed.length} current
+                      </Link>
+                      <div className="mt-0.5 text-ink-3">
+                        P&amp;P manual:{" "}
+                        {manual ? (
+                          <span>signed {fmt(manual.completedOn)}</span>
+                        ) : (
+                          <span className="text-crit">never signed</span>
+                        )}
+                      </div>
                     </td>
                     <td>
                       {next ? (

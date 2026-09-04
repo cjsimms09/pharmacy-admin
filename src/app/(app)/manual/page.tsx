@@ -515,7 +515,7 @@ export default async function ManualPage({
     "use server";
     const u = await requireManager();
     try {
-      const r = await putRight(u, { auditLimit: 25 });
+      const r = await putRight(u, { auditLimit: 5, draftLimit: 5 });
       await audit({
         action: "manual.put_right",
         userId: u.id,
@@ -530,11 +530,15 @@ export default async function ManualPage({
         r.markersRemoved ? `${r.markersRemoved} footnote marker${r.markersRemoved === 1 ? "" : "s"} removed` : "",
         r.audited ? `${r.audited} section${r.audited === 1 ? "" : "s"} read against the rules` : "",
         r.raised ? `${r.raised} finding${r.raised === 1 ? "" : "s"} raised` : "",
-        r.remaining ? `${r.remaining} still to read — press again, or leave it to run on its own` : "",
+        r.stillEmpty ? `${r.stillEmpty} heading${r.stillEmpty === 1 ? "" : "s"} still to write` : "",
+        r.remaining ? `${r.remaining} still to read against the rules` : "",
       ].filter(Boolean).join(". ");
-      const tail = r.drafted
-        ? " Anything drafted is marked as drafted and unreviewed until you have read it."
-        : "";
+      const more = r.stillEmpty > 0 || r.remaining > 0;
+      const tail =
+        (r.drafted ? " Anything drafted is marked as drafted and unreviewed until you have read it." : "") +
+        (more
+          ? " Press it again to carry on — each press does about a minute of work, and the rest happens on its own in the background either way."
+          : "");
       redirect(
         `/manual?${r.problems.length ? "error" : "ok"}=` +
           encodeURIComponent(`${said || "Nothing needed doing"}.${tail} ${r.problems.slice(0, 3).join(" ")}`.trim()),
