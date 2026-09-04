@@ -7,6 +7,7 @@ import { storeFile } from "./files";
 import { readInvoice } from "./ai";
 import { getSettings } from "./settings";
 import { pdfText } from "./pdf-text";
+import { scheduleFromNames, linesMatching } from "./controlled-names";
 import type { InvoiceSchedule, DocumentCategory } from "@/db/schema";
 
 /**
@@ -115,21 +116,38 @@ export function classifyInvoiceText(text: string): TextVerdict {
   const lines = text.split("\n");
 
   const supplier =
-    text.match(/\bIndependent Pharmacy Distributor\b/i)?.[0] ??
+    text.match(/\bIndependent Pharmacy (?:Distributor|Cooperative)\b/i)?.[0] ??
     lines.find((l) => /\b(MCKESSON|CARDINAL|CENCORA|AMERISOURCE|MORRIS ?& ?DICKSON|HD SMITH|KINRAY|ANDA|SMITH DRUG|BURLINGTON)\b/i.test(l))
       ?.match(/\b(MCKESSON|CARDINAL|CENCORA|AMERISOURCE\w*|MORRIS ?& ?DICKSON|HD SMITH|KINRAY|ANDA|SMITH DRUG|BURLINGTON)\b/i)?.[0] ?? null;
+  /*
+   * The invoice number, and only the invoice number.
+   *
+   * Order matters here more than it looks. One supplier's header reads "INVOICE" on one line with
+   * the order number under it and "Invoice Num:" further up — so the loose pattern, tried first,
+   * confidently returned the order number. Two different numbers on one page, one of them the one
+   * the wholesaler will quote back at you. The labelled forms are therefore all tried before
+   * anything positional.
+   */
   const invoiceNumber =
     text.match(/Billing No\.?:\s*(\S+)/i)?.[1] ??
-    text.match(/Invoice (?:No|Number)\.?:?\s*#?\s*(\S+)/i)?.[1] ??
+    text.match(/Invoice Num(?:ber)?\.?:?\s*#?\s*(\S+)/i)?.[1] ??
+    text.match(/Invoice No\.?:?\s*#?\s*(\S+)/i)?.[1] ??
     // "Invoice" on its own line with the number under it, which is how a Crystal Reports header
-    // comes out once the columns are put back together.
+    // comes out once the columns are put back together. Last, because it is the guess.
     text.match(/^\s*Invoice\s*\n\s*#?\s*(\d{4,})\s*$/im)?.[1] ??
     null;
   const invoiceDate =
     isoFrom(text.match(/Billing Date:?\s*(\d{2}\/\d{2}\/\d{4})/i)?.[1] ?? "") ??
     isoFrom(text.match(/Invoice Date:?\s*(\d{2}\/\d{2}\/\d{4})/i)?.[1] ?? "") ??
     isoFrom(text.match(/Ship Date:?\s*(\d{2}\/\d{2}\/\d{4})/i)?.[1] ?? "") ??
-    isoFrom(text.match(/Order Date:?\s*(\d{2}\/\d{2}\/\d{4})/i)?.[1] ?? "");
+    isoFrom(text.match(/Order Date:?\s*(\d{2}\/\d{2}\/\d{4})/i)?.[1] ?? "") ??
+    // A date printed without leading zeros, which is how one supplier writes it.
+    isoFrom(
+      (text.match(/Invoice Date:?\s*(\d{1,2}\/\d{1,2}\/\d{4})/i)?.[1] ?? "")
+        .split("/")
+        .map((x, i) => (i < 2 ? x.padStart(2, "0") : x))
+        .join("/"),
+    );
 
   const head = {
     supplier,
@@ -158,6 +176,21 @@ export function classifyInvoiceText(text: string): TextVerdict {
    * supplier's invoices, controlled or not, and reading a heading as evidence would file every
    * invoice they send as Schedule II.
    */
+  /*
+   * Item lines in a layout that carries no class column at all.
+   *
+   * A third wholesaler prints the NDC and the price and nothing about schedules — their only code
+   * column means taxed, net priced or web special. Their lines are still recognisable: an
+   * eleven-digit NDC, or a hyphenated one, next to a price.
+   */
+  const plainItems =
+    items.length === 0
+      ? lines
+          .map((l) => l.trim())
+          .filter((l) => /(?:\d{11}|\d{4,5}-\d{3,4}-\d{1,2})/.test(l) && /\$?\d[\d,]*\.\d{2}/.test(l))
+          .map((l) => l.replace(/\s{2,}/g, " "))
+      : [];
+
   if (items.length === 0) {
     const twoMarks = text.match(/\bC-\s?(?:2|II)\b/g) ?? [];
     const lowerMarks = text.match(/\bC-\s?(?:3|4|5|III|IV|V)\b/g) ?? [];
@@ -180,6 +213,48 @@ export function classifyInvoiceText(text: string): TextVerdict {
         controlledItems: lines.filter((l) => /\bC-\s?(?:3|4|5|III|IV|V)\b/.test(l)).map((l) => l.trim().slice(0, 300)),
         allItems: [],
         basis: `The invoice marks items as C-3, C-4 or C-5 in its own schedule column, and no C-2 marking appears anywhere on it.`,
+      };
+    }
+
+    /*
+     * Nothing on the page says what these are, so the drug names have to.
+     *
+     * A weaker source than the supplier's own marking, and only used where there is no marking to
+     * use. It reads only the item lines, never the page — a recall notice in a header naming a
+     * drug must not decide where an invoice is filed.
+     *
+     * The Schedule II list this leans on is meant to be complete for what a retail pharmacy can
+     * buy, because that is the one this must not miss. A missed Schedule III to V is a much
+     * smaller thing: 1304.04(h)(2) allows those to sit with ordinary business records provided
+     * the information is readily retrievable, and here it is retrievable by supplier, month, drug
+     * name and invoice number.
+     */
+    if (plainItems.length >= 3) {
+      const byName = scheduleFromNames(plainItems);
+      head.allItems = plainItems;
+      if (byName.schedule === "schedule_2") {
+        return {
+          ...head,
+          schedule: "schedule_2",
+          confident: true,
+          controlledItems: linesMatching(plainItems, byName.matched).map((l) => l.slice(0, 300)),
+          basis: `This supplier prints no schedule on the invoice, so the item names were read: ${byName.matched.slice(0, 4).join(", ")} ${byName.matched.length === 1 ? "is a Schedule II drug" : "are Schedule II drugs"}.`,
+        };
+      }
+      if (byName.schedule === "schedule_3_5") {
+        return {
+          ...head,
+          schedule: "schedule_3_5",
+          confident: true,
+          controlledItems: linesMatching(plainItems, byName.matched).map((l) => l.slice(0, 300)),
+          basis: `This supplier prints no schedule on the invoice, so the item names were read: ${byName.matched.slice(0, 4).join(", ")} ${byName.matched.length === 1 ? "is controlled" : "are controlled"}, and nothing on it is Schedule II.`,
+        };
+      }
+      return {
+        ...head,
+        schedule: "none",
+        confident: true,
+        basis: `This supplier prints no schedule on the invoice, so all ${plainItems.length} item names were read and none of them is a controlled substance.`,
       };
     }
   }
@@ -628,9 +703,69 @@ export async function invoiceIssues(): Promise<InvoiceIssue[]> {
     });
   }
 
+  /*
+   * A supplier sending something they never send.
+   *
+   * The pharmacist knows which of his wholesalers he orders Schedule IIs from, and that knowledge
+   * is worth having in the site — but never as a reason to file something as uncontrolled. Used
+   * that way it would suppress exactly the event worth catching. Used this way it does the
+   * opposite: an invoice that disagrees with what the pharmacy expects from that supplier is
+   * surfaced, because a controlled substance arriving from somewhere it never arrives from is
+   * either an ordering mistake or something worse, and it is invisible otherwise.
+   */
+  const s = await getSettings();
+  for (const rule of parseExpected(s.supplier_expected_schedule ?? "")) {
+    const surprises = rows.filter(
+      (r) =>
+        r.supplier &&
+        r.supplier.toLowerCase().includes(rule.supplier.toLowerCase()) &&
+        r.schedule !== "unknown" &&
+        RANK[r.schedule] > RANK[rule.expected],
+    );
+    if (surprises.length === 0) continue;
+    const worst = surprises.some((r) => r.schedule === "schedule_2");
+    out.push({
+      key: `unexpected:${rule.supplier}`,
+      severity: "blocking",
+      title: `${rule.supplier} sent ${worst ? "Schedule II" : "controlled"} items, which you said they never do`,
+      detail:
+        `${surprises.length} invoice${surprises.length === 1 ? "" : "s"} from them carr${surprises.length === 1 ? "ies" : "y"} ` +
+        `${worst ? "a Schedule II line" : "controlled lines"}, and this supplier is recorded as sending ` +
+        `${rule.expected === "none" ? "nothing controlled" : "Schedule III to V at most"}. Either the expectation is out of date, ` +
+        `or something was ordered or shipped that should not have been. The invoices are filed correctly either way.`,
+      href: `/inventory/invoices?q=${encodeURIComponent(rule.supplier)}`,
+      action: "Look at them",
+    });
+  }
+
   const rank = { blocking: 0, warn: 1 };
   return out.sort((a, b) => rank[a.severity] - rank[b.severity]);
 }
+
+/**
+ * What each supplier is expected to ship, as the pharmacy has told the site.
+ *
+ * One rule per line: "Independent Pharmacy Cooperative = none". Free text for the same reason the
+ * sender rules are: the pharmacy knows its own suppliers and the site should not pretend to.
+ */
+export function parseExpected(raw: string): { supplier: string; expected: InvoiceSchedule }[] {
+  const out: { supplier: string; expected: InvoiceSchedule }[] = [];
+  for (const line of (raw ?? "").split("\n")) {
+    const t = line.trim();
+    if (!t || t.startsWith("#")) continue;
+    const i = t.indexOf("=");
+    if (i < 0) continue;
+    const supplier = t.slice(0, i).trim();
+    const v = t.slice(i + 1).trim().toLowerCase().replace(/[\s_]/g, "-");
+    const expected: InvoiceSchedule | null =
+      v === "none" || v === "0" ? "none" : v === "3-5" || v === "iii-v" ? "schedule_3_5" : v === "2" || v === "ii" ? "schedule_2" : null;
+    if (supplier && expected) out.push({ supplier, expected });
+  }
+  return out;
+}
+
+/** How strictly one schedule outranks another, for comparing what arrived against what was expected. */
+const RANK: Record<InvoiceSchedule, number> = { none: 0, schedule_3_5: 1, schedule_2: 2, unknown: 2 };
 
 export type ForwardResult = { sent: number; to: string; message: string };
 

@@ -170,3 +170,70 @@ describe("an invoice that names the schedule in its own column", () => {
     assert.equal(v.confident, false);
   });
 });
+
+/**
+ * A third wholesaler, printing no schedule anywhere.
+ *
+ * Independent Pharmacy Cooperative's only code column means taxed, net priced or web special —
+ * nothing about controlled substances. So their item names are read instead. Weaker than a
+ * supplier's own marking, and used only where there is no marking to use.
+ */
+describe("an invoice with no schedule column at all", () => {
+  const ipc = (...items: string[]) =>
+    [
+      "Independent Pharmacy Cooperative",
+      "Invoice Num:11488865",
+      "Invoice Date:9/3/2026",
+      "INVOICE",
+      "6927156",
+      "Order Num:",
+      "     Nbr       NDCWACAWPCdQtyQty     Price     Amount",
+      ...items,
+      "t = Taxed Itemn = Net Priced Genericw = Web Special",
+    ].join("\n");
+
+  const plain = [
+    "5128541Amoxicillin/Clav Pot Tabs 500/125mg Auro 65862050220$8.80$75.6911$2.91$2.91",
+    "5173208Benazepril Hcl Tabs 20mg Solc 43547033710$12.00$105.0011$3.96$3.96",
+    "5308259Fluoxetine Tabs 60mg Sci 50228063830$9.75$313.2511$2.34$2.34",
+    "5149950Ondansetron ODT 8mg Auro 65862039110$25.35$1,113.9511$2.86$2.86",
+  ];
+
+  test("a page of ordinary generics is filed as ordinary business records", () => {
+    const v = classifyInvoiceText(ipc(...plain));
+    assert.equal(v.schedule, "none");
+    assert.equal(v.confident, true);
+  });
+
+  test("the invoice number is the invoice number, not the order number printed under the word", () => {
+    // Their header reads "INVOICE" with the order number beneath it and "Invoice Num:" above.
+    assert.equal(classifyInvoiceText(ipc(...plain)).invoiceNumber, "11488865");
+  });
+
+  test("supplier and date come off it, including a date written without leading zeros", () => {
+    const v = classifyInvoiceText(ipc(...plain));
+    assert.match(v.supplier ?? "", /Independent Pharmacy Cooperative/i);
+    assert.equal(v.invoiceDate, "2026-09-03");
+  });
+
+  test("a controlled line on one of their invoices is still caught", () => {
+    const v = classifyInvoiceText(
+      ipc(...plain, "5300001Alprazolam Tabs 1mg Acta 10059746017710$20.00$100.0011$4.00$4.00"),
+    );
+    assert.equal(v.schedule, "schedule_3_5");
+  });
+
+  test("and a Schedule II from a supplier who supposedly sends none is caught too", () => {
+    const v = classifyInvoiceText(
+      ipc(...plain, "5300002Oxycodone/APAP Tabs 5/325mg Cam 10000406051201$30.00$200.0011$8.00$8.00"),
+    );
+    assert.equal(v.schedule, "schedule_2");
+    assert.equal(v.confident, true);
+  });
+
+  test("too few readable lines is not enough to conclude anything", () => {
+    const v = classifyInvoiceText(ipc(plain[0]));
+    assert.equal(v.schedule, "unknown");
+    assert.equal(v.confident, false);
+  });
+});

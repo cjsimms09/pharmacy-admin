@@ -15,8 +15,10 @@ import {
   setInvoiceDate,
   forwardInvoices,
   recentForwards,
+  parseExpected,
   filingFor,
 } from "@/lib/invoices";
+import { setSetting } from "@/lib/settings";
 import { getSettings } from "@/lib/settings";
 import { PageHeader, Card, Figure, Notice, Empty } from "@/components/ui";
 import { INVOICE_SCHEDULES, type InvoiceSchedule } from "@/db/schema";
@@ -104,6 +106,7 @@ export default async function InvoicesPage({
   const shown = onlyUndated ? rows.filter((r) => !r.invoiceDate) : rows;
   const rules = (s.mail_supplier_rules ?? "").trim();
   const filtered = Boolean(sp.q || sp.month || sp.supplier || sp.from || sp.to || onlyUnconfirmed || onlyUndated);
+  const expectations = parseExpected(s.supplier_expected_schedule ?? "");
 
   async function confirm(fd: FormData) {
     "use server";
@@ -153,6 +156,20 @@ export default async function InvoicesPage({
       if (e && typeof e === "object" && "digest" in e) throw e;
       redirect(`${back}${back.includes("?") ? "&" : "?"}error=` + encodeURIComponent(e instanceof Error ? e.message : "Could not send that."));
     }
+  }
+
+  async function saveExpected(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    await setSetting("supplier_expected_schedule", String(fd.get("expected") ?? "").trim());
+    await audit({ action: "invoice.expectations", userId: u.id, userName: u.name });
+    revalidatePath("/inventory/invoices");
+    redirect(
+      "/inventory/invoices?ok=" +
+        encodeURIComponent(
+          "Saved. Nothing is filed differently because of this — it is only used to tell you when a supplier sends something they never send.",
+        ),
+    );
   }
 
   const here = `/inventory/invoices?${new URLSearchParams(
@@ -450,6 +467,42 @@ export default async function InvoicesPage({
               </li>
             ))}
           </ul>
+        </Card>
+      )}
+
+      {/*
+        What the pharmacist knows about his own suppliers, used the safe way round.
+
+        He orders Schedule IIs from two of his three wholesalers and never from the third. That is
+        real knowledge and worth having here — but never as a reason to file something as
+        uncontrolled, because used that way it would suppress the one event most worth catching.
+        Used this way it does the opposite: a controlled substance arriving from somewhere it
+        never arrives from is either an ordering mistake or something worse, and nothing else
+        would notice.
+      */}
+      {canManage && suppliers.length > 0 && (
+        <Card
+          title="What each supplier normally sends"
+          subtitle="Nothing is filed differently because of this. It is how the site tells you when a supplier ships something they never ship — which is what an ordering mistake, or a diversion problem, looks like from here."
+          className="mt-6"
+        >
+          <form action={saveExpected}>
+            <label className="block text-xs font-medium text-ink-2">
+              One per line, as <code>Supplier = none</code>, <code>= 3-5</code> or <code>= 2</code>
+              <textarea
+                name="expected"
+                rows={Math.max(3, suppliers.length + 1)}
+                defaultValue={s.supplier_expected_schedule ?? ""}
+                placeholder={suppliers.map((x) => `${x} = none`).join("\n")}
+                className="field mt-1 font-mono text-xs"
+              />
+            </label>
+            <p className="mt-1 text-xs text-ink-3">
+              Suppliers that have sent something so far: {suppliers.join(", ")}.
+              {expectations.length > 0 && ` Currently set for ${expectations.length} of them.`}
+            </p>
+            <button className="btn mt-2">Save</button>
+          </form>
         </Card>
       )}
 

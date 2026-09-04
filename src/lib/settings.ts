@@ -81,6 +81,14 @@ export const SETTING_KEYS = [
   "updates_behind",
   "updates_newest",
   "updates_check_error",
+  /**
+   * What each supplier is expected to ship, one rule per line: "Supplier = none | 3-5 | 2".
+   *
+   * Never used to classify anything. It is used the other way round — to notice when a supplier
+   * sends something they never send, which is the shape of both a diversion problem and an
+   * ordering mistake, and is invisible otherwise.
+   */
+  "supplier_expected_schedule",
   "manual_audit_last",
   "manual_audit_result",
   "manual_audit_auto",
