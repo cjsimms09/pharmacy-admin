@@ -75,3 +75,67 @@ export async function mailHealth(): Promise<MailHealth> {
 export function mailTone(state: MailHealth["state"]): "ok" | "warn" | "crit" {
   return state === "ok" ? "ok" : state === "unproven" ? "warn" : "crit";
 }
+
+export type LinkHealth = {
+  base: string | null;
+  /** Reachable only from inside the pharmacy — a phone on mobile data cannot open it. */
+  privateOnly: boolean;
+  /** A bare IP address, a non-standard port, or plain HTTP: all three read as malware to a filter. */
+  spamShaped: boolean;
+  reasons: string[];
+};
+
+/**
+ * Whether the address in the training email is one that can be opened, and one that will not get
+ * the message junked.
+ *
+ * These turn out to be the same question. A link like http://192.168.1.40:3100/t/xxxx is
+ * unreachable from a phone that is not on the pharmacy's wifi, and it is also close to the
+ * textbook description of a phishing link: no domain name, a raw private address, an unusual port,
+ * no encryption. Gmail and Outlook both weight that heavily, and a message carrying seven of them
+ * goes to junk on the strength of the links alone.
+ *
+ * So the fix for "it went to junk" and the fix for "the link does not work" are one fix, and it is
+ * worth saying that plainly rather than letting the pharmacy chase them as two problems.
+ */
+export function linkHealth(publicBaseUrl: string | undefined | null): LinkHealth {
+  const base = (publicBaseUrl ?? "").trim() || null;
+  const reasons: string[] = [];
+  if (!base) {
+    return {
+      base: null,
+      privateOnly: true,
+      spamShaped: true,
+      reasons: [
+        "No address is set, so links point at localhost and work on this computer only.",
+      ],
+    };
+  }
+
+  let host = "";
+  let protocol = "";
+  let port = "";
+  try {
+    const u = new URL(base);
+    host = u.hostname;
+    protocol = u.protocol;
+    port = u.port;
+  } catch {
+    return { base, privateOnly: true, spamShaped: true, reasons: ["The address is not a valid web address."] };
+  }
+
+  const isIp = /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
+  const isPrivate =
+    host === "localhost" ||
+    /^127\./.test(host) ||
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(host);
+
+  if (isPrivate) reasons.push("The address is on the pharmacy's own network, so a phone using mobile data cannot open it.");
+  if (isIp) reasons.push("It is a bare IP address rather than a name, which mail filters treat as a phishing signal.");
+  if (protocol === "http:") reasons.push("It is plain http rather than https, which filters also weigh against it.");
+  if (port && port !== "80" && port !== "443") reasons.push(`It uses port ${port}, which is unusual in a link and adds to the same suspicion.`);
+
+  return { base, privateOnly: isPrivate, spamShaped: isIp || protocol === "http:" || Boolean(port && port !== "80" && port !== "443"), reasons };
+}

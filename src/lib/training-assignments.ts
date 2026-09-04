@@ -7,7 +7,7 @@ import { addMonths, TRAINING_CADENCE } from "./due";
 import { TRAINING_LABEL } from "./labels";
 import { courseFor } from "./courses";
 import { makeReplyCode } from "./training-replies";
-import { packetText, packetFileName, courseVersion } from "./course-packet";
+import { packetText, packetFileName, courseVersion, packetPdf, packetPdfFileName } from "./course-packet";
 import { subjectFor, textFor, htmlFor, type EmailContext } from "./training-email";
 import { getSettings, setSetting } from "./settings";
 import { sendMail } from "./send-mail";
@@ -296,16 +296,28 @@ async function emailPerson(
    *
    * A pharmacy that wants the packet attached, and whose mail survives it, can turn it back on.
    */
-  const attach = s.training_attach_material === "yes";
+  /*
+   * The course travels as a PDF.
+   *
+   * It used to be a .txt, which on a phone opens as a wall of monospace or does not open at all —
+   * so the material nobody could read was material nobody read. A PDF opens everywhere, prints
+   * straight, and is what anyone expects a training handout to be. It also matters that this
+   * arrives at all: where the link cannot be reached — a phone off the pharmacy network, which is
+   * most phones — the attachment is the training, and the emailed code is how it gets attested.
+   *
+   * On by default. It was briefly turned off while attachments were the suspect for mail going
+   * missing; the actual cause was the spam folder, which the sender name and subject now address.
+   */
+  const attach = s.training_attach_material !== "no";
   const attachments: { filename: string; content: string | Buffer; contentType?: string }[] = !attach
     ? []
     : items
         .map((i) => courseFor(i.type))
         .filter((c): c is NonNullable<typeof c> => Boolean(c))
         .map((course) => ({
-          filename: packetFileName(course),
-          content: packetText(course, pharmacy),
-          contentType: "text/plain; charset=utf-8",
+          filename: packetPdfFileName(course),
+          content: packetPdf(course, pharmacy),
+          contentType: "application/pdf",
         }));
 
   // Where the assignment carries a document from the vault — a policy manual, a signed protocol —

@@ -1,4 +1,5 @@
 import { type Course } from "./courses";
+import { textPdf, wrapForPdf, type PdfLine } from "./pdf";
 
 /**
  * The course as a document that can be sent, printed and kept.
@@ -116,4 +117,54 @@ export function courseVersion(course: Course): string {
 export function packetFileName(course: Course): string {
   const slug = course.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   return slug + "-" + courseVersion(course) + ".txt";
+}
+
+/**
+ * The course as a PDF.
+ *
+ * A .txt attachment opens on a phone as a wall of monospace, or does not open at all, so the
+ * material that was supposed to be read was not being read. This is the same content laid out as
+ * a document people recognise — headings, wrapped paragraphs, page breaks — that opens anywhere
+ * and prints straight.
+ */
+export function packetPdf(course: Course, pharmacyName: string): Buffer {
+  const lines: PdfLine[] = [];
+  const para = (text: string, opts: { bold?: boolean; size?: number; gapBefore?: number } = {}) => {
+    const wrapped = wrapForPdf(text, opts.size ?? 10);
+    wrapped.forEach((w, i) => lines.push({ text: w, ...opts, gapBefore: i === 0 ? opts.gapBefore : 0 }));
+  };
+
+  para(pharmacyName, { bold: true, size: 11 });
+  para(course.title, { bold: true, size: 15, gapBefore: 6 });
+  para(`Approximately ${course.minutes} minutes · material version ${courseVersion(course)}`, { size: 9, gapBefore: 4 });
+  para(`Requirement addressed: ${course.authority}`, { size: 9 });
+  para(course.intro, { gapBefore: 10 });
+
+  course.sections.forEach((s, i) => {
+    para(`${i + 1}. ${s.heading}`, { bold: true, size: 12, gapBefore: 14 });
+    for (const b of s.body) para(b, { gapBefore: 6 });
+  });
+
+  para("Check your understanding", { bold: true, size: 13, gapBefore: 18 });
+  course.questions.forEach((q, i) => {
+    para(`${i + 1}. ${q.q}`, { gapBefore: 10 });
+    q.options.forEach((o, oi) => para(`     ${"abcd"[oi]}) ${o}`, { size: 9.5 }));
+  });
+
+  para("Answers", { bold: true, size: 13, gapBefore: 18 });
+  course.questions.forEach((q, i) => {
+    para(`${i + 1}. (${"abcd"[q.answer]}) ${q.why}`, { gapBefore: 6, size: 9.5 });
+  });
+
+  para(
+    `This is the material used for this training at ${pharmacyName}. Keep it with your records; the pharmacy holds a copy of this exact version.`,
+    { size: 9, gapBefore: 18 },
+  );
+
+  return textPdf(`${course.title} — ${pharmacyName}`, lines);
+}
+
+/** What the PDF is called when it lands in somebody's inbox. */
+export function packetPdfFileName(course: Course): string {
+  return packetFileName(course).replace(/\.txt$/i, "") + ".pdf";
 }

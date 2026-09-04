@@ -22,7 +22,7 @@ import {
 import { REPLY_PHRASE } from "@/lib/training-replies";
 import { courseFor } from "@/lib/courses";
 import { canSend, sendTestEmail } from "@/lib/send-mail";
-import { mailHealth } from "@/lib/mail-health";
+import { mailHealth, linkHealth } from "@/lib/mail-health";
 import { PickControls, PickGroup } from "@/components/pick-controls";
 import { onSiteToday } from "@/lib/roster";
 import { getSettings } from "@/lib/settings";
@@ -313,6 +313,28 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
           )}
         </Notice>
       )}
+
+      {(() => {
+        /*
+         * Why it went to junk, and why the link did not work: one cause, two symptoms.
+         */
+        const lh = linkHealth(settings.public_base_url);
+        if (!lh.privateOnly && !lh.spamShaped) return null;
+        return (
+          <Notice kind="crit">
+            <b>The links in the training email are the reason it lands in junk, and the reason nobody can open it.</b>{" "}
+            {lh.base ? <>The address staff are sent is <code>{lh.base}</code>. </> : null}
+            <ul className="ml-5 mt-1 list-disc">
+              {lh.reasons.map((r) => <li key={r}>{r}</li>)}
+            </ul>
+            <p className="mt-1">
+              Until that address is a real name over https, the course PDF attached to the email is the training and
+              the reply code is how it is attested — both work with no link at all. See{" "}
+              <Link href="/settings/network" className="underline">Settings → Network</Link>.
+            </p>
+          </Notice>
+        );
+      })()}
 
       {(() => {
         /*

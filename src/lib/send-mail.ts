@@ -150,11 +150,39 @@ export async function sendMail(
    * The packets are worth having and are not worth losing the email over: the link and the reply
    * code are what the person actually needs, and both are in the body.
    */
+  /*
+   * The conversation, recorded.
+   *
+   * Every other signal had been exhausted: the site said the message was sent, the pharmacy said
+   * nothing arrived, and nothing anywhere could say which end was wrong. This keeps the server's
+   * own words — the greeting, the recipient it accepted, the queue id it handed back — so the
+   * question stops being a matter of opinion. Credentials never reach it.
+   */
+  const transcript: string[] = [];
+  const record_line = (line: string) => {
+    if (transcript.length < 200) transcript.push(line.length > 300 ? `${line.slice(0, 300)}…` : line);
+  };
+  const smtpLogger = {
+    level: () => {},
+    trace: () => {},
+    debug: (entry: unknown, ...rest: unknown[]) => {
+      const msg = typeof entry === "string" ? entry : String((entry as { msg?: string })?.msg ?? "");
+      const text = [msg, ...rest.map(String)].filter(Boolean).join(" ");
+      // AUTH carries the password base64-encoded on the same line.
+      record_line(/AUTH|\bLOGIN\b|PLAIN/i.test(text) ? "[credentials withheld]" : text);
+    },
+    info: (entry: unknown, ...rest: unknown[]) => smtpLogger.debug(entry, ...rest),
+    warn: (entry: unknown, ...rest: unknown[]) => smtpLogger.debug(entry, ...rest),
+    error: (entry: unknown, ...rest: unknown[]) => smtpLogger.debug(entry, ...rest),
+    fatal: (entry: unknown, ...rest: unknown[]) => smtpLogger.debug(entry, ...rest),
+  };
+
   const attempt = async (withAttachments: boolean) => {
   const tried: string[] = [];
   for (const t of ordered) {
     const label = `${t.host}:${t.port}`;
     try {
+      record_line(`--- trying ${label} (secure=${t.secure}) ---`);
       const transport = nodemailer.createTransport({
         host: t.host,
         port: t.port,
@@ -163,6 +191,8 @@ export async function sendMail(
         connectionTimeout: 20_000,
         greetingTimeout: 20_000,
         socketTimeout: 60_000,
+        logger: smtpLogger as never,
+        debug: true,
       });
       // Both parts, always, when an HTML version exists: the plain text is what a phone's
       // notification preview shows and what survives a client that blocks markup, and an email
@@ -213,8 +243,13 @@ export async function sendMail(
   return { ok: false as const, tried };
   };
 
+  const saveTranscript = async () => {
+    await setSetting("mail_last_transcript", `${new Date().toISOString()} — to ${to}\n${transcript.join("\n")}`.slice(0, 20000));
+  };
+
   const first = await attempt(true);
   if (first.ok) {
+    await saveTranscript();
     await setSetting(
       "mail_last_send_result",
       `${new Date().toISOString()} — accepted for ${to} by ${first.via}. ${first.response || ""} id ${first.messageId || "(none)"}`.trim(),
@@ -225,6 +260,7 @@ export async function sendMail(
   if (attachments.length > 0) {
     const bare = await attempt(false);
     if (bare.ok) {
+      await saveTranscript();
       const degraded =
         `The message was accepted only after the ${attachments.length} attached file` +
         `${attachments.length === 1 ? "" : "s"} were removed — the mail server or a virus filter is refusing ` +
@@ -234,6 +270,7 @@ export async function sendMail(
     }
   }
 
+  await saveTranscript();
   const error = `Could not send. Tried: ${first.tried.join("; ")}`;
   await setSetting("mail_last_send_result", `${new Date().toISOString()} — FAILED to ${to}. ${error}`);
   return { ok: false, error, tried: first.tried };

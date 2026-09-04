@@ -80,6 +80,14 @@ export const SETTING_KEYS = [
   "backup_restore_last",
   "backup_restore_result",
   "mail_last_sweep",
+  /**
+   * The SMTP conversation from the last send, verbatim, with credentials removed.
+   *
+   * Kept because every other signal had been exhausted: the site said sent, the pharmacy said
+   * nothing arrived, and there was no way to tell which end was wrong. The transcript settles it —
+   * it shows the server's own words, the recipient it accepted, and the id it gave the message.
+   */
+  "mail_last_transcript",
   // Sending is not the same server as reading, and a pharmacy that cannot test it cannot tell a
   // failed send from one that was never attempted.
   "mail_smtp_host",
