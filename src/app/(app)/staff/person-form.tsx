@@ -21,9 +21,21 @@ type Person = {
   notes: string | null;
 };
 
-export function PersonForm({ action, person, submitLabel }: { action: (fd: FormData) => Promise<void>; person?: Person; submitLabel: string }) {
+export function PersonForm({
+  action,
+  person,
+  submitLabel,
+  hidden,
+}: {
+  action: (fd: FormData) => Promise<void>;
+  person?: Person;
+  submitLabel: string;
+  /** Extra values submitted with the form — where to go next, when the caller cares. */
+  hidden?: Record<string, string>;
+}) {
   return (
     <form action={action} className="grid gap-4 sm:grid-cols-2">
+      {hidden && Object.entries(hidden).map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />)}
       <Field label="First name"><input name="firstName" className="field" required defaultValue={person?.firstName} /></Field>
       <Field label="Last name"><input name="lastName" className="field" required defaultValue={person?.lastName} /></Field>
       <Field label="Role">

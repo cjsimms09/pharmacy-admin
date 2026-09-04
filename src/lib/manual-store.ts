@@ -182,10 +182,26 @@ export async function regenerateSiteSections(user: { name: string }): Promise<{ 
       title: "A.2 Forms produced by the compliance system",
       level: 2,
       body:
-        FORMS.map((f) => `${f.name}\n${f.purpose}\nWhen: ${f.cadence}`).join("\n\n") +
-        "\n\nNo blank copies are reproduced here. A blank form in a manual is the version that goes out of date first " +
-        "and is the one somebody photocopies; the current version is produced by the system on demand.",
+        `${pharmacy} uses the forms listed below and no others for the purposes described. Each is produced by the ` +
+        `compliance system rather than kept as a blank in this manual, and the description of each here is generated ` +
+        `from the form itself — so what this appendix says a form captures is what the form captures.\n\n` +
+        `A blank of any of them is printed from the screen route given. A completed one, for any past period, is ` +
+        `retrievable from the same place and available for inspection.`,
     },
+    // One section per form, so the manual describes the form the pharmacy actually uses rather
+    // than a paragraph about forms in general. Generated from the same list the site prints from,
+    // which is the only arrangement in which the two cannot drift.
+    ...FORMS.map((f, i) => ({
+      key: `form_${i}`,
+      title: `A.2.${i + 1} ${f.name}`,
+      level: 3,
+      body:
+        `${f.purpose}\n\n` +
+        `When it is produced: ${f.cadence}\n\n` +
+        `What it records:\n${f.fields.map((x) => `  \u2022 ${x}`).join("\n")}\n\n` +
+        `Where to get it: ${f.where}.\n\n` +
+        `Authority: ${f.authority}`,
+    })),
   ];
 
   for (const w of wanted) {

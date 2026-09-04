@@ -283,3 +283,24 @@ describe("sections somebody else maintains", () => {
     assert.deepEqual(managers([row({ id: "a", title: "Compounding", level: 1 })]), []);
   });
 });
+
+describe("the forms the manual describes", () => {
+  test("every form says what it records, where to get it, and under what rule", () => {
+    for (const f of FORMS) {
+      assert.ok(f.fields.length >= 3, `${f.name} lists too few fields to describe a form`);
+      assert.ok(f.where.trim().length > 3 && !f.where.endsWith("."), `${f.name} has no usable screen route`);
+      assert.ok(/CFR|K\.A\.R\.|K\.S\.A\./.test(f.authority), `${f.name} cites no authority`);
+      assert.ok(f.href.startsWith("/"), `${f.name} does not link anywhere`);
+    }
+  });
+
+  test("the appendix version changes when a form's fields change", async () => {
+    const { appendixVersion, policies } = await import("../src/lib/manual");
+    const before = appendixVersion(policies("Test Pharmacy"));
+    const original = FORMS[0].fields.slice();
+    FORMS[0].fields.push("A field somebody added");
+    const after = appendixVersion(policies("Test Pharmacy"));
+    FORMS[0].fields.splice(0, FORMS[0].fields.length, ...original);
+    assert.notEqual(before, after, "a changed form must make the filed manual demonstrably out of date");
+  });
+});

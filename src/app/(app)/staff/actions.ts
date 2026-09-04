@@ -113,7 +113,10 @@ export async function createPerson(formData: FormData) {
   await db.insert(schema.people).values({ id, ...parsed.data, active: true });
   await audit({ action: "person.create", userId: user.id, userName: user.name, entity: "person", entityId: id, details: `${parsed.data.firstName} ${parsed.data.lastName}` });
   revalidatePath("/staff");
-  redirect(`/staff/${id}`);
+  // Created from the new-employee screen, the next thing wanted is the checklist for this person,
+  // not their empty record. Anywhere else, their record is right.
+  const next = String(formData.get("next") ?? "");
+  redirect(next === "new-hire" ? `/staff/new-hire?person=${id}` : `/staff/${id}`);
 }
 
 export async function updatePerson(id: string, formData: FormData) {
