@@ -34,6 +34,16 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
       />
       {error && <Notice kind="crit">{error}</Notice>}
 
+      <Notice kind="warn">
+        <b>This one cannot live only on a screen.</b> K.A.R. 68-20-16 requires each controlled substance inventory to be
+        kept in legible hard-copy format, and 21 CFR 1304.11(a) requires it in written, typewritten or printed form at
+        the registered location. So print the C-250, have everyone who counted sign it with their licence or
+        registration number, and file it on the premises — then scan it back in against the inventory below, which is
+        what the &ldquo;signed sheet&rdquo; column is asking for. Everything else this site keeps (CQI, training,
+        temperatures, the technician list) may be held electronically, because the Board&rsquo;s test for those is
+        readily retrievable within 48 hours, and they are.
+      </Notice>
+
       <section className="card mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="text-xs font-semibold uppercase tracking-wide text-ink-2">Next inventory due</div>
