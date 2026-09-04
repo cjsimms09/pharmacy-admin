@@ -6,6 +6,7 @@ import { todayIso, daysBetween } from "./dates";
 import { getSettings, setSetting } from "./settings";
 import { hasApiKey, reviewPolicy, describeError } from "./ai";
 import { policies, suggestForm, appendixReference } from "./manual";
+import { pharmacyFacts } from "./pharmacy-facts";
 import { allSections, saveSection } from "./manual-store";
 
 /**
@@ -168,10 +169,16 @@ export async function runManualAudit(
 
   const s = await getSettings();
   const pharmacy = s.pharmacy_name || "This pharmacy";
-  const context =
-    `${pharmacy} in ${s.pharmacy_city || "Wichita"}, ${s.pharmacy_state || "KS"}. ` +
-    "Independent community pharmacy. Immunizes. Performs simple non-sterile non-hazardous compounding only. " +
-    "Dispenses controlled substances. Takes pharmacy students on rotation.";
+  /*
+   * Everything the site knows about this pharmacy, rather than four generic sentences.
+   *
+   * The old context said the pharmacy was independent, immunized and dispensed controlled
+   * substances, and nothing else — so the reviewer, correctly forbidden from inventing facts, kept
+   * returning "the registration number was not provided to me" and "the pharmacist in charge was
+   * not provided". Both are on file here. Withholding them turned twenty fixable findings into
+   * twenty things for the pharmacist to write himself.
+   */
+  const context = (await pharmacyFacts()).text;
   const siteDoes = policies(pharmacy).map((x) => `${x.title}: ${x.text[0]}`).join("\n");
   const now = new Date().toISOString();
 
@@ -409,10 +416,16 @@ export async function putRight(
   // ── 2 and 3. Empty headings: point at a form, or draft the policy ──
   const s = await getSettings();
   const pharmacy = s.pharmacy_name || "This pharmacy";
-  const context =
-    `${pharmacy} in ${s.pharmacy_city || "Wichita"}, ${s.pharmacy_state || "KS"}. ` +
-    "Independent community pharmacy. Immunizes. Performs simple non-sterile non-hazardous compounding only. " +
-    "Dispenses controlled substances. Takes pharmacy students on rotation.";
+  /*
+   * Everything the site knows about this pharmacy, rather than four generic sentences.
+   *
+   * The old context said the pharmacy was independent, immunized and dispensed controlled
+   * substances, and nothing else — so the reviewer, correctly forbidden from inventing facts, kept
+   * returning "the registration number was not provided to me" and "the pharmacist in charge was
+   * not provided". Both are on file here. Withholding them turned twenty fixable findings into
+   * twenty things for the pharmacist to write himself.
+   */
+  const context = (await pharmacyFacts()).text;
   const siteDoes = policies(pharmacy).map((x) => `${x.title}: ${x.text[0]}`).join("\n");
   const canDraft = await hasApiKey();
 
@@ -512,4 +525,51 @@ export async function applyAllFindings(user: { name: string }): Promise<{ applie
     }
   }
   return out;
+}
+
+/**
+ * Puts back into the queue the sections that were only waiting on a fact.
+ *
+ * A finding that came with no replacement text is one the reviewer could not write because a fact
+ * about this pharmacy was missing — the registration number, who receives a complaint, which
+ * schedules the DEA registration covers. Once those are on file the same section reads completely
+ * differently, but it will not be read again for a year: it was audited, and it is not due.
+ *
+ * So supplying the facts is not enough on its own. This clears the audit date on exactly those
+ * sections, and closes the findings that were only ever "you have to decide this" — they are not
+ * dismissed as wrong, they are superseded by an answer.
+ */
+export async function rereadBlockedSections(user: { name: string }): Promise<{ sections: number; findings: number }> {
+  const open = await db.query.manualFindings.findMany({
+    where: and(isNull(schema.manualFindings.appliedAt), isNull(schema.manualFindings.dismissedAt)),
+  });
+  // No suggested text is the marker: the reviewer had a finding and could not write the fix.
+  const blocked = open.filter((f) => !f.suggestedBody.trim());
+  const sectionIds = [...new Set(blocked.map((f) => f.sectionId))];
+
+  for (const id of sectionIds) {
+    await db
+      .update(schema.manualSections)
+      .set({ auditedOn: null, auditFailedOn: null, auditError: null })
+      .where(eq(schema.manualSections.id, id));
+  }
+  for (const f of blocked) {
+    await db
+      .update(schema.manualFindings)
+      .set({
+        dismissedAt: new Date().toISOString(),
+        dismissedReason: `Superseded — the pharmacy supplied what this was waiting on, and the section is being read again. Closed by ${user.name}.`,
+        closedBy: user.name,
+      })
+      .where(eq(schema.manualFindings.id, f.id));
+  }
+  return { sections: sectionIds.length, findings: blocked.length };
+}
+
+/** How many findings are open only because a fact about the pharmacy was missing. */
+export async function blockedOnFacts(): Promise<number> {
+  const open = await db.query.manualFindings.findMany({
+    where: and(isNull(schema.manualFindings.appliedAt), isNull(schema.manualFindings.dismissedAt)),
+  });
+  return open.filter((f) => !f.suggestedBody.trim()).length;
 }

@@ -115,6 +115,21 @@ export const SETTING_KEYS = [
   "manual_audit_result",
   "manual_audit_auto",
   /**
+   * The roles the inherited manual keeps naming, and who actually holds them here.
+   *
+   * The handbook came from a physician practice: complaints go to a Human Resources Manager,
+   * appeals to a Chief Administrator, keys to a Department Manager. Nobody at this pharmacy holds
+   * any of those titles, so the manual routes its own procedures to people who do not exist —
+   * which is a finding the pharmacy wrote for itself. Nine audit findings across six sections are
+   * that one problem, and one answer settles all of them.
+   */
+  "role_complaints",
+  "role_complaints_alt",
+  "role_hiring",
+  "role_termination",
+  /** Which schedules the DEA registration covers. On the certificate, nowhere else in the site. */
+  "dea_schedules",
+  /**
    * What the "Put it right" press is doing, as JSON, so the page can show it.
    *
    * The work used to happen inside the button's own request. A press that takes a minute makes

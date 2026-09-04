@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { getSettings } from "@/lib/settings";
+import { getSettings, setSetting } from "@/lib/settings";
 import { hasApiKey, draftPolicy, describeError } from "@/lib/ai";
 import {
   allSections,
@@ -27,6 +27,8 @@ import { policies, FORMS, appendixReference, suggestForm } from "@/lib/manual";
 import {
   auditProgress,
   auditFailures,
+  rereadBlockedSections,
+  blockedOnFacts,
   openFindings,
   runManualAudit,
   applyFinding,
@@ -36,6 +38,7 @@ import {
 import { manualJob, startPutRight, runPutRight, isRunning, isStale, summarise, ago } from "@/lib/manual-job";
 import { acknowledgementBoard, settleVersions } from "@/lib/manual-acknowledgement";
 import { estimateSentence } from "@/lib/ai-spend";
+import { pharmacyFacts, namedRoles } from "@/lib/pharmacy-facts";
 import { fmt } from "@/lib/dates";
 import { PageHeader, Card, Figure, Notice, Field, Empty } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
@@ -90,7 +93,13 @@ export default async function ManualPage({
   const working = isRunning(job);
   // Who has signed for this manual, and who signed for an older one. Read after the sections,
   // because it fingerprints exactly what is on this page.
-  const [ack, stuck] = await Promise.all([acknowledgementBoard(), auditFailures()]);
+  const [ack, stuck, facts, roles, blocked] = await Promise.all([
+    acknowledgementBoard(),
+    auditFailures(),
+    pharmacyFacts(),
+    namedRoles(),
+    blockedOnFacts(),
+  ]);
   const sections = outline(rows);
   const pharmacy = s.pharmacy_name || "This pharmacy";
 
@@ -554,6 +563,43 @@ export default async function ManualPage({
     );
   }
 
+  /** Saves the roles the inherited manual keeps naming, and offers to re-read what was waiting. */
+  async function saveRolesAction(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    await setSetting("role_complaints", String(fd.get("role_complaints") ?? "").trim());
+    await setSetting("role_complaints_alt", String(fd.get("role_complaints_alt") ?? "").trim());
+    await setSetting("role_hiring", String(fd.get("role_hiring") ?? "").trim());
+    await setSetting("role_termination", String(fd.get("role_termination") ?? "").trim());
+    await setSetting("dea_schedules", String(fd.get("dea_schedules") ?? "").trim());
+    await audit({ action: "manual.facts", userId: u.id, userName: u.name });
+    revalidatePath("/manual");
+    redirect(
+      "/manual?ok=" +
+        encodeURIComponent(
+          "Saved. Every review from now on is told these, so the findings that said “decide this yourself” can be " +
+            "written instead. Use “Read those sections again” below to redo the ones that were waiting on them.",
+        ),
+    );
+  }
+
+  /** Puts the sections that were only waiting on a fact back into the queue. */
+  async function rereadAction() {
+    "use server";
+    const u = await requireManager();
+    const r = await rereadBlockedSections(u);
+    await audit({ action: "manual.reread", userId: u.id, userName: u.name, details: `${r.sections}` });
+    revalidatePath("/manual");
+    redirect(
+      "/manual?ok=" +
+        encodeURIComponent(
+          r.sections === 0
+            ? "Nothing was waiting on a fact."
+            : `${r.sections} section${r.sections === 1 ? "" : "s"} put back in the queue and ${r.findings} finding${r.findings === 1 ? "" : "s"} closed as superseded. Press “Put it right” and they are read again — this time knowing who you are.`,
+        ),
+    );
+  }
+
   async function putRightAction() {
     "use server";
     const u = await requireManager();
@@ -918,6 +964,100 @@ export default async function ManualPage({
                   </>
                 )}
               </p>
+            )}
+          </Card>
+
+
+          {/*
+            What the reviewer is told about this pharmacy.
+
+            Twenty findings came back saying a fact "was not provided to me" — the registration
+            number, the pharmacist in charge, the DEA expiry. All of them are on file here and none
+            of them were being passed in. That is fixed; this card exists so the pharmacist can see
+            exactly what the reviewer knows, and fill in the few things the site genuinely does not
+            hold.
+
+            The named roles are the whole of nine findings. The manual was inherited from a
+            physician practice and routes complaints, hiring and departures to a Human Resources
+            Manager, a Chief Administrator and a Department Manager. Nobody here holds those titles,
+            so the manual sends its own procedures to people who do not exist. One answer, given
+            once, settles all nine.
+          */}
+          <Card
+            id="facts"
+            tone={facts.missing.length > 0 ? "warn" : undefined}
+            title="What the review knows about this pharmacy"
+            subtitle="The reviewer is forbidden from inventing a fact about you, which is why a missing one comes back as “decide this yourself” instead of as finished text. Everything here is passed in before a section is read."
+            count={facts.missing.length > 0 ? `${facts.missing.length} missing` : "complete"}
+            className="mt-6 scroll-mt-4"
+          >
+            <p className="rounded-md border border-line bg-ground p-3 text-xs leading-relaxed text-ink-2">
+              {facts.text}
+            </p>
+
+            {facts.missing.length > 0 && (
+              <ul className="rows mt-3">
+                {facts.missing.map((m) => (
+                  <li key={m.what} className="flex flex-wrap items-start justify-between gap-2 py-2">
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium">{m.what}</span>
+                      <span className="block text-xs text-ink-3">{m.why}</span>
+                    </span>
+                    {m.href !== "/manual#facts" && (
+                      <Link href={m.href} className="btn btn-sm shrink-0">Fill it in</Link>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {canManage && (
+              <form action={saveRolesAction} className="mt-4 grid gap-3 border-t border-line pt-4 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <h3 className="text-sm font-semibold">Who actually holds the roles the manual names</h3>
+                  <p className="mt-0.5 text-xs text-ink-3">
+                    A name and a role — &ldquo;Cory Simms, owner and pharmacist-in-charge&rdquo;. These replace the
+                    Human Resources Manager, the Chief Administrator and the Department Manager the inherited text
+                    keeps pointing at.
+                  </p>
+                </div>
+                <Field label="A complaint about conduct, harassment or violence goes to">
+                  <input name="role_complaints" defaultValue={roles.complaints} className="field" placeholder="Cory Simms, owner and pharmacist-in-charge" />
+                </Field>
+                <Field label="And when the complaint is about that person, to" hint="A policy with no route around the person complained of is one nobody can use.">
+                  <input name="role_complaints_alt" defaultValue={roles.complaintsAlt} className="field" />
+                </Field>
+                <Field label="Hiring paperwork and Form I-9 are held by">
+                  <input name="role_hiring" defaultValue={roles.hiring} className="field" />
+                </Field>
+                <Field label="A departure is decided and processed by">
+                  <input name="role_termination" defaultValue={roles.termination} className="field" />
+                </Field>
+                <Field label="Schedules on the DEA registration" hint="As printed on the certificate — for example 2, 2N, 3, 3N, 4, 5.">
+                  <input name="dea_schedules" defaultValue={s.dea_schedules} className="field" placeholder="2, 2N, 3, 3N, 4, 5" />
+                </Field>
+                <div className="flex items-end">
+                  <button className="btn btn-primary">Save these</button>
+                </div>
+              </form>
+            )}
+
+            {canManage && blocked > 0 && (
+              <div className="mt-4 rounded-md border border-accent bg-accent-soft p-3">
+                <p className="text-sm font-semibold text-accent">
+                  {blocked} finding{blocked === 1 ? "" : "s"} said only &ldquo;decide this yourself&rdquo;
+                </p>
+                <p className="mt-1 text-xs text-ink-2">
+                  Those are the ones the reviewer could not write because a fact was missing. Supplying the facts does
+                  not re-open them on its own — the sections were read, so they are not due again for a year. This puts
+                  exactly those sections back in the queue and closes the findings as superseded rather than dismissed.
+                </p>
+                <form action={rereadAction} className="mt-2">
+                  <SubmitButton className="btn btn-sm btn-primary" pendingLabel="Putting them back…">
+                    Read those sections again
+                  </SubmitButton>
+                </form>
+              </div>
             )}
           </Card>
 
