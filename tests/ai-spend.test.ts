@@ -1,6 +1,14 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { costOf, dollars, AUDIT_TOKENS, DRAFT_TOKENS, DEFAULT_RATE_IN, DEFAULT_RATE_OUT } from "../src/lib/ai-spend";
+import {
+  costOf,
+  dollars,
+  AUDIT_TOKENS,
+  DRAFT_TOKENS,
+  DEFAULT_RATE_IN,
+  DEFAULT_RATE_OUT,
+  DEFAULT_MONTHLY_CAP,
+} from "../src/lib/ai-spend";
 
 /**
  * What the buttons cost.
@@ -60,5 +68,28 @@ describe("writing an amount somebody reads", () => {
     // "$0.00" next to a button reads as free, which would be a lie.
     assert.equal(dollars(0.004), "under a cent");
     assert.equal(dollars(0), "$0.00");
+  });
+});
+
+/**
+ * The ceiling that applies when nobody has set one.
+ *
+ * "This is about to cost me a lot of money and I'm not at work to stop it." No limit at all is the
+ * wrong default for software that spends the owner's money on a computer he is not sitting at —
+ * and it is the default you get by doing nothing, which is what everybody does.
+ */
+describe("the default ceiling", () => {
+  test("is several times any legitimate month", () => {
+    // A hundred and fifty sections read once a year is about nine dollars. The default has to be
+    // clear of that by enough that it never fires on real work.
+    const wholeManual = costOf(150 * AUDIT_TOKENS.in, 150 * AUDIT_TOKENS.out, opus);
+    assert.ok(DEFAULT_MONTHLY_CAP > wholeManual * 3, `${DEFAULT_MONTHLY_CAP} is not clear of ${wholeManual}`);
+  });
+
+  test("and low enough that a runaway is caught in a day, not a quarter", () => {
+    // The failure that prompted it: a section that cannot be read, retried every half hour for
+    // ever. Two calls an attempt, forty-eight attempts a day.
+    const runawayPerDay = costOf(2 * 48 * AUDIT_TOKENS.in, 2 * 48 * AUDIT_TOKENS.out, opus);
+    assert.ok(DEFAULT_MONTHLY_CAP < runawayPerDay * 14, `${DEFAULT_MONTHLY_CAP} would take too long to bite`);
   });
 });

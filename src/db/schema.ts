@@ -585,6 +585,16 @@ export const manualSections = sqliteTable(
      */
     auditFailedOn: text("audit_failed_on"),
     auditError: text("audit_error"),
+    /**
+     * How many times reading this section has failed.
+     *
+     * Because a section that fails stays due, and a duty that is always due is retried for ever.
+     * Once everything else has been read, the only sections left are the ones that cannot be, and
+     * the half-hourly beat would retry them every half hour indefinitely — each attempt costing a
+     * model call, on the pharmacy's own account, with nobody at the computer. Three strikes and it
+     * is parked: still due, still reported, but not retried on its own again until somebody asks.
+     */
+    auditFailCount: integer("audit_fail_count").notNull().default(0),
     createdAt: text("created_at").notNull().default(now()),
     updatedAt: text("updated_at").notNull().default(now()),
   },

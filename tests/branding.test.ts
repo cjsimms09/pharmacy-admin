@@ -73,6 +73,7 @@ describe("the printed manual's identity", () => {
       id: "s1", sourceKey: null, source: "pharmacy", title: "T", level: 1, position: 1, body: "x",
       reviewedOn: null, reviewedBy: null, retiredOn: null, managedBy: null, updatedBy: null,
       auditedOn: null, auditFailedOn: null, auditError: null,
+  auditFailCount: 0,
       createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", ...over,
     }) as Section;
 

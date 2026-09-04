@@ -28,6 +28,7 @@ import {
   auditProgress,
   auditFailures,
   rereadBlockedSections,
+  retryParked,
   blockedOnFacts,
   findingsForOthers,
   openFindings,
@@ -617,6 +618,39 @@ export default async function ManualPage({
     );
   }
 
+  /** Stops, or restarts, the reading that happens on its own. The off switch, which had none. */
+  async function setAutoAction(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const on = String(fd.get("auto") ?? "") === "yes";
+    await setSetting("manual_audit_auto", on ? "yes" : "no");
+    await audit({ action: "manual.audit.auto", userId: u.id, userName: u.name, details: on ? "on" : "off" });
+    revalidatePath("/manual");
+    redirect(
+      "/manual?ok=" +
+        encodeURIComponent(
+          on
+            ? "The manual will be read a few sections at a time while nobody is using the site."
+            : "Stopped. Nothing will be read on its own — the button still works when you want it to.",
+        ),
+    );
+  }
+
+  /** Tries again the sections that stopped being retried after three failures. */
+  async function retryParkedAction() {
+    "use server";
+    const u = await requireManager();
+    const n = await retryParked();
+    await audit({ action: "manual.audit.retry", userId: u.id, userName: u.name, details: `${n}` });
+    revalidatePath("/manual");
+    redirect(
+      "/manual?ok=" +
+        encodeURIComponent(
+          n === 0 ? "Nothing was parked." : `${n} section${n === 1 ? "" : "s"} will be tried again on the next pass.`,
+        ),
+    );
+  }
+
   async function putRightAction() {
     "use server";
     const u = await requireManager();
@@ -864,6 +898,25 @@ export default async function ManualPage({
                 </>
               )}
               {audit_.lastResult && <p>Last pass: {audit_.lastResult}</p>}
+
+              {/*
+                The off switch, which did not exist.
+                
+                Reading the manual costs money on the pharmacy's own account and happens while
+                nobody is at the computer. Whether that runs at all was a setting with no screen —
+                so the honest position was that it could not be stopped except by pulling the API
+                key out, from inside the pharmacy.
+              */}
+              {canManage && (
+                <form action={setAutoAction} className="pt-1">
+                  <input type="hidden" name="auto" value={audit_.automatic ? "no" : "yes"} />
+                  <button className="text-xs text-ink-3 underline hover:text-ink">
+                    {audit_.automatic
+                      ? "Stop reading the manual on its own"
+                      : "Reading on its own is switched off — turn it back on"}
+                  </button>
+                </form>
+              )}
             </div>
 
             {/*
@@ -895,6 +948,18 @@ export default async function ManualPage({
                   read in one pass is one to split into smaller sections, which is worth doing anyway: nobody reads a
                   four-thousand-word policy either.
                 </p>
+                {stuck.some((f) => f.parked) && canManage && (
+                  <div className="mt-2 border-t border-warn/40 pt-2">
+                    <p className="text-xs text-ink-2">
+                      {stuck.filter((f) => f.parked).length} of these failed three times and are no longer tried on
+                      their own. They are still due and still listed — parking only stops the site retrying them every
+                      half hour for ever, which would spend money on a section that cannot be read.
+                    </p>
+                    <form action={retryParkedAction} className="mt-1.5">
+                      <button className="btn btn-sm">Try them again</button>
+                    </form>
+                  </div>
+                )}
               </div>
             )}
           </Card>

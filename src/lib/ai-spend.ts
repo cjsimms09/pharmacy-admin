@@ -62,12 +62,31 @@ export const dollars = (n: number): string =>
  * invoice reader, the CQI drafting and anything added later, rather than the one screen somebody
  * remembered to guard. Blank means no ceiling.
  */
-export async function monthlyCap(): Promise<{ cap: number | null; spent: number; left: number; over: boolean }> {
+/**
+ * The ceiling that applies when nobody has set one.
+ *
+ * Reading a hundred and fifty sections once a year costs about nine dollars, so this is several
+ * times any legitimate month. It exists because the alternative default is no limit at all, and
+ * "no limit" is the wrong default for software that spends the owner's money on a computer he is
+ * not sitting at. Somebody who wants more can say so; nobody has to say anything to be protected.
+ */
+export const DEFAULT_MONTHLY_CAP = 50;
+
+export async function monthlyCap(): Promise<{ cap: number | null; spent: number; left: number; over: boolean; isDefault: boolean }> {
   const s = await getSettings();
-  const raw = Number((s.ai_monthly_cap ?? "").trim());
-  const cap = Number.isFinite(raw) && raw > 0 ? raw : null;
+  const typed = (s.ai_monthly_cap ?? "").trim();
+  const raw = Number(typed);
+  // An explicit 0 means "no ceiling" for somebody who has decided that deliberately.
+  const cap = typed === "" ? DEFAULT_MONTHLY_CAP : Number.isFinite(raw) && raw > 0 ? raw : null;
+  const isDefault = typed === "";
   const spent = (await spend(31)).cost;
-  return { cap, spent, left: cap === null ? Infinity : Math.max(0, cap - spent), over: cap !== null && spent >= cap };
+  return {
+    cap,
+    spent,
+    left: cap === null ? Infinity : Math.max(0, cap - spent),
+    over: cap !== null && spent >= cap,
+    isDefault,
+  };
 }
 
 export type Spend = {

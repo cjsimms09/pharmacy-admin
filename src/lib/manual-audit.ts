@@ -31,6 +31,21 @@ import { allSections, saveSection } from "./manual-store";
 /** A section not read against the requirements within this many days is due again. */
 export const AUDIT_INTERVAL_DAYS = 365;
 
+/**
+ * How many times a section may fail before it stops being retried on its own.
+ *
+ * A section that fails stays due, and a thing that is always due is retried for ever. Once
+ * everything else has been read, the only sections left are the ones that cannot be, and the
+ * half-hourly beat would retry them every half hour indefinitely — a model call each time, on the
+ * pharmacy's own account, with nobody at the computer to notice. Three attempts is enough to ride
+ * out a bad afternoon at the API and few enough that a genuinely unreadable section costs pennies
+ * rather than running until somebody looks at a bill.
+ *
+ * Parked is not resolved. It is still due, still counted, still named on the page with its reason.
+ * What changes is that a person has to ask for it again.
+ */
+export const MAX_AUDIT_ATTEMPTS = 3;
+
 export type Finding = typeof schema.manualFindings.$inferSelect;
 
 export type AuditProgress = {
@@ -108,23 +123,34 @@ export function isAuditDue(auditedOn: string | null | undefined, today: string):
  * attempt is not a read — the section is still due — but it is an attempt, and something tried an
  * hour ago should go behind something never tried at all.
  */
-async function due(limit: number) {
+async function due(limit: number, opts: { includeParked?: boolean } = {}) {
   const rows = await auditable();
   const today = todayIso();
   const lastTried = (r: { auditedOn: string | null; auditFailedOn: string | null }) =>
     [r.auditedOn ?? "", r.auditFailedOn ?? ""].sort().at(-1) ?? "";
   return rows
     .filter((r) => isAuditDue(r.auditedOn, today))
+    // Parked sections are still due; they are simply not tried again without being asked for.
+    .filter((r) => (opts.includeParked ? true : (r.auditFailCount ?? 0) < MAX_AUDIT_ATTEMPTS))
     .sort((a, b) => lastTried(a).localeCompare(lastTried(b)))
     .slice(0, limit);
 }
 
 /** Sections that cannot be read, with the reason, so they can be dealt with rather than retried. */
-export async function auditFailures(): Promise<{ id: string; title: string; when: string; why: string }[]> {
+export async function auditFailures(): Promise<
+  { id: string; title: string; when: string; why: string; attempts: number; parked: boolean }[]
+> {
   const rows = await auditable();
   return rows
     .filter((r) => r.auditFailedOn && isAuditDue(r.auditedOn, todayIso()))
-    .map((r) => ({ id: r.id, title: r.title, when: r.auditFailedOn!, why: r.auditError ?? "No reason was recorded." }))
+    .map((r) => ({
+      id: r.id,
+      title: r.title,
+      when: r.auditFailedOn!,
+      why: r.auditError ?? "No reason was recorded.",
+      attempts: r.auditFailCount ?? 0,
+      parked: (r.auditFailCount ?? 0) >= MAX_AUDIT_ATTEMPTS,
+    }))
     .sort((a, b) => b.when.localeCompare(a.when));
 }
 
@@ -193,7 +219,7 @@ export async function runManualAudit(
           await saveSection(sec.id, { body: appendixReference(form.name) }, { name: "Annual audit" });
           await db
             .update(schema.manualSections)
-            .set({ auditedOn: todayIso(), auditFailedOn: null, auditError: null })
+            .set({ auditedOn: todayIso(), auditFailedOn: null, auditError: null, auditFailCount: 0 })
             .where(eq(schema.manualSections.id, sec.id));
           out.audited++;
           continue;
@@ -246,10 +272,20 @@ export async function runManualAudit(
        * first every time and consumed every batch. The pass reported "0 sections read" while a
        * hundred and eighteen others were never reached.
        */
+      const attempts = (sec.auditFailCount ?? 0) + 1;
       await db
         .update(schema.manualSections)
-        .set({ auditFailedOn: new Date().toISOString(), auditError: why.slice(0, 500) })
+        .set({
+          auditFailedOn: new Date().toISOString(),
+          auditError: why.slice(0, 500),
+          auditFailCount: attempts,
+        })
         .where(eq(schema.manualSections.id, sec.id));
+      if (attempts >= MAX_AUDIT_ATTEMPTS) {
+        out.problems.push(
+          `“${sec.title}” has now failed ${attempts} times and will not be tried again on its own. It is still due and still listed; ask for it and it will be tried again.`,
+        );
+      }
     }
   }
 
@@ -613,4 +649,20 @@ export async function rereadBlockedSections(user: { name: string }): Promise<{ s
 /** How many findings are open only because a fact about the pharmacy was missing. */
 export async function blockedOnFacts(): Promise<number> {
   return (await openFindings()).filter((f) => !f.suggestedBody.trim()).length;
+}
+
+/**
+ * Unparks the sections that stopped being retried, when somebody asks for them.
+ *
+ * Parking is a cost control, not a verdict. Whatever made a section unreadable may have been a bad
+ * afternoon at the API, or may have been fixed by splitting the section in two — but neither is
+ * something the site can know, so it waits to be told.
+ */
+export async function retryParked(): Promise<number> {
+  const rows = await auditable();
+  const parked = rows.filter((r) => (r.auditFailCount ?? 0) >= MAX_AUDIT_ATTEMPTS);
+  for (const r of parked) {
+    await db.update(schema.manualSections).set({ auditFailCount: 0 }).where(eq(schema.manualSections.id, r.id));
+  }
+  return parked.length;
 }

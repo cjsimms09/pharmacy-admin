@@ -26,6 +26,7 @@ const row = (id: string, title: string, body: string, level = 2) => ({
   auditedOn: null,
   auditFailedOn: null,
   auditError: null,
+  auditFailCount: 0,
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
 });
