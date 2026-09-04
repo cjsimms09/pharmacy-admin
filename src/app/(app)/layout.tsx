@@ -4,11 +4,13 @@ import { requireUser, logout } from "@/lib/auth";
 import { reimbursementEnabled } from "@/lib/features";
 import { noteRequest } from "@/lib/activity";
 import { Nav } from "@/components/nav";
+import { logo } from "@/lib/branding";
+import { getSettings } from "@/lib/settings";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   noteRequest();
   const user = await requireUser();
-  const showTools = await reimbursementEnabled();
+  const [showTools, mark, s] = await Promise.all([reimbursementEnabled(), logo(), getSettings()]);
 
   async function signOut() {
     "use server";
@@ -25,8 +27,23 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       */}
       <aside className="no-print border-b border-line bg-surface md:sticky md:top-0 md:flex md:h-screen md:flex-col md:border-b-0 md:border-r">
         <div className="shrink-0 px-4 py-4">
-          <Link href="/" className="text-base font-bold tracking-tight">Pharmacy Admin</Link>
-          <div className="mt-0.5 text-xs text-ink-3">Compliance desk</div>
+          {/*
+            The pharmacy's own mark, where the product name used to be alone.
+
+            This is one pharmacy's system, on one pharmacy's computer, and the person using it does
+            not need reminding what software they are looking at. Their own name at the top is what
+            makes it read as theirs — and it is the same image that goes on everything the site
+            prints, so the screen and the paper agree.
+          */}
+          <Link href="/" className="block">
+            {mark ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={mark.url} alt={s.pharmacy_name || "Pharmacy Admin"} className="max-h-11 w-auto max-w-full object-contain" />
+            ) : (
+              <span className="text-base font-bold tracking-tight">Pharmacy Admin</span>
+            )}
+          </Link>
+          <div className="mt-1 text-xs text-ink-3">{mark ? s.pharmacy_name || "Compliance desk" : "Compliance desk"}</div>
           {/*
             On every screen, because the moment it is needed is not a moment for navigating to it.
 

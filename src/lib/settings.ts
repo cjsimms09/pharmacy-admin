@@ -27,6 +27,13 @@ export const SETTING_KEYS = [
   "pso_member", // "yes" | "no"
   "pso_name",
   "pso_expires_on",
+  /**
+   * The pharmacy's logo, as a document id.
+   *
+   * Held as a reference rather than a path so it travels with the backup like any other document
+   * and cannot end up pointing at a file that was never copied.
+   */
+  "logo_document_id",
   "ai_model",
   /**
    * What a million tokens costs, in dollars, in and out.

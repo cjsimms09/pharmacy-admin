@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { PrintButton } from "./print-button";
+import { logo } from "@/lib/branding";
 
 /**
  * Page frame that mirrors the Kansas Board of Pharmacy form header so printed output
  * matches the Board's own forms. Use the browser's Print (Ctrl/Cmd+P) → Save as PDF.
  */
-export function PrintFrame({
+export async function PrintFrame({
   formTitle,
   formNumber,
   revised,
@@ -30,6 +31,16 @@ export function PrintFrame({
    */
   ownDocument?: boolean;
 }) {
+  /*
+   * The pharmacy's mark goes on the pharmacy's documents and nowhere else.
+   *
+   * A C-550 or a C-900 is the Board's form reproduced faithfully; adding a logo to one would be
+   * altering a state document, and handing an inspector something that looks official and is not
+   * is a worse problem than a plain page. The flag that already distinguishes them decides this
+   * too, so it cannot be got wrong one page at a time.
+   */
+  const mark = ownDocument ? await logo() : null;
+
   return (
     <div className="mx-auto max-w-[8.5in] bg-white text-black print:max-w-none">
       <div className="no-print mb-4 rounded-md border border-line bg-ground px-3 py-2 text-sm">
@@ -45,11 +56,19 @@ export function PrintFrame({
         </p>
       </div>
       {ownDocument ? (
-        <header className="print-block mb-3 border-b-2 border-black pb-2">
-          <div className="text-lg font-bold tracking-tight">{formTitle}</div>
-          <div className="text-[11px]">
-            A record produced by this pharmacy. Not a Kansas Board of Pharmacy form.
+        <header className="print-block mb-3 flex items-end justify-between gap-4 border-b-2 border-black pb-2">
+          <div className="min-w-0">
+            <div className="text-lg font-bold tracking-tight">{formTitle}</div>
+            <div className="text-[11px]">
+              A record produced by this pharmacy. Not a Kansas Board of Pharmacy form.
+            </div>
           </div>
+          {mark && (
+            // Height-constrained rather than width-constrained, so a wide logo and a square one
+            // both sit on the same baseline as the title instead of one of them dwarfing it.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={mark.url} alt="" className="max-h-14 w-auto max-w-[2.4in] shrink-0 object-contain" />
+          )}
         </header>
       ) : (
       <header className="print-block mb-3 flex items-stretch border border-black">

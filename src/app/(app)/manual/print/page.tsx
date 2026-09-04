@@ -6,6 +6,8 @@ import { getSettings } from "@/lib/settings";
 import { allSections, outline } from "@/lib/manual-store";
 import { fmtLong, todayIso } from "@/lib/dates";
 import { PrintButton } from "@/components/print-button";
+import { logo } from "@/lib/branding";
+import { revisionOf } from "@/lib/manual-version";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Print the manual" };
@@ -24,11 +26,13 @@ export const metadata = { title: "Print the manual" };
  */
 export default async function ManualPrintPage() {
   await requireUser();
-  const [sections, s, people] = await Promise.all([
+  const [sections, s, people, mark] = await Promise.all([
     allSections(),
     getSettings(),
     db.query.people.findMany({ where: eq(schema.people.active, true) }),
+    logo(),
   ]);
+  const revision = revisionOf(sections);
   const pic = people.find((p) => p.isPic);
   const pharmacy = s.pharmacy_name || "This pharmacy";
 
@@ -58,11 +62,27 @@ export default async function ManualPrintPage() {
         </p>
       </div>
 
-      {/* Cover */}
-      <section className="print-block flex min-h-[7in] flex-col justify-center border-b-2 border-black text-center">
-        <div className="text-xs uppercase tracking-[0.2em] text-neutral-600">Policy and procedure manual</div>
-        <h1 className="mt-3 text-3xl font-bold">{pharmacy}</h1>
-        <div className="mt-2 text-sm">
+      {/*
+        The cover.
+
+        A title page is the whole of the first impression a manual makes, and this one was a line
+        of small capitals and a heading. It now carries the pharmacy's own mark, a rule under it,
+        and the identifying facts an inspector opens a manual to find — the registration it is
+        written for and the pharmacist accountable for it — rather than leaving them to be hunted
+        for inside.
+      */}
+      <section className="print-block flex min-h-[9in] flex-col justify-center border-b-2 border-black text-center">
+        {mark && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={mark.url} alt="" className="mx-auto mb-8 max-h-[1.6in] w-auto max-w-[4in] object-contain" />
+        )}
+        <div className="mx-auto h-px w-24 bg-black" />
+        <h1 className="mt-6 text-[2.1rem] font-bold leading-tight tracking-tight">{pharmacy}</h1>
+        <div className="mt-3 text-[13px] uppercase tracking-[0.28em] text-neutral-700">
+          Policy and Procedure Manual
+        </div>
+        <div className="mx-auto mt-6 h-px w-24 bg-black" />
+        <div className="mt-6 text-sm">
           {s.pharmacy_address}
           {s.pharmacy_address ? <br /> : null}
           {[s.pharmacy_city, s.pharmacy_state, s.pharmacy_zip].filter(Boolean).join(", ")}
@@ -93,11 +113,44 @@ export default async function ManualPrintPage() {
               <dd>{s.pharmacy_npi}</dd>
             </>
           )}
+          <dt className="text-neutral-600">Revision</dt>
+          <dd className="font-mono">{revision.fingerprint}</dd>
+          <dt className="text-neutral-600">Sections</dt>
+          <dd>{revision.sections}</dd>
           <dt className="text-neutral-600">Printed</dt>
           <dd>{fmtLong(todayIso())}</dd>
           <dt className="text-neutral-600">Last section reviewed</dt>
           <dd>{reviewed ? fmtLong(reviewed) : "not recorded"}</dd>
         </dl>
+
+        {/*
+          The approval block.
+
+          A policy manual with nobody's name on it is a document nobody adopted. This is the line
+          an inspector looks for and the one a court would: who is accountable for it, and from
+          when. The revision is printed beside it so the signature names the version it approves —
+          the same fingerprint the staff acknowledgements are recorded against.
+        */}
+        <div className="mx-auto mt-10 w-[5in] border border-black p-3 text-left text-[10px]">
+          <div className="text-[11px] font-bold">Adopted for this pharmacy</div>
+          <p className="mt-1 leading-relaxed">
+            This manual, revision <span className="font-mono">{revision.fingerprint}</span>, is adopted as the policy
+            and procedure manual of {pharmacy}. Staff acknowledge it by revision, and the acknowledgements are held in
+            the pharmacy&rsquo;s compliance system.
+          </p>
+          <div className="mt-6 grid grid-cols-2 gap-x-8">
+            <div>
+              <div className="border-b border-black" />
+              <div className="pt-1">
+                {pic ? `${pic.firstName} ${pic.lastName}, ` : ""}pharmacist-in-charge
+              </div>
+            </div>
+            <div>
+              <div className="border-b border-black" />
+              <div className="pt-1">Date</div>
+            </div>
+          </div>
+        </div>
         <p className="mx-auto mt-8 max-w-[5in] text-[10px] leading-relaxed text-neutral-700">
           This manual is maintained in the pharmacy&rsquo;s compliance system and printed from it. The sections in
           Appendix A are generated from that system, so they describe the procedures the pharmacy actually performs and
@@ -105,14 +158,38 @@ export default async function ManualPrintPage() {
         </p>
       </section>
 
+      {/*
+        A running header, on every printed page after the cover.
+
+        Fixed positioning is how a browser repeats an element on each sheet. It matters more here
+        than on a one-page form: a hundred and forty loose pages with nothing on them but body text
+        cannot be put back in order, and a page that comes adrift of the binder cannot be identified
+        at all. The revision is on it, so two printings of a living document can be told apart.
+      */}
+      <div className="running-header hidden print:block">
+        <div className="flex items-baseline justify-between border-b border-neutral-400 pb-1 text-[8px] text-neutral-600">
+          <span className="font-semibold">{pharmacy} — Policy and Procedure Manual</span>
+          <span className="font-mono">rev {revision.fingerprint}</span>
+        </div>
+      </div>
+
       {/* Contents */}
       <section className="print-page-break mt-8">
-        <h2 className="print-heading border-b border-black pb-1 text-lg font-bold">Contents</h2>
-        <ul className="mt-2 text-[11px] leading-relaxed">
+        <h2 className="print-heading border-b-2 border-black pb-1 text-lg font-bold tracking-tight">Contents</h2>
+        <ul className="mt-3 text-[11px] leading-relaxed">
           {numbered.map((x) => (
-            <li key={x.id} style={{ paddingLeft: `${x.depth * 16}px` }} className={x.depth === 0 ? "mt-1 font-semibold" : ""}>
+            <li
+              key={x.id}
+              style={{ paddingLeft: `${x.depth * 16}px` }}
+              className={x.depth === 0 ? "mt-2.5 border-b border-neutral-300 pb-0.5 font-semibold" : "text-neutral-800"}
+            >
               <span className="inline-block w-14 text-neutral-600">{x.number}</span>
               {x.title}
+              {x.depth === 0 && x.managedBy && (
+                <span className="ml-2 text-[9px] font-normal italic text-neutral-600">
+                  maintained by {x.managedBy}
+                </span>
+              )}
             </li>
           ))}
         </ul>
@@ -123,21 +200,32 @@ export default async function ManualPrintPage() {
         {numbered.map((x) => (
           <article key={x.id} className="print-prose">
             {x.depth === 0 ? (
-              <h2 className="print-heading mt-6 border-b border-black pb-1 text-base font-bold">
-                {x.number}. {x.title}
+              // A chapter starts a sheet of its own. Running two chapters together down one page
+              // is what makes a manual feel like a printout rather than a document.
+              <header className="print-page-break pt-2">
+                <div className="text-[9px] uppercase tracking-[0.22em] text-neutral-600">Chapter {x.number}</div>
+                <h2 className="print-heading mt-1 border-b-2 border-black pb-1.5 text-xl font-bold tracking-tight">
+                  {x.title}
+                </h2>
                 {x.managedBy && (
-                  <span className="ml-2 text-[10px] font-normal italic">
-                    Maintained by {x.managedBy}. Reproduced here; not written by the pharmacy.
-                  </span>
+                  <p className="mt-1.5 border-l-2 border-neutral-400 pl-2 text-[10px] italic text-neutral-700">
+                    Maintained by {x.managedBy}. Reproduced here because this pharmacy is bound by it; not written by
+                    the pharmacy, and not amended by it.
+                  </p>
                 )}
-              </h2>
+              </header>
             ) : (
-              <h3 className={`print-heading mt-4 font-semibold ${x.depth === 1 ? "text-sm" : "text-[12px]"}`}>
-                {x.number} {x.title}
+              <h3
+                className={`print-heading mt-5 border-b border-neutral-300 pb-0.5 font-semibold ${
+                  x.depth === 1 ? "text-[13px]" : "text-[11.5px] text-neutral-800"
+                }`}
+              >
+                <span className="mr-2 text-neutral-600">{x.number}</span>
+                {x.title}
               </h3>
             )}
             {x.body.trim() ? (
-              <div className="mt-1 whitespace-pre-wrap text-[11px] leading-relaxed">{x.body.trim()}</div>
+              <div className="mt-1.5 whitespace-pre-wrap text-[11px] leading-[1.55]">{x.body.trim()}</div>
             ) : x.hasChildren ? null : (
               <div className="mt-1 text-[11px] italic text-neutral-500">[This section has no text. Nothing is claimed under this heading.]</div>
             )}
@@ -145,8 +233,14 @@ export default async function ManualPrintPage() {
         ))}
       </section>
 
-      <footer className="mt-10 border-t border-black pt-2 text-[10px] text-neutral-700">
-        {pharmacy} — policy and procedure manual. Printed {fmtLong(todayIso())}.
+      <footer className="mt-10 border-t-2 border-black pt-2 text-[10px] text-neutral-700">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <span>
+            <b>{pharmacy}</b> — policy and procedure manual, revision{" "}
+            <span className="font-mono">{revision.fingerprint}</span>.
+          </span>
+          <span>Printed {fmtLong(todayIso())}. End of manual.</span>
+        </div>
       </footer>
     </div>
   );

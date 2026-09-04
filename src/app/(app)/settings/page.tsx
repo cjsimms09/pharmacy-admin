@@ -8,6 +8,7 @@ import { getSettings, setSetting, SETTING_KEYS, type SettingKey } from "@/lib/se
 import { audit } from "@/lib/audit";
 import { apiKeyHint, clearApiKey, saveApiKey, testConnection, DEFAULT_MODEL } from "@/lib/ai";
 import { spend, rates, dollars, monthlyCap, DEFAULT_RATE_IN, DEFAULT_RATE_OUT } from "@/lib/ai-spend";
+import { logo, saveLogo, clearLogo } from "@/lib/branding";
 import { fmt } from "@/lib/dates";
 import { Hub } from "@/components/hub";
 import { PageHeader, Notice, Field } from "@/components/ui";
@@ -19,7 +20,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const { saved, error, ai } = await searchParams;
   const s = await getSettings();
   const keyHint = await apiKeyHint();
-  const [used, rate, cap] = await Promise.all([spend(90), rates(), monthlyCap()]);
+  const [used, rate, cap, mark] = await Promise.all([spend(90), rates(), monthlyCap(), logo()]);
   const users = await db.query.users.findMany({ orderBy: (u, { asc }) => [asc(u.name)] });
   const people = await db.query.people.findMany({ orderBy: (p, { asc }) => [asc(p.lastName)] });
 
@@ -91,6 +92,29 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     redirect("/settings?saved=1");
   }
 
+  async function uploadLogo(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    try {
+      await saveLogo(fd.get("logo") as File, u);
+      await audit({ action: "settings.logo", userId: u.id, userName: u.name });
+      revalidatePath("/", "layout");
+      redirect("/settings?saved=1");
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/settings?error=" + encodeURIComponent(e instanceof Error ? e.message : "That image could not be used."));
+    }
+  }
+
+  async function removeLogo() {
+    "use server";
+    const u = await requireManager();
+    await clearLogo();
+    await audit({ action: "settings.logo.remove", userId: u.id, userName: u.name });
+    revalidatePath("/", "layout");
+    redirect("/settings?saved=1");
+  }
+
   return (
     <>
       {/*
@@ -157,6 +181,48 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <Field label="PSO membership expires"><input name="pso_expires_on" type="date" className="field" defaultValue={s.pso_expires_on} /></Field>
         <div className="sm:col-span-2"><button className="btn btn-primary">Save</button></div>
       </form>
+
+      {/*
+        The pharmacy's own mark.
+
+        Everything this system produces goes to somebody: an invoice to an accounts department, a
+        training certificate to a member of staff, a policy manual to an inspector. Every one of
+        them arrived looking like a printout from a database, and a printout is read as a draft.
+        A letterhead is not decoration — it is what makes a page read as a record the pharmacy
+        keeps rather than something typed up this morning.
+      */}
+      <section className="card mb-6 max-w-3xl">
+        <h2 className="mb-1 font-semibold">Logo</h2>
+        <p className="mb-3 text-xs text-ink-3">
+          Used on the documents this pharmacy produces — the printed policy manual, its own forms and records, the
+          training certificates — and at the top of this site. Deliberately <b>not</b> put on the Kansas Board&rsquo;s
+          own forms: a C-550 or a C-900 is the Board&rsquo;s document reproduced faithfully, and adding a logo to one
+          would be altering a state form.
+        </p>
+        {mark ? (
+          <div className="mb-3 flex flex-wrap items-center gap-4">
+            <span className="inline-flex h-20 items-center rounded-md border border-line bg-white px-4">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={mark.url} alt="The pharmacy logo" className="max-h-14 w-auto max-w-[3in] object-contain" />
+            </span>
+            <span className="text-xs text-ink-3">{mark.fileName}</span>
+            <form action={removeLogo}>
+              <button className="btn btn-sm">Remove it</button>
+            </form>
+          </div>
+        ) : (
+          <p className="mb-3 text-sm text-ink-3">No logo on file, so documents print with the pharmacy name alone.</p>
+        )}
+        <form action={uploadLogo} className="flex flex-wrap items-end gap-3" encType="multipart/form-data">
+          <Field
+            label={mark ? "Replace it" : "Upload one"}
+            hint="PNG, JPG, SVG or WebP, under 3 MB. A wide logo with a transparent or white background sits best on a letterhead."
+          >
+            <input type="file" name="logo" accept="image/png,image/jpeg,image/svg+xml,image/webp" className="field" required />
+          </Field>
+          <button className="btn btn-primary">Save</button>
+        </form>
+      </section>
 
       <section className="card mb-6 max-w-3xl">
         <h2 className="mb-1 font-semibold">Claude</h2>

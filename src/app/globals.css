@@ -114,6 +114,21 @@ body { @apply bg-ground text-ink antialiased; }
     never sits alone at the foot of one, and a table that does run over repeats its header so the
     second page is still readable on its own.
   */
+  /*
+    A header repeated on every sheet.
+
+    Fixed positioning is the only way a browser will repeat an element across printed pages. The
+    page's top padding makes room for it — without that it overprints the first lines of the body
+    on every sheet, which looks worse than having no header at all.
+  */
+  .running-header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+  }
+  body:has(.running-header) { padding-top: 0.34in; }
+
   .print-block,
   .print-block * {
     break-inside: avoid;
