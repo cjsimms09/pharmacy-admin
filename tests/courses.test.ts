@@ -101,6 +101,29 @@ describe("courses", () => {
       assert.ok(STATEMENTS[type], `${type} has a course but nothing to sign`);
     }
   });
+
+  /*
+   * A statement that says only "I did the training" is worth nothing.
+   *
+   * The certificate quotes this wording back, so it is the whole of what the employee is on
+   * record as having understood. Hazard communication shipped attesting to knowledge alone — where
+   * the safety data sheets are, how to read a label — while the course itself spends a section on
+   * spills, splashes and the duty to report every exposure, and 29 CFR 1910.1200(h)(3)(iii)
+   * requires exactly that. The certificate therefore claimed less than the training delivered,
+   * which is a strange document to hand an inspector. Checking only that a statement exists is
+   * what let it through.
+   */
+  test("every statement carries an obligation, not just a claim to have attended", () => {
+    for (const [type, statement] of Object.entries(STATEMENTS) as [TrainingType, string][]) {
+      assert.match(statement, /I (confirm|acknowledge)/, `${type} does not say what was completed`);
+      assert.match(statement, /I understand/, `${type} attests to attendance without understanding`);
+      assert.match(
+        statement,
+        /report|what to do|expected|I must|my duty|obligation|has to be/,
+        `${type} places no duty on the person signing it — it is a receipt, not an attestation`,
+      );
+    }
+  });
 });
 
 describe("the packet", () => {

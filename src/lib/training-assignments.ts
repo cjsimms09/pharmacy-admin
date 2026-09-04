@@ -48,7 +48,9 @@ export const STATEMENTS: Partial<Record<TrainingType, string>> = {
     "risks in this pharmacy, the precautions required of me, and exactly what to do and who to tell if I am exposed.",
   osha_hazard_communication:
     "I confirm that I have completed the hazard communication training assigned to me. I know which hazardous " +
-    "chemicals are kept here, where the safety data sheets are, and how to read a label.",
+    "chemicals are kept here, where the safety data sheets are, and how to read a label. I understand that a " +
+    "container I fill and leave behind has to be labelled, what to do if something spills or splashes on me, and " +
+    "that I am to report every exposure however minor it seems.",
   controlled_substance_diversion:
     "I confirm that I have completed the controlled substance diversion awareness training assigned to me. I " +
     "understand the signs of diversion, my duty to report anything I suspect, and how to report it.",
