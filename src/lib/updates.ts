@@ -98,3 +98,41 @@ export function lastUpdateLog(): string | null {
     return null;
   }
 }
+
+/**
+ * Notices, once a day, that a newer version exists.
+ *
+ * Whether an update was waiting could only be discovered by opening Settings → Updates and
+ * pressing a button — so a fix shipped on Tuesday sat unnoticed on GitHub while the pharmacy went
+ * on hitting the bug it fixed and reporting it again. Software that repairs itself only when
+ * somebody goes looking for repairs is not repaired.
+ *
+ * Cached in settings rather than checked per request, because this shells out to git over the
+ * network and no page load should wait for that.
+ */
+export async function refreshUpdateCheck(): Promise<void> {
+  const { setSetting } = await import("./settings");
+  const r = await checkForUpdates();
+  await setSetting("updates_last_check", new Date().toISOString());
+  if (!r.ok) {
+    await setSetting("updates_check_error", r.error);
+    return;
+  }
+  await setSetting("updates_check_error", "");
+  await setSetting("updates_behind", String(r.behind));
+  await setSetting("updates_newest", r.changes[0]?.subject ?? "");
+}
+
+export type PendingUpdates = { behind: number; newest: string | null; checkedAt: string | null; error: string | null };
+
+/** What the last background check found. Reads settings only — never touches the network. */
+export async function pendingUpdates(): Promise<PendingUpdates> {
+  const { getSettings } = await import("./settings");
+  const s = await getSettings();
+  return {
+    behind: Number(s.updates_behind ?? "0") || 0,
+    newest: s.updates_newest?.trim() || null,
+    checkedAt: s.updates_last_check || null,
+    error: s.updates_check_error?.trim() || null,
+  };
+}

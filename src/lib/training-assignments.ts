@@ -204,8 +204,14 @@ export async function sendOutstanding(personIds?: string[]): Promise<SendResult>
         )
         .where(eq(schema.trainingAssignments.id, a.id));
     }
-    if (r.ok) out.emailed++;
-    else out.problems.push(`Could not email ${person.firstName}: ${r.error}`);
+    if (r.ok) {
+      out.emailed++;
+      // Delivered, but not intact. Silently dropping the course packet would leave the pharmacy
+      // believing it had emailed the training material when it had emailed a link to it.
+      if (r.degraded) out.problems.push(`${person.firstName}: ${r.degraded}`);
+    } else {
+      out.problems.push(`Could not email ${person.firstName}: ${r.error}`);
+    }
   }
   return out;
 }

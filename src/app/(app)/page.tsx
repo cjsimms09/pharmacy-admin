@@ -10,6 +10,7 @@ import { daysUntil, fmt, fmtLong, todayIso } from "@/lib/dates";
 import { PERSON_ROLE_LABEL } from "@/lib/labels";
 import { getSettings } from "@/lib/settings";
 import { mailHealth } from "@/lib/mail-health";
+import { pendingUpdates } from "@/lib/updates";
 import { Notice, Card, Figure, PageHeader } from "@/components/ui";
 
 // Live compliance status — never serve a cached copy after an action changes it.
@@ -76,7 +77,7 @@ const dueRow = (d: DueItem): Row => ({
 
 export default async function Dashboard({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
   const { ok, error } = await searchParams;
-  const [compliance, dated, matrix, cqi, cs, jobs, selfFindings, settings, mail] = await Promise.all([
+  const [compliance, dated, matrix, cqi, cs, jobs, selfFindings, settings, mail, updates] = await Promise.all([
     complianceSummary(),
     dueList({ horizonDays: 60 }),
     staffMatrix(),
@@ -86,6 +87,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     openFindings(),
     getSettings(),
     mailHealth(),
+    pendingUpdates(),
   ]);
 
   /*
@@ -214,6 +216,24 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
 
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
+
+      {/*
+        An update nobody knows about is an update nobody installs. This used to be discoverable
+        only by opening a settings sub-page and pressing a button, so repairs sat on GitHub while
+        the pharmacy went on hitting the bug they repaired and reporting it again.
+      */}
+      {updates.behind > 0 && (
+        <Notice kind="warn">
+          <b>
+            {updates.behind} update{updates.behind === 1 ? "" : "s"} {updates.behind === 1 ? "is" : "are"} waiting to be
+            installed.
+          </b>{" "}
+          {updates.newest && <>The newest is &ldquo;{updates.newest}&rdquo;. </>}
+          Nothing on this computer changes until you install{" "}
+          {updates.behind === 1 ? "it" : "them"}, so a fix made for you is not in front of you yet.{" "}
+          <Link href="/settings/updates" className="underline">Install now</Link>.
+        </Notice>
+      )}
 
       {/*
         Every "Send" on this page goes through the mail server, so its state belongs on this page

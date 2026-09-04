@@ -18,7 +18,10 @@ import { decryptText } from "./crypto";
  * which turns "it did not arrive" from a mystery into a line of text.
  */
 
-export type SendResult = { ok: true; via: string } | { ok: false; error: string; tried?: string[] };
+export type SendResult =
+  /** `degraded` is set when the message went, but not intact — the attachments had to be dropped. */
+  | { ok: true; via: string; degraded?: string }
+  | { ok: false; error: string; tried?: string[] };
 
 export async function canSend(): Promise<boolean> {
   const s = await getSettings();
@@ -136,6 +139,18 @@ export async function sendMail(
       ]
     : targets;
 
+  /**
+   * One pass over the candidate servers.
+   *
+   * Pulled out so it can be run a second time without attachments. A training email carries the
+   * course packets; a test email carries nothing — so "the test arrives and the training does not"
+   * points straight at the attachments, and plenty of mail providers and outbound virus filters
+   * will take a bare message and refuse the same message with files on it.
+   *
+   * The packets are worth having and are not worth losing the email over: the link and the reply
+   * code are what the person actually needs, and both are in the body.
+   */
+  const attempt = async (withAttachments: boolean) => {
   const tried: string[] = [];
   for (const t of ordered) {
     const label = `${t.host}:${t.port}`;
@@ -158,19 +173,38 @@ export async function sendMail(
         subject,
         text,
         html,
-        attachments: attachments.length ? attachments : undefined,
+        attachments: withAttachments && attachments.length ? attachments : undefined,
       });
       if (label !== remembered) await setSetting("mail_smtp_working", label);
-      await setSetting("mail_last_send_result", `${new Date().toISOString()} — sent to ${to} via ${label}`);
-      return { ok: true, via: label };
+      return { ok: true as const, via: label };
     } catch (e) {
       tried.push(`${label} → ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`);
     }
   }
+  return { ok: false as const, tried };
+  };
 
-  const error = `Could not send. Tried: ${tried.join("; ")}`;
+  const first = await attempt(true);
+  if (first.ok) {
+    await setSetting("mail_last_send_result", `${new Date().toISOString()} — sent to ${to} via ${first.via}`);
+    return { ok: true, via: first.via };
+  }
+
+  if (attachments.length > 0) {
+    const bare = await attempt(false);
+    if (bare.ok) {
+      const degraded =
+        `The message was accepted only after the ${attachments.length} attached file` +
+        `${attachments.length === 1 ? "" : "s"} were removed — the mail server or a virus filter is refusing ` +
+        `attachments. The link and the reply code were in the body, so the training can still be completed.`;
+      await setSetting("mail_last_send_result", `${new Date().toISOString()} — sent to ${to} via ${bare.via}, WITHOUT ATTACHMENTS. ${degraded}`);
+      return { ok: true, via: bare.via, degraded };
+    }
+  }
+
+  const error = `Could not send. Tried: ${first.tried.join("; ")}`;
   await setSetting("mail_last_send_result", `${new Date().toISOString()} — FAILED to ${to}. ${error}`);
-  return { ok: false, error, tried };
+  return { ok: false, error, tried: first.tried };
 }
 
 /**

@@ -157,6 +157,7 @@ export async function register() {
     await whenIdle("temperatures", tempTick);
     await whenIdle("cqi", cqiTick);
     await whenIdle("digest", digestTick);
+    await whenIdle("updates", updateTick);
   };
 
   /**
@@ -223,6 +224,26 @@ export async function register() {
     } catch {
       // A digest that cannot be built or sent must never stop the app. Settings → Email shows
       // the last result, and everything in it is on the screen regardless.
+    }
+  };
+
+  /**
+   * Notices once a day that a newer version is waiting.
+   *
+   * Not because updating is urgent, but because the alternative was that it was never noticed at
+   * all: the only way to find out was to open a settings sub-page and press a button, so fixes sat
+   * on GitHub while the pharmacy kept hitting the bugs they fixed.
+   */
+  const updateTick = async () => {
+    try {
+      const { getSettings } = await import("./lib/settings");
+      const s = await getSettings();
+      const last = s.updates_last_check ? Date.parse(s.updates_last_check) : 0;
+      if (Number.isFinite(last) && Date.now() - last < 20 * 60 * 60 * 1000) return;
+      const { refreshUpdateCheck } = await import("./lib/updates");
+      await refreshUpdateCheck();
+    } catch {
+      // Never allowed to stop the app. The outcome is recorded in settings either way.
     }
   };
 

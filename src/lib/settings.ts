@@ -58,6 +58,12 @@ export const SETTING_KEYS = [
   "backup_enabled", // "no" to switch off; anything else, including unset, means on
   "backup_keep", // how many archives to keep
   "backup_last_run",
+  // Checked on a background beat and cached, so the dashboard can say an update is waiting
+  // without every page load reaching out to GitHub.
+  "updates_last_check",
+  "updates_behind",
+  "updates_newest",
+  "updates_check_error",
   "backup_last_result",
   // The rehearsal: an archive already on disk, opened and restored to a scratch database, to prove
   // that what was written last month is still what comes back today.
