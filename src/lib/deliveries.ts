@@ -286,7 +286,24 @@ export const money = (cents: number) =>
 /** Who it is addressed to and what it says about being paid. */
 export async function invoiceParties() {
   const s = await getSettings();
+  /*
+   * The pharmacy's own address, on the invoice it raises.
+   *
+   * It was missing, and an invoice with no address on it looks like something somebody typed up
+   * rather than something a business issued. It matters practically too: this goes to an accounts
+   * department that pays several suppliers, and the address is how a query gets back to the right
+   * people without anybody having to ask who sent it.
+   */
+  const fromLines = [
+    (s.pharmacy_address ?? "").trim(),
+    [ (s.pharmacy_city ?? "").trim(), [(s.pharmacy_state ?? "").trim(), (s.pharmacy_zip ?? "").trim()].filter(Boolean).join(" ")]
+      .filter(Boolean)
+      .join(", "),
+    (s.pharmacy_phone ?? "").trim(),
+  ].filter(Boolean);
+
   return {
+    pharmacyLines: fromLines,
     driverName: (s.driver_name ?? "").trim() || "the driver",
     billToName: (s.driver_bill_to ?? "").trim() || "West Wichita Family Physicians, PA",
     sendTo: (s.driver_invoice_to ?? "").trim(),
