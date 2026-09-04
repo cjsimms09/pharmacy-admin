@@ -610,3 +610,41 @@ export async function monthsBySensor(): Promise<Map<string, string[]>> {
   for (const s of sensors) out.set(s.id, await availableMonths(s.id));
   return out;
 }
+
+/**
+ * Months that are over, have readings, and nobody has signed off.
+ *
+ * The readings file themselves; the sign-off cannot, and should not. A system that closed a month
+ * on its own would be manufacturing the one part of the record that is supposed to mean a person
+ * looked — which is exactly the part an inspector is asking about when they ask who reviewed it.
+ *
+ * But a duty that only a person can discharge still has to be put in front of that person. The
+ * page counted months signed off and coloured it green whatever the number was, so a January that
+ * closed unsigned looked identical to one that had been dealt with, and stayed that way until
+ * somebody happened to scroll the month list.
+ */
+export async function monthsAwaitingSignOff(
+  today = new Date().toISOString(),
+): Promise<{ sensorId: string; sensorName: string; periodKey: string; readings: number; unexplained: number }[]> {
+  const sensors = (await db.query.tempSensors.findMany()).filter((s) => s.tracked);
+  const current = periodOf(today);
+  const out: { sensorId: string; sensorName: string; periodKey: string; readings: number; unexplained: number }[] = [];
+
+  for (const sensor of sensors) {
+    for (const p of await availableMonths(sensor.id)) {
+      // The month in progress is not late; it is not finished.
+      if (p >= current) continue;
+      const m = await monthSummary(sensor.id, p);
+      if (!m || m.readings === 0 || m.reviewed) continue;
+      out.push({
+        sensorId: sensor.id,
+        sensorName: sensor.name,
+        periodKey: p,
+        readings: m.readings,
+        unexplained: m.allExplained ? 0 : m.excursions,
+      });
+    }
+  }
+  // Oldest first: the one that has been sitting longest is the one to do.
+  return out.sort((a, b) => a.periodKey.localeCompare(b.periodKey) || a.sensorName.localeCompare(b.sensorName));
+}

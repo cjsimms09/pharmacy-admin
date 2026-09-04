@@ -5,7 +5,9 @@ import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { hasCredentials, saveCredentials, clearCredentials, discoverSensors, syncReadings, trackedSensors, monthSummary, diagnose, recentReadings, unexplainedExcursions, monthsBySensor, f } from "@/lib/imonnit";
+import { hasCredentials, saveCredentials, clearCredentials, discoverSensors, syncReadings, trackedSensors, monthSummary, diagnose, recentReadings, unexplainedExcursions, monthsBySensor, f,
+  monthsAwaitingSignOff,
+} from "@/lib/imonnit";
 import { getSettings, setSetting } from "@/lib/settings";
 import { periodLabel } from "@/lib/periods";
 import { PageHeader, Notice, Empty, Field, Card, Figure } from "@/components/ui";
@@ -31,10 +33,11 @@ export default async function TempsPage({ searchParams }: { searchParams: Promis
 
   // The three questions this page is actually asked, in the order they get asked: is anything
   // unexplained, what has it been doing lately, and where is the month I need to print.
-  const [unexplained, latest, months] = await Promise.all([
+  const [unexplained, latest, months, awaiting] = await Promise.all([
     unexplainedExcursions(),
     recentReadings(30),
     monthsBySensor(),
+    monthsAwaitingSignOff(),
   ]);
   const dayAgo = new Date(Date.now() - 86_400_000).toISOString();
   const readingsToday = latest.filter((r) => r.takenAt >= dayAgo).length;
@@ -209,11 +212,15 @@ export default async function TempsPage({ searchParams }: { searchParams: Promis
               tone={readingsToday === 0 ? "crit" : "ok"}
             />
             <Figure
-              value={cards.filter((c) => c.summary?.reviewed).length}
-              label="Months signed off"
-              sub="This month and last, per sensor"
-              tone="ok"
-              href="#months"
+              value={awaiting.length}
+              label="Months awaiting sign-off"
+              sub={
+                awaiting.length === 0
+                  ? "Every month that has ended is signed"
+                  : "Ended, logged, and nobody has signed it yet"
+              }
+              tone={awaiting.length === 0 ? "ok" : "crit"}
+              href="#awaiting"
             />
             <Figure
               value={tracked.length}
@@ -223,6 +230,35 @@ export default async function TempsPage({ searchParams }: { searchParams: Promis
               href="#setup"
             />
           </div>
+
+          {awaiting.length > 0 && (
+            <Card
+              id="awaiting"
+              tone="crit"
+              title="Months that have ended and are not signed"
+              count={awaiting.length}
+              subtitle="The readings file themselves. The sign-off cannot — a system that closed a month on its own would be manufacturing the one part of the record that is supposed to mean somebody looked, which is exactly the part an inspector asks about."
+              className="mb-6"
+            >
+              <ul className="rows">
+                {awaiting.map((a) => (
+                  <li key={`${a.sensorId}-${a.periodKey}`} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                    <span className="text-sm">
+                      <span className="font-medium">{a.sensorName}</span>
+                      <span className="ml-2 text-ink-3">{periodLabel(a.periodKey)}</span>
+                    </span>
+                    <span className="flex items-center gap-3 text-xs text-ink-3">
+                      <span>{a.readings} readings</span>
+                      {a.unexplained > 0 && <span className="badge badge-crit">{a.unexplained} to explain first</span>}
+                      <Link href={`/temps/${a.sensorId}/${a.periodKey}`} className="btn btn-sm btn-primary">
+                        {a.unexplained > 0 ? "Explain and sign" : "Review and sign"}
+                      </Link>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
 
           {/* ── The one list that matters ── */}
           <Card
