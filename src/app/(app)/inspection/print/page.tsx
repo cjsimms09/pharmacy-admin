@@ -19,7 +19,7 @@ export default async function InspectionPrintPage() {
   const r = await inspectionReport();
 
   return (
-    <PrintFrame formTitle="Inspection readiness" formNumber="" revised="" backHref="/inspection">
+    <PrintFrame ownDocument formTitle="Inspection readiness" formNumber="" revised="" backHref="/inspection">
       <div className="mb-4">
         <p className="text-lg font-bold">{r.pharmacy.name}</p>
         <p className="text-xs">{r.pharmacy.address}</p>

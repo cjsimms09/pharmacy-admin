@@ -175,6 +175,7 @@ export async function inspectionReport(): Promise<InspectionReport> {
         ? "Everyone on site is current on all four, each with a signed certificate behind it."
         : `${trainingGaps} training record${trainingGaps === 1 ? " is" : "s are"} missing or lapsed across the people on site.`,
     href: "/compliance/training",
+    printHref: "/compliance/training/records",
   });
 
   // ── Controlled substances ────────────────────────────────────────

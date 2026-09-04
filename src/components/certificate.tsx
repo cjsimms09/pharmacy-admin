@@ -73,6 +73,9 @@ export function Certificate({ c }: { c: CertificateData }) {
           {c.authority && <Row term="Requirement addressed" desc={c.authority} />}
           {c.material && <Row term="Material delivered" desc={c.material} />}
           <Row term="How it was delivered" desc={c.how} />
+          {c.trainerQualifications && (
+            <Row term="Delivered by" desc={`${c.issuedBy.split(",")[0]} — ${c.trainerQualifications}`} />
+          )}
           {c.liveQuestions && <Row term="Interactive questions and answers" desc={c.liveQuestions} />}
           {c.provider && <Row term="Provider" desc={c.provider} />}
           {c.statement && <Row term="Attested" desc={<span className="italic">&ldquo;{c.statement}&rdquo;</span>} />}

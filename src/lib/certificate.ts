@@ -5,6 +5,7 @@ import { sha256 } from "./crypto";
 import { TRAINING_LABEL, PERSON_ROLE_LABEL } from "./labels";
 import { getSettings } from "./settings";
 import { courseFor } from "./courses";
+import { trainer } from "./training-records";
 import { courseVersion } from "./course-packet";
 
 /**
@@ -54,6 +55,15 @@ export type CertificateData = {
     phone: string | null;
   };
   issuedBy: string;
+  /**
+   * What makes the person who delivered it qualified to.
+   *
+   * 29 CFR 1910.1030(h)(2)(i)(C) requires the bloodborne training record to name the trainer's
+   * qualifications, not merely the trainer. Three of the four required elements were already on
+   * this certificate; this was the missing one, and its absence would have been a citation on an
+   * otherwise complete file.
+   */
+  trainerQualifications: string | null;
 };
 
 const fold = (...parts: (string | null | undefined)[]) => parts.filter(Boolean).join(" | ");
@@ -70,6 +80,7 @@ export async function certificateFor(trainingId: string): Promise<CertificateDat
   const s = await getSettings();
   const course = courseFor(t.type);
   const pic = (await db.query.people.findMany()).find((p) => p.isPic);
+  const who = await trainer();
 
   const address = [s.pharmacy_address, [s.pharmacy_city, s.pharmacy_state].filter(Boolean).join(", "), s.pharmacy_zip]
     .filter(Boolean)
@@ -112,6 +123,7 @@ export async function certificateFor(trainingId: string): Promise<CertificateDat
   const face = fold(
     number,
     material,
+    who.qualifications,
     `${person.firstName} ${person.lastName}`,
     TRAINING_LABEL[t.type],
     t.completedOn,
@@ -148,6 +160,7 @@ export async function certificateFor(trainingId: string): Promise<CertificateDat
       phone: s.pharmacy_phone || null,
     },
     issuedBy: pic ? `${pic.firstName} ${pic.lastName}, Pharmacist-in-Charge` : "The pharmacist-in-charge",
+    trainerQualifications: who.qualifications,
   };
 }
 

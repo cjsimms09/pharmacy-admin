@@ -229,11 +229,14 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
             : `${owed} training${owed === 1 ? "" : "s"} due or overdue across ${people.length} ${people.length === 1 ? "person" : "people"}.`
         }
         actions={
-          outstanding.length > 0 ? (
-            <form action={chase}>
-              <button className="btn">Chase all {outstanding.length} outstanding</button>
-            </form>
-          ) : undefined
+          <>
+            <Link href="/compliance/training/records" className="btn">Print the training file</Link>
+            {outstanding.length > 0 && (
+              <form action={chase}>
+                <button className="btn">Chase all {outstanding.length} outstanding</button>
+              </form>
+            )}
+          </>
         }
       />
 
