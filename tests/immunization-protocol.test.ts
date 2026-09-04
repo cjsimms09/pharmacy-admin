@@ -24,6 +24,7 @@ const ctx = (over: Partial<ProtocolContext["subject"]> = {}, physician: string |
     immunizationTraining: "APhA-2019",
     cpr: { number: "AHA-8812", expiresOn: "2099-01-01" },
     existing: null,
+    administersVaccines: true,
     ...over,
   },
 });
@@ -74,5 +75,20 @@ describe("the protocol's own content", () => {
   test("the steps run through to monitoring, not just the injection", () => {
     assert.match(EMERGENCY_STEPS.join(" "), /CPR/);
     assert.match(EMERGENCY_STEPS[EMERGENCY_STEPS.length - 1], /vital signs/);
+  });
+});
+
+describe("who the protocol page is offered to", () => {
+  test("somebody not yet marked as an immunizer is warned, not blocked", () => {
+    const gaps = protocolGaps(ctx({ administersVaccines: false }));
+    assert.match(gaps.join(" "), /does not say they administer vaccines/);
+  });
+
+  test("that warning names the person, so it is actionable", () => {
+    assert.match(protocolGaps(ctx({ administersVaccines: false })).join(" "), /Kimberly Ahn/);
+  });
+
+  test("a marked immunizer with everything on file is still clean", () => {
+    assert.deepEqual(protocolGaps(ctx({ administersVaccines: true })), []);
   });
 });

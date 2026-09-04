@@ -46,7 +46,7 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
                 <th>Role</th>
                 <th>Credentials</th>
                 <th>Next expiration</th>
-                {canManage && <th>Status</th>}
+                {canManage && <th>Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -89,6 +89,15 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
                           looking for how to make somebody inactive found nothing, because that is
                           not what it was called and not where it was.
                         */}
+                        {/*
+                          Printing the protocol from the list, because that is where somebody
+                          looking for it starts. It was on the person's own page only, and gated on
+                          the immunizer checkbox — so for anyone whose record did not already say
+                          immunizer, it did not exist anywhere.
+                        */}
+                        <Link href={`/staff/${p.id}/protocol`} className="btn btn-sm mb-1 block text-center">
+                          Protocol
+                        </Link>
                         {p.active ? (
                           <form action={endEmploymentAction}>
                             <input type="hidden" name="personId" value={p.id} />

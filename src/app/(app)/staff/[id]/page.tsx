@@ -113,10 +113,15 @@ export default async function PersonPage({
           canManage && !edit ? (
             <>
               <Link href="/compliance/training" className="btn">Send training</Link>
-              {/* Only offered where it means something: the protocol authorises immunizing. */}
-              {person.administersVaccines && (
-                <Link href={`${here}/protocol`} className="btn btn-primary">Immunization protocol</Link>
-              )}
+              {/*
+                Offered for everybody, not only people already ticked as immunizers.
+                
+                It was gated on that checkbox, which meant the one person most likely to want it —
+                somebody about to be authorised for the first time, whose record does not say
+                immunizer yet — was the one person who could not see the button. The page itself
+                says if they are not marked as one; a hidden control cannot say anything.
+              */}
+              <Link href={`${here}/protocol`} className="btn btn-primary">Immunization protocol</Link>
               <Link href={`${here}?edit=1`} className="btn">Edit details</Link>
             </>
           ) : undefined

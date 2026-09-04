@@ -52,6 +52,8 @@ export type ProtocolSubject = {
   cpr: { number: string | null; expiresOn: string | null } | null;
   /** A protocol already on file for this person, so the page can say what it is replacing. */
   existing: { signedOn: string | null; expiresOn: string | null } | null;
+  /** Whether their record says they administer vaccines at all. */
+  administersVaccines: boolean;
 };
 
 export type ProtocolContext = {
@@ -105,6 +107,7 @@ export async function protocolFor(personId: string): Promise<ProtocolContext | n
       immunizationTraining: trainingRow?.number ?? trainingRow?.issuer ?? null,
       cpr: cprRow ? { number: cprRow.number, expiresOn: cprRow.expiresOn } : null,
       existing: protocolRow ? { signedOn: protocolRow.issuedOn, expiresOn: protocolRow.expiresOn } : null,
+      administersVaccines: person.administersVaccines,
     },
   };
 }
@@ -118,6 +121,11 @@ export async function protocolFor(personId: string): Promise<ProtocolContext | n
  */
 export function protocolGaps(c: ProtocolContext): string[] {
   const out: string[] = [];
+  if (!c.subject.administersVaccines) {
+    out.push(
+      `${c.subject.name}'s record does not say they administer vaccines, so nothing will track this protocol's expiry. Tick it on their page.`,
+    );
+  }
   if (!c.physician) out.push("No authorising physician is recorded — set one under Settings so it prints on the form.");
   if (!c.subject.licence) out.push(`No licence or registration number is on file for ${c.subject.name}.`);
   if (!c.subject.immunizationTraining) {
