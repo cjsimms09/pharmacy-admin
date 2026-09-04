@@ -294,17 +294,33 @@ export async function inspectionReport(): Promise<InspectionReport> {
   // A DEA cyclic investigation opens with the registration and then goes straight to paper: who
   // may sign for orders, where the receiving records are, what has gone missing and whether it was
   // reported, and who has been let near the safe.
-  const poa = creds.find((c) => c.type === "controlled_substance_poa");
+  const poas = creds.filter((c) => c.type === "controlled_substance_poa");
+  const allPeople = await db.query.people.findMany();
+  // The one that bites: a power of attorney is live until it is revoked in writing, and nobody
+  // ever goes looking for one belonging to somebody who left eighteen months ago.
+  const orphaned = poas.filter((c) => {
+    const p = allPeople.find((x) => x.id === c.personId);
+    return p && !p.active;
+  });
   add({
     key: "cs_power_of_attorney",
     who: "dea",
     asks: "Who is authorised to sign your 222 forms and CSOS orders",
-    authority: "21 CFR 1305.05 — a power of attorney is required for anyone other than the registrant to sign.",
-    state: poa ? "ready" : "gap",
-    answer: poa
-      ? `A power of attorney is on file${poa.issuedOn ? `, dated ${poa.issuedOn}` : ""}.`
-      : "None is on file. If anyone other than the registrant signs an order, one is required — and it has to be revoked in writing when they leave.",
-    href: "/documents",
+    authority: "21 CFR 1305.05 — a power of attorney is required for anyone other than the registrant to sign, and stays in force until revoked in writing.",
+    state: orphaned.length > 0 ? "blocking" : poas.length > 0 ? "ready" : "gap",
+    answer:
+      orphaned.length > 0
+        ? `${orphaned.length} power${orphaned.length === 1 ? "" : "s"} of attorney ${orphaned.length === 1 ? "is" : "are"} still live for ${orphaned
+            .map((c) => {
+              const p = allPeople.find((x) => x.id === c.personId);
+              return p ? `${p.firstName} ${p.lastName}` : "someone";
+            })
+            .join(", ")}, who no longer work here. Print the revocation, have it signed, and file it with the original.`
+        : poas.length > 0
+          ? `${poas.length} on file${poas[0].issuedOn ? `, the most recent dated ${poas[0].issuedOn}` : ""}.`
+          : "None is on file. If anyone other than the registrant signs an order, one is required — and it has to be revoked in writing when they leave.",
+    href: "/inventory/power-of-attorney",
+    printHref: "/inventory/power-of-attorney",
   });
 
   const csos = pharmacyCred("csos_certificate");
