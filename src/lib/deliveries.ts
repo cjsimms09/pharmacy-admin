@@ -441,3 +441,123 @@ export async function catchUpInvoices(user: { name: string }): Promise<string[]>
 }
 
 void fmtLong;
+
+/**
+ * The invoice for a month, whether or not it has been raised yet.
+ *
+ * Somebody about to send an invoice to another company's accounts department wants to see the
+ * document first. Before it is raised there is no row to read, so a provisional one is built from
+ * the month as it stands — the same builder, the same layout, the same figures. The only thing
+ * that cannot be shown is the invoice number, because that is issued at the moment of raising and
+ * inventing one for a preview would put a number on a page that will never exist.
+ *
+ * A month already invoiced previews what was actually sent, not a fresh calculation of it. The
+ * question being asked is "what did Shelly get", and answering it with today's arithmetic would
+ * be answering a different one.
+ */
+export async function previewInvoice(
+  month: string,
+): Promise<{ invoice: DriverInvoice; lines: InvoiceLine[]; provisional: boolean } | null> {
+  const existing = await currentInvoice(month);
+  if (existing) return { invoice: existing, lines: linesOf(existing), provisional: false };
+
+  const state = await monthState(month);
+  if (state.entered === 0) return null;
+
+  const parties = await invoiceParties();
+  const lines: InvoiceLine[] = state.slots
+    .filter((x) => x.day)
+    .map((x) => ({
+      onDate: x.onDate,
+      deliveries: x.day!.deliveries,
+      mailTrips: x.day!.mailTrips,
+      trips: x.trips,
+      amountCents: x.amountCents,
+      note: x.day!.note,
+    }));
+
+  return {
+    provisional: true,
+    lines,
+    invoice: {
+      id: "preview",
+      month,
+      // Said plainly on the document rather than faked. A number here would be a number that
+      // never gets issued, and somebody would quote it.
+      invoiceNumber: "DRAFT",
+      driverName: parties.driverName,
+      rateCents: state.rateCents,
+      deliveries: state.deliveries,
+      mailTrips: state.mailTrips,
+      totalCents: state.totalCents,
+      linesJson: JSON.stringify(lines),
+      status: "draft",
+      sentTo: null,
+      sentAt: null,
+      sendError: null,
+      documentId: null,
+      issuedBy: "",
+      createdAt: new Date().toISOString(),
+    },
+  };
+}
+
+/** The PDF for a month, built the same way whether it is a draft or the one that was sent. */
+export async function invoicePdfFor(month: string): Promise<{ pdf: Buffer; fileName: string } | null> {
+  const preview = await previewInvoice(month);
+  if (!preview) return null;
+  const parties = await invoiceParties();
+  const { invoicePdf } = await import("./driver-invoice-pdf");
+  return {
+    pdf: invoicePdf(preview.invoice, preview.lines, parties),
+    fileName: `delivery-invoice-${month}${preview.provisional ? "-draft" : `-${preview.invoice.invoiceNumber}`}.pdf`,
+  };
+}
+
+/**
+ * Sends the invoice to somebody else first, to prove the whole path works.
+ *
+ * Everything about this arrangement is automatic, which is the point and also the risk: the first
+ * time anybody finds out whether the mail actually arrives is when the driver asks why he has not
+ * been paid. A test send is the same code as the real one — the same PDF, the same attachment,
+ * the same server — addressed somewhere harmless, so the answer is known in advance.
+ *
+ * It never marks the month as invoiced and never issues a number. A test that changed the state
+ * it was testing would be worse than no test.
+ */
+export async function sendTestInvoice(month: string, to: string, user: { name: string }): Promise<SendResult> {
+  const address = to.trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) throw new Error("That is not an email address.");
+
+  const built = await invoicePdfFor(month);
+  if (!built) throw new Error(`Nothing has been entered for ${monthLabel(month)} yet, so there is nothing to show.`);
+
+  const preview = await previewInvoice(month);
+  const parties = await invoiceParties();
+  const inv = preview!.invoice;
+
+  const { sendMail } = await import("./send-mail");
+  const r = await sendMail(
+    address,
+    `TEST — delivery invoice ${monthLabel(month)} — ${money(inv.totalCents)}`,
+    [
+      `This is a test copy of the ${monthLabel(month)} delivery invoice. It has not been sent to ${parties.sendTo || "anybody else"} and the month is not marked as invoiced.`,
+      "",
+      preview!.provisional
+        ? "The month is not finished, so this is a draft and carries no invoice number. The real one is numbered when it is raised."
+        : `Invoice ${inv.invoiceNumber}, as it was sent.`,
+      `${inv.deliveries} deliveries and ${inv.mailTrips} mail trips, ${inv.deliveries + inv.mailTrips} in total at ${money(inv.rateCents)} each.`,
+      `Amount: ${money(inv.totalCents)}`,
+      "",
+      `Requested by ${user.name}.`,
+    ].join("\n"),
+    [{ filename: built.fileName, content: built.pdf, contentType: "application/pdf" }],
+  );
+
+  return r.ok
+    ? {
+        ok: true,
+        message: `Test copy accepted for delivery to ${address}. If it arrives with the PDF attached and readable, the real one will too — nothing about the path differs. The month is untouched.`,
+      }
+    : { ok: false, message: `The test could not be sent: ${r.error}. The real invoice would fail the same way, so fix this before the month ends.` };
+}

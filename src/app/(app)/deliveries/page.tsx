@@ -16,6 +16,7 @@ import {
   issueInvoice,
   sendInvoice,
   invoiceParties,
+  sendTestInvoice,
   money,
   statusLabel,
   DEFAULT_RATE_CENTS,
@@ -124,6 +125,20 @@ export default async function DeliveriesPage({
     }
   }
 
+  async function testSend(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const m = String(fd.get("month") ?? "");
+    try {
+      const r = await sendTestInvoice(m, String(fd.get("to") ?? ""), u);
+      await audit({ action: "delivery.invoice.test", userId: u.id, userName: u.name, details: m });
+      redirect(`/deliveries?month=${m}&${r.ok ? "ok" : "error"}=` + encodeURIComponent(r.message));
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect(`/deliveries?month=${m}&error=` + encodeURIComponent(e instanceof Error ? e.message : "Could not send that."));
+    }
+  }
+
   async function saveSettings(fd: FormData) {
     "use server";
     const u = await requireManager();
@@ -157,9 +172,16 @@ export default async function DeliveriesPage({
         actions={
           <>
             <Link href="/deliveries?settings=1" className="btn">Driver and rate</Link>
-            {state.invoice?.documentId && (
-              <a href={`/files/${state.invoice.documentId}`} target="_blank" rel="noreferrer" className="btn">
-                The invoice sent
+            {state.entered > 0 && (
+              /*
+                The document itself, not a page that resembles it.
+
+                This is the exact PDF that will be attached to the email, opened in the browser's
+                own viewer — so looking at it is looking at what Shelly will get, and the viewer's
+                print button is the other half of what was asked for.
+              */
+              <a href={`/deliveries/${month}/preview`} target="_blank" rel="noreferrer" className="btn btn-primary">
+                View and print the invoice
               </a>
             )}
           </>
@@ -297,6 +319,52 @@ export default async function DeliveriesPage({
             <button className="btn btn-sm btn-primary">Raise it and send it</button>
           </form>
         </Notice>
+      )}
+
+      {/*
+        Seeing it and proving it, before anybody outside the pharmacy does.
+
+        Everything about this arrangement is automatic, which is the point and also the risk: the
+        first time anybody would otherwise learn whether the mail actually arrives is when the
+        driver asks why he has not been paid. So the document can be read on screen at any point
+        in the month, and the whole path — same PDF, same attachment, same server — can be proved
+        against an address that does not matter.
+      */}
+      {state.entered > 0 && canManage && (
+        <Card
+          title="Check it before it goes"
+          subtitle={
+            state.invoice
+              ? "The invoice below is the one that was sent. Opening it shows the exact file that was attached."
+              : "The month is not finished, so this is a draft — the same layout and the same figures, without an invoice number. The number is issued when it is raised."
+          }
+          className="mt-4"
+        >
+          <div className="flex flex-wrap items-end gap-3">
+            <a href={`/deliveries/${month}/preview`} target="_blank" rel="noreferrer" className="btn btn-primary">
+              View and print it
+            </a>
+            <form action={testSend} className="flex flex-wrap items-end gap-2">
+              <input type="hidden" name="month" value={month} />
+              <label className="text-xs font-medium text-ink-2">
+                Or send a test copy to
+                <input
+                  name="to"
+                  type="email"
+                  required
+                  placeholder="your own address"
+                  className="field mt-1 w-56"
+                />
+              </label>
+              <button className="btn">Send the test</button>
+            </form>
+          </div>
+          <p className="mt-2 text-xs text-ink-3">
+            Opening it uses your browser&rsquo;s own PDF viewer, so print is the button in there. A test copy goes
+            nowhere near {parties.sendTo || "the payer"}, issues no invoice number, and leaves the month exactly as it
+            is — it only proves that the mail arrives with the attachment readable.
+          </p>
+        </Card>
       )}
 
       <Card
@@ -440,9 +508,19 @@ export default async function DeliveriesPage({
                       {inv.sentAt ? ` · ${fmt(inv.sentAt.slice(0, 10))}` : ""}
                     </td>
                     <td className="whitespace-nowrap">
-                      {inv.documentId && (
-                        <a href={`/files/${inv.documentId}`} target="_blank" rel="noreferrer" className="btn btn-sm">Open</a>
-                      )}
+                      {/*
+                        The filed copy where there is one — that is the document that was actually
+                        attached to the email, byte for byte. Rebuilding it from the row would be
+                        showing today's arithmetic rather than what was sent.
+                      */}
+                      <a
+                        href={inv.documentId ? `/files/${inv.documentId}` : `/deliveries/${inv.month}/preview`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="btn btn-sm"
+                      >
+                        Open
+                      </a>
                     </td>
                   </tr>
                 ))}
