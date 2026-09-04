@@ -174,6 +174,68 @@ export async function invoiceCompliance(): Promise<Requirement[]> {
     href: "/settings/backups",
   });
 
+  /*
+   * ── Whether the paper can go ──────────────────────────────────────
+   *
+   * The question actually asked, and it has two different answers depending on how the invoice
+   * arrived — which is why it is worth separating rather than answering in general.
+   *
+   * An invoice emailed by the wholesaler is the original. No paper ever existed, the PDF is the
+   * record, and there is nothing to keep or destroy. That is the whole of this pharmacy's McKesson,
+   * IPC and IPD feed.
+   *
+   * An invoice that came on paper and was scanned is different. The system now holds a copy, and
+   * the DEA has never issued a rule saying the paper original may be destroyed once it has been
+   * imaged. Plenty of pharmacies do it; that is not the same as being authorised to. So this says
+   * how many are in each class and does not pretend the second question is settled.
+   */
+  const emailed = rows.filter((r) => /@/.test(r.receivedFrom ?? "")).length;
+  const uploaded = rows.length - emailed;
+
+  out.push({
+    key: "originals",
+    citation: "21 CFR 1304.04(a); 21 CFR 1300.01(b)",
+    requires:
+      "The record has to be kept, be at the registered location, and be producible. Where the record itself is " +
+      "electronic, that is the whole of it. Where it began as paper, nothing in the regulations says the paper may be " +
+      "destroyed once it has been scanned.",
+    how:
+      `${emailed} of these invoices were emailed by the wholesaler, so the PDF held here is the original record and ` +
+      `there is no paper to keep. ${uploaded} ${uploaded === 1 ? "was" : "were"} added by hand — if any of those ` +
+      "began life on paper, this system holds an image of it and not the thing itself.",
+    state: uploaded > 0 ? "attention" : "ok",
+    fix:
+      uploaded > 0
+        ? "Keep the paper for anything that arrived on paper until you have asked. The DEA field office and the " +
+          "Kansas Board will both answer it, and the answer is worth having in writing before anything is thrown away."
+        : undefined,
+    href: "/inventory/invoices",
+  });
+
+  /*
+   * ── The one this system does not hold ─────────────────────────────
+   *
+   * A compliance panel that lists what it does well and stays silent about what it does not is
+   * worse than no panel, because it is read as complete. Paper DEA Form 222s are the gap: they are
+   * not invoices, they do not arrive by email, nothing here touches them, and they have a
+   * retention rule of their own that no amount of good invoice filing satisfies.
+   */
+  out.push({
+    key: "order-forms",
+    citation: "21 CFR 1305.17(a), (c)",
+    requires:
+      "Copy 3 of every executed paper DEA Form 222 must be retained by the purchaser, with the number of packages " +
+      "received and the date recorded on it, for at least two years. Electronic CSOS orders are retained electronically.",
+    how:
+      "Not held here, and not something invoice filing can satisfy. An order form is a different record from the " +
+      "invoice for the same goods, and this system holds the invoice.",
+    state: "attention",
+    fix:
+      "Keep paper 222s exactly as you do now. If you order Schedule II through CSOS instead, those records live in the " +
+      "CSOS system and this line does not apply to them.",
+    href: "/inventory/power-of-attorney",
+  });
+
   // ── The feed itself ───────────────────────────────────────────────
   const suppliers = await db.query.suppliers.findMany();
   const active = suppliers.filter((x) => x.active);
