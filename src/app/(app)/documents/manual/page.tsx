@@ -5,6 +5,7 @@ import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { setSetting } from "@/lib/settings";
 import { currentAppendix } from "@/lib/manual";
+import { allSections } from "@/lib/manual-store";
 import { todayIso, fmt, fmtLong } from "@/lib/dates";
 import { PrintFrame } from "@/components/print";
 import { Notice } from "@/components/ui";
@@ -38,6 +39,7 @@ export default async function ManualAppendixPage({
   const user = await requireUser();
   const { ok } = await searchParams;
   const a = await currentAppendix();
+  const inSite = (await allSections()).some((x) => x.source === "pharmacy");
   const stale = a.filedVersion !== null && a.filedVersion !== a.version;
 
   async function markFiled() {
@@ -62,6 +64,14 @@ export default async function ManualAppendixPage({
     >
       <div className="no-print mb-4 space-y-3">
         {ok && <Notice kind="ok">{ok}</Notice>}
+        {inSite && (
+          <Notice kind="ok">
+            The whole manual now lives in this site, at <Link href="/manual" className="underline">P&amp;P manual</Link>,
+            and <Link href="/manual/print" className="underline">prints as one document</Link> with this appendix inside
+            it. This page is still here for the appendix on its own — for slotting into a paper manual somebody keeps
+            elsewhere. If the manual in the site is the only one you keep, there is nothing on this page you need to do.
+          </Notice>
+        )}
         {a.filedVersion === null ? (
           <Notice kind="warn">
             The filed manual has never been matched to a version of this appendix. Print this, put it in the manual,

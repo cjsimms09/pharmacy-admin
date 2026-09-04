@@ -437,6 +437,47 @@ export const selfInspectionItems = sqliteTable(
   (t) => [index("self_inspection_items_idx").on(t.inspectionId)],
 );
 
+/**
+ * The policy and procedure manual, kept here rather than in a Word file.
+ *
+ * Two documents describing one pharmacy will always drift, and the drift is invisible until an
+ * inspector reads both. The only arrangement that holds is one document — so the manual lives
+ * here, in sections, and is exported when a paper copy is wanted rather than being the paper copy.
+ *
+ * Sections come in two kinds and the distinction is the whole design. A pharmacy section is prose
+ * the pharmacy owns and edits: hours, conduct, benefits, the premises. A site section is
+ * generated from what this system actually does and cannot be edited by hand — because the moment
+ * it can be, it will say something the software does not do, and a manual is a standard an
+ * inspector holds you to.
+ */
+export const MANUAL_SECTION_SOURCES = ["pharmacy", "site"] as const;
+export type ManualSectionSource = (typeof MANUAL_SECTION_SOURCES)[number];
+
+export const manualSections = sqliteTable(
+  "manual_sections",
+  {
+    id: text("id").primaryKey(),
+    /** Stable key for a site-generated section, so regeneration replaces rather than duplicates. */
+    sourceKey: text("source_key"),
+    source: text("source", { enum: MANUAL_SECTION_SOURCES }).notNull().default("pharmacy"),
+    title: text("title").notNull(),
+    /** 1 for a chapter, 2 for a section within it. Deeper than that and nobody reads it. */
+    level: integer("level").notNull().default(1),
+    /** Sparse ordering, so a section can be moved without renumbering everything. */
+    position: integer("position").notNull(),
+    body: text("body").notNull().default(""),
+    /** Reviewed at least annually; the date is what an inspector asks for. */
+    reviewedOn: text("reviewed_on"),
+    reviewedBy: text("reviewed_by"),
+    /** Set when a section is retired, so its history survives being removed from the manual. */
+    retiredOn: text("retired_on"),
+    updatedBy: text("updated_by"),
+    createdAt: text("created_at").notNull().default(now()),
+    updatedAt: text("updated_at").notNull().default(now()),
+  },
+  (t) => [index("manual_sections_pos_idx").on(t.position)],
+);
+
 // ── Document intake (drop anything, Claude files it) ─────────────────
 export const intakeItems = sqliteTable("intake_items", {
   id: text("id").primaryKey(),

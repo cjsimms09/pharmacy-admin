@@ -124,6 +124,25 @@ export const FORMS: ManualForm[] = [
 ];
 
 /**
+ * The sentence a manual heading gets when the form it names is one this system produces.
+ *
+ * The alternative — pasting a blank copy of the form into the manual — is how a manual ends up
+ * describing a version of a form nobody has used for two years, and it is the copy somebody
+ * photocopies at the worst possible moment. Naming the form and saying where the current version
+ * comes from is both shorter and true for longer.
+ */
+export function appendixReference(formName: string): string {
+  const f = FORMS.find((x) => x.name === formName);
+  if (!f) throw new Error("That is not a form this system produces.");
+  return (
+    `${f.purpose} The current version of this form is produced and maintained in the pharmacy's compliance system ` +
+    `and is described at Appendix A.2 of this manual, under "${f.name}". ${f.cadence}\n\n` +
+    `No blank copy is filed under this heading. The form is produced by the system on demand and any completed copy, ` +
+    `for any past period, is retrievable and available for inspection.`
+  );
+}
+
+/**
  * What the site actually does, written so it can be dropped into the manual verbatim.
  *
  * Deliberately descriptive rather than aspirational. A manual is a standard the pharmacy wrote for

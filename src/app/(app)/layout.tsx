@@ -21,6 +21,9 @@ const NAV = [
   { href: "/cqi", label: "CQI program" },
   { href: "/staff", label: "Staff" },
   { href: "/documents", label: "Documents" },
+  // The policy manual is the document every other screen is measured against, so it is a
+  // place you go rather than a file somebody has a copy of.
+  { href: "/manual", label: "P&P manual" },
   { href: "/agreements", label: "Agreements" },
   // Where emailed reports land — temperature logs among them, so it belongs in the daily path.
   { href: "/inbox", label: "Inbox" },

@@ -456,3 +456,79 @@ export async function classifyDocument(
   if (!res.parsed_output) throw new Error("Claude could not read this document. Try a clearer scan, or file it by hand.");
   return res.parsed_output;
 }
+
+const PolicyDraft = z.object({
+  body: z.string().describe("The revised policy text, in full, ready to replace what was there."),
+  changed: z
+    .string()
+    .describe("What was changed and why, in two or three sentences addressed to the pharmacist-in-charge."),
+  concerns: z
+    .array(z.string())
+    .describe(
+      "Anything the pharmacy must decide or verify that the text assumes. Empty when there is nothing. Never invent a fact about this pharmacy to fill a gap.",
+    ),
+});
+
+export type PolicyDraftT = z.infer<typeof PolicyDraft>;
+
+/**
+ * Helps write or revise one section of the policy manual.
+ *
+ * The instruction that matters most is the one about invention. A policy manual is a standard the
+ * pharmacy is held to, so a plausible-sounding sentence describing a practice the pharmacy does
+ * not follow is worse than a gap — it is a finding somebody wrote for themselves. Anything the
+ * model would have to make up comes back as a concern to decide rather than as prose to sign.
+ */
+export async function draftPolicy(
+  input: {
+    title: string;
+    body: string;
+    instruction: string;
+    /** What this pharmacy is, so the text is about them rather than about pharmacies. */
+    context: string;
+    /** What the site actually does, where it bears on this section. */
+    siteDoes: string;
+  },
+  ctx: { userId: string; userName: string },
+): Promise<PolicyDraftT> {
+  if (MOCK) {
+    return {
+      body: `${input.body}\n\n[Draft: ${input.instruction}]`,
+      changed: "Mock response — no API key is configured, so nothing was sent anywhere.",
+      concerns: [],
+    };
+  }
+
+  const { client: c, model } = await client();
+  const res = await c.messages.parse({
+    model,
+    max_tokens: 4000,
+    system:
+      "You revise sections of a community pharmacy's policy and procedure manual. Three rules override everything else.\n\n" +
+      "First: never invent a fact about this pharmacy. If the text needs a detail you have not been given — a frequency, " +
+      "a person, a piece of equipment, a threshold — do not choose one. Write the sentence around it and raise it as a " +
+      "concern for the pharmacist-in-charge to decide.\n\n" +
+      "Second: a manual is a standard an inspector holds the pharmacy to. Never write that the pharmacy does something " +
+      "unless you have been told it does. Aspirational text is worse than a gap, because it becomes a finding the " +
+      "pharmacy wrote for itself.\n\n" +
+      "Third: where the compliance system already performs a procedure, the manual should refer to it rather than " +
+      "describe it a second time. Two descriptions of one procedure drift.\n\n" +
+      "Write in plain, direct prose. Short sentences. No headings inside the body, no bullet characters, no markdown. " +
+      "Cite a regulation only where it genuinely governs the sentence, and cite it exactly.",
+    messages: [
+      {
+        role: "user",
+        content:
+          `The pharmacy: ${input.context}\n\n` +
+          `What the compliance system already does that bears on this section:\n${input.siteDoes || "(nothing recorded)"}\n\n` +
+          `Section title: ${input.title}\n\n` +
+          `Current text:\n${input.body || "(empty — this section has a heading and no content)"}\n\n` +
+          `What is wanted: ${input.instruction}`,
+      },
+    ],
+    output_config: { format: zodOutputFormat(PolicyDraft) },
+  });
+  if (!res.parsed_output) throw new Error("Claude returned an unreadable answer. Try again.");
+  await logUsage("ai.policy.draft", ctx.userId, ctx.userName, res.usage, input.title.slice(0, 120));
+  return res.parsed_output;
+}
