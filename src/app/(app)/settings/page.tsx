@@ -7,6 +7,8 @@ import { requireManager, createUser } from "@/lib/auth";
 import { getSettings, setSetting, SETTING_KEYS, type SettingKey } from "@/lib/settings";
 import { audit } from "@/lib/audit";
 import { apiKeyHint, clearApiKey, saveApiKey, testConnection, DEFAULT_MODEL } from "@/lib/ai";
+import { spend, rates, dollars, DEFAULT_RATE_IN, DEFAULT_RATE_OUT } from "@/lib/ai-spend";
+import { fmt } from "@/lib/dates";
 import { Hub } from "@/components/hub";
 import { PageHeader, Notice, Field } from "@/components/ui";
 
@@ -17,6 +19,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const { saved, error, ai } = await searchParams;
   const s = await getSettings();
   const keyHint = await apiKeyHint();
+  const [used, rate] = await Promise.all([spend(90), rates()]);
   const users = await db.query.users.findMany({ orderBy: (u, { asc }) => [asc(u.name)] });
   const people = await db.query.people.findMany({ orderBy: (p, { asc }) => [asc(p.lastName)] });
 
@@ -44,6 +47,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       redirect("/settings?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not store the key."));
     }
     await setSetting("ai_model", model);
+    await setSetting("ai_price_in", String(fd.get("ai_price_in") ?? "").trim());
+    await setSetting("ai_price_out", String(fd.get("ai_price_out") ?? "").trim());
     await audit({ action: "ai.key.set", userId: u.id, userName: u.name, details: `model=${model}` });
     const t = await testConnection();
     revalidatePath("/settings");
@@ -168,8 +173,62 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <form action={setKey} className="grid gap-3 sm:grid-cols-3">
           <Field label={keyHint ? "Replace key" : "API key"} className="sm:col-span-2"><input name="apiKey" type="password" className="field font-mono" placeholder="sk-ant-…" autoComplete="off" required /></Field>
           <Field label="Model" hint="Leave as is unless told otherwise."><input name="ai_model" className="field font-mono" defaultValue={s.ai_model} /></Field>
+          {/*
+            The price list, as a setting.
+
+            Anthropic's rates are not this software's to know, and a figure compiled in is wrong
+            the first time the list changes with nobody noticing. Typing the two numbers off the
+            pricing page makes every estimate and every total on this site correct — including the
+            one printed next to the button that spends the money.
+          */}
+          <Field label="Cost per million input tokens" hint={`Dollars. Blank uses ${DEFAULT_RATE_IN}.`}>
+            <input name="ai_price_in" type="number" step="0.01" min="0" className="field" defaultValue={s.ai_price_in} placeholder={String(DEFAULT_RATE_IN)} />
+          </Field>
+          <Field label="Cost per million output tokens" hint={`Dollars. Blank uses ${DEFAULT_RATE_OUT}.`}>
+            <input name="ai_price_out" type="number" step="0.01" min="0" className="field" defaultValue={s.ai_price_out} placeholder={String(DEFAULT_RATE_OUT)} />
+          </Field>
           <div className="sm:col-span-3"><button className="btn btn-primary">Save and test</button></div>
         </form>
+
+        {/*
+          What it has actually cost.
+
+          Every model call has written its token counts into the audit log since the beginning;
+          they were simply never added up. Counted from that log rather than from a separate tally,
+          so this cannot drift from what really happened.
+        */}
+        <div className="mt-4 border-t border-line pt-4">
+          <h3 className="text-sm font-semibold">What Claude has cost</h3>
+          {used.calls === 0 ? (
+            <p className="mt-1 text-xs text-ink-3">Nothing yet — no model call has been made from this computer.</p>
+          ) : (
+            <>
+              <p className="mt-1 text-sm">
+                <b>{dollars(used.cost)}</b> over the last 90 days, across {used.calls} call{used.calls === 1 ? "" : "s"}
+                {used.since ? ` since ${fmt(used.since.slice(0, 10))}` : ""} — {used.tokensIn.toLocaleString("en-US")} tokens
+                in, {used.tokensOut.toLocaleString("en-US")} out, at ${rate.in} and ${rate.out} per million.
+              </p>
+              <table className="table mt-2">
+                <thead><tr><th>What</th><th className="text-right">Calls</th><th className="text-right">Tokens</th><th className="text-right">Cost</th></tr></thead>
+                <tbody>
+                  {used.byAction.slice(0, 8).map((a) => (
+                    <tr key={a.action}>
+                      <td className="font-mono text-xs">{a.action.replace(/^ai\./, "")}</td>
+                      <td className="text-right text-xs">{a.calls}</td>
+                      <td className="text-right text-xs">{(a.tokensIn + a.tokensOut).toLocaleString("en-US")}</td>
+                      <td className="text-right text-xs">{dollars(a.cost)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+          <p className="mt-2 text-xs text-ink-3">
+            This is Anthropic&rsquo;s charge to your own account, not a charge from this software. Most of what the site
+            does costs nothing at all: invoices are filed by reading the item class the wholesaler printed, and a model
+            is only asked when that fails.
+          </p>
+        </div>
       </section>
 
       <section className="card max-w-3xl">

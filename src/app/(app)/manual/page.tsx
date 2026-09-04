@@ -34,6 +34,7 @@ import {
 } from "@/lib/manual-audit";
 import { manualJob, startPutRight, runPutRight, isRunning, isStale, summarise, ago } from "@/lib/manual-job";
 import { acknowledgementBoard } from "@/lib/manual-acknowledgement";
+import { estimateSentence } from "@/lib/ai-spend";
 import { fmt } from "@/lib/dates";
 import { PageHeader, Card, Figure, Notice, Field, Empty } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
@@ -96,9 +97,18 @@ export default async function ManualPage({
   const generated = sections.filter((x) => x.source === "site");
   const elsewhere = sections.filter((x) => x.managedBy);
   const empty = gaps(rows);
+  /*
+   * What the press will cost, before it is pressed.
+   *
+   * This is a pharmacy paying its own API bill, and a button that spends money without saying how
+   * much is one nobody should press. The counts are already known — what is due to be read, and
+   * which empty headings need writing rather than merely pointing at a form — so the figure is
+   * arithmetic rather than a guess.
+   */
   const cites = citationMarkers(rows);
   const citeTotal = cites.reduce((n, c) => n + c.count, 0);
   const others = managers(rows);
+  const priceTag = aiReady ? await estimateSentence(audit_.due, empty.filter((g) => !suggestForm(g.title)).length) : "";
 
   // Editing a section always shows its chapter, so a link straight to a section from the gaps list
   // lands you in the chapter it belongs to rather than on a page with one section on it.
@@ -689,6 +699,17 @@ export default async function ManualPage({
                       Put it right
                     </SubmitButton>
                   </form>
+                )}
+                {/*
+                  The price, on the button rather than on a bill three weeks later.
+
+                  The pharmacy pays for this directly, and a figure only visible after the fact is
+                  one nobody can decide against. It also says the thing that makes the number make
+                  sense: a section is read once a year, so this is an annual cost and a manual that
+                  is current costs nothing to press.
+                */}
+                {priceTag && problems.length > 0 && !working && (
+                  <span className="w-full text-xs text-ink-3">{priceTag}</span>
                 )}
                 {working && (
                   <span className="text-xs text-accent">

@@ -28,6 +28,15 @@ export const SETTING_KEYS = [
   "pso_name",
   "pso_expires_on",
   "ai_model",
+  /**
+   * What a million tokens costs, in dollars, in and out.
+   *
+   * A setting rather than a constant because it is a fact about somebody else's price list, and
+   * the alternative is a figure in the code that is wrong the first time the list changes and
+   * nobody notices. Blank means the built-in default.
+   */
+  "ai_price_in",
+  "ai_price_out",
   "anthropic_api_key_enc", // encrypted with APP_ENCRYPTION_KEY; never rendered
   "mail_enabled", // "yes" | "no"
   "mail_host",
