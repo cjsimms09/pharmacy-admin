@@ -90,6 +90,25 @@ body { @apply bg-ground text-ink antialiased; }
   .no-print { display: none !important; }
 
   /*
+    Collapse the app frame.
+
+    The shell is a two-column grid — a fixed 228px sidebar, then the page. Hiding the sidebar for
+    print does not remove its track: `display: none` takes the aside out as a grid item, so <main>
+    slid up into the 228px column and every printed document came out as a ribbon an inch and a
+    half wide down the left of the page. Every form in the site printed that way — the C-250, the
+    C-900, the temperature logs, the power of attorney — and it was invisible on screen, because
+    on screen the sidebar is there holding the grid open.
+  */
+  .app-shell {
+    display: block !important;
+    min-height: 0 !important;
+  }
+  .app-shell > main {
+    padding: 0 !important;
+    min-width: 0 !important;
+  }
+
+  /*
     Board forms are signed and filed, so they have to paginate like a form rather than like a web
     page. Three rules do most of the work: a labelled block never splits across a page, a heading
     never sits alone at the foot of one, and a table that does run over repeats its header so the

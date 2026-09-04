@@ -17,7 +17,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <div className="min-h-screen md:grid md:grid-cols-[228px_1fr]">
+    <div className="app-shell min-h-screen md:grid md:grid-cols-[228px_1fr]">
       {/*
         The sidebar sticks and scrolls on its own. It got taller when the pages under each group
         became visible, and a footer pinned to the bottom of a column that now overflows is a
