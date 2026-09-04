@@ -471,6 +471,18 @@ export const manualSections = sqliteTable(
     reviewedBy: text("reviewed_by"),
     /** Set when a section is retired, so its history survives being removed from the manual. */
     retiredOn: text("retired_on"),
+    /**
+     * Who maintains this section, when it is not the pharmacy.
+     *
+     * The employment half of this handbook belongs to the medical practice next door; the
+     * pharmacy is bound by it but does not write it. Marking that is not cosmetic — it stops the
+     * site chasing an annual review the pharmacist-in-charge cannot perform, stops counting
+     * somebody else's empty heading as this pharmacy's gap, and puts the right name on the page
+     * when an inspector asks who owns a policy.
+     *
+     * Null means the pharmacy maintains it.
+     */
+    managedBy: text("managed_by"),
     updatedBy: text("updated_by"),
     createdAt: text("created_at").notNull().default(now()),
     updatedAt: text("updated_at").notNull().default(now()),

@@ -125,6 +125,11 @@ export default async function ManualPrintPage() {
             {x.depth === 0 ? (
               <h2 className="print-heading mt-6 border-b border-black pb-1 text-base font-bold">
                 {x.number}. {x.title}
+                {x.managedBy && (
+                  <span className="ml-2 text-[10px] font-normal italic">
+                    Maintained by {x.managedBy}. Reproduced here; not written by the pharmacy.
+                  </span>
+                )}
               </h2>
             ) : (
               <h3 className={`print-heading mt-4 font-semibold ${x.depth === 1 ? "text-sm" : "text-[12px]"}`}>

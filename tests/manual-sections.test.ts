@@ -1,7 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { createZip } from "../src/lib/zip";
-import { parseDocx, outline, gaps, citationMarkers } from "../src/lib/manual-store";
+import { parseDocx, outline, gaps, citationMarkers, managers } from "../src/lib/manual-store";
 import { FORMS, appendixReference } from "../src/lib/manual";
 import type { Section } from "../src/lib/manual-store";
 
@@ -258,5 +258,28 @@ describe("citationMarkers", () => {
 
   test("a generated section is never flagged", () => {
     assert.deepEqual(citationMarkers([row({ id: "a", title: "Appendix", level: 1, body: "text[1]", source: "site" })]), []);
+  });
+});
+
+describe("sections somebody else maintains", () => {
+  test("their empty heading is not this pharmacy's gap", () => {
+    const rows = [
+      row({ id: "a", title: "Employee Benefits", level: 1, body: "", managedBy: "West Wichita Family Physicians" }),
+      row({ id: "b", title: "Emergency refills", level: 1, body: "" }),
+    ];
+    assert.deepEqual(gaps(rows).map((s) => s.title), ["Emergency refills"]);
+  });
+
+  test("who maintains what, and how much", () => {
+    const rows = [
+      row({ id: "a", title: "Dress code", level: 1, managedBy: "The clinic" }),
+      row({ id: "b", title: "Pay", level: 1, managedBy: "The clinic" }),
+      row({ id: "c", title: "Compounding", level: 1 }),
+    ];
+    assert.deepEqual(managers(rows), [{ name: "The clinic", sections: 2 }]);
+  });
+
+  test("a manual nobody else maintains lists nobody", () => {
+    assert.deepEqual(managers([row({ id: "a", title: "Compounding", level: 1 })]), []);
   });
 });

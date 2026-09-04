@@ -19,6 +19,8 @@ import {
   needingReview,
   citationMarkers,
   stripCitationMarkers,
+  setChapterManager,
+  managers,
 } from "@/lib/manual-store";
 import { policies, FORMS, appendixReference } from "@/lib/manual";
 import { fmt } from "@/lib/dates";
@@ -55,11 +57,13 @@ export default async function ManualPage({
   const sections = outline(rows);
   const pharmacy = s.pharmacy_name || "This pharmacy";
 
-  const own = sections.filter((x) => x.source === "pharmacy");
+  const own = sections.filter((x) => x.source === "pharmacy" && !x.managedBy);
   const generated = sections.filter((x) => x.source === "site");
+  const elsewhere = sections.filter((x) => x.managedBy);
   const empty = gaps(rows);
   const cites = citationMarkers(rows);
   const citeTotal = cites.reduce((n, c) => n + c.count, 0);
+  const others = managers(rows);
 
   // Editing a section always shows its chapter, so a link straight to a section from the gaps list
   // lands you in the chapter it belongs to rather than on a page with one section on it.
@@ -202,6 +206,29 @@ export default async function ManualPage({
     redirect("/manual?ok=" + encodeURIComponent(`${r.markers} footnote markers removed from ${r.sections} sections. The policies themselves are untouched — read the controlled substances chapter once before you print it.`));
   }
 
+  async function setManager(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const id = String(fd.get("chapter") ?? "");
+    const name = String(fd.get("manager") ?? "").trim();
+    try {
+      const n = await setChapterManager(id, name || null, u);
+      await audit({ action: "manual.chapter.manager", userId: u.id, userName: u.name, details: `${id} → ${name || "the pharmacy"}` });
+      revalidatePath("/manual");
+      redirect(
+        "/manual?ok=" +
+          encodeURIComponent(
+            name
+              ? `${n} sections marked as maintained by ${name}. They still print as part of the manual, but the site will not chase you to review them or count their gaps as yours.`
+              : `${n} sections handed back to the pharmacy.`,
+          ),
+      );
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/manual?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not change that."));
+    }
+  }
+
   async function reviewed(fd: FormData) {
     "use server";
     const u = await requireManager();
@@ -256,6 +283,14 @@ export default async function ManualPage({
         /* ── One chapter ── */
         <>
           <h2 className="mb-3 text-lg">{open.number}. {open.title}</h2>
+          {open.managedBy && (
+            <Notice kind="warn">
+              This chapter is maintained by <b>{open.managedBy}</b>, not by the pharmacy. It prints as part of the
+              manual and the pharmacy is bound by it, but it is not edited here — a second copy of somebody
+              else&rsquo;s policy is how two versions of it start to disagree. Ask them for the change, then import the
+              handbook again; the marking survives the import.
+            </Notice>
+          )}
           <div className="space-y-3">
             {inChapter.map((x) => {
               const isEditing = editing?.id === x.id;
@@ -273,6 +308,8 @@ export default async function ManualPage({
                       <p className="mt-0.5 text-xs text-ink-3">
                         {x.source === "site" ? (
                           <span className="badge badge-ok mr-1.5">generated</span>
+                        ) : x.managedBy ? (
+                          <span className="badge badge-muted mr-1.5">{x.managedBy}</span>
                         ) : x.hasChildren ? (
                           <span className="badge badge-muted mr-1.5">heading</span>
                         ) : (
@@ -283,10 +320,10 @@ export default async function ManualPage({
                       </p>
                     </div>
                     <div className="flex shrink-0 flex-wrap gap-1.5">
-                      {x.source === "pharmacy" && !isEditing && (
+                      {x.source === "pharmacy" && !x.managedBy && !isEditing && (
                         <Link href={`/manual?ch=${open.id}&edit=${x.id}#${x.id}`} className="btn btn-sm">Edit</Link>
                       )}
-                      {x.source === "pharmacy" && !isEditing && (
+                      {x.source === "pharmacy" && !x.managedBy && !isEditing && (
                         <form action={reviewed}>
                           <input type="hidden" name="id" value={x.id} />
                           <input type="hidden" name="ch" value={open.id} />
@@ -383,7 +420,7 @@ export default async function ManualPage({
         /* ── The chapters ── */
         <>
           <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <Figure value={sections.length} label="Sections" sub={`${own.length} yours, ${generated.length} generated`} tone="ok" />
+            <Figure value={sections.length} label="Sections" sub={`${own.length} yours, ${generated.length} generated${elsewhere.length ? `, ${elsewhere.length} maintained elsewhere` : ""}`} tone="ok" />
             <Figure
               value={empty.length}
               label={empty.length === 1 ? "Heading with no policy" : "Headings with no policy"}
@@ -461,22 +498,44 @@ export default async function ManualPage({
             </Card>
           )}
 
+          <datalist id="manual-managers">
+            {others.map((o) => <option key={o.name} value={o.name} />)}
+            <option value={s.pharmacy_name ? `${s.pharmacy_name} — clinic side` : "The medical practice"} />
+          </datalist>
+
           <Card title="Contents" count={chapters.length} subtitle="Pick a chapter to read or edit it. Everything is one document — this is just where you open it." className="mb-6">
             <ul className="rows">
               {chapters.map((c) => {
                 const kids = sections.filter((x) => x.chapterId === c.id && x.id !== c.id);
                 const holes = empty.filter((x) => x.chapterId === c.id).length;
                 return (
-                  <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
-                    <Link href={`/manual?ch=${c.id}`} className="min-w-0 text-sm font-medium hover:underline">
-                      <span className="mr-2 text-ink-3">{c.number}</span>{c.title}
-                    </Link>
-                    <span className="flex shrink-0 items-center gap-3 text-xs text-ink-3">
-                      {holes > 0 && <span className="badge badge-crit">{holes} to write</span>}
-                      {c.source === "site" && <span className="badge badge-ok">generated</span>}
-                      <span>{kids.length} {kids.length === 1 ? "section" : "sections"}</span>
-                      <Link href={`/manual?ch=${c.id}`} className="btn btn-sm">Open</Link>
-                    </span>
+                  <li key={c.id} className="py-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <Link href={`/manual?ch=${c.id}`} className="min-w-0 text-sm font-medium hover:underline">
+                        <span className="mr-2 text-ink-3">{c.number}</span>{c.title}
+                      </Link>
+                      <span className="flex shrink-0 items-center gap-3 text-xs text-ink-3">
+                        {holes > 0 && <span className="badge badge-crit">{holes} to write</span>}
+                        {c.source === "site" && <span className="badge badge-ok">generated</span>}
+                        {c.managedBy && <span className="badge badge-muted">{c.managedBy}</span>}
+                        <span>{kids.length} {kids.length === 1 ? "section" : "sections"}</span>
+                        <Link href={`/manual?ch=${c.id}`} className="btn btn-sm">Open</Link>
+                      </span>
+                    </div>
+                    {c.source === "pharmacy" && (
+                      <form action={setManager} className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-ink-3">
+                        <input type="hidden" name="chapter" value={c.id} />
+                        <span>Maintained by</span>
+                        <input
+                          name="manager"
+                          defaultValue={c.managedBy ?? ""}
+                          list="manual-managers"
+                          className="field w-64 py-0.5 text-xs"
+                          placeholder="the pharmacy — leave empty"
+                        />
+                        <button className="btn btn-sm">Set for this chapter</button>
+                      </form>
+                    )}
                   </li>
                 );
               })}

@@ -115,19 +115,28 @@ export async function importDocx(buf: Buffer, user: { name: string }): Promise<{
   // Replace whatever pharmacy-owned sections are there. Site sections are regenerated separately
   // and must survive an import, or importing would silently delete the half that stays current.
   const existing = await db.query.manualSections.findMany();
+
+  // Who maintains what survives a re-import. Otherwise every corrected copy of the handbook
+  // silently hands the medical practice's fifty-nine HR sections back to the pharmacist-in-charge
+  // to review, and the marking gets done once and never again.
+  const managedByTitle = new Map<string, string>();
+  for (const r of existing) if (r.managedBy) managedByTitle.set(r.title, r.managedBy);
+
   for (const row of existing.filter((r) => r.source === "pharmacy")) {
     await db.delete(schema.manualSections).where(eq(schema.manualSections.id, row.id));
   }
 
   let pos = GAP;
   for (const s of parsed) {
+    const title = s.title.slice(0, 300);
     await db.insert(schema.manualSections).values({
       id: newId(),
       source: "pharmacy",
-      title: s.title.slice(0, 300),
+      title,
       level: s.level,
       position: pos,
       body: s.body,
+      managedBy: managedByTitle.get(title) ?? null,
       updatedBy: user.name,
     });
     pos += GAP;
@@ -223,6 +232,11 @@ export async function saveSection(
   if (row.source === "site") {
     throw new Error(
       "This section is generated from what the system actually does and cannot be edited here. Change the practice, or the setting behind it, and the section follows.",
+    );
+  }
+  if (row.managedBy) {
+    throw new Error(
+      `This section is maintained by ${row.managedBy}, not by the pharmacy. Editing a copy of somebody else's policy is how two versions of it start to disagree — ask them for the change, then re-import the handbook.`,
     );
   }
   await db
@@ -322,7 +336,7 @@ export function outline(rows: Section[]): SectionNode[] {
 
 /** A heading that promises something, has nothing under it, and no sections beneath it either. */
 export function gaps(rows: Section[]): SectionNode[] {
-  return outline(rows).filter((s) => s.source === "pharmacy" && !s.body.trim() && !s.hasChildren);
+  return outline(rows).filter((s) => s.source === "pharmacy" && !s.managedBy && !s.body.trim() && !s.hasChildren);
 }
 
 /**
@@ -333,7 +347,7 @@ export function gaps(rows: Section[]): SectionNode[] {
  */
 export async function markAllReviewed(user: { name: string }): Promise<number> {
   const rows = await allSections();
-  const own = rows.filter((r) => r.source === "pharmacy");
+  const own = rows.filter((r) => r.source === "pharmacy" && !r.managedBy);
   for (const r of own) {
     await db
       .update(schema.manualSections)
@@ -341,6 +355,39 @@ export async function markAllReviewed(user: { name: string }): Promise<number> {
       .where(eq(schema.manualSections.id, r.id));
   }
   return own.length;
+}
+
+/**
+ * Records that a chapter belongs to somebody else.
+ *
+ * The employment half of this handbook is the medical practice's document. The pharmacy is bound
+ * by it and prints it, but does not write it — so chasing the pharmacist-in-charge for an annual
+ * review of it, or counting its empty headings as this pharmacy's gaps, is asking for work that
+ * cannot be done and hiding the work that can.
+ *
+ * Set on the chapter and everything beneath it, because ownership does not change halfway down a
+ * chapter, and asking somebody to tick fifty-nine sections one at a time is how a good idea
+ * becomes an unused one.
+ */
+export async function setChapterManager(chapterId: string, manager: string | null, user: { name: string }): Promise<number> {
+  const rows = outline(await allSections());
+  const inChapter = rows.filter((r) => r.chapterId === chapterId && r.source === "pharmacy");
+  if (inChapter.length === 0) throw new Error("That chapter no longer exists.");
+  const value = manager?.trim() || null;
+  for (const r of inChapter) {
+    await db
+      .update(schema.manualSections)
+      .set({ managedBy: value, updatedBy: user.name, updatedAt: new Date().toISOString() })
+      .where(eq(schema.manualSections.id, r.id));
+  }
+  return inChapter.length;
+}
+
+/** Everyone other than the pharmacy who maintains part of this manual, and how much of it. */
+export function managers(rows: Section[]): { name: string; sections: number }[] {
+  const by = new Map<string, number>();
+  for (const r of rows) if (r.managedBy) by.set(r.managedBy, (by.get(r.managedBy) ?? 0) + 1);
+  return Array.from(by, ([name, sections]) => ({ name, sections })).sort((a, b) => b.sections - a.sections);
 }
 
 /**
@@ -388,5 +435,5 @@ export async function stripCitationMarkers(user: { name: string }): Promise<{ se
 export async function needingReview(): Promise<Section[]> {
   const rows = await allSections();
   const cutoff = new Date(Date.now() - 365 * 86_400_000).toISOString().slice(0, 10);
-  return rows.filter((r) => r.source === "pharmacy" && (!r.reviewedOn || r.reviewedOn < cutoff));
+  return rows.filter((r) => r.source === "pharmacy" && !r.managedBy && (!r.reviewedOn || r.reviewedOn < cutoff));
 }
