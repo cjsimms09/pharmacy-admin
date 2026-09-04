@@ -24,10 +24,13 @@ export const metadata = { title: "Power of attorney for DEA order forms" };
  *
  * Three things about it that are easy to get wrong and are stated on the form:
  *
- *   It must be signed by the person who signed the most recent application for registration —
- *   not by whoever happens to be pharmacist-in-charge. For an owner-operated pharmacy those are
- *   usually the same person; where they are not, a power of attorney signed by the wrong one is
- *   void and every order executed under it is unsigned.
+ *   Who may sign it is set by 21 CFR 1305.05 and is not a matter of who runs the pharmacy: the
+ *   registrant if the registrant is an individual, a partner if a partnership, and an officer of
+ *   the entity if the registrant is a corporation, association, trust or anything similar. Being
+ *   pharmacist-in-charge is not one of those things. Until 2019 the rule instead named whoever
+ *   signed the most recent registration application, and plenty of forms in circulation — this
+ *   one included, until it was corrected — still recite that older wording. A power of attorney
+ *   signed by the wrong person is void, and every order executed under it counts as unsigned.
  *
  *   It is filed with the executed Forms 222 and kept for as long as any order bearing the
  *   attorney-in-fact's signature — not in a personnel file.
@@ -36,13 +39,36 @@ export const metadata = { title: "Power of attorney for DEA order forms" };
  *   printed on the same page rather than left to be found later: a pharmacist who leaves with a
  *   live power of attorney is the finding, and nobody ever remembers to look for it.
  */
+/**
+ * In what capacity the person signing holds the authority.
+ *
+ * 21 CFR 1305.05 gives three, and only three: the registrant themselves where the registrant is a
+ * person, a partner where it is a partnership, and an officer where it is a corporation or similar
+ * entity. Asking which is not bureaucracy — a pharmacy owned by a medical practice has no
+ * individual registrant to sign, so the answer decides who may lawfully sign at all, and the
+ * document should say on its face which one it was.
+ */
+type Capacity = "individual" | "partner" | "officer";
+
+const CAPACITY_RECITAL: Record<Capacity, string> = {
+  individual: "who am the registrant named above",
+  partner: "who am a partner of the registrant named above",
+  officer: "who am an officer of the registrant named above",
+};
+
+const CAPACITY_LABEL: Record<Capacity, string> = {
+  individual: "The registrant in person — the pharmacy is registered to an individual",
+  partner: "A partner of the registrant — the pharmacy is a partnership",
+  officer: "An officer of the registrant — the pharmacy is owned by a corporation or similar entity",
+};
+
 export default async function PowerOfAttorneyPage({
   searchParams,
 }: {
-  searchParams: Promise<{ to?: string; grantor?: string; mode?: string; ok?: string; error?: string }>;
+  searchParams: Promise<{ to?: string; grantor?: string; title?: string; capacity?: string; mode?: string; ok?: string; error?: string }>;
 }) {
   const user = await requireUser();
-  const { to, grantor, mode, ok, error } = await searchParams;
+  const { to, grantor, title, capacity, mode, ok, error } = await searchParams;
   const [s, people, existing] = await Promise.all([
     getSettings(),
     db.query.people.findMany({ orderBy: (p, { asc }) => [asc(p.lastName)] }),
@@ -51,8 +77,16 @@ export default async function PowerOfAttorneyPage({
 
   const active = people.filter((p) => p.active);
   const attorney = to ? people.find((p) => p.id === to) : undefined;
-  const pic = people.find((p) => p.isPic);
-  const grantorName = (grantor ?? "").trim() || (pic ? `${pic.firstName} ${pic.lastName}` : "");
+  /*
+   * Deliberately not defaulted to the pharmacist-in-charge.
+   *
+   * It used to be, which put the wrong name on the one line of this document where the wrong name
+   * makes it void — and did so while the hint directly above said not to use the PIC. A blank that
+   * has to be filled in asks the question; a pre-filled plausible answer stops anyone asking it.
+   */
+  const grantorName = (grantor ?? "").trim();
+  const grantorTitle = (title ?? "").trim();
+  const cap: Capacity = capacity === "individual" || capacity === "partner" ? capacity : "officer";
   const revoking = mode === "revoke";
 
   const registrant = s.pharmacy_name || "________________________________";
@@ -123,9 +157,19 @@ export default async function PowerOfAttorneyPage({
           </Field>
           <Field
             label="Signed by"
-            hint="Must be whoever signed the most recent DEA registration application — usually the owner, not the PIC."
+            hint="Not the pharmacist-in-charge, unless they also hold one of the capacities below. 21 CFR 1305.05 names who may sign."
           >
-            <input name="grantor" defaultValue={grantorName} className="field" placeholder="Owner's full name" />
+            <input name="grantor" defaultValue={grantorName} className="field" placeholder="Full name of the person signing" />
+          </Field>
+          <Field label="Their capacity" hint="This goes on the face of the document, and decides whether it is valid at all.">
+            <select name="capacity" defaultValue={cap} className="field">
+              {(Object.keys(CAPACITY_LABEL) as Capacity[]).map((c) => (
+                <option key={c} value={c}>{CAPACITY_LABEL[c]}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Their title, if any" hint="e.g. President, or Managing Member — printed under the signature line.">
+            <input name="title" defaultValue={grantorTitle} className="field" placeholder="President" />
           </Field>
           <Field label="Which document" hint="Print the revocation the day somebody leaves.">
             <select name="mode" defaultValue={mode ?? ""} className="field">
@@ -139,8 +183,10 @@ export default async function PowerOfAttorneyPage({
         <p className="text-xs text-ink-3">
           Reproduced from the model forms at 21 CFR 1305.05. Verify the wording against the current regulation before
           it is signed — this is here so you have it to hand, not as legal advice. A separate power of attorney is
-          needed for each person, and it must be signed by the person who signed the most recent registration
-          application; one signed by the wrong person is void, and every order executed under it counts as unsigned.
+          needed for each person, each is signed by the person granting it, by the person receiving it, and by two
+          witnesses, and one signed by somebody without the authority to grant it is void — every order executed under
+          it then counts as unsigned. Note that the rule changed: until 2019 it named whoever signed the most recent
+          registration application, and older templates still in circulation recite that.
         </p>
       </div>
 
@@ -159,20 +205,23 @@ export default async function PowerOfAttorneyPage({
         {!revoking ? (
           <>
             <p className="mt-5 text-[12px] leading-relaxed">
-              I, <Blank value={grantorName} width="18rem" />, the undersigned, who am authorized to sign the current
-              application for registration of the above-named registrant under the Controlled Substances Act or the
-              Controlled Substances Import and Export Act, have made, constituted, and appointed, and by these presents
-              do make, constitute, and appoint{" "}
+              I, <Blank value={grantorName} width="18rem" />, the undersigned, {CAPACITY_RECITAL[cap]} under the
+              Controlled Substances Act or the Controlled Substances Import and Export Act, have made, constituted, and
+              appointed, and by these presents do make, constitute, and appoint{" "}
               <Blank value={attorney ? `${attorney.firstName} ${attorney.lastName}` : ""} width="18rem" />, my true and
               lawful attorney for me in my name, place, and stead, to execute applications for books of official order
-              forms and to sign such order forms in requisition for Schedule I and II controlled substances, in
-              accordance with 21 U.S.C. 828 and part 1305 of Title 21 of the Code of Federal Regulations. I hereby
-              ratify and confirm all that said attorney shall lawfully do or cause to be done by virtue hereof.
+              forms and to sign such order forms in requisition for Schedule I and II controlled substances, whether
+              issued on DEA Form 222 or electronically through the Controlled Substances Ordering System, in accordance
+              with 21 U.S.C. 828 and part 1305 of Title 21 of the Code of Federal Regulations. I hereby ratify and
+              confirm all that said attorney shall lawfully do or cause to be done by virtue hereof.
             </p>
 
             <div className="mt-8">
               <div className="border-b border-black" style={{ width: "22rem" }} />
-              <p className="mt-1 text-[10px]">Signature of person granting power</p>
+              <p className="mt-1 text-[10px]">
+                Signature of person granting power{grantorName ? ` — ${grantorName}` : ""}
+                {grantorTitle ? `, ${grantorTitle}` : ""}
+              </p>
             </div>
 
             <p className="mt-6 text-[12px] leading-relaxed">
@@ -191,14 +240,17 @@ export default async function PowerOfAttorneyPage({
             <p className="mt-5 text-[12px] leading-relaxed">
               The foregoing power of attorney, granted to{" "}
               <Blank value={attorney ? `${attorney.firstName} ${attorney.lastName}` : ""} width="18rem" />, is hereby
-              revoked by the undersigned, who is authorized to sign the current application for registration of the
-              above-named registrant under the Controlled Substances Act or the Controlled Substances Import and Export
-              Act. Written notice of this revocation has been given to the attorney-in-fact this same day.
+              revoked by the undersigned, {CAPACITY_RECITAL[cap]} under the Controlled Substances Act or the
+              Controlled Substances Import and Export Act. Written notice of this revocation has been given to the
+              attorney-in-fact this same day.
             </p>
 
             <div className="mt-8">
               <div className="border-b border-black" style={{ width: "22rem" }} />
-              <p className="mt-1 text-[10px]">Signature of person revoking power</p>
+              <p className="mt-1 text-[10px]">
+                Signature of person revoking power{grantorName ? ` — ${grantorName}` : ""}
+                {grantorTitle ? `, ${grantorTitle}` : ""}
+              </p>
             </div>
           </>
         )}
