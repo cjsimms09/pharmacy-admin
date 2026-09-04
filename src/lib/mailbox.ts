@@ -137,6 +137,21 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
           if (already) continue;
 
           /*
+           * Never consume our own outgoing mail.
+           *
+           * Where a member of staff's address is the same mailbox this site reads — the
+           * pharmacist-in-charge, usually — a training email sent to them lands right back here as
+           * unread mail. The sweep would then open it, decide it was not a report, and mark it
+           * read: the message arrives and silently stops being new, which from the far side looks
+           * exactly like an email that never came. Left untouched and unread, so it behaves like
+           * any other message in the mailbox.
+           */
+          const self = (s.mail_user ?? "").trim().toLowerCase();
+          if (self && from === self) {
+            continue;
+          }
+
+          /*
            * A bounce is checked before anything else.
            *
            * It comes from mailer-daemon, which is not on the allowed-senders list, so it used to

@@ -314,6 +314,32 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
         </Notice>
       )}
 
+      {(() => {
+        /*
+         * The address that is also the mailbox this site reads.
+         *
+         * Emailing training to the same account the site sends from is the one case where
+         * everything reports success and nothing ever looks like it arrived: the message is
+         * threaded into the sender's own conversation by Gmail and Outlook, and it lands back in
+         * the swept mailbox rather than anywhere new. Worth naming, because it is invisible
+         * otherwise and it is usually the pharmacist-in-charge's own address.
+         */
+        const self = (settings.mail_user ?? "").trim().toLowerCase();
+        const clash = self ? people.filter((p) => (p.email ?? "").trim().toLowerCase() === self) : [];
+        if (clash.length === 0) return null;
+        return (
+          <Notice kind="warn">
+            <b>
+              {clash.map((p) => `${p.firstName} ${p.lastName}`).join(", ")} {clash.length === 1 ? "uses" : "use"} the
+              same address the site sends from ({self}).
+            </b>{" "}
+            Mail to yourself from yourself is the one case where everything reports success and nothing looks like it
+            arrived — Gmail and Outlook thread it into your own Sent conversation instead of showing it as new. Check
+            Sent rather than the inbox, or give that person a different address, before concluding the email failed.
+          </Notice>
+        );
+      })()}
+
       <div className="mb-4 flex flex-wrap items-center gap-2">
         {mail.configured && (
           <form action={testSend}>
