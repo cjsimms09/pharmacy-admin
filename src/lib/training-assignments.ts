@@ -273,20 +273,34 @@ async function emailPerson(
     ),
   };
 
-  const attachments: { filename: string; content: string | Buffer; contentType?: string }[] = items
-    .map((i) => courseFor(i.type))
-    .filter((c): c is NonNullable<typeof c> => Boolean(c))
-    .map((course) => ({
-      filename: packetFileName(course),
-      content: packetText(course, pharmacy),
-      contentType: "text/plain; charset=utf-8",
-    }));
+  /*
+   * Attachments are opt-in, and off by default.
+   *
+   * A bare message arrived and the same message carrying seven text files and a Word document did
+   * not — accepted by the sending server, then dropped somewhere downstream, with no bounce and
+   * nothing in any log. That is the difference between a test email that works and a training
+   * email that vanishes, and it is not a difference worth keeping: the course is one click away in
+   * the body of the email, so the attachment adds very little and can cost the entire message.
+   *
+   * A pharmacy that wants the packet attached, and whose mail survives it, can turn it back on.
+   */
+  const attach = s.training_attach_material === "yes";
+  const attachments: { filename: string; content: string | Buffer; contentType?: string }[] = !attach
+    ? []
+    : items
+        .map((i) => courseFor(i.type))
+        .filter((c): c is NonNullable<typeof c> => Boolean(c))
+        .map((course) => ({
+          filename: packetFileName(course),
+          content: packetText(course, pharmacy),
+          contentType: "text/plain; charset=utf-8",
+        }));
 
   // Where the assignment carries a document from the vault — a policy manual, a signed protocol —
   // the document itself goes with the email. A link to it is a link somebody has to be on the
   // pharmacy network to open, and "we sent them a link" is a weaker sentence than "we sent them
   // the manual" in every conversation where it matters.
-  const docIds = [...new Set(items.map((i) => i.materialDocumentId).filter(Boolean))] as string[];
+  const docIds = attach ? ([...new Set(items.map((i) => i.materialDocumentId).filter(Boolean))] as string[]) : [];
   for (const id of docIds) {
     try {
       const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, id) });

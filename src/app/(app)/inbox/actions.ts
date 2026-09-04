@@ -67,6 +67,7 @@ export async function saveSendingServer(fd: FormData) {
   if (port && !/^\d{2,5}$/.test(port)) fail(here, "The port should be a number — 465 for SSL, 587 for STARTTLS.");
   await setSetting("mail_smtp_host", host);
   await setSetting("mail_smtp_port", port);
+  await setSetting("training_attach_material", fd.get("training_attach_material") ? "yes" : "");
   // Whatever combination worked before may no longer be the one to prefer.
   await setSetting("mail_smtp_working", "");
   await audit({ action: "mail.smtp.update", userId: user.id, userName: user.name, details: `${host}:${port}` });

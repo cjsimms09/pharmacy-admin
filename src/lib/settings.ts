@@ -34,6 +34,16 @@ export const SETTING_KEYS = [
   "cqi_automation_result",
   // One line per training: the type, then "=", then the link staff are sent to.
   "training_materials",
+  /**
+   * Whether the course text travels as a file attachment.
+   *
+   * Off by default, and that default is the fix for a real failure: a bare message arrived and the
+   * same message with seven text files and a Word document attached did not. Providers accept it,
+   * then drop it; virus and attachment filters take it out; nothing bounces and nothing is logged.
+   * The course is a click away in the email either way, so the attachment buys very little and
+   * costs the whole message.
+   */
+  "training_attach_material", // "yes" to attach; anything else, including unset, means no
   // NADAC is published weekly by CMS, free and without a key. These control the automatic pull.
   "nadac_auto", // "yes" | "no"
   "nadac_source_url",

@@ -217,6 +217,24 @@ export default async function EmailSettingsPage({ searchParams }: { searchParams
               <Field label="Port" hint="465 for SSL, 587 for STARTTLS.">
                 <input name="mail_smtp_port" className="field font-mono" defaultValue={s.mail_smtp_port} placeholder="465" />
               </Field>
+              <label className="sm:col-span-2 flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  name="training_attach_material"
+                  value="yes"
+                  defaultChecked={s.training_attach_material === "yes"}
+                  className="mt-0.5"
+                />
+                <span>
+                  Attach the course text to training emails
+                  <span className="hint block">
+                    Off by default, and worth leaving off. A bare message gets through where the same message
+                    carrying seven text files and a Word document does not — providers accept it and then drop it,
+                    with no bounce and nothing in any log, which is exactly the shape of &ldquo;the test email arrives
+                    and the training email never does&rdquo;. The course is one click away in the email either way.
+                  </span>
+                </span>
+              </label>
               <div className="sm:col-span-2"><button className="btn">Save the sending server</button></div>
             </form>
           </details>

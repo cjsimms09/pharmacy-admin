@@ -60,7 +60,9 @@ export function subjectFor(ctx: EmailContext): string {
   const prefix = ctx.reminder ? (late ? "Overdue: " : "Reminder: ") : "";
   if (ctx.items.length === 1) {
     const i = ctx.items[0];
-    return `${prefix}${TRAINING_LABEL[i.type]} — due ${fmt(i.dueOn)}${i.replyCode ? ` [${i.replyCode}]` : ""}`;
+    // The code stays in the subject so a reply that quotes it still matches, but not wrapped in
+    // brackets: a bracketed all-caps token is one of the oldest bulk-mail shapes there is.
+    return `${prefix}${TRAINING_LABEL[i.type]} — due ${fmt(i.dueOn)}${i.replyCode ? ` — code ${i.replyCode}` : ""}`;
   }
   return `${prefix}${ctx.items.length} required trainings — first due ${fmt(soonest)}`;
 }

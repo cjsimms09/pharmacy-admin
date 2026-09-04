@@ -168,7 +168,16 @@ export async function sendMail(
       // notification preview shows and what survives a client that blocks markup, and an email
       // whose fallback is empty looks broken in exactly the situations where it matters most.
       await transport.sendMail({
-        from: s.mail_user,
+        /*
+         * A display name, not a bare address.
+         *
+         * Mail from "pharmacy@example.com" with no name, to seven people, carrying links, is
+         * shaped exactly like the bulk mail filters are built to catch. Putting the pharmacy's
+         * own name on it costs nothing and is what every legitimate sender does.
+         */
+        from: s.pharmacy_name?.trim() ? { name: s.pharmacy_name.trim(), address: s.mail_user } : s.mail_user,
+        // Replies carry the attestation, so they must come back to the same mailbox that is swept.
+        replyTo: s.mail_user,
         to,
         subject,
         text,
