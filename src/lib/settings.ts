@@ -37,6 +37,14 @@ export const SETTING_KEYS = [
    */
   "ai_price_in",
   "ai_price_out",
+  /**
+   * A ceiling, in dollars, on what Claude may cost in any rolling month.
+   *
+   * Not a cost control so much as a way to stop worrying about one. A pharmacist paying his own
+   * API bill should be able to set a number he is comfortable with and then stop thinking about
+   * it, rather than watching a button and wondering. Blank means no ceiling.
+   */
+  "ai_monthly_cap",
   "anthropic_api_key_enc", // encrypted with APP_ENCRYPTION_KEY; never rendered
   "mail_enabled", // "yes" | "no"
   "mail_host",

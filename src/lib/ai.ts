@@ -49,9 +49,30 @@ export async function apiKeyHint(): Promise<string | null> {
   }
 }
 
+/** Thrown when the month's ceiling has been reached. Its own class, so it reads as a choice. */
+export class AiCapReachedError extends Error {
+  constructor(spent: string, cap: string) {
+    super(
+      `Claude has cost ${spent} in the last month, which is the ceiling you set (${cap}). Nothing further will be ` +
+        "sent until the month rolls on or you raise it under Settings → Claude. Everything already done is saved.",
+    );
+    this.name = "AiCapReachedError";
+  }
+}
+
+/*
+ * Every model call in this system goes through here, which is why the ceiling is here.
+ *
+ * Guarding the manual audit alone would leave the invoice reader, the CQI drafting and anything
+ * added next year unguarded — and the point of a limit somebody sets to stop worrying is that they
+ * do not then have to check whether it covers the thing they are about to press.
+ */
 async function client(): Promise<{ client: Anthropic; model: string }> {
   const s = await getSettings();
   if (!s.anthropic_api_key_enc) throw new AiNotConfiguredError();
+  const { monthlyCap, dollars } = await import("./ai-spend");
+  const limit = await monthlyCap();
+  if (limit.over) throw new AiCapReachedError(dollars(limit.spent), dollars(limit.cap!));
   return { client: new Anthropic({ apiKey: decryptText(s.anthropic_api_key_enc), maxRetries: 2, timeout: 10 * 60 * 1000 }), model: s.ai_model || DEFAULT_MODEL };
 }
 
@@ -68,6 +89,7 @@ export async function testConnection(): Promise<{ ok: true; model: string } | { 
 
 export function describeError(e: unknown): string {
   if (e instanceof AiNotConfiguredError) return e.message;
+  if (e instanceof AiCapReachedError) return e.message;
   if (e instanceof Anthropic.AuthenticationError) return "The API key was rejected. Check it under Settings → Claude.";
   if (e instanceof Anthropic.RateLimitError) return "Claude is rate-limited right now. Try again in a minute.";
   if (e instanceof Anthropic.BadRequestError) return `Claude rejected the request: ${e.message}`;

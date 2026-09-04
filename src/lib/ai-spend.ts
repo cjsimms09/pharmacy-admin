@@ -52,6 +52,24 @@ export function costOf(tokensIn: number, tokensOut: number, r: Rates): number {
 export const dollars = (n: number): string =>
   n === 0 ? "$0.00" : n < 0.01 ? "under a cent" : `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+/**
+ * The month's spend, and whether a ceiling has been reached.
+ *
+ * Asked for the moment the pharmacist saw a button that spends money on his own account: "am I
+ * about to pay a fortune?" The arithmetic says no, but arithmetic is not reassurance — a limit is.
+ *
+ * Enforced at the one place every model call passes through, so it covers the manual audit, the
+ * invoice reader, the CQI drafting and anything added later, rather than the one screen somebody
+ * remembered to guard. Blank means no ceiling.
+ */
+export async function monthlyCap(): Promise<{ cap: number | null; spent: number; left: number; over: boolean }> {
+  const s = await getSettings();
+  const raw = Number((s.ai_monthly_cap ?? "").trim());
+  const cap = Number.isFinite(raw) && raw > 0 ? raw : null;
+  const spent = (await spend(31)).cost;
+  return { cap, spent, left: cap === null ? Infinity : Math.max(0, cap - spent), over: cap !== null && spent >= cap };
+}
+
 export type Spend = {
   calls: number;
   tokensIn: number;

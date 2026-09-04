@@ -7,7 +7,7 @@ import { requireManager, createUser } from "@/lib/auth";
 import { getSettings, setSetting, SETTING_KEYS, type SettingKey } from "@/lib/settings";
 import { audit } from "@/lib/audit";
 import { apiKeyHint, clearApiKey, saveApiKey, testConnection, DEFAULT_MODEL } from "@/lib/ai";
-import { spend, rates, dollars, DEFAULT_RATE_IN, DEFAULT_RATE_OUT } from "@/lib/ai-spend";
+import { spend, rates, dollars, monthlyCap, DEFAULT_RATE_IN, DEFAULT_RATE_OUT } from "@/lib/ai-spend";
 import { fmt } from "@/lib/dates";
 import { Hub } from "@/components/hub";
 import { PageHeader, Notice, Field } from "@/components/ui";
@@ -19,7 +19,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const { saved, error, ai } = await searchParams;
   const s = await getSettings();
   const keyHint = await apiKeyHint();
-  const [used, rate] = await Promise.all([spend(90), rates()]);
+  const [used, rate, cap] = await Promise.all([spend(90), rates(), monthlyCap()]);
   const users = await db.query.users.findMany({ orderBy: (u, { asc }) => [asc(u.name)] });
   const people = await db.query.people.findMany({ orderBy: (p, { asc }) => [asc(p.lastName)] });
 
@@ -49,6 +49,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     await setSetting("ai_model", model);
     await setSetting("ai_price_in", String(fd.get("ai_price_in") ?? "").trim());
     await setSetting("ai_price_out", String(fd.get("ai_price_out") ?? "").trim());
+    await setSetting("ai_monthly_cap", String(fd.get("ai_monthly_cap") ?? "").trim());
     await audit({ action: "ai.key.set", userId: u.id, userName: u.name, details: `model=${model}` });
     const t = await testConnection();
     revalidatePath("/settings");
@@ -187,8 +188,40 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <Field label="Cost per million output tokens" hint={`Dollars. Blank uses ${DEFAULT_RATE_OUT}.`}>
             <input name="ai_price_out" type="number" step="0.01" min="0" className="field" defaultValue={s.ai_price_out} placeholder={String(DEFAULT_RATE_OUT)} />
           </Field>
+          {/*
+            A ceiling, so nobody has to watch the buttons.
+
+            The question that produced this was "am I about to pay a fortune in API fees?", and the
+            honest answer — about nine dollars a year — is arithmetic, not reassurance. A number the
+            pharmacist chooses himself is reassurance. It is enforced at the single point every
+            model call passes through, so it covers everything the site does rather than the one
+            screen somebody remembered to guard.
+          */}
+          <Field
+            label="Stop spending after, per month"
+            hint="Dollars. Blank means no ceiling. Nothing is sent to Claude once the last 31 days reach this."
+          >
+            <input name="ai_monthly_cap" type="number" step="1" min="0" className="field" defaultValue={s.ai_monthly_cap} placeholder="no ceiling" />
+          </Field>
           <div className="sm:col-span-3"><button className="btn btn-primary">Save and test</button></div>
         </form>
+
+        {cap.cap !== null && (
+          <p className={`mt-2 text-xs ${cap.over ? "text-crit" : "text-ink-3"}`}>
+            {cap.over ? (
+              <>
+                <b>The ceiling has been reached.</b> {dollars(cap.spent)} in the last 31 days against a ceiling of{" "}
+                {dollars(cap.cap)}. Nothing is being sent to Claude until the month rolls on or you raise it. Everything
+                already done is saved.
+              </>
+            ) : (
+              <>
+                {dollars(cap.spent)} of {dollars(cap.cap)} used in the last 31 days — {dollars(cap.left)} left before
+                the site stops sending anything to Claude.
+              </>
+            )}
+          </p>
+        )}
 
         {/*
           What it has actually cost.
