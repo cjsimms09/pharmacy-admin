@@ -630,7 +630,7 @@ export default async function ManualPage({
      * and returning immediately means the press is instant, the site stays usable, and the panel
      * on this page shows what is happening.
      */
-    if (r.started) after(() => runPutRight(u));
+    if (r.started) after(() => runPutRight(u, r.runId));
     revalidatePath("/manual");
     redirect(`/manual?${r.started ? "ok" : "error"}=` + encodeURIComponent(r.message));
   }

@@ -26,6 +26,15 @@ import { audit } from "./audit";
 
 export type ManualJob = {
   state: "running" | "done" | "failed";
+  /**
+   * Which press this is, so two that land together cannot both believe they started it.
+   *
+   * Checking "is one already running?" and then writing "one is running now" are two steps, and
+   * two presses a fraction apart can both pass the check before either writes. The window is
+   * narrow and the consequence is real: two passes reading the same sections, each paying for it.
+   * So the press writes its own id, reads it back, and only proceeds if what it reads is its own.
+   */
+  runId: string;
   startedAt: string;
   finishedAt?: string;
   by: string;
@@ -103,7 +112,9 @@ async function write(job: ManualJob): Promise<void> {
  * Returns rather than throws, because every reason it might not start is something the person who
  * pressed the button needs told in a sentence: it is already going, or Claude is not connected.
  */
-export async function startPutRight(user: { id: string; name: string }): Promise<{ started: boolean; message: string }> {
+export async function startPutRight(
+  user: { id: string; name: string },
+): Promise<{ started: boolean; message: string; runId?: string }> {
   const existing = await manualJob();
   if (isRunning(existing)) {
     return {
@@ -120,8 +131,10 @@ export async function startPutRight(user: { id: string; name: string }): Promise
     };
   }
 
+  const runId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const job: ManualJob = {
     state: "running",
+    runId,
     startedAt: new Date().toISOString(),
     by: user.name,
     step: "Starting",
@@ -129,7 +142,25 @@ export async function startPutRight(user: { id: string; name: string }): Promise
     total: 0,
   };
   await write(job);
-  return { started: true, message: "Started. It works through the manual in the background — this page shows where it has got to, and you can leave it or carry on using the site." };
+
+  /*
+   * Claim, then check the claim held.
+   *
+   * The write above is the claim. Reading it back is what makes two simultaneous presses safe:
+   * whichever wrote last owns the job, and the other finds somebody else's id and stands down
+   * rather than starting a second pass over the same sections.
+   */
+  const settled = await manualJob();
+  if (settled?.runId !== runId) {
+    return { started: false, message: "It is already running. This page shows it as it goes." };
+  }
+
+  return {
+    started: true,
+    runId,
+    message:
+      "Started. It works through the manual in the background — this page shows where it has got to, and you can leave it or carry on using the site.",
+  };
 }
 
 /**
@@ -138,15 +169,34 @@ export async function startPutRight(user: { id: string; name: string }): Promise
  * Called after the response has gone out, so nothing is waiting on it. Every failure is caught and
  * recorded: a job that dies silently leaves a button that can never be pressed again.
  */
-export async function runPutRight(user: { id: string; name: string }): Promise<void> {
+export async function runPutRight(user: { id: string; name: string }, runId?: string): Promise<void> {
   const started = new Date().toISOString();
+  /** True while this pass is still the one the stored job belongs to. */
+  const stillOurs = async () => {
+    if (!runId) return true;
+    const now = await manualJob();
+    return now?.runId === runId;
+  };
   const beat = async (p: { step: string; done: number; total: number }) => {
-    await write({ state: "running", startedAt: started, by: user.name, step: p.step, done: p.done, total: p.total, finishedAt: new Date().toISOString() });
+    if (!(await stillOurs())) return;
+    await write({
+      state: "running",
+      runId: runId ?? "",
+      startedAt: started,
+      by: user.name,
+      step: p.step,
+      done: p.done,
+      total: p.total,
+      finishedAt: new Date().toISOString(),
+    });
   };
   try {
     const result = await putRight(user, { auditLimit: 40, draftLimit: 40, budgetMs: BUDGET_MS, onProgress: beat });
+    // Do not overwrite a pass that has since taken over — its progress is the live one.
+    if (!(await stillOurs())) return;
     await write({
       state: "done",
+      runId: runId ?? "",
       startedAt: started,
       finishedAt: new Date().toISOString(),
       by: user.name,
@@ -163,8 +213,10 @@ export async function runPutRight(user: { id: string; name: string }): Promise<v
     });
   } catch (e) {
     const { describeError } = await import("./ai");
+    if (!(await stillOurs())) return;
     await write({
       state: "failed",
+      runId: runId ?? "",
       startedAt: started,
       finishedAt: new Date().toISOString(),
       by: user.name,

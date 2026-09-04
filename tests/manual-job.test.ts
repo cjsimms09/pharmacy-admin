@@ -19,6 +19,7 @@ const at = (minsAgo: number) => new Date(Date.now() - minsAgo * 60_000).toISOStr
 
 const running = (minsAgo: number): ManualJob => ({
   state: "running",
+  runId: "abc-123",
   startedAt: at(minsAgo + 1),
   finishedAt: at(minsAgo),
   by: "Cory Simms",
@@ -60,6 +61,13 @@ describe("reading the stored job", () => {
   test("nothing stored means no job", () => {
     assert.equal(parseJob(undefined), null);
     assert.equal(parseJob(""), null);
+  });
+
+  test("a job written before presses were identified still reads", () => {
+    // Older rows have no runId. They must still parse — the alternative is a manual page that
+    // will not render until somebody clears a setting by hand.
+    const legacy = '{"state":"running","startedAt":"2026-09-04T10:00:00.000Z","by":"Cory","step":"x","done":0,"total":0}';
+    assert.equal(parseJob(legacy)?.state, "running");
   });
 
   test("a corrupt record means no job rather than an error page", () => {
