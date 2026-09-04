@@ -382,6 +382,26 @@ export async function inspectionReport(): Promise<InspectionReport> {
     href: "/staff",
   });
 
+  const { openFindings } = await import("./self-inspection");
+  const selfFindings = await openFindings();
+  const lastWalk = (await db.query.selfInspections.findMany({ orderBy: (i, { desc }) => [desc(i.startedOn)] })).find(
+    (i) => i.completedOn,
+  );
+  add({
+    key: "self_inspection",
+    who: "both",
+    asks: "Do you inspect yourselves, and what did you find last time?",
+    authority: "Not a rule anyone will cite. It is the question behind every other one on this list.",
+    state: !lastWalk ? "gap" : selfFindings.length > 0 ? "gap" : "ready",
+    answer: !lastWalk
+      ? "No self-inspection has been completed. Walking the pharmacy against the same criteria an inspector uses is the single cheapest thing available here, and its absence is what makes every other answer sound rehearsed."
+      : selfFindings.length > 0
+        ? `Last walked ${lastWalk.completedOn}. ${selfFindings.length} finding${selfFindings.length === 1 ? "" : "s"} from it ${selfFindings.length === 1 ? "is" : "are"} still open — the oldest for ${selfFindings[0].daysOpen} days.`
+        : `Last walked ${lastWalk.completedOn} by ${lastWalk.completedBy}, and everything found has been closed out. This is the answer that changes how the rest of a visit goes.`,
+    href: "/inspection/walk",
+    printHref: "/inspection/walk",
+  });
+
   const blocking = checks.filter((c) => c.state === "blocking").length;
   const gaps = checks.filter((c) => c.state === "gap").length;
   const ready = checks.filter((c) => c.state === "ready").length;

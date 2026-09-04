@@ -4,6 +4,7 @@ import { dueList, type DueItem } from "@/lib/due";
 import { complianceSummary, type OpenItem } from "@/lib/compliance-status";
 import { staffMatrix, type Cell, type MatrixRow, type StaffMatrix } from "@/lib/staff-matrix";
 import { automationStatus, type JobStatus } from "@/lib/automation-status";
+import { openFindings } from "@/lib/self-inspection";
 import { attestAction, answerAction, sendTrainingAction } from "./_actions/compliance";
 import { daysUntil, fmt, fmtLong, todayIso } from "@/lib/dates";
 import { PERSON_ROLE_LABEL } from "@/lib/labels";
@@ -73,13 +74,14 @@ const dueRow = (d: DueItem): Row => ({
 
 export default async function Dashboard({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
   const { ok, error } = await searchParams;
-  const [compliance, dated, matrix, cqi, cs, jobs] = await Promise.all([
+  const [compliance, dated, matrix, cqi, cs, jobs, selfFindings] = await Promise.all([
     complianceSummary(),
     dueList({ horizonDays: 60 }),
     staffMatrix(),
     cqiSnapshot(),
     csInventoryStatus(),
     automationStatus(),
+    openFindings(),
   ]);
 
   const today = todayIso();
@@ -110,6 +112,20 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       badge: csDays === null ? "none on file" : `${-csDays}d late`,
       tone: csDays === null ? "warn" : "crit",
       href: "/inventory",
+    });
+  }
+
+  // Something the pharmacy found itself and has not put right is worse than something it has
+  // not looked at, not better — it is a known defect with a date on it. These sit with the late
+  // work rather than in a corner of the inspection screen.
+  for (const fnd of selfFindings) {
+    latePharmacy.push({
+      key: `finding-${fnd.id}`,
+      title: fnd.ask,
+      why: `Found on your own walkthrough ${fmt(fnd.foundOn)}${fnd.note ? ` — ${fnd.note}` : ""}. Say what was done and it closes.`,
+      badge: `open ${fnd.daysOpen}d`,
+      tone: fnd.daysOpen > 30 ? "crit" : "warn",
+      href: fnd.fixHref ?? "/inspection/walk",
     });
   }
 

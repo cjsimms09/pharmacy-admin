@@ -371,6 +371,53 @@ export const businessAssociates = sqliteTable(
   (t) => [index("business_associates_expires_idx").on(t.expiresOn)],
 );
 
+/**
+ * Self-inspection: walking the pharmacy against the criteria an inspector uses.
+ *
+ * The compliance calendar already carries a self-inspection duty, and until now closing it meant
+ * attesting "I walked the pharmacy against the Board's criteria". That is a real record and a
+ * weak one: it proves somebody said they looked, and nothing about what they looked at or what
+ * they found. A pharmacy that produces a dated, itemised walkthrough — with the two things it
+ * found and the dates those were put right — is telling an inspector something no attestation
+ * can, which is that the place inspects itself and fixes what it finds.
+ *
+ * Findings are the point, not the ticks. An inspection with nothing found is either a very good
+ * pharmacy or a walkthrough nobody took seriously, and the screen says so.
+ */
+export const selfInspections = sqliteTable("self_inspections", {
+  id: text("id").primaryKey(),
+  startedOn: text("started_on").notNull(),
+  /** Set when it is finalised. An unfinished walkthrough is not evidence of anything. */
+  completedOn: text("completed_on"),
+  completedBy: text("completed_by"),
+  /** Which period of the compliance calendar this satisfies. */
+  periodKey: text("period_key"),
+  notes: text("notes"),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull().default(now()),
+});
+
+export const SELF_INSPECTION_RESULTS = ["ok", "finding", "na"] as const;
+export type SelfInspectionResult = (typeof SELF_INSPECTION_RESULTS)[number];
+
+export const selfInspectionItems = sqliteTable(
+  "self_inspection_items",
+  {
+    id: text("id").primaryKey(),
+    inspectionId: text("inspection_id").notNull().references(() => selfInspections.id, { onDelete: "cascade" }),
+    /** Stable key from the checklist definition, so wording can be improved without losing history. */
+    itemKey: text("item_key").notNull(),
+    result: text("result", { enum: SELF_INSPECTION_RESULTS }).notNull(),
+    note: text("note"),
+    /** What is being done about a finding, and when it was done. */
+    correctiveAction: text("corrective_action"),
+    correctedOn: text("corrected_on"),
+    correctedBy: text("corrected_by"),
+    createdAt: text("created_at").notNull().default(now()),
+  },
+  (t) => [index("self_inspection_items_idx").on(t.inspectionId)],
+);
+
 // ── Document intake (drop anything, Claude files it) ─────────────────
 export const intakeItems = sqliteTable("intake_items", {
   id: text("id").primaryKey(),

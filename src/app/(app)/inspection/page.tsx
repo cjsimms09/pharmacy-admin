@@ -44,7 +44,12 @@ export default async function InspectionPage({
       <PageHeader
         title="If they walked in tomorrow"
         subtitle={`${r.pharmacy.name}${r.pharmacy.registration ? ` · registration ${r.pharmacy.registration}` : ""}${r.pharmacy.dea ? ` · DEA ${r.pharmacy.dea}` : ""} — checked ${fmtLong(r.takenOn)}`}
-        actions={<Link href="/inspection/print" className="btn btn-primary">Print the pack</Link>}
+        actions={
+          <>
+            <Link href="/inspection/walk" className="btn btn-primary">Walk the pharmacy</Link>
+            <Link href="/inspection/print" className="btn">Print the pack</Link>
+          </>
+        }
       />
 
       <div className="mb-4 flex flex-wrap gap-1.5">
