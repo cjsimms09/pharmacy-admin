@@ -561,3 +561,94 @@ export async function sendTestInvoice(month: string, to: string, user: { name: s
       }
     : { ok: false, message: `The test could not be sent: ${r.error}. The real invoice would fail the same way, so fix this before the month ends.` };
 }
+
+/**
+ * Months this site is not responsible for.
+ *
+ * The pharmacy was running before this screen existed, and August was invoiced the old way. The
+ * site then found twenty-one weekdays with no answer and reported them as a problem every day,
+ * which is not a bug in the alert — it is the alert doing exactly what it was told, against a
+ * month nobody ever intended it to cover.
+ *
+ * Two rules fix that, and they are different in kind. One is a boundary: nothing before the month
+ * this pharmacy started recording here is ever chased, because a system that demands you
+ * back-fill its own history before it will stop complaining is a system people turn off. The
+ * other is an escape hatch: any month can be marked as handled elsewhere, with a reason, and that
+ * reason is the record of why there is no invoice for it here.
+ */
+/** A real month, not merely four digits, a dash and two more — "2026-13" is neither. */
+const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+export function parseSkipped(raw: string): { month: string; reason: string }[] {
+  const out: { month: string; reason: string }[] = [];
+  for (const line of (raw ?? "").split("\n")) {
+    const t = line.trim();
+    if (!t || t.startsWith("#")) continue;
+    const i = t.indexOf("=");
+    const month = (i < 0 ? t : t.slice(0, i)).trim();
+    if (!MONTH.test(month)) continue;
+    out.push({ month, reason: i < 0 ? "Handled outside this site." : t.slice(i + 1).trim() || "Handled outside this site." });
+  }
+  return out;
+}
+
+export type MonthScope = {
+  /** The earliest month this site is answerable for. */
+  from: string | null;
+  skipped: { month: string; reason: string }[];
+};
+
+export async function monthScope(): Promise<MonthScope> {
+  const s = await getSettings();
+  const configured = (s.driver_tracking_from ?? "").trim();
+  let from = MONTH.test(configured) ? configured : null;
+
+  if (!from) {
+    /*
+     * Nothing set, so the first month anybody actually entered something is the boundary.
+     *
+     * Inferred rather than demanded. Asking the pharmacy to configure a start date before the
+     * feature stops nagging would be making them do work to silence a complaint about work they
+     * never agreed to do.
+     */
+    const rows = await db.query.deliveryDays.findMany();
+    from = rows.map((r) => r.onDate.slice(0, 7)).sort()[0] ?? null;
+  }
+  return { from, skipped: parseSkipped(s.driver_skipped_months ?? "") };
+}
+
+/** Whether this site is answerable for a month at all. */
+export async function monthIsOurs(month: string): Promise<{ ours: boolean; why: string | null }> {
+  const scope = await monthScope();
+  const skipped = scope.skipped.find((x) => x.month === month);
+  if (skipped) return { ours: false, why: skipped.reason };
+  if (scope.from && month < scope.from) {
+    return { ours: false, why: `Before ${monthLabel(scope.from)}, which is when deliveries started being recorded here.` };
+  }
+  return { ours: true, why: null };
+}
+
+/** Marks a month as handled elsewhere, so it stops being chased and says why. */
+export async function skipMonth(month: string, reason: string): Promise<void> {
+  if (!MONTH.test(month)) throw new Error("That is not a month.");
+  const why = reason.trim() || "Handled outside this site.";
+  const s = await getSettings();
+  const current = parseSkipped(s.driver_skipped_months ?? "").filter((x) => x.month !== month);
+  const next = [...current, { month, reason: why }]
+    .sort((a, b) => b.month.localeCompare(a.month))
+    .map((x) => `${x.month} = ${x.reason}`)
+    .join("\n");
+  const { setSetting } = await import("./settings");
+  await setSetting("driver_skipped_months", next);
+}
+
+/** Takes a month back, so the site chases and invoices it again. */
+export async function unskipMonth(month: string): Promise<void> {
+  const s = await getSettings();
+  const next = parseSkipped(s.driver_skipped_months ?? "")
+    .filter((x) => x.month !== month)
+    .map((x) => `${x.month} = ${x.reason}`)
+    .join("\n");
+  const { setSetting } = await import("./settings");
+  await setSetting("driver_skipped_months", next);
+}

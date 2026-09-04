@@ -96,6 +96,10 @@ export const SETTING_KEYS = [
   "driver_rate_cents",
   "driver_payment_terms",
   "driver_invoice_auto",
+  /** The first month this pharmacy started recording deliveries here. Nothing earlier is chased. */
+  "driver_tracking_from",
+  /** Months handled outside this site, one per line as "YYYY-MM = why". Never chased, never invoiced. */
+  "driver_skipped_months",
   "driver_invoice_last_check",
   "driver_invoice_last_result",
   "manual_audit_last",

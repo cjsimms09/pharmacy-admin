@@ -5,7 +5,7 @@ import { onSiteToday } from "./roster";
 import { dueList } from "./due";
 import { csInventoryStatus } from "./compliance";
 import { invoiceIssues, type InvoiceIssue } from "./invoices";
-import { monthState, monthLabel, weekdaysIn } from "./deliveries";
+import { monthState, monthLabel, weekdaysIn, monthIsOurs } from "./deliveries";
 import { getSettings } from "./settings";
 import { TRAINING_LABEL, CREDENTIAL_LABEL } from "./labels";
 
@@ -159,6 +159,10 @@ export async function alerts(): Promise<Alert[]> {
       months.push(prev);
     }
     for (const month of months) {
+      // A month the site was never asked to cover is not a gap. The pharmacy was running before
+      // this screen existed, and demanding it back-fill history before the complaining stops is
+      // how a feature gets turned off.
+      if (!(await monthIsOurs(month)).ours) continue;
       const state = await monthState(month);
       const stale = state.missing.filter((d) => daysBetween(d, today) > DELIVERY_GRACE_DAYS);
       if (stale.length === 0) continue;
@@ -180,7 +184,7 @@ export async function alerts(): Promise<Alert[]> {
 
     // A finished month nobody has invoiced is the driver waiting to be paid.
     const lastMonth = addDays(`${today.slice(0, 7)}-01`, -1).slice(0, 7);
-    if (weekdaysIn(lastMonth).length > 0) {
+    if (weekdaysIn(lastMonth).length > 0 && (await monthIsOurs(lastMonth)).ours) {
       const prev = await monthState(lastMonth);
       if (prev.complete && (!prev.invoice || prev.invoice.status !== "sent")) {
         out.push({

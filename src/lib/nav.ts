@@ -77,6 +77,11 @@ export const NAV: NavGroup[] = [
     blurb: "What the pharmacy can produce on request, and where each of it lives.",
     items: [
       { href: "/forms", label: "Forms", blurb: "Every form this pharmacy uses, and what each records" },
+      // The word people actually go looking for. Both kinds live where they belong — supplier
+      // invoices under controlled substances, the driver's here — and neither of those is where
+      // somebody hunting for "invoices" looks first. The question was asked twice, which is the
+      // answer.
+      { href: "/invoices", label: "Invoices", blurb: "Both kinds: what suppliers bill us, and what we bill for deliveries" },
       { href: "/deliveries", label: "Driver invoices", blurb: "Deliveries per day, and the monthly invoice that sends itself" },
       { href: "/agreements", label: "Agreements", blurb: "Business associates and everyone else with access" },
       { href: "/compliance/attestations", label: "Attestations", blurb: "Every standing duty confirmed, in the wording used" },

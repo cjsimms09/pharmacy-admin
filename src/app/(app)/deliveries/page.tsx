@@ -17,6 +17,9 @@ import {
   sendInvoice,
   invoiceParties,
   sendTestInvoice,
+  monthIsOurs,
+  skipMonth,
+  unskipMonth,
   money,
   statusLabel,
   DEFAULT_RATE_CENTS,
@@ -49,11 +52,12 @@ export default async function DeliveriesPage({
   const canManage = user.role !== "staff";
   const month = /^\d{4}-\d{2}$/.test(sp.month ?? "") ? sp.month! : todayIso().slice(0, 7);
 
-  const [state, parties, months, invoices] = await Promise.all([
+  const [state, parties, months, invoices, scope] = await Promise.all([
     monthState(month),
     invoiceParties(),
     monthsWithDays(),
     allInvoices(),
+    monthIsOurs(month),
   ]);
 
   const known = [...new Set([month, todayIso().slice(0, 7), ...months])].sort().reverse().slice(0, 24);
@@ -137,6 +141,38 @@ export default async function DeliveriesPage({
       if (e && typeof e === "object" && "digest" in e) throw e;
       redirect(`/deliveries?month=${m}&error=` + encodeURIComponent(e instanceof Error ? e.message : "Could not send that."));
     }
+  }
+
+  async function skip(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const m = String(fd.get("month") ?? "");
+    try {
+      await skipMonth(m, String(fd.get("reason") ?? ""));
+      await audit({ action: "delivery.month.skip", userId: u.id, userName: u.name, details: m });
+      revalidatePath("/deliveries");
+      revalidatePath("/");
+      redirect(
+        `/deliveries?month=${m}&ok=` +
+          encodeURIComponent(
+            `${monthLabel(m)} is marked as handled outside this site. It will not be chased or invoiced from here, and the reason you gave is the record of why there is no invoice for it.`,
+          ),
+      );
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect(`/deliveries?month=${m}&error=` + encodeURIComponent(e instanceof Error ? e.message : "Could not do that."));
+    }
+  }
+
+  async function unskip(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const m = String(fd.get("month") ?? "");
+    await unskipMonth(m);
+    await audit({ action: "delivery.month.unskip", userId: u.id, userName: u.name, details: m });
+    revalidatePath("/deliveries");
+    revalidatePath("/");
+    redirect(`/deliveries?month=${m}&ok=` + encodeURIComponent(`${monthLabel(m)} is being tracked here again.`));
   }
 
   async function saveSettings(fd: FormData) {
@@ -319,6 +355,55 @@ export default async function DeliveriesPage({
             <button className="btn btn-sm btn-primary">Raise it and send it</button>
           </form>
         </Notice>
+      )}
+
+      {/*
+        A month this site was never asked to cover.
+
+        The pharmacy was running before this screen existed, and August was invoiced the old way.
+        The site then found twenty-one weekdays with no answer and said so every day — which is
+        the alert working exactly as told, against a month nobody intended it to cover. Saying so
+        once has to be possible, and the reason given is then the record of why there is no
+        invoice here for that month.
+      */}
+      {!scope.ours ? (
+        <Notice kind="ok">
+          <b>{state.label} is not tracked here.</b> {scope.why} Nothing about it is chased or invoiced from this site.
+          {canManage && (
+            <form action={unskip} className="mt-2">
+              <input type="hidden" name="month" value={month} />
+              <button className="btn btn-sm">Track this month here after all</button>
+            </form>
+          )}
+        </Notice>
+      ) : (
+        state.missing.length > 0 &&
+        canManage && (
+          <details className="mt-4">
+            <summary className="cursor-pointer text-sm text-ink-3 hover:text-ink">
+              Was {state.label} handled outside this site?
+            </summary>
+            <Card className="mt-2">
+              <p className="card-sub">
+                If this month was invoiced the old way, say so and the site will stop asking for its {state.missing.length}{" "}
+                missing {state.missing.length === 1 ? "day" : "days"}. Nothing is deleted, and the reason you give is
+                what explains the gap later.
+              </p>
+              <form action={skip} className="mt-2 flex flex-wrap items-end gap-2">
+                <input type="hidden" name="month" value={month} />
+                <label className="text-xs font-medium text-ink-2">
+                  Why
+                  <input
+                    name="reason"
+                    defaultValue="Invoiced outside this site before deliveries were recorded here."
+                    className="field mt-1 w-96"
+                  />
+                </label>
+                <button className="btn">Stop tracking this month</button>
+              </form>
+            </Card>
+          </details>
+        )
       )}
 
       {/*
