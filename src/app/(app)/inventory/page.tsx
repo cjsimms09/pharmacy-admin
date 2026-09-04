@@ -24,7 +24,12 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
       <PageHeader
         title="Controlled substance inventories"
         subtitle="Kansas requires a complete count at least annually, no later than 375 days after the previous one, taken before opening or after close, with each participant's name, license number, and signature. Kept 5 years. Form C-250 is the cover sheet."
-        actions={<Link href="/inventory/discrepancies" className="btn">Discrepancy log</Link>}
+        actions={
+          <>
+            <Link href="/inventory/pharmacist-log" className="btn">Daily log statement</Link>
+            <Link href="/inventory/discrepancies" className="btn">Discrepancy log</Link>
+          </>
+        }
       />
       {error && <Notice kind="crit">{error}</Notice>}
 

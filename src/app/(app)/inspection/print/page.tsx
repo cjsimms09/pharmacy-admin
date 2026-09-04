@@ -38,6 +38,7 @@ export default async function InspectionPrintPage() {
       <table className="w-full border-collapse text-[11px]">
         <thead>
           <tr>
+            <th className="border border-black px-2 py-1 text-left">Asked by</th>
             <th className="border border-black px-2 py-1 text-left">Asked for</th>
             <th className="border border-black px-2 py-1 text-left">State</th>
             <th className="border border-black px-2 py-1 text-left">What we hold</th>
@@ -47,6 +48,9 @@ export default async function InspectionPrintPage() {
         <tbody>
           {r.checks.map((c) => (
             <tr key={c.key} className="print-block">
+              <td className="border border-black px-2 py-1 align-top">
+                {c.who === "dea" ? "DEA" : c.who === "board" ? "Board" : "Both"}
+              </td>
               <td className="border border-black px-2 py-1 align-top font-medium">{c.asks}</td>
               <td className="border border-black px-2 py-1 align-top">
                 {c.state === "blocking" ? "FINDING" : c.state === "gap" ? "thin" : "ready"}
