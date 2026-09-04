@@ -117,7 +117,12 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
             ? "Nothing outstanding."
             : `${needsAction.length + people.length} thing${needsAction.length + people.length === 1 ? "" : "s"} need you.`
         }
-        actions={<Link href="/compliance/register" className="btn">Full register</Link>}
+        actions={
+          <>
+            <Link href="/compliance/attestations" className="btn">What I have signed</Link>
+            <Link href="/compliance/register" className="btn">Full register</Link>
+          </>
+        }
       />
 
       {ok && <Notice kind="ok">{ok}</Notice>}

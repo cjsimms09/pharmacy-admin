@@ -57,6 +57,7 @@ export default async function RegisterPage() {
       <PageHeader
         title="Compliance register"
         subtitle="Every duty against every period. This is the view that shows a gap as a gap, rather than as a date that has passed."
+        actions={<Link href="/compliance/attestations" className="btn">What I have signed</Link>}
       />
 
       <div className="mt-4 overflow-x-auto rounded-lg border border-line">

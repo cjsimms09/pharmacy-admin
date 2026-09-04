@@ -269,7 +269,7 @@ export async function inspectionReport(): Promise<InspectionReport> {
         ? "Every period that has ended is covered."
         : `${missed} period${missed === 1 ? "" : "s"} went by without being covered. Those are what an inspector finds.`,
     href: "/compliance",
-    printHref: "/compliance/register",
+    printHref: "/compliance/attestations",
   });
 
   const blocking = checks.filter((c) => c.state === "blocking").length;
