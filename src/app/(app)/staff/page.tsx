@@ -25,7 +25,6 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
         actions={
           <>
             <Link href="/staff/rotations" className="btn">Rotations</Link>
-            <Link href="/staff/hepatitis-b" className="btn">Hepatitis B</Link>
             <Link href="/staff/technician-list" className="btn">Technician list (C-900)</Link>
             {canManage && <Link href="/staff/new" className="btn btn-primary">Add staff member</Link>}
           </>

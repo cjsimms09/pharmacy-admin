@@ -99,16 +99,30 @@ export async function sendMail(
   html?: string,
 ): Promise<SendResult> {
   const s = await getSettings();
+
+  /*
+   * Every way this can fail has to leave a trace.
+   *
+   * These early returns did not record anything, so the two most diagnostic failures — no account
+   * configured, and a password that cannot be decrypted — left the last-send result untouched.
+   * A pharmacy in that state read as "nothing has been sent yet" on every screen rather than as
+   * broken, which is the difference between looking at it and not.
+   */
+  const record = async (error: string): Promise<SendResult> => {
+    await setSetting("mail_last_send_result", `${new Date().toISOString()} — FAILED to ${to || "(no address)"}. ${error}`);
+    return { ok: false, error };
+  };
+
   if (!s.mail_user || !s.mail_password_enc) {
-    return { ok: false, error: "Email is not set up yet. Settings → Email." };
+    return record("Email is not set up yet. Settings → Email.");
   }
-  if (!to?.trim()) return { ok: false, error: "No address to send to." };
+  if (!to?.trim()) return record("No address to send to.");
 
   let password: string;
   try {
     password = decryptText(s.mail_password_enc);
   } catch {
-    return { ok: false, error: "The stored mail password cannot be read — the encryption key changed." };
+    return record("The stored mail password cannot be read — the encryption key changed.");
   }
 
   // Whatever worked last time is tried first; a working configuration should not be rediscovered

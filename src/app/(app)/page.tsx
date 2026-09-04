@@ -9,6 +9,7 @@ import { attestAction, answerAction, sendTrainingAction } from "./_actions/compl
 import { daysUntil, fmt, fmtLong, todayIso } from "@/lib/dates";
 import { PERSON_ROLE_LABEL } from "@/lib/labels";
 import { getSettings } from "@/lib/settings";
+import { mailHealth } from "@/lib/mail-health";
 import { Notice, Card, Figure, PageHeader } from "@/components/ui";
 
 // Live compliance status — never serve a cached copy after an action changes it.
@@ -75,7 +76,7 @@ const dueRow = (d: DueItem): Row => ({
 
 export default async function Dashboard({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
   const { ok, error } = await searchParams;
-  const [compliance, dated, matrix, cqi, cs, jobs, selfFindings, settings] = await Promise.all([
+  const [compliance, dated, matrix, cqi, cs, jobs, selfFindings, settings, mail] = await Promise.all([
     complianceSummary(),
     dueList({ horizonDays: 60 }),
     staffMatrix(),
@@ -84,6 +85,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     automationStatus(),
     openFindings(),
     getSettings(),
+    mailHealth(),
   ]);
 
   /*
@@ -212,6 +214,27 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
 
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
+
+      {/*
+        Every "Send" on this page goes through the mail server, so its state belongs on this page
+        rather than three clicks away under Settings. The distinction the old wording missed:
+        configured is not working. A Gmail address with the account password rather than an app
+        password is configured, cannot send anything, and looked fine everywhere.
+      */}
+      {mail.state !== "ok" && (
+        <Notice kind={mail.state === "unproven" ? "warn" : "crit"}>
+          <b>{mail.summary}</b>{" "}
+          {mail.failed.length > 0 && (
+            <>
+              The last error was: <i>{mail.failed[0].error}</i>{" "}
+            </>
+          )}
+          <Link href="/settings/email" className="underline">
+            {mail.configured ? "Check the mail settings and send yourself a test" : "Set up sending"}
+          </Link>
+          .
+        </Notice>
+      )}
 
       {setup.length > 0 && (
         <Notice kind="crit">

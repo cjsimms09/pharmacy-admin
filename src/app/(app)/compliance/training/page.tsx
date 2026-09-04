@@ -21,7 +21,8 @@ import {
 } from "@/lib/training-assignments";
 import { REPLY_PHRASE } from "@/lib/training-replies";
 import { courseFor } from "@/lib/courses";
-import { canSend } from "@/lib/send-mail";
+import { canSend, sendTestEmail } from "@/lib/send-mail";
+import { mailHealth } from "@/lib/mail-health";
 import { PickControls, PickGroup } from "@/components/pick-controls";
 import { onSiteToday } from "@/lib/roster";
 import { getSettings } from "@/lib/settings";
@@ -44,12 +45,13 @@ const REQUIRED = Object.keys(TRAINING_CADENCE) as TrainingType[];
 export default async function TrainingPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
   await requireUser();
   const { ok, error } = await searchParams;
-  const [assignments, mailReady, people, trainings, settings] = await Promise.all([
+  const [assignments, mailReady, people, trainings, settings, mail] = await Promise.all([
     openAssignments(),
     canSend(),
     onSiteToday(),
     db.query.trainings.findMany({ orderBy: (t, { desc }) => [desc(t.completedOn)] }),
     getSettings(),
+    mailHealth(),
   ]);
   // Policy documents the pharmacy holds, so the acknowledgement can carry the actual manual
   // rather than a link somebody has to be on the network to open.
@@ -231,6 +233,34 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
     redirect("/compliance/training?ok=" + encodeURIComponent("Recorded."));
   }
 
+  /**
+   * Proves sending works, from the screen that depends on it.
+   *
+   * It already existed under Settings → Email, which is exactly where somebody who has just
+   * pressed Send and is wondering whether anything happened will not go. The question "did that
+   * actually leave the building" belongs next to the button that was supposed to send it.
+   *
+   * Addressed to the pharmacy's own sending account: it is the one address certain to exist, it
+   * is a mailbox the PIC already reads, and a message that leaves and comes straight back proves
+   * both halves at once.
+   */
+  async function testSend() {
+    "use server";
+    const u = await requireManager();
+    const r = await sendTestEmail("");
+    await audit({ action: "mail.test", userId: u.id, userName: u.name, details: r.ok ? `via ${r.via}` : r.error });
+    revalidatePath("/compliance/training");
+    revalidatePath("/");
+    redirect(
+      `/compliance/training?${r.ok ? "ok" : "error"}=` +
+        encodeURIComponent(
+          r.ok
+            ? `Test message sent via ${r.via}, to the pharmacy's own address. If it arrives, training emails will too — if it does not, the problem is at the receiving end rather than here.`
+            : `The test could not be sent. ${r.error}`,
+        ),
+    );
+  }
+
   if (people.length === 0) {
     return (
       <>
@@ -264,11 +294,29 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
 
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
-      {!mailReady && (
-        <Notice kind="warn">
-          Email is not set up, so nothing can be sent. <Link href="/settings/email" className="underline">Set it up</Link> —
-          until then, the only route is recording training you delivered yourself.
+      {mail.state !== "ok" && (
+        <Notice kind={mail.state === "unproven" ? "warn" : "crit"}>
+          <b>{mail.summary}</b>{" "}
+          {mail.failed.length > 0 && <>The last error was: <i>{mail.failed[0].error}</i>{" "}</>}
+          {!mail.configured ? (
+            <>
+              <Link href="/settings/email" className="underline">Set it up</Link> — until then the only route is
+              recording training you delivered yourself.
+            </>
+          ) : (
+            <>
+              <Link href="/settings/email" className="underline">Check the settings</Link>, or prove it from here with
+              the button below. A Gmail address needs an app password rather than the account password, which is the
+              usual reason a correct-looking setup sends nothing.
+            </>
+          )}
         </Notice>
+      )}
+
+      {mail.configured && (
+        <form action={testSend} className="mb-4">
+          <button className="btn btn-sm">Send a test to me, so I know it works</button>
+        </form>
       )}
 
       <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

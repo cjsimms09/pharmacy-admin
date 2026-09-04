@@ -32,7 +32,6 @@ export const NAV: NavGroup[] = [
       { href: "/compliance/training/records", label: "Training file", blurb: "The whole file, printable for an inspector" },
       { href: "/staff/technician-list", label: "Technician list", blurb: "Form C-900, filed automatically every month" },
       { href: "/staff/rotations", label: "Students on rotation", blurb: "Present for a fixed spell, not staff and not former staff" },
-      { href: "/staff/hepatitis-b", label: "Hepatitis B", blurb: "Offer, acceptance or declination, per person" },
     ],
   },
   {
