@@ -53,6 +53,14 @@ function judge(key: string, enabled: boolean, lastAt: string | null | undefined)
   return age > MAX_QUIET_HOURS[key] ? "stale" : "ok";
 }
 
+/** A recorded failure that is newer than the last good run — the drive that stopped being there. */
+function backupFailedSinceLastRun(failedAt: string | undefined, lastRun: string | undefined): boolean {
+  const f = failedAt ? Date.parse(failedAt) : NaN;
+  if (!Number.isFinite(f)) return false;
+  const r = lastRun ? Date.parse(lastRun) : NaN;
+  return !Number.isFinite(r) || f > r;
+}
+
 export async function automationStatus(): Promise<JobStatus[]> {
   const s = await getSettings();
   const on = (v: string | undefined) => v === "yes";
@@ -70,7 +78,17 @@ export async function automationStatus(): Promise<JobStatus[]> {
       key: "backup",
       label: "Verified backup",
       // On unless deliberately switched off, matching backupStatus().
-      state: judge("backup", s.backup_enabled !== "no", s.backup_last_run),
+      //
+      // A failure recorded since the last success outranks the clock. A backup that ran fine
+      // yesterday and could not find the stick this morning is still "recent" by age, and that is
+      // exactly the morning the pharmacy needs to be told — an unplugged drive reads as healthy
+      // for two days otherwise, which is two days of believing something is being kept.
+      state:
+        s.backup_enabled === "no"
+          ? "off"
+          : backupFailedSinceLastRun(s.backup_last_failure, s.backup_last_run)
+            ? "stale"
+            : judge("backup", true, s.backup_last_run),
       lastAt: s.backup_last_run ?? null,
       detail:
         s.backup_enabled === "no"

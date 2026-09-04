@@ -17,9 +17,7 @@ import { DocumentList, UploadForm } from "@/components/documents";
 import { retentionFor } from "@/lib/offboarding";
 import { PersonForm } from "../person-form";
 import {
-  addCe,
   addCredential,
-  deleteCe,
   deleteCredential,
   updateCredential,
   updatePerson,
@@ -58,10 +56,9 @@ export default async function PersonPage({
   const person = await db.query.people.findFirst({ where: eq(schema.people.id, id) });
   if (!person) notFound();
 
-  const [creds, docs, ce, retention, trainings, assignments] = await Promise.all([
+  const [creds, docs, retention, trainings, assignments] = await Promise.all([
     db.query.credentials.findMany({ where: eq(schema.credentials.personId, id), orderBy: (c, { asc }) => [asc(c.expiresOn)] }),
     db.query.documents.findMany({ where: eq(schema.documents.personId, id), orderBy: (d, { desc }) => [desc(d.uploadedAt)] }),
-    db.query.ceEntries.findMany({ where: eq(schema.ceEntries.personId, id), orderBy: (c, { desc }) => [desc(c.completedOn)] }),
     retentionFor(id),
     db.query.trainings.findMany({ where: eq(schema.trainings.personId, id), orderBy: (t, { desc }) => [desc(t.completedOn)] }),
     db.query.trainingAssignments.findMany({ where: eq(schema.trainingAssignments.personId, id) }),
@@ -87,11 +84,6 @@ export default async function PersonPage({
   const fixing = fix ? creds.find((c) => c.id === fix) : undefined;
 
   const license = heldFor(person.role === "pharmacist" ? "pharmacist_license" : "technician_registration");
-  const ceRequired = person.role === "pharmacist" ? 30 : person.role === "technician" ? 20 : 0;
-  const cycleStart = license?.issuedOn ?? null;
-  const ceInCycle = ce.filter((e) => !cycleStart || e.completedOn >= cycleStart);
-  const ceHours = ceInCycle.reduce((s, e) => s + e.hours, 0) / 10;
-  const boardCourseDone = ceInCycle.some((e) => e.isBoardCourse);
 
   const trainingDue = trainings.filter((t) => t.expiresOn && daysUntil(t.expiresOn)! < 0).length;
 
@@ -144,16 +136,7 @@ export default async function PersonPage({
           sub={trainingDue > 0 ? `${trainingDue} lapsed` : trainings.length === 0 ? "Nothing recorded yet" : "All current"}
           tone={trainings.length === 0 || trainingDue > 0 ? "warn" : "ok"}
         />
-        {ceRequired > 0 ? (
-          <Figure
-            value={`${ceHours.toFixed(1)}/${ceRequired}`}
-            label="CE hours this cycle"
-            sub={person.role === "pharmacist" ? (boardCourseDone ? "Board course done" : "Board course still needed") : "Two-year period to Oct 31"}
-            tone={ceHours >= ceRequired && (person.role !== "pharmacist" || boardCourseDone) ? "ok" : "warn"}
-          />
-        ) : (
-          <Figure value={docs.length} label="Documents on file" tone="muted" />
-        )}
+        <Figure value={docs.length} label="Documents on file" tone="muted" />
         <Figure
           value={person.email ? "yes" : "no"}
           label="Email on file"
@@ -382,77 +365,6 @@ export default async function PersonPage({
         )}
       </Card>
 
-      {/* ── CE ─────────────────────────────────────────────────────── */}
-      {ceRequired > 0 && (
-        <Card
-          title="Continuing education"
-          actions={
-            <>
-              <span className={`badge ${ceHours >= ceRequired ? "badge-ok" : "badge-warn"}`}>{ceHours.toFixed(1)} / {ceRequired} hours</span>
-              {person.role === "pharmacist" && (
-                <span className={`badge ${boardCourseDone ? "badge-ok" : "badge-warn"}`}>
-                  {boardCourseDone ? "Board course done" : "Board course needed"}
-                </span>
-              )}
-            </>
-          }
-          subtitle={
-            (person.role === "pharmacist"
-              ? "30 clock hours per biennium including the 1-hour Board-provided course; no carryover (K.A.R. 68-1-1b)."
-              : "20 hours per two-year period ending October 31; non-ACPE certificates submitted within 30 days (K.A.R. 68-5-18).") +
-            (cycleStart ? ` Counting entries since ${fmt(cycleStart)}, the licence issue date.` : " Set the licence issue date to count only the current cycle.")
-          }
-          className="mb-6"
-        >
-          {ce.length > 0 && (
-            <div className="overflow-x-auto">
-              <table className="table">
-                <thead><tr><th>Date</th><th>Course</th><th>Provider / ACPE #</th><th className="num">Hours</th><th></th></tr></thead>
-                <tbody>
-                  {ce.map((e) => (
-                    <tr key={e.id} className={cycleStart && e.completedOn < cycleStart ? "opacity-50" : ""}>
-                      <td className="whitespace-nowrap text-xs">{fmt(e.completedOn)}</td>
-                      <td>
-                        {e.title}
-                        {e.isBoardCourse && <span className="badge badge-ok ml-2">Board course</span>}
-                        {e.isLive && <span className="badge badge-muted ml-2">live</span>}
-                      </td>
-                      <td className="text-xs text-ink-2">{e.provider ?? ""}{e.acpeNumber ? ` · ${e.acpeNumber}` : ""}</td>
-                      <td className="num">{(e.hours / 10).toFixed(1)}</td>
-                      <td>
-                        {canManage && (
-                          <form action={deleteCe.bind(null, e.id, id)}>
-                            <button className="text-xs text-crit hover:underline">Delete</button>
-                          </form>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-          {canManage && (
-            <details className="mt-4">
-              <summary className="cursor-pointer text-sm font-medium text-accent">Add CE entry</summary>
-              <form action={addCe} className="mt-3 grid gap-3 sm:grid-cols-3">
-                <input type="hidden" name="personId" value={id} />
-                <Field label="Completed on"><input name="completedOn" type="date" className="field" required /></Field>
-                <Field label="Hours"><input name="hours" type="number" step="0.1" min="0.1" className="field" required /></Field>
-                <Field label="Course title" className="sm:col-span-3"><input name="title" className="field" required /></Field>
-                <Field label="Provider"><input name="provider" className="field" /></Field>
-                <Field label="ACPE / UAN number"><input name="acpeNumber" className="field" /></Field>
-                <div className="flex flex-col justify-end gap-1 text-sm">
-                  <label className="flex items-center gap-2"><input type="checkbox" name="isBoardCourse" /> Board-provided 1-hour course</label>
-                  <label className="flex items-center gap-2"><input type="checkbox" name="isLive" /> Live</label>
-                </div>
-                <div className="sm:col-span-3"><button className="btn btn-primary">Add</button></div>
-              </form>
-            </details>
-          )}
-        </Card>
-      )}
-
       {/* ── Documents ──────────────────────────────────────────────── */}
       <Card
         title="Documents"
@@ -468,7 +380,7 @@ export default async function PersonPage({
               <UploadForm
                 redirectTo={here}
                 hidden={{ personId: id }}
-                categories={["license", "cpr_card", "immunization_training", "immunization_protocol", "ce_certificate", "training_record", "controlled_substance_poa", "other"]}
+                categories={["license", "cpr_card", "immunization_training", "immunization_protocol", "training_record", "controlled_substance_poa", "other"]}
                 defaultCategory="license"
               />
             </div>

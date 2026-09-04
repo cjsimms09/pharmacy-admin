@@ -18,6 +18,8 @@ export const CREDENTIAL_LABEL: Record<CredentialType, string> = {
   immunization_record: "Immunization record (MMR, Td/Tdap, hep B titer, varicella)",
   tb_screening: "TB screening (skin test, Quantiferon or chest x-ray)",
   background_check: "Background checks (OIG LEIE, SAM, criminal, sex offender registry)",
+  technician_certification: "CPhT certification (PTCB / NHA)",
+  // Kept only so a record filed before this was removed still has a name; not offered anywhere new.
   hepatitis_b: "Hepatitis B vaccination offer or declination",
   pharmacy_registration: "Kansas pharmacy registration",
   dea_registration: "DEA registration",
@@ -40,6 +42,7 @@ export const CREDENTIAL_LABEL: Record<CredentialType, string> = {
 export const CREDENTIAL_TYPES_FOR_PERSON: CredentialType[] = [
   "pharmacist_license",
   "technician_registration",
+  "technician_certification",
   "intern_registration",
   "cpr",
   "immunization_training",
@@ -51,7 +54,6 @@ export const CREDENTIAL_TYPES_FOR_PERSON: CredentialType[] = [
   "immunization_record",
   "tb_screening",
   "background_check",
-  "hepatitis_b",
   "liability_insurance",
   "controlled_substance_poa",
   "npi",
@@ -68,7 +70,12 @@ export const CREDENTIAL_TYPES_FOR_PERSON: CredentialType[] = [
 export function requiredCredentials(role: PersonRole, administersVaccines: boolean): CredentialType[] {
   const licence: CredentialType =
     role === "pharmacist" ? "pharmacist_license" : role === "technician" ? "technician_registration" : "intern_registration";
-  return administersVaccines ? [licence, "cpr", "immunization_training", "immunization_protocol", "hepatitis_b"] : [licence];
+  const out: CredentialType[] = [licence];
+  // The CPhT is a technician's credential and nobody else's. Asking a pharmacist or an intern for
+  // one produces a gap that can never be closed, which is how a compliance list stops being read.
+  if (role === "technician") out.push("technician_certification");
+  if (administersVaccines) out.push("cpr", "immunization_training", "immunization_protocol");
+  return out;
 }
 export const CREDENTIAL_TYPES_FOR_PHARMACY: CredentialType[] = [
   "pharmacy_registration",
@@ -90,6 +97,8 @@ export const CREDENTIAL_TYPES_FOR_PHARMACY: CredentialType[] = [
 
 /** Kansas renewal notes, shown as helper text. */
 export const CREDENTIAL_HINT: Partial<Record<CredentialType, string>> = {
+  technician_certification:
+    "The national CPhT from PTCB or NHA, separate from the Kansas registration. Renews on its own cycle — record the certificate number and the date it runs to.",
   pharmacist_license: "Renews every two years by June 30. 30 CE hours per biennium including the 1-hour Board course. No grace period.",
   technician_registration: "Renews every two years by October 31. 20 CE hours per period. No grace period.",
   intern_registration: "Expires six years from issuance.",
@@ -99,7 +108,6 @@ export const CREDENTIAL_HINT: Partial<Record<CredentialType, string>> = {
   immunization_record: "Two MMR, Td/Tdap in date, hepatitis B series with a titer showing immunity, and varicella immunity. The school informs the student; the site has to ask for it.",
   tb_screening: "Within the previous year, or documented treatment or a negative chest x-ray.",
   background_check: "The school runs OIG LEIE, SAM/GSA, criminal and sex offender registry checks. Keep proof — an excluded person working here is the pharmacy's problem, not the school's.",
-  hepatitis_b: "Offered free within ten working days of taking on duties with exposure. Record the series, or the signed declination — an employee never offered and one who declined look identical without it.",
   controlled_substance_poa: "DEA power of attorney to sign 222 forms and order controlled substances.",
   pharmacy_registration: "Renews annually by June 30.",
   dea_registration: "Renews every three years. The CSOS certificate expires with it.",
@@ -125,7 +133,9 @@ export const DOCUMENT_CATEGORY_LABEL: Record<DocumentCategory, string> = {
   agreement: "Agreement / contract",
   cqi_summary: "CQI bimonthly summary (C-550)",
   cqi_incident: "CQI incident report / evaluation (C-650)",
-  ce_certificate: "CE certificate",
+  // Kept only so documents filed before CE tracking was removed still have a name. Not offered
+  // anywhere new.
+  ce_certificate: "Certificate (CE tracking has been removed)",
   training_record: "Training record / attestation",
   policy: "Policy / procedure",
   report: "Report received by email",

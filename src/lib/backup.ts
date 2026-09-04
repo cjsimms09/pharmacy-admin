@@ -94,6 +94,29 @@ async function tableCounts(url: string): Promise<Record<string, number>> {
  * gives no warning until the day it is needed.
  */
 export async function runBackup(destination: string, secondary?: string | null): Promise<BackupResult> {
+  /*
+   * A backup that never started is the one nobody hears about.
+   *
+   * Everything below records its own outcome once it has written something. What it could not
+   * record was the failure before that point — an unplugged stick, a network share that is not
+   * mounted, a folder that was renamed — because the throw went straight past the recording and
+   * into a background job that swallows it. The result was a pharmacy told nothing at all, which
+   * is the worst of the three possible states to be in.
+   *
+   * So the reason is written down before the error is re-thrown, and the date of the failure with
+   * it: the dashboard compares that against the last success, and says so on the front page.
+   */
+  try {
+    return await takeBackup(destination, secondary);
+  } catch (e) {
+    const why = e instanceof Error ? e.message : String(e);
+    await setSetting("backup_last_result", `Backup could not be taken: ${why}`);
+    await setSetting("backup_last_failure", new Date().toISOString());
+    throw e;
+  }
+}
+
+async function takeBackup(destination: string, secondary?: string | null): Promise<BackupResult> {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   const fileName = `pharmacy-admin-backup-${stamp}.zip`;
   const dest = path.resolve(destination);
@@ -200,6 +223,9 @@ export async function runBackup(destination: string, secondary?: string | null):
 
   await setSetting("backup_last_run", new Date().toISOString());
   await setSetting("backup_last_result", message);
+  // Cleared only on a run that got this far, so the dashboard stops reporting a failure that has
+  // since been fixed — and keeps reporting one that has not.
+  if (verified) await setSetting("backup_last_failure", "");
 
   return {
     ok: verified,

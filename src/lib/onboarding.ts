@@ -147,15 +147,6 @@ export async function newHirePack(personId: string): Promise<Pack | null> {
   }
 
   // ── What the pharmacy has to do about them ──
-  const hepB = creds.some((c) => c.type === "hepatitis_b");
-  items.push({
-    key: "hep-b",
-    group: "record",
-    label: "Hepatitis B: offered, and accepted or declined in writing",
-    why: "29 CFR 1910.1030(f)(2) requires the vaccine be offered within ten working days of the start of exposure, and a signed declination kept if it is refused.",
-    done: hepB,
-    href: `/staff/${personId}#credential-form`,
-  });
   if (person.role === "technician") {
     items.push({
       key: "tech-list",

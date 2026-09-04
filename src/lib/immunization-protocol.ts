@@ -137,3 +137,94 @@ export function protocolGaps(c: ProtocolContext): string[] {
   }
   return out;
 }
+
+/**
+ * The protocol's own words, once, in order.
+ *
+ * The document is printed for a physician to sign, read on screen by the person who has to work
+ * to it, and attached to the email that asks them to. Three renderings of one document is three
+ * chances for them to disagree, and the one that matters — what somebody actually read before
+ * signing that they had read it — is the one nobody would notice had drifted. So the wording
+ * lives here and every rendering walks this list.
+ */
+export type ProtocolBlock =
+  | { kind: "para"; text: string }
+  | { kind: "statute"; heading: string; text: string }
+  | { kind: "vaccines" }
+  | { kind: "heading"; text: string }
+  | { kind: "emergency" };
+
+export function protocolBody(c: ProtocolContext): ProtocolBlock[] {
+  return [
+    {
+      kind: "para",
+      text:
+        "The Pharmacist, Pharmacy Intern, or Pharmacy Technician acting as an agent for the undersigned physician, " +
+        "according to and in compliance with Statute 65-1635a of the Kansas State Pharmacy Practice Act and all " +
+        "revisions thereof, may administer the immunizations (vaccines) listed below.",
+    },
+    {
+      kind: "statute",
+      heading:
+        "65-1635a. Administration of vaccine; education and reporting requirements; delegation of authority " +
+        "prohibited; “pharmacist” defined.",
+      text:
+        "(a) A pharmacist or a pharmacy student, intern or pharmacy technician who is 18 years of age or older and " +
+        "working under the direct supervision and control of a pharmacist may administer influenza vaccine to a person " +
+        "six years of age or older and may administer vaccine, other than influenza vaccine, to a person 12 years of " +
+        "age or older pursuant to a vaccination protocol if the pharmacist, pharmacy student, intern or pharmacy " +
+        "technician has successfully completed a course of study and training, approved by the accreditation council " +
+        "for pharmacy or the board, in vaccination storage, protocols, injection technique, emergency procedures and " +
+        "recordkeeping and has taken a course in cardiopulmonary resuscitation (CPR) and has a current CPR certificate " +
+        "when administering vaccines. A pharmacist, pharmacy student, intern or pharmacy technician who successfully " +
+        "completes such a course of study and training shall maintain proof of completion and, upon request, provide a " +
+        "copy of such proof to the board.",
+    },
+    {
+      kind: "para",
+      text:
+        "The pharmacist, pharmacy intern, or pharmacy technician, possessing a certificate of training in Pharmacy " +
+        "Based Immunization Delivery, current BLS Healthcare CPR Certification, and, if applicable, pharmacist " +
+        "professional liability insurance coverage may administer influenza vaccine to persons 6 years of age or " +
+        "older and the following immunizations (vaccines) to persons 12 years of age or older, consistent with the " +
+        "FDA approved indications and contraindications and/or recommended in current guideline from the Advisory " +
+        "Committee on Immunizations Practices (ACIP) of the U.S Centers for Disease Control & Prevention (CDC), and " +
+        "other competent authorities:",
+    },
+    { kind: "vaccines" },
+    {
+      kind: "para",
+      text:
+        "Pursuant to statute 65-1635a, pharmacy technician or interns certified in Pharmacy Based Immunization " +
+        "Delivery carrying liability insurance coverage and current CPR certification may administer vaccinations " +
+        "under the direct supervision of the afore mentioned licensed pharmacist.",
+    },
+    {
+      kind: "para",
+      text:
+        `${c.pharmacy} will maintain records of all immunizations administered, immunization training, and CPR ` +
+        "Certifications for a minimum of 5 years and shall be made available at the request of the board of pharmacy. " +
+        "Before immunization, vaccine candidates will be screened regarding previous adverse events following " +
+        "immunizations, food or drug allergies, current health, immunosuppression status, pregnancy, and underlying " +
+        "diseases. All vaccine candidates will be provided with a current Vaccine Information Statement (VIS). If a " +
+        `primary care provider (PCP) is provided to ${c.pharmacy} by the vaccinated patient, ${c.pharmacy} will notify ` +
+        "or make an attempt to notify the PCP of the vaccine(s) administered. If no PCP is provided by the patient the " +
+        "administration record will be sent to the protocol physician. The pharmacist shall report administration of " +
+        "all vaccinations to the Kansas Immunization Registry in compliance with K.S.A 65-1635a for reporting " +
+        "vaccinations. Any clinically significant adverse events following an immunization shall be reported to the " +
+        "Vaccine Adverse Events Reporting System (VAERS), even if unclear whether the event was caused by the vaccine.",
+    },
+    { kind: "heading", text: "Emergency Protocol:" },
+    { kind: "para", text: "If an allergic reaction to a vaccine occurs, this pharmacist is authorized to;" },
+    { kind: "emergency" },
+    {
+      kind: "para",
+      text:
+        `As the authorizing physician, I will maintain a valid Yellow-Fever stamp registered to ${c.pharmacy} and ` +
+        "review the activities of the pharmacist administering vaccines under this protocol on a yearly basis. This " +
+        `protocol shall be valid for ${c.termYears} years or such time preceding ${c.termYears} years that it is ` +
+        "revoked in writing. I, the authorizing physician, hereby authorize the pharmacist, pharmacy intern, or " +
+        "pharmacy technician to administer vaccinations in accordance with this protocol.",
+    },
+  ];
+}

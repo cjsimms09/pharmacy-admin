@@ -22,7 +22,7 @@ export function KindPicker({
   ce: React.ReactNode;
 }) {
   const [kind, setKind] = useState(initialKind);
-  const needsPerson = kind === "person_credential" || kind === "person_training" || kind === "person_ce";
+  const needsPerson = kind === "person_credential" || kind === "person_training";
 
   return (
     <div className="grid gap-3 sm:grid-cols-2">
@@ -35,7 +35,6 @@ export function KindPicker({
       {needsPerson && <div className="sm:col-span-2">{person}</div>}
       {(kind === "person_credential" || kind === "pharmacy_credential") && <div className="grid gap-3 sm:col-span-2">{credential}</div>}
       {kind === "person_training" && <div className="grid gap-3 sm:col-span-2 sm:grid-cols-3">{training}</div>}
-      {kind === "person_ce" && <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2">{ce}</div>}
     </div>
   );
 }

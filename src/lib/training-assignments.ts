@@ -7,7 +7,8 @@ import { addMonths, TRAINING_CADENCE } from "./due";
 import { TRAINING_LABEL } from "./labels";
 import { courseFor } from "./courses";
 import { makeReplyCode } from "./training-replies";
-import { packetText, packetFileName, courseVersion, packetPdf, packetPdfFileName } from "./course-packet";
+import { packetText, packetFileName, courseVersion } from "./course-packet";
+import { trainingMaterial } from "./training-material";
 import { subjectFor, textFor, htmlFor, type EmailContext } from "./training-email";
 import { getSettings, setSetting } from "./settings";
 import { sendMail } from "./send-mail";
@@ -193,7 +194,11 @@ export async function sendOutstanding(personIds?: string[]): Promise<SendResult>
     const r = await emailPerson(person, items);
     const now = new Date().toISOString();
     for (const a of items) {
-      const course = courseFor(a.type);
+      // What was actually delivered, and when. The certificate names this version, so a course —
+      // or the manual — edited later cannot retroactively claim to be the one they read. Taken
+      // from what the email actually carried rather than from the course table, because for the
+      // manual acknowledgement there is no course and the version is the manual's own.
+      const version = r.materials[a.type] ?? null;
       await db
         .update(schema.trainingAssignments)
         .set(
@@ -201,10 +206,8 @@ export async function sendOutstanding(personIds?: string[]): Promise<SendResult>
             ? {
                 sentAt: now,
                 sendError: null,
-                // What was actually delivered, and when. The certificate names this version, so
-                // a course edited later cannot retroactively claim to be the one they sat.
-                materialVersion: course ? courseVersion(course) : null,
-                materialSentAt: course ? now : null,
+                materialVersion: version,
+                materialSentAt: version ? now : null,
               }
             : { sendError: r.error },
         )
@@ -250,7 +253,7 @@ export async function sendOutstanding(personIds?: string[]): Promise<SendResult>
  * carrying the course proves the pharmacy provided it, and only the second is training.
  */
 async function emailPerson(
-  person: { firstName: string; lastName: string; email: string | null },
+  person: { id: string; firstName: string; lastName: string; email: string | null },
   items: { type: TrainingType; token: string; replyCode: string | null; dueOn: string; materialDocumentId?: string | null }[],
   opts: { reminder?: boolean } = {},
 ) {
@@ -262,6 +265,21 @@ async function emailPerson(
       .join(" · ") || null;
   const pic = (await db.query.people.findMany()).find((p) => p.isPic);
 
+  /*
+   * The material for each item, worked out once.
+   *
+   * Once, because the email has to attach it and then say so, and those two had drifted apart:
+   * the wording claimed every course was attached while the code only ever attached the six that
+   * are written courses. The manual acknowledgement — which every member of staff is sent —
+   * arrived with nothing on it and a sentence saying the material was enclosed. So the email is
+   * built from what was actually produced, and where nothing could be produced it says that
+   * instead.
+   */
+  const attach = s.training_attach_material !== "no";
+  const materials = await Promise.all(
+    items.map((i) => trainingMaterial(i.type, { pharmacyName: pharmacy, personId: person.id }).catch(() => null)),
+  );
+
   const ctx: EmailContext = {
     firstName: person.firstName,
     pharmacy,
@@ -270,34 +288,26 @@ async function emailPerson(
     picName: pic ? `${pic.firstName} ${pic.lastName}` : null,
     today: todayIso(),
     reminder: Boolean(opts.reminder),
+    attachmentsOn: attach,
     items: await Promise.all(
-      items.map(async (i) => {
+      items.map(async (i, n) => {
         const course = courseFor(i.type);
+        const material = materials[n];
         return {
           type: i.type,
-          title: course?.title ?? TRAINING_LABEL[i.type],
+          title: course?.title ?? material?.title ?? TRAINING_LABEL[i.type],
           minutes: course?.minutes ?? null,
           dueOn: i.dueOn,
           url: await linkFor(i.token),
           replyCode: i.replyCode,
+          attachment: attach ? (material?.filename ?? null) : null,
         };
       }),
     ),
   };
 
   /*
-   * Attachments are opt-in, and off by default.
-   *
-   * A bare message arrived and the same message carrying seven text files and a Word document did
-   * not — accepted by the sending server, then dropped somewhere downstream, with no bounce and
-   * nothing in any log. That is the difference between a test email that works and a training
-   * email that vanishes, and it is not a difference worth keeping: the course is one click away in
-   * the body of the email, so the attachment adds very little and can cost the entire message.
-   *
-   * A pharmacy that wants the packet attached, and whose mail survives it, can turn it back on.
-   */
-  /*
-   * The course travels as a PDF.
+   * The material travels as a PDF.
    *
    * It used to be a .txt, which on a phone opens as a wall of monospace or does not open at all —
    * so the material nobody could read was material nobody read. A PDF opens everywhere, prints
@@ -307,18 +317,13 @@ async function emailPerson(
    *
    * On by default. It was briefly turned off while attachments were the suspect for mail going
    * missing; the actual cause was the spam folder, which the sender name and subject now address.
+   * A pharmacy whose mail genuinely cannot carry attachments can still turn it off.
    */
-  const attach = s.training_attach_material !== "no";
   const attachments: { filename: string; content: string | Buffer; contentType?: string }[] = !attach
     ? []
-    : items
-        .map((i) => courseFor(i.type))
-        .filter((c): c is NonNullable<typeof c> => Boolean(c))
-        .map((course) => ({
-          filename: packetPdfFileName(course),
-          content: packetPdf(course, pharmacy),
-          contentType: "application/pdf",
-        }));
+    : materials
+        .filter((m): m is NonNullable<typeof m> => Boolean(m))
+        .map((m) => ({ filename: m.filename, content: m.pdf, contentType: "application/pdf" }));
 
   // Where the assignment carries a document from the vault — a policy manual, a signed protocol —
   // the document itself goes with the email. A link to it is a link somebody has to be on the
@@ -338,7 +343,15 @@ async function emailPerson(
     }
   }
 
-  return sendMail(person.email!, subjectFor(ctx), textFor(ctx), attachments, htmlFor(ctx));
+  const sent = await sendMail(person.email!, subjectFor(ctx), textFor(ctx), attachments, htmlFor(ctx));
+  // Which version of what actually went, per training, so the caller can record it against the
+  // assignment rather than guess it back later from a course table that may have moved on.
+  const versions: Partial<Record<TrainingType, string>> = {};
+  items.forEach((i, n) => {
+    const m = materials[n];
+    if (m && attach) versions[i.type] = m.version;
+  });
+  return { ...sent, materials: versions };
 }
 
 /**

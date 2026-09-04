@@ -10,13 +10,18 @@ credentials*.json
 secrets/
 
 # ── Real data: never in git ──────────────────────────────────────────
-data/
-uploads/
-private/
-contracts/
-reports/
-remits/
-backups/
+# Anchored to the repository root, every one of them, and that matters more than it looks.
+# Unanchored, "backups/" also matched src/app/(app)/settings/backups/ — so the Backups screen,
+# the Remits screen and the Reports screen were quietly never committed, and the site 404'd on
+# them anywhere it was cloned. A rule meant to keep patient data out of git was deleting three
+# features instead. These are directories that exist once, at the top of the project.
+/data/
+/uploads/
+/private/
+/contracts/
+/reports/
+/remits/
+/backups/
 *.835
 *.837
 *.edi

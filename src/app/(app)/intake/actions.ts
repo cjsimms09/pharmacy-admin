@@ -102,7 +102,7 @@ export async function applyIntake(id: string, fd: FormData) {
   const expiresOn = orNull(g("expiresOn"));
   const issuedOn = orNull(g("issuedOn"));
 
-  if ((kind === "person_credential" || kind === "person_training" || kind === "person_ce") && !personId) {
+  if ((kind === "person_credential" || kind === "person_training") && !personId) {
     fail(here, "Choose whose document this is, or change where it is filed.");
   }
 
@@ -150,23 +150,6 @@ export async function applyIntake(id: string, fd: FormData) {
       provider: orNull(g("issuer")),
       documentId: item.documentId,
       createdBy: user.id,
-    });
-  }
-
-  if (kind === "person_ce") {
-    const completedOn = g("completedOn") || issuedOn || todayIso();
-    const hours = Number(g("ceHours"));
-    if (!Number.isFinite(hours) || hours <= 0) fail(here, "Enter the number of CE hours on the certificate.");
-    await db.insert(schema.ceEntries).values({
-      id: newId(),
-      personId: personId!,
-      completedOn,
-      hours: Math.round(hours * 10),
-      title,
-      provider: orNull(g("issuer")),
-      acpeNumber: orNull(g("ceAcpeNumber")),
-      isBoardCourse: g("isBoardCourse") === "on",
-      documentId: item.documentId,
     });
   }
 

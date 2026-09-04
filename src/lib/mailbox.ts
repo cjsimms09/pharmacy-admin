@@ -15,6 +15,7 @@ import { loadNadacFiles, nadacDir } from "./nadac";
 import { gateFile } from "./phi-gate";
 import { audit } from "./audit";
 import { matchTrainingReplies, completeByEmailReply } from "./training-replies";
+import { matchCertificateReply, fileCertificateReply } from "./credential-requests";
 import { isBounce, parseBounce, describeBounce } from "./bounces";
 
 /**
@@ -198,6 +199,80 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
               reason: `Delivery failure. ${note}${attached}`,
             });
             result.stored++;
+            await client.messageFlagsAdd(String(uid), ["\\Seen"], { uid: true });
+            continue;
+          }
+
+          /*
+           * A member of staff sending in the certificate they were asked for.
+           *
+           * Checked alongside the training replies and before the allowed-senders list, for the
+           * same reason: staff are not report senders and will never be on that list, so the one
+           * message that closes the gap would otherwise be filed as "ignored".
+           *
+           * Matched on the code and the sender's own address together. A code forwarded to
+           * somebody else must not be able to file a certificate under the wrong name — that is
+           * the document an inspector asks to see.
+           */
+          const certMatches = await matchCertificateReply({ from, subject, text: bodyText });
+          if (certMatches.length > 0) {
+            const certAttachments = (parsed.attachments ?? []).filter(
+              (a) => a.filename && ATTACHMENT_EXT.test(a.filename) && ATTACHMENT_MIME.has(a.contentType ?? ""),
+            );
+            const filed: string[] = [];
+            for (const m of certMatches) {
+              const att = certAttachments.shift();
+              if (!att) {
+                // They replied with the code and forgot the photo. Say so rather than closing it.
+                await db.insert(schema.inboxItems).values({
+                  id: newId(),
+                  messageId: `${messageId}#${m.requestId}`,
+                  receivedAt,
+                  fromAddress: from,
+                  subject,
+                  status: "ignored",
+                  reason: `${m.personName} replied about their ${m.type} but attached nothing, so the request is still open.`,
+                });
+                result.ignored++;
+                continue;
+              }
+              try {
+                const buf = att.content as Buffer;
+                const fileName = att.filename!;
+                const file = new File([new Uint8Array(buf)], fileName, {
+                  type: att.contentType || "application/octet-stream",
+                });
+                const stored = await storeFile(file, { allowReportTypes: true });
+                const docId = newId();
+                await db.insert(schema.documents).values({
+                  id: docId,
+                  category: "license",
+                  title: `${m.personName} — sent in by email`,
+                  fileName,
+                  mimeType: file.type,
+                  sizeBytes: buf.length,
+                  storageKey: stored.storageKey,
+                  sha256: stored.sha256,
+                  uploadedBy: m.personName,
+                });
+                await fileCertificateReply(m.requestId, docId, { name: m.personName });
+                filed.push(`${m.personName}'s ${m.type}`);
+              } catch (e) {
+                result.errors.push(`Certificate from ${from}: ${e instanceof Error ? e.message : String(e)}`);
+              }
+            }
+            if (filed.length > 0) {
+              await db.insert(schema.inboxItems).values({
+                id: newId(),
+                messageId,
+                receivedAt,
+                fromAddress: from,
+                subject,
+                status: "stored",
+                reason: `Certificate filed — ${filed.join("; ")}. The record is created with the dates blank; enter them from the document.`,
+              });
+              result.stored++;
+            }
             await client.messageFlagsAdd(String(uid), ["\\Seen"], { uid: true });
             continue;
           }

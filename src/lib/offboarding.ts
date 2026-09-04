@@ -22,7 +22,6 @@ export type Retention = {
   credentials: number;
   trainings: number;
   documents: number;
-  ceEntries: number;
   signedAttestations: number;
   /** The earliest date everything about this person could be destroyed, and why. */
   keepUntil: string | null;
@@ -58,11 +57,10 @@ function addYears(iso: string, years: number): string {
 /** What is on file for someone, and how long it has to stay there. */
 export async function retentionFor(personId: string): Promise<Retention> {
   const person = await db.query.people.findFirst({ where: eq(schema.people.id, personId) });
-  const [credentials, trainings, documents, ceEntries, assignments] = await Promise.all([
+  const [credentials, trainings, documents, assignments] = await Promise.all([
     db.query.credentials.findMany({ where: eq(schema.credentials.personId, personId) }),
     db.query.trainings.findMany({ where: eq(schema.trainings.personId, personId) }),
     db.query.documents.findMany({ where: eq(schema.documents.personId, personId) }),
-    db.query.ceEntries.findMany({ where: eq(schema.ceEntries.personId, personId) }),
     db.query.trainingAssignments.findMany({ where: eq(schema.trainingAssignments.personId, personId) }),
   ]);
 
@@ -72,7 +70,6 @@ export async function retentionFor(personId: string): Promise<Retention> {
     credentials: credentials.length,
     trainings: trainings.length,
     documents: documents.length,
-    ceEntries: ceEntries.length,
     signedAttestations: assignments.filter((a) => a.completedAt).length,
     keepUntil: from ? addYears(from, longest.years) : null,
     reasons: [...RETENTION_RULES.map((r) => r.why), MEDICAL_RECORD_RULE],

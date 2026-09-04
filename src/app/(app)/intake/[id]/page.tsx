@@ -17,7 +17,6 @@ export const dynamic = "force-dynamic";
 const KIND_LABEL: Record<string, string> = {
   person_credential: "A licence, card or certificate belonging to a person",
   person_training: "Annual training for a person (FWA, HIPAA, OSHA)",
-  person_ce: "A continuing education certificate",
   pharmacy_credential: "A pharmacy-level registration, insurance or agreement",
   cqi_incident: "A CQI incident form",
   cqi_summary: "A CQI bimonthly summary",
@@ -133,8 +132,6 @@ export default async function IntakeReviewPage({ params, searchParams }: { param
                 ce={
                   <>
                     <Field label="Completed on"><input name="completedOn" type="date" className="field" defaultValue={completedGuess} /></Field>
-                    <Field label="Hours"><input name="ceHours" type="number" step="0.1" min="0.1" className="field" defaultValue={r?.ceHours ?? ""} /></Field>
-                    <Field label="ACPE / UAN number"><input name="ceAcpeNumber" className="field" defaultValue={r?.ceAcpeNumber ?? ""} /></Field>
                     <label className="flex items-center gap-2 text-sm">
                       <input type="checkbox" name="isBoardCourse" defaultChecked={r?.isBoardCourse ?? false} /> The Board&apos;s required 1-hour course
                     </label>

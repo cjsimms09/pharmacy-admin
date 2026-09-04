@@ -40,7 +40,8 @@ export function makeReplyCode(): string {
 /** The words staff are asked to send back. Matched loosely — people add "Thanks!" and a signature. */
 export const REPLY_PHRASE = "I COMPLETED THIS";
 
-const normalise = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, "");
+/** Shared with the certificate-request matcher, so both compare codes the same way. */
+export const normalise = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, "");
 
 export type ReplyMatch = {
   assignmentId: string;

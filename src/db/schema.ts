@@ -110,6 +110,14 @@ export const CREDENTIAL_TYPES = [
    * employee who declined look identical without it, and only one of those is compliant.
    */
   "hepatitis_b",
+  /**
+   * PTCB or NHA national certification — the CPhT.
+   *
+   * Distinct from the Kansas technician registration, which every technician must hold to work at
+   * all. Certification is the national credential on top of it, it expires on its own cycle, and
+   * it applies to technicians and to nobody else — an intern or a pharmacist does not hold one.
+   */
+  "technician_certification",
   "pharmacy_registration",
   "dea_registration",
   "csos_certificate",
@@ -127,6 +135,45 @@ export const CREDENTIAL_TYPES = [
   "other",
 ] as const;
 export type CredentialType = (typeof CREDENTIAL_TYPES)[number];
+
+/**
+ * A request to a member of staff for a credential the pharmacy does not hold.
+ *
+ * The gap is visible on every screen; closing it meant emailing somebody by hand, waiting, then
+ * remembering to file whatever came back against the right person and the right requirement. Each
+ * of those steps is where it stopped happening.
+ *
+ * So the request is a record. It carries a code, the reply is matched on that code *and* the
+ * sender's own address, and the attachment that comes back is filed against the person and the
+ * requirement it was asked for — which is the whole loop, closed without anybody remembering
+ * anything.
+ */
+export const credentialRequests = sqliteTable(
+  "credential_requests",
+  {
+    id: text("id").primaryKey(),
+    personId: text("person_id")
+      .notNull()
+      .references(() => people.id, { onDelete: "cascade" }),
+    type: text("type", { enum: CREDENTIAL_TYPES }).notNull(),
+    /** Short, spoken-aloud-able, and what the reply is matched on. */
+    replyCode: text("reply_code").notNull(),
+    requestedOn: text("requested_on").notNull(),
+    requestedBy: text("requested_by"),
+    sentAt: text("sent_at"),
+    sendError: text("send_error"),
+    remindersSent: integer("reminders_sent").notNull().default(0),
+    /** Set when a reply arrived and something was filed from it. */
+    fulfilledAt: text("fulfilled_at"),
+    /** The document that came back, and the credential row it produced. */
+    documentId: text("document_id"),
+    credentialId: text("credential_id"),
+    /** Cancelled without being fulfilled — they left, or it was asked for in error. */
+    cancelledAt: text("cancelled_at"),
+    createdAt: text("created_at").notNull().default(now()),
+  },
+  (t) => [index("credential_requests_person_idx").on(t.personId), index("credential_requests_code_idx").on(t.replyCode)],
+);
 
 export const credentials = sqliteTable(
   "credentials",

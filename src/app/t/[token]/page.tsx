@@ -3,6 +3,9 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { assignmentByToken, completeAssignment } from "@/lib/training-assignments";
 import { courseFor } from "@/lib/courses";
+import { allSections, outline } from "@/lib/manual-store";
+import { protocolFor, protocolBody } from "@/lib/immunization-protocol";
+import { ProtocolBody } from "@/components/protocol-body";
 import { TRAINING_LABEL } from "@/lib/labels";
 import { db, schema } from "@/db";
 import { getSettings } from "@/lib/settings";
@@ -52,6 +55,17 @@ export default async function TrainingLinkPage({
 
   const { assignment: a, person } = found;
   const course = courseFor(a.type);
+
+  /*
+   * The two trainings that are not written courses still have a document behind them.
+   *
+   * Acknowledging the policy manual and reviewing the immunization protocol used to open a page
+   * that said "use the material the pharmacy has given you" and offered a signature box. That is
+   * asking somebody to sign for having read something they were never shown — worthless as a
+   * record and insulting as a request. Both documents are held here, so both are put on the page.
+   */
+  const manual = a.type === "policy_manual_acknowledgement" ? outline(await allSections()) : null;
+  const protocol = a.type === "immunization_protocol_review" ? await protocolFor(person.id) : null;
   const wrongIndexes = new Set((wrong ?? "").split(",").filter(Boolean).map(Number));
 
   if (done === "1" || a.completedAt) {
@@ -201,12 +215,50 @@ export default async function TrainingLinkPage({
           </form>
         </>
       ) : (
-        // No written course for this one — the immunization protocol review, for instance, is
-        // reading the pharmacy's own document, which cannot live in the software.
         <form action={sign} className="mt-6 space-y-4">
           <section className="rounded-lg border border-line bg-surface p-4">
-            <h2 className="font-semibold">1. Work through the training</h2>
-            {a.materialUrl ? (
+            <h2 className="font-semibold">1. Read it</h2>
+            {manual && manual.length > 0 ? (
+              <>
+                <p className="mt-1 text-sm text-ink-2">
+                  This is {pharmacy}&rsquo;s manual as it stands today. It is also attached to the email you were sent,
+                  as a PDF you can keep.
+                </p>
+                <div className="mt-4 max-h-[28rem] overflow-y-auto rounded-md border border-line bg-ground p-4">
+                  {manual
+                    .filter((n) => !n.retiredOn)
+                    .map((n) => (
+                      <section key={n.id} className={n.depth === 0 ? "mt-5 first:mt-0" : "mt-4"}>
+                        <h3 className={n.depth === 0 ? "font-semibold" : "text-sm font-semibold"}>
+                          {n.number} {n.title}
+                        </h3>
+                        {n.managedBy && (
+                          <p className="mt-1 text-xs text-ink-3">
+                            Held by {n.managedBy} — not {pharmacy}&rsquo;s to maintain.
+                          </p>
+                        )}
+                        {n.body
+                          .split("\n")
+                          .map((x) => x.trim())
+                          .filter(Boolean)
+                          .map((para) => (
+                            <p key={para} className="mt-2 text-sm leading-relaxed text-ink-2">{para}</p>
+                          ))}
+                      </section>
+                    ))}
+                </div>
+              </>
+            ) : protocol ? (
+              <>
+                <p className="mt-1 text-sm text-ink-2">
+                  This is the protocol you administer under. It is also attached to the email you were sent, as a PDF
+                  you can keep.
+                </p>
+                <div className="mt-4 max-h-[28rem] overflow-y-auto rounded-md border border-line bg-ground p-4">
+                  <ProtocolBody blocks={protocolBody(protocol)} />
+                </div>
+              </>
+            ) : a.materialUrl ? (
               <p className="mt-1 text-sm">
                 <a href={a.materialUrl} target="_blank" rel="noreferrer" className="underline">Open the training material</a>{" "}
                 — come back to this page afterwards to sign.

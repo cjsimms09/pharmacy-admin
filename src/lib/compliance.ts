@@ -111,13 +111,6 @@ export async function computeAlerts(): Promise<Alert[]> {
   return alerts;
 }
 
-/** CE status for a person over the current renewal period. Returns null when the person has no license/registration on file. */
-export function ceRequirement(role: string): { hours: number; label: string; cycleEnd: (expiresOn: string) => string } | null {
-  if (role === "pharmacist") return { hours: 30, label: "30 hours per biennium incl. 1-hour Board course", cycleEnd: (e) => e };
-  if (role === "technician") return { hours: 20, label: "20 hours per two-year period (Nov 1 – Oct 31)", cycleEnd: (e) => e };
-  return null;
-}
-
 // ── Dashboard panels ─────────────────────────────────────────────────
 
 export type StaffRow = {

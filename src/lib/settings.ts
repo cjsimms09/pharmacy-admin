@@ -82,6 +82,7 @@ export const SETTING_KEYS = [
   "updates_newest",
   "updates_check_error",
   "backup_last_result",
+  "backup_last_failure",
   // The rehearsal: an archive already on disk, opened and restored to a scratch database, to prove
   // that what was written last month is still what comes back today.
   "backup_restore_last",

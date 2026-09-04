@@ -180,38 +180,6 @@ export async function deleteCredential(id: string, redirectTo: string) {
   redirect(redirectTo);
 }
 
-const ceSchema = z.object({
-  personId: z.string().min(1),
-  completedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  hours: z.coerce.number().min(0.1).max(100),
-  title: z.string().trim().min(1).max(200),
-  provider: optText(200),
-  acpeNumber: optText(100),
-  isBoardCourse: bool,
-  isLive: bool,
-});
-
-export async function addCe(formData: FormData) {
-  const user = await requireManager();
-  const parsed = ceSchema.safeParse(Object.fromEntries(formData.entries()));
-  const personId = String(formData.get("personId") ?? "");
-  if (!parsed.success) fail(`/staff/${personId}`, "Check the CE form.");
-  const { hours, ...rest } = parsed.data;
-  const id = newId();
-  await db.insert(schema.ceEntries).values({ id, ...rest, hours: Math.round(hours * 10) });
-  await audit({ action: "ce.create", userId: user.id, userName: user.name, entity: "ce", entityId: id });
-  revalidatePath(`/staff/${personId}`);
-  redirect(`/staff/${personId}?saved=1`);
-}
-
-export async function deleteCe(id: string, personId: string) {
-  const user = await requireManager();
-  await db.delete(schema.ceEntries).where(eq(schema.ceEntries.id, id));
-  await audit({ action: "ce.delete", userId: user.id, userName: user.name, entity: "ce", entityId: id });
-  revalidatePath(`/staff/${personId}`);
-  redirect(`/staff/${personId}`);
-}
-
 /**
  * Records that somebody has left.
  *

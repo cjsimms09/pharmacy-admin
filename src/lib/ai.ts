@@ -362,7 +362,7 @@ function mockPacket(): ExtractedPacketT {
 // ── Document intake: read anything dropped in and work out what it is ─
 export const ClassifiedDoc = z.object({
   /** What kind of record this belongs to. */
-  kind: z.enum(["person_credential", "person_training", "person_ce", "pharmacy_credential", "cqi_incident", "cqi_summary", "cs_inventory", "policy", "report", "unknown"]),
+  kind: z.enum(["person_credential", "person_training", "pharmacy_credential", "cqi_incident", "cqi_summary", "cs_inventory", "policy", "report", "unknown"]),
   /** Best-guess document category for the file vault. */
   category: z.enum(DOCUMENT_CATEGORIES),
   /** A short title a person would recognise, e.g. "CPR card — American Heart Association". */
@@ -376,9 +376,6 @@ export const ClassifiedDoc = z.object({
   issuer: z.string().nullable(),
   issuedOn: z.string().nullable(),
   expiresOn: z.string().nullable(),
-  /** CE only. */
-  ceHours: z.number().nullable(),
-  ceAcpeNumber: z.string().nullable(),
   isBoardCourse: z.boolean().nullable(),
   /** How sure you are, 0 to 1. Below 0.6 the pharmacy is asked to confirm everything. */
   confidence: z.number(),
@@ -387,14 +384,13 @@ export const ClassifiedDoc = z.object({
 });
 export type ClassifiedDocT = z.infer<typeof ClassifiedDoc>;
 
-const CLASSIFY_SYSTEM = `You sort documents for a Kansas independent pharmacy's compliance file. Someone drops in a scan or photo — a licence, a CPR card, an immunization training certificate, a CE certificate, a fraud-waste-and-abuse training completion, a DEA registration, an insurance certificate, a signed CQI form, an inventory sheet, a policy — and you work out what it is, whose it is, and the dates that matter.
+const CLASSIFY_SYSTEM = `You sort documents for a Kansas independent pharmacy's compliance file. Someone drops in a scan or photo — a licence, a CPR card, an immunization training certificate, a fraud-waste-and-abuse training completion, a DEA registration, an insurance certificate, a signed CQI form, an inventory sheet, a policy — and you work out what it is, whose it is, and the dates that matter.
 
 Rules:
 - Read the dates carefully and return them as YYYY-MM-DD. Cards often print "MM/YYYY" for an expiry: use the last day of that month. American Heart Association CPR cards print an issue date and expire two years later at the end of that month; if only the issue date is printed, compute the expiry and say so in notes.
 - Kansas pharmacist licences and pharmacy registrations expire 30 June; technician registrations expire 31 October. If a scan shows a renewal year but no day, use those dates and note it.
 - personName is the person the document belongs to, copied exactly as printed, or null when it belongs to the pharmacy rather than a person (pharmacy registration, DEA registration, insurance, policies, CQI forms, inventories).
 - credentialType applies to licences, registrations, cards and certificates that expire. trainingType applies to annual workforce training: fraud/waste/abuse and general compliance (fwa_general_compliance), HIPAA privacy and security, OSHA bloodborne pathogens, OSHA hazard communication, controlled substance diversion, immunization protocol review, CQI program review. Set only the one that fits and leave the other null.
-- Continuing education certificates are kind "person_ce": pull the hours and the ACPE/UAN number. A UAN whose provider segment marks it as the Kansas Board's own required course means isBoardCourse true.
 - If the scan is unreadable, or it is something else entirely, return kind "unknown" with your best category and explain in notes. Never guess a licence number or a date you cannot see — return null and say so.
 - Never copy a patient's name, date of birth, address, phone number or member ID into any field, even if the document shows one. If the document is patient-specific rather than a pharmacy record, say so in notes and return kind "unknown".
 - Write notes in plain language for a pharmacist, not for a developer.`;
@@ -417,8 +413,6 @@ export async function classifyDocument(
       issuer: "American Heart Association",
       issuedOn: "2026-03-01",
       expiresOn: "2028-03-31",
-      ceHours: null,
-      ceAcpeNumber: null,
       isBoardCourse: null,
       confidence: 0.9,
       notes: "Mock mode: no document was read.",

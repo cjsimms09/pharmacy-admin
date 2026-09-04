@@ -30,6 +30,15 @@ export type EmailItem = {
   dueOn: string;
   url: string;
   replyCode: string | null;
+  /**
+   * The file name of the material actually attached for this one, or null if none was.
+   *
+   * Carried per item rather than assumed for all of them. The email used to state flatly that the
+   * material was attached, which was true of the six written courses and false of the manual
+   * acknowledgement — the one every member of staff is sent. An email that says "attached" over an
+   * empty paperclip is how somebody concludes the whole thing is broken and stops opening them.
+   */
+  attachment: string | null;
 };
 
 export type EmailContext = {
@@ -41,6 +50,8 @@ export type EmailContext = {
   items: EmailItem[];
   today: string;
   reminder: boolean;
+  /** Whether the pharmacy sends material at all; off means the link is the only route. */
+  attachmentsOn: boolean;
 };
 
 const esc = (s: string) =>
@@ -101,6 +112,7 @@ export function textFor(ctx: EmailContext): string {
       `   ${i.url}`,
     );
     if (i.replyCode) lines.push(`   Code: ${i.replyCode}`);
+    if (i.attachment) lines.push(`   Attached: ${i.attachment}`);
     lines.push("");
   });
 
@@ -123,11 +135,7 @@ export function textFor(ctx: EmailContext): string {
     );
   }
 
-  lines.push(
-    "The material for each one is attached to this email. It is the same content as the page,",
-    "so you can read it there if you prefer. Keep it if you like — we hold a copy.",
-    "",
-  );
+  lines.push(...materialLines(ctx), "");
 
   if (ctx.picName) {
     lines.push(`Any questions, ask ${ctx.picName}.`, "");
@@ -143,6 +151,40 @@ export function textFor(ctx: EmailContext): string {
   if (ctx.phone) lines.push(ctx.phone);
 
   return lines.join("\n");
+}
+
+/**
+ * What to say about the material, based on what is actually on the message.
+ *
+ * Three genuinely different situations, and saying the same sentence in all three is what made
+ * the email untrustworthy. Everything attached: say so. Nothing attached: do not mention
+ * attachments at all, and point at the page, which is then the only copy. Some attached: name
+ * which, because the person is going to count the paperclips.
+ */
+function materialLines(ctx: EmailContext): string[] {
+  const withFile = ctx.items.filter((i) => i.attachment);
+  if (withFile.length === 0) {
+    return [
+      "Everything you need to read is on the page each link opens. Nothing is attached to this",
+      "email — open the link and it is all there.",
+    ];
+  }
+  if (withFile.length === ctx.items.length) {
+    return [
+      ctx.items.length === 1
+        ? "The material is attached to this email as a PDF. It is the same content as the page, so you"
+        : "The material for each one is attached to this email as a PDF. It is the same content as the",
+      ctx.items.length === 1
+        ? "can read it there if you prefer. Keep it if you like — we hold a copy."
+        : "page, so you can read it there if you prefer. Keep it if you like — we hold a copy.",
+    ];
+  }
+  return [
+    "Attached to this email as PDFs:",
+    ...withFile.map((i) => `    ${i.title}`),
+    "",
+    "The rest is on the page each link opens.",
+  ];
 }
 
 export function htmlFor(ctx: EmailContext): string {
@@ -225,8 +267,7 @@ export function htmlFor(ctx: EmailContext): string {
 
   <tr><td style="padding:20px 24px 0 24px;">
     <div style="font:400 13px/1.6 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:${INK2};">
-      The full material for each one is attached to this email — the same content as the page, so you can read it
-      there if you prefer. Keep it if you like; we hold a copy.
+      ${esc(materialLines(ctx).filter(Boolean).join(" "))}
     </div>
     ${
       ctx.picName

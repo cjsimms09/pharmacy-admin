@@ -11,7 +11,7 @@ import type { TrainingType } from "../src/db/schema";
  * dropped downstream with no bounce and nothing in any log. Everything here is about keeping the
  * training email the same shape as the message that is known to get through.
  */
-const ctx = (replyCode: string | null, count = 1) => ({
+const ctx = (replyCode: string | null, count = 1, attachment: string | null = "hipaa-privacy-and-security-v1.pdf") => ({
   firstName: "Kimberly",
   pharmacy: "West Wichita Family Pharmacy",
   address: null,
@@ -19,6 +19,7 @@ const ctx = (replyCode: string | null, count = 1) => ({
   picName: "Cory Simms",
   today: "2026-09-04",
   reminder: false,
+  attachmentsOn: true,
   items: Array.from({ length: count }, (_, i) => ({
     type: "hipaa_privacy_security" as TrainingType,
     title: "HIPAA privacy & security",
@@ -26,6 +27,7 @@ const ctx = (replyCode: string | null, count = 1) => ({
     dueOn: `2026-10-0${i + 1}`,
     url: "http://192.0.2.2:3100/t/abc",
     replyCode,
+    attachment,
   })),
 });
 

@@ -94,7 +94,6 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
                             <option value="license">Licence or registration</option>
                             <option value="immunization_training">Immunization training</option>
                             <option value="immunization_protocol">Immunization protocol</option>
-                            <option value="ce_certificate">Certificate</option>
                             <option value="other">Something else</option>
                           </select>
                           <input name="number" placeholder="Number (optional)" className="field text-xs" />
