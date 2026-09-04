@@ -5,7 +5,7 @@ import { complianceSummary, type OpenItem } from "@/lib/compliance-status";
 import { staffMatrix, type Cell, type MatrixRow, type StaffMatrix } from "@/lib/staff-matrix";
 import { automationStatus, type JobStatus } from "@/lib/automation-status";
 import { openFindings } from "@/lib/self-inspection";
-import { attestAction, answerAction, sendTrainingAction } from "./_actions/compliance";
+import { attestAction, answerAction, sendTrainingAction, requestCredentialAction } from "./_actions/compliance";
 import { daysUntil, fmt, fmtLong, todayIso } from "@/lib/dates";
 import { PERSON_ROLE_LABEL } from "@/lib/labels";
 import { getSettings } from "@/lib/settings";
@@ -556,9 +556,10 @@ function StaffBoard({ m }: { m: StaffMatrix }) {
       </div>
       <p className="mt-2 text-xs text-ink-3">
         Scrolls sideways; the name and its gap count stay put. Hover any cell for the date and where it came from.
-        &ldquo;—&rdquo; means the requirement does not apply to that person. Training sends from here: the cell then
-        says when it went out and offers the follow-up. Licence and CPR gaps are fixed on the person&rsquo;s own
-        page — click their name.
+        &ldquo;—&rdquo; means the requirement does not apply to that person. Everything on this board acts from the
+        cell that shows it: training sends, and a missing licence, CPhT or card is asked for by email. What they send
+        back files itself against that requirement, with the dates left blank for you to fill in — because a made-up
+        expiry date passes every check while telling you nothing.
       </p>
     </Card>
   );
@@ -590,6 +591,39 @@ function CellBadge({ cell }: { cell: Cell }) {
   ) : (
     <span className={`badge ${cls}`} title={cell.title}>{cell.label}</span>
   );
+  /*
+    A credential gap the site can do something about, done from the cell that shows it.
+    
+    Licence and CPR gaps used to be the one column on this board with nothing behind it — you
+    were told to go to the person's page, and on the person's page the only options assumed the
+    card was in the building. When it is not, the job is: email them, wait, remember, then file
+    what came back against the right requirement. That is four steps and four places to stop,
+    which is why the same empty cells were still empty months later.
+  */
+  if (cell.credentialAction) {
+    const { credentialType, personId: pid, askedOn, hasEmail } = cell.credentialAction;
+    return (
+      <div className="w-[5.5rem]">
+        {badge}
+        {!hasEmail ? (
+          <div className="mt-1 text-[11px] leading-tight text-ink-3">no email</div>
+        ) : (
+          <>
+            {askedOn && <div className="mt-1 text-[11px] leading-tight text-ink-3">asked {askedOn}</div>}
+            <form action={requestCredentialAction} className="mt-1">
+              <input type="hidden" name="personId" value={pid} />
+              <input type="hidden" name="credentialType" value={credentialType} />
+              <input type="hidden" name="back" value="/" />
+              <button className={`btn btn-sm w-full px-1 ${askedOn ? "" : "btn-primary"}`}>
+                {askedOn ? "Ask again" : "Ask for it"}
+              </button>
+            </form>
+          </>
+        )}
+      </div>
+    );
+  }
+
   if (!cell.action) return badge;
 
   const { trainingType, personId, sentOn, reminders, sendError } = cell.action;
