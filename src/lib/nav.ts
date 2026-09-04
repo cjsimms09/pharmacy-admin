@@ -54,6 +54,9 @@ export const NAV: NavGroup[] = [
       { href: "/inventory/pharmacist-log", label: "Daily pharmacist log", blurb: "The C-III/IV refill statement and signature sheet" },
       { href: "/inventory/power-of-attorney", label: "Power of attorney", blurb: "Who may execute a Form 222 or a CSOS order" },
       { href: "/inventory/invoices", label: "Supplier invoices", blurb: "Filed by schedule, with the C2s kept apart" },
+      // Next to the invoices because that is what it is for: an invoice files itself only if the
+      // address it came from is recognised, and this is where the addresses live.
+      { href: "/suppliers", label: "Suppliers", blurb: "Who we buy from, and the addresses their invoices arrive from" },
     ],
   },
   {

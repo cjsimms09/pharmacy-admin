@@ -20,7 +20,11 @@ import {
   adoptAll,
   uploadInvoice,
   filingFor,
+  setInvoiceTotal,
+  sumOf,
+  money,
 } from "@/lib/invoices";
+import { invoiceCompliance, RETENTION_YEARS } from "@/lib/invoice-compliance";
 import { setSetting } from "@/lib/settings";
 import { getSettings } from "@/lib/settings";
 import { PageHeader, Card, Figure, Notice, Empty } from "@/components/ui";
@@ -74,6 +78,10 @@ export default async function InvoicesPage({
     supplier?: string;
     from?: string;
     to?: string;
+    on?: string;
+    min?: string;
+    max?: string;
+    noamount?: string;
     unconfirmed?: string;
     undated?: string;
     ok?: string;
@@ -86,8 +94,11 @@ export default async function InvoicesPage({
   const canManage = user.role !== "staff";
   const onlyUnconfirmed = sp.unconfirmed === "1";
   const onlyUndated = sp.undated === "1";
+  const onlyNoAmount = sp.noamount === "1";
+  // An empty box and a zero are different answers, so a blank never becomes a filter.
+  const dollars = (v: string | undefined) => (v && v.trim() !== "" && Number.isFinite(Number(v)) ? Number(v) : undefined);
 
-  const [rows, review, counts, issues, suppliers, months, sent, s, adoptable] = await Promise.all([
+  const [rows, review, counts, issues, suppliers, months, sent, s, adoptable, complianceRows] = await Promise.all([
     invoices({
       schedule: active === "all" ? undefined : active,
       text: sp.q,
@@ -95,6 +106,10 @@ export default async function InvoicesPage({
       supplier: sp.supplier,
       from: sp.from,
       to: sp.to,
+      on: sp.on,
+      minAmount: dollars(sp.min),
+      maxAmount: dollars(sp.max),
+      noAmount: onlyNoAmount || undefined,
       unconfirmed: onlyUnconfirmed || undefined,
     }),
     awaitingReview(),
@@ -105,11 +120,17 @@ export default async function InvoicesPage({
     recentForwards(5),
     getSettings(),
     adoptableDocuments(),
+    invoiceCompliance(),
   ]);
+  const compliance = complianceRows;
+  const unmet = compliance.filter((c) => c.state === "attention");
 
   const shown = onlyUndated ? rows.filter((r) => !r.invoiceDate) : rows;
   const rules = (s.mail_supplier_rules ?? "").trim();
-  const filtered = Boolean(sp.q || sp.month || sp.supplier || sp.from || sp.to || onlyUnconfirmed || onlyUndated);
+  const filtered = Boolean(
+    sp.q || sp.month || sp.supplier || sp.from || sp.to || sp.on || sp.min || sp.max || onlyUnconfirmed || onlyUndated || onlyNoAmount,
+  );
+  const totals = sumOf(shown);
   const expectations = parseExpected(s.supplier_expected_schedule ?? "");
 
   async function confirm(fd: FormData) {
@@ -143,6 +164,29 @@ export default async function InvoicesPage({
     } catch (e) {
       if (e && typeof e === "object" && "digest" in e) throw e;
       redirect("/inventory/invoices?undated=1&error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not set that date."));
+    }
+  }
+
+  /*
+   * The amount, where the invoice would not say it clearly enough to read.
+   *
+   * One of this pharmacy's three wholesalers prints subtotals by schedule and no single figure
+   * for the invoice, so there is nothing safe to read. Adding the parts up and calling the result
+   * the total would put a number the site invented onto a financial record that gets reconciled
+   * against a payment — a blank somebody fills in is the honest version of not knowing.
+   */
+  async function amount(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const id = String(fd.get("id") ?? "");
+    try {
+      await setInvoiceTotal(id, Number(fd.get("dollars") ?? NaN), u);
+      await audit({ action: "invoice.total", userId: u.id, userName: u.name, entity: "invoice", entityId: id });
+      revalidatePath("/inventory/invoices");
+      redirect("/inventory/invoices?noamount=1&ok=" + encodeURIComponent("Amount saved, and counted in the totals from now on."));
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/inventory/invoices?noamount=1&error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not save that amount."));
     }
   }
 
@@ -230,7 +274,14 @@ export default async function InvoicesPage({
         back={{ href: "/inventory", label: "Controlled substances" }}
         title="Supplier invoices"
         subtitle="Emailed in by the supplier, read on arrival, and filed by what each one carries. Schedule II invoices are kept apart from everything else, which is what the rule actually asks for."
-        actions={<Link href="/settings/email" className="btn">Which senders are suppliers</Link>}
+        actions={
+          <>
+            <Link href="/suppliers" className="btn">Suppliers</Link>
+            <Link href="#compliance" className={`btn ${unmet.length ? "btn-primary" : ""}`}>
+              {unmet.length ? `${unmet.length} thing${unmet.length === 1 ? "" : "s"} to settle` : "How this meets the rules"}
+            </Link>
+          </>
+        }
       />
 
       {sp.ok && <Notice kind="ok">{sp.ok}</Notice>}
@@ -238,9 +289,9 @@ export default async function InvoicesPage({
 
       {!rules && (
         <Notice kind="warn">
-          <b>No sender is named as a supplier yet, so nothing will be filed as an invoice.</b> Add a line under{" "}
-          <Link href="/settings/email" className="underline">Settings → Email</Link> matching your wholesaler&rsquo;s
-          address, then ask them to email invoices to this mailbox. From then on it happens with nobody doing
+          <b>No sender is named as a supplier yet, so nothing will be filed as an invoice.</b> Add your wholesalers
+          on the <Link href="/suppliers" className="underline">Suppliers</Link> page, with the addresses they send
+          from, then ask them to email invoices to this mailbox. From then on it happens with nobody doing
           anything.
         </Notice>
       )}
@@ -409,6 +460,10 @@ export default async function InvoicesPage({
             </select>
           </label>
           <label className="text-xs font-medium text-ink-2">
+            On this exact day
+            <input type="date" name="on" defaultValue={sp.on} className="field mt-1" />
+          </label>
+          <label className="text-xs font-medium text-ink-2">
             From
             <input type="date" name="from" defaultValue={sp.from} className="field mt-1" />
           </label>
@@ -416,10 +471,26 @@ export default async function InvoicesPage({
             To
             <input type="date" name="to" defaultValue={sp.to} className="field mt-1" />
           </label>
-          <div className="flex items-end gap-1.5 lg:col-span-2">
+          <label className="text-xs font-medium text-ink-2">
+            Amount at least
+            <input type="number" step="0.01" min="0" name="min" defaultValue={sp.min} placeholder="$" className="field mt-1" />
+          </label>
+          <label className="text-xs font-medium text-ink-2">
+            Amount at most
+            <input type="number" step="0.01" min="0" name="max" defaultValue={sp.max} placeholder="$" className="field mt-1" />
+          </label>
+          <div className="flex flex-wrap items-end gap-3 lg:col-span-2">
             <button className="btn btn-primary">Search</button>
             {filtered && <Link href={`/inventory/invoices?tab=${active}`} className="btn">Clear</Link>}
+            <label className="flex items-center gap-1.5 text-xs text-ink-2">
+              <input type="checkbox" name="noamount" value="1" defaultChecked={onlyNoAmount} />
+              Only ones with no amount read
+            </label>
           </div>
+          <p className="text-xs text-ink-3 lg:col-span-4">
+            A day on its own answers &ldquo;what came in on the 4th&rdquo;. From and To answer a quarter. An exact day
+            wins over a range if both are filled in, and a month over either.
+          </p>
         </form>
       </Card>
 
@@ -468,7 +539,7 @@ export default async function InvoicesPage({
                   <thead>
                     <tr>
                       {canManage && <th className="w-8"></th>}
-                      <th>Date</th><th>Supplier</th><th>Invoice</th><th>Carries</th><th>Lines</th><th></th>
+                      <th>Date</th><th>Supplier</th><th>Invoice</th><th className="text-right">Amount</th><th>Carries</th><th>Lines</th><th></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -492,6 +563,13 @@ export default async function InvoicesPage({
                         </td>
                         <td className="align-top text-sm">{i.supplier ?? "—"}</td>
                         <td className="align-top font-mono text-xs">{i.invoiceNumber ?? "—"}</td>
+                        <td className="whitespace-nowrap align-top text-right font-mono text-xs">
+                          {i.totalCents === null ? (
+                            <Link href="/inventory/invoices?noamount=1" className="badge badge-muted">no amount</Link>
+                          ) : (
+                            money(i.totalCents)
+                          )}
+                        </td>
                         <td className="align-top">
                           <span className={`badge ${i.schedule === "schedule_2" ? "badge-crit" : i.schedule === "schedule_3_5" ? "badge-warn" : "badge-muted"}`}>
                             {filingFor(i.schedule).label}
@@ -507,6 +585,31 @@ export default async function InvoicesPage({
                       </tr>
                     ))}
                   </tbody>
+                  {/*
+                    What the shown invoices come to.
+                    It follows the filter rather than the whole archive, so "August, McKesson" is
+                    also the answer to "what did we spend with McKesson in August" — which is the
+                    question actually asked of an invoice file between inspections.
+                  */}
+                  <tfoot>
+                    <tr className="border-t border-line font-medium">
+                      <td colSpan={canManage ? 4 : 3} className="pt-2 text-xs text-ink-2">
+                        {shown.length} invoice{shown.length === 1 ? "" : "s"}
+                        {filtered ? " matching this search" : ""}
+                      </td>
+                      <td className="pt-2 text-right font-mono text-sm">{money(totals.total)}</td>
+                      <td colSpan={3} className="pt-2 pl-2 text-xs text-ink-3">
+                        {totals.missing > 0 && (
+                          <>
+                            excludes{" "}
+                            <Link href="/inventory/invoices?noamount=1" className="underline">
+                              {totals.missing} with no amount read
+                            </Link>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
 
@@ -551,6 +654,37 @@ export default async function InvoicesPage({
                 <form action={dateIt} className="flex items-center gap-1.5">
                   <input type="hidden" name="id" value={i.id} />
                   <input type="date" name="invoiceDate" required className="field w-auto py-1 text-xs" />
+                  <button className="btn btn-sm">Save</button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
+      {onlyNoAmount && canManage && shown.length > 0 && (
+        <Card
+          title="Type in the amount for these"
+          className="mt-4"
+          subtitle="The figure the invoice is billed at. One wholesaler prints subtotals by schedule and no single invoice total, so there is nothing on the page safe to read — adding the parts up would be the site inventing a number that later gets reconciled against a payment."
+        >
+          <ul className="rows">
+            {shown.map((i) => (
+              <li key={i.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                <a href={`/files/${i.documentId}`} target="_blank" rel="noreferrer" className="text-sm text-accent hover:underline">
+                  {[i.supplier, i.invoiceNumber, i.invoiceDate ? fmt(i.invoiceDate) : null].filter(Boolean).join(" · ") || "Invoice"}
+                </a>
+                <form action={amount} className="flex items-center gap-1.5">
+                  <input type="hidden" name="id" value={i.id} />
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    name="dollars"
+                    required
+                    placeholder="0.00"
+                    className="field w-32 py-1 text-right text-xs"
+                  />
                   <button className="btn btn-sm">Save</button>
                 </form>
               </li>
@@ -610,6 +744,50 @@ export default async function InvoicesPage({
           </Card>
         </details>
       )}
+
+      {/*
+        The compliance posture, checked rather than claimed.
+
+        The ask was to make sure invoice storage is compliant, and a paragraph asserting that it
+        is would be worth nothing to the person it is written for. This is the list of what each
+        rule requires, what this system does about it, and — for the two that depend on how the
+        pharmacy has things set up rather than on the code — whether it is actually satisfied
+        right now. An inspector can be shown this page; so can an auditor asking where the
+        Schedule II records are kept.
+      */}
+      <Card
+        id="compliance"
+        title="How this meets the rules"
+        subtitle="Each requirement, what it asks for, and what this system does about it. Two of these depend on how the pharmacy is set up rather than on the software, so they are checked rather than asserted."
+        tone={unmet.length ? "warn" : undefined}
+        count={unmet.length ? `${unmet.length} to settle` : "all met"}
+        className="mt-6 scroll-mt-4"
+      >
+        <ul className="rows">
+          {compliance.map((c) => (
+            <li key={c.key} className="py-3">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="flex flex-wrap items-baseline gap-2">
+                  <span className={`badge ${c.state === "ok" ? "badge-ok" : "badge-warn"}`}>
+                    {c.state === "ok" ? "met" : "settle this"}
+                  </span>
+                  <span className="font-mono text-xs text-ink-3">{c.citation}</span>
+                </span>
+                {c.href && c.state !== "ok" && (
+                  <Link href={c.href} className="btn btn-sm shrink-0">Fix it</Link>
+                )}
+              </div>
+              <p className="mt-1 text-sm">{c.requires}</p>
+              <p className="mt-1 text-xs text-ink-2">{c.how}</p>
+              {c.fix && <p className="mt-1 text-xs text-warn">{c.fix}</p>}
+            </li>
+          ))}
+        </ul>
+        <p className="mt-3 text-xs text-ink-3">
+          Kept for {RETENTION_YEARS} years, which is the Kansas retention period and longer than the two years
+          21 CFR 1304.04(a) requires of these records.
+        </p>
+      </Card>
 
       {sent.length > 0 && (
         <Card title="Recently sent on" count={sent.length} className="mt-6" subtitle="What has left the building, and to whom.">

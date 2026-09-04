@@ -11,6 +11,7 @@ import { storeFile, ALLOWED_MIME, MAX_FILE_BYTES } from "./files";
 import { classify, parseSupplierRules, supplierFor } from "./autoroute";
 import { importClaims } from "./claims";
 import { importSupplierCatalog } from "./suppliers";
+import { allSuppliers, supplierForSender } from "./suppliers-registry";
 import { loadNadacFiles, nadacDir } from "./nadac";
 import { gateFile } from "./phi-gate";
 import { audit } from "./audit";
@@ -117,6 +118,15 @@ export type SweepResult = { stored: number; rejected: number; ignored: number; i
 export async function sweepMailbox(ctx: { userId: string | null; userName: string | null }): Promise<SweepResult> {
   const s = await getSettings();
   const allowed = allowedSendersOf(s.mail_allowed_senders);
+  /*
+   * The supplier register, read once for the whole sweep.
+   *
+   * Retired suppliers are included deliberately. An invoice arriving from a wholesaler the
+   * pharmacy has stopped buying from is still a record it has to keep, and refusing to recognise
+   * the sender would file it as an ordinary report — commingled with everything else, which is
+   * the one outcome 1304.04(h)(1) does not allow.
+   */
+  const register = await allSuppliers(true);
   const result: SweepResult = { stored: 0, rejected: 0, ignored: 0, imported: 0, errors: [] };
   let client: ImapFlow | null = null;
   try {
@@ -375,7 +385,17 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
              * "we moved it later" is not what separately maintained means. So the schedule is
              * decided before anything is written, and the invoice is only ever in one place.
              */
-            const supplierName = supplierFor(parseSupplierRules(s.mail_supplier_rules ?? ""), from, subject);
+            /*
+             * Who sent it: the register first, the old settings line only as a fallback.
+             *
+             * The register knows the addresses against a named supplier, which is what lets an
+             * invoice be filed under that supplier's identity rather than under a string somebody
+             * typed. The free-text rules stay honoured so a pharmacy that has not moved its
+             * suppliers across yet goes on filing invoices exactly as before.
+             */
+            const matched = supplierForSender(register, from);
+            const supplierName =
+              matched?.name ?? supplierFor(parseSupplierRules(s.mail_supplier_rules ?? ""), from, subject);
             if (
               looksLikeInvoice({
                 fileName,
@@ -391,6 +411,7 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
                     fileName,
                     mimeType: att.contentType ?? "application/pdf",
                     supplier: supplierName,
+                    supplierId: matched?.id ?? null,
                     from: from || "(unknown)",
                     subject,
                   },

@@ -4,6 +4,7 @@ import { requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { setSetting } from "@/lib/settings";
 import { runBackup, backupStatus, pruneBackups, encryptionKey, rehearseRestore } from "@/lib/backup";
+import { detectCloudFolders, backupFolderIn, isInside } from "@/lib/cloud-folders";
 import { PageHeader, Notice, BackLink, Empty, Field, Figure } from "@/components/ui";
 import { fmtLong } from "@/lib/dates";
 
@@ -15,7 +16,7 @@ const mb = (n: number) => `${(n / 1_048_576).toFixed(1)} MB`;
 export default async function BackupsPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string; showKey?: string }> }) {
   await requireManager();
   const { ok, error, showKey } = await searchParams;
-  const s = await backupStatus();
+  const [s, clouds] = await Promise.all([backupStatus(), detectCloudFolders()]);
   const key = showKey === "1" ? encryptionKey() : null;
 
   async function save(fd: FormData) {
@@ -47,6 +48,31 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
       if (e && typeof e === "object" && "digest" in e) throw e;
       redirect("/settings/backups?error=" + encodeURIComponent(e instanceof Error ? e.message : "The backup failed."));
     }
+  }
+
+  /**
+   * Points the second copy at a synced folder, in one press.
+   *
+   * The alternative is finding the OneDrive path in Explorer and typing it correctly, which is
+   * where this stops happening. Set as the *second* destination rather than the first on purpose:
+   * the working copy of a backup should be somewhere a file appears immediately, and a sync client
+   * that is paused, signed out or out of space would otherwise be the only place anything went.
+   */
+  async function useCloud(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const root = String(fd.get("root") ?? "").trim();
+    if (!root) redirect("/settings/backups?error=" + encodeURIComponent("No folder was chosen."));
+    const dest = backupFolderIn(root);
+    await setSetting("backup_destination_2", dest);
+    await audit({ action: "backup.settings", userId: u.id, userName: u.name, details: `second copy \u2192 ${dest}` });
+    revalidatePath("/settings/backups");
+    redirect(
+      "/settings/backups?ok=" +
+        encodeURIComponent(
+          `Every verified archive will now also be written to ${dest}, and read back to prove it arrived. Press \u201cBack up now\u201d to put one there straight away and confirm it syncs.`,
+        ),
+    );
   }
 
   async function rehearse() {
@@ -133,6 +159,70 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
         </Notice>
       )}
 
+      {/*
+        The off-site copy, made easy enough that it actually happens.
+
+        Windows records where OneDrive syncs to, so the folder is offered as a button rather than
+        as a path to find in Explorer and type without a typo. The account distinction is stated
+        because it decides something real: these archives hold the whole record, and Microsoft will
+        sign a business associate agreement for a work or school account and not for a personal one.
+      */}
+      {clouds.length > 0 && (
+        <section className="my-4 rounded-lg border border-line bg-surface p-4">
+          <h2 className="text-sm font-semibold">Send a copy to OneDrive</h2>
+          <p className="mt-0.5 text-sm text-ink-2">
+            A folder that syncs to the cloud is the second copy that survives this building. Each archive is verified
+            here, written there, and read back to prove it arrived &mdash; the sync client then carries it off the
+            premises on its own, with nobody remembering to do anything.
+          </p>
+          <ul className="rows mt-2">
+            {clouds.map((c) => {
+              const dest = backupFolderIn(c.path);
+              const already = isInside(s.destination2 ?? "", c) || isInside(s.destination, c);
+              return (
+                <li key={c.path} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium">{c.label}</span>
+                    <span className="block font-mono text-xs text-ink-3">{dest}</span>
+                    {!c.baaAvailable && (
+                      <span className="mt-0.5 block text-xs text-warn">
+                        A personal account. Microsoft signs a business associate agreement for Microsoft 365 business
+                        and enterprise accounts, not for consumer ones &mdash; so a work or school OneDrive is the one
+                        to use for these archives.
+                      </span>
+                    )}
+                  </span>
+                  {already ? (
+                    <span className="badge badge-ok shrink-0">in use</span>
+                  ) : (
+                    <form action={useCloud} className="shrink-0">
+                      <input type="hidden" name="root" value={c.path} />
+                      <button className="btn btn-sm btn-primary">Use as the second copy</button>
+                    </form>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+          <p className="mt-2 text-xs text-ink-3">
+            The archive holds the whole record &mdash; incidents, staff files, documents, every invoice &mdash; and is
+            not encrypted in itself, so treat that folder as holding protected health information: keep it in the
+            pharmacy&rsquo;s own Microsoft account rather than a personal one, and do not share the folder with anybody.
+            The API keys and the mail password are not in the archive at all.
+          </p>
+        </section>
+      )}
+
+      {clouds.length === 0 && !s.destination2 && (
+        <Notice kind="warn">
+          <b>No synced folder was found on this computer.</b> If OneDrive is signed in, its folder is usually{" "}
+          <code>C:\Users\&lt;you&gt;\OneDrive</code> or <code>C:\Users\&lt;you&gt;\OneDrive - Your Company</code>. Put
+          that path with <code>\PharmacyAdminBackups</code> on the end into the second box below, and every verified
+          archive is written and read back there too. A work or school OneDrive is the right one: Microsoft will sign a
+          business associate agreement for those and not for a personal account.
+        </Notice>
+      )}
+
       <section className="my-4 rounded-lg border border-line bg-surface p-4">
         <form action={save} className="grid gap-3 sm:grid-cols-2">
           <Field
@@ -144,7 +234,7 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
           </Field>
           <Field
             label="And a second place"
-            hint="Somewhere that does not fail at the same time as the first: a USB drive kept off the premises, a network share, or a synced cloud folder. Every archive that passes verification is written and read back here too."
+            hint="Somewhere that does not fail at the same time as the first: a USB drive kept off the premises, a network share, or a synced cloud folder such as OneDrive. Every archive that passes verification is written and read back here too."
             className="sm:col-span-2"
           >
             <input name="destination2" defaultValue={s.destination2 ?? ""} className="field font-mono" placeholder="Leave empty for one copy only" />

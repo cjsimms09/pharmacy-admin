@@ -7,6 +7,7 @@ import { storeFile } from "./files";
 import { readInvoice } from "./ai";
 import { getSettings } from "./settings";
 import { pdfText } from "./pdf-text";
+import { allSuppliers, supplierForSender } from "./suppliers-registry";
 import { scheduleFromNames, linesMatching } from "./controlled-names";
 import type { InvoiceSchedule, DocumentCategory } from "@/db/schema";
 
@@ -94,6 +95,35 @@ const CLASS_UNCONTROLLED = new Set(["R", "O", "N", "S", "G", "H", "P", "T", "V",
 /** A line of the invoice's item table, and what the supplier said it was. */
 const ITEM_LINE = /^(\d{4,5}-\d{3,4}-\d{2}|\d{5}-\d{4}-\d{2}).{0,200}?\s([\d,]+\.\d{2})\s+([A-Z])\s/;
 
+/**
+ * What the invoice came to, where it says so.
+ *
+ * Only a labelled total is read. Every one of these invoices carries a dozen dollar amounts —
+ * line extensions, subtotals by category, AWP, a statement balance — and picking the largest or
+ * the last would be inventing a figure that goes onto a financial record and gets reconciled
+ * against a payment. A missing amount is a blank somebody can fill in; a wrong one is a
+ * discrepancy nobody can explain.
+ *
+ * The order matters. One wholesaler prints "TOTAL RX PURCHASES" and "NET PAYABLE" on the same
+ * invoice, and the payable is the one the pharmacy is actually billed.
+ */
+export function readTotalCents(text: string): number | null {
+  const patterns = [
+    /net payable[^$\n]{0,60}\$\s*([\d,]+\.\d{2})/i,
+    /total due[^$\n]{0,20}\$\s*([\d,]+\.\d{2})/i,
+    /amount due[^$\n]{0,20}\$\s*([\d,]+\.\d{2})/i,
+    /invoice total[^$\n]{0,20}\$\s*([\d,]+\.\d{2})/i,
+    /balance due[^$\n]{0,20}\$\s*([\d,]+\.\d{2})/i,
+  ];
+  for (const re of patterns) {
+    const m = re.exec(text);
+    if (!m) continue;
+    const n = Number(m[1].replace(/,/g, ""));
+    if (Number.isFinite(n) && n >= 0) return Math.round(n * 100);
+  }
+  return null;
+}
+
 export type TextVerdict = {
   schedule: InvoiceSchedule;
   confident: boolean;
@@ -104,6 +134,8 @@ export type TextVerdict = {
   supplier: string | null;
   invoiceNumber: string | null;
   invoiceDate: string | null;
+  /** What it came to, where the invoice says so. Null rather than a guess. */
+  totalCents: number | null;
 };
 
 /** "09/04/2026" as an ISO date, where it is one. */
@@ -153,6 +185,7 @@ export function classifyInvoiceText(text: string): TextVerdict {
     supplier,
     invoiceNumber,
     invoiceDate,
+    totalCents: readTotalCents(text),
     controlledItems: [] as string[],
     allItems: [] as string[],
   };
@@ -338,7 +371,15 @@ export type FiledInvoice = { id: string; documentId: string; schedule: InvoiceSc
  */
 export async function fileInvoice(
   buf: Buffer,
-  meta: { fileName: string; mimeType: string; supplier: string | null; from: string; subject: string },
+  meta: {
+    fileName: string;
+    mimeType: string;
+    supplier: string | null;
+    /** The register row the sender matched, when there is one. The name alone is only a label. */
+    supplierId?: string | null;
+    from: string;
+    subject: string;
+  },
   ctx: { userId: string; userName: string },
 ): Promise<FiledInvoice> {
   let schedule: InvoiceSchedule = "unknown";
@@ -349,6 +390,7 @@ export async function fileInvoice(
   let invoiceDate: string | null = null;
   let confident = false;
   let items: string[] = [];
+  let totalCents: number | null = null;
 
   /*
    * The supplier's own answer first, and a model only where there isn't one.
@@ -377,12 +419,14 @@ export async function fileInvoice(
     supplier = fromText.supplier || meta.supplier;
     invoiceNumber = fromText.invoiceNumber;
     invoiceDate = fromText.invoiceDate;
+    totalCents = fromText.totalCents;
   } else {
     // Anything the rule could not settle, including a disagreement it spotted, goes to the model
     // — and if that is unavailable or unsure too, the invoice waits for a person.
     supplier = fromText?.supplier || meta.supplier;
     invoiceNumber = fromText?.invoiceNumber ?? null;
     invoiceDate = fromText?.invoiceDate ?? null;
+    totalCents = fromText?.totalCents ?? null;
     controlled = fromText?.controlledItems ?? [];
     items = fromText?.allItems ?? [];
     basis = fromText?.basis ?? "The invoice could not be read as text.";
@@ -434,6 +478,8 @@ export async function fileInvoice(
     // Capped, because this exists to be searched rather than read, and a hundred-line invoice
     // should not push anything else out of the page it is shown on.
     itemsText: items.join("\n").slice(0, 20000),
+    totalCents,
+    supplierId: meta.supplierId ?? null,
     needsReview: !confident,
     receivedFrom: meta.from,
   });
@@ -478,6 +524,13 @@ export type InvoiceQuery = {
   text?: string;
   /** Only those nobody has confirmed. */
   unconfirmed?: boolean;
+  /** A single day, for "what came in on the 4th". */
+  on?: string;
+  /** Amounts, in dollars, for finding the invoice somebody is querying. */
+  minAmount?: number;
+  maxAmount?: number;
+  /** Only ones with no amount read, so they can be filled in. */
+  noAmount?: boolean;
 };
 
 /**
@@ -493,8 +546,11 @@ export async function invoices(q: InvoiceQuery = {}): Promise<SupplierInvoice[]>
 
   const where = [
     q.schedule ? eq(schema.supplierInvoices.schedule, q.schedule) : undefined,
-    from ? gte(schema.supplierInvoices.invoiceDate, from) : undefined,
-    to ? lte(schema.supplierInvoices.invoiceDate, to) : undefined,
+    // A single day beats a range of one day: "what arrived on the 4th" is asked far more often
+    // than "between the 4th and the 4th".
+    q.on ? eq(schema.supplierInvoices.invoiceDate, q.on) : undefined,
+    !q.on && from ? gte(schema.supplierInvoices.invoiceDate, from) : undefined,
+    !q.on && to ? lte(schema.supplierInvoices.invoiceDate, to) : undefined,
     q.supplier ? eq(schema.supplierInvoices.supplier, q.supplier) : undefined,
     q.unconfirmed ? eq(schema.supplierInvoices.needsReview, true) : undefined,
   ].filter(Boolean);
@@ -513,7 +569,22 @@ export async function invoices(q: InvoiceQuery = {}): Promise<SupplierInvoice[]>
    * typed has to appear somewhere, which is what makes "oxycodone march" behave the way
    * somebody expects rather than returning everything with either.
    */
-  return rows.filter((r) => matchesText(r, q.text));
+  return rows
+    .filter((r) => matchesText(r, q.text))
+    .filter((r) => {
+      if (q.noAmount) return r.totalCents === null;
+      if (q.minAmount !== undefined && (r.totalCents === null || r.totalCents < q.minAmount * 100)) return false;
+      if (q.maxAmount !== undefined && (r.totalCents === null || r.totalCents > q.maxAmount * 100)) return false;
+      return true;
+    });
+}
+
+/** What the shown invoices come to, so a filtered list answers "how much was that month". */
+export function sumOf(rows: SupplierInvoice[]): { total: number; missing: number } {
+  return {
+    total: rows.reduce((n, r) => n + (r.totalCents ?? 0), 0),
+    missing: rows.filter((r) => r.totalCents === null).length,
+  };
 }
 
 /**
@@ -967,8 +1038,18 @@ export async function adoptDocument(documentId: string, ctx: { userId: string; u
   let controlled = fromText?.controlledItems ?? [];
   let items = fromText?.allItems ?? [];
   let supplier = fromText?.supplier ?? null;
+  /*
+   * Who it came from, where the document remembers.
+   *
+   * A document adopted from the vault has no envelope any more — only the note written when it
+   * arrived, which contains the sending address. Matching that against the register is what lets
+   * an invoice filed long before this page existed still belong to a named supplier.
+   */
+  const register = await allSuppliers(true);
+  const matched = supplierForSender(register, `${doc.notes ?? ""} ${doc.fileName ?? ""}`);
   let invoiceNumber = fromText?.invoiceNumber ?? null;
   let invoiceDate = fromText?.invoiceDate ?? doc.effectiveOn ?? null;
+  const totalCents = fromText?.totalCents ?? null;
 
   if (!fromText?.confident) {
     try {
@@ -995,13 +1076,15 @@ export async function adoptDocument(documentId: string, ctx: { userId: string; u
   await db.insert(schema.supplierInvoices).values({
     id,
     documentId,
-    supplier,
+    supplier: supplier ?? matched?.name ?? null,
     invoiceNumber,
     invoiceDate,
     schedule,
     basis: `${basis} Filed from a document already held, by ${ctx.userName}.`.trim(),
     controlledItems: controlled.join("\n"),
     itemsText: items.join("\n").slice(0, 20000),
+    totalCents,
+    supplierId: matched?.id ?? null,
     needsReview: !(fromText?.confident ?? false) && schedule === "unknown",
     receivedFrom: doc.notes ?? null,
   });
@@ -1033,3 +1116,28 @@ export async function uploadInvoice(file: File, ctx: { userId: string; userName:
     ctx,
   );
 }
+
+/**
+ * Types in the amount an invoice did not label clearly enough to read.
+ *
+ * One wholesaler prints subtotals by schedule and no single figure for the invoice, so the total
+ * has to come from a person. Better that than a number the site assembled from parts it guessed
+ * belonged together — this figure gets reconciled against a payment.
+ */
+export async function setInvoiceTotal(id: string, dollars: number, user: { name: string }): Promise<void> {
+  if (!Number.isFinite(dollars) || dollars < 0) throw new Error("That is not an amount.");
+  const inv = await db.query.supplierInvoices.findFirst({ where: eq(schema.supplierInvoices.id, id) });
+  if (!inv) throw new Error("That invoice no longer exists.");
+  await db
+    .update(schema.supplierInvoices)
+    .set({
+      totalCents: Math.round(dollars * 100),
+      basis: `${inv.basis ?? ""} Amount entered by ${user.name} on ${todayIso()}.`.trim(),
+    })
+    .where(eq(schema.supplierInvoices.id, id));
+}
+
+export const money = (cents: number | null): string =>
+  cents === null
+    ? "—"
+    : `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;

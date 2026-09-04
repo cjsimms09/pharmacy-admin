@@ -105,6 +105,15 @@ export const SETTING_KEYS = [
   "manual_audit_last",
   "manual_audit_result",
   "manual_audit_auto",
+  /**
+   * What the "Put it right" press is doing, as JSON, so the page can show it.
+   *
+   * The work used to happen inside the button's own request. A press that takes a minute makes
+   * the browser's router wait on it — every other link on the site stops responding until it
+   * returns, which is indistinguishable from the site having frozen. So the press now only
+   * starts the job and this is where the job says where it has got to.
+   */
+  "manual_job",
   "backup_last_result",
   "backup_last_failure",
   // The rehearsal: an archive already on disk, opened and restored to a scratch database, to prove

@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { newId, sha256 } from "./crypto";
 
-const filesDir = () => process.env.FILES_DIR ?? "./data/files";
+export const filesDir = () => process.env.FILES_DIR ?? "./data/files";
 
 /**
  * What may be uploaded, decided by extension as well as by type.

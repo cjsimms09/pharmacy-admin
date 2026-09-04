@@ -615,6 +615,50 @@ export const manualFindings = sqliteTable(
 export const INVOICE_SCHEDULES = ["schedule_2", "schedule_3_5", "none", "unknown"] as const;
 export type InvoiceSchedule = (typeof INVOICE_SCHEDULES)[number];
 
+/**
+ * The wholesalers this pharmacy buys from.
+ *
+ * This began as a line of free text in the email settings — "a fragment, an equals sign, a
+ * name" — which was enough to route a file and nothing else. A supplier is not a routing rule.
+ * It is a party the pharmacy has a DEA-registered relationship with, whose invoices are records
+ * the pharmacy is required to keep, and whose silence is itself reportable. All of that needs
+ * somewhere to live.
+ *
+ * The addresses they send from are the load-bearing part: an invoice only files itself if the
+ * sender is recognised, so a wholesaler who changes their billing address quietly stops being
+ * recorded. Keeping them here rather than in a settings blob means the site can say which
+ * supplier has gone quiet, and by name.
+ */
+export const suppliers = sqliteTable(
+  "suppliers",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    /** Every address they send invoices from, one per line. Matched against the sender. */
+    senderEmails: text("sender_emails").notNull().default(""),
+    /** The pharmacy's account number with them, as it appears on the invoice. */
+    accountNumber: text("account_number"),
+    /** Their DEA registration, printed on any invoice carrying controlled substances. */
+    deaNumber: text("dea_number"),
+    phone: text("phone"),
+    website: text("website"),
+    /**
+     * What they are expected to ship, as the pharmacy states it.
+     *
+     * Never used to classify anything — used the other way round, to notice when a supplier sends
+     * something they never send. Used as a classifier it would suppress the one event most worth
+     * catching.
+     */
+    expectedSchedule: text("expected_schedule", { enum: INVOICE_SCHEDULES }),
+    notes: text("notes"),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    createdAt: text("created_at").notNull().default(now()),
+    updatedAt: text("updated_at"),
+  },
+  (t) => [index("suppliers_name_idx").on(t.name)],
+);
+
+
 export const supplierInvoices = sqliteTable(
   "supplier_invoices",
   {
@@ -638,6 +682,17 @@ export const supplierInvoices = sqliteTable(
      * only knows the number on the front of the document.
      */
     itemsText: text("items_text").notNull().default(""),
+    /**
+     * What the invoice came to, in cents, as printed on it.
+     *
+     * Kept because it is the first thing anybody looks for on a list of invoices and the only
+     * figure that lets the pharmacy reconcile what it was billed against what it paid. Null where
+     * the total could not be read rather than zero, because a zero here would be a lie that adds
+     * up.
+     */
+    totalCents: integer("total_cents"),
+    /** The supplier record this came from, where one is known. */
+    supplierId: text("supplier_id"),
     /** Set until a person has confirmed anything the reader was unsure about. */
     needsReview: integer("needs_review", { mode: "boolean" }).notNull().default(true),
     reviewedBy: text("reviewed_by"),

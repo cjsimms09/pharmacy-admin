@@ -110,6 +110,16 @@ async function due(limit: number) {
 export type AuditRun = { audited: number; findings: number; remaining: number; problems: string[] };
 
 /**
+ * Where the work has got to, reported as it happens.
+ *
+ * Not decoration. This runs for minutes against a model, and a button with no visible effect is
+ * one somebody presses again, and again, and then reports as broken — which is exactly what
+ * happened. Whoever starts the job decides what to do with these; the background beat throws
+ * them away, the page writes them where it can show them.
+ */
+export type Progress = (p: { step: string; done: number; total: number }) => void | Promise<void>;
+
+/**
  * Audits the next few sections that are due.
  *
  * Bounded on purpose. A hundred and fifty model calls in one request is a page that appears to
@@ -122,7 +132,7 @@ export type AuditRun = { audited: number; findings: number; remaining: number; p
  */
 export async function runManualAudit(
   user: { id: string; name: string },
-  opts: { limit?: number; deadline?: number } = {},
+  opts: { limit?: number; deadline?: number; onProgress?: Progress } = {},
 ): Promise<AuditRun> {
   const limit = Math.max(1, Math.min(opts.limit ?? 4, 40));
   // A wall clock as well as a count. A model call that takes a minute turns a batch of five into
@@ -145,8 +155,9 @@ export async function runManualAudit(
   const siteDoes = policies(pharmacy).map((x) => `${x.title}: ${x.text[0]}`).join("\n");
   const now = new Date().toISOString();
 
-  for (const sec of rows) {
+  for (const [n, sec] of rows.entries()) {
     if (Date.now() > deadline) break;
+    await opts.onProgress?.({ step: `Reading “${sec.title}” against the rules`, done: n, total: rows.length });
     // The one case that needs no model: an empty heading naming a form this site produces.
     if (!sec.body.trim()) {
       const form = suggestForm(sec.title);
@@ -310,7 +321,7 @@ export type PutRightResult = {
  */
 export async function putRight(
   user: { id: string; name: string },
-  opts: { auditLimit?: number; draftLimit?: number; budgetMs?: number } = {},
+  opts: { auditLimit?: number; draftLimit?: number; budgetMs?: number; onProgress?: Progress } = {},
 ): Promise<PutRightResult> {
   /*
    * Bounded, because a press has to finish while somebody is looking at it.
@@ -353,7 +364,10 @@ export async function putRight(
     problems: [],
   };
 
+  const say = opts.onProgress ?? (() => {});
+
   // ── 1. The generated half, level with what the software does ──
+  await say({ step: "Bringing the generated sections level with what the site does", done: 0, total: 0 });
   try {
     const { regenerateSiteSections } = await import("./manual-store");
     out.regenerated = (await regenerateSiteSections(user)).written;
@@ -376,7 +390,8 @@ export async function putRight(
   // Pointing at a form costs nothing, so all of those are done. Drafting costs a model call
   // each, so those are the ones that are rationed.
   let draftsLeft = draftLimit;
-  for (const g of empty) {
+  for (const [n, g] of empty.entries()) {
+    await say({ step: `Filling in “${g.title}”`, done: n, total: empty.length });
     const form = suggestForm(g.title);
     if (form) {
       try {
@@ -414,6 +429,7 @@ export async function putRight(
   }
 
   // ── 4. Footnote markers with no footnotes ──
+  await say({ step: "Removing footnote markers that point at nothing", done: 0, total: 0 });
   try {
     const { stripCitationMarkers } = await import("./manual-store");
     out.markersRemoved = (await stripCitationMarkers(user)).markers;
@@ -425,7 +441,7 @@ export async function putRight(
 
   // ── 5. Read what is due against the requirements ──
   if (canDraft) {
-    const r = await runManualAudit(user, { limit: auditLimit, deadline });
+    const r = await runManualAudit(user, { limit: auditLimit, deadline, onProgress: opts.onProgress });
     out.audited = r.audited;
     out.raised = r.findings;
     out.remaining = r.remaining;

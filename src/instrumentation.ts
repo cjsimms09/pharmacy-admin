@@ -265,6 +265,17 @@ export async function register() {
       const { getSettings } = await import("./lib/settings");
       const s = await getSettings();
       if (s.manual_audit_auto === "no") return;
+      /*
+       * Never at the same time as a pass somebody started by hand.
+       *
+       * Two passes reading and rewriting the same sections at once would race each other, and the
+       * one a person is watching should win. This is also where a job whose process went away —
+       * the computer switched off mid-pass — gets marked as stopped, so the button is never left
+       * permanently unpressable.
+       */
+      const { reapStale, isRunning, manualJob } = await import("./lib/manual-job");
+      await reapStale();
+      if (isRunning(await manualJob())) return;
       const { hasApiKey } = await import("./lib/ai");
       if (!(await hasApiKey())) return;
       const last = s.manual_audit_last ? Date.parse(s.manual_audit_last) : 0;

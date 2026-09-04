@@ -30,12 +30,14 @@ import {
   runManualAudit,
   applyFinding,
   dismissFinding,
-  putRight,
   applyAllFindings,
 } from "@/lib/manual-audit";
+import { manualJob, startPutRight, runPutRight, isRunning, isStale, summarise, ago } from "@/lib/manual-job";
 import { fmt } from "@/lib/dates";
 import { PageHeader, Card, Figure, Notice, Field } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
+import { JobPanel } from "@/components/job-panel";
+import { after } from "next/server";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Policy manual" };
@@ -73,14 +75,16 @@ export default async function ManualPage({
 }) {
   const user = await requireUser();
   const { ok, error, edit, ch, q, draft, note, concerns } = await searchParams;
-  const [rows, s, aiReady, stale, audit_, findings] = await Promise.all([
+  const [rows, s, aiReady, stale, audit_, findings, job] = await Promise.all([
     allSections(),
     getSettings(),
     hasApiKey(),
     needingReview(),
     auditProgress(),
     openFindings(),
+    manualJob(),
   ]);
+  const working = isRunning(job);
   const sections = outline(rows);
   const pharmacy = s.pharmacy_name || "This pharmacy";
 
@@ -515,39 +519,19 @@ export default async function ManualPage({
   async function putRightAction() {
     "use server";
     const u = await requireManager();
-    try {
-      const r = await putRight(u, { auditLimit: 5, draftLimit: 5 });
-      await audit({
-        action: "manual.put_right",
-        userId: u.id,
-        userName: u.name,
-        details: `${r.pointed} pointed, ${r.drafted} drafted, ${r.audited} read, ${r.raised} raised`,
-      });
-      revalidatePath("/manual");
-      const said = [
-        r.regenerated ? `${r.regenerated} generated section${r.regenerated === 1 ? "" : "s"} brought level with the site` : "",
-        r.pointed ? `${r.pointed} heading${r.pointed === 1 ? "" : "s"} now point${r.pointed === 1 ? "s" : ""} at the form this site produces` : "",
-        r.drafted ? `${r.drafted} ${r.drafted === 1 ? "policy was" : "policies were"} drafted` : "",
-        r.markersRemoved ? `${r.markersRemoved} footnote marker${r.markersRemoved === 1 ? "" : "s"} removed` : "",
-        r.audited ? `${r.audited} section${r.audited === 1 ? "" : "s"} read against the rules` : "",
-        r.raised ? `${r.raised} finding${r.raised === 1 ? "" : "s"} raised` : "",
-        r.stillEmpty ? `${r.stillEmpty} heading${r.stillEmpty === 1 ? "" : "s"} still to write` : "",
-        r.remaining ? `${r.remaining} still to read against the rules` : "",
-      ].filter(Boolean).join(". ");
-      const more = r.stillEmpty > 0 || r.remaining > 0;
-      const tail =
-        (r.drafted ? " Anything drafted is marked as drafted and unreviewed until you have read it." : "") +
-        (more
-          ? " Press it again to carry on — each press does about a minute of work, and the rest happens on its own in the background either way."
-          : "");
-      redirect(
-        `/manual?${r.problems.length ? "error" : "ok"}=` +
-          encodeURIComponent(`${said || "Nothing needed doing"}.${tail} ${r.problems.slice(0, 3).join(" ")}`.trim()),
-      );
-    } catch (e) {
-      if (e && typeof e === "object" && "digest" in e) throw e;
-      redirect("/manual?error=" + encodeURIComponent(e instanceof Error ? e.message : "That could not be finished."));
-    }
+    const r = await startPutRight(u);
+    /*
+     * The work runs after the response, not inside it.
+     *
+     * A press that does the work inline holds the browser's router open for as long as it takes,
+     * which stops every other link on the site responding — the site had not frozen, but there is
+     * no way to tell that from the outside, and it was reported as frozen twice. Starting the job
+     * and returning immediately means the press is instant, the site stays usable, and the panel
+     * on this page shows what is happening.
+     */
+    if (r.started) after(() => runPutRight(u));
+    revalidatePath("/manual");
+    redirect(`/manual?${r.started ? "ok" : "error"}=` + encodeURIComponent(r.message));
   }
 
   /** Puts every finding that came with replacement text into the manual, in one act. */
@@ -589,12 +573,9 @@ export default async function ManualPage({
           sections.length > 0 ? (
             <>
               <Link href="/manual/print" className="btn">Print it</Link>
-              {canManage && problems.length > 0 && (
+              {canManage && problems.length > 0 && !working && (
                 <form action={putRightAction}>
-                  <SubmitButton
-                    pendingLabel="Working through it…"
-                    disabled={!aiReady && empty.length === 0 && citeTotal === 0}
-                  >
+                  <SubmitButton pendingLabel="Starting…" disabled={!aiReady && empty.length === 0 && citeTotal === 0}>
                     Put it right
                   </SubmitButton>
                 </form>
@@ -606,6 +587,40 @@ export default async function ManualPage({
 
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
+
+      {/*
+        Whether it is running, and what happened last time.
+
+        Both halves matter. Without the first, a press that takes four minutes looks like a press
+        that did nothing. Without the second, a press whose work finished after the page was closed
+        leaves no evidence it ever ran — and the honest report was "is it running? is it working?",
+        asked about a button that was in fact working.
+      */}
+      {working && job && (
+        <JobPanel step={job.step} done={job.done} total={job.total} startedAt={job.startedAt} by={job.by} />
+      )}
+
+      {!working && isStale(job) && (
+        <Notice kind="warn">
+          <b>The last pass stopped before it finished.</b> That normally means the computer was switched off or
+          restarted while it was working. Everything it had done by then was saved. Press <b>Put it right</b> to carry
+          on from there.
+        </Notice>
+      )}
+
+      {!working && job?.state === "failed" && (
+        <Notice kind="crit">
+          <b>The last pass stopped {ago(job.finishedAt)}:</b> {job.error}
+        </Notice>
+      )}
+
+      {!working && job?.state === "done" && job.result && (
+        <Notice kind={job.result.problems.length ? "warn" : "ok"}>
+          <b>Last pass finished {ago(job.finishedAt)}.</b> {summarise(job.result)}.
+          {job.result.drafted > 0 && " Anything drafted is marked as drafted and unreviewed until you have read it."}
+          {job.result.problems.length > 0 && ` ${job.result.problems.slice(0, 3).join(" ")}`}
+        </Notice>
+      )}
 
       {sections.length === 0 ? (
         <Card title="Bring your manual in" subtitle="Upload the Word file and it is split into sections on its own headings. Nothing is rewritten — the text arrives exactly as it is, and you edit from there.">
@@ -660,16 +675,21 @@ export default async function ManualPage({
 
             {canManage && (
               <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-4">
-                {problems.length > 0 && (
+                {problems.length > 0 && !working && (
                   <form action={putRightAction}>
                     <SubmitButton
-                      pendingLabel="Working through it…"
-                      hint="Up to a minute. It reads the manual against the rules, so leave this page open — whatever it finishes is saved as it goes."
-                      disabled={!aiReady && empty.length === 0 && citeTotal === 0}
+                      pendingLabel="Starting…"
+                      hint="Starts straight away and then works in the background — the site stays usable and this page shows where it has got to."
+                      disabled={!aiReady}
                     >
                       Put it right
                     </SubmitButton>
                   </form>
+                )}
+                {working && (
+                  <span className="text-xs text-accent">
+                    It is running now — the panel at the top of the page shows where it has got to.
+                  </span>
                 )}
                 {/*
                   Rewriting existing policies is its own act, with the count on the button.
@@ -692,9 +712,10 @@ export default async function ManualPage({
                   </form>
                 )}
                 {!aiReady && (
-                  <span className="text-xs text-warn">
-                    No Anthropic API key is stored, so nothing can be drafted or read against the rules.{" "}
-                    <Link href="/settings/connections" className="underline">Add one</Link>.
+                  <span className="text-xs text-crit">
+                    <b>Claude is not connected</b>, so &ldquo;Put it right&rdquo; cannot draft anything or read the
+                    manual against the rules — that is why it does nothing. Add your Anthropic API key under{" "}
+                    <Link href="/settings/connections" className="underline">Settings → Claude</Link> and it will work.
                   </span>
                 )}
               </div>
