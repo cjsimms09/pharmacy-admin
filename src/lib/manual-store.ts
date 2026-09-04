@@ -453,3 +453,62 @@ export async function needingReview(): Promise<Section[]> {
   const cutoff = new Date(Date.now() - 365 * 86_400_000).toISOString().slice(0, 10);
   return rows.filter((r) => r.source === "pharmacy" && !r.managedBy && (!r.reviewedOn || r.reviewedOn < cutoff));
 }
+
+export type SectionHit = {
+  id: string;
+  number: string;
+  title: string;
+  chapterId: string;
+  chapterTitle: string;
+  /** The matching text with a little either side, so a result can be judged without opening it. */
+  snippet: string;
+  /** True when the words matched the heading rather than the body. */
+  inTitle: boolean;
+};
+
+/**
+ * Finding a section without knowing where it lives.
+ *
+ * The manual is a hundred and fifty sections under fourteen chapters, and the way anybody
+ * actually arrives at it is with a question — what do we do about a recall, who signs for a
+ * delivery, how long do we keep this. Answering that by remembering which chapter it is in is a
+ * memory test, and the paper copy at least had an index.
+ *
+ * Every word typed has to appear somewhere in the section, which is what makes two words narrow
+ * the result rather than widen it. A heading match sorts first: somebody typing "recall" wants
+ * the section called Recalls before the four that mention the word in passing.
+ */
+export function searchSections(rows: Section[], query: string): SectionHit[] {
+  const terms = query.toLowerCase().split(/\s+/).map((t) => t.trim()).filter(Boolean);
+  if (terms.length === 0) return [];
+
+  const nodes = outline(rows);
+  const chapterTitle = new Map(nodes.filter((n) => n.depth === 0).map((n) => [n.id, n.title]));
+
+  const hits: SectionHit[] = [];
+  for (const n of nodes) {
+    if (n.retiredOn) continue;
+    const title = n.title.toLowerCase();
+    const body = n.body.toLowerCase();
+    if (!terms.every((t) => title.includes(t) || body.includes(t))) continue;
+
+    const inTitle = terms.every((t) => title.includes(t));
+    const at = body.indexOf(terms[0]);
+    const snippet =
+      at >= 0
+        ? (at > 40 ? "…" : "") + n.body.slice(Math.max(0, at - 40), at + 160).trim() + (n.body.length > at + 160 ? "…" : "")
+        : n.body.slice(0, 160).trim();
+
+    hits.push({
+      id: n.id,
+      number: n.number,
+      title: n.title,
+      chapterId: n.chapterId,
+      chapterTitle: chapterTitle.get(n.chapterId) ?? "",
+      snippet,
+      inTitle,
+    });
+  }
+
+  return hits.sort((a, b) => (a.inTitle === b.inTitle ? a.number.localeCompare(b.number) : a.inTitle ? -1 : 1));
+}

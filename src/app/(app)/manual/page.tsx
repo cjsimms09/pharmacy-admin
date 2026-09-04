@@ -21,9 +21,18 @@ import {
   stripCitationMarkers,
   setChapterManager,
   managers,
+  searchSections,
 } from "@/lib/manual-store";
 import { policies, FORMS, appendixReference, suggestForm } from "@/lib/manual";
-import { auditProgress, openFindings, runManualAudit, applyFinding, dismissFinding } from "@/lib/manual-audit";
+import {
+  auditProgress,
+  openFindings,
+  runManualAudit,
+  applyFinding,
+  dismissFinding,
+  putRight,
+  applyAllFindings,
+} from "@/lib/manual-audit";
 import { fmt } from "@/lib/dates";
 import { PageHeader, Card, Figure, Notice, Field } from "@/components/ui";
 
@@ -50,10 +59,19 @@ export const metadata = { title: "Policy manual" };
 export default async function ManualPage({
   searchParams,
 }: {
-  searchParams: Promise<{ ok?: string; error?: string; edit?: string; ch?: string; draft?: string; note?: string; concerns?: string }>;
+  searchParams: Promise<{
+    ok?: string;
+    error?: string;
+    edit?: string;
+    ch?: string;
+    q?: string;
+    draft?: string;
+    note?: string;
+    concerns?: string;
+  }>;
 }) {
   const user = await requireUser();
-  const { ok, error, edit, ch, draft, note, concerns } = await searchParams;
+  const { ok, error, edit, ch, q, draft, note, concerns } = await searchParams;
   const [rows, s, aiReady, stale, audit_, findings] = await Promise.all([
     allSections(),
     getSettings(),
@@ -80,6 +98,73 @@ export default async function ManualPage({
   const chapters = sections.filter((x) => x.depth === 0);
   const open = openId ? chapters.find((c) => c.id === openId) : undefined;
   const inChapter = open ? sections.filter((x) => x.chapterId === open.id) : [];
+
+  const query = (q ?? "").trim();
+  const hits = query ? searchSections(rows, query) : [];
+  const canManage = user.role !== "staff";
+
+  /*
+   * Everything wrong with the manual, in one list, in the order it matters.
+   *
+   * The page used to carry a card per problem — an audit card, a gaps card, a footnote-marker
+   * card — each with its own button, and the pharmacist-in-charge was left to work out which of
+   * them his manual needed. He does not know that. He knows the manual is not right. Which
+   * operation fixes which symptom is the software's job, so the symptoms are named in one place
+   * and there is one button under them.
+   */
+  const problems: { key: string; severity: "crit" | "warn"; what: string; fix: string }[] = [];
+  if (audit_.blocking > 0) {
+    problems.push({
+      key: "blocking",
+      severity: "crit",
+      what: `${audit_.blocking} finding${audit_.blocking === 1 ? "" : "s"} an inspector would write up`,
+      fix: "Each comes with the replacement text where one could be written.",
+    });
+  }
+  if (empty.length > 0) {
+    const named = empty.filter((x) => suggestForm(x.title)).length;
+    problems.push({
+      key: "empty",
+      severity: "crit",
+      what: `${empty.length} heading${empty.length === 1 ? "" : "s"} promising a policy and delivering none`,
+      fix: named
+        ? `${named} name a form this site produces and are filled in without a model; the rest are drafted.`
+        : "Each is drafted against what this pharmacy is and what this site does.",
+    });
+  }
+  if (findings.length - audit_.blocking > 0) {
+    problems.push({
+      key: "findings",
+      severity: "warn",
+      what: `${findings.length - audit_.blocking} weaker finding${findings.length - audit_.blocking === 1 ? "" : "s"} to answer`,
+      fix: "Applied or dismissed with a reason, one at a time or all together.",
+    });
+  }
+  if (citeTotal > 0) {
+    problems.push({
+      key: "cites",
+      severity: "warn",
+      what: `${citeTotal} footnote marker${citeTotal === 1 ? "" : "s"} with no footnotes anywhere`,
+      fix: "Removed. The policies underneath are not touched.",
+    });
+  }
+  if (audit_.due > 0) {
+    problems.push({
+      key: "due",
+      severity: "warn",
+      what: `${audit_.due} section${audit_.due === 1 ? "" : "s"} not read against the rules within the last year`,
+      fix: "Read against Kansas, DEA, HIPAA and OSHA, and against what this site does.",
+    });
+  }
+  if (stale.length > 0) {
+    problems.push({
+      key: "stale",
+      severity: "warn",
+      what: `${stale.length} section${stale.length === 1 ? "" : "s"} with no review date inside the last year`,
+      fix: "Only you can sign that. The button below records today against the whole manual.",
+    });
+  }
+  const fixable = findings.filter((f) => f.suggestedBody.trim()).length;
 
   async function doImport(fd: FormData) {
     "use server";
@@ -417,6 +502,69 @@ export default async function ManualPage({
     redirect(`/manual?ch=${String(fd.get("ch") ?? "")}&ok=` + encodeURIComponent("Marked as reviewed today."));
   }
 
+  /**
+   * The one button.
+   *
+   * Runs everything the site can do to the manual without a person deciding anything: the
+   * generated sections brought level with what the software actually does, empty headings that
+   * name a form pointed at it, the rest drafted, borrowed footnote markers removed, and whatever
+   * is due read against the requirements. It deliberately does not rewrite a policy the pharmacy
+   * has already written — that is the next button along, and it says how many it will change.
+   */
+  async function putRightAction() {
+    "use server";
+    const u = await requireManager();
+    try {
+      const r = await putRight(u, { auditLimit: 25 });
+      await audit({
+        action: "manual.put_right",
+        userId: u.id,
+        userName: u.name,
+        details: `${r.pointed} pointed, ${r.drafted} drafted, ${r.audited} read, ${r.raised} raised`,
+      });
+      revalidatePath("/manual");
+      const said = [
+        r.regenerated ? `${r.regenerated} generated section${r.regenerated === 1 ? "" : "s"} brought level with the site` : "",
+        r.pointed ? `${r.pointed} heading${r.pointed === 1 ? "" : "s"} now point${r.pointed === 1 ? "s" : ""} at the form this site produces` : "",
+        r.drafted ? `${r.drafted} ${r.drafted === 1 ? "policy was" : "policies were"} drafted` : "",
+        r.markersRemoved ? `${r.markersRemoved} footnote marker${r.markersRemoved === 1 ? "" : "s"} removed` : "",
+        r.audited ? `${r.audited} section${r.audited === 1 ? "" : "s"} read against the rules` : "",
+        r.raised ? `${r.raised} finding${r.raised === 1 ? "" : "s"} raised` : "",
+        r.remaining ? `${r.remaining} still to read — press again, or leave it to run on its own` : "",
+      ].filter(Boolean).join(". ");
+      const tail = r.drafted
+        ? " Anything drafted is marked as drafted and unreviewed until you have read it."
+        : "";
+      redirect(
+        `/manual?${r.problems.length ? "error" : "ok"}=` +
+          encodeURIComponent(`${said || "Nothing needed doing"}.${tail} ${r.problems.slice(0, 3).join(" ")}`.trim()),
+      );
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/manual?error=" + encodeURIComponent(e instanceof Error ? e.message : "That could not be finished."));
+    }
+  }
+
+  /** Puts every finding that came with replacement text into the manual, in one act. */
+  async function applyAllAction() {
+    "use server";
+    const u = await requireManager();
+    const r = await applyAllFindings(u);
+    await audit({ action: "manual.findings.apply_all", userId: u.id, userName: u.name, details: `${r.applied}` });
+    revalidatePath("/manual");
+    redirect(
+      `/manual?${r.problems.length ? "error" : "ok"}=` +
+        encodeURIComponent(
+          [
+            r.applied ? `${r.applied} section${r.applied === 1 ? "" : "s"} rewritten from the audit` : "Nothing had replacement text",
+            r.left ? `${r.left} left because the fix needs a decision about this pharmacy` : "",
+            "Read what changed before the manual is printed — every one is marked as applied and unreviewed.",
+            ...r.problems.slice(0, 2),
+          ].filter(Boolean).join(". "),
+        ),
+    );
+  }
+
   async function reviewAll() {
     "use server";
     const u = await requireManager();
@@ -435,8 +583,14 @@ export default async function ManualPage({
         actions={
           sections.length > 0 ? (
             <>
-              <Link href="/manual/print" className="btn btn-primary">Print the whole manual</Link>
-              <form action={regenerate}><button className="btn">Refresh generated sections</button></form>
+              <Link href="/manual/print" className="btn">Print it</Link>
+              {canManage && problems.length > 0 && (
+                <form action={putRightAction}>
+                  <button className="btn btn-primary" disabled={!aiReady && empty.length === 0 && citeTotal === 0}>
+                    Put it right
+                  </button>
+                </form>
+              )}
             </>
           ) : undefined
         }
@@ -448,30 +602,306 @@ export default async function ManualPage({
       {sections.length === 0 ? (
         <Card title="Bring your manual in" subtitle="Upload the Word file and it is split into sections on its own headings. Nothing is rewritten — the text arrives exactly as it is, and you edit from there.">
           <form action={doImport} className="flex flex-wrap items-end gap-3" encType="multipart/form-data">
-            <Field label="The manual" hint="A .docx file. Word's own Heading 1, 2 and 3 marks are used to split it.">
-              <input type="file" name="file" accept=".docx" className="field" />
-            </Field>
-            <button className="btn btn-primary">Import it</button>
+            <Field label="A .docx file"><input type="file" name="file" accept=".docx" className="field" /></Field>
+            <button className="btn btn-primary">Import</button>
           </form>
           <p className="mt-3 text-xs text-ink-3">
-            The generated sections describing what this site does are written at the same time, as an appendix. After
-            that, delete the descriptions of those procedures from your own sections and let the appendix carry them —
-            two descriptions of one procedure is how a manual and a practice come apart.
+            Or start from what this site already does — {policies(pharmacy).length} generated sections describing the
+            procedures it performs.
+            <form action={regenerate} className="mt-2"><button className="btn btn-sm">Generate those now</button></form>
           </p>
         </Card>
-      ) : open ? (
-        /* ── One chapter ── */
+      ) : (
         <>
-          <h2 className="mb-3 text-lg">{open.number}. {open.title}</h2>
-          {open.managedBy && (
-            <Notice kind="warn">
-              This chapter is maintained by <b>{open.managedBy}</b>, not by the pharmacy. It prints as part of the
-              manual and the pharmacy is bound by it, but it is not edited here — a second copy of somebody
-              else&rsquo;s policy is how two versions of it start to disagree. Ask them for the change, then import the
-              handbook again; the marking survives the import.
-            </Notice>
+          {/*
+            What is wrong, and the one button that fixes it.
+
+            This replaced three cards with three buttons — an audit card, a gaps card, a
+            footnote-marker card — each of which asked the pharmacist-in-charge to know which
+            operation his manual needed. He does not know that, and should not have to: he knows
+            the manual is not right. So the symptoms are listed in one place, in the order they
+            matter, and the button underneath does all of it.
+          */}
+          <Card
+            id="state"
+            tone={problems.some((p) => p.severity === "crit") ? "crit" : problems.length ? "warn" : undefined}
+            title={problems.length === 0 ? "The manual is in order" : "What is wrong with the manual"}
+            count={problems.length === 0 ? undefined : problems.length}
+            subtitle={
+              problems.length === 0
+                ? `All ${own.length} of your sections are written, read against the requirements within the last year, and reviewed. Nothing is outstanding.`
+                : "Everything here is fixed by one press, except the last line of each — which says what the fix actually does, so nothing happens to the manual that you did not know about."
+            }
+            className="mb-6"
+          >
+            {problems.length > 0 && (
+              <ul className="rows">
+                {problems.map((p) => (
+                  <li key={p.key} className="flex flex-wrap items-start gap-2 py-2">
+                    <span className={`badge ${p.severity === "crit" ? "badge-crit" : "badge-warn"} mt-0.5 shrink-0`}>
+                      {p.severity === "crit" ? "would be written up" : "worth fixing"}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium">{p.what}</span>
+                      <span className="block text-xs text-ink-3">{p.fix}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {canManage && (
+              <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-4">
+                {problems.length > 0 && (
+                  <form action={putRightAction}>
+                    <button className="btn btn-primary" disabled={!aiReady && empty.length === 0 && citeTotal === 0}>
+                      Put it right
+                    </button>
+                  </form>
+                )}
+                {/*
+                  Rewriting existing policies is its own act, with the count on the button.
+
+                  The press above only ever adds what was missing or corrects what the site itself
+                  generated. This one changes prose the pharmacy has already written and stands
+                  behind, which is a different kind of decision and should not happen inside a
+                  general "fix" button.
+                */}
+                {fixable > 0 && (
+                  <form action={applyAllAction}>
+                    <button className="btn">Apply all {fixable} suggested rewrites</button>
+                  </form>
+                )}
+                {stale.length > 0 && (
+                  <form action={reviewAll}>
+                    <button className="btn">I have reviewed the manual — record today</button>
+                  </form>
+                )}
+                {!aiReady && (
+                  <span className="text-xs text-warn">
+                    No Anthropic API key is stored, so nothing can be drafted or read against the rules.{" "}
+                    <Link href="/settings/connections" className="underline">Add one</Link>.
+                  </span>
+                )}
+              </div>
+            )}
+
+            <p className="mt-3 text-xs text-ink-3">
+              {audit_.current} of {audit_.total} sections have been read against Kansas, DEA, HIPAA and OSHA
+              requirements within the last year, a few at a time on their own.
+              {audit_.lastResult ? ` Last pass: ${audit_.lastResult}` : ""}
+            </p>
+          </Card>
+
+          {/* ── The findings, where there are any ─────────────────────── */}
+          {findings.length > 0 && (
+            <Card
+              id="findings"
+              tone={audit_.blocking > 0 ? "crit" : "warn"}
+              title="What the audit found"
+              count={findings.length}
+              subtitle="Each one names the requirement it falls short of. Where the fix could be written it comes with the text; where it turns on a fact about this pharmacy nobody supplied, it deliberately does not, because an invented sentence in a manual is a standard you are then held to."
+              className="mb-6"
+            >
+              <ul className="rows">
+                {findings.map((f) => (
+                  <li key={f.id} className="py-3">
+                    <div className="flex flex-wrap items-baseline gap-2">
+                      <span
+                        className={`badge ${f.severity === "blocking" ? "badge-crit" : f.severity === "should" ? "badge-warn" : "badge-muted"}`}
+                      >
+                        {f.severity === "blocking" ? "would be written up" : f.severity === "should" ? "weakness" : "wording"}
+                      </span>
+                      <Link href={`/manual?edit=${f.sectionId}#${f.sectionId}`} className="text-sm font-medium text-accent hover:underline">
+                        {f.sectionTitle}
+                      </Link>
+                    </div>
+                    <p className="mt-1 text-sm text-ink-2">{f.what}</p>
+                    <p className="mt-0.5 text-xs text-ink-3">{f.why}</p>
+                    {canManage && (
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        {f.suggestedBody.trim() ? (
+                          <form action={applyFindingAction}>
+                            <input type="hidden" name="id" value={f.id} />
+                            <button className="btn btn-sm btn-primary">Put the fix in</button>
+                          </form>
+                        ) : (
+                          <span className="text-xs text-ink-3">
+                            Needs a decision about this pharmacy —{" "}
+                            <Link href={`/manual?edit=${f.sectionId}#${f.sectionId}`} className="underline">open the section</Link>.
+                          </span>
+                        )}
+                        <form action={dismissFindingAction} className="flex flex-wrap items-center gap-1.5">
+                          <input type="hidden" name="id" value={f.id} />
+                          <input name="reason" required className="field w-56 py-1 text-xs" placeholder="Why this is not a problem here" />
+                          <button className="btn btn-sm">Not a problem</button>
+                        </form>
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </Card>
           )}
-          <div className="space-y-3">
+
+          {/*
+            Finding a section without knowing which chapter it is in.
+
+            The way anybody arrives at a manual is with a question — what do we do about a recall,
+            who signs for a delivery, how long do we keep this. Answering that by remembering the
+            chapter is a memory test, and the paper copy at least had an index.
+          */}
+          <Card
+            title="Find anything in the manual"
+            subtitle="Searches every heading and every word of every policy. Two words narrow it rather than widen it."
+            className="mb-6"
+          >
+            <form className="flex flex-wrap items-center gap-2">
+              <input
+                name="q"
+                defaultValue={query}
+                placeholder="recall, epinephrine, how long we keep, who signs"
+                className="field max-w-md"
+                aria-label="Search the manual"
+              />
+              <button className="btn btn-primary">Search</button>
+              {query && <Link href="/manual" className="btn">Clear</Link>}
+            </form>
+
+            {query && (
+              <div className="mt-4">
+                <p className="text-xs text-ink-3">
+                  {hits.length === 0
+                    ? `Nothing in the manual mentions “${query}”. That may itself be the finding — if it is something this pharmacy does, it belongs in here.`
+                    : `${hits.length} section${hits.length === 1 ? "" : "s"} mention ${query}.`}
+                </p>
+                <ul className="rows mt-2">
+                  {hits.slice(0, 40).map((h) => (
+                    <li key={h.id} className="py-2">
+                      <Link href={`/manual?ch=${h.chapterId}&q=${encodeURIComponent(query)}#${h.id}`} className="text-sm font-medium text-accent hover:underline">
+                        <span className="mr-2 text-ink-3">{h.number}</span>{h.title}
+                      </Link>
+                      {h.inTitle && <span className="badge badge-ok ml-2">in the heading</span>}
+                      <p className="mt-0.5 text-xs text-ink-3">{h.chapterTitle}</p>
+                      {h.snippet && <p className="mt-1 text-xs leading-relaxed text-ink-2">{h.snippet}</p>}
+                    </li>
+                  ))}
+                </ul>
+                {hits.length > 40 && (
+                  <p className="mt-2 text-xs text-ink-3">and {hits.length - 40} more — add a word to narrow it.</p>
+                )}
+              </div>
+            )}
+          </Card>
+
+          {/*
+            Contents on the left, the chapter on the right.
+
+            The old page put you on a list of chapters, then replaced the whole screen with one
+            chapter — so finding the section next door meant going back, reading the list again,
+            and clicking in. Keeping the contents on screen is how a book works, and it is the
+            difference between reading a manual and navigating an application.
+          */}
+          <div className="grid gap-4 lg:grid-cols-[18rem_1fr] lg:items-start">
+            <Card title="Contents" count={chapters.length} className="lg:sticky lg:top-4">
+              <ul className="-mx-1 max-h-[34rem] overflow-y-auto">
+                {chapters.map((c) => {
+                  const kids = sections.filter((x) => x.chapterId === c.id && x.id !== c.id);
+                  const holes = empty.filter((x) => x.chapterId === c.id).length;
+                  const isOpen = open?.id === c.id;
+                  return (
+                    <li key={c.id}>
+                      <Link
+                        href={`/manual?ch=${c.id}`}
+                        className={`block rounded-md px-2 py-1.5 text-sm hover:bg-ground ${isOpen ? "bg-ground font-medium" : ""}`}
+                      >
+                        <span className="mr-1.5 text-xs text-ink-3">{c.number}</span>
+                        {c.title}
+                        <span className="ml-1.5 whitespace-nowrap text-[11px] text-ink-3">
+                          {holes > 0 && <span className="badge badge-crit mr-1">{holes}</span>}
+                          {c.managedBy && <span className="badge badge-muted mr-1">theirs</span>}
+                          {c.source === "site" && <span className="badge badge-ok mr-1">generated</span>}
+                          {kids.length || ""}
+                        </span>
+                      </Link>
+                      {isOpen && kids.length > 0 && (
+                        <ul className="mb-1 ml-3 border-l border-line">
+                          {kids.map((k) => (
+                            <li key={k.id}>
+                              <a
+                                href={`#${k.id}`}
+                                className={`block truncate rounded-r px-2 py-1 text-xs text-ink-2 hover:bg-ground ${k.depth > 1 ? "pl-4" : ""}`}
+                                title={k.title}
+                              >
+                                <span className="mr-1 text-ink-3">{k.number}</span>{k.title}
+                              </a>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </Card>
+
+            <div className="min-w-0">
+              {!open ? (
+                <Card title="Pick a chapter" subtitle="Or search above. Everything is one document — this is just where you open it.">
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <Figure value={sections.length} label="Sections" sub={`${own.length} yours, ${generated.length} generated`} tone="ok" />
+                    <Figure
+                      value={audit_.current}
+                      label="Read against the rules"
+                      sub={audit_.due === 0 ? "The whole manual is current" : `${audit_.due} still due`}
+                      tone={audit_.due === 0 ? "ok" : "warn"}
+                    />
+                    <Figure
+                      value={empty.length}
+                      label="Still to write"
+                      sub={empty.length === 0 ? "Nothing promised and undelivered" : "Headings with nothing under them"}
+                      tone={empty.length === 0 ? "ok" : "crit"}
+                    />
+                  </div>
+                  {elsewhere.length > 0 && (
+                    <p className="mt-3 text-xs text-ink-3">
+                      {elsewhere.length} sections are maintained by {others.map((o) => o.name).join(", ")} rather than by
+                      the pharmacy. They print as part of the manual, but nothing here chases you to review them or
+                      counts their gaps as yours.
+                    </p>
+                  )}
+                </Card>
+              ) : (
+                <>
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="text-lg font-semibold">
+                      <span className="mr-2 text-ink-3">{open.number}</span>{open.title}
+                    </h2>
+                    {canManage && open.source === "pharmacy" && (
+                      <form action={setManager} className="flex flex-wrap items-center gap-1.5 text-xs text-ink-3">
+                        <input type="hidden" name="chapter" value={open.id} />
+                        <span>Maintained by</span>
+                        <input
+                          name="manager"
+                          defaultValue={open.managedBy ?? ""}
+                          list="manual-managers"
+                          className="field w-52 py-0.5 text-xs"
+                          placeholder="the pharmacy"
+                        />
+                        <button className="btn btn-sm">Set</button>
+                      </form>
+                    )}
+                  </div>
+
+                  {open.managedBy && (
+                    <Notice kind="warn">
+                      This chapter is maintained by {open.managedBy}, not by the pharmacy. It is not edited here — editing
+                      a copy of somebody else&rsquo;s policy is how two versions of it start to disagree. Ask them for the
+                      change, then import the handbook again; the marking survives the import.
+                    </Notice>
+                  )}
+
+                  <div className="space-y-3">
             {inChapter.map((x) => {
               const isEditing = editing?.id === x.id;
               return (
@@ -500,20 +930,22 @@ export default async function ManualPage({
                       </p>
                     </div>
                     <div className="flex shrink-0 flex-wrap gap-1.5">
-                      {x.source === "pharmacy" && !x.managedBy && !isEditing && (
+                      {canManage && x.source === "pharmacy" && !x.managedBy && !isEditing && (
                         <Link href={`/manual?ch=${open.id}&edit=${x.id}#${x.id}`} className="btn btn-sm">Edit</Link>
                       )}
-                      {x.source === "pharmacy" && !x.managedBy && !isEditing && (
+                      {canManage && x.source === "pharmacy" && !x.managedBy && !isEditing && (
                         <form action={reviewed}>
                           <input type="hidden" name="id" value={x.id} />
                           <input type="hidden" name="ch" value={open.id} />
                           <button className="btn btn-sm">Reviewed today</button>
                         </form>
                       )}
-                      <form action={add}>
-                        <input type="hidden" name="after" value={x.id} />
-                        <button className="btn btn-sm">Add after</button>
-                      </form>
+                      {canManage && (
+                        <form action={add}>
+                          <input type="hidden" name="after" value={x.id} />
+                          <button className="btn btn-sm">Add after</button>
+                        </form>
+                      )}
                     </div>
                   </div>
 
@@ -594,307 +1026,52 @@ export default async function ManualPage({
                 </section>
               );
             })}
-          </div>
-        </>
-      ) : (
-        /* ── The chapters ── */
-        <>
-          <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <Figure value={sections.length} label="Sections" sub={`${own.length} yours, ${generated.length} generated${elsewhere.length ? `, ${elsewhere.length} maintained elsewhere` : ""}`} tone="ok" />
-            <Figure
-              value={empty.length}
-              label={empty.length === 1 ? "Heading with no policy" : "Headings with no policy"}
-              sub={empty.length === 0 ? "Nothing promised and undelivered" : "Promised in the contents, missing from the manual"}
-              tone={empty.length === 0 ? "ok" : "crit"}
-              href="#empty"
-            />
-            <Figure
-              value={stale.length}
-              label="Not reviewed in a year"
-              sub="An annual review is a date somebody can show"
-              tone={stale.length === 0 ? "ok" : "warn"}
-              href="#review"
-            />
-            <Figure value={aiReady ? "ready" : "off"} label="Claude" sub={aiReady ? "Available on every section" : "Add an API key in Settings"} tone={aiReady ? "ok" : "muted"} href="/settings" />
-          </div>
-
-          {/*
-            The audit, and what it found.
-            
-            First on the page because it answers the question the rest of the page cannot: not
-            "has this manual been reviewed" — which is a date anybody can enter — but "is what it
-            says actually right". A manual can be signed off on time for five years running and
-            still describe a practice that stopped in year one.
-          */}
-          <Card
-            id="audit"
-            tone={audit_.blocking > 0 ? "crit" : findings.length > 0 ? "warn" : undefined}
-            title="Audited against the requirements"
-            count={`${audit_.current} of ${audit_.total} current`}
-            actions={
-              audit_.ready ? (
-                <form action={auditNow}>
-                  <button className="btn btn-sm btn-primary" disabled={audit_.due === 0}>
-                    {audit_.due === 0 ? "Nothing due" : `Read ${Math.min(audit_.due, 20)} now`}
-                  </button>
-                </form>
-              ) : (
-                <Link href="/settings/connections" className="btn btn-sm">Add an API key</Link>
-              )
-            }
-            subtitle={
-              audit_.ready
-                ? "Every section the pharmacy owns is read against Kansas, DEA, HIPAA and OSHA requirements and against what this site actually does — a few at a time, on their own, so the whole manual is covered within the year. Anything found appears below as something to act on rather than as a report to file."
-                : "This needs an Anthropic API key. Without one the manual is still reviewed and printed, but nothing is checking what it says against the rules."
-            }
-            className="mb-6"
-          >
-            <div className="grid gap-3 sm:grid-cols-3">
-              <Figure
-                value={`${audit_.current}/${audit_.total}`}
-                label="Read this year"
-                sub={audit_.due === 0 ? "The whole manual is current" : `${audit_.due} still due`}
-                tone={audit_.due === 0 ? "ok" : "warn"}
-              />
-              <Figure
-                value={findings.length}
-                label="Open findings"
-                sub={findings.length === 0 ? "Nothing outstanding" : "Each one is applied or answered"}
-                tone={findings.length === 0 ? "ok" : audit_.blocking > 0 ? "crit" : "warn"}
-              />
-              <Figure
-                value={audit_.blocking}
-                label="An inspector would write up"
-                sub={audit_.blocking === 0 ? "None" : "Do these first"}
-                tone={audit_.blocking === 0 ? "ok" : "crit"}
-              />
+                  </div>
+                </>
+              )}
             </div>
-
-            {audit_.lastResult && <p className="mt-3 text-xs text-ink-3">Last pass: {audit_.lastResult}</p>}
-
-            {findings.length > 0 && (
-              <ul className="rows mt-4">
-                {findings.map((f) => (
-                  <li key={f.id} className="py-3">
-                    <div className="flex flex-wrap items-baseline gap-2">
-                      <span
-                        className={`badge ${f.severity === "blocking" ? "badge-crit" : f.severity === "should" ? "badge-warn" : "badge-muted"}`}
-                      >
-                        {f.severity === "blocking" ? "would be written up" : f.severity === "should" ? "weakness" : "wording"}
-                      </span>
-                      <Link href={`/manual?edit=${f.sectionId}#${f.sectionId}`} className="text-sm font-medium text-accent hover:underline">
-                        {f.sectionTitle}
-                      </Link>
-                    </div>
-                    <p className="mt-1 text-sm text-ink-2">{f.what}</p>
-                    <p className="mt-0.5 text-xs text-ink-3">{f.why}</p>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      {f.suggestedBody.trim() ? (
-                        <form action={applyFindingAction}>
-                          <input type="hidden" name="id" value={f.id} />
-                          <button className="btn btn-sm btn-primary">Put the fix in</button>
-                        </form>
-                      ) : (
-                        /*
-                          No suggested text, and that is the honest answer rather than a failure.
-                          
-                          Where the fix turns on a fact about this pharmacy that nobody supplied —
-                          a frequency, a threshold, who does it — writing one would mean inventing
-                          it, and an invented sentence in a manual is a standard the pharmacy is
-                          then held to.
-                        */
-                        <span className="text-xs text-ink-3">
-                          Needs a decision about this pharmacy, so nothing was written for you —{" "}
-                          <Link href={`/manual?edit=${f.sectionId}#${f.sectionId}`} className="underline">open the section</Link>.
-                        </span>
-                      )}
-                      <form action={dismissFindingAction} className="flex flex-wrap items-center gap-1.5">
-                        <input type="hidden" name="id" value={f.id} />
-                        <input
-                          name="reason"
-                          required
-                          className="field w-56 py-1 text-xs"
-                          placeholder="Why this is not a problem here"
-                        />
-                        <button className="btn btn-sm">Not a problem</button>
-                      </form>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-
-          {empty.length > 0 && (
-            <Card
-              id="empty"
-              tone="crit"
-              title="Headings with nothing under them"
-              count={empty.length}
-              subtitle="An inspector who reads to the back of a manual and finds ten promised forms and no forms has learned something about the rest of it. Chapter headings are not counted here — only headings that promise a policy and deliver none."
-              className="mb-6"
-              actions={
-                /*
-                  One press for all of it.
-                  
-                  A dropdown and an editor per row is ten decisions and ten pieces of writing, which
-                  is why these had been open for as long as anyone could remember: the work was
-                  real and the row only started it. Here, a heading naming a form this site produces
-                  gets the reference outright, and the rest get a draft to read.
-                */
-                <form action={fillGaps}>
-                  <button className="btn btn-sm btn-primary">Close all {empty.length}</button>
-                </form>
-              }
-            >
-              <ul className="rows">
-                {empty.map((x) => {
-                  const guess = suggestForm(x.title);
-                  return (
-                    <li key={x.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
-                      <span className="text-sm font-medium">
-                        <span className="mr-2 text-ink-3">{x.number}</span>{x.title}
-                        {guess ? (
-                          <span className="ml-2 text-xs font-normal text-ink-3">
-                            looks like the {guess.name.toLowerCase()}
-                          </span>
-                        ) : (
-                          <span className="ml-2 text-xs font-normal text-ink-3">no form matches — needs writing</span>
-                        )}
-                      </span>
-                      <form action={pointAtAppendix} className="flex flex-wrap items-center gap-1.5">
-                        <input type="hidden" name="id" value={x.id} />
-                        {/*
-                          The match is proposed rather than hunted for.
-                          
-                          A pharmacist looking at "Medication Incident Form" scanned twelve formal
-                          names, saw nothing called that, and concluded the site could not do it. It
-                          could — under the Board's name for the same document. Naming the Board's
-                          form is right on a printed form and wrong in a picker, so the picker now
-                          opens on the answer and the full list stays behind it.
-                        */}
-                        <select name="form" required className="field max-w-[22rem] py-1 text-xs" defaultValue={guess?.name ?? ""}>
-                          <option value="" disabled>Is this a form the site produces?</option>
-                          {FORMS.map((f) => <option key={f.name} value={f.name}>{f.name}</option>)}
-                        </select>
-                        <button className="btn btn-sm">Point at the appendix</button>
-                        <Link href={`/manual?edit=${x.id}#${x.id}`} className="btn btn-sm btn-primary">Write it myself</Link>
-                      </form>
-                    </li>
-                  );
-                })}
-              </ul>
-              <p className="mt-2 text-xs text-ink-3">
-                Headings promising forms, with no forms behind them, are the single thing in this manual an inspector is
-                most likely to notice. Where the heading names something this system produces, the picker opens on it
-                and the heading gets a sentence saying where the current version comes from — shorter, and true for
-                longer, than a blank copy pasted into a manual. Where nothing matches, Claude drafts the policy against
-                what this pharmacy is and what this system does, and it stays marked as drafted and unreviewed until you
-                have read it. {aiReady ? "Closing all of them takes a few minutes." : "Drafting needs an Anthropic API key in Settings; without one, only the form references are filled in."}
-              </p>
-            </Card>
-          )}
-
-          {citeTotal > 0 && (
-            <Card
-              tone="warn"
-              title="Footnote markers with no footnotes"
-              count={citeTotal}
-              subtitle="Numbers in square brackets after almost every sentence, and no reference list anywhere in the manual. The policy underneath may be perfectly good; the markers make it read as borrowed, and the chapter they are in is the controlled substances chapter."
-              className="mb-6"
-            >
-              <ul className="rows">
-                {cites.map((c) => (
-                  <li key={c.id} className="flex items-center justify-between gap-2 py-2">
-                    <Link href={`/manual?edit=${c.id}#${c.id}`} className="text-sm font-medium hover:underline">{c.title}</Link>
-                    <span className="text-xs text-ink-3">{c.count} markers</span>
-                  </li>
-                ))}
-              </ul>
-              <form action={stripCitations} className="mt-3">
-                <button className="btn btn-primary">Remove all {citeTotal} markers</button>
-              </form>
-              <p className="mt-2 text-xs text-ink-3">
-                Only brackets containing nothing but digits are removed. Anything you wrote in brackets yourself —
-                &ldquo;[Reserved]&rdquo;, &ldquo;[see Appendix A]&rdquo; — stays where it is.
-              </p>
-            </Card>
-          )}
+          </div>
 
           <datalist id="manual-managers">
             {others.map((o) => <option key={o.name} value={o.name} />)}
             <option value={s.pharmacy_name ? `${s.pharmacy_name} — clinic side` : "The medical practice"} />
           </datalist>
 
-          <Card title="Contents" count={chapters.length} subtitle="Pick a chapter to read or edit it. Everything is one document — this is just where you open it." className="mb-6">
-            <ul className="rows">
-              {chapters.map((c) => {
-                const kids = sections.filter((x) => x.chapterId === c.id && x.id !== c.id);
-                const holes = empty.filter((x) => x.chapterId === c.id).length;
-                return (
-                  <li key={c.id} className="py-2">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <Link href={`/manual?ch=${c.id}`} className="min-w-0 text-sm font-medium hover:underline">
-                        <span className="mr-2 text-ink-3">{c.number}</span>{c.title}
-                      </Link>
-                      <span className="flex shrink-0 items-center gap-3 text-xs text-ink-3">
-                        {holes > 0 && <span className="badge badge-crit">{holes} to write</span>}
-                        {c.source === "site" && <span className="badge badge-ok">generated</span>}
-                        {c.managedBy && <span className="badge badge-muted">{c.managedBy}</span>}
-                        <span>{kids.length} {kids.length === 1 ? "section" : "sections"}</span>
-                        <Link href={`/manual?ch=${c.id}`} className="btn btn-sm">Open</Link>
-                      </span>
-                    </div>
-                    {c.source === "pharmacy" && (
-                      <form action={setManager} className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-ink-3">
-                        <input type="hidden" name="chapter" value={c.id} />
-                        <span>Maintained by</span>
-                        <input
-                          name="manager"
-                          defaultValue={c.managedBy ?? ""}
-                          list="manual-managers"
-                          className="field w-64 py-0.5 text-xs"
-                          placeholder="the pharmacy — leave empty"
-                        />
-                        <button className="btn btn-sm">Set for this chapter</button>
-                      </form>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          </Card>
+          {/*
+            The rare acts, folded away.
 
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Card id="review" title="Annual review">
-              <p className="card-sub">
-                The Board expects a manual that somebody has actually read this year. Read it, change what needs
-                changing, then record the date here — one date, across the whole manual, in your name.
-              </p>
-              <p className="mt-2 text-sm">
-                {stale.length === 0
-                  ? `All ${own.length} of your sections were reviewed within the last year.`
-                  : `${stale.length} of ${own.length} sections have no review date inside the last year.`}
-              </p>
-              <form action={reviewAll} className="mt-3">
-                <button className="btn btn-primary">I have reviewed the manual — record today, {user.name}</button>
-              </form>
-              <p className="mt-2 text-xs text-ink-3">
-                A single section can also be dated on its own, from inside its chapter.
-              </p>
-            </Card>
-
-            <Card title="Replace the whole manual">
-              <p className="card-sub">
-                Importing again replaces your own sections with the file&rsquo;s. The generated appendix survives,
-                because it is written from the software rather than from the document.
-              </p>
-              <form action={doImport} className="mt-2 flex flex-wrap items-end gap-3" encType="multipart/form-data">
-                <Field label="A .docx file"><input type="file" name="file" accept=".docx" className="field" /></Field>
-                <button className="btn">Import and replace</button>
-              </form>
-            </Card>
-          </div>
+            Replacing the whole manual and regenerating the site's own sections are things a
+            pharmacy does once a year at most. Left open on the page they competed for attention
+            with the work, and "Import and replace" sitting next to a search box is an accident
+            waiting to happen.
+          */}
+          {canManage && (
+            <details className="mt-6">
+              <summary className="cursor-pointer text-sm font-medium text-accent">
+                Replace the manual, or rebuild the generated sections
+              </summary>
+              <div className="mt-3 grid gap-4 lg:grid-cols-2">
+                <Card title="Replace the whole manual">
+                  <p className="card-sub">
+                    Importing again replaces your own sections with the file&rsquo;s. The generated appendix survives,
+                    because it is written from the software rather than from the document.
+                  </p>
+                  <form action={doImport} className="mt-2 flex flex-wrap items-end gap-3" encType="multipart/form-data">
+                    <Field label="A .docx file"><input type="file" name="file" accept=".docx" className="field" /></Field>
+                    <button className="btn">Import and replace</button>
+                  </form>
+                </Card>
+                <Card title="The generated sections">
+                  <p className="card-sub">
+                    {generated.length} sections are written from what this software actually does, and cannot be typed
+                    over — the moment they can be, they will say something the site does not do. Rebuilding them brings
+                    them level with the current behaviour, which &ldquo;Put it right&rdquo; also does.
+                  </p>
+                  <form action={regenerate} className="mt-2"><button className="btn">Rebuild them now</button></form>
+                </Card>
+              </div>
+            </details>
+          )}
         </>
       )}
     </>

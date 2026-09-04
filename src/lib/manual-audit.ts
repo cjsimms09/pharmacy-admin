@@ -267,3 +267,153 @@ export async function closedFindings(limit = 100): Promise<Finding[]> {
 void or;
 void lt;
 void asc;
+
+export type PutRightResult = {
+  regenerated: number;
+  pointed: number;
+  drafted: number;
+  markersRemoved: number;
+  audited: number;
+  raised: number;
+  remaining: number;
+  problems: string[];
+};
+
+/**
+ * Everything the site can do to the manual on its own, in one press.
+ *
+ * The work was spread over four buttons on four cards — regenerate, fill the gaps, strip the
+ * markers, run the audit — and the pharmacist-in-charge is not supposed to know which of those
+ * his manual needs. He knows the manual is not right. Knowing which of four operations fixes
+ * which of four symptoms is the software's job, and asking him to work it out is how a page ends
+ * up looking busy and doing nothing.
+ *
+ * The order matters and is not arbitrary. The generated sections are brought level with what the
+ * software actually does first, so that everything after this is judged against the truth. Empty
+ * headings naming a form the site produces are settled without a model, because that is a fact
+ * rather than a judgement. What is left empty gets drafted. Borrowed footnote markers go. Only
+ * then is anything read against the requirements, so the audit is never spending a call on a
+ * section that was about to be replaced anyway.
+ *
+ * Nothing here rewrites a policy the pharmacy has already written. That is deliberate: this is
+ * the button somebody presses without reading the consequences, so it may only add what was
+ * missing and correct what the site itself generated. Changing existing prose is a separate,
+ * explicit act.
+ */
+export async function putRight(user: { id: string; name: string }, opts: { auditLimit?: number } = {}): Promise<PutRightResult> {
+  const out: PutRightResult = {
+    regenerated: 0,
+    pointed: 0,
+    drafted: 0,
+    markersRemoved: 0,
+    audited: 0,
+    raised: 0,
+    remaining: 0,
+    problems: [],
+  };
+
+  // ── 1. The generated half, level with what the software does ──
+  try {
+    const { regenerateSiteSections } = await import("./manual-store");
+    out.regenerated = (await regenerateSiteSections(user)).written;
+  } catch (e) {
+    out.problems.push(`The generated sections could not be refreshed: ${describeError(e)}`);
+  }
+
+  // ── 2 and 3. Empty headings: point at a form, or draft the policy ──
+  const s = await getSettings();
+  const pharmacy = s.pharmacy_name || "This pharmacy";
+  const context =
+    `${pharmacy} in ${s.pharmacy_city || "Wichita"}, ${s.pharmacy_state || "KS"}. ` +
+    "Independent community pharmacy. Immunizes. Performs simple non-sterile non-hazardous compounding only. " +
+    "Dispenses controlled substances. Takes pharmacy students on rotation.";
+  const siteDoes = policies(pharmacy).map((x) => `${x.title}: ${x.text[0]}`).join("\n");
+  const canDraft = await hasApiKey();
+
+  const { gaps } = await import("./manual-store");
+  for (const g of gaps(await allSections())) {
+    const form = suggestForm(g.title);
+    if (form) {
+      try {
+        await saveSection(g.id, { body: appendixReference(form.name) }, user);
+        out.pointed++;
+      } catch (e) {
+        out.problems.push(`${g.title}: ${describeError(e)}`);
+      }
+      continue;
+    }
+    if (!canDraft) continue;
+    try {
+      const { draftPolicy } = await import("./ai");
+      const r = await draftPolicy(
+        {
+          title: g.title,
+          body: "",
+          instruction:
+            "This heading is in the pharmacy's policy manual and has nothing under it. Write the policy it " +
+            "promises, for an independent Kansas community pharmacy, covering what a Board inspector would look " +
+            "for. Describe only what this pharmacy can actually be held to. Where a detail is specific to this " +
+            "pharmacy and you do not have it, raise it as a concern rather than inventing it.",
+          context,
+          siteDoes,
+        },
+        { userId: user.id, userName: user.name },
+      );
+      await saveSection(g.id, { body: r.body }, { name: `${user.name} — drafted by Claude, not yet reviewed` });
+      out.drafted++;
+    } catch (e) {
+      out.problems.push(`${g.title}: ${describeError(e)}`);
+    }
+  }
+
+  // ── 4. Footnote markers with no footnotes ──
+  try {
+    const { stripCitationMarkers } = await import("./manual-store");
+    out.markersRemoved = (await stripCitationMarkers(user)).markers;
+  } catch (e) {
+    out.problems.push(`The footnote markers could not be removed: ${describeError(e)}`);
+  }
+
+  // ── 5. Read what is due against the requirements ──
+  if (canDraft) {
+    const r = await runManualAudit(user, { limit: opts.auditLimit ?? 25 });
+    out.audited = r.audited;
+    out.raised = r.findings;
+    out.remaining = r.remaining;
+    out.problems.push(...r.problems);
+  } else {
+    out.problems.push("No Anthropic API key is stored, so nothing could be drafted or read against the rules.");
+  }
+
+  return out;
+}
+
+/**
+ * Applies every finding that came with replacement text.
+ *
+ * Separate from putRight, and separate on purpose. This one changes policies the pharmacy has
+ * already written, which is a different kind of act from filling in a blank — so it is its own
+ * button, with the number of sections it will change written on it, rather than something that
+ * happens inside a general "fix" press.
+ *
+ * Findings with no suggested text are left alone and stay on the list. Those are the ones whose
+ * fix turns on a fact about this pharmacy that nobody supplied, and inventing one would put a
+ * sentence in a manual that the pharmacy is then held to.
+ */
+export async function applyAllFindings(user: { name: string }): Promise<{ applied: number; left: number; problems: string[] }> {
+  const open = await openFindings();
+  const out = { applied: 0, left: 0, problems: [] as string[] };
+  for (const f of open) {
+    if (!f.suggestedBody.trim()) {
+      out.left++;
+      continue;
+    }
+    try {
+      await applyFinding(f.id, user);
+      out.applied++;
+    } catch (e) {
+      out.problems.push(`${f.sectionTitle}: ${describeError(e)}`);
+    }
+  }
+  return out;
+}
