@@ -416,6 +416,19 @@ export function policies(pharmacy: string): ManualPolicy[] {
 
   return [
     {
+      key: "supplier_invoices",
+      title: "Supplier invoices and the separation of controlled substance records",
+      authority: "21 CFR 1304.04(a), (h)(1) and (h)(2); K.A.R. 68-7-11.",
+      text: [
+        `Invoices from ${pharmacy}'s wholesalers are delivered by email to the pharmacy's own mailbox and are filed automatically by the compliance system. Each invoice is read on arrival to establish which controlled substance schedules, if any, it carries, and is filed accordingly before it is stored anywhere.`,
+        "Invoices carrying any Schedule II line are maintained separately from all other records of the registrant, as 21 CFR 1304.04(h)(1) requires. The separation is made in three ways: the record is held under a category used by no other document, the file itself is written to a directory containing only Schedule II records, and the pharmacy can list Schedule II invoices for any period on their own without any other record appearing in the result.",
+        "Invoices carrying only Schedule III, IV or V lines are maintained separately as well, which satisfies 21 CFR 1304.04(h)(2) by the stricter of the two routes it allows. Invoices carrying no controlled substances are kept as ordinary business records.",
+        "Where the reading of an invoice is not certain — a partial scan, an unrendered page, a line that cannot be resolved — the invoice is filed with the Schedule II records and appears in a list awaiting confirmation by the pharmacist-in-charge. It is never filed as non-controlled on an uncertain reading, because the only error that breaks the separation requirement is a Schedule II record placed among the others.",
+        "The pharmacist-in-charge may confirm or correct the schedule of any invoice at any time; the record retains how the original determination was made, who changed it and when.",
+        "Invoices are retained for five years, which exceeds the two years required by 21 CFR 1304.04(a), and are included in the pharmacy's daily verified backup. Every invoice remains available for inspection at the registered location.",
+      ],
+    },
+    {
       key: "temperatures",
       title: "Temperature monitoring and review",
       authority: "CDC Vaccine Storage and Handling Toolkit; USP 1079.",

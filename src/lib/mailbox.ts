@@ -17,6 +17,7 @@ import { audit } from "./audit";
 import { matchTrainingReplies, completeByEmailReply } from "./training-replies";
 import { matchCertificateReply, fileCertificateReply } from "./credential-requests";
 import { isBounce, parseBounce, describeBounce } from "./bounces";
+import { looksLikeInvoice, fileInvoice, filingFor } from "./invoices";
 
 /**
  * Sweeps the pharmacy's admin mailbox for scheduled reports.
@@ -365,6 +366,74 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
               await audit({ action: "inbox.rejected", userId: ctx.userId, userName: ctx.userName, details: `${fileName}: ${gate.reason}` });
               continue;
             }
+            /*
+             * A supplier invoice takes a different path, and has to take it here.
+             *
+             * 21 CFR 1304.04(h)(1) requires Schedule II records to be kept separately from every
+             * other record the registrant holds. Filing the invoice as an ordinary report first
+             * and sorting it afterwards would mean it was, however briefly, commingled — and
+             * "we moved it later" is not what separately maintained means. So the schedule is
+             * decided before anything is written, and the invoice is only ever in one place.
+             */
+            const supplierName = supplierFor(parseSupplierRules(s.mail_supplier_rules ?? ""), from, subject);
+            if (
+              looksLikeInvoice({
+                fileName,
+                mimeType: att.contentType ?? "",
+                subject,
+                supplier: supplierName,
+              })
+            ) {
+              try {
+                const filed = await fileInvoice(
+                  buf,
+                  {
+                    fileName,
+                    mimeType: att.contentType ?? "application/pdf",
+                    supplier: supplierName,
+                    from: from || "(unknown)",
+                    subject,
+                  },
+                  { userId: ctx.userId ?? "mailbox-sweep", userName: ctx.userName ?? "Automatic check" },
+                );
+                const where = filingFor(filed.schedule).label;
+                await db.insert(schema.inboxItems).values({
+                  id: itemId,
+                  messageId: `${messageId}#${fileName}`,
+                  receivedAt,
+                  fromAddress: from || "(unknown)",
+                  subject,
+                  fileName,
+                  documentId: filed.documentId,
+                  status: "stored",
+                  reason: filed.needsReview
+                    ? `Supplier invoice, held with the Schedule II records until somebody confirms what it carries.`
+                    : `Supplier invoice, filed under ${where}, kept apart from every other record.`,
+                  scanned: true,
+                });
+                result.stored++;
+                await audit({
+                  action: "invoice.filed",
+                  userId: ctx.userId,
+                  userName: ctx.userName,
+                  entity: "document",
+                  entityId: filed.documentId,
+                  details: `${supplierName ?? "supplier"} · ${filed.schedule}`,
+                });
+                await client.messageFlagsAdd(String(uid), ["\\Seen"], { uid: true });
+                continue;
+              } catch (e) {
+                // Falls through to the ordinary path. An invoice filed as a report is visible and
+                // fixable; an invoice dropped on the floor is not.
+                await audit({
+                  action: "invoice.failed",
+                  userId: ctx.userId,
+                  userName: ctx.userName,
+                  details: `${fileName}: ${e instanceof Error ? e.message : String(e)}`,
+                });
+              }
+            }
+
             const file = new File([new Uint8Array(buf)], fileName, { type: att.contentType || "application/octet-stream" });
             const stored = await storeFile(file, { allowReportTypes: true });
             const docId = newId();

@@ -64,7 +64,18 @@ export const REPORT_MIME = new Set([
 
 export async function storeFile(
   file: File,
-  opts: { allowReportTypes?: boolean } = {},
+  opts: {
+    allowReportTypes?: boolean;
+    /**
+     * A folder of its own, for records the law requires to be kept apart.
+     *
+     * 21 CFR 1304.04(h)(1) says Schedule II records are maintained separately from all other
+     * records of the registrant. A category on a row is enough to retrieve them; a directory
+     * makes the separation true of the bytes as well, which is what somebody copying the files
+     * off this machine — for a backup, for an inspection, for a new system — would rely on.
+     */
+    folder?: string;
+  } = {},
 ): Promise<{ storageKey: string; sha256: string; sizeBytes: number; mimeType: string }> {
   if (file.size === 0) throw new Error("The file is empty.");
   if (file.size > MAX_FILE_BYTES) throw new Error("File is larger than 20 MB.");
@@ -85,7 +96,8 @@ export async function storeFile(
 
   const buf = Buffer.from(await file.arrayBuffer());
   const hash = sha256(buf);
-  const key = `${new Date().getUTCFullYear()}/${newId()}`;
+  const safeFolder = (opts.folder ?? "").replace(/[^a-z0-9-]/gi, "");
+  const key = `${safeFolder ? `${safeFolder}/` : ""}${new Date().getUTCFullYear()}/${newId()}`;
   const full = path.join(filesDir(), key);
   await fs.mkdir(path.dirname(full), { recursive: true });
   await fs.writeFile(full, buf, { mode: 0o600 });

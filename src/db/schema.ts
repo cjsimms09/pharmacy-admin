@@ -229,6 +229,18 @@ export const DOCUMENT_CATEGORIES = [
   "controlled_substance_poa",
   "cs_inventory",
   "cs_discrepancy",
+  /**
+   * Supplier invoices, split by schedule, and split on purpose.
+   *
+   * 21 CFR 1304.04(h)(1) requires Schedule II records to be kept separately from all other
+   * records of the registrant; (h)(2) allows Schedule III-V records to be separate or merely
+   * readily retrievable. Three categories rather than one is what makes "show me every Schedule
+   * II invoice for last year" a filter rather than a search, and a C2 invoice sitting in the same
+   * pile as the floor stock is the finding this exists to prevent.
+   */
+  "invoice_schedule_2",
+  "invoice_schedule_3_5",
+  "invoice",
   "insurance",
   "agreement",
   "cqi_summary",
@@ -579,6 +591,53 @@ export const manualFindings = sqliteTable(
     createdAt: text("created_at").notNull().default(now()),
   },
   (t) => [index("manual_findings_section_idx").on(t.sectionId)],
+);
+
+/**
+ * Supplier invoices, and which schedule each one carries.
+ *
+ * The separation requirement is not about paper. 21 CFR 1304.04(h)(1) says Schedule II records
+ * are maintained separately from all other records of the registrant, and (h)(2) lets Schedule
+ * III-V be separate or readily retrievable from ordinary business records. An electronic system
+ * satisfies both as long as the C2s are distinguishable and can be pulled on their own, quickly,
+ * with nobody sorting through anything.
+ *
+ * So each invoice gets a row saying what schedule it carries, the document is filed under a
+ * category that matches, and the file itself is written to its own folder. What an inspector asks
+ * for — every Schedule II invoice, this date to that date — is then one query and one export.
+ *
+ * "unknown" is a real and important state. An invoice nobody could read is not filed as
+ * non-controlled: it waits in a review queue, because a C2 invoice quietly landing in the general
+ * pile is exactly the failure this table exists to prevent.
+ */
+export const INVOICE_SCHEDULES = ["schedule_2", "schedule_3_5", "none", "unknown"] as const;
+export type InvoiceSchedule = (typeof INVOICE_SCHEDULES)[number];
+
+export const supplierInvoices = sqliteTable(
+  "supplier_invoices",
+  {
+    id: text("id").primaryKey(),
+    documentId: text("document_id").notNull(),
+    supplier: text("supplier"),
+    invoiceNumber: text("invoice_number"),
+    /** The date on the invoice, not the date it arrived. */
+    invoiceDate: text("invoice_date"),
+    schedule: text("schedule", { enum: INVOICE_SCHEDULES }).notNull().default("unknown"),
+    /** How the schedule was decided, so a filing can be defended or corrected. */
+    basis: text("basis"),
+    /** The controlled lines found, as read, so nobody has to reopen the PDF to check. */
+    controlledItems: text("controlled_items").notNull().default(""),
+    /** Set until a person has confirmed anything the reader was unsure about. */
+    needsReview: integer("needs_review", { mode: "boolean" }).notNull().default(true),
+    reviewedBy: text("reviewed_by"),
+    reviewedAt: text("reviewed_at"),
+    receivedFrom: text("received_from"),
+    createdAt: text("created_at").notNull().default(now()),
+  },
+  (t) => [
+    index("supplier_invoices_schedule_idx").on(t.schedule),
+    index("supplier_invoices_date_idx").on(t.invoiceDate),
+  ],
 );
 
 // ── Document intake (drop anything, Claude files it) ─────────────────

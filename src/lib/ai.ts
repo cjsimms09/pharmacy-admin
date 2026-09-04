@@ -181,6 +181,89 @@ export async function extractPacket(pdf: Buffer, ctx: { userId: string; userName
   return ExtractedPacket.parse(JSON.parse(text));
 }
 
+// ── Reading a supplier invoice, to decide where it has to be filed ───
+const ReadInvoice = z.object({
+  supplier: z.string().describe("The wholesaler or supplier the invoice is from. Empty string if it cannot be read."),
+  invoiceNumber: z.string().describe("The invoice number as printed. Empty string if there is none."),
+  invoiceDate: z.string().describe("The invoice date as YYYY-MM-DD. Empty string if it cannot be read."),
+  schedule: z
+    .enum(["schedule_2", "schedule_3_5", "none", "unknown"])
+    .describe(
+      "schedule_2: at least one line is a Schedule II controlled substance. schedule_3_5: controlled lines are " +
+        "present and all are Schedule III, IV or V. none: no controlled substance appears. unknown: the document " +
+        "could not be read well enough to be sure of any of that.",
+    ),
+  controlledItems: z
+    .array(z.string())
+    .describe("Each controlled line as printed, with its schedule marking if the invoice shows one."),
+  basis: z
+    .string()
+    .describe("How the schedule was decided, in one sentence — the column, the marking, or the drug names relied on."),
+  confident: z
+    .boolean()
+    .describe("False if anything about the reading is doubtful, including a page that did not render or a partial scan."),
+});
+
+export type ReadInvoiceT = z.infer<typeof ReadInvoice>;
+
+/**
+ * Decides which pile a supplier invoice belongs in.
+ *
+ * The whole value of this is the one thing it must never get wrong: a Schedule II invoice filed
+ * as anything else. 21 CFR 1304.04(h)(1) requires C2 records to be kept separately from every
+ * other record the registrant holds, and an invoice sitting in the general pile is not a filing
+ * error — it is the finding.
+ *
+ * So the model is told to say "unknown" rather than guess, and doubt of any kind clears the
+ * confidence flag. Both land the invoice in a review queue where a person decides. An invoice
+ * waiting to be looked at is a small nuisance; a C2 invoice quietly in with the floor stock is
+ * the thing this exists to prevent.
+ */
+export async function readInvoice(pdf: Buffer, ctx: { userId: string; userName: string }): Promise<ReadInvoiceT> {
+  if (MOCK) {
+    return {
+      supplier: "",
+      invoiceNumber: "",
+      invoiceDate: "",
+      schedule: "unknown",
+      controlledItems: [],
+      basis: "Mock response — no API key is configured, so nothing was sent anywhere.",
+      confident: false,
+    };
+  }
+  const { client: c, model } = await client();
+  const res = await c.messages.parse({
+    model,
+    max_tokens: 8000,
+    system:
+      "You read a pharmacy wholesaler's invoice and decide which controlled substance schedule it carries, so it " +
+      "can be filed where the law requires.\n\n" +
+      "The rule you are serving: 21 CFR 1304.04(h)(1) requires Schedule II records to be kept separately from all " +
+      "other records the registrant holds. A Schedule II invoice filed as anything else is a finding against the " +
+      "pharmacy.\n\n" +
+      "Because of that, guessing is forbidden. Prefer the invoice's own schedule column or marking where it has " +
+      "one — wholesalers print C2, CII, 2, or similar. Where there is no marking, you may rely on the drug names, " +
+      "but only where you are certain of the federal schedule. If a page did not render, if the scan is partial, if " +
+      "a line is ambiguous, or if you are relying on a drug name you are not certain about, answer unknown and set " +
+      "confident to false. An invoice sent for a person to look at costs a minute. A misfiled C2 costs the " +
+      "registration.\n\n" +
+      "Report only the controlled lines, as printed. Do not summarise quantities or prices.",
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "document", source: { type: "base64", media_type: "application/pdf", data: pdf.toString("base64") } },
+          { type: "text", text: "Which schedule does this invoice carry, and what are the controlled lines?" },
+        ],
+      },
+    ],
+    output_config: { format: zodOutputFormat(ReadInvoice) },
+  });
+  if (!res.parsed_output) throw new Error("Claude returned an unreadable answer.");
+  await logUsage("ai.invoice.read", ctx.userId, ctx.userName, res.usage, "supplier invoice");
+  return res.parsed_output;
+}
+
 // ── Writing / strengthening RCA and CAP for an incident ───────────────
 const RcaCap = z.object({
   rootCauseAnalysis: z.string(),
