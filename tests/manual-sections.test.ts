@@ -1,7 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { createZip } from "../src/lib/zip";
-import { parseDocx, outline, gaps } from "../src/lib/manual-store";
+import { parseDocx, outline, gaps, citationMarkers } from "../src/lib/manual-store";
 import { FORMS, appendixReference } from "../src/lib/manual";
 import type { Section } from "../src/lib/manual-store";
 
@@ -16,12 +16,14 @@ import type { Section } from "../src/lib/manual-store";
  */
 
 /** A .docx is a zip with a document.xml in it. This builds the smallest one Word would accept. */
-function docx(paragraphs: { style?: string; text: string }[]): Buffer {
+function docx(paragraphs: { style?: string; text?: string; raw?: string }[]): Buffer {
   const body = paragraphs
     .map(
       (p) =>
-        `<w:p w:rsidR="00"><w:pPr>${p.style ? `<w:pStyle w:val="${p.style}"/>` : ""}</w:pPr>` +
-        `<w:r><w:t xml:space="preserve">${p.text}</w:t></w:r></w:p>`,
+        `<w:p w:rsidR="00"><w:pPr>${p.style ? `<w:pStyle w:val="${p.style}"/>` : ""}` +
+        `<w:tabs><w:tab w:val="right" w:pos="9360"/></w:tabs></w:pPr>` +
+        (p.raw ?? `<w:r><w:t xml:space="preserve">${p.text}</w:t></w:r>`) +
+        `</w:p>`,
     )
     .join("");
   return createZip([
@@ -122,6 +124,37 @@ describe("parseDocx", () => {
     assert.equal(out[0].title, "Fraud, Waste & Abuse");
   });
 
+  test("a hyphen the author did not want broken is still a hyphen", () => {
+    // How Word actually stores "Pharmacist-in-Charge" when the hyphens are non-breaking.
+    const out = parseDocx(
+      docx([
+        { style: "Heading1", text: "Structure" },
+        {
+          raw:
+            '<w:r><w:t>Staff report to the Pharmacist</w:t></w:r>' +
+            '<w:r><w:noBreakHyphen/><w:t>in</w:t></w:r>' +
+            '<w:r><w:noBreakHyphen/><w:t>Charge.</w:t></w:r>',
+        },
+      ]),
+    );
+    assert.equal(out[0].body, "Staff report to the Pharmacist-in-Charge.");
+  });
+
+  test("a line break inside a paragraph is a line break", () => {
+    const out = parseDocx(
+      docx([
+        { style: "Heading1", text: "Hours" },
+        { raw: "<w:r><w:t>Monday</w:t><w:br/><w:t>Tuesday</w:t></w:r>" },
+      ]),
+    );
+    assert.equal(out[0].body, "Monday\nTuesday");
+  });
+
+  test("tab stops defined on the paragraph are not mistaken for tab characters", () => {
+    const out = parseDocx(docx([{ style: "Heading1", text: "Hours" }, { text: "Nine to six." }]));
+    assert.equal(out[0].body, "Nine to six.");
+  });
+
   test("a file that is not a Word document says so rather than importing nothing", () => {
     assert.throws(() => parseDocx(createZip([{ name: "hello.txt", data: Buffer.from("hi") }])), /Word document/);
   });
@@ -206,5 +239,24 @@ describe("appendixReference", () => {
 
   test("a heading that names something the system does not produce cannot be filled in this way", () => {
     assert.throws(() => appendixReference("Medicare Prescription Drug Coverage and Your Rights"), /not a form/);
+  });
+});
+
+describe("citationMarkers", () => {
+  test("counts footnote markers that point at no bibliography", () => {
+    const rows = [
+      row({ id: "a", title: "Record keeping", level: 1, body: "Records are kept five years[5][6][7]. Invoices are initialled[8]." }),
+      row({ id: "b", title: "Dress code", level: 1, body: "Staff wear a lab coat." }),
+    ];
+    assert.deepEqual(citationMarkers(rows), [{ id: "a", title: "Record keeping", count: 2 }]);
+  });
+
+  test("something a person wrote in brackets is not a footnote marker", () => {
+    const rows = [row({ id: "a", title: "Emergency refills", level: 1, body: "[Reserved] See [Appendix A] and 21 CFR 1306.11(d)." })];
+    assert.deepEqual(citationMarkers(rows), []);
+  });
+
+  test("a generated section is never flagged", () => {
+    assert.deepEqual(citationMarkers([row({ id: "a", title: "Appendix", level: 1, body: "text[1]", source: "site" })]), []);
   });
 });

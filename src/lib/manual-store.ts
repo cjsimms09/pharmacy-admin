@@ -47,11 +47,7 @@ export function parseDocx(buf: Buffer): { title: string; level: number; body: st
   for (const para of xml.split("<w:p ").slice(1)) {
     const styleMatch = /<w:pStyle w:val="([^"]+)"/.exec(para);
     const style = styleMatch?.[1] ?? "";
-    const text = decode(
-      Array.from(para.matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g))
-        .map((m) => m[1])
-        .join(""),
-    ).trim();
+    const text = paragraphText(para);
     if (!text) continue;
 
     // Table of contents entries carry the field codes, and Word marks them with its own TOC
@@ -77,6 +73,31 @@ export function parseDocx(buf: Buffer): { title: string; level: number; body: st
   // A heading with nothing under it and nothing after it is the empty appendix problem: worth
   // importing so it is visible as empty, rather than dropped so it is invisible.
   return out.filter((s) => s.title.trim().length > 0);
+}
+
+/**
+ * The visible text of one Word paragraph.
+ *
+ * Not every character in a Word paragraph is inside a <w:t>. A hyphen the author did not want
+ * broken across a line is its own element, and reading only the text runs turns
+ * "Pharmacist-in-Charge" into "PharmacistinCharge" — 284 times in this pharmacy's manual, silently,
+ * in a document nobody proof-reads after an import because it is supposed to be the same document
+ * they wrote. Line breaks and tabs go the same way. So the paragraph is walked in document order
+ * and each of those elements contributes the character it stands for.
+ */
+function paragraphText(para: string): string {
+  // Paragraph properties carry tab-stop definitions and style marks, not text.
+  const body = para.replace(/<w:pPr>[\s\S]*?<\/w:pPr>/g, "");
+  let out = "";
+  const re = /<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>|<w:(noBreakHyphen|softHyphen|tab|br|cr)\s*\/>/g;
+  for (const m of body.matchAll(re)) {
+    if (m[1] !== undefined) out += decode(m[1]);
+    else if (m[2] === "noBreakHyphen") out += "-";
+    else if (m[2] === "softHyphen") out += "";
+    else if (m[2] === "tab") out += "\t";
+    else out += "\n";
+  }
+  return out.trim();
 }
 
 const decode = (s: string) =>
@@ -320,6 +341,47 @@ export async function markAllReviewed(user: { name: string }): Promise<number> {
       .where(eq(schema.manualSections.id, r.id));
   }
   return own.length;
+}
+
+/**
+ * Footnote markers pointing at a bibliography that is not in the document.
+ *
+ * Five sections of this manual carry 397 of them — "[8][10]" after almost every sentence of the
+ * controlled substances chapter, with no reference list anywhere in the manual. They are the
+ * fingerprint of text pasted in from a research tool, and an inspector reading a controlled
+ * substances policy is exactly the reader most likely to notice. The policy underneath may be
+ * perfectly good; the markers make it look borrowed.
+ *
+ * A digits-only bracket is the only shape removed. Anything a person actually wrote in
+ * brackets — "[Reserved]", "[see Appendix A]" — is left where it is.
+ */
+const CITATION = /\s*(?:\[\d{1,3}\])+/g;
+
+export function citationMarkers(rows: Section[]): { id: string; title: string; count: number }[] {
+  return rows
+    .filter((r) => r.source === "pharmacy")
+    .map((r) => ({ id: r.id, title: r.title, count: (r.body.match(CITATION) ?? []).length }))
+    .filter((x) => x.count > 0)
+    .sort((a, b) => b.count - a.count);
+}
+
+/** Removes them, keeping the punctuation that followed. Returns how many sections changed. */
+export async function stripCitationMarkers(user: { name: string }): Promise<{ sections: number; markers: number }> {
+  const rows = await allSections();
+  let sections = 0;
+  let markers = 0;
+  for (const r of rows) {
+    if (r.source !== "pharmacy") continue;
+    const found = (r.body.match(CITATION) ?? []).length;
+    if (!found) continue;
+    markers += found;
+    sections += 1;
+    await db
+      .update(schema.manualSections)
+      .set({ body: r.body.replace(CITATION, ""), updatedBy: user.name, updatedAt: new Date().toISOString() })
+      .where(eq(schema.manualSections.id, r.id));
+  }
+  return { sections, markers };
 }
 
 /** Sections nobody has confirmed in the last year — what an annual manual review is actually for. */

@@ -17,6 +17,8 @@ import {
   markReviewed,
   markAllReviewed,
   needingReview,
+  citationMarkers,
+  stripCitationMarkers,
 } from "@/lib/manual-store";
 import { policies, FORMS, appendixReference } from "@/lib/manual";
 import { fmt } from "@/lib/dates";
@@ -56,6 +58,8 @@ export default async function ManualPage({
   const own = sections.filter((x) => x.source === "pharmacy");
   const generated = sections.filter((x) => x.source === "site");
   const empty = gaps(rows);
+  const cites = citationMarkers(rows);
+  const citeTotal = cites.reduce((n, c) => n + c.count, 0);
 
   // Editing a section always shows its chapter, so a link straight to a section from the gaps list
   // lands you in the chapter it belongs to rather than on a page with one section on it.
@@ -187,6 +191,15 @@ export default async function ManualPage({
       if (e && typeof e === "object" && "digest" in e) throw e;
       redirect("/manual?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not fill that in."));
     }
+  }
+
+  async function stripCitations() {
+    "use server";
+    const u = await requireManager();
+    const r = await stripCitationMarkers(u);
+    await audit({ action: "manual.citations.stripped", userId: u.id, userName: u.name, details: `${r.markers} markers in ${r.sections} sections` });
+    revalidatePath("/manual");
+    redirect("/manual?ok=" + encodeURIComponent(`${r.markers} footnote markers removed from ${r.sections} sections. The policies themselves are untouched — read the controlled substances chapter once before you print it.`));
   }
 
   async function reviewed(fd: FormData) {
@@ -418,6 +431,32 @@ export default async function ManualPage({
                 is most likely to notice. Where the heading names something this system produces, pick it and the
                 heading gets a sentence saying where the current version comes from — which is both shorter and true for
                 longer than a blank copy pasted into a manual.
+              </p>
+            </Card>
+          )}
+
+          {citeTotal > 0 && (
+            <Card
+              tone="warn"
+              title="Footnote markers with no footnotes"
+              count={citeTotal}
+              subtitle="Numbers in square brackets after almost every sentence, and no reference list anywhere in the manual. The policy underneath may be perfectly good; the markers make it read as borrowed, and the chapter they are in is the controlled substances chapter."
+              className="mb-6"
+            >
+              <ul className="rows">
+                {cites.map((c) => (
+                  <li key={c.id} className="flex items-center justify-between gap-2 py-2">
+                    <Link href={`/manual?edit=${c.id}#${c.id}`} className="text-sm font-medium hover:underline">{c.title}</Link>
+                    <span className="text-xs text-ink-3">{c.count} markers</span>
+                  </li>
+                ))}
+              </ul>
+              <form action={stripCitations} className="mt-3">
+                <button className="btn btn-primary">Remove all {citeTotal} markers</button>
+              </form>
+              <p className="mt-2 text-xs text-ink-3">
+                Only brackets containing nothing but digits are removed. Anything you wrote in brackets yourself —
+                &ldquo;[Reserved]&rdquo;, &ldquo;[see Appendix A]&rdquo; — stays where it is.
               </p>
             </Card>
           )}
