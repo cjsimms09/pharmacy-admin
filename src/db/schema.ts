@@ -752,6 +752,61 @@ export const driverInvoices = sqliteTable(
   (t) => [index("driver_invoices_month_idx").on(t.month)],
 );
 
+/**
+ * A record signed on screen rather than on paper.
+ *
+ * The pharmacy prints its own records — the workforce training file, the technician list, a
+ * month of temperatures — and each ends with a line for the pharmacist-in-charge to sign. Printing
+ * a document in order to sign it and scan it back is a photocopier standing in for a database, and
+ * the unsigned printout in the drawer is the version an inspector finds.
+ *
+ * The ESIGN Act (15 U.S.C. 7001) and the Kansas UETA (K.S.A. 16-1601 et seq.) make an electronic
+ * signature as good as ink, provided four things are true, and every one of them is a column here.
+ *
+ * Intent: the person did something deliberate that means "I am signing" — a ticked box and a
+ * typed name, not a page they scrolled past.
+ *
+ * Attribution: the signature is attributable to that person, which is why the signed-in user, the
+ * name they typed, the address they came from and the browser they used are all kept.
+ *
+ * Association: the signature is bound to the record it signs, not to a document that may since
+ * have changed — so the exact wording signed is stored, together with a fingerprint of the record
+ * as it stood at that moment.
+ *
+ * Retention: it can be produced later in a form that accurately reflects what was signed. That is
+ * this row, and it is never edited.
+ */
+export const recordSignatures = sqliteTable(
+  "record_signatures",
+  {
+    id: text("id").primaryKey(),
+    /** Which kind of record — the workforce training file, a month of temperatures, and so on. */
+    kind: text("kind").notNull(),
+    /** Which one of that kind: a year, a month, an id. Together with kind it names the record. */
+    recordKey: text("record_key").notNull(),
+    /**
+     * The statement, word for word, as it was on screen when it was signed.
+     *
+     * Stored rather than looked up. If the wording is improved next year, what this person put
+     * their name to must not change with it — that is the difference between a record and an
+     * assertion about a record.
+     */
+    statement: text("statement").notNull(),
+    /** A fingerprint of the record's own content, so a later edit is detectable. */
+    contentHash: text("content_hash"),
+    signedName: text("signed_name").notNull(),
+    signedByUserId: text("signed_by_user_id").notNull(),
+    signedRole: text("signed_role"),
+    signedAt: text("signed_at").notNull().default(now()),
+    signedIp: text("signed_ip"),
+    signedAgent: text("signed_agent"),
+    /** Set only when a signature is withdrawn; the row itself is never deleted or altered. */
+    revokedAt: text("revoked_at"),
+    revokedReason: text("revoked_reason"),
+  },
+  (t) => [index("record_signatures_record_idx").on(t.kind, t.recordKey)],
+);
+
 // ── Document intake (drop anything, Claude files it) ─────────────────
 export const intakeItems = sqliteTable("intake_items", {
   id: text("id").primaryKey(),

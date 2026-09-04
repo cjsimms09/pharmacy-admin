@@ -27,6 +27,22 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <div className="shrink-0 px-4 py-4">
           <Link href="/" className="text-base font-bold tracking-tight">Pharmacy Admin</Link>
           <div className="mt-0.5 text-xs text-ink-3">Compliance desk</div>
+          {/*
+            On every screen, because the moment it is needed is not a moment for navigating to it.
+
+            A menu is a map somebody has to have learned. This is the one thing on the page that
+            works when you know what you want and not where it lives — which is the position the
+            pharmacist-in-charge is in when an inspector asks for something by name.
+          */}
+          <form action="/find" className="mt-3">
+            <input
+              name="q"
+              type="search"
+              placeholder="Find anything…"
+              aria-label="Find anything in the site"
+              className="field w-full py-1.5 text-sm"
+            />
+          </form>
         </div>
         <div className="md:min-h-0 md:flex-1 md:overflow-y-auto">
           <Nav tools={showTools} />

@@ -3,6 +3,10 @@ import { requireUser } from "@/lib/auth";
 import { trainingFile } from "@/lib/training-records";
 import { fmt, fmtLong } from "@/lib/dates";
 import { PrintFrame } from "@/components/print";
+import { SignBlock } from "@/components/sign-block";
+import { Notice } from "@/components/ui";
+import { signatureFor } from "@/lib/record-signatures";
+import { signRecordAction } from "../../../_actions/sign";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Training records" };
@@ -20,14 +24,36 @@ export const metadata = { title: "Training records" };
 export default async function TrainingRecordsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ all?: string }>;
+  searchParams: Promise<{ all?: string; ok?: string; error?: string }>;
 }) {
   const user = await requireUser();
-  const { all } = await searchParams;
+  const { all, ok, error } = await searchParams;
   const f = await trainingFile({ includeFormer: all === "1" });
+
+  /*
+   * The record is signed per year and per scope, not once for all time.
+   *
+   * A signature that covered "the training file" for ever would be a signature against a moving
+   * document — every completion added afterwards would arrive under somebody's certification
+   * without them seeing it. The year and the scope together name a version somebody can actually
+   * have read.
+   */
+  const recordKey = `${f.preparedOn.slice(0, 4)}-${all === "1" ? "all" : "current"}`;
+  const signature = await signatureFor("training_file", recordKey);
+
+  // What the signature is bound to. Any change to who is on the file, or to what they have
+  // completed, changes this — and the signed block then says so rather than standing silently.
+  const content = f.people
+    .map((p) => `${p.name}|${p.lines.map((l) => `${l.type}:${l.completedOn ?? ""}`).join(",")}`)
+    .join("\n");
+
+  const backTo = `/compliance/training/records${all === "1" ? "?all=1" : ""}`;
 
   return (
     <PrintFrame ownDocument formTitle="Workforce training records" formNumber="" revised="" backHref="/compliance/training">
+      {ok && <div className="no-print"><Notice kind="ok">{ok}</Notice></div>}
+      {error && <div className="no-print"><Notice kind="crit">{error}</Notice></div>}
+
       <div className="no-print mb-4 flex flex-wrap gap-2">
         <Link href="/compliance/training/records" className={`btn btn-sm ${all === "1" ? "" : "btn-primary"}`}>
           Current staff
@@ -161,14 +187,16 @@ export default async function TrainingRecordsPage({
         </ul>
       </div>
 
-      <div className="print-signature mt-6">
-        <p className="text-xs">
-          I certify that this is a true record of the workforce training delivered at this pharmacy.
-        </p>
-        <p className="mt-4 text-xs">
-          {f.trainer.name}, pharmacist-in-charge: ______________________________ Date: ______________
-        </p>
-      </div>
+      <SignBlock
+        kind="training_file"
+        recordKey={recordKey}
+        signature={signature}
+        content={content}
+        action={signRecordAction}
+        canSign={user.role !== "staff"}
+        defaultName={user.name}
+        backTo={backTo}
+      />
     </PrintFrame>
   );
 }

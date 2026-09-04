@@ -888,3 +888,148 @@ export async function setInvoiceDate(id: string, invoiceDate: string, user: { na
     .where(eq(schema.supplierInvoices.id, id));
   await db.update(schema.documents).set({ effectiveOn: invoiceDate }).where(eq(schema.documents.id, inv.documentId));
 }
+
+/**
+ * Documents that are supplier invoices but were never filed as one.
+ *
+ * Every invoice that arrived before this existed went into the document vault as an ordinary
+ * report, and so did any that arrived from a sender the pharmacy had not yet named as a supplier.
+ * They are in the building and they are not on the invoice screen, which is the worst of both
+ * worlds: the pharmacy holds Schedule II records it cannot produce on demand, and believes it
+ * holds none.
+ *
+ * Recognised on the same narrow evidence as an incoming attachment — a PDF whose name or title
+ * says invoice, or one that came from a wholesaler — and offered for filing rather than filed
+ * silently, because moving a document between categories on a guess is how a C2 record ends up
+ * somewhere nobody looks.
+ */
+export async function adoptableDocuments(): Promise<
+  { id: string; title: string; fileName: string; receivedFrom: string | null; effectiveOn: string | null }[]
+> {
+  const [docs, already] = await Promise.all([
+    db.query.documents.findMany(),
+    db.query.supplierInvoices.findMany(),
+  ]);
+  const claimed = new Set(already.map((i) => i.documentId));
+
+  return docs
+    .filter((d) => !claimed.has(d.id))
+    .filter((d) => d.category !== "invoice_schedule_2" && d.category !== "invoice_schedule_3_5" && d.category !== "invoice")
+    .filter((d) => /\.pdf$/i.test(d.fileName) || d.mimeType === "application/pdf")
+    .filter((d) =>
+      /invoice|inv\b|statement of account|packing (list|slip)|mckesson|independent pharmacy|cardinal|cencora|amerisource/i.test(
+        `${d.title} ${d.fileName} ${d.notes ?? ""}`,
+      ),
+    )
+    .map((d) => ({
+      id: d.id,
+      title: d.title || d.fileName,
+      fileName: d.fileName,
+      receivedFrom: d.notes?.match(/from ([^\s.]+@[^\s.]+\.\S+)/i)?.[1] ?? null,
+      effectiveOn: d.effectiveOn,
+    }))
+    .sort((a, b) => (b.effectiveOn ?? "").localeCompare(a.effectiveOn ?? ""));
+}
+
+/**
+ * Files a document that is already in the vault as the supplier invoice it always was.
+ *
+ * The document is not re-stored — it is the same file, and copying it would leave two. What
+ * changes is the category, so it stops appearing among the general documents and starts appearing
+ * in the list that has to be producible by schedule. Where the reading is not certain the invoice
+ * lands with the Schedule IIs and waits, exactly as an emailed one would.
+ */
+export async function adoptDocument(documentId: string, ctx: { userId: string; userName: string }): Promise<FiledInvoice> {
+  const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, documentId) });
+  if (!doc) throw new Error("That document no longer exists.");
+
+  const existing = await db.query.supplierInvoices.findFirst({
+    where: eq(schema.supplierInvoices.documentId, documentId),
+  });
+  if (existing) throw new Error("That document is already filed as an invoice.");
+
+  const { readFile } = await import("./files");
+  const buf = await readFile(doc.storageKey);
+
+  const fromText = (() => {
+    try {
+      const text = pdfText(buf);
+      return text.length > 200 ? classifyInvoiceText(text) : null;
+    } catch {
+      return null;
+    }
+  })();
+
+  let schedule: InvoiceSchedule = fromText?.confident ? fromText.schedule : "unknown";
+  let basis = fromText?.confident
+    ? `Read from the invoice itself. ${fromText.basis}`
+    : (fromText?.basis ?? "The document could not be read as text.");
+  let controlled = fromText?.controlledItems ?? [];
+  let items = fromText?.allItems ?? [];
+  let supplier = fromText?.supplier ?? null;
+  let invoiceNumber = fromText?.invoiceNumber ?? null;
+  let invoiceDate = fromText?.invoiceDate ?? doc.effectiveOn ?? null;
+
+  if (!fromText?.confident) {
+    try {
+      const r = await readInvoice(buf, ctx);
+      if (r.confident && r.schedule !== "unknown") {
+        schedule = r.schedule;
+        basis = `${basis} ${r.basis}`;
+        if (r.controlledItems.length) controlled = r.controlledItems;
+        supplier = r.supplier?.trim() || supplier;
+        invoiceNumber = r.invoiceNumber?.trim() || invoiceNumber;
+        if (/^\d{4}-\d{2}-\d{2}$/.test(r.invoiceDate ?? "")) invoiceDate = r.invoiceDate;
+      } else {
+        basis = `${basis} ${r.basis} The reading was not certain, so this is held for a person to confirm.`;
+      }
+    } catch (e) {
+      basis = `${basis} It could not be read automatically either: ${e instanceof Error ? e.message : String(e)}.`;
+    }
+  }
+
+  const filing = FILING[schedule];
+  await db.update(schema.documents).set({ category: filing.category, effectiveOn: invoiceDate }).where(eq(schema.documents.id, documentId));
+
+  const id = newId();
+  await db.insert(schema.supplierInvoices).values({
+    id,
+    documentId,
+    supplier,
+    invoiceNumber,
+    invoiceDate,
+    schedule,
+    basis: `${basis} Filed from a document already held, by ${ctx.userName}.`.trim(),
+    controlledItems: controlled.join("\n"),
+    itemsText: items.join("\n").slice(0, 20000),
+    needsReview: !(fromText?.confident ?? false) && schedule === "unknown",
+    receivedFrom: doc.notes ?? null,
+  });
+
+  return { id, documentId, schedule, needsReview: schedule === "unknown" };
+}
+
+/** Files every document that looks like an invoice, in one press. */
+export async function adoptAll(ctx: { userId: string; userName: string }): Promise<{ filed: number; problems: string[] }> {
+  const out = { filed: 0, problems: [] as string[] };
+  for (const d of await adoptableDocuments()) {
+    try {
+      await adoptDocument(d.id, ctx);
+      out.filed++;
+    } catch (e) {
+      out.problems.push(`${d.title}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  return out;
+}
+
+/** A PDF handed to the site directly, rather than emailed in. */
+export async function uploadInvoice(file: File, ctx: { userId: string; userName: string }): Promise<FiledInvoice> {
+  if (file.size === 0) throw new Error("That file is empty.");
+  const buf = Buffer.from(await file.arrayBuffer());
+  return fileInvoice(
+    buf,
+    { fileName: file.name, mimeType: file.type || "application/pdf", supplier: null, from: `uploaded by ${ctx.userName}`, subject: file.name },
+    ctx,
+  );
+}

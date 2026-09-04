@@ -4,6 +4,7 @@ import { dueList, type DueItem } from "@/lib/due";
 import { complianceSummary, type OpenItem } from "@/lib/compliance-status";
 import { staffMatrix, type Cell, type MatrixRow, type StaffMatrix } from "@/lib/staff-matrix";
 import { invoiceIssues } from "@/lib/invoices";
+import { alerts, SOON_DAYS } from "@/lib/alerts";
 import { automationStatus, type JobStatus } from "@/lib/automation-status";
 import { openFindings } from "@/lib/self-inspection";
 import { attestAction, answerAction, sendTrainingAction, requestCredentialAction } from "./_actions/compliance";
@@ -78,7 +79,8 @@ const dueRow = (d: DueItem): Row => ({
 
 export default async function Dashboard({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
   const { ok, error } = await searchParams;
-  const [compliance, dated, matrix, cqi, cs, jobs, selfFindings, settings, mail, updates, invoiceProblems] = await Promise.all([
+  const [compliance, dated, matrix, cqi, cs, jobs, selfFindings, settings, mail, updates, invoiceProblems, alertList] =
+    await Promise.all([
     complianceSummary(),
     dueList({ horizonDays: 60 }),
     staffMatrix(),
@@ -90,6 +92,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     mailHealth(),
     pendingUpdates(),
     invoiceIssues(),
+    alerts(),
   ]);
 
   /*
@@ -237,6 +240,85 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
 
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
+
+      {/*
+        Two levels, and nothing else on the screen shouts.
+
+        The old list showed everything due inside sixty days, which is not an alert list — it is
+        an inventory of the future. A licence expiring in eight weeks sat in red beside one that
+        expired last Tuesday, and the result of that is not vigilance: it is a screen nobody
+        reads, which is worse than no screen.
+
+        Now means the pharmacy is exposed today and somebody could be asked to explain it this
+        afternoon. Soon means it needs doing this month and takes weeks to do. Everything else
+        stays on its own page, so that these two keep meaning something.
+      */}
+      {(() => {
+        const now = alertList.filter((a) => a.level === "now");
+        const soon = alertList.filter((a) => a.level === "soon");
+        if (now.length === 0 && soon.length === 0) {
+          return (
+            <Card tone="ok" title="Nothing needs you today" className="mb-6">
+              <p className="card-sub">
+                Nothing has expired, lapsed or stopped running, and nothing falls due in the next {SOON_DAYS} days.
+                What is further out is on its own page rather than here.
+              </p>
+            </Card>
+          );
+        }
+        return (
+          <>
+            {now.length > 0 && (
+              <Card
+                id="now"
+                tone="crit"
+                title="Needs you today"
+                count={now.length}
+                subtitle="Each of these is something the pharmacy is exposed on right now — expired, lapsed, missed, or stopped working."
+                className="mb-4"
+              >
+                <ul className="rows">
+                  {now.map((a) => (
+                    <li key={a.key} className="flex flex-wrap items-start justify-between gap-2 py-2.5">
+                      <span className="min-w-0">
+                        <Link href={a.href} className="text-sm font-medium text-accent hover:underline">{a.title}</Link>
+                        <span className="mt-0.5 block text-xs text-ink-3">{a.why}</span>
+                      </span>
+                      <Link href={a.href} className="btn btn-sm btn-primary shrink-0">{a.action ?? "Fix it"}</Link>
+                    </li>
+                  ))}
+                </ul>
+              </Card>
+            )}
+
+            {soon.length > 0 && (
+              /*
+                Folded shut on purpose. These are real and they are not today's problem, and
+                putting them on screen next to the expired ones is exactly what taught everybody
+                to stop reading the expired ones.
+              */
+              <details className="mb-6" open={now.length === 0}>
+                <summary className="cursor-pointer text-sm font-medium text-accent">
+                  {soon.length} more within {SOON_DAYS} days — renewals and rounds that take weeks
+                </summary>
+                <Card className="mt-2">
+                  <ul className="rows">
+                    {soon.map((a) => (
+                      <li key={a.key} className="flex flex-wrap items-start justify-between gap-2 py-2">
+                        <span className="min-w-0">
+                          <Link href={a.href} className="text-sm hover:underline">{a.title}</Link>
+                          <span className="mt-0.5 block text-xs text-ink-3">{a.why}</span>
+                        </span>
+                        <Link href={a.href} className="btn btn-sm shrink-0">{a.action ?? "Open"}</Link>
+                      </li>
+                    ))}
+                  </ul>
+                </Card>
+              </details>
+            )}
+          </>
+        );
+      })()}
 
       {/*
         An update nobody knows about is an update nobody installs. This used to be discoverable

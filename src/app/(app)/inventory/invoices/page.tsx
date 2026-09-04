@@ -16,6 +16,9 @@ import {
   forwardInvoices,
   recentForwards,
   parseExpected,
+  adoptableDocuments,
+  adoptAll,
+  uploadInvoice,
   filingFor,
 } from "@/lib/invoices";
 import { setSetting } from "@/lib/settings";
@@ -84,7 +87,7 @@ export default async function InvoicesPage({
   const onlyUnconfirmed = sp.unconfirmed === "1";
   const onlyUndated = sp.undated === "1";
 
-  const [rows, review, counts, issues, suppliers, months, sent, s] = await Promise.all([
+  const [rows, review, counts, issues, suppliers, months, sent, s, adoptable] = await Promise.all([
     invoices({
       schedule: active === "all" ? undefined : active,
       text: sp.q,
@@ -101,6 +104,7 @@ export default async function InvoicesPage({
     invoiceMonths(),
     recentForwards(5),
     getSettings(),
+    adoptableDocuments(),
   ]);
 
   const shown = onlyUndated ? rows.filter((r) => !r.invoiceDate) : rows;
@@ -172,6 +176,50 @@ export default async function InvoicesPage({
     );
   }
 
+  async function fileThem() {
+    "use server";
+    const u = await requireManager();
+    const r = await adoptAll({ userId: u.id, userName: u.name });
+    await audit({ action: "invoice.adopt", userId: u.id, userName: u.name, details: `${r.filed}` });
+    revalidatePath("/inventory/invoices");
+    redirect(
+      `/inventory/invoices?${r.problems.length ? "error" : "ok"}=` +
+        encodeURIComponent(
+          [
+            r.filed
+              ? `${r.filed} document${r.filed === 1 ? "" : "s"} filed as supplier invoices and sorted by schedule`
+              : "Nothing could be filed",
+            ...r.problems.slice(0, 3),
+          ].join(". ") + ".",
+        ),
+    );
+  }
+
+  async function upload(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const file = fd.get("file");
+    if (!(file instanceof File) || file.size === 0) {
+      redirect("/inventory/invoices?error=" + encodeURIComponent("Choose a PDF."));
+    }
+    try {
+      const r = await uploadInvoice(file as File, { userId: u.id, userName: u.name });
+      await audit({ action: "invoice.upload", userId: u.id, userName: u.name, details: r.schedule });
+      revalidatePath("/inventory/invoices");
+      redirect(
+        "/inventory/invoices?ok=" +
+          encodeURIComponent(
+            r.needsReview
+              ? "Filed with the Schedule II records until you say what it carries — that is the cautious side, and the only safe one."
+              : `Filed under ${filingFor(r.schedule).label}.`,
+          ),
+      );
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/inventory/invoices?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not read that file."));
+    }
+  }
+
   const here = `/inventory/invoices?${new URLSearchParams(
     Object.entries(sp).filter(([k, v]) => v && k !== "ok" && k !== "error") as [string, string][],
   ).toString()}`;
@@ -230,6 +278,47 @@ export default async function InvoicesPage({
               </li>
             ))}
           </ul>
+        </Card>
+      )}
+
+      {/*
+        Invoices the site already holds but never filed as invoices.
+
+        Everything that arrived before this screen existed went into the document vault as an
+        ordinary report, and so did anything from a sender not yet named as a supplier. They are
+        in the building and not on this page, which is the worst of both worlds: the pharmacy
+        holds Schedule II records it cannot produce on demand and believes it holds none.
+      */}
+      {adoptable.length > 0 && canManage && (
+        <Card
+          tone="warn"
+          title="Already received, but not filed as invoices"
+          count={adoptable.length}
+          subtitle="These arrived by email and went into the document vault before this screen existed, or came from a sender not yet named as a supplier. Filing them reads each one and sorts it by schedule, exactly as an incoming one would be."
+          className="mt-4 mb-6"
+          actions={
+            <form action={fileThem}>
+              <button className="btn btn-sm btn-primary">File all {adoptable.length}</button>
+            </form>
+          }
+        >
+          <ul className="rows">
+            {adoptable.slice(0, 12).map((d) => (
+              <li key={d.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                <span className="min-w-0">
+                  <a href={`/files/${d.id}`} target="_blank" rel="noreferrer" className="text-sm text-accent hover:underline">
+                    {d.title}
+                  </a>
+                  <span className="mt-0.5 block text-xs text-ink-3">
+                    {[d.fileName, d.receivedFrom, d.effectiveOn ? fmt(d.effectiveOn) : ""].filter(Boolean).join(" · ")}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+          {adoptable.length > 12 && (
+            <p className="mt-2 text-xs text-ink-3">and {adoptable.length - 12} more — all of them are filed by the one button.</p>
+          )}
         </Card>
       )}
 
@@ -504,6 +593,22 @@ export default async function InvoicesPage({
             <button className="btn mt-2">Save</button>
           </form>
         </Card>
+      )}
+
+      {canManage && (
+        <details className="mt-6">
+          <summary className="cursor-pointer text-sm font-medium text-accent">Add an invoice by hand</summary>
+          <Card className="mt-2">
+            <p className="card-sub">
+              For one that arrived on paper and was scanned, or came to somebody else&rsquo;s inbox. It is read and
+              filed by schedule the same way an emailed one is.
+            </p>
+            <form action={upload} className="mt-2 flex flex-wrap items-end gap-3" encType="multipart/form-data">
+              <input type="file" name="file" accept="application/pdf,.pdf" className="field" />
+              <button className="btn">Read it and file it</button>
+            </form>
+          </Card>
+        </details>
       )}
 
       {sent.length > 0 && (

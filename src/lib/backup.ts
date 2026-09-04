@@ -70,6 +70,30 @@ async function walk(dir: string, base = dir): Promise<{ name: string; full: stri
 }
 
 /** Row counts per table, which is what verification compares. */
+/**
+ * Deleting a scratch file, on an operating system that may not let you yet.
+ *
+ * Windows refuses to unlink a file while any handle to it is open, and closing a SQLite
+ * connection does not always release the handle in the same tick. On Linux the unlink simply
+ * succeeds, which is why this never showed up here and showed up immediately on the pharmacy's
+ * own computer: every backup it took reported
+ *
+ *   EBUSY: resource busy or locked, unlink '...\Temp\pa-verify-....db'
+ *
+ * A few short retries clear it. If they do not, the file is left in the temporary folder for the
+ * operating system to clean up, which is a housekeeping problem and nothing more.
+ */
+async function removeQuietly(file: string): Promise<void> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      await fs.rm(file, { force: true });
+      return;
+    } catch {
+      await new Promise((r) => setTimeout(r, 50 * (attempt + 1)));
+    }
+  }
+}
+
 async function tableCounts(url: string): Promise<Record<string, number>> {
   const c = createClient({ url });
   try {
@@ -123,7 +147,7 @@ async function takeBackup(destination: string, secondary?: string | null): Promi
   await fs.mkdir(dest, { recursive: true });
 
   const tmp = path.join(os.tmpdir(), `pa-snapshot-${stamp}.db`);
-  await fs.rm(tmp, { force: true });
+  await removeQuietly(tmp);
 
   const live = createClient({ url: `file:${dbPath()}` });
   try {
@@ -192,8 +216,17 @@ async function takeBackup(destination: string, secondary?: string | null): Promi
     await fs.rm(outPath, { force: true });
     message = `Backup failed verification and was deleted: ${e instanceof Error ? e.message : String(e)}`;
   } finally {
-    await fs.rm(tmp, { force: true });
-    await fs.rm(check, { force: true });
+    /*
+     * Cleanup may never fail the backup.
+     *
+     * These two lines threw on Windows, and because they are in a finally the throw replaced a
+     * completed, verified backup with an error — so the pharmacy had eighteen good archives on
+     * disk, every run reporting failure, and a dashboard saying no backup had ever been taken.
+     * A scratch file that will not delete is housekeeping. It is not a reason to disown work that
+     * has already been done and proved.
+     */
+    await removeQuietly(tmp);
+    await removeQuietly(check);
   }
 
   // ── The second copy ─────────────────────────────────────────────
@@ -418,6 +451,8 @@ export async function rehearseRestore(destination?: string): Promise<RestoreRehe
   } catch (e) {
     return fail(`The newest backup (${names[0]}) could NOT be restored: ${e instanceof Error ? e.message : String(e)}. Treat the pharmacy as having no working backup until this is fixed.`);
   } finally {
-    await fs.rm(scratch, { force: true });
+    // Same reason as the verification scratch file: on Windows this throws while the handle is
+    // still settling, and a throw here would turn a proved restore into a reported failure.
+    await removeQuietly(scratch);
   }
 }
