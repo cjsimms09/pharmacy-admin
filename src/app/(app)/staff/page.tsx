@@ -4,13 +4,15 @@ import { db, schema } from "@/db";
 import { requireUser } from "@/lib/auth";
 import { daysUntil, fmt } from "@/lib/dates";
 import { CREDENTIAL_LABEL, PERSON_ROLE_LABEL } from "@/lib/labels";
-import { PageHeader, Empty, StatusBadge } from "@/components/ui";
+import { PageHeader, Empty, StatusBadge, Notice } from "@/components/ui";
+import { endEmploymentAction, reinstateAction } from "./actions";
+import { todayIso } from "@/lib/dates";
 
 export const metadata = { title: "Staff & licenses" };
 
-export default async function StaffPage({ searchParams }: { searchParams: Promise<{ all?: string }> }) {
+export default async function StaffPage({ searchParams }: { searchParams: Promise<{ all?: string; saved?: string; error?: string }> }) {
   const user = await requireUser();
-  const { all } = await searchParams;
+  const { all, saved, error } = await searchParams;
   const people = await db.query.people.findMany({ orderBy: (p, { asc }) => [asc(p.lastName), asc(p.firstName)] });
   const creds = await db.query.credentials.findMany();
   const shown = people.filter((p) => (all ? true : p.active) && (user.role === "staff" ? p.id === user.personId : true));
@@ -30,6 +32,9 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
           </>
         }
       />
+      {saved && <Notice kind="ok">{saved}</Notice>}
+      {error && <Notice kind="crit">{error}</Notice>}
+
       {shown.length === 0 ? (
         <Empty>No staff yet. {canManage && <Link href="/staff/new" className="text-accent underline">Add the first person.</Link>}</Empty>
       ) : (
@@ -41,6 +46,7 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
                 <th>Role</th>
                 <th>Credentials</th>
                 <th>Next expiration</th>
+                {canManage && <th>Status</th>}
               </tr>
             </thead>
             <tbody>
@@ -55,7 +61,7 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
                       <div className="text-xs text-ink-3">
                         {p.isPic && <span className="badge badge-ok mr-1">PIC</span>}
                         {p.administersVaccines && <span className="badge badge-muted mr-1">vaccinator</span>}
-                        {!p.active && <span className="badge badge-muted">left {fmt(p.endedOn)}</span>}
+                        {!p.active && <span className="badge badge-muted">inactive since {fmt(p.endedOn)}</span>}
                         {p.title}
                       </div>
                     </td>
@@ -73,6 +79,36 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
                         <span className="text-xs text-ink-3">—</span>
                       )}
                     </td>
+                    {canManage && (
+                      <td>
+                        {/*
+                          One click, from the list somebody is already looking at.
+                          
+                          This existed only as a collapsed section at the foot of each person's own
+                          page, under the words "record that they have left" — so a pharmacist
+                          looking for how to make somebody inactive found nothing, because that is
+                          not what it was called and not where it was.
+                        */}
+                        {p.active ? (
+                          <form action={endEmploymentAction}>
+                            <input type="hidden" name="personId" value={p.id} />
+                            <input type="hidden" name="endedOn" value={todayIso()} />
+                            <input type="hidden" name="back" value="/staff" />
+                            <button className="btn btn-sm" title="Keeps the whole file; stops them owing training and stops the emails.">
+                              Make inactive
+                            </button>
+                          </form>
+                        ) : (
+                          <form action={reinstateAction}>
+                            <input type="hidden" name="personId" value={p.id} />
+                            <input type="hidden" name="back" value="/staff" />
+                            <button className="btn btn-sm btn-primary" title="They are back — training and licences start counting again.">
+                              Reactivate
+                            </button>
+                          </form>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 );
               })}
@@ -80,15 +116,20 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
           </table>
         </div>
       )}
-      <p className="mt-3 text-xs text-ink-3">
+      <p className="mt-3 text-sm text-ink-2">
         {all ? (
-          <Link href="/staff" className="underline">Hide former staff</Link>
+          <Link href="/staff" className="btn btn-sm">Hide inactive staff</Link>
         ) : (
-          <Link href="/staff?all=1" className="underline">
-            Show former staff{former > 0 ? ` (${former})` : ""}
+          <Link href="/staff?all=1" className="btn btn-sm">
+            Show inactive staff{former > 0 ? ` (${former})` : ""}
           </Link>
         )}
-        {" — nobody is ever deleted. A former employee's licences, training records and signed attestations stay on their page and stay searchable for as long as the retention rules require."}
+      </p>
+      <p className="mt-2 text-xs text-ink-3">
+        Making somebody inactive deletes nothing. Their licences, training records, certificates and signed
+        attestations stay on their page and stay searchable for as long as the retention rules require — what changes
+        is that they stop counting as staff who owe training and the site stops emailing them. Reactivating puts them
+        straight back; check their dates afterwards, because some will have lapsed while they were away.
       </p>
     </>
   );

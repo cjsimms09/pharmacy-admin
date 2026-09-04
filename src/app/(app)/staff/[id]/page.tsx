@@ -469,7 +469,7 @@ export default async function PersonPage({
 
       {/* ── Employment ─────────────────────────────────────────────── */}
       {canManage && (
-        <Card title="Employment" className="mb-6">
+        <Card title={person.active ? "Employment — make inactive" : "Employment — inactive"} className="mb-6">
           {person.active ? (
             <>
               <p className="text-sm text-ink-2">
@@ -481,9 +481,14 @@ export default async function PersonPage({
                 {retention.documents === 1 ? "" : "s"} — exactly where it is. Nothing is deleted. What changes is that
                 they stop counting as staff who owe training, and the site stops emailing them.
               </p>
-              <details className="mt-3">
-                <summary className="cursor-pointer text-sm underline">Record that they have left</summary>
-                <form action={endEmploymentAction} className="mt-3 grid max-w-2xl gap-3 sm:grid-cols-2">
+              {/*
+                Not hidden behind a disclosure any more.
+                
+                It sat collapsed under the words "record that they have left", at the foot of a long
+                page — so somebody looking for how to make an employee inactive found nothing,
+                because that is neither what it was called nor where anybody would look for it.
+              */}
+              <form action={endEmploymentAction} className="mt-3 grid max-w-2xl gap-3 sm:grid-cols-2">
                   <input type="hidden" name="personId" value={id} />
                   <Field label="Last day worked" hint="Retention is counted from this date.">
                     <input name="endedOn" type="date" className="field" defaultValue={new Date().toISOString().slice(0, 10)} />
@@ -491,16 +496,15 @@ export default async function PersonPage({
                   <Field label="Reason" hint="Optional, and kept on the record.">
                     <input name="reason" className="field" placeholder="Resigned, moved out of state, end of contract" />
                   </Field>
-                  <div className="sm:col-span-2">
-                    <button className="btn">Record that {person.firstName} has left</button>
-                  </div>
-                </form>
-              </details>
+                <div className="sm:col-span-2">
+                  <button className="btn">Make {person.firstName} inactive</button>
+                </div>
+              </form>
             </>
           ) : (
             <>
               <p className="text-sm">
-                Left {fmt(person.endedOn)}{person.endedReason ? ` — ${person.endedReason}` : ""}
+                Inactive since {fmt(person.endedOn)}{person.endedReason ? ` — ${person.endedReason}` : ""}
                 {person.endedBy ? ` · recorded by ${person.endedBy}` : ""}.
               </p>
               <p className="mt-2 text-sm text-ink-2">
@@ -512,7 +516,7 @@ export default async function PersonPage({
               </ul>
               <form action={reinstateAction} className="mt-3">
                 <input type="hidden" name="personId" value={id} />
-                <button className="btn">They are back — make active again</button>
+                <button className="btn btn-primary">Reactivate {person.firstName}</button>
               </form>
             </>
           )}

@@ -223,6 +223,10 @@ export async function deleteCe(id: string, personId: string) {
 export async function endEmploymentAction(formData: FormData) {
   const user = await requireManager();
   const id = String(formData.get("personId") ?? "");
+  // Usable from the staff list as well as the person's own page, so it comes back to whichever
+  // one it was pressed from. A control that always throws you onto a different screen is a
+  // control people stop using.
+  const back = String(formData.get("back") ?? "") || `/staff/${id}`;
   try {
     const r = await endEmployment(
       id,
@@ -237,26 +241,27 @@ export async function endEmploymentAction(formData: FormData) {
     if (r.assignmentsCancelled > 0) {
       bits.push(`${r.assignmentsCancelled} outstanding training link${r.assignmentsCancelled === 1 ? "" : "s"} cancelled, so no more reminders go to them.`);
     }
-    redirect(`/staff/${id}?saved=` + encodeURIComponent(bits.join(" ")));
+    redirect(`${back}?saved=` + encodeURIComponent(bits.join(" ")));
   } catch (e) {
     if (e && typeof e === "object" && "digest" in e) throw e;
-    redirect(`/staff/${id}?error=` + encodeURIComponent(e instanceof Error ? e.message : "Could not record that."));
+    redirect(`${back}?error=` + encodeURIComponent(e instanceof Error ? e.message : "Could not record that."));
   }
 }
 
 export async function reinstateAction(formData: FormData) {
   const user = await requireManager();
   const id = String(formData.get("personId") ?? "");
+  const back = String(formData.get("back") ?? "") || `/staff/${id}`;
   try {
     const r = await reinstate(id, user);
     await audit({ action: "person.reinstated", userId: user.id, userName: user.name, details: id });
     revalidatePath(`/staff/${id}`);
     revalidatePath("/staff");
     revalidatePath("/");
-    redirect(`/staff/${id}?saved=` + encodeURIComponent(`${r.name} is active again. Check their licence and training dates — some may have lapsed while they were away.`));
+    redirect(`${back}?saved=` + encodeURIComponent(`${r.name} is active again. Check their licence and training dates — some may have lapsed while they were away.`));
   } catch (e) {
     if (e && typeof e === "object" && "digest" in e) throw e;
-    redirect(`/staff/${id}?error=` + encodeURIComponent(e instanceof Error ? e.message : "Could not record that."));
+    redirect(`${back}?error=` + encodeURIComponent(e instanceof Error ? e.message : "Could not record that."));
   }
 }
 
