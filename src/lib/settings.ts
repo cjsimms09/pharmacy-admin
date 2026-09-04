@@ -10,6 +10,13 @@ export const SETTING_KEYS = [
   "pharmacy_state",
   "pharmacy_zip",
   "pharmacy_county",
+  /**
+   * The physician who authorises immunizations under K.S.A. 65-1635a.
+   *
+   * Held once rather than typed onto each protocol, because every immunizer works under the same
+   * one and a name typed five times is a name spelled four ways.
+   */
+  "protocol_physician_name",
   "pharmacy_phone",
   "pharmacy_npi",
   "pharmacy_ncpdp", // NCPDP / NABP provider number

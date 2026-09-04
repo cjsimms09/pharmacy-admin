@@ -105,7 +105,7 @@ export default async function PersonPage({
           person.title,
           person.isPic ? "Pharmacist-in-Charge" : null,
           person.administersVaccines ? "administers vaccines" : null,
-          person.active ? null : `left ${fmt(person.endedOn)}`,
+          person.active ? null : `inactive since ${fmt(person.endedOn)}`,
         ]
           .filter(Boolean)
           .join(" · ")}
@@ -113,6 +113,10 @@ export default async function PersonPage({
           canManage && !edit ? (
             <>
               <Link href="/compliance/training" className="btn">Send training</Link>
+              {/* Only offered where it means something: the protocol authorises immunizing. */}
+              {person.administersVaccines && (
+                <Link href={`${here}/protocol`} className="btn btn-primary">Immunization protocol</Link>
+              )}
               <Link href={`${here}?edit=1`} className="btn">Edit details</Link>
             </>
           ) : undefined

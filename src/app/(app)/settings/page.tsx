@@ -111,6 +111,13 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <Field label="County"><input name="pharmacy_county" className="field" defaultValue={s.pharmacy_county} /></Field>
         </div>
         <Field label="Phone"><input name="pharmacy_phone" className="field" defaultValue={s.pharmacy_phone} /></Field>
+        <Field
+          label="Authorizing physician for immunizations"
+          hint="Prints on every immunizer's protocol. Held once because they all work under the same one, and a name typed five times is a name spelled four ways."
+          className="sm:col-span-2"
+        >
+          <input name="protocol_physician_name" className="field" defaultValue={s.protocol_physician_name} placeholder="Dr Larry Dircksen" />
+        </Field>
 
         <h2 className="mt-2 font-semibold sm:col-span-2">Identifiers</h2>
         <p className="-mt-2 text-xs text-ink-3 sm:col-span-2">
