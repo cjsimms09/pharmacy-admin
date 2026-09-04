@@ -96,6 +96,14 @@ export const SETTING_KEYS = [
   // A second place every verified archive is also written. One disk failing, one laptop stolen,
   // one folder deleted by accident — a single copy answers none of those.
   "backup_destination_2",
+  /**
+   * A third place, because two is not the number the rule asks for.
+   *
+   * Three copies, on two kinds of media, one of them off the premises. A USB drive in a drawer and
+   * a synced cloud folder fail in different ways and neither of them is this computer, which is
+   * the whole point.
+   */
+  "backup_destination_3",
   "backup_enabled", // "no" to switch off; anything else, including unset, means on
   "backup_keep", // how many archives to keep
   "backup_last_run",

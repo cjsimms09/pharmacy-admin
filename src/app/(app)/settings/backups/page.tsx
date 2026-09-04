@@ -24,6 +24,7 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
     const u = await requireManager();
     await setSetting("backup_destination", String(fd.get("destination") ?? "").trim());
     await setSetting("backup_destination_2", String(fd.get("destination2") ?? "").trim());
+    await setSetting("backup_destination_3", String(fd.get("destination3") ?? "").trim());
     await setSetting("backup_enabled", fd.get("enabled") ? "yes" : "no");
     await setSetting("backup_keep", String(Number(fd.get("keep")) || 14));
     await audit({ action: "backup.settings", userId: u.id, userName: u.name });
@@ -36,11 +37,8 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
     const u = await requireManager();
     const st = await backupStatus();
     try {
-      const r = await runBackup(st.destination, st.destination2);
-      if (r.ok) {
-        await pruneBackups(st.destination, st.keepCount);
-        if (st.destination2) await pruneBackups(st.destination2, st.keepCount);
-      }
+      const r = await runBackup(st.destination, [st.destination2, st.destination3]);
+      if (r.ok) for (const where of st.destinations) await pruneBackups(where, st.keepCount);
       await audit({ action: "backup.run", userId: u.id, userName: u.name, details: r.message });
       revalidatePath("/settings/backups");
       redirect(`/settings/backups?${r.ok ? "ok" : "error"}=` + encodeURIComponent(r.message));
@@ -64,8 +62,11 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
     const root = String(fd.get("root") ?? "").trim();
     if (!root) redirect("/settings/backups?error=" + encodeURIComponent("No folder was chosen."));
     const dest = backupFolderIn(root);
-    await setSetting("backup_destination_2", dest);
-    await audit({ action: "backup.settings", userId: u.id, userName: u.name, details: `second copy \u2192 ${dest}` });
+    // Into whichever further slot is free, so a second cloud folder does not overwrite the first.
+    const st = await backupStatus();
+    const slot = !st.destination2 ? "backup_destination_2" : "backup_destination_3";
+    await setSetting(slot, dest);
+    await audit({ action: "backup.settings", userId: u.id, userName: u.name, details: `${slot} \u2192 ${dest}` });
     revalidatePath("/settings/backups");
     redirect(
       "/settings/backups?ok=" +
@@ -87,7 +88,7 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
 
   const hoursSince = s.lastRun ? (Date.now() - Date.parse(s.lastRun)) / 3_600_000 : null;
   const rehearsalDays = s.restoreLast ? Math.floor((Date.now() - Date.parse(s.restoreLast)) / 86_400_000) : null;
-  const copies = 1 + (s.destination2 ? 1 : 0);
+  const copies = s.destinations.length;
 
   return (
     <>
@@ -137,7 +138,7 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
         </Notice>
       )}
 
-      {s.enabled && !s.destination2 && (
+      {s.enabled && s.destinations.length < 2 && (
         <Notice kind="warn">
           There is one copy of each backup. That covers this computer dying; it does not cover the backup drive dying,
           the folder being deleted, or a fire. Set a second place below — a USB drive kept somewhere else, a network
@@ -151,7 +152,7 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
         </Notice>
       )}
 
-      {s.onSameDisk && !s.destination2 && (
+      {s.onSameDisk && s.destinations.length < 2 && (
         <Notice kind="warn">
           Backups are going into the application&rsquo;s own data folder, which is on the same disk as the thing they
           are protecting. A failed drive or a stolen laptop takes both. Point this at a USB drive, a network folder, or
@@ -178,7 +179,8 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
           <ul className="rows mt-2">
             {clouds.map((c) => {
               const dest = backupFolderIn(c.path);
-              const already = isInside(s.destination2 ?? "", c) || isInside(s.destination, c);
+              const already =
+                isInside(s.destination2 ?? "", c) || isInside(s.destination3 ?? "", c) || isInside(s.destination, c);
               return (
                 <li key={c.path} className="flex flex-wrap items-center justify-between gap-2 py-2">
                   <span className="min-w-0">
@@ -194,10 +196,14 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
                   </span>
                   {already ? (
                     <span className="badge badge-ok shrink-0">in use</span>
+                  ) : s.destination2 && s.destination3 ? (
+                    <span className="text-xs text-ink-3">all three places are set</span>
                   ) : (
                     <form action={useCloud} className="shrink-0">
                       <input type="hidden" name="root" value={c.path} />
-                      <button className="btn btn-sm btn-primary">Use as the second copy</button>
+                      <button className="btn btn-sm btn-primary">
+                        Use as the {s.destination2 ? "third" : "second"} copy
+                      </button>
                     </form>
                   )}
                 </li>
@@ -213,7 +219,7 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
         </section>
       )}
 
-      {clouds.length === 0 && !s.destination2 && (
+      {clouds.length === 0 && s.destinations.length < 2 && (
         <Notice kind="warn">
           <b>No synced folder was found on this computer.</b> If OneDrive is signed in, its folder is usually{" "}
           <code>C:\Users\&lt;you&gt;\OneDrive</code> or <code>C:\Users\&lt;you&gt;\OneDrive - Your Company</code>. Put
@@ -238,6 +244,13 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
             className="sm:col-span-2"
           >
             <input name="destination2" defaultValue={s.destination2 ?? ""} className="field font-mono" placeholder="Leave empty for one copy only" />
+          </Field>
+          <Field
+            label="And a third"
+            hint="Three copies, on two kinds of media, one of them off the premises — the rule worth following. A USB drive in a drawer and a synced cloud folder fail in different ways, and neither of them is this computer."
+            className="sm:col-span-2"
+          >
+            <input name="destination3" defaultValue={s.destination3 ?? ""} className="field font-mono" placeholder="Leave empty for two copies" />
           </Field>
           <Field label="How many to keep" hint="Older ones beyond this are deleted after each successful run.">
             <input name="keep" type="number" min={1} max={365} defaultValue={s.keepCount} className="field" />

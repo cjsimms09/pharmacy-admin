@@ -38,10 +38,22 @@ const dataDir = () => path.dirname(path.resolve(process.env.DATABASE_PATH ?? "./
 const dbPath = () => path.resolve(process.env.DATABASE_PATH ?? "./data/pharmacy-admin.db");
 const filesDir = () => path.join(dataDir(), "files");
 
+/** One further copy of a verified archive, and how it went. */
+export type ExtraCopy = { destination: string; path: string | null; error: string | null };
+
 export type BackupResult = {
   ok: boolean;
   file: string;
-  /** The second copy, when a second destination is set and the write succeeded. */
+  /**
+   * The further copies, one per extra destination.
+   *
+   * Three of them rather than two now, and a list rather than a pair, because the rule worth
+   * following here is the old one: three copies, on two kinds of media, one of them off the
+   * premises. A USB drive in a drawer and a synced cloud folder are two different failure modes,
+   * and neither of them is the pharmacy computer.
+   */
+  copies: ExtraCopy[];
+  /** The first extra copy, kept for the screens that only ever showed one. */
   copy: string | null;
   copyError: string | null;
   sizeBytes: number;
@@ -117,7 +129,7 @@ async function tableCounts(url: string): Promise<Record<string, number>> {
  * mid-write, and a copied SQLite file caught mid-transaction restores to a corrupt database that
  * gives no warning until the day it is needed.
  */
-export async function runBackup(destination: string, secondary?: string | null): Promise<BackupResult> {
+export async function runBackup(destination: string, extras: (string | null | undefined)[] = []): Promise<BackupResult> {
   /*
    * A backup that never started is the one nobody hears about.
    *
@@ -131,7 +143,7 @@ export async function runBackup(destination: string, secondary?: string | null):
    * it: the dashboard compares that against the last success, and says so on the front page.
    */
   try {
-    return await takeBackup(destination, secondary);
+    return await takeBackup(destination, extras);
   } catch (e) {
     const why = e instanceof Error ? e.message : String(e);
     await setSetting("backup_last_result", `Backup could not be taken: ${why}`);
@@ -140,7 +152,7 @@ export async function runBackup(destination: string, secondary?: string | null):
   }
 }
 
-async function takeBackup(destination: string, secondary?: string | null): Promise<BackupResult> {
+async function takeBackup(destination: string, extras: (string | null | undefined)[]): Promise<BackupResult> {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   const fileName = `pharmacy-admin-backup-${stamp}.zip`;
   const dest = path.resolve(destination);
@@ -229,30 +241,48 @@ async function takeBackup(destination: string, secondary?: string | null): Promi
     await removeQuietly(check);
   }
 
-  // ── The second copy ─────────────────────────────────────────────
-  // Only ever a copy of an archive that has already passed verification. Copying an unverified
-  // one would just put the same bad file in two places, which is not two backups.
-  let copy: string | null = null;
-  let copyError: string | null = null;
-  if (verified && secondary?.trim()) {
-    const dest2 = path.resolve(secondary.trim());
-    try {
-      if (path.resolve(dest2) === dest) throw new Error("it is the same folder as the first copy");
-      await fs.mkdir(dest2, { recursive: true });
-      const p2 = path.join(dest2, fileName);
-      await fs.writeFile(p2, archive);
-      // Read it back off that disk too. A network share or a USB stick can accept a write and
-      // keep none of it, and finding that out on the day you need it is the whole failure.
-      const back = unzip(await fs.readFile(p2));
-      const inner2 = back.get("pharmacy-admin.db");
-      if (!inner2 || sha256(inner2) !== manifest.databaseSha256) throw new Error("the copy read back does not match");
-      copy = p2;
-      message += ` Second copy written to ${dest2} and read back.`;
-    } catch (e) {
-      copyError = e instanceof Error ? e.message : String(e);
-      message += ` The second copy to ${dest2} FAILED: ${copyError}. There is only one copy of this backup.`;
+  // ── The further copies ──────────────────────────────────────────
+  /*
+   * Only ever copies of an archive that has already passed verification. Copying an unverified one
+   * would put the same bad file in three places, which is not three backups.
+   *
+   * Each is written and then read back off its own disk. A network share, a USB stick or a sync
+   * folder can accept a write and keep none of it, and finding that out on the day you need it is
+   * the whole failure this exists to prevent. One failing does not stop the others: a USB drive
+   * that is unplugged should not cost you the copy that went to the cloud.
+   */
+  const copies: ExtraCopy[] = [];
+  const seen = new Set([dest.toLowerCase()]);
+  if (verified) {
+    for (const raw of extras) {
+      const trimmed = (raw ?? "").trim();
+      if (!trimmed) continue;
+      const where = path.resolve(trimmed);
+      const entry: ExtraCopy = { destination: where, path: null, error: null };
+      try {
+        if (seen.has(where.toLowerCase())) throw new Error("it is the same folder as another copy");
+        seen.add(where.toLowerCase());
+        await fs.mkdir(where, { recursive: true });
+        const target = path.join(where, fileName);
+        await fs.writeFile(target, archive);
+        const back = unzip(await fs.readFile(target));
+        const inner2 = back.get("pharmacy-admin.db");
+        if (!inner2 || sha256(inner2) !== manifest.databaseSha256) throw new Error("the copy read back does not match");
+        entry.path = target;
+        message += ` Copied to ${where} and read back.`;
+      } catch (e) {
+        entry.error = e instanceof Error ? e.message : String(e);
+        message += ` The copy to ${where} FAILED: ${entry.error}.`;
+      }
+      copies.push(entry);
+    }
+    const good = copies.filter((c) => c.path).length + 1;
+    if (copies.length > 0) {
+      message += ` ${good} copy${good === 1 ? "" : " copies"} of this archive ${good === 1 ? "exists" : "exist"} in total.`;
     }
   }
+  const copy = copies.find((c) => c.path)?.path ?? null;
+  const copyError = copies.find((c) => c.error)?.error ?? null;
 
   await setSetting("backup_last_run", new Date().toISOString());
   await setSetting("backup_last_result", message);
@@ -263,6 +293,7 @@ async function takeBackup(destination: string, secondary?: string | null): Promi
   return {
     ok: verified,
     file: verified ? outPath : "",
+    copies,
     copy,
     copyError,
     sizeBytes: archive.length,
@@ -317,6 +348,9 @@ function restoreInstructions(m: { takenAt: string; documents: number; rows: numb
 export type BackupStatus = {
   destination: string;
   destination2: string | null;
+  destination3: string | null;
+  /** Every place a copy goes, primary first, blanks removed. */
+  destinations: string[];
   restoreLast: string | null;
   restoreResult: string | null;
   lastRun: string | null;
@@ -345,6 +379,8 @@ export async function backupStatus(): Promise<BackupStatus> {
   return {
     destination,
     destination2: s.backup_destination_2?.trim() || null,
+    destination3: s.backup_destination_3?.trim() || null,
+    destinations: [destination, s.backup_destination_2?.trim() || "", s.backup_destination_3?.trim() || ""].filter(Boolean),
     restoreLast: s.backup_restore_last || null,
     restoreResult: s.backup_restore_result || null,
     lastRun: s.backup_last_run || null,

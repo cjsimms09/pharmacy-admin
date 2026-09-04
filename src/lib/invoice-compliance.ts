@@ -143,7 +143,9 @@ export async function invoiceCompliance(): Promise<Requirement[]> {
    * and "the computer died" is not a defence anybody has ever succeeded with.
    */
   const backupDir = (s.backup_destination ?? "").trim();
-  const secondary = (s.backup_destination_2 ?? "").trim();
+  const secondary = [(s.backup_destination_2 ?? "").trim(), (s.backup_destination_3 ?? "").trim()]
+    .filter(Boolean)
+    .join(" and ");
   const sameDisk =
     !backupDir || path.resolve(backupDir).startsWith(path.resolve(path.dirname(localStore)));
   const ranAt = s.backup_last_run ? Date.parse(s.backup_last_run) : NaN;

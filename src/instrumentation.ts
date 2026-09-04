@@ -73,11 +73,9 @@ export async function register() {
 
       const last = s.backup_last_run ? Date.parse(s.backup_last_run) : 0;
       if (!Number.isFinite(last) || Date.now() - last >= 20 * 60 * 60 * 1000) {
-        const r = await runBackup(status.destination, status.destination2);
-        if (r.ok) {
-          await pruneBackups(status.destination, status.keepCount);
-          if (status.destination2) await pruneBackups(status.destination2, status.keepCount);
-        }
+        const r = await runBackup(status.destination, [status.destination2, status.destination3]);
+        // Prune every place a copy went, or the drive that is never looked at fills up quietly.
+        if (r.ok) for (const where of status.destinations) await pruneBackups(where, status.keepCount);
         return; // one heavy job per turn; the rehearsal can wait for the next idle gap
       }
 

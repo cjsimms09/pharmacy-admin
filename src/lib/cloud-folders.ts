@@ -25,7 +25,14 @@ export type CloudFolder = {
   /** The sync root itself, not the folder the backups go in. */
   path: string;
   kind: "business" | "personal" | "other";
-  /** Whether a business associate agreement is available for this kind of account. */
+  /**
+   * Whether a business associate agreement is available for this kind of account.
+   *
+   * True only where the folder itself proves it: a OneDrive work or school account. Google will
+   * sign one for a Google Workspace account and not for a personal one, and Dropbox for Dropbox
+   * Business and not for Basic — but nothing about the folder on disk says which the pharmacy
+   * has, so those are marked as something to check rather than assumed either way.
+   */
   baaAvailable: boolean;
 };
 
@@ -65,16 +72,36 @@ export function cloudFoldersFromEnv(env: Record<string, string | undefined>): Cl
 
   const home = (env.USERPROFILE ?? env.HOME ?? "").trim();
   if (home) {
-    add(path.join(home, "Dropbox"), "Dropbox", "other", false);
+    add(path.join(home, "My Drive"), "Google Drive", "other", false);
     add(path.join(home, "Google Drive"), "Google Drive", "other", false);
+    add(path.join(home, "Dropbox"), "Dropbox", "other", false);
   }
   return found;
+}
+
+/**
+ * Places Google Drive mounts itself, which it does not announce anywhere.
+ *
+ * Google Drive for desktop mounts a virtual drive — G: by default, though the letter is a setting
+ * — with "My Drive" inside it. There is no environment variable and no registry value this can
+ * rely on, so the likely letters are tried. Kept out of the environment reader on purpose: that
+ * function must never offer a path nobody configured, and these are offered only after the disk
+ * has confirmed they are really there.
+ */
+function mountedDriveCandidates(): CloudFolder[] {
+  const out: CloudFolder[] = [];
+  for (const letter of ["G", "H", "I", "J"]) {
+    out.push({ label: `Google Drive (${letter}:)`, path: `${letter}:\\My Drive`, kind: "other", baaAvailable: false });
+    out.push({ label: `Google Shared drives (${letter}:)`, path: `${letter}:\\Shared drives`, kind: "other", baaAvailable: false });
+  }
+  return out;
 }
 
 /** The candidates that actually exist on this machine. */
 export async function detectCloudFolders(env: Record<string, string | undefined> = process.env): Promise<CloudFolder[]> {
   const out: CloudFolder[] = [];
-  for (const c of cloudFoldersFromEnv(env)) {
+  for (const c of [...cloudFoldersFromEnv(env), ...mountedDriveCandidates()]) {
+    if (out.some((x) => path.resolve(x.path).toLowerCase() === path.resolve(c.path).toLowerCase())) continue;
     try {
       const st = await fs.stat(c.path);
       if (st.isDirectory()) out.push(c);
