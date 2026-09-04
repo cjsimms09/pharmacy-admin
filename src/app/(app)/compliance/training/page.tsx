@@ -51,6 +51,12 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
     db.query.trainings.findMany({ orderBy: (t, { desc }) => [desc(t.completedOn)] }),
     getSettings(),
   ]);
+  // Policy documents the pharmacy holds, so the acknowledgement can carry the actual manual
+  // rather than a link somebody has to be on the network to open.
+  const policies = await db.query.documents.findMany({
+    where: eq(schema.documents.category, "policy"),
+    orderBy: (d, { desc }) => [desc(d.uploadedAt)],
+  });
   // The reply route only works if something is actually reading the mailbox. Sending the
   // instruction while nothing collects the answer is worse than not offering it: staff do as
   // they are asked, hear nothing back, and the record never appears.
@@ -116,7 +122,17 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
       // Create every assignment first, then send once per person. Otherwise somebody with three
       // trainings gets three emails, and three emails is how all three get ignored.
       for (const [type, ids] of byType) {
-        const r = await assignTraining(ids, type, { dueOn, email: false }, u);
+          const r = await assignTraining(
+          ids,
+          type,
+          {
+            dueOn,
+            email: false,
+            // Only meaningful for the manual acknowledgement, and harmless elsewhere.
+            materialDocumentId: type === "policy_manual_acknowledgement" ? String(fd.get("policyDocId") ?? "") || null : null,
+          },
+          u,
+        );
         assigned += r.assigned;
         problems.push(...r.problems);
       }
@@ -372,10 +388,19 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
               Due by
               <input type="date" name="dueOn" defaultValue={addMonths(today, 1)} className="field ml-2 w-auto" />
             </label>
+            {policies.length > 0 && (
+              <label className="text-sm">
+                Manual to attach
+                <select name="policyDocId" className="field ml-2 w-auto" defaultValue={policies[0]?.id}>
+                  {policies.map((d) => <option key={d.id} value={d.id}>{d.title}</option>)}
+                </select>
+              </label>
+            )}
             <button className="btn btn-primary" disabled={!mailReady}>Send what is ticked</button>
             <p className="text-xs text-ink-3">
-              One email per person covering everything ticked for them, with the course attached. They complete it on
-              their phone, or reply to the email.
+              One email per person covering everything ticked for them, with the course attached — and the manual
+              itself attached where the policy acknowledgement is being sent. They complete it on their phone, or
+              reply to the email.
             </p>
           </div>
         </Card>

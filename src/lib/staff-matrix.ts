@@ -93,6 +93,7 @@ const TRAINING_COLUMNS: { key: string; type: TrainingType; short: string }[] = [
   { key: "hazcom", type: "osha_hazard_communication", short: TRAINING_SHORT.osha_hazard_communication },
   { key: "diversion", type: "controlled_substance_diversion", short: TRAINING_SHORT.controlled_substance_diversion },
   { key: "cqi", type: "cqi_program_review", short: TRAINING_SHORT.cqi_program_review },
+  { key: "manual", type: "policy_manual_acknowledgement", short: TRAINING_SHORT.policy_manual_acknowledgement },
 ];
 
 export function matrixColumns(): MatrixColumn[] {

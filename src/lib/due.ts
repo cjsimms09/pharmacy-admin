@@ -91,6 +91,11 @@ export const TRAINING_CADENCE: Partial<Record<TrainingType, { months: number; wh
     why: "Annual awareness training for everyone handling controlled substances.",
     what: "Spotting diversion — by staff, prescribers or patients — and how to raise it. Not a legal requirement in Kansas, but the first thing asked about after a loss.",
   },
+  policy_manual_acknowledgement: {
+    months: 12,
+    why: "The manual itself says every employee signs an acknowledgement and that it is retained in their file.",
+    what: "This pharmacy's own policy and procedure manual — how we do things here, what is expected, and where to find the answer when something is not covered.",
+  },
   cqi_program_review: {
     months: 12,
     why: "The written CQI programme is read and signed off annually.",

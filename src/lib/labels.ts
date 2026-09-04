@@ -154,6 +154,7 @@ export const TRAINING_SHORT: Record<TrainingType, string> = {
   controlled_substance_diversion: "Diversion",
   immunization_protocol_review: "Protocol",
   cqi_program_review: "CQI",
+  policy_manual_acknowledgement: "P&P manual",
   other: "Other",
 };
 
@@ -165,5 +166,6 @@ export const TRAINING_LABEL: Record<TrainingType, string> = {
   controlled_substance_diversion: "Controlled substance diversion awareness",
   immunization_protocol_review: "Immunization protocol review",
   cqi_program_review: "CQI program review",
+  policy_manual_acknowledgement: "Policy and procedure manual — read and acknowledged",
   other: "Other training",
 };

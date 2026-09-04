@@ -52,6 +52,11 @@ export const STATEMENTS: Partial<Record<TrainingType, string>> = {
   controlled_substance_diversion:
     "I confirm that I have completed the controlled substance diversion awareness training assigned to me. I " +
     "understand the signs of diversion, my duty to report anything I suspect, and how to report it.",
+  policy_manual_acknowledgement:
+    "I confirm that I have read the policy and procedure manual of this pharmacy. I understand that I am expected to " +
+    "work in accordance with it, that it covers my conduct as well as my duties, and that where something is not " +
+    "covered I am expected to ask rather than to decide alone. I understand this acknowledgement is retained in my " +
+    "employee file.",
   cqi_program_review:
     "I confirm that I have read the pharmacy's written continuous quality improvement programme. I understand how " +
     "to report a quality-related event, that reporting is expected of me rather than held against me, and that the " +
@@ -98,7 +103,7 @@ export type AssignResult = { assigned: number; emailed: number; problems: string
 export async function assignTraining(
   personIds: string[],
   type: TrainingType,
-  opts: { dueOn?: string; materialUrl?: string | null; email?: boolean },
+  opts: { dueOn?: string; materialUrl?: string | null; materialDocumentId?: string | null; email?: boolean },
   user: { id: string; name: string },
 ): Promise<AssignResult> {
   const people = await db.query.people.findMany();
@@ -130,6 +135,7 @@ export async function assignTraining(
         dueOn,
         // The link given for this run, else whatever the pharmacy has set as its standard.
         materialUrl: opts.materialUrl ?? (await materialFor(type)),
+        materialDocumentId: opts.materialDocumentId ?? null,
         statement,
         createdBy: user.name,
       });
@@ -215,7 +221,7 @@ export async function sendOutstanding(personIds?: string[]): Promise<SendResult>
  */
 async function emailPerson(
   person: { firstName: string; lastName: string; email: string | null },
-  items: { type: TrainingType; token: string; replyCode: string | null; dueOn: string }[],
+  items: { type: TrainingType; token: string; replyCode: string | null; dueOn: string; materialDocumentId?: string | null }[],
   opts: { reminder?: boolean } = {},
 ) {
   const s = await getSettings();
@@ -249,7 +255,7 @@ async function emailPerson(
     ),
   };
 
-  const attachments = items
+  const attachments: { filename: string; content: string | Buffer; contentType?: string }[] = items
     .map((i) => courseFor(i.type))
     .filter((c): c is NonNullable<typeof c> => Boolean(c))
     .map((course) => ({
@@ -257,6 +263,24 @@ async function emailPerson(
       content: packetText(course, pharmacy),
       contentType: "text/plain; charset=utf-8",
     }));
+
+  // Where the assignment carries a document from the vault — a policy manual, a signed protocol —
+  // the document itself goes with the email. A link to it is a link somebody has to be on the
+  // pharmacy network to open, and "we sent them a link" is a weaker sentence than "we sent them
+  // the manual" in every conversation where it matters.
+  const docIds = [...new Set(items.map((i) => i.materialDocumentId).filter(Boolean))] as string[];
+  for (const id of docIds) {
+    try {
+      const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, id) });
+      if (!doc) continue;
+      const { readFile } = await import("./files");
+      const content = await readFile(doc.storageKey);
+      if (content.byteLength > 15 * 1024 * 1024) continue; // too big to email; the link still works
+      attachments.push({ filename: doc.fileName, content, contentType: doc.mimeType });
+    } catch {
+      // A missing file must not stop the training being sent. The link in the email still works.
+    }
+  }
 
   return sendMail(person.email!, subjectFor(ctx), textFor(ctx), attachments, htmlFor(ctx));
 }

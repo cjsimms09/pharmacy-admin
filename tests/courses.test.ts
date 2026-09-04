@@ -79,11 +79,19 @@ describe("courses", () => {
     }
   });
 
-  test("everything chased annually has either a course or a stated reason not to", () => {
-    // The one exception is the immunization protocol review: the material is the pharmacy's own
-    // signed protocol, which cannot live in the software.
+  test("everything chased annually has either a course or material the pharmacy holds", () => {
+    // Two trainings deliberately have no course written into the site, because their material is
+    // a document belonging to this pharmacy that cannot live in the software: the physician-signed
+    // immunization protocol, and the policy and procedure manual. Both are attached to the email
+    // instead. Anything else chased annually with nothing behind it is a requirement nobody can
+    // actually meet, which is worse than not chasing it.
+    const materialFromTheVault: TrainingType[] = ["immunization_protocol_review", "policy_manual_acknowledgement"];
     for (const type of Object.keys(TRAINING_CADENCE) as TrainingType[]) {
-      if (type === "immunization_protocol_review") continue;
+      if (materialFromTheVault.includes(type)) {
+        // Still has to have something to sign, or it is a chase with no closing move.
+        assert.ok(STATEMENTS[type], `${type} has no course and nothing to sign either`);
+        continue;
+      }
       assert.ok(courseFor(type), `${type} is chased annually with no material behind it`);
     }
   });

@@ -225,6 +225,15 @@ export const TRAINING_TYPES = [
   "controlled_substance_diversion",
   "immunization_protocol_review",
   "cqi_program_review",
+  /**
+   * Reading and acknowledging the pharmacy's own policy and procedure manual.
+   *
+   * The manual itself says every employee signs an acknowledgement page and that it is retained
+   * in their file. That is the pharmacy's own policy, and until now nothing enforced it — which
+   * is the most awkward kind of gap, because it is not a rule somebody else imposed and forgot
+   * to follow up on. It is theirs, written down, and unmet.
+   */
+  "policy_manual_acknowledgement",
   "other",
 ] as const;
 export type TrainingType = (typeof TRAINING_TYPES)[number];
@@ -1041,6 +1050,14 @@ export const trainingAssignments = sqliteTable(
     dueOn: text("due_on").notNull(),
     /** Where the material lives, if it is not being read on the page itself. */
     materialUrl: text("material_url"),
+    /**
+     * A document from the vault sent with the email.
+     *
+     * A link to a policy manual is a link somebody has to be on the pharmacy network to open. The
+     * document itself, attached, is what proves the pharmacy provided the material rather than
+     * merely pointed at it — the same distinction that made the course packets worth attaching.
+     */
+    materialDocumentId: text("material_document_id"),
     /** The wording the person is asked to agree to. Stored per assignment so a later change
      *  to the template can never rewrite what somebody already signed. */
     statement: text("statement").notNull(),

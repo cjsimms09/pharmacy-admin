@@ -204,6 +204,13 @@
       "when": 1788491821725,
       "tag": "0028_flimsy_chronomancer",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1788492919795,
+      "tag": "0029_true_vermin",
+      "breakpoints": true
     }
   ]
 }

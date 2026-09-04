@@ -93,6 +93,7 @@ const REQUIRED: TrainingType[] = [
   "osha_hazard_communication",
   "controlled_substance_diversion",
   "cqi_program_review",
+  "policy_manual_acknowledgement",
 ];
 
 export async function trainingFile(opts: { includeFormer?: boolean } = {}): Promise<TrainingFile> {
@@ -169,8 +170,18 @@ export async function trainingFile(opts: { includeFormer?: boolean } = {}): Prom
     trainer: who,
     people,
     courses: REQUIRED.map((t) => {
-      const c = courseFor(t)!;
-      return { type: t, title: c.title, authority: c.authority, minutes: c.minutes, version: courseVersion(c) };
+      const c = courseFor(t);
+      // The policy manual has no course written into the site — the material is the pharmacy's
+      // own manual, which cannot live in the software and is attached to the email instead.
+      return c
+        ? { type: t, title: c.title, authority: c.authority, minutes: c.minutes, version: courseVersion(c) }
+        : {
+            type: t,
+            title: TRAINING_LABEL[t],
+            authority: "The pharmacy's own policy and procedure manual, which the manual itself requires every employee to acknowledge.",
+            minutes: 0,
+            version: "the manual as attached",
+          };
     }),
     retention: [
       "HIPAA training documentation is kept six years from creation — 45 CFR 164.530(j).",
