@@ -188,9 +188,9 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
                     <span className="block font-mono text-xs text-ink-3">{dest}</span>
                     {!c.baaAvailable && (
                       <span className="mt-0.5 block text-xs text-warn">
-                        A personal account. Microsoft signs a business associate agreement for Microsoft 365 business
-                        and enterprise accounts, not for consumer ones &mdash; so a work or school OneDrive is the one
-                        to use for these archives.
+                        {c.kind === "personal"
+                          ? "A personal account, and Microsoft only offers a business associate agreement on Microsoft 365 business and enterprise plans. Sign in to OneDrive with the pharmacy's own Microsoft account instead, or use a USB drive kept off the premises — there is no agreement to sign with a drive."
+                          : "Check the account before using this one. Google will sign a business associate agreement for a Google Workspace account and not for a personal one; Dropbox for Dropbox Business and not for Basic. Nothing about the folder on this computer says which you have."}
                       </span>
                     )}
                   </span>
@@ -211,10 +211,13 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
             })}
           </ul>
           <p className="mt-2 text-xs text-ink-3">
-            The archive holds the whole record &mdash; incidents, staff files, documents, every invoice &mdash; and is
-            not encrypted in itself, so treat that folder as holding protected health information: keep it in the
-            pharmacy&rsquo;s own Microsoft account rather than a personal one, and do not share the folder with anybody.
-            The API keys and the mail password are not in the archive at all.
+            The archive holds the whole record &mdash; incidents, staff files, documents, every invoice. Whoever stores
+            it is storing protected health information, and encrypting it first does not change that: HHS treats a
+            cloud provider holding encrypted health records as a business associate even when it has no key. So the
+            question is only ever who you have an agreement with. A pharmacy Microsoft 365 or Google Workspace account
+            carries one; a personal Microsoft or Google account does not; a USB drive in a locked drawer at home needs
+            none, because there is nobody to have it with. Do not share the folder with anybody. The API keys and the
+            mail password are not in the archive at all.
           </p>
         </section>
       )}
