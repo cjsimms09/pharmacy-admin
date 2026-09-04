@@ -162,5 +162,53 @@ export async function completeByEmailReply(
     })
     .where(eq(schema.trainingAssignments.id, a.id));
 
+  await acknowledge(person, a.token, TRAINING_LABEL[a.type]);
+
   return { trainingId, label: TRAINING_LABEL[a.type], personName: `${person.firstName} ${person.lastName}` };
+}
+
+/**
+ * Tells the person their reply landed, and gives them their certificate.
+ *
+ * Without this they reply into silence. Silence after a compliance instruction is read as "that
+ * probably did not work", and the next thing that happens is either a second reply or — far more
+ * likely — nothing at all next year, because the process felt like shouting into a void. It costs
+ * one email to close the loop, and it hands them proof they can keep, which is the difference
+ * between something done to staff and something staff can point at.
+ *
+ * Never allowed to fail the completion. The record is already written and correct; a mail server
+ * being down must not undo it.
+ */
+async function acknowledge(
+  person: { firstName: string; lastName: string; email: string | null },
+  token: string,
+  label: string,
+): Promise<void> {
+  if (!person.email) return;
+  try {
+    const { sendMail } = await import("./send-mail");
+    const { linkFor } = await import("./training-assignments");
+    const { getSettings } = await import("./settings");
+    const s = await getSettings();
+    const url = `${await linkFor(token)}/certificate`;
+    await sendMail(
+      person.email,
+      `Recorded: ${label}`,
+      [
+        `${person.firstName},`,
+        "",
+        `Your reply came through and your ${label.toLowerCase()} is recorded. There is nothing else`,
+        "for you to do.",
+        "",
+        "Your certificate is here, and this address keeps working — print it or save it:",
+        "",
+        url,
+        "",
+        `${s.pharmacy_name || "The pharmacy"}`,
+      ].join("\n"),
+    );
+  } catch {
+    // Deliberately silent. The training is recorded either way, and an acknowledgement that
+    // could not be sent is not a reason to lose it.
+  }
 }

@@ -24,6 +24,7 @@ import { courseFor } from "@/lib/courses";
 import { canSend } from "@/lib/send-mail";
 import { PickControls, PickGroup } from "@/components/pick-controls";
 import { onSiteToday } from "@/lib/roster";
+import { getSettings } from "@/lib/settings";
 
 export const metadata = { title: "Training" };
 export const dynamic = "force-dynamic";
@@ -43,12 +44,17 @@ const REQUIRED = Object.keys(TRAINING_CADENCE) as TrainingType[];
 export default async function TrainingPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
   await requireUser();
   const { ok, error } = await searchParams;
-  const [assignments, mailReady, people, trainings] = await Promise.all([
+  const [assignments, mailReady, people, trainings, settings] = await Promise.all([
     openAssignments(),
     canSend(),
     onSiteToday(),
     db.query.trainings.findMany({ orderBy: (t, { desc }) => [desc(t.completedOn)] }),
+    getSettings(),
   ]);
+  // The reply route only works if something is actually reading the mailbox. Sending the
+  // instruction while nothing collects the answer is worse than not offering it: staff do as
+  // they are asked, hear nothing back, and the record never appears.
+  const sweeping = settings.mail_enabled === "yes" && Boolean(settings.mail_user && settings.mail_password_enc);
   const outstanding = assignments.filter((a) => !a.completedAt);
   // Resolved up front: linkFor reads a setting, and awaiting inside the table would mean one
   // lookup per row inside JSX, which is not allowed and would be wasteful if it were.
@@ -484,13 +490,20 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
       </section>
 
       {/* ── How the email reply route works, stated once, where it is relevant ── */}
-      <section className="card mb-6">
-        <h2 className="font-semibold">Replying by email counts</h2>
-        <p className="mt-1 text-sm text-ink-2">
+      <Card title="Replying by email counts" tone={sweeping ? undefined : "crit"} className="mb-6">
+        {!sweeping && (
+          <p className="mb-3 rounded-md bg-crit-soft px-3 py-2 text-sm font-medium text-crit">
+            Nothing is reading the mailbox, so replies will never be seen. Staff will do as they are asked, hear
+            nothing back, and the record will never appear.{" "}
+            <Link href="/settings/email" className="underline">Turn on automatic checking</Link> before you rely on
+            this route.
+          </p>
+        )}
+        <p className="text-sm text-ink-2">
           Every training email carries a code. If someone replies from their own address with the words{" "}
-          <b>{REPLY_PHRASE}</b> and that code, the site files the reply as their attestation, records the training and
-          produces their certificate — no action needed from you. One reply can close several at once, because quoting
-          the original brings all the codes with it.
+          <b>{REPLY_PHRASE}</b> and that code, the site files the reply as their attestation, records the training,
+          produces their certificate and emails it back to them — no action needed from you. One reply can close
+          several at once, because quoting the original brings all the codes with it.
         </p>
         <p className="mt-2 text-xs text-ink-3">
           The link is the better record: it captures a typed signature, the time, the device, and that they answered
@@ -498,7 +511,7 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
           face. Both are real; they are not identical, and a file where every record claims to be the stronger kind is
           the one that gets picked apart.
         </p>
-      </section>
+      </Card>
 
       {/* ── Certificates ── */}
       {done.length > 0 && (

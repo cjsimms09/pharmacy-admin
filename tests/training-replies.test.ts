@@ -33,3 +33,48 @@ describe("reply codes", () => {
     assert.match(REPLY_PHRASE, /^[A-Z ]+$/, "the phrase must survive being shouted by a mail client");
   });
 });
+
+import fs from "node:fs";
+
+/**
+ * The reply route has two ends and both have to exist. Somebody is told to reply; something has
+ * to read the reply; and they have to hear back, or the next instruction they get is one they
+ * assume does not work either.
+ */
+describe("the loop actually closes", () => {
+  const email = fs.readFileSync("src/lib/training-email.ts", "utf8");
+  const replies = fs.readFileSync("src/lib/training-replies.ts", "utf8");
+  const page = fs.readFileSync("src/app/(app)/compliance/training/page.tsx", "utf8");
+
+  test("the email says the words to send and where to send them from", () => {
+    assert.match(email, /REPLY_PHRASE/);
+    assert.match(email, /from this address/i, "must say the reply has to come from their own address");
+    assert.match(email, /reply code|Reply code/, "must show them the code");
+  });
+
+  test("both the plain-text and HTML versions carry the instruction", () => {
+    // A client that strips markup must not strip the only copy of how to reply.
+    const text = email.slice(email.indexOf("export function textFor"), email.indexOf("export function htmlFor"));
+    const html = email.slice(email.indexOf("export function htmlFor"));
+    assert.match(text, /REPLY_PHRASE/, "plain text lost the instruction");
+    assert.match(html, /REPLY_PHRASE/, "HTML lost the instruction");
+  });
+
+  test("a matched reply produces a training record and a certificate to point at", () => {
+    assert.match(replies, /schema\.trainings/, "must write the training record");
+    assert.match(replies, /trainingId/, "must link the record to the assignment");
+    assert.match(replies, /\/certificate/, "must send them their certificate");
+  });
+
+  test("the acknowledgement can never lose the record it is acknowledging", () => {
+    const ack = replies.slice(replies.indexOf("async function acknowledge"));
+    assert.match(ack, /try \{/, "sending must be guarded");
+    assert.match(ack, /catch/, "a mail failure must not undo a written record");
+  });
+
+  test("the screen says so when nothing is reading the mailbox", () => {
+    // Offering the reply route with no sweep running is worse than not offering it.
+    assert.match(page, /mail_enabled === "yes"/);
+    assert.match(page, /never be seen/i);
+  });
+});
