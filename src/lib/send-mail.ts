@@ -20,7 +20,7 @@ import { decryptText } from "./crypto";
 
 export type SendResult =
   /** `degraded` is set when the message went, but not intact — the attachments had to be dropped. */
-  | { ok: true; via: string; degraded?: string }
+  | { ok: true; via: string; degraded?: string; messageId?: string; response?: string }
   | { ok: false; error: string; tried?: string[] };
 
 export async function canSend(): Promise<boolean> {
@@ -167,7 +167,7 @@ export async function sendMail(
       // Both parts, always, when an HTML version exists: the plain text is what a phone's
       // notification preview shows and what survives a client that blocks markup, and an email
       // whose fallback is empty looks broken in exactly the situations where it matters most.
-      await transport.sendMail({
+      const info = await transport.sendMail({
         /*
          * A display name, not a bare address.
          *
@@ -184,8 +184,28 @@ export async function sendMail(
         html,
         attachments: withAttachments && attachments.length ? attachments : undefined,
       });
+      /*
+       * A resolved promise is not a delivered message.
+       *
+       * nodemailer only throws when the conversation itself fails — a bad password, a refused
+       * connection. When the server accepts the session and then refuses the *recipient*, it
+       * resolves normally with that address in `rejected`, and we were discarding the whole
+       * result object and calling it a success. So a mistyped or refused address reported "sent"
+       * and nothing ever arrived, which is precisely the failure being chased here.
+       */
+      const accepted = (info?.accepted ?? []).map(String);
+      const rejected = (info?.rejected ?? []).map(String);
+      const response = String(info?.response ?? "").trim();
+      if (rejected.length > 0 || accepted.length === 0) {
+        const why = rejected.length ? `the server refused ${rejected.join(", ")}` : "the server accepted the message for nobody";
+        tried.push(`${label} → ${why}${response ? `: ${response}` : ""}`);
+        continue;
+      }
+
       if (label !== remembered) await setSetting("mail_smtp_working", label);
-      return { ok: true as const, via: label };
+      // Kept so a message can be found afterwards: this id is in the Sent folder and in the
+      // receiving server's logs, and it is the difference between "we think it went" and proof.
+      return { ok: true as const, via: label, messageId: String(info?.messageId ?? ""), response };
     } catch (e) {
       tried.push(`${label} → ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`);
     }
@@ -195,8 +215,11 @@ export async function sendMail(
 
   const first = await attempt(true);
   if (first.ok) {
-    await setSetting("mail_last_send_result", `${new Date().toISOString()} — sent to ${to} via ${first.via}`);
-    return { ok: true, via: first.via };
+    await setSetting(
+      "mail_last_send_result",
+      `${new Date().toISOString()} — accepted for ${to} by ${first.via}. ${first.response || ""} id ${first.messageId || "(none)"}`.trim(),
+    );
+    return { ok: true, via: first.via, messageId: first.messageId, response: first.response };
   }
 
   if (attachments.length > 0) {
@@ -206,8 +229,8 @@ export async function sendMail(
         `The message was accepted only after the ${attachments.length} attached file` +
         `${attachments.length === 1 ? "" : "s"} were removed — the mail server or a virus filter is refusing ` +
         `attachments. The link and the reply code were in the body, so the training can still be completed.`;
-      await setSetting("mail_last_send_result", `${new Date().toISOString()} — sent to ${to} via ${bare.via}, WITHOUT ATTACHMENTS. ${degraded}`);
-      return { ok: true, via: bare.via, degraded };
+      await setSetting("mail_last_send_result", `${new Date().toISOString()} — accepted for ${to} by ${bare.via}, WITHOUT ATTACHMENTS. ${degraded} id ${bare.messageId || "(none)"}`);
+      return { ok: true, via: bare.via, degraded, messageId: bare.messageId, response: bare.response };
     }
   }
 

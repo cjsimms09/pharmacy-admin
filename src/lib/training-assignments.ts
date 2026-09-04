@@ -215,7 +215,19 @@ export async function sendOutstanding(personIds?: string[]): Promise<SendResult>
       // Named, always. The commonest reason an email "sends" and never arrives is that the address
       // on file is wrong — a typo, or a placeholder nobody replaced — and seeing it written out is
       // the entire diagnosis.
-      out.delivered.push(`${person.firstName} ${person.lastName} <${person.email}>`);
+      /*
+       * The message id, kept and shown.
+       *
+       * When a message is accepted and then never appears, this id is the only thread anyone can
+       * pull: it is in the sending account's Sent folder and in the receiving domain's mail logs,
+       * so whoever runs that domain can trace exactly where it went — delivered, quarantined, or
+       * dropped. Without it the conversation is "it says it sent" against "I never got it", which
+       * nobody can resolve.
+       */
+      out.delivered.push(
+        `${person.firstName} ${person.lastName} <${person.email}>` +
+          (r.messageId ? ` — message id ${r.messageId}` : ""),
+      );
       // Delivered, but not intact. Silently dropping the course packet would leave the pharmacy
       // believing it had emailed the training material when it had emailed a link to it.
       if (r.degraded) out.problems.push(`${person.firstName}: ${r.degraded}`);
