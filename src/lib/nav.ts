@@ -112,6 +112,7 @@ export const NAV: NavGroup[] = [
       { href: "/settings/email", label: "Email", blurb: "Reading reports in and sending training out" },
       { href: "/settings/connections", label: "Connections", blurb: "Claude, iMonnit and the rest" },
       { href: "/settings/training", label: "Training settings", blurb: "Materials and cadence" },
+      { href: "/settings/features", label: "Extra sections", blurb: "Parts of the site that are still being built" },
       { href: "/settings/network", label: "Network", blurb: "How to reach this from another computer" },
       { href: "/settings/updates", label: "Updates", blurb: "What version this is running" },
     ],

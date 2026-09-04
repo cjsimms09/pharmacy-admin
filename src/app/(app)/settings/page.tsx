@@ -7,6 +7,7 @@ import { requireManager, createUser } from "@/lib/auth";
 import { getSettings, setSetting, SETTING_KEYS, type SettingKey } from "@/lib/settings";
 import { audit } from "@/lib/audit";
 import { apiKeyHint, clearApiKey, saveApiKey, testConnection, DEFAULT_MODEL } from "@/lib/ai";
+import { Hub } from "@/components/hub";
 import { PageHeader, Notice, Field } from "@/components/ui";
 
 export const metadata = { title: "Settings" };
@@ -86,17 +87,15 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      <PageHeader title="Settings" subtitle="Pharmacy details used on printed Board forms, PSO status, Claude, logins, and updates." actions={
-        <>
-          <Link href="/settings/training" className="btn">Training material</Link>
-          <Link href="/settings/features" className="btn">Extra sections</Link>
-          <Link href="/settings/backups" className="btn">Backups</Link>
-          <Link href="/settings/connections" className="btn">Connections &amp; API keys</Link>
-          <Link href="/settings/email" className="btn">Email</Link>
-          <Link href="/settings/network" className="btn">Use from another computer</Link>
-          <Link href="/settings/updates" className="btn">Updates</Link>
-        </>
-      } />
+      {/*
+        The seven buttons that used to sit here are the seven pages the sidebar now lists under
+        Settings. Saying the same thing twice on the same screen is not twice as helpful; the
+        cards at the foot of the page say what each one is for, which the buttons never did.
+      */}
+      <PageHeader
+        title="Settings"
+        subtitle="The pharmacy's own details — these go on every printed Board form — plus the connections, the backups and who can sign in."
+      />
       {saved && <Notice>{ai ? `Connected to Claude (${ai}).` : "Saved."}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
 
@@ -217,10 +216,27 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <p className="text-xs text-ink-3">The first time, Windows must be told to allow it: in the app folder, right-click <b>Allow on network</b> and choose "Run as administrator" (once). Only computers on the pharmacy's own network can reach it; nothing is exposed to the internet. Phone access from outside comes with the hosting step in the plan.</p>
       </section>
 
+      {/*
+        This used to tell the pharmacy to close the app and copy the data folder by hand. That
+        advice is now wrong — backups run daily on their own, are verified before they are kept,
+        go to two places and are proved to restore once a month — and stale instructions sitting
+        next to a working mechanism are how somebody ends up doing neither.
+      */}
       <section className="card mt-6 max-w-3xl">
         <h2 className="mb-1 font-semibold">Backups</h2>
-        <p className="text-sm text-ink-2">Everything lives in the <code>data</code> folder inside the app folder (database and uploaded files) plus the <code>.env</code> file (encryption keys). Copy both to the pharmacy's backup drive regularly; the app should be closed while copying. Without the <code>.env</code> keys, prescription numbers in the CQI records cannot be read back.</p>
+        <p className="text-sm text-ink-2">
+          Taken automatically, once a day, without anybody copying anything. Each one is read back off the disk and
+          checked against the live database before it is kept, written to a second place if one is set, and once a
+          month an archive already on disk is opened cold and proved to restore.{" "}
+          <Link href="/settings/backups" className="underline">Backups</Link> shows the state of all of that, and holds
+          the encryption key you should have written down somewhere else.
+        </p>
       </section>
+
+      <div className="max-w-3xl">
+        <h2 className="mb-3 mt-8">Elsewhere in settings</h2>
+        <Hub href="/settings" exclude={["/settings"]} />
+      </div>
     </>
   );
 }

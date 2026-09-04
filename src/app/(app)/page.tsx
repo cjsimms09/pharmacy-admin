@@ -8,6 +8,7 @@ import { openFindings } from "@/lib/self-inspection";
 import { attestAction, answerAction, sendTrainingAction } from "./_actions/compliance";
 import { daysUntil, fmt, fmtLong, todayIso } from "@/lib/dates";
 import { PERSON_ROLE_LABEL } from "@/lib/labels";
+import { getSettings } from "@/lib/settings";
 import { Notice, Card, Figure, PageHeader } from "@/components/ui";
 
 // Live compliance status — never serve a cached copy after an action changes it.
@@ -74,7 +75,7 @@ const dueRow = (d: DueItem): Row => ({
 
 export default async function Dashboard({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
   const { ok, error } = await searchParams;
-  const [compliance, dated, matrix, cqi, cs, jobs, selfFindings] = await Promise.all([
+  const [compliance, dated, matrix, cqi, cs, jobs, selfFindings, settings] = await Promise.all([
     complianceSummary(),
     dueList({ horizonDays: 60 }),
     staffMatrix(),
@@ -82,7 +83,22 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     csInventoryStatus(),
     automationStatus(),
     openFindings(),
+    getSettings(),
   ]);
+
+  /*
+   * Details that print on Board forms.
+   *
+   * Missing, they do not break anything visibly — the C-250 and the C-900 just go out with a
+   * blank where the registration number belongs, and nobody notices until the form is in an
+   * inspector's hand. So it is said once, at the top, until it is fixed.
+   */
+  const setup = ([
+    ["pharmacy_name", "the pharmacy's name"],
+    ["pharmacy_registration_number", "the Kansas registration number"],
+    ["pharmacy_dea", "the DEA registration"],
+    ["pharmacy_address", "the address"],
+  ] as const).filter(([k]) => !settings[k]?.trim()).map(([, label]) => label);
 
   const today = todayIso();
   const cqiDays = daysUntil(cqi.dueOn)!;
@@ -196,6 +212,15 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
 
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
+
+      {setup.length > 0 && (
+        <Notice kind="crit">
+          Every Board form this site prints carries the pharmacy&rsquo;s own details, and{" "}
+          {setup.length === 1 ? "one is" : `${setup.length} are`} missing: {setup.join(", ")}. A C-250 or a C-900
+          handed over with a blank where the registration number belongs is a finding.{" "}
+          <Link href="/settings" className="underline">Fill them in once</Link> and every form is right from then on.
+        </Notice>
+      )}
 
       {/* ── The four numbers. Large, because this is the question asked from the doorway. ── */}
       <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -421,8 +446,8 @@ function StaffBoard({ m }: { m: StaffMatrix }) {
     return (
       <Card id="staff" title="Staff compliance" className="mb-6">
         <p className="text-sm text-ink-3">
-          No active staff yet. <Link href="/staff/new" className="text-accent underline">Add the first person</Link> and
-          this becomes the board you show an inspector.
+          No active staff yet. <Link href="/staff/new-hire" className="text-accent underline">Add the first person</Link>{" "}
+          and this becomes the board you show an inspector.
         </p>
       </Card>
     );
@@ -434,6 +459,7 @@ function StaffBoard({ m }: { m: StaffMatrix }) {
       actions={
         <>
           <Link href="/compliance/training" className="btn btn-sm btn-primary">Send training</Link>
+          <Link href="/staff/new-hire" className="btn btn-sm">New employee</Link>
           <Link href="/staff" className="btn btn-sm">Manage staff</Link>
         </>
       }
@@ -444,24 +470,35 @@ function StaffBoard({ m }: { m: StaffMatrix }) {
       }
       className="mb-6"
     >
-      {/* The grid is wider than a laptop on purpose — ten requirements is ten requirements — so it
-          scrolls inside its own box rather than squeezing the columns until nothing is readable. */}
+      {/*
+        Ten requirements is wider than a laptop, so the grid scrolls inside its own box rather than
+        squeezing the columns until nothing is readable. The person column is pinned: scrolling
+        right used to take the name off screen, leaving a row of badges belonging to nobody, and
+        the per-person count sat in the last column where it was the first thing cut off. Both now
+        travel with the row.
+      */}
       <div className="-mx-5 overflow-x-auto px-5">
-        <table className="w-full min-w-[62rem] text-sm">
+        <table className="w-full min-w-[58rem] text-sm">
           <thead>
             <tr className="border-b border-line text-left text-[10px] uppercase tracking-wide text-ink-3">
-              <th className="py-2 pr-3 font-semibold">Person</th>
+              <th className="sticky left-0 z-10 border-r border-line bg-surface py-2 pr-3 font-semibold shadow-[6px_0_6px_-6px_rgba(27,42,42,.12)]">Person</th>
               {m.columns.map((c) => (
                 <th key={c.key} className="whitespace-nowrap px-1 py-2 font-semibold" title={c.label}>{c.short}</th>
               ))}
-              <th className="py-2 pl-2 text-right font-semibold">Gaps</th>
             </tr>
           </thead>
           <tbody>
             {m.rows.map((r: MatrixRow) => (
               <tr key={r.id} className="border-b border-line last:border-0">
-                <td className="py-2 pr-3 whitespace-nowrap">
-                  <Link href={`/staff/${r.id}`} className="font-medium text-accent hover:underline">{r.name}</Link>
+                <td className="sticky left-0 z-10 whitespace-nowrap border-r border-line bg-surface py-2 pr-3 shadow-[6px_0_6px_-6px_rgba(27,42,42,.12)]">
+                  <div className="flex items-center gap-2">
+                    <Link href={`/staff/${r.id}`} className="font-medium text-accent hover:underline">{r.name}</Link>
+                    {r.gaps === 0 ? (
+                      <span className="badge badge-ok">clear</span>
+                    ) : (
+                      <span className="badge badge-crit" title={`${r.gaps} gaps`}>{r.gaps}</span>
+                    )}
+                  </div>
                   <div className="text-xs text-ink-3">
                     {PERSON_ROLE_LABEL[r.role as keyof typeof PERSON_ROLE_LABEL] ?? r.role}{r.isPic ? " · PIC" : ""}
                   </div>
@@ -469,22 +506,16 @@ function StaffBoard({ m }: { m: StaffMatrix }) {
                 {m.columns.map((c) => (
                   <td key={c.key} className="px-1 py-2 align-top"><CellBadge cell={r.cells[c.key]} /></td>
                 ))}
-                <td className="py-2 pl-2 text-right">
-                  {r.gaps === 0 ? (
-                    <span className="badge badge-ok">clear</span>
-                  ) : (
-                    <span className="badge badge-crit">{r.gaps}</span>
-                  )}
-                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
       <p className="mt-2 text-xs text-ink-3">
-        Hover any cell for the date and where it came from. &ldquo;—&rdquo; means the requirement does not apply to
-        that person. Training sends from here: the cell then says when it went out and offers the follow-up. Licence
-        and CPR gaps are fixed on the person&rsquo;s own page — click their name.
+        Scrolls sideways; the name and its gap count stay put. Hover any cell for the date and where it came from.
+        &ldquo;—&rdquo; means the requirement does not apply to that person. Training sends from here: the cell then
+        says when it went out and offers the follow-up. Licence and CPR gaps are fixed on the person&rsquo;s own
+        page — click their name.
       </p>
     </Card>
   );
