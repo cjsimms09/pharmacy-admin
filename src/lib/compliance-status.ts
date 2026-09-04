@@ -4,7 +4,7 @@ import { db, schema } from "@/db";
 import { newId } from "./crypto";
 import { onSiteToday } from "./roster";
 import { todayIso } from "./dates";
-import { ensureObligations, CLOSURES } from "./obligations";
+import { ensureObligations, CLOSURES, OBLIGATION_SEEDS, RENEWAL_CREDENTIAL } from "./obligations";
 import { periodsBetween, periodKeyFor, periodLabel, periodEnds, stateOf, type PeriodState } from "./periods";
 import type { ObligationKind, ObligationCadence } from "@/db/schema";
 
@@ -216,12 +216,59 @@ export async function answerObligation(
 }
 
 /** Everything outstanding, worst first. */
+/**
+ * When a duty is actually due inside its period.
+ *
+ * The period end is the fallback and it was being used for everything, which made every annual
+ * duty read "due Dec 31" — including the Kansas pharmacy registration, which runs to 30 June, and
+ * the DEA registration, which expires on whatever date is printed on the certificate. Both dates
+ * are already on file. Showing a date the pharmacist can see is wrong is worse than showing none:
+ * it teaches him not to trust the screen.
+ *
+ * The certificate first, then the rule, then the end of the period. A date read off the
+ * pharmacy's own registration beats any general rule about when registrations renew.
+ */
+function deadlineFor(
+  seedKey: string | null,
+  periodKey: string,
+  pharmacyCredentials: { type: string; expiresOn: string | null; noExpiry: boolean }[],
+): string {
+  const end = periodEnds(periodKey);
+  if (!seedKey) return end;
+
+  const credentialType = RENEWAL_CREDENTIAL[seedKey];
+  if (credentialType) {
+    const held = pharmacyCredentials
+      .filter((c) => c.type === credentialType && !c.noExpiry && c.expiresOn)
+      .map((c) => c.expiresOn!)
+      .sort();
+    // The one that falls inside this period is this period's deadline. A registration expiring in
+    // a later year says nothing about when the duty for this year was due.
+    const inPeriod = held.find((d) => d.startsWith(periodKey.slice(0, 4)));
+    if (inPeriod) return inPeriod;
+  }
+
+  const seed = OBLIGATION_SEEDS.find((s) => s.key === seedKey);
+  if (seed?.fixedDate) {
+    return `${periodKey.slice(0, 4)}-${String(seed.fixedDate.month).padStart(2, "0")}-${String(seed.fixedDate.day).padStart(2, "0")}`;
+  }
+  return end;
+}
+
 export async function openItems(): Promise<OpenItem[]> {
   await ensureObligations();
   const today = todayIso();
   const start = await startedUsingSite();
   const obligations = (await db.query.obligations.findMany()).filter((o) => o.active);
   const completions = await db.query.obligationCompletions.findMany();
+  /*
+   * The pharmacy's own registrations, so a renewal shows its real date.
+   *
+   * Null personId means a credential of the pharmacy rather than of a person. These carry the
+   * dates printed on the certificates, which is what "when is this due" actually means for a
+   * renewal — and which the site was ignoring in favour of the end of the annual period.
+   */
+  const pharmacyCredentials = (await db.query.credentials.findMany()).filter((c) => !c.personId);
 
   const out: OpenItem[] = [];
 
@@ -249,7 +296,7 @@ export async function openItems(): Promise<OpenItem[]> {
       const state = stateOf(have, o.expectedPerPeriod, periodKey, today);
       if (state === "satisfied") continue;
 
-      const dueOn = periodEnds(periodKey);
+      const dueOn = deadlineFor(o.seedKey, periodKey, pharmacyCredentials);
       const daysLate = dueOn < today ? Math.round((Date.parse(today) - Date.parse(dueOn)) / 86_400_000) : 0;
 
       out.push({

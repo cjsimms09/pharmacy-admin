@@ -28,6 +28,8 @@ export type Revision = {
   words: number;
   /** The most recent edit to any section, as a date. */
   changedOn: string | null;
+  /** The same, to the second, for deciding whether a signature came after the last edit. */
+  changedAt: string | null;
 };
 
 /**
@@ -71,11 +73,19 @@ export function revisionOf(sections: Section[]): Revision {
     .sort()
     .at(-1);
 
+
+  const changedAt = live
+    .map((s) => s.updatedAt ?? "")
+    .filter(Boolean)
+    .sort()
+    .at(-1);
+
   return {
     fingerprint: fingerprintOf(live.map((s) => `${s.title} ${s.body.trim()}`)),
     sections: live.length,
     words,
     changedOn: changed ?? null,
+    changedAt: changedAt ?? null,
   };
 }
 
@@ -106,3 +116,20 @@ export const ACK_LABEL: Record<AckState, string> = {
   superseded: "Acknowledged an earlier manual",
   unknown: "Acknowledged, version not recorded",
 };
+
+/**
+ * Whether an acknowledgement with no version recorded is nonetheless provably of this manual.
+ *
+ * The honest answer to "signed, but of what?" is usually to ask again — but not always, and asking
+ * for a signature somebody gave an hour ago is the sort of thing that teaches people to sign
+ * without reading. The manual records when each section was last edited. If nothing has been
+ * edited since the moment the person signed, the document they were shown is character for
+ * character the document on file now. That is not an assumption; it is a fact the system holds.
+ *
+ * Where the manual *has* been edited since, nothing can be established and it stays unresolved.
+ * Backfilling a fingerprint there would be inventing evidence.
+ */
+export function provablyCurrent(signedAt: string | null | undefined, current: Revision): boolean {
+  if (!signedAt || !current.changedAt) return false;
+  return current.changedAt <= signedAt;
+}

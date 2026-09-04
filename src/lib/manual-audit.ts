@@ -98,13 +98,33 @@ export function isAuditDue(auditedOn: string | null | undefined, today: string):
 }
 
 /** Sections due, oldest first, with never-audited ones ahead of everything. */
+/**
+ * The sections to read next, oldest first — with the ones that could not be read at the back.
+ *
+ * The ordering is the whole of a real bug. A never-audited section sorts first, so two sections
+ * that fail every time were retried first every time and consumed every batch: the pass reported
+ * "0 sections read" while a hundred and eighteen others were never reached, indefinitely. A failed
+ * attempt is not a read — the section is still due — but it is an attempt, and something tried an
+ * hour ago should go behind something never tried at all.
+ */
 async function due(limit: number) {
   const rows = await auditable();
   const today = todayIso();
+  const lastTried = (r: { auditedOn: string | null; auditFailedOn: string | null }) =>
+    [r.auditedOn ?? "", r.auditFailedOn ?? ""].sort().at(-1) ?? "";
   return rows
     .filter((r) => isAuditDue(r.auditedOn, today))
-    .sort((a, b) => (a.auditedOn ?? "").localeCompare(b.auditedOn ?? ""))
+    .sort((a, b) => lastTried(a).localeCompare(lastTried(b)))
     .slice(0, limit);
+}
+
+/** Sections that cannot be read, with the reason, so they can be dealt with rather than retried. */
+export async function auditFailures(): Promise<{ id: string; title: string; when: string; why: string }[]> {
+  const rows = await auditable();
+  return rows
+    .filter((r) => r.auditFailedOn && isAuditDue(r.auditedOn, todayIso()))
+    .map((r) => ({ id: r.id, title: r.title, when: r.auditFailedOn!, why: r.auditError ?? "No reason was recorded." }))
+    .sort((a, b) => b.when.localeCompare(a.when));
 }
 
 export type AuditRun = { audited: number; findings: number; remaining: number; problems: string[] };
@@ -166,7 +186,7 @@ export async function runManualAudit(
           await saveSection(sec.id, { body: appendixReference(form.name) }, { name: "Annual audit" });
           await db
             .update(schema.manualSections)
-            .set({ auditedOn: todayIso() })
+            .set({ auditedOn: todayIso(), auditFailedOn: null, auditError: null })
             .where(eq(schema.manualSections.id, sec.id));
           out.audited++;
           continue;
@@ -206,12 +226,23 @@ export async function runManualAudit(
       }
       await db
         .update(schema.manualSections)
-        .set({ auditedOn: todayIso() })
+        .set({ auditedOn: todayIso(), auditFailedOn: null, auditError: null })
         .where(eq(schema.manualSections.id, sec.id));
       out.audited++;
     } catch (e) {
-      out.problems.push(`${sec.title}: ${describeError(e)}`);
-      // Not marked as audited. A section the model could not be asked about is still due.
+      const why = describeError(e);
+      out.problems.push(`${sec.title}: ${why}`);
+      /*
+       * Not marked as audited — a section that could not be read is still due. But the attempt is
+       * recorded, and that is the fix for a real stall: the queue is oldest-first and a
+       * never-audited section sorts first, so two sections that fail every time were retried
+       * first every time and consumed every batch. The pass reported "0 sections read" while a
+       * hundred and eighteen others were never reached.
+       */
+      await db
+        .update(schema.manualSections)
+        .set({ auditFailedOn: new Date().toISOString(), auditError: why.slice(0, 500) })
+        .where(eq(schema.manualSections.id, sec.id));
     }
   }
 

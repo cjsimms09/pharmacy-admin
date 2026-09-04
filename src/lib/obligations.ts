@@ -1,6 +1,7 @@
 import "server-only";
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
+import type { CredentialType } from "@/db/schema";
 import { newId } from "./crypto";
 import { addDays, todayIso } from "./dates";
 import type { ObligationCadence, ObligationKind } from "@/db/schema";
@@ -176,6 +177,23 @@ export const CLOSURES: Record<string, Closure> = {
   // ── Renewals, driven by an expiry date ───────────────────────────
   ks_pharmacy_registration: { kind: "renewal", minutes: 20 },
   dea_registration: { kind: "renewal", minutes: 30 },
+};
+
+/**
+ * Renewals whose real date the site already holds.
+ *
+ * A renewal duty has a deadline, and it is not the end of the year. The Kansas pharmacy
+ * registration runs to 30 June; a DEA registration expires on whatever date is printed on the
+ * certificate, which is the pharmacy's own and nobody else's. Both are recorded on the licences
+ * page — so showing "due Dec 31" because that is when the annual period happens to end is the site
+ * ignoring a date it is already holding, and telling the pharmacist something he can see is wrong.
+ *
+ * The certificate wins where there is one. A date somebody read off their own registration beats
+ * any rule about when registrations generally renew.
+ */
+export const RENEWAL_CREDENTIAL: Record<string, CredentialType> = {
+  ks_pharmacy_registration: "pharmacy_registration",
+  dea_registration: "dea_registration",
 };
 
 export const OBLIGATION_SEEDS: ObligationSeed[] = [

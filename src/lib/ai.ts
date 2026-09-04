@@ -592,9 +592,27 @@ export async function reviewPolicy(
   if (MOCK) return { verdict: "ok", findings: [], suggestedBody: "" };
 
   const { client: c, model } = await client();
+
+  /*
+   * A long section is reviewed, not rewritten.
+   *
+   * The reply has to carry the findings *and*, where there is one, the whole section rewritten.
+   * On a long section that second part does not fit — the answer is cut off mid-structure, comes
+   * back unparseable, and the pharmacist is told "Claude returned an unreadable answer", which is
+   * both useless and untrue. Two sections of this pharmacy's manual failed on exactly that.
+   *
+   * Above this length the rewrite is not asked for at all. A four-thousand-word section is not
+   * something anybody reviews as a wholesale replacement anyway; the findings are what is wanted,
+   * and they always fit.
+   */
+  const TOO_LONG_TO_REWRITE = 9_000;
+  const longSection = input.body.length > TOO_LONG_TO_REWRITE;
+
   const res = await c.messages.parse({
     model,
-    max_tokens: 4000,
+    // Generous enough to carry findings and a full rewrite of an ordinary section. The old limit
+    // of 4,000 was the failure above.
+    max_tokens: 12_000,
     system:
       "You audit sections of an independent Kansas community pharmacy's policy and procedure manual against Kansas " +
       "Board of Pharmacy regulations (K.S.A. 65-16xx, K.A.R. 68-x), DEA requirements (21 CFR 1300-1317), HIPAA " +
@@ -620,12 +638,33 @@ export async function reviewPolicy(
           `The pharmacy: ${input.context}\n\n` +
           `What the compliance system already does:\n${input.siteDoes || "(nothing recorded)"}\n\n` +
           `Section title: ${input.title}\n\n` +
+          (longSection
+            ? "This section is long. Leave suggestedBody empty whatever you find — it is too long to replace " +
+              "wholesale, and the findings are what is wanted. Describe the change in the finding instead.\n\n"
+            : "") +
           `Current text:\n${input.body || "(empty)"}`,
       },
     ],
     output_config: { format: zodOutputFormat(PolicyReview) },
   });
-  if (!res.parsed_output) throw new Error("Claude returned an unreadable answer. Try again.");
+
+  /*
+   * Say what actually went wrong.
+   *
+   * "Claude returned an unreadable answer" was the message for every failure here, including the
+   * one that was really "the answer did not fit". A pharmacist reading that has nothing to act on
+   * and no reason to believe pressing again will help — and on a truncated answer it will not.
+   */
+  if (!res.parsed_output) {
+    if (res.stop_reason === "max_tokens") {
+      throw new Error(
+        `The review of “${input.title}” did not fit in one answer. The section is ${Math.round(input.body.length / 5)} words; ` +
+          "split it into smaller sections and each part will read on its own.",
+      );
+    }
+    if (res.stop_reason === "refusal") throw new Error(`Claude declined to review “${input.title}”.`);
+    throw new Error(`Claude returned an answer that could not be read for “${input.title}”. Try again.`);
+  }
   await logUsage("ai.policy.review", ctx.userId, ctx.userName, res.usage, input.title.slice(0, 120));
   return res.parsed_output;
 }
@@ -675,7 +714,9 @@ export async function draftPolicy(
   const { client: c, model } = await client();
   const res = await c.messages.parse({
     model,
-    max_tokens: 4000,
+    // A draft returns the whole section. The old limit of 4,000 truncated long ones, and a
+    // truncated structured answer comes back unparseable rather than short.
+    max_tokens: 12_000,
     system:
       "You revise sections of a community pharmacy's policy and procedure manual. Three rules override everything else.\n\n" +
       "First: never invent a fact about this pharmacy. If the text needs a detail you have not been given — a frequency, " +
@@ -701,7 +742,16 @@ export async function draftPolicy(
     ],
     output_config: { format: zodOutputFormat(PolicyDraft) },
   });
-  if (!res.parsed_output) throw new Error("Claude returned an unreadable answer. Try again.");
+  if (!res.parsed_output) {
+    if (res.stop_reason === "max_tokens") {
+      throw new Error(
+        `The draft of “${input.title}” did not fit in one answer. Split the section into smaller ones and each part ` +
+          "will write on its own.",
+      );
+    }
+    if (res.stop_reason === "refusal") throw new Error(`Claude declined to draft “${input.title}”.`);
+    throw new Error(`Claude returned an answer that could not be read for “${input.title}”. Try again.`);
+  }
   await logUsage("ai.policy.draft", ctx.userId, ctx.userName, res.usage, input.title.slice(0, 120));
   return res.parsed_output;
 }

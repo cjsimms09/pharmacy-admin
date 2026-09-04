@@ -26,6 +26,7 @@ import {
 import { policies, FORMS, appendixReference, suggestForm } from "@/lib/manual";
 import {
   auditProgress,
+  auditFailures,
   openFindings,
   runManualAudit,
   applyFinding,
@@ -33,7 +34,7 @@ import {
   applyAllFindings,
 } from "@/lib/manual-audit";
 import { manualJob, startPutRight, runPutRight, isRunning, isStale, summarise, ago } from "@/lib/manual-job";
-import { acknowledgementBoard } from "@/lib/manual-acknowledgement";
+import { acknowledgementBoard, settleVersions } from "@/lib/manual-acknowledgement";
 import { estimateSentence } from "@/lib/ai-spend";
 import { fmt } from "@/lib/dates";
 import { PageHeader, Card, Figure, Notice, Field, Empty } from "@/components/ui";
@@ -89,7 +90,7 @@ export default async function ManualPage({
   const working = isRunning(job);
   // Who has signed for this manual, and who signed for an older one. Read after the sections,
   // because it fingerprints exactly what is on this page.
-  const ack = await acknowledgementBoard();
+  const [ack, stuck] = await Promise.all([acknowledgementBoard(), auditFailures()]);
   const sections = outline(rows);
   const pharmacy = s.pharmacy_name || "This pharmacy";
 
@@ -530,6 +531,29 @@ export default async function ManualPage({
    * is due read against the requirements. It deliberately does not rewrite a policy the pharmacy
    * has already written — that is the next button along, and it says how many it will change.
    */
+  /**
+   * Settles acknowledgements that were signed before versions were recorded.
+   *
+   * Only the ones where nothing in the manual has been edited since the signature, so nothing is
+   * asserted that the system cannot show. The basis goes into the record beside the version, since
+   * a fingerprint that appeared afterwards has to say how it got there.
+   */
+  async function settleAction() {
+    "use server";
+    const u = await requireManager();
+    const r = await settleVersions(u);
+    await audit({ action: "manual.ack.settle", userId: u.id, userName: u.name, details: `${r.settled}` });
+    revalidatePath("/manual");
+    redirect(
+      "/manual?ok=" +
+        encodeURIComponent(
+          r.settled === 0
+            ? "Nothing could be settled from the edit history. Those signatures were given before an edit, so the only way to say which manual they cover is to ask again."
+            : `${r.settled} acknowledgement${r.settled === 1 ? "" : "s"} recorded against this revision, because no section had been edited between the signature and now. ${r.left > 0 ? `${r.left} still cannot be established and would need sending again.` : "Every acknowledgement now names its manual."}`,
+        ),
+    );
+  }
+
   async function putRightAction() {
     "use server";
     const u = await requireManager();
@@ -751,6 +775,38 @@ export default async function ManualPage({
               requirements within the last year, a few at a time on their own.
               {audit_.lastResult ? ` Last pass: ${audit_.lastResult}` : ""}
             </p>
+
+            {/*
+              Sections that cannot be read, named rather than left to stall the queue.
+
+              These used to be invisible and self-perpetuating: the queue is oldest-first, a
+              never-read section sorts first, so the same two failures were retried first every
+              time and consumed every batch — the pass reported "0 sections read" while the rest
+              of the manual was never reached. They go to the back now, and they appear here so
+              they can be dealt with instead of retried.
+            */}
+            {stuck.length > 0 && (
+              <div className="mt-3 rounded-md border border-warn bg-warn-soft p-3">
+                <p className="text-xs font-semibold text-warn">
+                  {stuck.length} section{stuck.length === 1 ? "" : "s"} could not be read
+                </p>
+                <ul className="mt-1 space-y-1">
+                  {stuck.slice(0, 5).map((f) => (
+                    <li key={f.id} className="text-xs">
+                      <Link href={`/manual?edit=${f.id}`} className="font-medium text-accent hover:underline">
+                        {f.title}
+                      </Link>
+                      <span className="block text-ink-3">{f.why}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-1.5 text-xs text-ink-3">
+                  The rest of the manual is read regardless — these no longer hold up the queue. A section too long to
+                  read in one pass is one to split into smaller sections, which is worth doing anyway: nobody reads a
+                  four-thousand-word policy either.
+                </p>
+              </div>
+            )}
           </Card>
 
           {/*
@@ -815,6 +871,34 @@ export default async function ManualPage({
               </ul>
             )}
 
+            {/*
+              The version that can be established without asking anybody again.
+
+              "Acknowledged, version not recorded" is a real gap — the file shows a signature and
+              cannot say of what — but the honest fix is not always to ask again. The manual records
+              when each section was last edited; where nothing has been edited since somebody
+              signed, the document they were shown is character for character the one on file, and
+              that can simply be recorded. Asking for a signature given this morning is how people
+              learn to sign without reading.
+            */}
+            {ack.settleable > 0 && canManage && (
+              <div className="mt-3 rounded-md border border-accent bg-accent-soft p-3">
+                <p className="text-sm font-semibold text-accent">
+                  {ack.settleable} of these can be settled without asking anybody again
+                </p>
+                <p className="mt-1 text-xs text-ink-2">
+                  No section of the manual has been edited since {ack.settleable === 1 ? "that person" : "those people"}{" "}
+                  signed, so the manual they were shown is character for character this one. Recording it says so, and
+                  records how it was established.
+                </p>
+                <form action={settleAction} className="mt-2">
+                  <SubmitButton className="btn btn-sm btn-primary" pendingLabel="Recording…">
+                    Record this revision against them
+                  </SubmitButton>
+                </form>
+              </div>
+            )}
+
             {(ack.superseded > 0 || ack.unknownCount > 0) && (
               <p className="mt-3 text-xs text-ink-3">
                 {ack.superseded > 0 && (
@@ -827,7 +911,10 @@ export default async function ManualPage({
                 {ack.unknownCount > 0 && (
                   <>
                     {ack.unknownCount} signed before revisions were recorded, so the file shows an acknowledgement
-                    without saying of what. Sending it again is the only way to fix that.
+                    without saying of what.
+                    {ack.unknownCount > ack.settleable
+                      ? ` ${ack.unknownCount - ack.settleable} of those cannot be established from the edit history — the manual was edited after they signed — so sending it again is the only way to fix ${ack.unknownCount - ack.settleable === 1 ? "that one" : "those"}.`
+                      : ""}
                   </>
                 )}
               </p>

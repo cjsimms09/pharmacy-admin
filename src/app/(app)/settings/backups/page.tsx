@@ -234,7 +234,7 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
           </Field>
           <Field
             label="And a second place"
-            hint="Somewhere that does not fail at the same time as the first: a USB drive kept off the premises, a network share, or a synced cloud folder such as OneDrive. Every archive that passes verification is written and read back here too."
+            hint="Somewhere that does not fail at the same time as the first. A USB drive kept off the premises is the simplest answer and needs no agreement with anybody; a pharmacy OneDrive works and carries one; a personal cloud account does not. Every archive that passes verification is written and read back here too."
             className="sm:col-span-2"
           >
             <input name="destination2" defaultValue={s.destination2 ?? ""} className="field font-mono" placeholder="Leave empty for one copy only" />

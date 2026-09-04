@@ -574,6 +574,17 @@ export const manualSections = sqliteTable(
      * and still be wrong, which is the failure mode this column exists to make visible.
      */
     auditedOn: text("audited_on"),
+    /**
+     * When reading this section last failed, and why.
+     *
+     * Without this a section that cannot be read is retried first for ever. The queue is ordered
+     * oldest-first, a never-audited section sorts first, and two sections that fail every time
+     * therefore consume every batch — the audit reports "0 sections read" indefinitely while the
+     * other hundred and eighteen are never reached. Recording the attempt moves them to the back
+     * without pretending they were read, and gives the pharmacist something to act on.
+     */
+    auditFailedOn: text("audit_failed_on"),
+    auditError: text("audit_error"),
     createdAt: text("created_at").notNull().default(now()),
     updatedAt: text("updated_at").notNull().default(now()),
   },
