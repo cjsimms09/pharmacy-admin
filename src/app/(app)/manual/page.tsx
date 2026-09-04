@@ -35,6 +35,7 @@ import {
 } from "@/lib/manual-audit";
 import { fmt } from "@/lib/dates";
 import { PageHeader, Card, Figure, Notice, Field } from "@/components/ui";
+import { SubmitButton } from "@/components/submit-button";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Policy manual" };
@@ -590,9 +591,12 @@ export default async function ManualPage({
               <Link href="/manual/print" className="btn">Print it</Link>
               {canManage && problems.length > 0 && (
                 <form action={putRightAction}>
-                  <button className="btn btn-primary" disabled={!aiReady && empty.length === 0 && citeTotal === 0}>
+                  <SubmitButton
+                    pendingLabel="Working through it…"
+                    disabled={!aiReady && empty.length === 0 && citeTotal === 0}
+                  >
                     Put it right
-                  </button>
+                  </SubmitButton>
                 </form>
               )}
             </>
@@ -658,9 +662,13 @@ export default async function ManualPage({
               <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-4">
                 {problems.length > 0 && (
                   <form action={putRightAction}>
-                    <button className="btn btn-primary" disabled={!aiReady && empty.length === 0 && citeTotal === 0}>
+                    <SubmitButton
+                      pendingLabel="Working through it…"
+                      hint="Up to a minute. It reads the manual against the rules, so leave this page open — whatever it finishes is saved as it goes."
+                      disabled={!aiReady && empty.length === 0 && citeTotal === 0}
+                    >
                       Put it right
-                    </button>
+                    </SubmitButton>
                   </form>
                 )}
                 {/*
@@ -673,7 +681,9 @@ export default async function ManualPage({
                 */}
                 {fixable > 0 && (
                   <form action={applyAllAction}>
-                    <button className="btn">Apply all {fixable} suggested rewrites</button>
+                    <SubmitButton className="btn" pendingLabel="Rewriting…" hint="A few seconds per section.">
+                      Apply all {fixable} suggested rewrites
+                    </SubmitButton>
                   </form>
                 )}
                 {stale.length > 0 && (

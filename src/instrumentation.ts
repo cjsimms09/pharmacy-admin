@@ -268,9 +268,18 @@ export async function register() {
       const { hasApiKey } = await import("./lib/ai");
       if (!(await hasApiKey())) return;
       const last = s.manual_audit_last ? Date.parse(s.manual_audit_last) : 0;
-      if (Number.isFinite(last) && Date.now() - last < 60 * 60 * 1000) return;
-      const { runManualAudit } = await import("./lib/manual-audit");
-      await runManualAudit({ id: "system", name: "Annual audit" }, { limit: 4 });
+      if (Number.isFinite(last) && Date.now() - last < 25 * 60 * 1000) return;
+      const { runManualAudit, auditProgress } = await import("./lib/manual-audit");
+      /*
+       * Faster while there is a backlog, and idle to a crawl once there is not.
+       *
+       * This is where the bulk of the reading happens — the button on the page is only the part
+       * that shows somebody it is working. A hundred and fifty sections at four an hour is most
+       * of two days; at eight every half hour it is a few hours, all of it while nobody is using
+       * the site, and it costs nothing once the manual is current because there is nothing due.
+       */
+      const progress = await auditProgress();
+      await runManualAudit({ id: "system", name: "Annual audit" }, { limit: progress.due > 20 ? 8 : 4 });
     } catch {
       // The outcome is recorded in settings and shown on the manual page.
     }

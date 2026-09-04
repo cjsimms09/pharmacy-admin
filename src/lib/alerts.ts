@@ -241,6 +241,33 @@ export async function alerts(): Promise<Alert[]> {
     }
   }
 
+  /*
+   * An installation that is behind is the alert that explains the other alerts.
+   *
+   * Repairs are made and pushed, and then nothing changes on the pharmacy's own computer until
+   * somebody installs them — so a bug that was fixed a week ago is still being hit, reported
+   * again, and investigated again. That happened: three separate things were reported as broken
+   * after they had been repaired, because the copy in the pharmacy predated every one of the
+   * repairs.
+   *
+   * It sits with the things that need doing today for exactly that reason. It is not a feature
+   * request; it is the difference between running the software that was fixed and the software
+   * that was not.
+   */
+  const behind = Number(s.updates_behind ?? 0);
+  if (behind > 0) {
+    out.push({
+      key: "updates",
+      level: behind >= 5 ? "now" : "soon",
+      title: `${behind} update${behind === 1 ? "" : "s"} ${behind === 1 ? "is" : "are"} waiting to be installed`,
+      why:
+        (s.updates_newest ? `The newest is “${s.updates_newest}”. ` : "") +
+        "Nothing on this computer changes until they are installed, so anything already repaired is still broken here.",
+      href: "/settings/updates",
+      action: "Install",
+    });
+  }
+
   // ── A pharmacy with nobody in charge of it ────────────────────────
   if (people.length > 0 && !people.some((p) => p.isPic)) {
     out.push({

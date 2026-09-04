@@ -327,15 +327,19 @@ export async function putRight(
   const auditLimit = opts.auditLimit ?? 5;
   const draftLimit = opts.draftLimit ?? 5;
   /*
-   * A hard stop, in seconds rather than in items.
+   * A hard stop, in seconds rather than in items, and a short one.
    *
    * The count alone was not enough. The site appeared to freeze after this button was pressed,
-   * because a request holding the connection for ten minutes is a frozen site as far as anybody
-   * watching is concerned. Counting items assumes each one takes a predictable time; a clock does
-   * not have to assume anything. Whatever is finished is saved as it goes, so stopping early
-   * loses nothing and the next press picks up where this one left off.
+   * because a request that takes minutes is a frozen site as far as anybody watching is
+   * concerned. Counting items assumes each one takes a predictable time; a clock does not have to
+   * assume anything.
+   *
+   * Thirty seconds, because that is about as long as somebody will watch a button before deciding
+   * it is broken. The press is not where the bulk of the work happens — the background pass is,
+   * and it runs whether or not anybody presses anything. This is the part that shows you it is
+   * working. Whatever finishes is saved as it goes, so stopping early loses nothing.
    */
-  const deadline = Date.now() + (opts.budgetMs ?? 75_000);
+  const deadline = Date.now() + (opts.budgetMs ?? 30_000);
 
   const out: PutRightResult = {
     regenerated: 0,
