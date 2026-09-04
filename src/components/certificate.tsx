@@ -21,6 +21,22 @@ export function Certificate({ c }: { c: CertificateData }) {
     <article className="certificate mx-auto max-w-3xl bg-white p-2 text-ink">
       <div className="border-[3px] border-double border-[#0e6b5a] p-8 sm:p-12">
         <header className="text-center">
+          {/*
+            The mark above the name, not beside it.
+
+            A certificate is a symmetrical object — everything on it is centred — and a logo pushed
+            into a corner reads as a letterhead stuck onto something else. Height-capped so a wide
+            logo and a square one both leave the tracked capitals underneath as the thing the eye
+            lands on second.
+          */}
+          {c.pharmacy.logoUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={c.pharmacy.logoUrl}
+              alt=""
+              className="mx-auto mb-4 max-h-16 w-auto max-w-[2.6in] object-contain"
+            />
+          )}
           <p className="text-[11px] uppercase tracking-[0.35em] text-ink-2">{c.pharmacy.name}</p>
           {c.pharmacy.address && <p className="mt-1 text-[11px] text-ink-3">{c.pharmacy.address}</p>}
           <p className="text-[11px] text-ink-3">

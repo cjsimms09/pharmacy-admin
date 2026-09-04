@@ -9,6 +9,8 @@ import { endEmploymentAction, reinstateAction } from "./actions";
 import { todayIso } from "@/lib/dates";
 import { trainingsFor } from "@/lib/onboarding";
 import { TRAINING_CADENCE, addMonths } from "@/lib/due";
+import { staffMatrix } from "@/lib/staff-matrix";
+import { StaffBoard } from "@/components/staff-board";
 
 export const metadata = { title: "Staff & licenses" };
 
@@ -17,6 +19,7 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
   const { all, saved, error } = await searchParams;
   const people = await db.query.people.findMany({ orderBy: (p, { asc }) => [asc(p.lastName), asc(p.firstName)] });
   const creds = await db.query.credentials.findMany();
+  const matrix = await staffMatrix();
   /*
    * Training belongs on the list of people, not only inside each person.
    *
@@ -45,6 +48,15 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
       />
       {saved && <Notice kind="ok">{saved}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
+
+      {/*
+        Is my staff covered, on the page about staff.
+
+        It used to sit on the dashboard directly beneath a list that had already named every one of
+        the same gaps, which is two renderings of the same forty-two things on one screen. Here it
+        is the summary of the list underneath it rather than a duplicate of something else.
+      */}
+      <StaffBoard m={matrix} back="/staff" />
 
       {shown.length === 0 ? (
         <Empty>No staff yet. {canManage && <Link href="/staff/new" className="text-accent underline">Add the first person.</Link>}</Empty>
@@ -145,7 +157,7 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
                           the immunizer checkbox — so for anyone whose record did not already say
                           immunizer, it did not exist anywhere.
                         */}
-                        <Link href={`/staff/${p.id}/protocol`} className="btn btn-sm mb-1 block text-center">
+                        <Link href={`/staff/${p.id}/protocol`} className="text-xs text-accent hover:underline">
                           Protocol
                         </Link>
                         {p.active ? (
@@ -153,7 +165,10 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
                             <input type="hidden" name="personId" value={p.id} />
                             <input type="hidden" name="endedOn" value={todayIso()} />
                             <input type="hidden" name="back" value="/staff" />
-                            <button className="btn btn-sm" title="Keeps the whole file; stops them owing training and stops the emails.">
+                            <button
+                              className="text-xs text-ink-3 hover:text-crit hover:underline"
+                              title="Keeps the whole file; stops them owing training and stops the emails."
+                            >
                               Make inactive
                             </button>
                           </form>

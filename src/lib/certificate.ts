@@ -53,6 +53,8 @@ export type CertificateData = {
     address: string;
     registration: string | null;
     phone: string | null;
+    /** The pharmacy's own mark, where one has been uploaded. */
+    logoUrl: string | null;
   };
   issuedBy: string;
   /**
@@ -158,6 +160,7 @@ export async function certificateFor(trainingId: string): Promise<CertificateDat
       address,
       registration: s.pharmacy_registration_number || null,
       phone: s.pharmacy_phone || null,
+      logoUrl: (await (await import("./branding")).logo())?.url ?? null,
     },
     issuedBy: pic ? `${pic.firstName} ${pic.lastName}, Pharmacist-in-Charge` : "The pharmacist-in-charge",
     trainerQualifications: who.qualifications,

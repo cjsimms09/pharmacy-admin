@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
  */
 describe("a completed training links to its certificate", () => {
   const matrix = readFileSync(new URL("../src/lib/staff-matrix.ts", import.meta.url), "utf8");
-  const dash = readFileSync(new URL("../src/app/(app)/page.tsx", import.meta.url), "utf8");
+  const dash = readFileSync(new URL("../src/components/staff-board.tsx", import.meta.url), "utf8");
   const training = readFileSync(new URL("../src/app/(app)/compliance/training/page.tsx", import.meta.url), "utf8");
 
   test("the route the links point at actually exists", () => {
@@ -31,7 +31,10 @@ describe("a completed training links to its certificate", () => {
     assert.match(matrix, /\/staff\/\$\{p\.id\}#credential-form/);
   });
 
-  test("the dashboard renders the cell as a link when there is one", () => {
+  test("the staff board renders the cell as a link when there is one", () => {
+    // The board moved off the dashboard and into its own component when it was rebuilt; the
+    // behaviour this asserts — a cell with evidence behind it opens that evidence — is the point
+    // of it, so the test follows the code rather than the page it used to live on.
     assert.match(dash, /cell\.href \? \(/);
   });
 

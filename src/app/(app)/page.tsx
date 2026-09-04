@@ -2,14 +2,13 @@ import Link from "next/link";
 import { cqiSnapshot, csInventoryStatus } from "@/lib/compliance";
 import { dueList, type DueItem } from "@/lib/due";
 import { complianceSummary, type OpenItem } from "@/lib/compliance-status";
-import { staffMatrix, type Cell, type MatrixRow, type StaffMatrix } from "@/lib/staff-matrix";
+import { staffMatrix } from "@/lib/staff-matrix";
 import { invoiceIssues } from "@/lib/invoices";
 import { alerts, SOON_DAYS } from "@/lib/alerts";
 import { automationStatus, type JobStatus } from "@/lib/automation-status";
 import { openFindings } from "@/lib/self-inspection";
-import { attestAction, answerAction, sendTrainingAction, requestCredentialAction } from "./_actions/compliance";
+import { attestAction, answerAction } from "./_actions/compliance";
 import { daysUntil, fmt, fmtLong, todayIso } from "@/lib/dates";
-import { PERSON_ROLE_LABEL } from "@/lib/labels";
 import { getSettings } from "@/lib/settings";
 import { mailHealth } from "@/lib/mail-health";
 import { pendingUpdates } from "@/lib/updates";
@@ -417,9 +416,15 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         </Card>
       )}
 
-      {/* ── Is my staff covered. Second, and prominent, because it is the question an inspector
-             actually asks and the only view that answers it in one look. ── */}
-      <StaffBoard m={matrix} />
+      {/*
+        The staff board is not here any more.
+
+        It answered "is my staff covered" a second time, in a grid, directly under a list that had
+        just named every one of the same gaps with a button beside each. Two renderings of forty-two
+        gaps on one screen is not thoroughness, it is noise — and it pushed everything else on this
+        page below the fold. It lives on the staff page, which is where somebody goes to look at
+        people.
+      */}
 
       {/* ── One-click closures ── */}
       {quick.length > 0 && (
@@ -602,178 +607,6 @@ function Group({ title, rows, action }: { title: string; rows: Row[]; action: { 
  * An empty cell is a finding; a cell merely approaching its date is not, and is not coloured as
  * though it were.
  */
-function StaffBoard({ m }: { m: StaffMatrix }) {
-  if (m.rows.length === 0) {
-    return (
-      <Card id="staff" title="Staff compliance" className="mb-6">
-        <p className="text-sm text-ink-3">
-          No active staff yet. <Link href="/staff/new-hire" className="text-accent underline">Add the first person</Link>{" "}
-          and this becomes the board you show an inspector.
-        </p>
-      </Card>
-    );
-  }
-  return (
-    <Card
-      id="staff"
-      title="Staff compliance"
-      actions={
-        <>
-          <Link href="/compliance/training" className="btn btn-sm btn-primary">Send training</Link>
-          <Link href="/staff/new-hire" className="btn btn-sm">New employee</Link>
-          <Link href="/staff" className="btn btn-sm">Manage staff</Link>
-        </>
-      }
-      subtitle={
-        m.gaps === 0
-          ? `All ${m.rows.length} active staff are covered on every requirement.`
-          : `${m.gaps} gap${m.gaps === 1 ? "" : "s"} across ${m.rows.length - m.covered} of ${m.rows.length} people. A gap is nothing on file, or lapsed — not merely approaching its date.`
-      }
-      className="mb-6"
-    >
-      {/*
-        Ten requirements is wider than a laptop, so the grid scrolls inside its own box rather than
-        squeezing the columns until nothing is readable. The person column is pinned: scrolling
-        right used to take the name off screen, leaving a row of badges belonging to nobody, and
-        the per-person count sat in the last column where it was the first thing cut off. Both now
-        travel with the row.
-      */}
-      <div className="-mx-5 overflow-x-auto px-5">
-        <table className="w-full min-w-[58rem] text-sm">
-          <thead>
-            <tr className="border-b border-line text-left text-[10px] uppercase tracking-wide text-ink-3">
-              <th className="sticky left-0 z-10 border-r border-line bg-surface py-2 pr-3 font-semibold shadow-[6px_0_6px_-6px_rgba(27,42,42,.12)]">Person</th>
-              {m.columns.map((c) => (
-                <th key={c.key} className="whitespace-nowrap px-1 py-2 font-semibold" title={c.label}>{c.short}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {m.rows.map((r: MatrixRow) => (
-              <tr key={r.id} className="border-b border-line last:border-0">
-                <td className="sticky left-0 z-10 whitespace-nowrap border-r border-line bg-surface py-2 pr-3 shadow-[6px_0_6px_-6px_rgba(27,42,42,.12)]">
-                  <div className="flex items-center gap-2">
-                    <Link href={`/staff/${r.id}`} className="font-medium text-accent hover:underline">{r.name}</Link>
-                    {r.gaps === 0 ? (
-                      <span className="badge badge-ok">clear</span>
-                    ) : (
-                      <span className="badge badge-crit" title={`${r.gaps} gaps`}>{r.gaps}</span>
-                    )}
-                  </div>
-                  <div className="text-xs text-ink-3">
-                    {PERSON_ROLE_LABEL[r.role as keyof typeof PERSON_ROLE_LABEL] ?? r.role}{r.isPic ? " · PIC" : ""}
-                  </div>
-                </td>
-                {m.columns.map((c) => (
-                  <td key={c.key} className="px-1 py-2 align-top"><CellBadge cell={r.cells[c.key]} /></td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <p className="mt-2 text-xs text-ink-3">
-        Scrolls sideways; the name and its gap count stay put. Hover any cell for the date and where it came from.
-        &ldquo;—&rdquo; means the requirement does not apply to that person. Everything on this board acts from the
-        cell that shows it: training sends, and a missing licence, CPhT or card is asked for by email. What they send
-        back files itself against that requirement, with the dates left blank for you to fill in — because a made-up
-        expiry date passes every check while telling you nothing.
-      </p>
-    </Card>
-  );
-}
-
-/**
- * One cell of the staff board.
- *
- * Where the cell is a gap the site can do something about, the cell is the control: send it, and
- * afterwards the same cell says when it went and offers the follow-up. A grid that only reports
- * makes you go and find the screen that acts, and the going is where the work stops happening.
- */
-function CellBadge({ cell }: { cell: Cell }) {
-  if (cell.state === "na") return <span className="text-xs text-ink-3" title={cell.title}>—</span>;
-  const cls =
-    cell.state === "missing" || cell.state === "late" ? "badge-crit" : cell.state === "soon" ? "badge-warn" : "badge-ok";
-  /*
-   * The badge is the link to its own evidence.
-   *
-   * "It says they did it" and "here is the certificate" are different claims, and the second is the
-   * only one worth anything with an inspector in the room. Where the cell has something behind
-   * it — a certificate for a completed training, the record a credential was read from — the cell
-   * opens it, so the grid can be trusted without leaving the grid.
-   */
-  const badge = cell.href ? (
-    <Link href={cell.href} className={`badge ${cls} hover:underline`} title={cell.title}>
-      {cell.label}
-    </Link>
-  ) : (
-    <span className={`badge ${cls}`} title={cell.title}>{cell.label}</span>
-  );
-  /*
-    A credential gap the site can do something about, done from the cell that shows it.
-    
-    Licence and CPR gaps used to be the one column on this board with nothing behind it — you
-    were told to go to the person's page, and on the person's page the only options assumed the
-    card was in the building. When it is not, the job is: email them, wait, remember, then file
-    what came back against the right requirement. That is four steps and four places to stop,
-    which is why the same empty cells were still empty months later.
-  */
-  if (cell.credentialAction) {
-    const { credentialType, personId: pid, askedOn, hasEmail } = cell.credentialAction;
-    return (
-      <div className="w-[5.5rem]">
-        {badge}
-        {!hasEmail ? (
-          <div className="mt-1 text-[11px] leading-tight text-ink-3">no email</div>
-        ) : (
-          <>
-            {askedOn && <div className="mt-1 text-[11px] leading-tight text-ink-3">asked {askedOn}</div>}
-            <form action={requestCredentialAction} className="mt-1">
-              <input type="hidden" name="personId" value={pid} />
-              <input type="hidden" name="credentialType" value={credentialType} />
-              <input type="hidden" name="back" value="/" />
-              <button className={`btn btn-sm w-full px-1 ${askedOn ? "" : "btn-primary"}`}>
-                {askedOn ? "Ask again" : "Ask for it"}
-              </button>
-            </form>
-          </>
-        )}
-      </div>
-    );
-  }
-
-  if (!cell.action) return badge;
-
-  const { trainingType, personId, sentOn, reminders, sendError } = cell.action;
-  return (
-    <div className="w-[5.5rem]">
-      {badge}
-      {sentOn || sendError ? (
-        <>
-          <div className="mt-1 text-[11px] leading-tight text-ink-3">
-            {sendError ? <span className="text-crit">{sendError}</span> : <>sent {sentOn}</>}
-            {reminders > 0 && <> · {reminders} reminder{reminders === 1 ? "" : "s"}</>}
-          </div>
-          <form action={sendTrainingAction} className="mt-1">
-            <input type="hidden" name="personId" value={personId} />
-            <input type="hidden" name="trainingType" value={trainingType} />
-            <input type="hidden" name="followUp" value="1" />
-            <input type="hidden" name="back" value="/" />
-            <button className="btn btn-sm w-full px-1">Follow up</button>
-          </form>
-        </>
-      ) : (
-        <form action={sendTrainingAction} className="mt-1">
-          <input type="hidden" name="personId" value={personId} />
-          <input type="hidden" name="trainingType" value={trainingType} />
-          <input type="hidden" name="back" value="/" />
-          <button className="btn btn-sm btn-primary w-full px-1">Send</button>
-        </form>
-      )}
-    </div>
-  );
-}
-
 /** How long ago, in the words a person would use. */
 function ago(iso: string | null): string {
   if (!iso) return "never";

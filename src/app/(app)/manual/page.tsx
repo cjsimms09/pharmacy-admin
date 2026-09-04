@@ -94,6 +94,15 @@ export default async function ManualPage({
   const working = isRunning(job);
   // Who has signed for this manual, and who signed for an older one. Read after the sections,
   // because it fingerprints exactly what is on this page.
+  /*
+   * Which chapters the open findings are landing in, and who maintains each.
+   *
+   * The pharmacist-in-charge said plainly that the employment half of this handbook is not his to
+   * change. The site has always been able to record that — but only from a select buried inside an
+   * opened chapter, which is to say nowhere anybody would look. So the findings kept arriving
+   * against sections he cannot edit, and the only way to stop them was to know about a control he
+   * had never seen. It belongs next to the findings, which is where the problem is felt.
+   */
   const [ack, stuck, facts, roles, blocked] = await Promise.all([
     acknowledgementBoard(),
     auditFailures(),
@@ -1112,6 +1121,68 @@ export default async function ManualPage({
               </Card>
             </details>
           ))}
+
+          {/*
+            Whose chapter is this, asked where the findings are.
+
+            Every finding here names a section. If a run of them is landing in a chapter the
+            pharmacy does not write, the answer is not to fix them one at a time — it is to say so
+            once. Marking a chapter takes it out of the audit, out of this list and out of the
+            annual review, and moves what was already found into the panel addressed to whoever
+            does maintain it. Nothing is deleted and the chapter still prints as part of the manual.
+          */}
+          {findings.length > 0 && canManage && (() => {
+            const byChapter = new Map<string, { title: string; count: number }>();
+            for (const f of findings) {
+              const node = sections.find((x) => x.id === f.sectionId);
+              const chapterId = node?.chapterId ?? f.sectionId;
+              const chapter = sections.find((x) => x.id === chapterId);
+              if (!chapter || chapter.managedBy) continue;
+              const cur = byChapter.get(chapterId) ?? { title: chapter.title, count: 0 };
+              byChapter.set(chapterId, { title: cur.title, count: cur.count + 1 });
+            }
+            const rows = [...byChapter.entries()].filter(([, v]) => v.count >= 2).sort((a, b) => b[1].count - a[1].count);
+            if (rows.length === 0) return null;
+            // Names already in use elsewhere in this manual, so the usual answer is one press.
+            const known = others.map((o) => o.name);
+            return (
+              <Card
+                title="Is any of this somebody else's to fix?"
+                subtitle="A chapter the pharmacy is bound by but does not write — an employment handbook from a practice next door, for instance — should not be on this list at all. Say so once and every finding in it moves to a panel addressed to them."
+                className="mb-4"
+              >
+                <ul className="rows">
+                  {rows.map(([id, v]) => (
+                    <li key={id} className="flex flex-wrap items-center justify-between gap-3 py-2">
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium">{v.title}</span>
+                        <span className="block text-xs text-ink-3">
+                          {v.count} of the findings below are in this chapter
+                        </span>
+                      </span>
+                      <form action={setManager} className="flex flex-wrap items-center gap-1.5">
+                        <input type="hidden" name="chapter" value={id} />
+                        <input
+                          name="manager"
+                          list="known-managers"
+                          placeholder="Who maintains it"
+                          className="field w-56 py-1 text-xs"
+                        />
+                        <button className="btn btn-sm">Not ours</button>
+                      </form>
+                    </li>
+                  ))}
+                </ul>
+                <datalist id="known-managers">
+                  {known.map((n) => <option key={n} value={n} />)}
+                </datalist>
+                <p className="mt-2 text-xs text-ink-3">
+                  Leave the box empty and press it to hand a chapter back to the pharmacy again. Nothing is deleted
+                  either way — the chapter still prints as part of the manual, because you are still bound by it.
+                </p>
+              </Card>
+            );
+          })()}
 
           {/* ── The findings, where there are any ─────────────────────── */}
           {findings.length > 0 && (
