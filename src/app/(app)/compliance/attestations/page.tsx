@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requireUser } from "@/lib/auth";
 import { ensureObligations } from "@/lib/obligations";
@@ -34,12 +35,14 @@ export default async function AttestationsPage({
   const { year, duty } = await searchParams;
   await ensureObligations();
 
-  const [s, obligations, completions, documents] = await Promise.all([
+  const [s, obligations, completions, documents, signatures] = await Promise.all([
     getSettings(),
     db.query.obligations.findMany(),
     db.query.obligationCompletions.findMany({ orderBy: (c, { desc }) => [desc(c.completedOn), desc(c.createdAt)] }),
     db.query.documents.findMany(),
+    db.query.recordSignatures.findMany({ where: eq(schema.recordSignatures.kind, "obligation_attestation") }),
   ]);
+  const signedBy = new Map(signatures.map((x) => [x.id, x]));
 
   const byId = new Map(obligations.map((o) => [o.id, o]));
   const years = [...new Set(completions.map((c) => c.completedOn.slice(0, 4)))].sort().reverse();
@@ -108,7 +111,10 @@ export default async function AttestationsPage({
         </p>
         <p className="mt-1 text-xs">
           Each entry below is the wording as it was agreed to at the time. Wording is stored per attestation and never
-          regenerated, so a later change to a template cannot alter what somebody signed.
+          regenerated, so a later change to a template cannot alter what somebody signed. Entries marked as signed
+          electronically were made under the Electronic Signatures in Global and National Commerce Act (15 U.S.C. 7001)
+          and the Kansas Uniform Electronic Transactions Act (K.S.A. 16-1601 et seq.): the signer ticked to confirm
+          intent and typed their name, and the time and the address they signed from are held with the statement.
         </p>
       </div>
 
@@ -137,6 +143,26 @@ export default async function AttestationsPage({
                       No statement was recorded with this entry — it predates the wording being stored.
                     </p>
                   )}
+                  {/*
+                    The signature, printed with the statement.
+
+                    An attestation is often the only evidence that a duty performed outside this
+                    system was performed at all, so it has to carry more than a name in a column.
+                    Entries made before attestations were signed say so plainly rather than being
+                    dressed up as something they were not.
+                  */}
+                  {(() => {
+                    const sig = c.signatureId ? signedBy.get(c.signatureId) : null;
+                    if (!sig) return null;
+                    return (
+                      <p className="mt-1 text-[9px] leading-relaxed">
+                        <b>Signed electronically</b> by {sig.signedName}
+                        {sig.signedRole ? ` (${sig.signedRole})` : ""} on{" "}
+                        {new Date(sig.signedAt).toLocaleString()} from {sig.signedIp ?? "an address not recorded"}.
+                        {sig.revokedAt && <> Withdrawn: {sig.revokedReason}</>}
+                      </p>
+                    );
+                  })()}
                   {c.notes && !c.statement?.includes(c.notes) && (
                     <p className="mt-1 text-[10px]">{c.notes.length > 400 ? `${c.notes.slice(0, 400)}…` : c.notes}</p>
                   )}

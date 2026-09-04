@@ -16,6 +16,7 @@ import { fmt, todayIso } from "@/lib/dates";
 import { storeFile } from "@/lib/files";
 import { newId } from "@/lib/crypto";
 import { PageHeader, Notice } from "@/components/ui";
+import { AttestForm } from "@/components/attest-form";
 
 export const metadata = { title: "Compliance" };
 export const dynamic = "force-dynamic";
@@ -148,7 +149,7 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
 
           <div className="space-y-3">
             {shown.map((i) => (
-              <Item key={`${i.obligationId}-${i.periodKey}`} i={i} attestAction={attestAction} fileAction={fileEvidence} />
+              <Item key={`${i.obligationId}-${i.periodKey}`} i={i} attestAction={attestAction} fileAction={fileEvidence} signerName={user.name} />
             ))}
 
             {people.map((p) => (
@@ -237,7 +238,7 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
           </p>
           <div className="mt-3 space-y-3">
             {notYetDue.map((i) => (
-              <Item key={`${i.obligationId}-${i.periodKey}`} i={i} attestAction={attestAction} fileAction={fileEvidence} />
+              <Item key={`${i.obligationId}-${i.periodKey}`} i={i} attestAction={attestAction} fileAction={fileEvidence} signerName={user.name} />
             ))}
           </div>
         </details>
@@ -261,10 +262,12 @@ function Item({
   i,
   attestAction,
   fileAction,
+  signerName,
 }: {
   i: OpenItem;
   attestAction: (fd: FormData) => Promise<void>;
   fileAction: (fd: FormData) => Promise<void>;
+  signerName: string;
 }) {
   const border = i.state === "missed" ? "border-red-300 bg-red-50" : i.state === "partial" ? "border-amber-300 bg-amber-50" : "border-line bg-surface";
   return (
@@ -284,19 +287,17 @@ function Item({
         </Badge>
       </div>
 
-      {/* ── attest: one button, and the sentence it records shown first ── */}
+      {/* ── attest: the sentence, then the two acts that make it a signature ── */}
       {i.kind === "attest" && i.statement && (
-        <form action={attestAction} className="mt-3">
-          <input type="hidden" name="obligationId" value={i.obligationId} />
-          <input type="hidden" name="periodKey" value={i.periodKey} />
-          <input type="hidden" name="statement" value={i.statement} />
-          <input type="hidden" name="back" value="/compliance" />
-          <p className="rounded-md border border-line bg-ground p-3 text-sm italic text-ink-2">&ldquo;{i.statement}&rdquo;</p>
-          <div className="mt-2 flex items-center gap-3">
-            <button className="rounded-md bg-ink px-3 py-1.5 text-sm text-white">Confirm and record</button>
-            <span className="text-xs text-ink-3">Recorded word for word, with your name and today&rsquo;s date.</span>
-          </div>
-        </form>
+        <AttestForm
+          action={attestAction}
+          obligationId={i.obligationId}
+          periodKey={i.periodKey}
+          statement={i.statement}
+          back="/compliance"
+          defaultName={signerName}
+          minutes={i.minutes}
+        />
       )}
 
       {/* ── evidence: upload where it stands ── */}

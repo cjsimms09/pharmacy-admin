@@ -13,7 +13,9 @@ import { PERSON_ROLE_LABEL } from "@/lib/labels";
 import { getSettings } from "@/lib/settings";
 import { mailHealth } from "@/lib/mail-health";
 import { pendingUpdates } from "@/lib/updates";
+import { requireUser } from "@/lib/auth";
 import { Notice, Card, Figure, PageHeader } from "@/components/ui";
+import { AttestForm } from "@/components/attest-form";
 
 // Live compliance status — never serve a cached copy after an action changes it.
 export const dynamic = "force-dynamic";
@@ -79,6 +81,8 @@ const dueRow = (d: DueItem): Row => ({
 
 export default async function Dashboard({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
   const { ok, error } = await searchParams;
+  // The signer's own name, to fill in the attestation form without asking them to remember it.
+  const user = await requireUser();
   const [compliance, dated, matrix, cqi, cs, jobs, selfFindings, settings, mail, updates, invoiceProblems, alertList] =
     await Promise.all([
     complianceSummary(),
@@ -442,18 +446,29 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                     <span className={`badge ${r.tone === "crit" ? "badge-crit" : r.tone === "warn" ? "badge-warn" : "badge-muted"}`}>
                       {r.badge}
                     </span>
-                    <form action={attestAction}>
-                      <input type="hidden" name="obligationId" value={r.attest!.obligationId} />
-                      <input type="hidden" name="periodKey" value={r.attest!.periodKey} />
-                      <input type="hidden" name="statement" value={r.attest!.statement} />
-                      <input type="hidden" name="back" value="/" />
-                      <button className="btn btn-sm btn-primary">Confirm</button>
-                    </form>
                   </div>
                 </div>
+                {/*
+                  Signing it from here, rather than a button that records a click.
+
+                  The statement is the evidence and has to be read before it is agreed to, so the
+                  form opens rather than sitting inline on a dashboard row — and it carries the two
+                  deliberate acts an electronic signature needs. Still done from where the duty is
+                  seen: being sent to another screen to sign one sentence is exactly the friction
+                  that leaves duties open for a fortnight.
+                */}
                 <details className="mt-1">
-                  <summary className="cursor-pointer text-xs text-ink-3 hover:text-ink-2">what gets recorded</summary>
-                  <p className="mt-1 text-xs italic text-ink-2">&ldquo;{r.attest!.statement}&rdquo;</p>
+                  <summary className="cursor-pointer text-xs font-medium text-accent hover:underline">
+                    Sign it — read what gets recorded
+                  </summary>
+                  <AttestForm
+                    action={attestAction}
+                    obligationId={r.attest!.obligationId}
+                    periodKey={r.attest!.periodKey}
+                    statement={r.attest!.statement}
+                    back="/"
+                    defaultName={user.name}
+                  />
                 </details>
               </li>
             ))}

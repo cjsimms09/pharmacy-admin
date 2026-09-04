@@ -422,6 +422,14 @@ export const obligationCompletions = sqliteTable(
     completedBy: text("completed_by").notNull(),
     /** The attestation as recorded. This is the evidence, not the row's existence. */
     statement: text("statement"),
+    /**
+     * The electronic signature behind it, where there is one.
+     *
+     * Null for a completion filed as evidence rather than attested, and for the ones recorded
+     * before attestations were signed — which is worth being able to tell apart rather than
+     * showing every row as though it carried a signature.
+     */
+    signatureId: text("signature_id"),
     notes: text("notes"),
     documentId: text("document_id"),
     createdAt: text("created_at").notNull().default(now()),

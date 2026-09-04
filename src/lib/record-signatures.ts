@@ -39,6 +39,16 @@ export type Signable = {
   label: string;
   /** Only these roles may sign it, where the law or the Board is specific about who. */
   roles?: ("owner" | "manager" | "staff")[];
+  /**
+   * Whether the wording is supplied per signature rather than fixed here.
+   *
+   * True for exactly one kind: a compliance attestation, whose sentence names the duty, the period
+   * and what was actually checked — "on 3 September I signed in to K-TRACS and reviewed the
+   * submission status for August". That sentence is the evidence, and it cannot be written in
+   * advance because the period is part of it. Everything else has fixed wording on purpose, so it
+   * is written once by somebody thinking about what it commits the pharmacy to.
+   */
+  dynamic?: boolean;
 };
 
 /**
@@ -48,6 +58,22 @@ export type Signable = {
  * commits the pharmacy to, rather than typed into a page by somebody thinking about layout.
  */
 export const SIGNABLE: Record<string, Signable> = {
+  /**
+   * A compliance duty, attested for a period.
+   *
+   * These were being recorded with the statement, the date and the signed-in user's name — real
+   * evidence, and better than a tick — but not as a signature in the sense the rest of this system
+   * means it. There was no deliberate act of signing and no typed name, so an attestation was
+   * weaker than the temperature log sitting next to it, which is the wrong way round: the
+   * attestation is often the *only* evidence a duty done outside this system was done at all.
+   */
+  obligation_attestation: {
+    kind: "obligation_attestation",
+    label: "Compliance attestation",
+    statement: "",
+    dynamic: true,
+    roles: ["owner", "manager"],
+  },
   training_file: {
     kind: "training_file",
     label: "Workforce training records",
@@ -114,6 +140,8 @@ export async function signatureFor(kind: string, recordKey: string): Promise<Rec
 export type SignInput = {
   kind: string;
   recordKey: string;
+  /** Only for a dynamic kind: the exact wording being signed. Stored verbatim. */
+  statement?: string;
   /** The name the signer typed. Compared against their account name, but not required to match. */
   typedName: string;
   /** Proof they meant it. Without this nothing is recorded. */
@@ -145,6 +173,11 @@ export async function signRecord(
   const name = input.typedName.trim();
   if (name.length < 3) throw new Error("Type your full name as you would sign it.");
 
+  // What is actually being signed. A dynamic kind supplies its own sentence; every other kind
+  // uses the wording written once, above, and may not substitute anything for it.
+  const wording = spec.dynamic ? (input.statement ?? "").trim() : spec.statement;
+  if (!wording) throw new Error("Nothing was recorded — an attestation with no statement is not evidence.");
+
   const already = await signatureFor(input.kind, input.recordKey);
   if (already) throw new Error(`This record was already signed by ${already.signedName}.`);
 
@@ -165,7 +198,7 @@ export async function signRecord(
     id,
     kind: input.kind,
     recordKey: input.recordKey,
-    statement: spec.statement,
+    statement: wording,
     contentHash: input.content ? fingerprint(input.content) : null,
     signedName: name,
     signedByUserId: user.id,

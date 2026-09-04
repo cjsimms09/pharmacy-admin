@@ -281,6 +281,13 @@
       "when": 1788555991748,
       "tag": "0039_natural_sasquatch",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1788556859628,
+      "tag": "0040_spooky_cerebro",
+      "breakpoints": true
     }
   ]
 }

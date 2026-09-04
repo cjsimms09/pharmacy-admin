@@ -302,23 +302,51 @@ function hrefFor(seedKey: string | null): string | null {
  * PIC actually agreed to, word for word, and a template that changes in a future release must
  * never silently rewrite what someone signed.
  */
+/**
+ * Records an attestation, signed.
+ *
+ * It used to store the sentence, the date and the signed-in user's name. That is real evidence and
+ * better than a tick in a box, but it was not a signature in the sense the rest of this system
+ * means it — no deliberate act, no typed name — which left an attestation weaker than the
+ * temperature log sitting beside it. That is the wrong way round: for a duty performed outside
+ * this system, the attestation is often the only evidence it was performed at all.
+ *
+ * So it goes through the same machinery as every other signed record: the box, the typed name, the
+ * time, the address, the wording kept word for word. The completion row stays, because the
+ * register and the due dates are built on it, and it now points at the signature.
+ */
 export async function attest(
   obligationId: string,
   periodKey: string,
   statement: string,
-  user: { id: string; name: string },
+  user: { id: string; name: string; role: string },
+  signing: { typedName: string; intent: boolean },
 ): Promise<void> {
   const o = await db.query.obligations.findFirst({ where: eq(schema.obligations.id, obligationId) });
   if (!o) throw new Error("That duty no longer exists.");
   if (!statement.trim()) throw new Error("Nothing was recorded — an attestation with no statement is not evidence.");
+
+  const { signRecord } = await import("./record-signatures");
+  const signature = await signRecord(
+    {
+      kind: "obligation_attestation",
+      recordKey: `${obligationId}:${periodKey || todayIso()}`,
+      statement: statement.trim(),
+      typedName: signing.typedName,
+      intent: signing.intent,
+      content: statement.trim(),
+    },
+    user,
+  );
 
   await db.insert(schema.obligationCompletions).values({
     id: newId(),
     obligationId,
     periodKey,
     completedOn: todayIso(),
-    completedBy: user.name,
+    completedBy: signature.signedName,
     statement: statement.trim(),
+    signatureId: signature.id,
   });
   await db
     .update(schema.obligations)

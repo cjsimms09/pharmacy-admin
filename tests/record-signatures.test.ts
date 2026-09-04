@@ -14,10 +14,27 @@ describe("what can be signed", () => {
   test("every signable record states what is being certified, in the first person", () => {
     for (const [kind, spec] of Object.entries(SIGNABLE)) {
       assert.equal(spec.kind, kind);
+      assert.ok(spec.label.length > 0, kind);
+      // A dynamic kind is signed against wording supplied per signature — a compliance
+      // attestation names the duty and the period, which cannot be written in advance.
+      if (spec.dynamic) continue;
       assert.ok(spec.statement.length > 80, `${kind} statement is too thin to mean anything`);
       assert.match(spec.statement, /\bI\b/, `${kind} does not say who is asserting it`);
-      assert.ok(spec.label.length > 0, kind);
     }
+  });
+
+  test("a dynamic kind carries no wording of its own, so nothing generic can be signed by mistake", () => {
+    // The danger of allowing a per-signature statement is a kind that also has a fallback: a
+    // signature would then silently record boilerplate when the real sentence went missing.
+    for (const [kind, spec] of Object.entries(SIGNABLE)) {
+      if (!spec.dynamic) continue;
+      assert.equal(spec.statement, "", `${kind} must not have wording of its own`);
+    }
+  });
+
+  test("an attestation may only be signed by the pharmacist-in-charge or a manager", () => {
+    assert.ok(SIGNABLE.obligation_attestation.roles?.includes("owner"));
+    assert.ok(!SIGNABLE.obligation_attestation.roles?.includes("staff"));
   });
 
   test("records the law is specific about may only be signed by somebody who can", () => {

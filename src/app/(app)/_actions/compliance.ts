@@ -33,8 +33,11 @@ export async function attestAction(fd: FormData) {
   const periodKey = String(fd.get("periodKey") ?? "");
   const statement = String(fd.get("statement") ?? "");
   try {
-    await attest(id, periodKey, statement, u);
-    await audit({ action: "compliance.attest", userId: u.id, userName: u.name, details: `${id} ${periodKey}` });
+    await attest(id, periodKey, statement, u, {
+      typedName: String(fd.get("typedName") ?? ""),
+      intent: String(fd.get("intent") ?? "") === "yes",
+    });
+    await audit({ action: "compliance.attest", userId: u.id, userName: u.name, details: `${id} ${periodKey} signed` });
     revalidatePath("/");
     revalidatePath("/compliance");
     revalidatePath("/compliance/register");
