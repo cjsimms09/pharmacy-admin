@@ -284,6 +284,45 @@ export const CHECKLIST: ChecklistSection[] = [
     ],
   },
   {
+    key: "compounding",
+    title: "Compounding",
+    where: "At the bench where non-sterile preparations are made.",
+    items: [
+      {
+        key: "compounding_scope",
+        ask: "Is everything being compounded within what the manual actually permits — simple, non-sterile, non-hazardous, from commercially available ingredients?",
+        authority: "USP 795; the pharmacy's own compounding policy.",
+        looksLike: "Anything outside that scope needs the policy changed first, not the practice explained afterwards.",
+      },
+      {
+        key: "compounding_records",
+        ask: "Is there a record for each preparation — the formula, the ingredients and their lot numbers and expiry, who made it, and who checked it?",
+        authority: "USP 795; K.A.R. 68-7-12.",
+        looksLike: "This is the first thing asked for and the most commonly absent. A label without a compounding record behind it is the finding.",
+      },
+      {
+        key: "compounding_bud",
+        ask: "Does every compounded preparation carry a beyond-use date, assigned by a stated rule rather than by guess?",
+        authority: "USP 795 default beyond-use dates.",
+      },
+      {
+        key: "compounding_equipment",
+        ask: "Is compounding equipment clean, dedicated where it needs to be, and is the balance within calibration if one is used?",
+        authority: "USP 795; K.A.R. 68-7-11.",
+      },
+      {
+        key: "compounding_area",
+        ask: "Is there a defined compounding area, kept clean and separate from routine dispensing traffic?",
+        authority: "USP 795.",
+      },
+      {
+        key: "compounding_ingredients",
+        ask: "Are bulk ingredients labelled with their source, lot and expiry, and is a certificate of analysis on file where one is required?",
+        authority: "USP 795.",
+      },
+    ],
+  },
+  {
     key: "immunization",
     title: "Immunizations",
     where: "At the immunization station.",

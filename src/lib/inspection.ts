@@ -402,6 +402,30 @@ export async function inspectionReport(): Promise<InspectionReport> {
     printHref: "/inspection/walk",
   });
 
+  const { currentAppendix } = await import("./manual");
+  const appendix = await currentAppendix();
+  const manualDoc = docs.find((d) => d.category === "policy" && /polic(y|ies)|manual|procedure/i.test(d.title));
+  add({
+    key: "policy_manual",
+    who: "board",
+    asks: "Your policy and procedure manual",
+    authority: "K.A.R. 68-7-11. An inspector holds you to your own manual, so anything in it you do not do is a finding you wrote yourself.",
+    state: !manualDoc
+      ? "blocking"
+      : appendix.filedVersion === null || appendix.filedVersion !== appendix.version
+        ? "gap"
+        : "ready",
+    answer: !manualDoc
+      ? "No policy and procedure manual is filed under Documents. It is the first thing asked for and the document every other answer is measured against."
+      : appendix.filedVersion === null
+        ? `"${manualDoc.title}" is on file, but it has never been matched to a version of the site-maintained appendix — so nothing can tell you whether the filed copy still describes what this pharmacy does.`
+        : appendix.filedVersion !== appendix.version
+          ? `"${manualDoc.title}" carries appendix version ${appendix.filedVersion}, filed ${appendix.filedOn}. The current version is ${appendix.version} — a procedure or form has changed since, and the filed manual now describes something other than what happens.`
+          : `"${manualDoc.title}" is on file and its appendix is current at version ${appendix.version}, filed ${appendix.filedOn}.`,
+    href: "/documents/manual",
+    printHref: "/documents/manual",
+  });
+
   const blocking = checks.filter((c) => c.state === "blocking").length;
   const gaps = checks.filter((c) => c.state === "gap").length;
   const ready = checks.filter((c) => c.state === "ready").length;

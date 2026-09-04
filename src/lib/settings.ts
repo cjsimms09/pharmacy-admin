@@ -68,6 +68,10 @@ export const SETTING_KEYS = [
   "digest_last_sent",
   "digest_last_result",
   "digest_enabled",
+  // Which version of the site-maintained appendix is in the filed policy manual, so drift between
+  // the two is something the site notices rather than something somebody remembers to check.
+  "manual_appendix_filed_version",
+  "manual_appendix_filed_on",
   "mail_last_result",
   // ── Medicare Transaction Facilitator (MTF) ──
   // CMS's channel for Maximum Fair Price refunds under the Inflation Reduction Act. The key is

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { isNull } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requireManager } from "@/lib/auth";
@@ -23,7 +24,11 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
 
   return (
     <>
-      <PageHeader title="Pharmacy documents" subtitle="Pharmacy-level registrations, protocols, policies, and inventories. Staff documents live on each person's page." />
+      <PageHeader
+        title="Pharmacy documents"
+        subtitle="Pharmacy-level registrations, protocols, policies, and inventories. Staff documents live on each person's page."
+        actions={<Link href="/documents/manual" className="btn">Manual appendix</Link>}
+      />
       {error && <Notice kind="crit">{error}</Notice>}
       {saved && <Notice>Saved.</Notice>}
 
