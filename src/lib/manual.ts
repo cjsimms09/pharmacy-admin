@@ -290,6 +290,33 @@ export const FORMS: ManualForm[] = [
     aliases: ["vaccine administration record", "immunization record", "var", "vaccine record"],
   },
   {
+    name: "Policy and procedure manual acknowledgement",
+    purpose:
+      "The staff member's signature confirming they have been given, and have read, this pharmacy's policy and procedure manual in a stated revision.",
+    href: "/forms/policy-acknowledgement",
+    cadence:
+      "Signed by every member of staff on joining, and again when the manual is revised in a way that changes what they are expected to do. Normally done from the emailed link; this is the paper version.",
+    fields: [
+      "The revision of the manual being acknowledged, and the date it was last edited",
+      "The chapters the manual contained at that revision",
+      "That the person has read it and had the chance to ask questions",
+      "That the policies apply to their work and may be enforced",
+      "Signature, printed name, job title and date",
+      "The pharmacist-in-charge's signature where it was gone through with them",
+    ],
+    where: "Records -> Forms -> Policy manual acknowledgement",
+    authority:
+      "45 CFR 164.530(b)(1) and (e)(1), documented under 164.530(j)(1)(ii); 29 CFR 1910.1030(g)(2); K.A.R. 68-19-1.",
+    aliases: [
+      "policy acknowledgement",
+      "p&p acknowledgement",
+      "manual acknowledgement",
+      "policy manual signature",
+      "staff acknowledgement",
+      "handbook acknowledgement",
+    ],
+  },
+  {
     name: "Acknowledgement of receipt of the Notice of Privacy Practices",
     purpose:
       "The patient's acknowledgement that they were given the pharmacy's privacy notice — or, where it was not obtained, the record of the effort made.",

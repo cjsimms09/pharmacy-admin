@@ -324,6 +324,18 @@ export const trainings = sqliteTable(
     minutes: integer("minutes"),
     documentId: text("document_id"),
     notes: text("notes"),
+    /**
+     * Which manual a policy acknowledgement was signed against.
+     *
+     * Only ever set for the policy manual acknowledgement, and the reason it exists is that the
+     * manual is edited here. A signature collected in March refers to text that may not exist by
+     * June, so "I have read the manual" with nothing else recorded becomes quietly false and
+     * cannot answer the question an inspector asks — which version did your staff acknowledge.
+     *
+     * "legacy" for the ones signed before this was recorded: a real acknowledgement, of a manual
+     * nothing identifies.
+     */
+    manualRevision: text("manual_revision"),
     createdBy: text("created_by").notNull(),
     createdAt: text("created_at").notNull().default(now()),
   },

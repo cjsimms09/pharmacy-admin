@@ -272,6 +272,33 @@ export async function alerts(): Promise<Alert[]> {
     });
   }
 
+  /*
+   * Nobody has signed for the manual.
+   *
+   * Only the never-signed case alerts. Somebody holding a signature against an earlier revision is
+   * a judgement — a typo corrected in a heading is not a change of policy, and alerting on every
+   * edit would train the pharmacist-in-charge to ignore this the way he learned to ignore the old
+   * board. That state is shown on the manual page, where it can be looked at with the change that
+   * caused it in front of him.
+   */
+  if (people.length > 0) {
+    const { acknowledgementGap } = await import("./manual-acknowledgement");
+    const gap = await acknowledgementGap();
+    if (gap.missing > 0) {
+      out.push({
+        key: "manual-ack",
+        level: "soon",
+        title: `${gap.missing} ${gap.missing === 1 ? "person has" : "people have"} not acknowledged the policy manual`,
+        why:
+          "It is the record that the workforce was trained on the privacy policies, that the exposure control plan " +
+          "was explained, and that a sanction for breaking a rule could be defended — 45 CFR 164.530(b) and (e), " +
+          "29 CFR 1910.1030(g)(2).",
+        href: "/manual#acknowledgement",
+        action: "Send it",
+      });
+    }
+  }
+
   // ── A pharmacy with nobody in charge of it ────────────────────────
   if (people.length > 0 && !people.some((p) => p.isPic)) {
     out.push({

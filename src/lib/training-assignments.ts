@@ -503,6 +503,19 @@ export async function completeAssignment(
   const today = todayIso();
   const months = TRAINING_CADENCE[a.type]?.months;
   const trainingId = newId();
+  /*
+   * Which manual was acknowledged, recorded at the moment of signing.
+   *
+   * The page the person read renders the manual as it stands, so the revision now is the revision
+   * they saw. Taken here rather than when the assignment was sent, because a manual edited in
+   * between would make the record say they agreed to text they were never shown.
+   */
+  let manualRevision: string | null = null;
+  if (a.type === "policy_manual_acknowledgement") {
+    const [{ allSections }, { revisionOf }] = await Promise.all([import("./manual-store"), import("./manual-version")]);
+    manualRevision = revisionOf(await allSections(true)).fingerprint;
+  }
+
   await db.insert(schema.trainings).values({
     id: trainingId,
     personId: a.personId,
@@ -513,6 +526,7 @@ export async function completeAssignment(
     provider: course ? "The pharmacy's own course, signed online" : "Signed online",
     minutes: course?.minutes ?? null,
     notes: a.statement,
+    manualRevision,
     createdBy: signedName,
   });
   await db
@@ -567,6 +581,14 @@ export async function recordGroupTraining(
     (how ? ` ${how}` : "") +
     ` Recorded by me as pharmacist-in-charge; they did not sign individually.`;
 
+  // The paper form this site prints carries the manual's revision on it, so a session recorded
+  // here was delivered against the manual as it stands today.
+  let manualRevision: string | null = null;
+  if (type === "policy_manual_acknowledgement") {
+    const [{ allSections }, { revisionOf }] = await Promise.all([import("./manual-store"), import("./manual-version")]);
+    manualRevision = revisionOf(await allSections(true)).fingerprint;
+  }
+
   for (const p of people) {
     const trainingId = newId();
     await db.insert(schema.trainings).values({
@@ -579,6 +601,7 @@ export async function recordGroupTraining(
       provider: "In-house, attested by the PIC",
       minutes: course?.minutes ?? null,
       notes: statement,
+      manualRevision,
       createdBy: user.name,
     });
     // Close any outstanding link for the same thing, so nobody is chased for training they

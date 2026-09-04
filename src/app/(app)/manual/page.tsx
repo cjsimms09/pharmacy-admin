@@ -33,8 +33,9 @@ import {
   applyAllFindings,
 } from "@/lib/manual-audit";
 import { manualJob, startPutRight, runPutRight, isRunning, isStale, summarise, ago } from "@/lib/manual-job";
+import { acknowledgementBoard } from "@/lib/manual-acknowledgement";
 import { fmt } from "@/lib/dates";
-import { PageHeader, Card, Figure, Notice, Field } from "@/components/ui";
+import { PageHeader, Card, Figure, Notice, Field, Empty } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import { JobPanel } from "@/components/job-panel";
 import { after } from "next/server";
@@ -85,6 +86,9 @@ export default async function ManualPage({
     manualJob(),
   ]);
   const working = isRunning(job);
+  // Who has signed for this manual, and who signed for an older one. Read after the sections,
+  // because it fingerprints exactly what is on this page.
+  const ack = await acknowledgementBoard();
   const sections = outline(rows);
   const pharmacy = s.pharmacy_name || "This pharmacy";
 
@@ -726,6 +730,87 @@ export default async function ManualPage({
               requirements within the last year, a few at a time on their own.
               {audit_.lastResult ? ` Last pass: ${audit_.lastResult}` : ""}
             </p>
+          </Card>
+
+          {/*
+            Who has signed for this manual, and who signed for an older one.
+
+            The question asked was whether staff need to acknowledge the P&P manual. They do — not
+            because one regulation says so in those words, but because four separate requirements
+            are evidenced by this signature and by nothing else the pharmacy holds: HIPAA workforce
+            training and its documentation, the sanctions policy that cannot stand against somebody
+            never shown the rule, the exposure control plan being explained, and participation in
+            the CQI programme.
+            
+            It is on this page rather than only on the staff page because it is a fact about the
+            manual. Editing a manual eleven people have signed for is the moment that matters, and
+            this is where the editing happens.
+          */}
+          <Card
+            id="acknowledgement"
+            tone={ack.missing > 0 ? "warn" : undefined}
+            title="Who has acknowledged this manual"
+            count={`${ack.current} of ${ack.people.length}`}
+            subtitle="A signature against a manual that has since been rewritten is not the same as a signature against this one, so each is recorded with the revision it was given for."
+            className="mt-6"
+            actions={
+              <>
+                <Link href="/forms/policy-acknowledgement" className="btn">Paper form</Link>
+                <Link href="/compliance/training" className="btn btn-primary">Send it</Link>
+              </>
+            }
+          >
+            <p className="text-xs text-ink-3">
+              This manual is <span className="font-mono">{ack.revision.fingerprint}</span> — {ack.revision.sections}{" "}
+              sections, {ack.revision.words.toLocaleString("en-US")} words
+              {ack.revision.changedOn ? `, last edited ${fmt(ack.revision.changedOn)}` : ""}.
+            </p>
+
+            {ack.people.length === 0 ? (
+              <Empty>Nobody is on the staff list, so there is nobody to acknowledge it.</Empty>
+            ) : (
+              <ul className="rows mt-2">
+                {ack.people.map((a) => (
+                  <li key={a.personId} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                    <span className="min-w-0">
+                      <Link href={`/staff/${a.personId}`} className="text-sm font-medium text-accent hover:underline">
+                        {a.name}
+                      </Link>
+                      <span className="mt-0.5 block text-xs text-ink-3">
+                        {a.signedOn
+                          ? `${a.stateLabel} · signed ${fmt(a.signedOn)}${a.signedRevision && a.signedRevision !== "legacy" ? ` for ${a.signedRevision}` : ""}`
+                          : "Has not acknowledged the manual"}
+                      </span>
+                    </span>
+                    <span
+                      className={`badge shrink-0 ${
+                        a.state === "current" ? "badge-ok" : a.state === "none" ? "badge-crit" : "badge-warn"
+                      }`}
+                    >
+                      {a.state === "current" ? "current" : a.state === "none" ? "not signed" : a.state === "unknown" ? "version not recorded" : "earlier manual"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {(ack.superseded > 0 || ack.unknownCount > 0) && (
+              <p className="mt-3 text-xs text-ink-3">
+                {ack.superseded > 0 && (
+                  <>
+                    {ack.superseded} {ack.superseded === 1 ? "person signed" : "people signed"} for an earlier revision.
+                    That is not automatically a problem — a typo corrected in a heading is not a change of policy — but
+                    where the manual has changed what somebody is expected to do, send it again.{" "}
+                  </>
+                )}
+                {ack.unknownCount > 0 && (
+                  <>
+                    {ack.unknownCount} signed before revisions were recorded, so the file shows an acknowledgement
+                    without saying of what. Sending it again is the only way to fix that.
+                  </>
+                )}
+              </p>
+            )}
           </Card>
 
           {/* ── The findings, where there are any ─────────────────────── */}
