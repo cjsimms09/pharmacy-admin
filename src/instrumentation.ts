@@ -136,6 +136,7 @@ export async function register() {
     await whenIdle("technician-list", technicianListTick);
     await whenIdle("temperatures", tempTick);
     await whenIdle("cqi", cqiTick);
+    await whenIdle("digest", digestTick);
   };
 
   /**
@@ -185,6 +186,23 @@ export async function register() {
       );
     } catch {
       // Shown on the CQI page; never allowed to stop the app.
+    }
+  };
+
+  /**
+   * The weekly note to the pharmacist-in-charge.
+   *
+   * Last in the run, deliberately: it summarises the state of everything above it, so it should
+   * read that state after those jobs have had their turn rather than before. Its own once-a-week
+   * gate lives in the digest module, so running this hourly costs nothing.
+   */
+  const digestTick = async () => {
+    try {
+      const { sendWeeklyDigest } = await import("./lib/digest");
+      await sendWeeklyDigest();
+    } catch {
+      // A digest that cannot be built or sent must never stop the app. Settings → Email shows
+      // the last result, and everything in it is on the screen regardless.
     }
   };
 

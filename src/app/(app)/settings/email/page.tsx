@@ -3,7 +3,7 @@ import { requireManager } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
 import { hasMailPassword } from "@/lib/mailbox";
 import { PageHeader, BackLink, Notice, Field } from "@/components/ui";
-import { removeMailPassword, saveMailSettings, saveSendingServer, sweepNow, testMailSettings, sendTestMail } from "@/app/(app)/inbox/actions";
+import { removeMailPassword, saveMailSettings, saveSendingServer, sweepNow, testMailSettings, sendTestMail, sendDigestNow } from "@/app/(app)/inbox/actions";
 import { smtpTargets } from "@/lib/send-mail";
 
 export const metadata = { title: "Email" };
@@ -183,6 +183,19 @@ export default async function EmailSettingsPage({ searchParams }: { searchParams
             </Field>
             <button className="btn btn-primary" disabled={!configured}>Send it</button>
           </form>
+          <div className="mt-4 border-t border-line pt-4">
+            <h3>Your weekly compliance note</h3>
+            <p className="mt-1 text-sm text-ink-2">
+              Once a week the pharmacist-in-charge is emailed what is late, what expires in the next sixty days, and
+              whether any of the automatic jobs have stopped. It is not sent at all in a week with nothing in it — a
+              cheerful all-clear every Monday is how the one that matters gets archived unread.
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <form action={sendDigestNow}><button className="btn" disabled={!configured}>Send it to me now</button></form>
+              <span className="text-xs text-ink-3">{s.digest_last_result || "Not sent yet."}</span>
+            </div>
+          </div>
+
           <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
             <div className="sm:col-span-2">
               <dt className="text-xs uppercase tracking-wide text-ink-2">Last send</dt>

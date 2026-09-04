@@ -507,3 +507,106 @@ export async function monthsSatisfied(periodKeys: string[]): Promise<Map<string,
   }
   return out;
 }
+
+export type RecentReading = {
+  id: string;
+  sensorId: string;
+  sensorName: string;
+  takenAt: string;
+  valueTenthsF: number;
+  excursion: boolean;
+  rangeMin: number;
+  rangeMax: number;
+  /** The explanation written against it, where one exists. */
+  note: string | null;
+  noteBy: string | null;
+  periodKey: string;
+};
+
+/**
+ * The last readings across every tracked sensor, newest first.
+ *
+ * The temperature page opened on a list of months, which is the wrong first question. What a
+ * pharmacist wants to know walking past the fridge is "is it fine right now, and has it been
+ * fine" — and the answer to that is the last day of readings, not a link to August.
+ */
+export async function recentReadings(limit = 30): Promise<RecentReading[]> {
+  const sensors = (await db.query.tempSensors.findMany()).filter((s) => s.tracked);
+  if (sensors.length === 0) return [];
+  const ids = sensors.map((s) => s.id);
+
+  const rows = await db.query.tempReadings.findMany({
+    where: inArray(schema.tempReadings.sensorId, ids),
+    orderBy: (r, { desc }) => [desc(r.takenAt)],
+    limit,
+  });
+  const notes = await db.query.tempNotes.findMany({ where: inArray(schema.tempNotes.sensorId, ids) });
+  const byReading = new Map(notes.filter((n) => n.readingId).map((n) => [n.readingId!, n]));
+
+  return rows.map((r) => {
+    const s = sensors.find((x) => x.id === r.sensorId)!;
+    const n = byReading.get(r.id);
+    return {
+      id: r.id,
+      sensorId: r.sensorId,
+      sensorName: s.name,
+      takenAt: r.takenAt,
+      valueTenthsF: r.valueTenthsF,
+      excursion: r.excursion,
+      rangeMin: s.minTenthsF,
+      rangeMax: s.maxTenthsF,
+      note: n?.note ?? null,
+      noteBy: n?.writtenBy ?? null,
+      periodKey: r.periodKey,
+    };
+  });
+}
+
+/**
+ * Every out-of-range reading with nothing written against it, oldest first.
+ *
+ * The single most useful list on the whole temperature side, and it did not exist: an unexplained
+ * excursion is the thing an inspector stops on, and they were previously findable only by opening
+ * each month of each sensor in turn and looking. Oldest first because the oldest gap is the one
+ * that has been sitting there longest and is hardest to reconstruct from memory.
+ */
+export async function unexplainedExcursions(limit = 100): Promise<RecentReading[]> {
+  const sensors = (await db.query.tempSensors.findMany()).filter((s) => s.tracked);
+  if (sensors.length === 0) return [];
+  const ids = sensors.map((s) => s.id);
+
+  const rows = await db.query.tempReadings.findMany({
+    where: and(inArray(schema.tempReadings.sensorId, ids), eq(schema.tempReadings.excursion, true)),
+    orderBy: (r, { asc }) => [asc(r.takenAt)],
+  });
+  const notes = await db.query.tempNotes.findMany({ where: inArray(schema.tempNotes.sensorId, ids) });
+  const explained = new Set(notes.filter((n) => n.readingId).map((n) => n.readingId!));
+
+  return rows
+    .filter((r) => !explained.has(r.id))
+    .slice(0, limit)
+    .map((r) => {
+      const s = sensors.find((x) => x.id === r.sensorId)!;
+      return {
+        id: r.id,
+        sensorId: r.sensorId,
+        sensorName: s.name,
+        takenAt: r.takenAt,
+        valueTenthsF: r.valueTenthsF,
+        excursion: true,
+        rangeMin: s.minTenthsF,
+        rangeMax: s.maxTenthsF,
+        note: null,
+        noteBy: null,
+        periodKey: r.periodKey,
+      };
+    });
+}
+
+/** Every month that has readings, per sensor, newest first — for the month picker. */
+export async function monthsBySensor(): Promise<Map<string, string[]>> {
+  const sensors = (await db.query.tempSensors.findMany()).filter((s) => s.tracked);
+  const out = new Map<string, string[]>();
+  for (const s of sensors) out.set(s.id, await availableMonths(s.id));
+  return out;
+}

@@ -35,6 +35,8 @@ const MAX_QUIET_HOURS: Record<string, number> = {
   nadac: 8 * 24,
   cqi: 50,
   reminders: 8 * 24,
+  // Weekly, with a day of slack for a computer that was switched off over a weekend.
+  digest: 8 * 24,
 };
 
 function ageHours(iso: string | null | undefined): number | null {
@@ -87,6 +89,16 @@ export async function automationStatus(): Promise<JobStatus[]> {
       lastAt: s.cqi_automation_last ?? null,
       detail: s.cqi_automation_result ?? "Reviews are started and summaries assembled on their own.",
       href: "/cqi",
+    },
+    {
+      key: "digest",
+      label: "Your weekly compliance note",
+      state: judge("digest", Boolean(s.mail_user && s.mail_password_enc), s.digest_last_sent),
+      lastAt: s.digest_last_sent ?? null,
+      detail:
+        s.digest_last_result ??
+        "Once a week you are emailed what is late, what is expiring and whether anything here has stopped — and only in a week that has something in it.",
+      href: "/settings/email",
     },
     {
       key: "reminders",

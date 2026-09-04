@@ -63,6 +63,11 @@ export const SETTING_KEYS = [
   "mail_smtp_port",
   "mail_smtp_working",
   "mail_last_send_result",
+  // The weekly note to the PIC. Everything this site knows was otherwise only knowable by
+  // opening it, which is the wrong way round for a licence that expires.
+  "digest_last_sent",
+  "digest_last_result",
+  "digest_enabled",
   "mail_last_result",
   // ── Medicare Transaction Facilitator (MTF) ──
   // CMS's channel for Maximum Fair Price refunds under the Inflation Reduction Act. The key is

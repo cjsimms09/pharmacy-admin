@@ -74,6 +74,20 @@ export async function saveSendingServer(fd: FormData) {
   redirect(`${here}?saved=1&detail=${encodeURIComponent(host ? `Sending server set to ${host}${port ? `:${port}` : ""}. Send a test to check it.` : "Sending server cleared — the site will work it out from the address again.")}`);
 }
 
+/**
+ * Sends the weekly note now, whatever the schedule says.
+ *
+ * Worth a button for the same reason the test message is: a weekly email that has never been
+ * seen is one nobody trusts, and waiting a week to find out whether it works is not a test.
+ */
+export async function sendDigestNow() {
+  await requireManager();
+  const { sendWeeklyDigest } = await import("@/lib/digest");
+  const r = await sendWeeklyDigest({ force: true });
+  revalidatePath("/settings/email");
+  redirect(`/settings/email?${r.sent ? "saved=1&detail" : "error"}=` + encodeURIComponent(r.reason));
+}
+
 export async function removeMailPassword() {
   const user = await requireManager();
   await clearMailPassword();
