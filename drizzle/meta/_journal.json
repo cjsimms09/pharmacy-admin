@@ -246,6 +246,13 @@
       "when": 1788542661942,
       "tag": "0034_high_terror",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1788544150704,
+      "tag": "0035_daffy_tana_nile",
+      "breakpoints": true
     }
   ]
 }

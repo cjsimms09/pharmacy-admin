@@ -3,6 +3,7 @@ import { cqiSnapshot, csInventoryStatus } from "@/lib/compliance";
 import { dueList, type DueItem } from "@/lib/due";
 import { complianceSummary, type OpenItem } from "@/lib/compliance-status";
 import { staffMatrix, type Cell, type MatrixRow, type StaffMatrix } from "@/lib/staff-matrix";
+import { invoiceIssues } from "@/lib/invoices";
 import { automationStatus, type JobStatus } from "@/lib/automation-status";
 import { openFindings } from "@/lib/self-inspection";
 import { attestAction, answerAction, sendTrainingAction, requestCredentialAction } from "./_actions/compliance";
@@ -77,7 +78,7 @@ const dueRow = (d: DueItem): Row => ({
 
 export default async function Dashboard({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
   const { ok, error } = await searchParams;
-  const [compliance, dated, matrix, cqi, cs, jobs, selfFindings, settings, mail, updates] = await Promise.all([
+  const [compliance, dated, matrix, cqi, cs, jobs, selfFindings, settings, mail, updates, invoiceProblems] = await Promise.all([
     complianceSummary(),
     dueList({ horizonDays: 60 }),
     staffMatrix(),
@@ -88,6 +89,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     getSettings(),
     mailHealth(),
     pendingUpdates(),
+    invoiceIssues(),
   ]);
 
   /*
@@ -146,6 +148,25 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       badge: `open ${fnd.daysOpen}d`,
       tone: fnd.daysOpen > 30 ? "crit" : "warn",
       href: fnd.fixHref ?? "/inspection/walk",
+    });
+  }
+
+  /*
+    The invoice archive going wrong belongs here, not only on its own page.
+
+    Its failures are silent by nature — the supplier changes the address they send from and the
+    invoices stop, with no error anywhere and nothing to notice. A pharmacist who does not open
+    that page for a month would find out during an inspection. So they sit with the rest of the
+    late work, where the morning glance already goes.
+  */
+  for (const p of invoiceProblems) {
+    latePharmacy.push({
+      key: `invoice-${p.key}`,
+      title: p.title,
+      why: p.detail,
+      badge: p.severity === "blocking" ? "fix this" : "look at",
+      tone: p.severity === "blocking" ? "crit" : "warn",
+      href: p.href ?? "/inventory/invoices",
     });
   }
 

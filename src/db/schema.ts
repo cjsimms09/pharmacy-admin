@@ -627,6 +627,15 @@ export const supplierInvoices = sqliteTable(
     basis: text("basis"),
     /** The controlled lines found, as read, so nobody has to reopen the PDF to check. */
     controlledItems: text("controlled_items").notNull().default(""),
+    /**
+     * Every item line, as printed, so the invoices can be searched by what is on them.
+     *
+     * Searching by invoice number answers a question nobody has. The questions people actually
+     * have are "when did we last buy oxycodone", "which invoice had that NDC on it", and "what
+     * did we get from them in March" — and none of those can be answered by a filing system that
+     * only knows the number on the front of the document.
+     */
+    itemsText: text("items_text").notNull().default(""),
     /** Set until a person has confirmed anything the reader was unsure about. */
     needsReview: integer("needs_review", { mode: "boolean" }).notNull().default(true),
     reviewedBy: text("reviewed_by"),
@@ -637,7 +646,34 @@ export const supplierInvoices = sqliteTable(
   (t) => [
     index("supplier_invoices_schedule_idx").on(t.schedule),
     index("supplier_invoices_date_idx").on(t.invoiceDate),
+    index("supplier_invoices_supplier_idx").on(t.supplier),
   ],
+);
+
+/**
+ * Who was sent which invoices, and when.
+ *
+ * Forwarding a controlled substance record to an accountant or a lawyer is a disclosure, and the
+ * pharmacy should be able to say exactly what left the building. It is also the ordinary
+ * question — "did you send me August?" — that otherwise turns into a search of somebody's sent
+ * mail. One row per send, listing every invoice in it.
+ */
+export const invoiceForwards = sqliteTable(
+  "invoice_forwards",
+  {
+    id: text("id").primaryKey(),
+    toAddress: text("to_address").notNull(),
+    /** The invoice ids sent, newline separated, kept even if an invoice is later corrected. */
+    invoiceIds: text("invoice_ids").notNull(),
+    count: integer("count").notNull().default(0),
+    /** Whether any Schedule II record was in the send, which is the part worth being able to see. */
+    includedScheduleTwo: integer("included_schedule_two", { mode: "boolean" }).notNull().default(false),
+    note: text("note"),
+    sentBy: text("sent_by").notNull(),
+    sentAt: text("sent_at").notNull().default(now()),
+    error: text("error"),
+  },
+  (t) => [index("invoice_forwards_sent_idx").on(t.sentAt)],
 );
 
 // ── Document intake (drop anything, Claude files it) ─────────────────

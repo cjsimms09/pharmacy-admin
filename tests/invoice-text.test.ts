@@ -119,3 +119,54 @@ describe("everything the rule refuses to decide", () => {
     assert.match(v.basis, /CSOS/);
   });
 });
+
+/**
+ * A second wholesaler, printing the schedule outright.
+ *
+ * Independent Pharmacy Distributor puts "C-2" in a DEA column beside each product rather than a
+ * one-letter item class. That is plainer than the class codes, and the site reads it — but only
+ * in the direction that is safe, because the site has seen very few of these.
+ */
+describe("an invoice that names the schedule in its own column", () => {
+  const ipd = (...marks: string[]) =>
+    [
+      "Independent Pharmacy Distributor, LLC",
+      "Invoice",
+      " 1004797",
+      "Ship Date: 08/31/2026",
+      "Ship CII Subtotal:QuantityPrice",
+      ...marks,
+      "Page 1 of 3",
+    ].join("\n");
+
+  test("a C-2 marking files it with the Schedule II records", () => {
+    const v = classifyInvoiceText(ipd("ADZENYS XR 9.4MG   C-2 (P)"));
+    assert.equal(v.schedule, "schedule_2");
+    assert.equal(v.confident, true);
+  });
+
+  test("its supplier, number and date are read off it too", () => {
+    const v = classifyInvoiceText(ipd("ADZENYS XR 9.4MG   C-2 (P)"));
+    assert.match(v.supplier ?? "", /Independent Pharmacy Distributor/i);
+    assert.equal(v.invoiceNumber, "1004797");
+    assert.equal(v.invoiceDate, "2026-08-31");
+  });
+
+  test("C-3 to C-5 markings, with no C-2 anywhere, go to the Schedule III-V records", () => {
+    const v = classifyInvoiceText(ipd("LORAZEPAM 1MG   C-4 (P)"));
+    assert.equal(v.schedule, "schedule_3_5");
+    assert.equal(v.confident, true);
+  });
+
+  test("the CII column heading is not read as a marking, or every invoice would be Schedule II", () => {
+    // The heading prints on every one of this supplier's invoices, controlled or not.
+    const v = classifyInvoiceText(ipd("AMOXICILLIN 500MG"));
+    assert.notEqual(v.schedule, "schedule_2");
+  });
+
+  test("no marking at all is unknown, not uncontrolled — the layout is too new to conclude from silence", () => {
+    const v = classifyInvoiceText(ipd("AMOXICILLIN 500MG"));
+    assert.equal(v.schedule, "unknown");
+    assert.equal(v.confident, false);
+  });
+});

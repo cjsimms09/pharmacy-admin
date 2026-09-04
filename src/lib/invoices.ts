@@ -2,9 +2,10 @@ import "server-only";
 import { and, eq, gte, lte, isNull } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "./crypto";
-import { todayIso } from "./dates";
+import { todayIso, daysBetween } from "./dates";
 import { storeFile } from "./files";
 import { readInvoice } from "./ai";
+import { getSettings } from "./settings";
 import { pdfText } from "./pdf-text";
 import type { InvoiceSchedule, DocumentCategory } from "@/db/schema";
 
@@ -97,6 +98,8 @@ export type TextVerdict = {
   confident: boolean;
   basis: string;
   controlledItems: string[];
+  /** Every item line read, controlled or not, so the invoice can be searched by what is on it. */
+  allItems: string[];
   supplier: string | null;
   invoiceNumber: string | null;
   invoiceDate: string | null;
@@ -112,12 +115,29 @@ export function classifyInvoiceText(text: string): TextVerdict {
   const lines = text.split("\n");
 
   const supplier =
+    text.match(/\bIndependent Pharmacy Distributor\b/i)?.[0] ??
     lines.find((l) => /\b(MCKESSON|CARDINAL|CENCORA|AMERISOURCE|MORRIS ?& ?DICKSON|HD SMITH|KINRAY|ANDA|SMITH DRUG|BURLINGTON)\b/i.test(l))
       ?.match(/\b(MCKESSON|CARDINAL|CENCORA|AMERISOURCE\w*|MORRIS ?& ?DICKSON|HD SMITH|KINRAY|ANDA|SMITH DRUG|BURLINGTON)\b/i)?.[0] ?? null;
-  const invoiceNumber = text.match(/Billing No\.?:\s*(\S+)/i)?.[1] ?? text.match(/Invoice (?:No|Number)\.?:?\s*(\S+)/i)?.[1] ?? null;
+  const invoiceNumber =
+    text.match(/Billing No\.?:\s*(\S+)/i)?.[1] ??
+    text.match(/Invoice (?:No|Number)\.?:?\s*#?\s*(\S+)/i)?.[1] ??
+    // "Invoice" on its own line with the number under it, which is how a Crystal Reports header
+    // comes out once the columns are put back together.
+    text.match(/^\s*Invoice\s*\n\s*#?\s*(\d{4,})\s*$/im)?.[1] ??
+    null;
   const invoiceDate =
     isoFrom(text.match(/Billing Date:?\s*(\d{2}\/\d{2}\/\d{4})/i)?.[1] ?? "") ??
-    isoFrom(text.match(/Invoice Date:?\s*(\d{2}\/\d{2}\/\d{4})/i)?.[1] ?? "");
+    isoFrom(text.match(/Invoice Date:?\s*(\d{2}\/\d{2}\/\d{4})/i)?.[1] ?? "") ??
+    isoFrom(text.match(/Ship Date:?\s*(\d{2}\/\d{2}\/\d{4})/i)?.[1] ?? "") ??
+    isoFrom(text.match(/Order Date:?\s*(\d{2}\/\d{2}\/\d{4})/i)?.[1] ?? "");
+
+  const head = {
+    supplier,
+    invoiceNumber,
+    invoiceDate,
+    controlledItems: [] as string[],
+    allItems: [] as string[],
+  };
 
   const items: { line: string; cls: string }[] = [];
   for (const line of lines) {
@@ -125,7 +145,44 @@ export function classifyInvoiceText(text: string): TextVerdict {
     if (m) items.push({ line: line.trim().replace(/\s{2,}/g, " "), cls: m[3] });
   }
 
-  const head = { supplier, invoiceNumber, invoiceDate, controlledItems: [] as string[] };
+  /*
+   * The other kind of invoice: one that names the schedule outright.
+   *
+   * A second wholesaler prints "C-2" and "C-3" in a DEA column beside each product rather than a
+   * one-letter item class. That is a plainer statement than the class codes and worth reading
+   * directly — but only in the direction that is safe. A C-2 marking on the page is proof there
+   * is a Schedule II line on it. The absence of any marking, in a layout the site has only seen
+   * a handful of times, is not proof of the opposite, so it does not get to conclude anything.
+   *
+   * The hyphen is required. "CII Subtotal" is a column heading that prints on every one of that
+   * supplier's invoices, controlled or not, and reading a heading as evidence would file every
+   * invoice they send as Schedule II.
+   */
+  if (items.length === 0) {
+    const twoMarks = text.match(/\bC-\s?(?:2|II)\b/g) ?? [];
+    const lowerMarks = text.match(/\bC-\s?(?:3|4|5|III|IV|V)\b/g) ?? [];
+
+    if (twoMarks.length > 0) {
+      return {
+        ...head,
+        schedule: "schedule_2",
+        confident: true,
+        controlledItems: lines.filter((l) => /\bC-\s?(?:2|II)\b/.test(l)).map((l) => l.trim().slice(0, 300)),
+        allItems: [],
+        basis: `The invoice marks ${twoMarks.length} item${twoMarks.length === 1 ? "" : "s"} as C-2 in its own schedule column.`,
+      };
+    }
+    if (lowerMarks.length > 0) {
+      return {
+        ...head,
+        schedule: "schedule_3_5",
+        confident: true,
+        controlledItems: lines.filter((l) => /\bC-\s?(?:3|4|5|III|IV|V)\b/.test(l)).map((l) => l.trim().slice(0, 300)),
+        allItems: [],
+        basis: `The invoice marks items as C-3, C-4 or C-5 in its own schedule column, and no C-2 marking appears anywhere on it.`,
+      };
+    }
+  }
 
   if (items.length === 0) {
     return {
@@ -141,6 +198,8 @@ export function classifyInvoiceText(text: string): TextVerdict {
   const unrecognised = items.filter(
     (i) => !CLASS_SCHEDULE_2.has(i.cls) && !CLASS_SCHEDULE_3_5.has(i.cls) && !CLASS_UNCONTROLLED.has(i.cls),
   );
+
+  head.allItems = items.map((i) => i.line);
 
   if (two.length > 0) {
     return {
@@ -214,6 +273,7 @@ export async function fileInvoice(
   let invoiceNumber: string | null = null;
   let invoiceDate: string | null = null;
   let confident = false;
+  let items: string[] = [];
 
   /*
    * The supplier's own answer first, and a model only where there isn't one.
@@ -238,6 +298,7 @@ export async function fileInvoice(
     confident = true;
     basis = `Read from the invoice itself. ${fromText.basis}`;
     controlled = fromText.controlledItems;
+    items = fromText.allItems;
     supplier = fromText.supplier || meta.supplier;
     invoiceNumber = fromText.invoiceNumber;
     invoiceDate = fromText.invoiceDate;
@@ -248,6 +309,7 @@ export async function fileInvoice(
     invoiceNumber = fromText?.invoiceNumber ?? null;
     invoiceDate = fromText?.invoiceDate ?? null;
     controlled = fromText?.controlledItems ?? [];
+    items = fromText?.allItems ?? [];
     basis = fromText?.basis ?? "The invoice could not be read as text.";
     try {
       const r = await readInvoice(buf, ctx);
@@ -294,6 +356,9 @@ export async function fileInvoice(
     schedule,
     basis,
     controlledItems: controlled.join("\n"),
+    // Capped, because this exists to be searched rather than read, and a hundred-line invoice
+    // should not push anything else out of the page it is shown on.
+    itemsText: items.join("\n").slice(0, 20000),
     needsReview: !confident,
     receivedFrom: meta.from,
   });
@@ -327,7 +392,18 @@ export async function setSchedule(
     .where(eq(schema.supplierInvoices.id, id));
 }
 
-export type InvoiceQuery = { schedule?: InvoiceSchedule; from?: string; to?: string };
+export type InvoiceQuery = {
+  schedule?: InvoiceSchedule;
+  from?: string;
+  to?: string;
+  /** A single month, as YYYY-MM. Simpler than two dates for the question people actually ask. */
+  month?: string;
+  supplier?: string;
+  /** Free text, matched against the supplier, the number, and every item line on the invoice. */
+  text?: string;
+  /** Only those nobody has confirmed. */
+  unconfirmed?: boolean;
+};
 
 /**
  * The query an inspection actually asks: this schedule, these dates, nothing else.
@@ -336,15 +412,79 @@ export type InvoiceQuery = { schedule?: InvoiceSchedule; from?: string; to?: str
  * Schedule IIs come back on their own, immediately, with nothing else in the answer.
  */
 export async function invoices(q: InvoiceQuery = {}): Promise<SupplierInvoice[]> {
+  // A month is just a date range, and saying so here keeps one code path rather than two.
+  const from = q.month ? `${q.month}-01` : q.from;
+  const to = q.month ? `${q.month}-31` : q.to;
+
   const where = [
     q.schedule ? eq(schema.supplierInvoices.schedule, q.schedule) : undefined,
-    q.from ? gte(schema.supplierInvoices.invoiceDate, q.from) : undefined,
-    q.to ? lte(schema.supplierInvoices.invoiceDate, q.to) : undefined,
+    from ? gte(schema.supplierInvoices.invoiceDate, from) : undefined,
+    to ? lte(schema.supplierInvoices.invoiceDate, to) : undefined,
+    q.supplier ? eq(schema.supplierInvoices.supplier, q.supplier) : undefined,
+    q.unconfirmed ? eq(schema.supplierInvoices.needsReview, true) : undefined,
   ].filter(Boolean);
-  return db.query.supplierInvoices.findMany({
+
+  const rows = await db.query.supplierInvoices.findMany({
     where: where.length ? and(...where) : undefined,
     orderBy: (i, { desc }) => [desc(i.invoiceDate), desc(i.createdAt)],
   });
+
+  /*
+   * Free text last, in memory, and deliberately so.
+   *
+   * The corpus is one pharmacy's invoices — thousands of rows at most, and the item text is
+   * already in hand. Pushing this into SQL would mean a full-text index to maintain and a
+   * migration to get wrong, in exchange for a difference nobody could perceive. Every word
+   * typed has to appear somewhere, which is what makes "oxycodone march" behave the way
+   * somebody expects rather than returning everything with either.
+   */
+  return rows.filter((r) => matchesText(r, q.text));
+}
+
+/**
+ * Whether one invoice answers a free-text search.
+ *
+ * Everything a person might have in their hand is searched: the supplier, the invoice number as
+ * printed, the date, the address it arrived from, and every item line on it. The invoice number
+ * matters as much as the drug names — it is what is written on a statement, quoted in an email
+ * from the wholesaler, and read down the phone — and a partial one matches, because people
+ * remember the last four digits rather than all ten.
+ *
+ * Every word typed has to appear somewhere. That is what makes "oxycodone august" behave the way
+ * somebody expects instead of returning everything with either.
+ */
+export function matchesText(
+  invoice: Pick<SupplierInvoice, "supplier" | "invoiceNumber" | "invoiceDate" | "itemsText" | "controlledItems" | "receivedFrom">,
+  text: string | undefined,
+): boolean {
+  const terms = (text ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return true;
+  const hay = [
+    invoice.supplier,
+    invoice.invoiceNumber,
+    invoice.invoiceDate,
+    invoice.itemsText,
+    invoice.controlledItems,
+    invoice.receivedFrom,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return terms.every((t) => hay.includes(t));
+}
+
+/** The suppliers that have actually sent something, for the filter. */
+export async function invoiceSuppliers(): Promise<string[]> {
+  const rows = await db.query.supplierInvoices.findMany();
+  return [...new Set(rows.map((r) => r.supplier).filter((x): x is string => Boolean(x)))].sort();
+}
+
+/** The months that have invoices in them, newest first, so the picker offers only real months. */
+export async function invoiceMonths(): Promise<string[]> {
+  const rows = await db.query.supplierInvoices.findMany();
+  return [...new Set(rows.map((r) => r.invoiceDate?.slice(0, 7)).filter((x): x is string => Boolean(x)))]
+    .sort()
+    .reverse();
 }
 
 /** Anything the reader was not sure about, which is the only queue that must not grow quietly. */
@@ -367,4 +507,249 @@ export async function invoiceCounts(): Promise<InvoiceCounts> {
     review: all.filter((i) => i.needsReview && !i.reviewedAt).length,
     total: all.length,
   };
+}
+
+/**
+ * What is wrong with the invoice records right now.
+ *
+ * A mail-fed archive fails quietly, and every one of these is a way it does. The supplier changes
+ * the address they send from and the invoices simply stop; a scan comes through that nothing
+ * could read and sits unconfirmed; an invoice arrives with no date on it, so it is in the archive
+ * but cannot be produced by a date range, which is the entire retrieval requirement. None of
+ * those announce themselves. A pharmacy that trusted this and was not told would find out during
+ * an inspection.
+ *
+ * Ordered worst first, and each one says what to do rather than only what is wrong.
+ */
+export type InvoiceIssue = {
+  key: string;
+  severity: "blocking" | "warn";
+  title: string;
+  detail: string;
+  /** Where the fix is, when the site can offer one. */
+  href?: string;
+  action?: string;
+};
+
+/** Days of silence from a supplier before the silence is itself the news. */
+const SUPPLIER_SILENT_DAYS = 21;
+
+export async function invoiceIssues(): Promise<InvoiceIssue[]> {
+  const rows = await db.query.supplierInvoices.findMany();
+  const out: InvoiceIssue[] = [];
+  const today = todayIso();
+
+  if (rows.length === 0) return out;
+
+  // ── Unconfirmed, and how long they have sat ──────────────────────
+  const unconfirmed = rows.filter((r) => r.needsReview && !r.reviewedAt);
+  if (unconfirmed.length > 0) {
+    const oldest = unconfirmed
+      .map((r) => r.createdAt.slice(0, 10))
+      .sort()[0];
+    const days = daysBetween(oldest, today);
+    out.push({
+      key: "unconfirmed",
+      severity: days >= 7 ? "blocking" : "warn",
+      title: `${unconfirmed.length} invoice${unconfirmed.length === 1 ? "" : "s"} nobody has confirmed`,
+      detail:
+        `Each is held with the Schedule II records, which is the safe place for it but not the right one. ` +
+        (days >= 7
+          ? `The oldest has been waiting ${days} days.`
+          : `The oldest arrived ${days === 0 ? "today" : `${days} day${days === 1 ? "" : "s"} ago`}.`),
+      href: "/inventory/invoices?unconfirmed=1",
+      action: "Say what they carry",
+    });
+  }
+
+  // ── Filed, but not retrievable by date ───────────────────────────
+  const undated = rows.filter((r) => !r.invoiceDate);
+  if (undated.length > 0) {
+    out.push({
+      key: "undated",
+      severity: "blocking",
+      title: `${undated.length} invoice${undated.length === 1 ? " has" : "s have"} no date`,
+      detail:
+        "An invoice with no date is in the archive but cannot be produced by a date range, which is exactly what an inspector asks for. Open each one and put the date on it.",
+      href: "/inventory/invoices?undated=1",
+      action: "Put the dates on",
+    });
+  }
+
+  // ── The same invoice, filed twice ────────────────────────────────
+  const seen = new Map<string, number>();
+  for (const r of rows) {
+    if (!r.invoiceNumber || !r.supplier) continue;
+    const k = `${r.supplier}|${r.invoiceNumber}`;
+    seen.set(k, (seen.get(k) ?? 0) + 1);
+  }
+  const dupes = [...seen.entries()].filter(([, n]) => n > 1);
+  if (dupes.length > 0) {
+    out.push({
+      key: "duplicates",
+      severity: "warn",
+      title: `${dupes.length} invoice number${dupes.length === 1 ? " appears" : "s appear"} more than once`,
+      detail:
+        `Usually the supplier sent it twice, which is harmless. Occasionally it is two different invoices sharing a ` +
+        `number, which is not. ${dupes.slice(0, 3).map(([k]) => k.split("|")[1]).join(", ")}${dupes.length > 3 ? " and others" : ""}.`,
+      href: "/inventory/invoices",
+      action: "Look at them",
+    });
+  }
+
+  // ── A supplier that has gone quiet ───────────────────────────────
+  /*
+   * The failure this catches is the one nobody notices: the supplier changes the address they
+   * send from, or the rule that recognises them stops matching, and the invoices simply stop
+   * arriving. Nothing breaks, no error appears, and the pharmacy carries on believing its records
+   * are being kept. Silence from a supplier that used to write every week is the only symptom.
+   */
+  const bySupplier = new Map<string, string[]>();
+  for (const r of rows) {
+    if (!r.supplier || !r.invoiceDate) continue;
+    bySupplier.set(r.supplier, [...(bySupplier.get(r.supplier) ?? []), r.invoiceDate]);
+  }
+  for (const [supplier, dates] of bySupplier) {
+    // Only worth saying about a supplier that has written enough for silence to mean something.
+    if (dates.length < 3) continue;
+    const last = dates.sort().at(-1)!;
+    const quiet = daysBetween(last, today);
+    if (quiet < SUPPLIER_SILENT_DAYS) continue;
+    out.push({
+      key: `silent:${supplier}`,
+      severity: "blocking",
+      title: `Nothing from ${supplier} for ${quiet} days`,
+      detail:
+        `They have sent ${dates.length} invoices before this, and the last was ${last}. Either the pharmacy has ` +
+        `stopped ordering, or they have changed the address they send from and the invoices are no longer being ` +
+        `recognised — in which case records the pharmacy is required to keep are not being kept.`,
+      href: "/settings/email",
+      action: "Check the sender rules",
+    });
+  }
+
+  const rank = { blocking: 0, warn: 1 };
+  return out.sort((a, b) => rank[a.severity] - rank[b.severity]);
+}
+
+export type ForwardResult = { sent: number; to: string; message: string };
+
+/**
+ * Sends selected invoices to somebody else, as attachments, from within the site.
+ *
+ * The alternative was going and finding each PDF, then attaching them by hand in a mail client —
+ * which is how the accountant ends up with the wrong month and nobody can afterwards say what was
+ * sent. Every send is recorded: who, what, when, and whether any Schedule II record was in it.
+ * Forwarding a controlled substance record is a disclosure, and the pharmacy should be able to
+ * say exactly what left the building.
+ */
+export async function forwardInvoices(
+  ids: string[],
+  to: string,
+  note: string,
+  user: { name: string },
+): Promise<ForwardResult> {
+  const address = to.trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) throw new Error("That is not an email address.");
+  if (ids.length === 0) throw new Error("Nothing was selected.");
+
+  const rows = await db.query.supplierInvoices.findMany();
+  const chosen = rows.filter((r) => ids.includes(r.id));
+  if (chosen.length === 0) throw new Error("Those invoices no longer exist.");
+
+  const docs = await db.query.documents.findMany();
+  const { readFile } = await import("./files");
+  const attachments: { filename: string; content: Buffer; contentType?: string }[] = [];
+  const missing: string[] = [];
+
+  for (const inv of chosen) {
+    const doc = docs.find((d) => d.id === inv.documentId);
+    if (!doc) {
+      missing.push(inv.invoiceNumber ?? inv.id);
+      continue;
+    }
+    try {
+      attachments.push({
+        filename: doc.fileName,
+        content: await readFile(doc.storageKey),
+        contentType: doc.mimeType,
+      });
+    } catch {
+      missing.push(inv.invoiceNumber ?? inv.id);
+    }
+  }
+  if (attachments.length === 0) throw new Error("None of the selected files could be read, so nothing was sent.");
+
+  const s = await getSettings();
+  const pharmacy = s.pharmacy_name || "The pharmacy";
+  const hasTwo = chosen.some((i) => i.schedule === "schedule_2");
+  const lines = [
+    note.trim() || `${chosen.length} invoice${chosen.length === 1 ? "" : "s"} from ${pharmacy}.`,
+    "",
+    ...chosen.map(
+      (i) =>
+        `${i.invoiceDate ?? "no date"} · ${i.supplier ?? "supplier not recorded"} · ${i.invoiceNumber ?? "no number"} · ${filingFor(i.schedule).label}`,
+    ),
+    "",
+    hasTwo
+      ? "This message includes Schedule II purchase records. Handle and store them accordingly."
+      : "",
+    `Sent by ${user.name} from ${pharmacy}.`,
+  ].filter((l) => l !== undefined);
+
+  const { sendMail } = await import("./send-mail");
+  const r = await sendMail(
+    address,
+    `${pharmacy}: ${chosen.length} supplier invoice${chosen.length === 1 ? "" : "s"}`,
+    lines.join("\n"),
+    attachments,
+  );
+
+  await db.insert(schema.invoiceForwards).values({
+    id: newId(),
+    toAddress: address,
+    invoiceIds: chosen.map((i) => i.id).join("\n"),
+    count: attachments.length,
+    includedScheduleTwo: hasTwo,
+    note: note.trim() || null,
+    sentBy: user.name,
+    error: r.ok ? null : r.error,
+  });
+
+  if (!r.ok) throw new Error(`Could not send: ${r.error}`);
+
+  return {
+    sent: attachments.length,
+    to: address,
+    message:
+      `${attachments.length} invoice${attachments.length === 1 ? "" : "s"} accepted for delivery to ${address}` +
+      (hasTwo ? ", including Schedule II records" : "") +
+      "." +
+      (missing.length ? ` ${missing.length} could not be read and ${missing.length === 1 ? "was" : "were"} left out: ${missing.join(", ")}.` : "") +
+      " The send is recorded against your name.",
+  };
+}
+
+/** What has been sent out, most recent first. */
+export async function recentForwards(limit = 20) {
+  const rows = await db.query.invoiceForwards.findMany({ orderBy: (f, { desc }) => [desc(f.sentAt)] });
+  return rows.slice(0, limit);
+}
+
+/**
+ * Puts a date on an invoice that arrived without one.
+ *
+ * A dateless invoice is in the archive and outside every date range, which is the one form of
+ * retrieval an inspector actually uses. The date wanted is the one printed on the invoice, not
+ * the day it arrived — so this is a person reading the document, not something to infer.
+ */
+export async function setInvoiceDate(id: string, invoiceDate: string, user: { name: string }): Promise<void> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(invoiceDate)) throw new Error("That is not a date.");
+  const inv = await db.query.supplierInvoices.findFirst({ where: eq(schema.supplierInvoices.id, id) });
+  if (!inv) throw new Error("That invoice no longer exists.");
+  await db
+    .update(schema.supplierInvoices)
+    .set({ invoiceDate, basis: `${inv.basis ?? ""} Date entered by ${user.name} on ${todayIso()}.`.trim() })
+    .where(eq(schema.supplierInvoices.id, id));
+  await db.update(schema.documents).set({ effectiveOn: invoiceDate }).where(eq(schema.documents.id, inv.documentId));
 }
