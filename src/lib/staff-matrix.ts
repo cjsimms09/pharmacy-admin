@@ -5,6 +5,7 @@ import { onSiteToday } from "./roster";
 import { todayIso, daysBetween } from "./dates";
 import { addMonths, TRAINING_CADENCE } from "./due";
 import { TRAINING_SHORT } from "./labels";
+import { openRequests } from "./credential-requests";
 import type { CredentialType, TrainingType } from "@/db/schema";
 
 /**
@@ -54,6 +55,20 @@ export type Cell = {
     reminders: number;
     sendError: string | null;
   };
+  /**
+   * For a credential column with nothing on file: ask the person for it from here.
+   *
+   * Same reasoning as the training action above, and the same gap it closes. Emailing somebody
+   * for their CPhT card, waiting, then remembering to file what came back against the right
+   * requirement is four steps, and the board that shows the gap should be able to start it.
+   */
+  credentialAction?: {
+    credentialType: CredentialType;
+    personId: string;
+    /** Whether they have already been asked and have not replied. */
+    askedOn: string | null;
+    hasEmail: boolean;
+  };
 };
 
 export type MatrixColumn = {
@@ -88,8 +103,24 @@ export type StaffMatrix = {
 const SOON_CREDENTIAL = 60;
 const SOON_TRAINING = 30;
 
-const CREDENTIAL_COLUMNS: { key: string; type: CredentialType; short: string; label: string; immunizersOnly?: boolean }[] = [
+const CREDENTIAL_COLUMNS: {
+  key: string;
+  type: CredentialType;
+  short: string;
+  label: string;
+  immunizersOnly?: boolean;
+  techniciansOnly?: boolean;
+}[] = [
   { key: "license", type: "pharmacist_license", short: "Licence", label: "Kansas licence or registration" },
+  // The CPhT is a technician's credential and nobody else's, so it reads as not applicable for
+  // everyone else rather than as a gap that can never be closed.
+  {
+    key: "cpht",
+    type: "technician_certification",
+    short: "CPhT",
+    label: "CPhT certification (PTCB / NHA)",
+    techniciansOnly: true,
+  },
   { key: "cpr", type: "cpr", short: "CPR", label: "CPR certification", immunizersOnly: true },
   { key: "imm_training", type: "immunization_training", short: "Imm trng", label: "Immunization training", immunizersOnly: true },
   { key: "imm_protocol", type: "immunization_protocol", short: "Protocol", label: "Signed immunization protocol", immunizersOnly: true },
@@ -131,11 +162,12 @@ function dated(iso: string | null, soonDays: number, what: string): Cell {
 }
 
 export async function staffMatrix(): Promise<StaffMatrix> {
-  const [people, creds, trainings, assignments] = await Promise.all([
+  const [people, creds, trainings, assignments, requests] = await Promise.all([
     onSiteToday(),
     db.query.credentials.findMany(),
     db.query.trainings.findMany(),
     db.query.trainingAssignments.findMany(),
+    openRequests(),
   ]);
   const open = assignments.filter((a) => !a.completedAt);
 
@@ -149,13 +181,29 @@ export async function staffMatrix(): Promise<StaffMatrix> {
         cells[col.key] = { state: "na", label: "—", title: `${p.firstName} does not administer vaccines, so this is not required.` };
         continue;
       }
+      if (col.techniciansOnly && p.role !== "technician") {
+        cells[col.key] = { state: "na", label: "—", title: `${col.label} applies to technicians only.` };
+        continue;
+      }
       const type = col.key === "license" ? licenseTypeFor(p.role) : col.type;
       const held = mine
         .filter((c) => c.type === type)
         .sort((a, b) => (b.expiresOn ?? "9999").localeCompare(a.expiresOn ?? "9999"))[0];
 
+      const askAction = {
+        credentialType: type,
+        personId: p.id,
+        askedOn: requests.find((r) => r.personId === p.id && r.type === type)?.sentAt?.slice(0, 10) ?? null,
+        hasEmail: Boolean(p.email),
+      };
+
       if (!held) {
-        cells[col.key] = { state: "missing", label: "none", title: `No ${col.label.toLowerCase()} is on file for ${p.firstName}.` };
+        cells[col.key] = {
+          state: "missing",
+          label: "none",
+          title: `No ${col.label.toLowerCase()} is on file for ${p.firstName}.`,
+          credentialAction: askAction,
+        };
         continue;
       }
       if (held.noExpiry) {
@@ -169,10 +217,18 @@ export async function staffMatrix(): Promise<StaffMatrix> {
           state: "missing",
           label: "no date",
           title: `${col.label} is on file for ${p.firstName} but carries no expiry date, so nothing can tell you when it lapses.`,
+          href: `/staff/${p.id}#credential-form`,
         };
         continue;
       }
-      cells[col.key] = { ...dated(held.expiresOn, SOON_CREDENTIAL, col.label), href: `/staff/${p.id}#credential-form` };
+      const cell = dated(held.expiresOn, SOON_CREDENTIAL, col.label);
+      cells[col.key] = {
+        ...cell,
+        href: `/staff/${p.id}#credential-form`,
+        // Lapsed is as good as absent for asking purposes: the pharmacy needs the new card, and
+        // the request is the same email either way.
+        credentialAction: cell.state === "late" ? askAction : undefined,
+      };
     }
 
     for (const col of TRAINING_COLUMNS) {

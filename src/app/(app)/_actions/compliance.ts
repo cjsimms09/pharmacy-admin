@@ -7,7 +7,8 @@ import { audit } from "@/lib/audit";
 import { attest, answerObligation } from "@/lib/compliance-status";
 import { periodLabel } from "@/lib/periods";
 import { assignTraining, sendOutstanding } from "@/lib/training-assignments";
-import type { TrainingType } from "@/db/schema";
+import { requestCredential } from "@/lib/credential-requests";
+import type { TrainingType, CredentialType } from "@/db/schema";
 
 /**
  * The two compliance actions, in one place.
@@ -120,6 +121,38 @@ export async function sendTrainingAction(fd: FormData) {
             : r.problems.join(" ") || "Assigned, but nothing could be emailed.",
         ),
     );
+  } catch (e) {
+    if (e && typeof e === "object" && "digest" in e) throw e;
+    redirect(`${back}?error=` + encodeURIComponent(e instanceof Error ? e.message : "Could not send that."));
+  }
+}
+
+/**
+ * Asks somebody for the certificate the pharmacy does not have.
+ *
+ * Lives here for the same reason sending training does: the gap is seen on the staff board and on
+ * the person's own page, and both should be able to close it. Emailing someone, waiting, then
+ * remembering to file whatever came back against the right person and the right requirement is
+ * four steps, and every one of them is a place it stopped happening — which is why the same gaps
+ * sat open for months.
+ *
+ * The reply files itself. What comes back is matched on a code and on the sender's own address,
+ * both or neither, and the credential is created with the dates deliberately left blank: an
+ * attachment proves the certificate exists and says nothing about when it expires, and an invented
+ * expiry date passes every check while telling you nothing.
+ */
+export async function requestCredentialAction(fd: FormData) {
+  const u = await requireManager();
+  const back = backTo(fd);
+  const personId = String(fd.get("personId") ?? "");
+  const type = String(fd.get("credentialType") ?? "") as CredentialType;
+  try {
+    const r = await requestCredential(personId, type, u);
+    await audit({ action: "credential.request", userId: u.id, userName: u.name, entity: "person", entityId: personId, details: type });
+    revalidatePath("/");
+    revalidatePath(`/staff/${personId}`);
+    revalidatePath("/staff");
+    redirect(`${back}?${r.ok ? "ok" : "error"}=` + encodeURIComponent(r.message));
   } catch (e) {
     if (e && typeof e === "object" && "digest" in e) throw e;
     redirect(`${back}?error=` + encodeURIComponent(e instanceof Error ? e.message : "Could not send that."));

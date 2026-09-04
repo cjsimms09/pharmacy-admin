@@ -5,6 +5,7 @@ import { newId } from "./crypto";
 import { todayIso } from "./dates";
 import { storeFile } from "./files";
 import { readInvoice } from "./ai";
+import { pdfText } from "./pdf-text";
 import type { InvoiceSchedule, DocumentCategory } from "@/db/schema";
 
 /**
@@ -63,6 +64,135 @@ export function looksLikeInvoice(opts: {
   return /invoice|inv\b|statement of account|packing (list|slip)/i.test(`${opts.subject} ${opts.fileName}`);
 }
 
+/**
+ * Reading the schedule the wholesaler already printed.
+ *
+ * McKesson — and every other wholesaler that prints an item class — puts a single letter beside
+ * each line saying what that item is. The pharmacy's own invoices carry R against ordinary legend
+ * drugs, X against every Schedule II, and B, D or E against the Schedule III to V lines. That is
+ * the supplier's own determination, made by the party that shipped the goods, and it is a better
+ * source than anything that reads the drug names and infers a schedule.
+ *
+ * So the ordinary case is settled by a rule: same answer every time, no API key needed, free,
+ * and testable. Judgement is kept for what actually needs it — a scan, an unfamiliar layout, a
+ * supplier who prints no class at all.
+ *
+ * The asymmetry is the whole design. An unrecognised class letter does not mean uncontrolled, it
+ * means unknown, and unknown goes to a person. Only a page where every line carries a class this
+ * knows to be non-controlled is allowed to be filed as ordinary business records.
+ */
+
+/** Item classes that mean Schedule II. */
+const CLASS_SCHEDULE_2 = new Set(["X", "A"]);
+/** Item classes that mean Schedule III, IV or V. */
+const CLASS_SCHEDULE_3_5 = new Set(["B", "C", "D", "E"]);
+/** Item classes known to be nothing of the sort: legend, OTC, supplies. */
+const CLASS_UNCONTROLLED = new Set(["R", "O", "N", "S", "G", "H", "P", "T", "V", "W", "Y", "Z"]);
+
+/** A line of the invoice's item table, and what the supplier said it was. */
+const ITEM_LINE = /^(\d{4,5}-\d{3,4}-\d{2}|\d{5}-\d{4}-\d{2}).{0,200}?\s([\d,]+\.\d{2})\s+([A-Z])\s/;
+
+export type TextVerdict = {
+  schedule: InvoiceSchedule;
+  confident: boolean;
+  basis: string;
+  controlledItems: string[];
+  supplier: string | null;
+  invoiceNumber: string | null;
+  invoiceDate: string | null;
+};
+
+/** "09/04/2026" as an ISO date, where it is one. */
+function isoFrom(us: string): string | null {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(us.trim());
+  return m ? `${m[3]}-${m[1]}-${m[2]}` : null;
+}
+
+export function classifyInvoiceText(text: string): TextVerdict {
+  const lines = text.split("\n");
+
+  const supplier =
+    lines.find((l) => /\b(MCKESSON|CARDINAL|CENCORA|AMERISOURCE|MORRIS ?& ?DICKSON|HD SMITH|KINRAY|ANDA|SMITH DRUG|BURLINGTON)\b/i.test(l))
+      ?.match(/\b(MCKESSON|CARDINAL|CENCORA|AMERISOURCE\w*|MORRIS ?& ?DICKSON|HD SMITH|KINRAY|ANDA|SMITH DRUG|BURLINGTON)\b/i)?.[0] ?? null;
+  const invoiceNumber = text.match(/Billing No\.?:\s*(\S+)/i)?.[1] ?? text.match(/Invoice (?:No|Number)\.?:?\s*(\S+)/i)?.[1] ?? null;
+  const invoiceDate =
+    isoFrom(text.match(/Billing Date:?\s*(\d{2}\/\d{2}\/\d{4})/i)?.[1] ?? "") ??
+    isoFrom(text.match(/Invoice Date:?\s*(\d{2}\/\d{2}\/\d{4})/i)?.[1] ?? "");
+
+  const items: { line: string; cls: string }[] = [];
+  for (const line of lines) {
+    const m = ITEM_LINE.exec(line.trim());
+    if (m) items.push({ line: line.trim().replace(/\s{2,}/g, " "), cls: m[3] });
+  }
+
+  const head = { supplier, invoiceNumber, invoiceDate, controlledItems: [] as string[] };
+
+  if (items.length === 0) {
+    return {
+      ...head,
+      schedule: "unknown",
+      confident: false,
+      basis: "No item lines could be read from this document, so nothing can be said about what it carries.",
+    };
+  }
+
+  const two = items.filter((i) => CLASS_SCHEDULE_2.has(i.cls));
+  const lower = items.filter((i) => CLASS_SCHEDULE_3_5.has(i.cls));
+  const unrecognised = items.filter(
+    (i) => !CLASS_SCHEDULE_2.has(i.cls) && !CLASS_SCHEDULE_3_5.has(i.cls) && !CLASS_UNCONTROLLED.has(i.cls),
+  );
+
+  if (two.length > 0) {
+    return {
+      ...head,
+      schedule: "schedule_2",
+      confident: true,
+      controlledItems: [...two, ...lower].map((i) => i.line),
+      basis: `${two.length} line${two.length === 1 ? "" : "s"} carry the supplier's Schedule II item class, out of ${items.length} read.`,
+    };
+  }
+
+  // A CSOS order number on a page nothing else marked as controlled is a contradiction, and a
+  // contradiction about Schedule II is never resolved by picking the convenient side.
+  if (/CSOS ID/i.test(text)) {
+    return {
+      ...head,
+      schedule: "unknown",
+      confident: false,
+      controlledItems: items.map((i) => i.line),
+      basis:
+        "The invoice carries a CSOS order number, which is used for controlled orders, but no line was marked with a controlled item class. That disagreement needs a person.",
+    };
+  }
+
+  if (lower.length > 0 && unrecognised.length === 0) {
+    return {
+      ...head,
+      schedule: "schedule_3_5",
+      confident: true,
+      controlledItems: lower.map((i) => i.line),
+      basis: `${lower.length} controlled line${lower.length === 1 ? "" : "s"}, all in the supplier's Schedule III to V item classes, and no Schedule II class anywhere on the invoice.`,
+    };
+  }
+
+  if (unrecognised.length > 0) {
+    return {
+      ...head,
+      schedule: "unknown",
+      confident: false,
+      controlledItems: unrecognised.map((i) => i.line),
+      basis: `${unrecognised.length} line${unrecognised.length === 1 ? " carries an item class" : "s carry item classes"} this does not recognise (${[...new Set(unrecognised.map((i) => i.cls))].join(", ")}), so what they are has to be confirmed.`,
+    };
+  }
+
+  return {
+    ...head,
+    schedule: "none",
+    confident: true,
+    basis: `All ${items.length} lines carry item classes the supplier uses for non-controlled goods, and no controlled class appears anywhere on the invoice.`,
+  };
+}
+
 export type FiledInvoice = { id: string; documentId: string; schedule: InvoiceSchedule; needsReview: boolean };
 
 /**
@@ -85,19 +215,52 @@ export async function fileInvoice(
   let invoiceDate: string | null = null;
   let confident = false;
 
-  try {
-    const r = await readInvoice(buf, ctx);
-    schedule = r.confident ? r.schedule : "unknown";
-    confident = r.confident && r.schedule !== "unknown";
-    basis = r.confident
-      ? r.basis
-      : `${r.basis} The reading was not certain, so this is held for a person to confirm.`;
-    controlled = r.controlledItems;
-    supplier = r.supplier?.trim() || meta.supplier;
-    invoiceNumber = r.invoiceNumber?.trim() || null;
-    invoiceDate = /^\d{4}-\d{2}-\d{2}$/.test(r.invoiceDate ?? "") ? r.invoiceDate : null;
-  } catch (e) {
-    basis = `Could not be read automatically: ${e instanceof Error ? e.message : String(e)}. Held with the Schedule II records until somebody says otherwise.`;
+  /*
+   * The supplier's own answer first, and a model only where there isn't one.
+   *
+   * The wholesaler prints an item class beside every line, and that is the determination of the
+   * party that actually shipped the goods. Reading it gives the same answer every time, costs
+   * nothing, works with no API key, and can be tested against real invoices — none of which is
+   * true of inferring a schedule from drug names. The model is the fallback for the cases the
+   * rule cannot settle: a scan, an unfamiliar layout, a supplier who prints no class at all.
+   */
+  const fromText = (() => {
+    try {
+      const text = pdfText(buf);
+      return text.length > 200 ? classifyInvoiceText(text) : null;
+    } catch {
+      return null;
+    }
+  })();
+
+  if (fromText?.confident) {
+    schedule = fromText.schedule;
+    confident = true;
+    basis = `Read from the invoice itself. ${fromText.basis}`;
+    controlled = fromText.controlledItems;
+    supplier = fromText.supplier || meta.supplier;
+    invoiceNumber = fromText.invoiceNumber;
+    invoiceDate = fromText.invoiceDate;
+  } else {
+    // Anything the rule could not settle, including a disagreement it spotted, goes to the model
+    // — and if that is unavailable or unsure too, the invoice waits for a person.
+    supplier = fromText?.supplier || meta.supplier;
+    invoiceNumber = fromText?.invoiceNumber ?? null;
+    invoiceDate = fromText?.invoiceDate ?? null;
+    controlled = fromText?.controlledItems ?? [];
+    basis = fromText?.basis ?? "The invoice could not be read as text.";
+    try {
+      const r = await readInvoice(buf, ctx);
+      schedule = r.confident ? r.schedule : "unknown";
+      confident = r.confident && r.schedule !== "unknown";
+      basis = `${basis} ${r.confident ? r.basis : `${r.basis} The reading was not certain, so this is held for a person to confirm.`}`;
+      if (r.controlledItems.length > 0) controlled = r.controlledItems;
+      supplier = r.supplier?.trim() || supplier;
+      invoiceNumber = r.invoiceNumber?.trim() || invoiceNumber;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(r.invoiceDate ?? "")) invoiceDate = r.invoiceDate;
+    } catch (e) {
+      basis = `${basis} It could not be read automatically either: ${e instanceof Error ? e.message : String(e)}. Held with the Schedule II records until somebody says otherwise.`;
+    }
   }
 
   const filing = FILING[schedule];

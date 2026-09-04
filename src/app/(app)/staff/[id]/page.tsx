@@ -15,6 +15,8 @@ import {
 import { PageHeader, Card, Figure, Notice, StatusBadge, Field } from "@/components/ui";
 import { DocumentList, UploadForm } from "@/components/documents";
 import { retentionFor } from "@/lib/offboarding";
+import { openRequestsFor } from "@/lib/credential-requests";
+import { requestCredentialAction } from "../../_actions/compliance";
 import { PersonForm } from "../person-form";
 import {
   addCredential,
@@ -56,12 +58,13 @@ export default async function PersonPage({
   const person = await db.query.people.findFirst({ where: eq(schema.people.id, id) });
   if (!person) notFound();
 
-  const [creds, docs, retention, trainings, assignments] = await Promise.all([
+  const [creds, docs, retention, trainings, assignments, asked] = await Promise.all([
     db.query.credentials.findMany({ where: eq(schema.credentials.personId, id), orderBy: (c, { asc }) => [asc(c.expiresOn)] }),
     db.query.documents.findMany({ where: eq(schema.documents.personId, id), orderBy: (d, { desc }) => [desc(d.uploadedAt)] }),
     retentionFor(id),
     db.query.trainings.findMany({ where: eq(schema.trainings.personId, id), orderBy: (t, { desc }) => [desc(t.completedOn)] }),
     db.query.trainingAssignments.findMany({ where: eq(schema.trainingAssignments.personId, id) }),
+    openRequestsFor(id),
   ]);
 
   const here = `/staff/${id}`;
@@ -220,6 +223,46 @@ export default async function PersonPage({
                             <Link href={`${here}?add=${type}#credential-form`} className="btn btn-sm btn-primary block text-center">
                               Add with document
                             </Link>
+                            {/*
+                              The third way, for the card nobody has and nobody has brought in.
+                              
+                              Both of the other options assume the certificate is in the building.
+                              When it is not, the whole job was: email them, wait, remember, then
+                              file what came back against the right person and the right
+                              requirement — four steps, each one a place it stopped happening. This
+                              is that, as one button, and the reply files itself.
+                            */}
+                            {person.email ? (
+                              (() => {
+                                const out = asked.find((r) => r.type === type);
+                                return out ? (
+                                  <div className="rounded-md border border-line bg-ground px-2 py-1.5 text-[11px] leading-tight text-ink-2">
+                                    Asked {out.sentAt ? fmt(out.sentAt.slice(0, 10)) : "but not sent"}
+                                    {out.sendError ? <span className="block text-crit">{out.sendError}</span> : null}
+                                    <span className="block text-ink-3">
+                                      They reply with a photo and the code {out.replyCode}, and it files itself here.
+                                    </span>
+                                    <form action={requestCredentialAction} className="mt-1">
+                                      <input type="hidden" name="personId" value={id} />
+                                      <input type="hidden" name="credentialType" value={type} />
+                                      <input type="hidden" name="back" value={here} />
+                                      <button className="btn btn-sm w-full">Ask again</button>
+                                    </form>
+                                  </div>
+                                ) : (
+                                  <form action={requestCredentialAction}>
+                                    <input type="hidden" name="personId" value={id} />
+                                    <input type="hidden" name="credentialType" value={type} />
+                                    <input type="hidden" name="back" value={here} />
+                                    <button className="btn btn-sm w-full">Ask them for it</button>
+                                  </form>
+                                );
+                              })()
+                            ) : (
+                              <p className="text-[11px] text-ink-3">
+                                No email address on file, so there is nowhere to send a request.
+                              </p>
+                            )}
                             {/* The short path, for the card that was put on the counter and was
                                 current. The alternative to this is not a fuller record — it is no
                                 record, which is the state this whole page exists to prevent. */}
