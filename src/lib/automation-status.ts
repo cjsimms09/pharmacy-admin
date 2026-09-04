@@ -69,9 +69,13 @@ export async function automationStatus(): Promise<JobStatus[]> {
     {
       key: "backup",
       label: "Verified backup",
-      state: judge("backup", on(s.backup_enabled), s.backup_last_run),
+      // On unless deliberately switched off, matching backupStatus().
+      state: judge("backup", s.backup_enabled !== "no", s.backup_last_run),
       lastAt: s.backup_last_run ?? null,
-      detail: s.backup_last_result ?? "Backups are switched off, so nothing here survives this computer.",
+      detail:
+        s.backup_enabled === "no"
+          ? "Backups are switched off, so nothing here survives this computer."
+          : (s.backup_last_result ?? "No backup has run yet."),
       href: "/settings/backups",
     },
     {

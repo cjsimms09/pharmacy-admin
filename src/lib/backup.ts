@@ -41,6 +41,9 @@ const filesDir = () => path.join(dataDir(), "files");
 export type BackupResult = {
   ok: boolean;
   file: string;
+  /** The second copy, when a second destination is set and the write succeeded. */
+  copy: string | null;
+  copyError: string | null;
   sizeBytes: number;
   documents: number;
   tables: number;
@@ -90,7 +93,7 @@ async function tableCounts(url: string): Promise<Record<string, number>> {
  * mid-write, and a copied SQLite file caught mid-transaction restores to a corrupt database that
  * gives no warning until the day it is needed.
  */
-export async function runBackup(destination: string): Promise<BackupResult> {
+export async function runBackup(destination: string, secondary?: string | null): Promise<BackupResult> {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   const fileName = `pharmacy-admin-backup-${stamp}.zip`;
   const dest = path.resolve(destination);
@@ -170,12 +173,39 @@ export async function runBackup(destination: string): Promise<BackupResult> {
     await fs.rm(check, { force: true });
   }
 
+  // ── The second copy ─────────────────────────────────────────────
+  // Only ever a copy of an archive that has already passed verification. Copying an unverified
+  // one would just put the same bad file in two places, which is not two backups.
+  let copy: string | null = null;
+  let copyError: string | null = null;
+  if (verified && secondary?.trim()) {
+    const dest2 = path.resolve(secondary.trim());
+    try {
+      if (path.resolve(dest2) === dest) throw new Error("it is the same folder as the first copy");
+      await fs.mkdir(dest2, { recursive: true });
+      const p2 = path.join(dest2, fileName);
+      await fs.writeFile(p2, archive);
+      // Read it back off that disk too. A network share or a USB stick can accept a write and
+      // keep none of it, and finding that out on the day you need it is the whole failure.
+      const back = unzip(await fs.readFile(p2));
+      const inner2 = back.get("pharmacy-admin.db");
+      if (!inner2 || sha256(inner2) !== manifest.databaseSha256) throw new Error("the copy read back does not match");
+      copy = p2;
+      message += ` Second copy written to ${dest2} and read back.`;
+    } catch (e) {
+      copyError = e instanceof Error ? e.message : String(e);
+      message += ` The second copy to ${dest2} FAILED: ${copyError}. There is only one copy of this backup.`;
+    }
+  }
+
   await setSetting("backup_last_run", new Date().toISOString());
   await setSetting("backup_last_result", message);
 
   return {
     ok: verified,
     file: verified ? outPath : "",
+    copy,
+    copyError,
     sizeBytes: archive.length,
     documents: docs.length,
     tables: manifest.tables,
@@ -227,6 +257,9 @@ function restoreInstructions(m: { takenAt: string; documents: number; rows: numb
 
 export type BackupStatus = {
   destination: string;
+  destination2: string | null;
+  restoreLast: string | null;
+  restoreResult: string | null;
   lastRun: string | null;
   lastResult: string | null;
   enabled: boolean;
@@ -252,9 +285,14 @@ export async function backupStatus(): Promise<BackupStatus> {
   }
   return {
     destination,
+    destination2: s.backup_destination_2?.trim() || null,
+    restoreLast: s.backup_restore_last || null,
+    restoreResult: s.backup_restore_result || null,
     lastRun: s.backup_last_run || null,
     lastResult: s.backup_last_result || null,
-    enabled: s.backup_enabled === "yes",
+    // On unless deliberately switched off. A compliance system whose backup is opt-in is a trap:
+    // the pharmacy that most needs one is the pharmacy that never found the switch.
+    enabled: s.backup_enabled !== "no",
     keepCount: Number(s.backup_keep) || 14,
     // A destination inside the application's own data folder shares the disk it is protecting against.
     onSameDisk: path.resolve(destination).startsWith(path.resolve(dataDir())),
@@ -277,4 +315,83 @@ export async function pruneBackups(destination: string, keep: number): Promise<n
 export function encryptionKey(): string | null {
   const raw = process.env.APP_ENCRYPTION_KEY;
   return raw && !raw.startsWith("EXAMPLE") ? raw : null;
+}
+
+export type RestoreRehearsal = {
+  ok: boolean;
+  archive: string | null;
+  takenAt: string | null;
+  tables: number;
+  rows: number;
+  documents: number;
+  message: string;
+};
+
+/**
+ * Proves that an archive already sitting on disk still restores.
+ *
+ * Verifying a backup at the moment it is written proves the write. It does not prove the file is
+ * still there a month later, that the USB stick has not gone bad, that a sync client has not
+ * replaced it with a zero-byte placeholder, or that the folder still exists after somebody
+ * tidied up. Those are the ways backups actually fail, and every one of them is invisible until
+ * the day it matters.
+ *
+ * So this opens the newest archive as a stranger would — off disk, with no memory of having
+ * written it — restores the database inside it to a scratch file, opens that as a database, and
+ * counts what is in it. Nothing is written to the live system except the result.
+ */
+export async function rehearseRestore(destination?: string): Promise<RestoreRehearsal> {
+  const s = await backupStatus();
+  const dir = destination ?? s.destination;
+  const fail = async (message: string): Promise<RestoreRehearsal> => {
+    await setSetting("backup_restore_last", new Date().toISOString());
+    await setSetting("backup_restore_result", message);
+    return { ok: false, archive: null, takenAt: null, tables: 0, rows: 0, documents: 0, message };
+  };
+
+  let names: string[];
+  try {
+    names = (await fs.readdir(dir)).filter((n) => /^pharmacy-admin-backup-.*\.zip$/.test(n)).sort().reverse();
+  } catch {
+    return fail(`The backup folder ${dir} could not be read. There may be no backups at all.`);
+  }
+  if (names.length === 0) return fail(`No backup archive was found in ${dir}.`);
+
+  const archive = path.join(dir, names[0]);
+  const scratch = path.join(os.tmpdir(), `pa-rehearse-${Date.now()}.db`);
+  try {
+    const entries = unzip(await fs.readFile(archive));
+    const inner = entries.get("pharmacy-admin.db");
+    if (!inner) throw new Error("the archive does not contain a database");
+
+    const manifestRaw = entries.get("MANIFEST.json");
+    const manifest = manifestRaw ? (JSON.parse(manifestRaw.toString("utf8")) as { takenAt?: string; databaseSha256?: string; counts?: Record<string, number>; documents?: number }) : null;
+    if (manifest?.databaseSha256 && sha256(inner) !== manifest.databaseSha256) {
+      throw new Error("the database inside has changed since it was written — the file is damaged");
+    }
+
+    await fs.writeFile(scratch, inner);
+    const counts = await tableCounts(`file:${scratch}`);
+    const tables = Object.keys(counts).length;
+    const rows = Object.values(counts).reduce((a, b) => a + b, 0);
+    if (tables === 0) throw new Error("the restored database has no tables in it");
+
+    // Compare against what the archive said it held, where it said so.
+    if (manifest?.counts) {
+      const off = Object.entries(manifest.counts).filter(([t, n]) => counts[t] !== n);
+      if (off.length) throw new Error(`restored row counts differ from the manifest on ${off.map(([t]) => t).join(", ")}`);
+    }
+
+    const documents = Array.from(entries.keys()).filter((k) => k.startsWith("files/")).length;
+    const message =
+      `Restore rehearsed from ${names[0]}: ${tables} tables, ${rows.toLocaleString()} rows and ${documents} uploaded ` +
+      `file${documents === 1 ? "" : "s"} came back intact.`;
+    await setSetting("backup_restore_last", new Date().toISOString());
+    await setSetting("backup_restore_result", message);
+    return { ok: true, archive: names[0], takenAt: manifest?.takenAt ?? null, tables, rows, documents, message };
+  } catch (e) {
+    return fail(`The newest backup (${names[0]}) could NOT be restored: ${e instanceof Error ? e.message : String(e)}. Treat the pharmacy as having no working backup until this is fixed.`);
+  } finally {
+    await fs.rm(scratch, { force: true });
+  }
 }

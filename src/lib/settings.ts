@@ -52,10 +52,17 @@ export const SETTING_KEYS = [
   // come from outside, and half-working pages in the daily path are a daily irritation.
   "feature_reimbursement", // "yes" | "no"
   "backup_destination",
-  "backup_enabled", // "yes" | "no"
+  // A second place every verified archive is also written. One disk failing, one laptop stolen,
+  // one folder deleted by accident — a single copy answers none of those.
+  "backup_destination_2",
+  "backup_enabled", // "no" to switch off; anything else, including unset, means on
   "backup_keep", // how many archives to keep
   "backup_last_run",
   "backup_last_result",
+  // The rehearsal: an archive already on disk, opened and restored to a scratch database, to prove
+  // that what was written last month is still what comes back today.
+  "backup_restore_last",
+  "backup_restore_result",
   "mail_last_sweep",
   // Sending is not the same server as reading, and a pharmacy that cannot test it cannot tell a
   // failed send from one that was never attempted.

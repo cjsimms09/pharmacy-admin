@@ -64,15 +64,35 @@ export async function register() {
     try {
       const { getSettings } = await import("./lib/settings");
       const s = await getSettings();
-      if (s.backup_enabled !== "yes") return;
+      // On unless deliberately switched off: the pharmacy that most needs a backup is the one
+      // that never found the switch.
+      if (s.backup_enabled === "no") return;
+
+      const { runBackup, backupStatus, pruneBackups, rehearseRestore } = await import("./lib/backup");
+      const status = await backupStatus();
 
       const last = s.backup_last_run ? Date.parse(s.backup_last_run) : 0;
-      if (Number.isFinite(last) && Date.now() - last < 20 * 60 * 60 * 1000) return;
+      if (!Number.isFinite(last) || Date.now() - last >= 20 * 60 * 60 * 1000) {
+        const r = await runBackup(status.destination, status.destination2);
+        if (r.ok) {
+          await pruneBackups(status.destination, status.keepCount);
+          if (status.destination2) await pruneBackups(status.destination2, status.keepCount);
+        }
+        return; // one heavy job per turn; the rehearsal can wait for the next idle gap
+      }
 
-      const { runBackup, backupStatus, pruneBackups } = await import("./lib/backup");
-      const status = await backupStatus();
-      const r = await runBackup(status.destination);
-      if (r.ok) await pruneBackups(status.destination, status.keepCount);
+      /*
+       * Once a month, prove an archive already on disk still restores.
+       *
+       * Verifying at the moment of writing proves the write. It does not prove the file survived
+       * the month — that the stick is still good, that a sync client has not replaced it with a
+       * placeholder, that the folder still exists. Those are the ways backups actually fail, and
+       * every one is invisible until the day it matters.
+       */
+      const lastRehearsal = s.backup_restore_last ? Date.parse(s.backup_restore_last) : 0;
+      if (!Number.isFinite(lastRehearsal) || Date.now() - lastRehearsal >= 30 * 24 * 60 * 60 * 1000) {
+        await rehearseRestore(status.destination);
+      }
     } catch {
       // The outcome is recorded in settings and shown on the backups page.
     }

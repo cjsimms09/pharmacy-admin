@@ -100,9 +100,12 @@ async function witnessed(seedKey: string, periods: string[], cadence: Obligation
       return { counts, missing: "This month's list is filed once the month ends." };
     }
     case "backup_restore_test": {
-      const s = await db.query.settings.findFirst({ where: eq(schema.settings.key, "backup_last_run") });
+      // A backup having been taken is not evidence that a backup can be restored, and this
+      // obligation asks the second question. The rehearsal answers it: an archive already on
+      // disk, opened cold and restored to a scratch database.
+      const s = await db.query.settings.findFirst({ where: eq(schema.settings.key, "backup_restore_last") });
       bump(s?.value ?? null);
-      return { counts, missing: "No verified backup has been taken in this period." };
+      return { counts, missing: "No backup has been opened and proved to restore in this period." };
     }
     case "fwa_training":
     case "hipaa_training":
