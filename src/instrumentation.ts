@@ -158,6 +158,7 @@ export async function register() {
     await whenIdle("cqi", cqiTick);
     await whenIdle("digest", digestTick);
     await whenIdle("updates", updateTick);
+    await whenIdle("manual-audit", manualAuditTick);
   };
 
   /**
@@ -244,6 +245,33 @@ export async function register() {
       await refreshUpdateCheck();
     } catch {
       // Never allowed to stop the app. The outcome is recorded in settings either way.
+    }
+  };
+
+  /**
+   * Reads a few sections of the policy manual against the requirements.
+   *
+   * The regulation asks for an annual review, which in practice is a signature: nobody rereads a
+   * hundred and fifty sections against Kansas, DEA, HIPAA and OSHA once a year, so a manual can be
+   * reviewed on time for years and still describe a practice that stopped in year one.
+   *
+   * Four sections per turn, at most once an hour. That is deliberately slow — the deadline is a
+   * year away, a long run would be a bill nobody chose and a page that appears to hang, and at
+   * this rate the whole manual has been read long before it is due.
+   */
+  const manualAuditTick = async () => {
+    try {
+      const { getSettings } = await import("./lib/settings");
+      const s = await getSettings();
+      if (s.manual_audit_auto === "no") return;
+      const { hasApiKey } = await import("./lib/ai");
+      if (!(await hasApiKey())) return;
+      const last = s.manual_audit_last ? Date.parse(s.manual_audit_last) : 0;
+      if (Number.isFinite(last) && Date.now() - last < 60 * 60 * 1000) return;
+      const { runManualAudit } = await import("./lib/manual-audit");
+      await runManualAudit({ id: "system", name: "Annual audit" }, { limit: 4 });
+    } catch {
+      // The outcome is recorded in settings and shown on the manual page.
     }
   };
 

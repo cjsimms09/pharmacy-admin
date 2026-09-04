@@ -35,6 +35,9 @@ const MAX_QUIET_HOURS: Record<string, number> = {
   nadac: 8 * 24,
   cqi: 50,
   reminders: 8 * 24,
+  // Four sections an hour when there is anything due, and nothing at all when the manual is
+  // current — so a fortnight of silence is normal and only a month of it is news.
+  manual_audit: 31 * 24,
   // Weekly, with a day of slack for a computer that was switched off over a weekend.
   digest: 8 * 24,
 };
@@ -121,6 +124,16 @@ export async function automationStatus(): Promise<JobStatus[]> {
         s.digest_last_result ??
         "Once a week you are emailed what is late, what is expiring and whether anything here has stopped — and only in a week that has something in it.",
       href: "/settings/email",
+    },
+    {
+      key: "manual_audit",
+      label: "Policy manual audit",
+      state: judge("manual_audit", Boolean(s.anthropic_api_key_enc) && s.manual_audit_auto !== "no", s.manual_audit_last),
+      lastAt: s.manual_audit_last ?? null,
+      detail:
+        s.manual_audit_result ??
+        "Every section is read against Kansas, DEA, HIPAA and OSHA requirements and against what this site does, a few at a time, so the whole manual is covered within the year.",
+      href: "/manual#audit",
     },
     {
       key: "reminders",

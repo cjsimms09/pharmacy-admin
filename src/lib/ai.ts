@@ -451,6 +451,102 @@ export async function classifyDocument(
   return res.parsed_output;
 }
 
+const PolicyReview = z.object({
+  verdict: z
+    .enum(["ok", "gap", "conflict", "unclear"])
+    .describe(
+      "ok: nothing needs changing. gap: something a requirement asks for is missing. conflict: the text says the " +
+        "pharmacy does something it does not do, or contradicts what the compliance system does. unclear: the text " +
+        "is too vague to hold anyone to.",
+    ),
+  findings: z
+    .array(
+      z.object({
+        what: z.string().describe("What is wrong with this section as it stands, in one or two sentences."),
+        why: z
+          .string()
+          .describe(
+            "The requirement it falls short of, cited exactly, or the thing this system does that it contradicts.",
+          ),
+        severity: z
+          .enum(["blocking", "should", "note"])
+          .describe(
+            "blocking: an inspector would write this up. should: a real weakness that is not itself a finding. " +
+              "note: wording or clarity.",
+          ),
+      }),
+    )
+    .describe("Empty when the verdict is ok."),
+  suggestedBody: z
+    .string()
+    .describe(
+      "The section rewritten so the findings no longer apply, in full and ready to replace what is there. Empty " +
+        "string where the fix depends on a fact about this pharmacy that you were not given — say so in the finding " +
+        "instead. Never invent such a fact to produce text.",
+    ),
+});
+
+export type PolicyReviewT = z.infer<typeof PolicyReview>;
+
+/**
+ * Reads one section of the manual against the requirements and against what this site does.
+ *
+ * Separate from drafting, and deliberately so. Drafting is asked for by somebody who has already
+ * decided a section is wrong; this decides whether it is — which means it has to be allowed to
+ * answer "nothing needs changing", and has to be trusted when it does. A reviewer that finds
+ * something in every section is one whose findings stop being read by the third page.
+ *
+ * The two failure modes worth naming are opposite. Missing a real gap leaves the pharmacy holding
+ * a manual that does not meet the rules. Inventing one produces a rewrite of a section that was
+ * fine, in a document an inspector holds the pharmacy to — so the standard for changing text is
+ * higher than the standard for raising a concern, and where the fix needs a fact about this
+ * pharmacy that nobody supplied, it must stay a concern.
+ */
+export async function reviewPolicy(
+  input: { title: string; body: string; context: string; siteDoes: string },
+  ctx: { userId: string; userName: string },
+): Promise<PolicyReviewT> {
+  if (MOCK) return { verdict: "ok", findings: [], suggestedBody: "" };
+
+  const { client: c, model } = await client();
+  const res = await c.messages.parse({
+    model,
+    max_tokens: 4000,
+    system:
+      "You audit sections of an independent Kansas community pharmacy's policy and procedure manual against Kansas " +
+      "Board of Pharmacy regulations (K.S.A. 65-16xx, K.A.R. 68-x), DEA requirements (21 CFR 1300-1317), HIPAA " +
+      "(45 CFR 160/164), OSHA (29 CFR 1910), and CMS Part D requirements where they reach the pharmacy counter.\n\n" +
+      "Four rules override everything else.\n\n" +
+      "First: a section that is adequate gets the verdict ok and no findings. Do not manufacture work. A reviewer " +
+      "who finds something everywhere is one nobody reads by the third page.\n\n" +
+      "Second: never invent a fact about this pharmacy. If fixing something needs a detail you were not given — a " +
+      "frequency, a person, a threshold, a piece of equipment — leave suggestedBody empty and say in the finding what " +
+      "the pharmacy has to decide.\n\n" +
+      "Third: a manual is a standard an inspector holds the pharmacy to. Text claiming a practice the pharmacy does " +
+      "not follow is worse than a gap, because it is a finding the pharmacy wrote for itself. Where the text claims " +
+      "something the compliance system contradicts, that is a conflict and it matters.\n\n" +
+      "Fourth: where the compliance system already performs a procedure, the manual should refer to it rather than " +
+      "describe it a second time. Two descriptions of one procedure drift apart, and the one in the manual is the " +
+      "one that goes stale.\n\n" +
+      "Cite a regulation only where it genuinely governs the sentence, and cite it exactly. Plain prose in " +
+      "suggestedBody: short sentences, no headings, no bullet characters, no markdown.",
+    messages: [
+      {
+        role: "user",
+        content:
+          `The pharmacy: ${input.context}\n\n` +
+          `What the compliance system already does:\n${input.siteDoes || "(nothing recorded)"}\n\n` +
+          `Section title: ${input.title}\n\n` +
+          `Current text:\n${input.body || "(empty)"}`,
+      },
+    ],
+    output_config: { format: zodOutputFormat(PolicyReview) },
+  });
+  if (!res.parsed_output) throw new Error("Claude returned an unreadable answer. Try again.");
+  await logUsage("ai.policy.review", ctx.userId, ctx.userName, res.usage, input.title.slice(0, 120));
+  return res.parsed_output;
+}
+
 const PolicyDraft = z.object({
   body: z.string().describe("The revised policy text, in full, ready to replace what was there."),
   changed: z

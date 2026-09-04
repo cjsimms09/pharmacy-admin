@@ -23,6 +23,7 @@ import {
   managers,
 } from "@/lib/manual-store";
 import { policies, FORMS, appendixReference, suggestForm } from "@/lib/manual";
+import { auditProgress, openFindings, runManualAudit, applyFinding, dismissFinding } from "@/lib/manual-audit";
 import { fmt } from "@/lib/dates";
 import { PageHeader, Card, Figure, Notice, Field } from "@/components/ui";
 
@@ -53,7 +54,14 @@ export default async function ManualPage({
 }) {
   const user = await requireUser();
   const { ok, error, edit, ch, draft, note, concerns } = await searchParams;
-  const [rows, s, aiReady, stale] = await Promise.all([allSections(), getSettings(), hasApiKey(), needingReview()]);
+  const [rows, s, aiReady, stale, audit_, findings] = await Promise.all([
+    allSections(),
+    getSettings(),
+    hasApiKey(),
+    needingReview(),
+    auditProgress(),
+    openFindings(),
+  ]);
   const sections = outline(rows);
   const pharmacy = s.pharmacy_name || "This pharmacy";
 
@@ -170,6 +178,79 @@ export default async function ManualPage({
     } catch (e) {
       if (e && typeof e === "object" && "digest" in e) throw e;
       redirect("/manual?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not remove that."));
+    }
+  }
+
+  /**
+   * Reads the sections that are due, now rather than waiting for the background job.
+   *
+   * The pass runs itself a few sections at a time on the idle beat, which is the right pace for a
+   * deadline a year away. This is for the day before an inspection, when the right pace is
+   * "as much as you can before I get back from lunch".
+   */
+  async function auditNow() {
+    "use server";
+    const u = await requireManager();
+    try {
+      const r = await runManualAudit(u, { limit: 20 });
+      await audit({
+        action: "manual.audit",
+        userId: u.id,
+        userName: u.name,
+        details: `${r.audited} read, ${r.findings} raised`,
+      });
+      revalidatePath("/manual");
+      redirect(
+        `/manual?${r.problems.length ? "error" : "ok"}=` +
+          encodeURIComponent(
+            [
+              r.audited
+                ? `${r.audited} section${r.audited === 1 ? "" : "s"} read against the requirements`
+                : "Nothing was due",
+              r.findings ? `${r.findings} finding${r.findings === 1 ? "" : "s"} raised` : "nothing found",
+              r.remaining ? `${r.remaining} still due — press again, or leave it to run on its own` : "the whole manual is now current",
+              ...r.problems,
+            ].join(". ") + ".",
+          ) + "#audit",
+      );
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/manual?error=" + encodeURIComponent(e instanceof Error ? e.message : "The audit could not run."));
+    }
+  }
+
+  async function applyFindingAction(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const id = String(fd.get("id") ?? "");
+    try {
+      await applyFinding(id, u);
+      await audit({ action: "manual.finding.apply", userId: u.id, userName: u.name, entity: "manual", entityId: id });
+      revalidatePath("/manual");
+      redirect(
+        "/manual?ok=" +
+          encodeURIComponent(
+            "Put into the manual, marked as applied from the audit and not yet reviewed. Read it — applying a suggestion is not the same as having read it.",
+          ) + "#audit",
+      );
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/manual?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not apply that.") + "#audit");
+    }
+  }
+
+  async function dismissFindingAction(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const id = String(fd.get("id") ?? "");
+    try {
+      await dismissFinding(id, String(fd.get("reason") ?? ""), u);
+      await audit({ action: "manual.finding.dismiss", userId: u.id, userName: u.name, entity: "manual", entityId: id });
+      revalidatePath("/manual");
+      redirect("/manual?ok=" + encodeURIComponent("Closed, with your reason on it.") + "#audit");
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/manual?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not close that.") + "#audit");
     }
   }
 
@@ -536,6 +617,113 @@ export default async function ManualPage({
             />
             <Figure value={aiReady ? "ready" : "off"} label="Claude" sub={aiReady ? "Available on every section" : "Add an API key in Settings"} tone={aiReady ? "ok" : "muted"} href="/settings" />
           </div>
+
+          {/*
+            The audit, and what it found.
+            
+            First on the page because it answers the question the rest of the page cannot: not
+            "has this manual been reviewed" — which is a date anybody can enter — but "is what it
+            says actually right". A manual can be signed off on time for five years running and
+            still describe a practice that stopped in year one.
+          */}
+          <Card
+            id="audit"
+            tone={audit_.blocking > 0 ? "crit" : findings.length > 0 ? "warn" : undefined}
+            title="Audited against the requirements"
+            count={`${audit_.current} of ${audit_.total} current`}
+            actions={
+              audit_.ready ? (
+                <form action={auditNow}>
+                  <button className="btn btn-sm btn-primary" disabled={audit_.due === 0}>
+                    {audit_.due === 0 ? "Nothing due" : `Read ${Math.min(audit_.due, 20)} now`}
+                  </button>
+                </form>
+              ) : (
+                <Link href="/settings/connections" className="btn btn-sm">Add an API key</Link>
+              )
+            }
+            subtitle={
+              audit_.ready
+                ? "Every section the pharmacy owns is read against Kansas, DEA, HIPAA and OSHA requirements and against what this site actually does — a few at a time, on their own, so the whole manual is covered within the year. Anything found appears below as something to act on rather than as a report to file."
+                : "This needs an Anthropic API key. Without one the manual is still reviewed and printed, but nothing is checking what it says against the rules."
+            }
+            className="mb-6"
+          >
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Figure
+                value={`${audit_.current}/${audit_.total}`}
+                label="Read this year"
+                sub={audit_.due === 0 ? "The whole manual is current" : `${audit_.due} still due`}
+                tone={audit_.due === 0 ? "ok" : "warn"}
+              />
+              <Figure
+                value={findings.length}
+                label="Open findings"
+                sub={findings.length === 0 ? "Nothing outstanding" : "Each one is applied or answered"}
+                tone={findings.length === 0 ? "ok" : audit_.blocking > 0 ? "crit" : "warn"}
+              />
+              <Figure
+                value={audit_.blocking}
+                label="An inspector would write up"
+                sub={audit_.blocking === 0 ? "None" : "Do these first"}
+                tone={audit_.blocking === 0 ? "ok" : "crit"}
+              />
+            </div>
+
+            {audit_.lastResult && <p className="mt-3 text-xs text-ink-3">Last pass: {audit_.lastResult}</p>}
+
+            {findings.length > 0 && (
+              <ul className="rows mt-4">
+                {findings.map((f) => (
+                  <li key={f.id} className="py-3">
+                    <div className="flex flex-wrap items-baseline gap-2">
+                      <span
+                        className={`badge ${f.severity === "blocking" ? "badge-crit" : f.severity === "should" ? "badge-warn" : "badge-muted"}`}
+                      >
+                        {f.severity === "blocking" ? "would be written up" : f.severity === "should" ? "weakness" : "wording"}
+                      </span>
+                      <Link href={`/manual?edit=${f.sectionId}#${f.sectionId}`} className="text-sm font-medium text-accent hover:underline">
+                        {f.sectionTitle}
+                      </Link>
+                    </div>
+                    <p className="mt-1 text-sm text-ink-2">{f.what}</p>
+                    <p className="mt-0.5 text-xs text-ink-3">{f.why}</p>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      {f.suggestedBody.trim() ? (
+                        <form action={applyFindingAction}>
+                          <input type="hidden" name="id" value={f.id} />
+                          <button className="btn btn-sm btn-primary">Put the fix in</button>
+                        </form>
+                      ) : (
+                        /*
+                          No suggested text, and that is the honest answer rather than a failure.
+                          
+                          Where the fix turns on a fact about this pharmacy that nobody supplied —
+                          a frequency, a threshold, who does it — writing one would mean inventing
+                          it, and an invented sentence in a manual is a standard the pharmacy is
+                          then held to.
+                        */
+                        <span className="text-xs text-ink-3">
+                          Needs a decision about this pharmacy, so nothing was written for you —{" "}
+                          <Link href={`/manual?edit=${f.sectionId}#${f.sectionId}`} className="underline">open the section</Link>.
+                        </span>
+                      )}
+                      <form action={dismissFindingAction} className="flex flex-wrap items-center gap-1.5">
+                        <input type="hidden" name="id" value={f.id} />
+                        <input
+                          name="reason"
+                          required
+                          className="field w-56 py-1 text-xs"
+                          placeholder="Why this is not a problem here"
+                        />
+                        <button className="btn btn-sm">Not a problem</button>
+                      </form>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
 
           {empty.length > 0 && (
             <Card

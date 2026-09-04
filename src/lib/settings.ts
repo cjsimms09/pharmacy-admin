@@ -81,6 +81,9 @@ export const SETTING_KEYS = [
   "updates_behind",
   "updates_newest",
   "updates_check_error",
+  "manual_audit_last",
+  "manual_audit_result",
+  "manual_audit_auto",
   "backup_last_result",
   "backup_last_failure",
   // The rehearsal: an archive already on disk, opened and restored to a scratch database, to prove

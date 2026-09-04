@@ -232,6 +232,13 @@
       "when": 1788540435776,
       "tag": "0032_fresh_franklin_richards",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1788542265681,
+      "tag": "0033_smiling_iceman",
+      "breakpoints": true
     }
   ]
 }

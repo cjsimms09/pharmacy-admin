@@ -531,10 +531,54 @@ export const manualSections = sqliteTable(
      */
     managedBy: text("managed_by"),
     updatedBy: text("updated_by"),
+    /**
+     * When this section was last read against the requirements, rather than merely signed off.
+     *
+     * Separate from reviewedOn on purpose. An annual review is a date a person puts their name to;
+     * this is the date something actually checked the words against Kansas and federal
+     * requirements and against what the system does. A manual can be reviewed on time for years
+     * and still be wrong, which is the failure mode this column exists to make visible.
+     */
+    auditedOn: text("audited_on"),
     createdAt: text("created_at").notNull().default(now()),
     updatedAt: text("updated_at").notNull().default(now()),
   },
   (t) => [index("manual_sections_pos_idx").on(t.position)],
+);
+
+/**
+ * What the audit found, kept until somebody does something about it.
+ *
+ * Findings are rows rather than a report, because a report is read once and a row is worked
+ * through. Each carries the text the audit would put in its place, so the fix is a button rather
+ * than a writing job — and each has to be either applied or explicitly dismissed with a reason,
+ * so "we looked at it and decided it was fine" is itself a record.
+ */
+export const MANUAL_FINDING_SEVERITIES = ["blocking", "should", "note"] as const;
+export type ManualFindingSeverity = (typeof MANUAL_FINDING_SEVERITIES)[number];
+
+export const manualFindings = sqliteTable(
+  "manual_findings",
+  {
+    id: text("id").primaryKey(),
+    sectionId: text("section_id").notNull(),
+    /** Kept alongside the id so a finding still reads if the section is later retired. */
+    sectionTitle: text("section_title").notNull(),
+    severity: text("severity", { enum: MANUAL_FINDING_SEVERITIES }).notNull().default("should"),
+    /** What is wrong with the section as it stands. */
+    what: text("what").notNull(),
+    /** The requirement, or the thing this site does, that it is wrong against. */
+    why: text("why").notNull(),
+    /** The replacement text, where the audit could write one. Empty where it could not. */
+    suggestedBody: text("suggested_body").notNull().default(""),
+    appliedAt: text("applied_at"),
+    dismissedAt: text("dismissed_at"),
+    /** Why it was dismissed. A finding waved away with no reason is not closed, it is hidden. */
+    dismissedReason: text("dismissed_reason"),
+    closedBy: text("closed_by"),
+    createdAt: text("created_at").notNull().default(now()),
+  },
+  (t) => [index("manual_findings_section_idx").on(t.sectionId)],
 );
 
 // ── Document intake (drop anything, Claude files it) ─────────────────
