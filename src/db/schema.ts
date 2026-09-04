@@ -100,6 +100,16 @@ export const CREDENTIAL_TYPES = [
   "immunization_record",
   "tb_screening",
   "background_check",
+  /**
+   * The hepatitis B vaccination offer, and its refusal.
+   *
+   * 29 CFR 1910.1030(f)(2) requires the series to be offered free of charge within ten working
+   * days of taking on duties with occupational exposure, and 1910.1030(f)(2)(iv) requires a signed
+   * declination in the specific wording of Appendix A to the standard from anyone who refuses.
+   * The declination is the record that matters — an employee who was never offered and an
+   * employee who declined look identical without it, and only one of those is compliant.
+   */
+  "hepatitis_b",
   "pharmacy_registration",
   "dea_registration",
   "csos_certificate",

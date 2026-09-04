@@ -18,6 +18,7 @@ export const CREDENTIAL_LABEL: Record<CredentialType, string> = {
   immunization_record: "Immunization record (MMR, Td/Tdap, hep B titer, varicella)",
   tb_screening: "TB screening (skin test, Quantiferon or chest x-ray)",
   background_check: "Background checks (OIG LEIE, SAM, criminal, sex offender registry)",
+  hepatitis_b: "Hepatitis B vaccination offer or declination",
   pharmacy_registration: "Kansas pharmacy registration",
   dea_registration: "DEA registration",
   csos_certificate: "CSOS certificate",
@@ -50,6 +51,7 @@ export const CREDENTIAL_TYPES_FOR_PERSON: CredentialType[] = [
   "immunization_record",
   "tb_screening",
   "background_check",
+  "hepatitis_b",
   "liability_insurance",
   "controlled_substance_poa",
   "npi",
@@ -66,7 +68,7 @@ export const CREDENTIAL_TYPES_FOR_PERSON: CredentialType[] = [
 export function requiredCredentials(role: PersonRole, administersVaccines: boolean): CredentialType[] {
   const licence: CredentialType =
     role === "pharmacist" ? "pharmacist_license" : role === "technician" ? "technician_registration" : "intern_registration";
-  return administersVaccines ? [licence, "cpr", "immunization_training", "immunization_protocol"] : [licence];
+  return administersVaccines ? [licence, "cpr", "immunization_training", "immunization_protocol", "hepatitis_b"] : [licence];
 }
 export const CREDENTIAL_TYPES_FOR_PHARMACY: CredentialType[] = [
   "pharmacy_registration",
@@ -97,6 +99,7 @@ export const CREDENTIAL_HINT: Partial<Record<CredentialType, string>> = {
   immunization_record: "Two MMR, Td/Tdap in date, hepatitis B series with a titer showing immunity, and varicella immunity. The school informs the student; the site has to ask for it.",
   tb_screening: "Within the previous year, or documented treatment or a negative chest x-ray.",
   background_check: "The school runs OIG LEIE, SAM/GSA, criminal and sex offender registry checks. Keep proof — an excluded person working here is the pharmacy's problem, not the school's.",
+  hepatitis_b: "Offered free within ten working days of taking on duties with exposure. Record the series, or the signed declination — an employee never offered and one who declined look identical without it.",
   controlled_substance_poa: "DEA power of attorney to sign 222 forms and order controlled substances.",
   pharmacy_registration: "Renews annually by June 30.",
   dea_registration: "Renews every three years. The CSOS certificate expires with it.",
