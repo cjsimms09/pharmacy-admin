@@ -91,8 +91,13 @@ describe("NDCs", () => {
     assert.equal(normalizeClaimNdc("83980001110"), "83980001110");
     assert.equal(normalizeClaimNdc("83980-0011-10"), "83980001110");
   });
-  test("a leading zero lost to a numeric cell is restored", () => {
-    assert.equal(normalizeClaimNdc("3858001101"), "03858001101");
+  test("ten bare digits are settled only against products already held, never padded on a guess", () => {
+    // "3858001101" could be 03858-0011-01, 38580-0011-01 or 38580-0110-1: three different products.
+    assert.equal(normalizeClaimNdc("3858001101"), null);
+    const held = new Set(["03858001101"]);
+    assert.equal(normalizeClaimNdc("3858001101", (n) => held.has(n)), "03858001101");
+    const two = new Set(["03858001101", "38580001101"]);
+    assert.equal(normalizeClaimNdc("3858001101", (n) => two.has(n)), null);
   });
   test("anything else is null rather than padded into shape", () => {
     assert.equal(normalizeClaimNdc("123"), null);

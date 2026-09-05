@@ -23,12 +23,12 @@ import {
   setInvoiceTotal,
   backfillTotals,
   missingTotals,
+  backfillInvoiceLines,
+  invoicesWithoutLines,
   recordReceipt,
   awaitingReceipt,
   sumOf,
   money,
-  backfillInvoiceLines,
-  invoiceLineStats,
 } from "@/lib/invoices";
 import { invoiceCompliance, RETENTION_YEARS } from "@/lib/invoice-compliance";
 import { setSetting } from "@/lib/settings";
@@ -132,6 +132,7 @@ export default async function InvoicesPage({
     invoiceCompliance(),
   ]);
   const noAmountCount = await missingTotals();
+  const noLinesCount = await invoicesWithoutLines();
   const unreceipted = await awaitingReceipt();
   const onlyUnreceipted = sp.unreceipted === "1";
   const compliance = complianceRows;
@@ -147,7 +148,6 @@ export default async function InvoicesPage({
    * use — was still told no sender was named. Two places to record one fact, and the banner
    * watching the one nobody uses.
    */
-  const lineStats = await invoiceLineStats();
   const receiptElsewhere = (s.receipt_record_kept_in ?? "").trim();
   const registered = await allSuppliers();
   const withSenders = registered.filter((x) => addressesOf(x).length > 0);
@@ -243,6 +243,27 @@ export default async function InvoicesPage({
   }
 
   /**
+   * Reads the item lines as numbers off every invoice they have not been read from.
+   *
+   * The lines were kept as text to be searched; what was bought — NDC, quantity, price — is what
+   * every purchasing question starts from, and the PDFs are still here to ask.
+   */
+  async function readLines() {
+    "use server";
+    const u = await requireManager();
+    const r = await backfillInvoiceLines();
+    await audit({ action: "invoice.lines.backfill", userId: u.id, userName: u.name, details: `${r.invoices} invoices, ${r.linesRead} lines` });
+    revalidatePath("/inventory/invoices");
+    revalidatePath("/purchasing");
+    const bits = [`${r.linesRead.toLocaleString()} item line${r.linesRead === 1 ? "" : "s"} read off ${r.invoices} invoice${r.invoices === 1 ? "" : "s"}`];
+    // Named apart, because they are different problems: a scan has no text at all, while an
+    // invoice whose lines do not add up to its printed total was read and deliberately not kept.
+    if (r.unreconciled > 0) bits.push(`${r.unreconciled} did not add up to the total printed on them and were left out rather than counted short`);
+    if (r.unreadable > 0) bits.push(`${r.unreadable} ${r.unreadable === 1 ? "is a scan" : "are scans"} with no text to read`);
+    redirect("/inventory/invoices?ok=" + encodeURIComponent(bits.join(". ") + "."));
+  }
+
+  /**
    * Records that the goods arrived, which is what lets the paper go.
    *
    * The emailed invoice proves what the wholesaler shipped. It does not prove what arrived — that
@@ -288,26 +309,6 @@ export default async function InvoicesPage({
             : "Receipt will be recorded here again, against each invoice.",
         ),
     );
-  }
-
-  /**
-   * Reads the figures off every invoice already filed.
-   *
-   * The invoices were kept long before their line items were read as data, so without this the
-   * purchasing ledger would start empty and fill up over months. The documents are on disk; nothing
-   * has to be asked of a supplier.
-   */
-  async function readLines() {
-    "use server";
-    const u = await requireManager();
-    const r = await backfillInvoiceLines();
-    await audit({ action: "invoice.lines.backfill", userId: u.id, userName: u.name, details: `${r.lines} lines from ${r.invoices} invoices` });
-    revalidatePath("/inventory/invoices");
-    revalidatePath("/purchasing");
-    const bits = [`${r.lines.toLocaleString()} item line${r.lines === 1 ? "" : "s"} read from ${r.invoices.toLocaleString()} invoice${r.invoices === 1 ? "" : "s"}`];
-    if (r.unreconciled) bits.push(`${r.unreconciled} did not add up to their printed total and were left out rather than counted short`);
-    if (r.unreadable) bits.push(`${r.unreadable} could not be read as text`);
-    redirect("/inventory/invoices?ok=" + encodeURIComponent(bits.join(". ") + "."));
   }
 
   async function send(fd: FormData) {
@@ -443,27 +444,6 @@ export default async function InvoicesPage({
       )}
 
 
-      {/*
-        The figures, as against the filing.
-
-        An invoice filed is a record kept; an invoice read is a price the purchasing ledger can use.
-        This is the one-off catch-up for everything filed before the lines were being read — from
-        now on it happens as each invoice arrives.
-      */}
-      {canManage && rows.length > 0 && lineStats.invoicesWithLines < rows.length && (
-        <Notice kind="warn">
-          <b>
-            {(rows.length - lineStats.invoicesWithLines).toLocaleString()} invoice
-            {rows.length - lineStats.invoicesWithLines === 1 ? " has" : "s have"} not had their item lines read.
-          </b>{" "}
-          Until they are, the purchasing comparison does not know what this pharmacy actually paid for those drugs — only
-          what the catalogues list. The documents are already here; this reads them.
-          <form action={readLines} className="mt-2">
-            <button className="btn btn-sm btn-primary">Read the item lines off them</button>
-          </form>
-        </Notice>
-      )}
-
       {noSenders ? (
         <Notice kind="warn">
           <b>No sender is named as a supplier yet, so nothing will be filed as an invoice.</b> Add your wholesalers
@@ -590,6 +570,29 @@ export default async function InvoicesPage({
             what you are billed. An invoice that prints no total at all comes back blank and has to be typed in: that
             is IPD, which shows subtotals by schedule and no single figure. A number assembled from parts would be one
             this system invented, on a record that gets reconciled against a payment.
+          </p>
+        </Card>
+      )}
+
+      {noLinesCount > 0 && canManage && (
+        <Card
+          tone="warn"
+          title={`${noLinesCount} invoice${noLinesCount === 1 ? " has" : "s have"} not had ${noLinesCount === 1 ? "its" : "their"} item lines read as numbers`}
+          subtitle="What was bought — NDC, quantity, unit price, extended amount — is kept per line so purchases can be added up by product, checked against the catalogue price, and counted toward a rebate tier. Invoices filed before this existed have only the text."
+          className="mt-4 mb-6"
+          actions={
+            <form action={readLines}>
+              <SubmitButton className="btn btn-sm btn-primary" pendingLabel="Reading…">
+                Read the lines off the invoices
+              </SubmitButton>
+            </form>
+          }
+        >
+          <p className="text-xs text-ink-3">
+            Every column is read only in a layout this knows, which today is McKesson&apos;s. Other wholesalers&apos; lines are
+            read for the NDC and the amount, and marked as partial; nothing is assumed for a quantity or a price the
+            page did not print. Each invoice records how many lines were read and how many could not be, so a sum of
+            lines is never mistaken for the total of the invoice.
           </p>
         </Card>
       )}
@@ -803,6 +806,14 @@ export default async function InvoicesPage({
                             {filingFor(i.schedule).label}
                           </span>
                           {i.needsReview && !i.reviewedAt && <span className="badge badge-warn ml-1">unconfirmed</span>}
+                          {/* How much of the invoice is held as numbers, so a blank total on a
+                              product-by-product page traces back to this row. */}
+                          {i.linesRead !== null && (
+                            <span className="mt-1 block text-[11px] text-ink-3">
+                              {i.linesRead} line{i.linesRead === 1 ? "" : "s"} as numbers
+                              {i.linesUnread ? `, ${i.linesUnread} not read` : ""}
+                            </span>
+                          )}
                         </td>
                         <td className="max-w-[24rem] align-top whitespace-pre-wrap text-xs text-ink-2">
                           {i.controlledItems || <span className="text-ink-3">no controlled lines</span>}

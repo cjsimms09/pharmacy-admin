@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { loadNadacFiles, nadacCoverage, nadacClaimCoverage, nadacWeekGaps, nadacDir, nadacHealth } from "@/lib/nadac";
-import { yearArchiveUrl, archiveYears, nadacAuto } from "@/lib/nadac-fetch";
+import { yearArchiveUrlAsync, archiveYearsAsync, nadacAuto, nadacDatasets, weekSources } from "@/lib/nadac-fetch";
 import { nadacJob, startNadacFetch, runNadacFetch, nadacJobRunning } from "@/lib/nadac-job";
 import { JobPanel } from "@/components/job-panel";
 import { getSettings, setSetting } from "@/lib/settings";
@@ -53,6 +53,9 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
   const gaps = claimCov && claimCov.priced < claimCov.withNdc ? await nadacWeekGaps() : [];
   const job = await nadacJob();
   const running = nadacJobRunning(job);
+  // What data.medicaid.gov currently calls its NADAC datasets, so the ids are never stale.
+  const datasets = await nadacDatasets();
+  const years = await archiveYearsAsync();
 
 
   async function saveAuto(fd: FormData) {
@@ -69,9 +72,32 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
 
   async function pullNow() {
     "use server";
-    const { weeklySources } = await import("@/lib/nadac-fetch");
+    const { weeklySourcesAsync } = await import("@/lib/nadac-fetch");
     const s2 = await getSettings();
-    await begin("the current weekly file", weeklySources(s2.nadac_source_url));
+    await begin("the current weekly file", await weeklySourcesAsync(s2.nadac_source_url));
+  }
+
+  /*
+   * One missing week, fetched on its own.
+   *
+   * The gaps table names the weeks; this is the button beside each. It tries the plain weekly
+   * file for that week's Wednesday, then the week cut out of the yearly dataset — a few megabytes
+   * — rather than the whole archive.
+   */
+  async function pullWeek(fd: FormData) {
+    "use server";
+    const weekStart = String(fd.get("weekStart") ?? "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) redirect("/nadac?error=" + encodeURIComponent("That is not a week."));
+    await begin(`the file for the week of ${weekStart}`, await weekSources(weekStart));
+  }
+
+  async function refreshDatasets() {
+    "use server";
+    const u = await requireManager();
+    const d = await nadacDatasets({ refresh: true });
+    await audit({ action: "nadac.datasets", userId: u.id, userName: u.name, details: d ? `weekly ${d.weekly?.id ?? "none"}; years ${Object.keys(d.years).join(", ")}` : "listing unreachable" });
+    revalidatePath("/nadac");
+    redirect("/nadac?" + (d ? `ok=${encodeURIComponent(`Read the dataset listing: ${d.weekly ? "the current weekly file" : "no weekly file"}, archives for ${Object.keys(d.years).sort().reverse().join(", ") || "no years"}.`)}` : `error=${encodeURIComponent("Could not read the dataset listing on data.medicaid.gov. The built-in addresses are still in use.")}`));
   }
 
   async function pullFrom(fd: FormData) {
@@ -84,7 +110,7 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
   async function pullYear(fd: FormData) {
     "use server";
     const year = String(fd.get("year") ?? "");
-    const url = yearArchiveUrl(year);
+    const url = await yearArchiveUrlAsync(year);
     if (!url) redirect("/nadac?error=" + encodeURIComponent(`No archive address is known for ${year}.`));
     await begin(`the ${year} archive`, [url]);
   }
@@ -233,7 +259,7 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
           <div className="mt-3 overflow-x-auto">
             <table className="table">
               <thead>
-                <tr><th>Week beginning</th><th className="text-right">Claims</th><th className="text-right">Products</th><th>For example</th></tr>
+                <tr><th>Week beginning</th><th className="text-right">Claims</th><th className="text-right">Products</th><th>For example</th><th></th></tr>
               </thead>
               <tbody>
                 {gaps.map((g) => (
@@ -242,6 +268,14 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
                     <td className="text-right">{g.claims}</td>
                     <td className="text-right text-ink-2">{g.distinctNdcs}</td>
                     <td className="text-xs text-ink-3">{g.examples.join(", ") || "—"}</td>
+                    <td className="text-right">
+                      <form action={pullWeek}>
+                        <input type="hidden" name="weekStart" value={g.weekStart} />
+                        <button className="rounded-md border border-line px-2 py-1 text-xs hover:bg-ground" disabled={running}>
+                          Fetch this week
+                        </button>
+                      </form>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -260,15 +294,39 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
         history starts from scratch. It is deliberately one quiet button rather than a row of
         years.
       */}
+      {/*
+        Where the ids come from. The yearly dataset gets a new id every January; a site that only
+        knew last year's would offer an archive that no longer exists, or fetch the wrong one, and
+        say nothing. So the listing is read once a week and what it said is shown here.
+      */}
       <section className="my-4 rounded-lg border border-line bg-surface p-4">
-        <h2 className="text-sm font-semibold">Earlier weeks of {archiveYears()[0]}</h2>
+        <h2 className="text-sm font-semibold">What data.medicaid.gov calls these files</h2>
+        {datasets ? (
+          <p className="mt-1 text-sm text-ink-2">
+            Read {new Date(datasets.readAt).toLocaleDateString()}: {datasets.weekly ? "the current weekly file" : "no current weekly file"}
+            {Object.keys(datasets.years).length ? `, and yearly archives for ${Object.keys(datasets.years).sort().reverse().join(", ")}` : ", and no yearly archives"}.
+            The addresses used above follow this, so a dataset CMS renumbers in January is picked up without anybody editing anything.
+          </p>
+        ) : (
+          <p className="mt-1 text-sm text-ink-2">
+            The dataset listing has not been read yet, so only the built-in addresses are in use. Reading it is one small
+            request and needs no account.
+          </p>
+        )}
+        <form action={refreshDatasets} className="mt-2">
+          <button className="rounded-md border border-line px-3 py-2 text-sm hover:bg-ground" disabled={running}>Read the listing now</button>
+        </form>
+      </section>
+
+      <section className="my-4 rounded-lg border border-line bg-surface p-4">
+        <h2 className="text-sm font-semibold">Earlier weeks of {years[0]}</h2>
         <p className="mt-1 text-sm text-ink-2">
           Only needed to price claims filled <b>before the first weekly pull</b>. The floor took effect on 1 July
           2026, so nothing earlier than that is ever wanted, and once the weekly fetch has been running there is no
           reason to press this again.
         </p>
         <div className="mt-3 flex flex-wrap items-center gap-3">
-          {archiveYears().map((y) => (
+          {years.map((y) => (
             <form key={y} action={pullYear}>
               <input type="hidden" name="year" value={y} />
               <button className="rounded-md border border-line px-3 py-2 text-sm hover:bg-ground" disabled={running}>

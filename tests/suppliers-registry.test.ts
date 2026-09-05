@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { supplierForSender, normaliseAddresses, addressesOf } from "../src/lib/suppliers-registry";
+import { supplierForSender, normaliseAddresses, addressesOf, supplierRecordFor, type Supplier } from "../src/lib/suppliers-registry";
 
 /**
  * Recognising who sent an invoice.
@@ -67,5 +67,30 @@ describe("tidying the addresses somebody typed", () => {
     // A blank entry would make every sender match, filing the whole inbox as invoices.
     assert.equal(normaliseAddresses("\n\n  \n"), "");
     assert.deepEqual(addressesOf(supplier("X", "")), []);
+  });
+});
+
+describe("which register row a catalogue or invoice name belongs to", () => {
+  const row = (name: string, catalogName: string | null = null) =>
+    ({ id: name.toLowerCase(), name, catalogName, senderEmails: "", active: true } as unknown as Supplier);
+  const register = [row("McKesson Corporation", "McKesson"), row("Independent Pharmacy Distributor", "IPD"), row("Cardinal Health (ParMed)", "ParMed")];
+
+  test("the catalogue name wins, however it is cased or spaced", () => {
+    assert.equal(supplierRecordFor(register, "McKesson")?.id, "mckesson corporation");
+    assert.equal(supplierRecordFor(register, "MCKESSON")?.id, "mckesson corporation");
+    assert.equal(supplierRecordFor(register, "ipd")?.id, "independent pharmacy distributor");
+  });
+
+  test("the register name matches too, and so does the catalogue's canonical spelling", () => {
+    assert.equal(supplierRecordFor(register, "Cardinal Health (ParMed)")?.id, "cardinal health (parmed)");
+    // "parmed" is what the pharmacy abbreviates it to in a filename; the reader canonicalises it to ParMed.
+    assert.equal(supplierRecordFor(register, "parmed")?.id, "cardinal health (parmed)");
+    assert.equal(supplierRecordFor(register, "Mck")?.id, "mckesson corporation");
+  });
+
+  test("a name nobody has recorded is null, not the nearest thing", () => {
+    assert.equal(supplierRecordFor(register, "Anda"), null);
+    assert.equal(supplierRecordFor(register, ""), null);
+    assert.equal(supplierRecordFor(register, null), null);
   });
 });

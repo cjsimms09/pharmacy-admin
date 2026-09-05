@@ -1,0 +1,319 @@
+import Link from "next/link";
+import { notFound, redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
+import { eq } from "drizzle-orm";
+import { db, schema } from "@/db";
+import { requireUser, requireManager } from "@/lib/auth";
+import { audit } from "@/lib/audit";
+import { fmt, todayIso } from "@/lib/dates";
+import {
+  parseTierLines,
+  parseCreditLines,
+  parseList,
+  describeRebate,
+  describeReturns,
+  readRebateTerms,
+  readReturnTerms,
+  rebateTierFor,
+  type RebateTermsT,
+  type ReturnTermsT,
+} from "@/lib/supplier-terms";
+import { rebateProgramsFor, returnPoliciesFor, saveRebateProgram, saveReturnPolicy } from "@/lib/supplier-terms-store";
+import { PageHeader, Card, Notice, Field } from "@/components/ui";
+
+export const dynamic = "force-dynamic";
+export const metadata = { title: "Supplier terms" };
+
+/**
+ * A supplier's rebate schedule and return policy, typed in from the agreement.
+ *
+ * Neither is on any feed. The catalogue says what an item costs; only the rebate schedule says
+ * what it costs after the tier comes off, and only the return policy says what a bottle on the
+ * shelf is still worth. Both are entered here against the supplier, with the date they took
+ * effect, and every earlier version is kept below — a rebate paid last quarter was earned under
+ * last quarter's ladder.
+ *
+ * Tiers and credit steps are typed one per line rather than in a grid, because that is how they
+ * are printed on the schedule and how somebody reads them down the phone. Every line has to
+ * parse; a line that does not is quoted back, and nothing is saved until it does.
+ */
+export default async function SupplierTermsPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ ok?: string; error?: string }>;
+}) {
+  const user = await requireUser();
+  const { id } = await params;
+  const { ok, error } = await searchParams;
+  const supplier = await db.query.suppliers.findFirst({ where: eq(schema.suppliers.id, id) });
+  if (!supplier) notFound();
+  const canManage = user.role !== "staff";
+
+  const [rebates, returns] = await Promise.all([rebateProgramsFor(id), returnPoliciesFor(id)]);
+  const today = todayIso();
+  const currentRebate = rebates.find((r) => r.effectiveFrom <= today && (r.effectiveTo === null || r.effectiveTo >= today)) ?? rebates[0] ?? null;
+  const currentReturn = returns.find((r) => r.effectiveFrom <= today && (r.effectiveTo === null || r.effectiveTo >= today)) ?? returns[0] ?? null;
+  const rebateTerms = currentRebate ? readRebateTerms(currentRebate.termsJson) : null;
+  const returnTerms = currentReturn ? readReturnTerms(currentReturn.termsJson) : null;
+
+  async function saveRebate(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const supplierId = String(fd.get("supplierId") ?? "");
+    const tiers = parseTierLines(String(fd.get("tiers") ?? ""));
+    if (tiers.problems.length) redirect(`/suppliers/${supplierId}/terms?error=` + encodeURIComponent(tiers.problems.join(" ")));
+    const terms = {
+      kind: tiers.tiers.length > 1 ? "tiered_ratio" : "flat_percent",
+      period: String(fd.get("period") ?? "quarter"),
+      eligibility: String(fd.get("eligibility") ?? "catalog_rebate_flag"),
+      ratioDefinition: String(fd.get("ratioDefinition") ?? "").trim() || null,
+      tiers: tiers.tiers,
+      paidAs: String(fd.get("paidAs") ?? "").trim() || null,
+      notes: String(fd.get("termNotes") ?? "").trim() || null,
+    };
+    try {
+      await saveRebateProgram(
+        supplierId,
+        { name: String(fd.get("name") ?? ""), effectiveFrom: String(fd.get("effectiveFrom") ?? ""), notes: String(fd.get("notes") ?? "") },
+        terms,
+        u,
+      );
+      await audit({ action: "supplier.rebate.save", userId: u.id, userName: u.name, entity: "supplier", entityId: supplierId, details: String(fd.get("name") ?? "") });
+      revalidatePath(`/suppliers/${supplierId}/terms`);
+      revalidatePath("/suppliers");
+      redirect(`/suppliers/${supplierId}/terms?ok=` + encodeURIComponent("Rebate schedule saved. Anything current before it is closed the day before this one starts."));
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect(`/suppliers/${supplierId}/terms?error=` + encodeURIComponent(e instanceof Error ? e.message : "Could not save that."));
+    }
+  }
+
+  async function saveReturns(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const supplierId = String(fd.get("supplierId") ?? "");
+    const steps = parseCreditLines(String(fd.get("creditSteps") ?? ""));
+    if (steps.problems.length) redirect(`/suppliers/${supplierId}/terms?error=` + encodeURIComponent(steps.problems.join(" ")));
+    const num = (k: string) => {
+      const s = String(fd.get(k) ?? "").trim();
+      if (!s) return null;
+      const n = Number(s);
+      return Number.isFinite(n) ? n : NaN;
+    };
+    const terms = {
+      windowMonthsBeforeExpiry: num("windowBefore"),
+      windowMonthsAfterExpiry: num("windowAfter"),
+      creditSteps: steps.steps,
+      restockingFeePercent: num("restockingFee"),
+      nonReturnable: parseList(String(fd.get("nonReturnable") ?? "")),
+      reverseDistributor: String(fd.get("reverseDistributor") ?? "").trim() || null,
+      notes: String(fd.get("termNotes") ?? "").trim() || null,
+    };
+    try {
+      await saveReturnPolicy(
+        supplierId,
+        { name: String(fd.get("name") ?? ""), effectiveFrom: String(fd.get("effectiveFrom") ?? ""), notes: String(fd.get("notes") ?? "") },
+        terms,
+        u,
+      );
+      await audit({ action: "supplier.returns.save", userId: u.id, userName: u.name, entity: "supplier", entityId: supplierId });
+      revalidatePath(`/suppliers/${supplierId}/terms`);
+      revalidatePath("/suppliers");
+      redirect(`/suppliers/${supplierId}/terms?ok=` + encodeURIComponent("Return policy saved."));
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect(`/suppliers/${supplierId}/terms?error=` + encodeURIComponent(e instanceof Error ? e.message : "Could not save that."));
+    }
+  }
+
+  return (
+    <>
+      <PageHeader
+        back={{ href: "/suppliers", label: "Suppliers" }}
+        title={`${supplier.name} — rebate and return terms`}
+        subtitle="Typed in from the agreement, with the date each took effect. Earlier versions are kept: a rebate paid last quarter was earned under last quarter's schedule."
+      />
+
+      {ok && <Notice kind="ok">{ok}</Notice>}
+      {error && <Notice kind="crit">{error}</Notice>}
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card title="Rebate schedule" subtitle={rebateTerms ? `${currentRebate!.name}, in force from ${fmt(currentRebate!.effectiveFrom)}.` : "Nothing recorded yet, so a comparison cannot take any rebate off this supplier's prices."}>
+          {rebateTerms && <RebateSummary terms={rebateTerms} />}
+          {rebates.length > 1 && (
+            <details className="mt-3 text-xs">
+              <summary className="cursor-pointer text-ink-3">Earlier schedules ({rebates.length - 1})</summary>
+              <ul className="mt-1 space-y-1">
+                {rebates.filter((r) => r.id !== currentRebate?.id).map((r) => {
+                  const t = readRebateTerms(r.termsJson);
+                  return (
+                    <li key={r.id}>
+                      <b>{r.name}</b> · {fmt(r.effectiveFrom)} to {r.effectiveTo ? fmt(r.effectiveTo) : "open"} · {t ? describeRebate(t) : "terms no longer readable"}
+                    </li>
+                  );
+                })}
+              </ul>
+            </details>
+          )}
+          {canManage && (
+            <form action={saveRebate} className="mt-4 grid gap-3">
+              <input type="hidden" name="supplierId" value={supplier.id} />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Programme name" hint="As the supplier calls it.">
+                  <input name="name" required className="field" defaultValue={currentRebate?.name ?? ""} placeholder="OneStop generics" />
+                </Field>
+                <Field label="Takes effect on">
+                  <input name="effectiveFrom" type="date" required className="field" defaultValue={today} />
+                </Field>
+                <Field label="Measured and paid">
+                  <select name="period" className="field" defaultValue={rebateTerms?.period ?? "quarter"}>
+                    <option value="month">Monthly</option>
+                    <option value="quarter">Quarterly</option>
+                    <option value="year">Annually</option>
+                  </select>
+                </Field>
+                <Field label="What earns it">
+                  <select name="eligibility" className="field" defaultValue={rebateTerms?.eligibility ?? "catalog_rebate_flag"}>
+                    <option value="catalog_rebate_flag">Items the catalogue marks rebated (McKesson OneStop)</option>
+                    <option value="all_generics">All generics</option>
+                    <option value="all_purchases">All purchases</option>
+                  </select>
+                </Field>
+              </div>
+              <Field
+                label="Tiers, one per line — ratio threshold then rebate"
+                hint='e.g. "0% -> 1%", "14% -> 2.5%", "16% -> 3.5%". Not cumulative: the ratio lands in a tier and every eligible purchase earns that tier. A flat programme is one line: "0 -> 2".'
+              >
+                <textarea
+                  name="tiers"
+                  rows={5}
+                  required
+                  className="field font-mono text-xs"
+                  defaultValue={rebateTerms ? rebateTerms.tiers.map((t) => `${t.thresholdPercent}% -> ${t.rebatePercent}%`).join("\n") : ""}
+                  placeholder={"0% -> 1%\n14% -> 2.5%\n16% -> 3.5%"}
+                />
+              </Field>
+              <Field label="How the supplier defines the ratio" hint="Their words: what is in the numerator, what is in the denominator, what is excluded.">
+                <input name="ratioDefinition" className="field" defaultValue={rebateTerms?.ratioDefinition ?? ""} placeholder="OneStop generic purchases ÷ total Rx purchases, excluding drop-ship and returns" />
+              </Field>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Paid as">
+                  <input name="paidAs" className="field" defaultValue={rebateTerms?.paidAs ?? ""} placeholder="Credit memo the month after quarter end" />
+                </Field>
+                <Field label="Anything else that changes the money">
+                  <input name="termNotes" className="field" defaultValue={rebateTerms?.notes ?? ""} placeholder="Minimum commitments, promotional windows, exclusions" />
+                </Field>
+              </div>
+              <Field label="Where these numbers came from" hint="The document name in the private folder, or who confirmed them. Never the numbers' source document itself.">
+                <input name="notes" className="field" defaultValue={currentRebate?.notes ?? ""} />
+              </Field>
+              <div>
+                <button className="btn btn-primary">Save rebate schedule</button>
+              </div>
+            </form>
+          )}
+        </Card>
+
+        <Card title="Return policy" subtitle={returnTerms ? `${currentReturn!.name}, in force from ${fmt(currentReturn!.effectiveFrom)}.` : "Nothing recorded yet, so nothing can say what a return to this supplier is worth."}>
+          {returnTerms && <p className="text-sm">{describeReturns(returnTerms)}</p>}
+          {returnTerms?.reverseDistributor && <p className="mt-1 text-xs text-ink-3">Outside the window: {returnTerms.reverseDistributor}.</p>}
+          {returns.length > 1 && (
+            <details className="mt-3 text-xs">
+              <summary className="cursor-pointer text-ink-3">Earlier policies ({returns.length - 1})</summary>
+              <ul className="mt-1 space-y-1">
+                {returns.filter((r) => r.id !== currentReturn?.id).map((r) => {
+                  const t = readReturnTerms(r.termsJson);
+                  return (
+                    <li key={r.id}>
+                      <b>{r.name}</b> · {fmt(r.effectiveFrom)} to {r.effectiveTo ? fmt(r.effectiveTo) : "open"} · {t ? describeReturns(t) : "terms no longer readable"}
+                    </li>
+                  );
+                })}
+              </ul>
+            </details>
+          )}
+          {canManage && (
+            <form action={saveReturns} className="mt-4 grid gap-3">
+              <input type="hidden" name="supplierId" value={supplier.id} />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Policy name">
+                  <input name="name" className="field" defaultValue={currentReturn?.name ?? "Return policy"} />
+                </Field>
+                <Field label="Takes effect on">
+                  <input name="effectiveFrom" type="date" required className="field" defaultValue={today} />
+                </Field>
+                <Field label="Earliest: months before expiry" hint="Leave blank if the policy does not say.">
+                  <input name="windowBefore" type="number" step="0.5" min="0" className="field" defaultValue={returnTerms?.windowMonthsBeforeExpiry ?? ""} placeholder="6" />
+                </Field>
+                <Field label="Latest: months after expiry" hint="0 means nothing after expiry.">
+                  <input name="windowAfter" type="number" step="0.5" min="0" className="field" defaultValue={returnTerms?.windowMonthsAfterExpiry ?? ""} placeholder="6" />
+                </Field>
+              </div>
+              <Field
+                label="Credit steps, one per line — months to expiry then credit"
+                hint='e.g. "6 -> 100%", "0 -> 50%", "-6 -> 25%": at least that many months left earns that credit. Negative months are after expiry.'
+              >
+                <textarea
+                  name="creditSteps"
+                  rows={4}
+                  className="field font-mono text-xs"
+                  defaultValue={returnTerms ? returnTerms.creditSteps.map((s) => `${s.monthsToExpiryMin} -> ${s.creditPercent}%`).join("\n") : ""}
+                  placeholder={"6 -> 100%\n0 -> 50%"}
+                />
+              </Field>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Restocking fee, percent">
+                  <input name="restockingFee" type="number" step="0.5" min="0" max="100" className="field" defaultValue={returnTerms?.restockingFeePercent ?? ""} />
+                </Field>
+                <Field label="Reverse distributor" hint="Who takes what the supplier will not.">
+                  <input name="reverseDistributor" className="field" defaultValue={returnTerms?.reverseDistributor ?? ""} />
+                </Field>
+              </div>
+              <Field label="Never returnable" hint="In the policy's words, separated by commas or lines.">
+                <textarea name="nonReturnable" rows={2} className="field text-xs" defaultValue={returnTerms?.nonReturnable.join("\n") ?? ""} placeholder={"refrigerated\ncontrolled Schedule II\npartial bottles\nshort-dated at purchase"} />
+              </Field>
+              <Field label="Anything else">
+                <input name="termNotes" className="field" defaultValue={returnTerms?.notes ?? ""} />
+              </Field>
+              <Field label="Where this came from">
+                <input name="notes" className="field" defaultValue={currentReturn?.notes ?? ""} />
+              </Field>
+              <div>
+                <button className="btn btn-primary">Save return policy</button>
+              </div>
+            </form>
+          )}
+        </Card>
+      </div>
+
+      <p className="mt-4 text-xs text-ink-3">
+        Prices, invoices and these terms all hang off this supplier. If a catalogue arrives under a different spelling,{" "}
+        <Link href={`/suppliers?edit=${supplier.id}#edit`} className="text-accent hover:underline">
+          record that spelling as the catalogue name
+        </Link>{" "}
+        so it is filed here too.
+      </p>
+    </>
+  );
+}
+
+function RebateSummary({ terms }: { terms: RebateTermsT }) {
+  const example = rebateTierFor(terms, 15);
+  return (
+    <div className="text-sm">
+      <p>{describeRebate(terms)}</p>
+      {terms.ratioDefinition && <p className="mt-1 text-xs text-ink-3">Ratio: {terms.ratioDefinition}</p>}
+      {terms.paidAs && <p className="mt-1 text-xs text-ink-3">Paid as {terms.paidAs}.</p>}
+      {terms.kind === "tiered_ratio" && example && (
+        <p className="mt-1 text-xs text-ink-3">
+          Check: a ratio of 15% would earn {example.rebatePercent}% on every eligible purchase in the period.
+        </p>
+      )}
+    </div>
+  );
+}
+
+// Keeps the type import used, for the summary of a return policy in the card header.
+export type { ReturnTermsT };

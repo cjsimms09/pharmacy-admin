@@ -69,7 +69,14 @@ export type Transaction = {
   grossProfitCents: number | null;
   /** Plan paid + patient paid − dispensing fee. Null where any part is missing. */
   ingredientPaidCents: number | null;
+  /** Eleven digits, or null. Null with `ndcBare10` set means the importer still has a chance to settle it. */
   ndc11: string | null;
+  /**
+   * A ten-digit NDC printed without hyphens, kept for the importer to settle against the products
+   * the site holds. The reader never pads it: a zero in front is right for one FDA layout and
+   * wrong for two, and a claim filed under the wrong product is worse than one with no NDC.
+   */
+  ndcBare10: string | null;
   /** Identifies this row across re-sends of the same day's report. */
   transactionKey: string;
   raw: Record<string, string>;
@@ -267,7 +274,8 @@ function readRow(parts: string[], section: ReturnType<typeof parseSectionLabel>,
   const pcn = parts[POS.pcn] || section.pcnHint || null;
   const groupNumber = repairNumericId(parts[POS.group]) || null;
   const networkId = repairNumericId(parts[POS.network]) || null;
-  const ndc11 = ndcRaw.length === 11 ? ndcRaw : ndcRaw.length === 10 ? `0${ndcRaw}` : null;
+  const ndc11 = ndcRaw.length === 11 ? ndcRaw : null;
+  const ndcBare10 = ndcRaw.length === 10 ? ndcRaw : null;
   const quantityThousandths = parseQuantityThousandths(qtyRaw);
 
   const raw: Record<string, string> = {
@@ -300,7 +308,9 @@ function readRow(parts: string[], section: ReturnType<typeof parseSectionLabel>,
     grossProfitCents: parseCents(parts[POS.grossProfit]),
     ingredientPaidCents,
     ndc11,
-    transactionKey: [rx[1], rx[2], status, dateFilled, bin ?? "", ndc11 ?? "", remitCents ?? "", copayCents ?? "", quantityThousandths ?? ""].join("|"),
+    ndcBare10,
+    // Keyed on the NDC as printed, so the key is the same whether or not a bare code was later settled.
+    transactionKey: [rx[1], rx[2], status, dateFilled, bin ?? "", ndc11 ?? ndcRaw, remitCents ?? "", copayCents ?? "", quantityThousandths ?? ""].join("|"),
     raw,
   };
 }
