@@ -327,14 +327,25 @@ async function acknowledgePartly(
  * their questions, which is what 29 CFR 1910.1030(g)(2)(vii)(N) asks for and what an email cannot
  * carry. The statement stored against each person names both halves and both dates, so the record
  * says what happened rather than implying it.
+ *
+ * It is recorded as a signature rather than as a button press, because it has to stand next to the
+ * employee's own on the same certificate. Theirs is made by replying from their address with the
+ * code issued to them; this one is made by ticking to sign and typing a name, which is what makes
+ * the intent deliberate. Both are electronic signatures under 15 U.S.C. 7006(5) and K.S.A.
+ * 16-1602, and a certificate that prints two signatures is a much harder document to wave away
+ * than one that describes two events.
  */
 export async function attestQuestionsAndAnswers(
   assignmentIds: string[],
-  input: { on: string; note: string },
-  user: { id: string; name: string },
+  input: { on: string; note: string; typedName: string; intent: boolean },
+  user: { id: string; name: string; role: string },
 ): Promise<{ completed: number; names: string[] }> {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.on)) throw new Error("Give the date you went through it with them.");
   if (assignmentIds.length === 0) throw new Error("Nobody was selected.");
+  if (!input.intent) {
+    throw new Error("Tick the box to say you are signing this. A form submitted without it is not a signature.");
+  }
+  if (input.typedName.trim().length < 3) throw new Error("Type your full name, as you would sign it.");
 
   const names: string[] = [];
   let completed = 0;
@@ -355,7 +366,7 @@ export async function attestQuestionsAndAnswers(
       `been given and had read the ${TRAINING_LABEL[a.type].toLowerCase()} material. On ${input.on} I went through ` +
       `it with them and answered their questions, as 29 CFR 1910.1030(g)(2)(vii)(N) requires.` +
       (input.note.trim() ? ` ${input.note.trim()}` : "") +
-      ` Attested by ${user.name}.`;
+      ` Attested by ${input.typedName.trim()}.`;
 
     await db.insert(schema.trainings).values({
       id: trainingId,
@@ -371,9 +382,30 @@ export async function attestQuestionsAndAnswers(
       createdBy: user.name,
     });
 
+    // The signature is bound to the sentence and to the record it completes. One per assignment,
+    // so withdrawing one person's attestation never disturbs anybody else's.
+    const { signRecord } = await import("./record-signatures");
+    const signature = await signRecord(
+      {
+        kind: "training_qa_attestation",
+        recordKey: id,
+        statement,
+        typedName: input.typedName,
+        intent: true,
+        content: `${a.personId}|${a.type}|${on}|${input.on}`,
+      },
+      user,
+    );
+
     await db
       .update(schema.trainingAssignments)
-      .set({ trainingId, qaAttestedOn: input.on, qaAttestedBy: user.name, qaNote: input.note.trim() || null })
+      .set({
+        trainingId,
+        qaAttestedOn: input.on,
+        qaAttestedBy: input.typedName.trim(),
+        qaNote: input.note.trim() || null,
+        qaSignatureId: signature.id,
+      })
       .where(eq(schema.trainingAssignments.id, id));
 
     names.push(`${person.firstName} ${person.lastName}`);

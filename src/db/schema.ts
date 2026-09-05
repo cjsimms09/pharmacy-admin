@@ -1626,6 +1626,16 @@ export const trainingAssignments = sqliteTable(
     /** What was gone through, in the trainer's words. */
     qaNote: text("qa_note"),
     /**
+     * The trainer's attestation as an actual electronic signature, not a button press.
+     *
+     * Points at a row in record_signatures carrying the wording, the typed name, the deliberate
+     * act of ticking to sign, the time, the address and the device. The two halves of this record
+     * are then both signatures in the sense the ESIGN Act and the Kansas UETA mean — the
+     * employee's made by replying from their own address with the code issued to them, the
+     * trainer's made here — and the certificate can print both rather than describing them.
+     */
+    qaSignatureId: text("qa_signature_id"),
+    /**
      * The version of the course material actually sent to this person.
      *
      * Stamped on the certificate. Without it a certificate says a person was trained and leaves

@@ -66,6 +66,37 @@ export type CertificateData = {
    * otherwise complete file.
    */
   trainerQualifications: string | null;
+  /**
+   * The signatures on the record, printed as signatures.
+   *
+   * A training attested by email and completed by the trainer has two of them, made in different
+   * ways by different people, and until now the certificate described both in prose. Prose is not
+   * a signature. Under 15 U.S.C. 7006(5) an electronic signature is any symbol or process attached
+   * to or logically associated with a record and adopted with intent to sign — a reply sent from
+   * a person's own address, quoting the phrase they were asked to send and the code issued to them
+   * for that training, is exactly that; so is the trainer ticking to sign and typing their name.
+   * K.S.A. 16-1609 then lets the signature be attributed to the person by any manner, including
+   * the efficacy of the security procedure used, which is what the code and the address are.
+   *
+   * So both are set out as signature blocks, each with the wording adopted, the method by which
+   * it was made, when, and what attributes it to that person. That is more than a wet signature
+   * carries, and it is the difference between a document that survives being read closely and one
+   * that has to be explained.
+   */
+  signatures: CertSignature[];
+};
+
+export type CertSignature = {
+  /** "The employee" or "The trainer" — whose signature this is and what it covers. */
+  role: string;
+  who: string;
+  /** The exact wording adopted, stored at the time rather than reconstructed. */
+  statement: string;
+  /** How the signature was made, in evidence terms rather than in software terms. */
+  method: string;
+  at: string | null;
+  /** What ties it to that person — the address, the code, the device, the account. */
+  attribution: string[];
 };
 
 const fold = (...parts: (string | null | undefined)[]) => parts.filter(Boolean).join(" | ");
@@ -153,8 +184,69 @@ export async function certificateFor(trainingId: string): Promise<CertificateDat
     quiz,
     assignment?.signedName,
     assignment?.completedAt,
+    assignment?.qaAttestedOn,
+    assignment?.qaAttestedBy,
+    assignment?.qaSignatureId,
     t.notes,
   );
+
+  /*
+   * The two halves, as signatures.
+   *
+   * Order matters: the employee's first, because it is the one that says the training happened to
+   * them. The trainer's completes it.
+   */
+  const signatures: CertSignature[] = [];
+  if (assignment?.completedAt && assignment.completedVia !== "pic_recorded") {
+    const { REPLY_PHRASE } = await import("./training-replies");
+    const byReply2 = assignment.completedVia === "email_reply";
+    signatures.push({
+      role: "The employee, that they were given the material and read it",
+      who: assignment.signedName || `${person.firstName} ${person.lastName}`,
+      statement: assignment.statement,
+      method: byReply2
+        ? `Reply sent by email from the person's own address containing the words "${REPLY_PHRASE}" and the reply ` +
+          `code issued to them for this training. Adopted with intent to sign under 15 U.S.C. 7006(5).`
+        : "Typed name and submission on this pharmacy's training page, after every comprehension question was " +
+          "answered correctly.",
+      at: assignment.completedAt,
+      attribution: [
+        byReply2 && assignment.replyFromAddress
+          ? `Sent from ${assignment.replyFromAddress}, the address held for this person on the pharmacy's staff record.`
+          : null,
+        byReply2 && assignment.replyCode
+          ? `Carried reply code ${assignment.replyCode}, issued to this person for this training and no other.`
+          : null,
+        byReply2 && assignment.replyDocumentId ? "The reply itself is retained with this record." : null,
+        !byReply2 && assignment.signedIp ? `Signed from ${assignment.signedIp}.` : null,
+        !byReply2 && assignment.signedAgent ? `Device: ${assignment.signedAgent.slice(0, 120)}` : null,
+        assignment.quizTotal
+          ? `${assignment.quizCorrect} of ${assignment.quizTotal} comprehension questions answered correctly.`
+          : null,
+      ].filter((x): x is string => Boolean(x)),
+    });
+  }
+  if (assignment?.qaSignatureId) {
+    const sig = await db.query.recordSignatures.findFirst({
+      where: eq(schema.recordSignatures.id, assignment.qaSignatureId),
+    });
+    if (sig) {
+      signatures.push({
+        role: "The trainer, that the questions and answers happened",
+        who: sig.signedName,
+        statement: sig.statement,
+        method:
+          "Signed on this pharmacy's system: the statement agreed to, a box ticked to signify intent, and a name " +
+          "typed as it would be signed.",
+        at: sig.signedAt,
+        attribution: [
+          sig.signedRole ? `Signed by the ${sig.signedRole} account for ${sig.signedName}.` : null,
+          sig.signedIp ? `Signed from ${sig.signedIp}.` : null,
+          sig.revokedAt ? `WITHDRAWN on ${sig.revokedAt.slice(0, 10)}: ${sig.revokedReason ?? ""}` : null,
+        ].filter((x): x is string => Boolean(x)),
+      });
+    }
+  }
 
   return {
     number,
@@ -183,6 +275,7 @@ export async function certificateFor(trainingId: string): Promise<CertificateDat
     },
     issuedBy: pic ? `${pic.firstName} ${pic.lastName}, Pharmacist-in-Charge` : "The pharmacist-in-charge",
     trainerQualifications: who.qualifications,
+    signatures,
   };
 }
 

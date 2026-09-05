@@ -1,4 +1,4 @@
-import type { CertificateData } from "@/lib/certificate";
+import type { CertificateData, CertSignature } from "@/lib/certificate";
 import { fmtLong } from "@/lib/dates";
 
 /**
@@ -70,13 +70,39 @@ export function Certificate({ c }: { c: CertificateData }) {
           <p className="mt-3 text-center text-sm text-ink-2">Valid until {fmtLong(c.expiresOn)}, when it falls due again.</p>
         )}
 
-        {/* ── seal and signature ── */}
+        {/* ── seal and signatures ── */}
         <div className="mt-12 flex flex-wrap items-end justify-between gap-8">
-          <div className="min-w-[14rem] flex-1">
-            <p className="border-t border-ink pt-2 font-serif text-lg">{c.issuedBy.split(",")[0]}</p>
-            <p className="text-[11px] uppercase tracking-widest text-ink-3">
-              {c.issuedBy.includes(",") ? c.issuedBy.split(",").slice(1).join(",").trim() : "Pharmacist-in-Charge"}
-            </p>
+          {/*
+            Whose names go on the face.
+
+            Where the record carries real signatures they are the ones printed, in the order they
+            were made — the employee's first, because it is the one that says the training happened
+            to them. Where it does not, the pharmacist-in-charge issuing it is the only claim the
+            record actually supports, and that is what appears.
+          */}
+          <div className="flex min-w-[14rem] flex-1 flex-wrap gap-8">
+            {c.signatures.length > 0 ? (
+              c.signatures.map((sig) => (
+                <div key={sig.role} className="min-w-[12rem] flex-1">
+                  <p className="border-t border-ink pt-2 font-serif text-lg">{sig.who}</p>
+                  <p className="text-[11px] uppercase tracking-widest text-ink-3">
+                    {sig.role.startsWith("The employee") ? "The employee" : "Pharmacist-in-Charge"}
+                  </p>
+                  {sig.at && (
+                    <p className="text-[10px] text-ink-3">
+                      Signed electronically {new Date(sig.at).toLocaleDateString()}
+                    </p>
+                  )}
+                </div>
+              ))
+            ) : (
+              <div className="min-w-[14rem] flex-1">
+                <p className="border-t border-ink pt-2 font-serif text-lg">{c.issuedBy.split(",")[0]}</p>
+                <p className="text-[11px] uppercase tracking-widest text-ink-3">
+                  {c.issuedBy.includes(",") ? c.issuedBy.split(",").slice(1).join(",").trim() : "Pharmacist-in-Charge"}
+                </p>
+              </div>
+            )}
           </div>
           <Seal number={c.number} />
         </div>
@@ -95,19 +121,6 @@ export function Certificate({ c }: { c: CertificateData }) {
           {c.liveQuestions && <Row term="Interactive questions and answers" desc={c.liveQuestions} />}
           {c.provider && <Row term="Provider" desc={c.provider} />}
           {c.statement && <Row term="Attested" desc={<span className="italic">&ldquo;{c.statement}&rdquo;</span>} />}
-          {c.signedName && (
-            <Row
-              term="Signature"
-              desc={
-                <>
-                  Signed electronically as <b>{c.signedName}</b>
-                  {c.signedAt ? ` on ${new Date(c.signedAt).toLocaleString()}` : ""}. The typed name, the time and the
-                  device were recorded together, which is what makes it a valid electronic signature under the ESIGN
-                  Act and the Kansas Uniform Electronic Transactions Act.
-                </>
-              }
-            />
-          )}
           <Row
             term="Verification"
             desc={
@@ -120,7 +133,52 @@ export function Certificate({ c }: { c: CertificateData }) {
           />
         </dl>
       </section>
+
+      {/*
+        ── The signatures, set out as signatures ──
+
+        Two people signed this in two different ways, and describing that in a sentence was doing
+        the record a disservice. Each block states the wording that was adopted, how the signature
+        was made, when, and what attributes it to that person — which is more than a signature in
+        ink carries, and is what the ESIGN Act and the Kansas UETA are actually asking for.
+      */}
+      {c.signatures.length > 0 && (
+        <section className="mt-4 border border-line p-6 text-[11px] leading-relaxed">
+          <h2 className="text-xs font-semibold uppercase tracking-widest text-ink-2">Electronic signatures</h2>
+          <div className="mt-3 space-y-4">
+            {c.signatures.map((sig) => <SignatureBlock key={sig.role} sig={sig} />)}
+          </div>
+          <p className="mt-4 border-t border-line pt-3 text-[10px] text-ink-3">
+            Signed electronically under the Electronic Signatures in Global and National Commerce Act
+            (15 U.S.C. 7001 et seq.) and the Kansas Uniform Electronic Transactions Act (K.S.A. 16-1601 et seq.). An
+            electronic signature is a symbol or process attached to or logically associated with a record and adopted
+            with the intent to sign it (15 U.S.C. 7006(5)); it is attributable to a person where that is shown in any
+            manner, including by the efficacy of the security procedure used (K.S.A. 16-1609). The wording adopted,
+            the time, the method and the attributing details above are retained in this pharmacy&rsquo;s compliance
+            system and are reproducible on request.
+          </p>
+        </section>
+      )}
     </article>
+  );
+}
+
+function SignatureBlock({ sig }: { sig: CertSignature }) {
+  return (
+    <div className="border border-line p-3">
+      <p className="text-[10px] font-semibold uppercase tracking-widest text-ink-3">{sig.role}</p>
+      <p className="mt-1 italic">&ldquo;{sig.statement}&rdquo;</p>
+      <p className="mt-2">
+        <b>{sig.who}</b>
+        {sig.at ? ` — ${new Date(sig.at).toLocaleString()}` : ""}
+      </p>
+      <p className="mt-1 text-ink-2">{sig.method}</p>
+      {sig.attribution.length > 0 && (
+        <ul className="mt-1 list-disc space-y-0.5 pl-4 text-ink-2">
+          {sig.attribution.map((a) => <li key={a}>{a}</li>)}
+        </ul>
+      )}
+    </div>
   );
 }
 

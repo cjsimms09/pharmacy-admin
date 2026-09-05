@@ -179,7 +179,18 @@ function blockHeight(text: string, size: number, width = CONTENT_W): number {
   return wrapForPdf(text, size, width).length * lineHeight(size);
 }
 
-function packetPages(course: Course, pharmacyName: string): Draw[][] {
+/**
+ * The pages of one course.
+ *
+ * Exported with an optional numbering offset so the same pages can be printed on their own — where
+ * "Page 3 of 10" means this course — or bound into the whole set, where it has to mean the binder.
+ * Two implementations of this layout would have disagreed within a month.
+ */
+export function packetPages(
+  course: Course,
+  pharmacyName: string,
+  numbering?: { offset: number; total: number },
+): Draw[][] {
   const sheet: Sheet = { pages: [], page: [], y: TOP };
 
   const brk = () => {
@@ -392,7 +403,8 @@ function packetPages(course: Course, pharmacyName: string): Draw[][] {
   // ── Header and footer, once the page count is known ────────────
   const version = courseVersion(course);
   return sheet.pages.map((page, i) => {
-    const n = i + 1;
+    const n = (numbering?.offset ?? 0) + i + 1;
+    const of = numbering?.total ?? sheet.pages.length;
     const furniture: Draw[] = [
       { kind: "text", x: PAGE.margin, y: PAGE.height - 52, text: pharmacyName, size: 8, bold: true, grey: 0.4 },
       {
@@ -411,7 +423,7 @@ function packetPages(course: Course, pharmacyName: string): Draw[][] {
         kind: "text",
         x: PAGE.width / 2,
         y: 50,
-        text: `Page ${n} of ${sheet.pages.length}`,
+        text: `Page ${n} of ${of}`,
         size: 7.5,
         align: "center",
         grey: 0.45,

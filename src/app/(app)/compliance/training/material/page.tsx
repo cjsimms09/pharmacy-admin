@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
 import { onSiteToday } from "@/lib/roster";
 import { COURSES } from "@/lib/courses";
+import { binderContents } from "@/lib/training-binder";
 import { courseVersion } from "@/lib/course-packet";
 import { TRAINING_LABEL } from "@/lib/labels";
 import { TRAINING_TYPES, type TrainingType } from "@/db/schema";
@@ -29,6 +30,7 @@ export default async function TrainingMaterialPage() {
   const immunizers = people.filter((p) => p.administersVaccines);
 
   const written = TRAINING_TYPES.filter((t) => COURSES[t]);
+  const binder = binderContents();
   const generated: TrainingType[] = ["policy_manual_acknowledgement", "immunization_protocol_review"];
 
   return (
@@ -39,6 +41,35 @@ export default async function TrainingMaterialPage() {
         subtitle="The exact document each member of staff is sent, to read on screen or print for the file. Opening one uses your browser's PDF viewer, so print is the button in there."
         actions={<Link href="/compliance/training/records" className="btn">The training file</Link>}
       />
+
+      {/*
+        The binder, first, because it is the thing somebody came here to do.
+
+        Six courses printed one at a time from six rows is the friction that leaves a binder a year
+        out of date. One file, one print job, continuously numbered, with a contents page carrying
+        the version codes — so a year from now it can be told at a glance whether the paper copy
+        still matches what the site is sending.
+      */}
+      <Card
+        title="Print the whole set for the binder"
+        subtitle="Every course in one file, with a cover and a contents page, numbered straight through. This is what belongs on the shelf next to the policy and procedure manual."
+        className="mb-6"
+      >
+        <div className="flex flex-wrap items-center gap-3">
+          <a href="/compliance/training/binder" target="_blank" rel="noreferrer" className="btn btn-primary">
+            Open the binder
+          </a>
+          <span className="text-sm text-ink-2">
+            {binder.length} courses · {binder.reduce((n, b) => n + b.pages, 0) + 2} pages · about{" "}
+            {binder.reduce((n, b) => n + b.minutes, 0)} minutes of reading in total
+          </span>
+        </div>
+        <p className="mt-3 text-xs text-ink-3">
+          Reprint it when a version code below stops matching the one on the printed contents page. A certificate
+          always names the version the person actually sat, so an out-of-date binder never makes a record wrong — it
+          just stops being the material anybody was given.
+        </p>
+      </Card>
 
       <Card
         title="The written courses"

@@ -74,6 +74,26 @@ export const SIGNABLE: Record<string, Signable> = {
     dynamic: true,
     roles: ["owner", "manager"],
   },
+  /**
+   * The trainer's half of a training attested by email.
+   *
+   * Dynamic because the sentence names the person, both dates and what was actually gone through
+   * — "Nicole confirmed by email on 3 September that she had read the material; on 8 September I
+   * went through it with her and answered her questions". That sentence is the evidence and it
+   * cannot be written in advance.
+   *
+   * It is a signature rather than a button because the record it completes has to stand next to
+   * the employee's own. Theirs is made by replying from their address with the code issued to
+   * them; this one is made by ticking to sign and typing a name. Both are electronic signatures
+   * under 15 U.S.C. 7006(5) and K.S.A. 16-1602, and the certificate prints them as such.
+   */
+  training_qa_attestation: {
+    kind: "training_qa_attestation",
+    label: "Trainer's attestation of questions and answers",
+    statement: "",
+    dynamic: true,
+    roles: ["owner", "manager"],
+  },
   training_file: {
     kind: "training_file",
     label: "Workforce training records",

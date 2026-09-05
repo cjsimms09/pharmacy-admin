@@ -43,7 +43,7 @@ export const dynamic = "force-dynamic";
 const REQUIRED = Object.keys(TRAINING_CADENCE) as TrainingType[];
 
 export default async function TrainingPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
-  await requireUser();
+  const user = await requireUser();
   const { ok, error } = await searchParams;
   const [assignments, mailReady, people, trainings, settings, mail, qaQueue] = await Promise.all([
     openAssignments(),
@@ -173,7 +173,12 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
     try {
       const r = await attestQuestionsAndAnswers(
         picks,
-        { on: String(fd.get("qaOn") ?? ""), note: String(fd.get("qaNote") ?? "") },
+        {
+          on: String(fd.get("qaOn") ?? ""),
+          note: String(fd.get("qaNote") ?? ""),
+          typedName: String(fd.get("qaName") ?? ""),
+          intent: fd.get("qaIntent") === "yes",
+        },
         u,
       );
       await audit({ action: "training.qa_attested", userId: u.id, userName: u.name, details: r.names.join(", ") });
@@ -733,12 +738,38 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
                 />
               </label>
             </div>
+            {/*
+              Two deliberate acts, the same as everywhere else a record is signed here.
+
+              This is the trainer's half of a two-signature record and it is printed on the
+              certificate beside the employee's. A single button labelled "Record it" is something
+              people press meaning "next", which is exactly what the ESIGN Act's intent requirement
+              is there to exclude — so it is a box and a typed name.
+            */}
+            <div className="rounded-md border border-line bg-surface p-3">
+              <p className="text-sm italic leading-relaxed">
+                &ldquo;[Name] confirmed by email on [the day they replied], from their own address, that they had been
+                given and had read the material. On the date above I went through it with them and answered their
+                questions, as 29 CFR 1910.1030(g)(2)(vii)(N) requires.&rdquo;
+              </p>
+              <p className="mt-2 text-xs text-ink-3">
+                Written out in full, with the real names and dates, against each person you tick.
+              </p>
+              <label className="mt-3 flex items-start gap-2 text-sm">
+                <input type="checkbox" name="qaIntent" value="yes" className="mt-0.5" />
+                <span>I am signing this attestation, and I agree to the statement above.</span>
+              </label>
+              <label className="mt-2 block text-sm">
+                Type your full name, as you would sign it
+                <input name="qaName" defaultValue={user.name} className="field mt-1 max-w-sm" autoComplete="name" />
+              </label>
+            </div>
             <p className="text-xs text-ink-3">
-              You are attesting that you, or another person knowledgeable in the subject, went through the material
-              with each person ticked and answered their questions on that date. That sentence is stored word for word
-              against each of their records.
+              Your name, the time, and the address you are signing from are recorded with the statement, which makes
+              this the equal of ink under the ESIGN Act and the Kansas UETA. It prints on each person&rsquo;s
+              certificate beside their own signature.
             </p>
-            <button className="btn btn-primary">Record it</button>
+            <button className="btn btn-primary">Sign and record it</button>
           </form>
         </Card>
       )}
