@@ -274,3 +274,40 @@ describe("a package is not a unit", () => {
   });
 });
 
+
+describe("a rebate belongs to the supplier that pays it", () => {
+  const base = {
+    catalogue: [
+      { ndc11: "00093721698", supplier: "McKesson", description: "AMLODIPINE 5MG", unitCostMicros: 100_000, packQty: 90, contractFlag: "rebated", pricedOn: "2026-09-01", availability: null },
+      { ndc11: "00093721698", supplier: "IPC", description: "AMLODIPINE 5MG", unitCostMicros: 95_000, packQty: 90, contractFlag: "rebated", pricedOn: "2026-09-01", availability: null },
+    ],
+    nadac: [],
+    claims: [],
+    materialityCents: 100,
+  };
+
+  test("one supplier's contract discount is never lent to another", () => {
+    // The failure: a single global rate took McKesson's thirty percent off an IPC line the moment
+    // IPC's catalogue marked something rebated, and the comparison then preferred IPC on a
+    // discount it does not give.
+    const rows = buildLedger({ ...base, invoiceLines: [], contract: { bySupplier: { mckesson: 0.3 }, genericRebateRate: null } });
+    const buys = rows[0].buys;
+    const mck = buys.find((b) => b.supplier === "McKesson")!;
+    const ipc = buys.find((b) => b.supplier === "IPC")!;
+    assert.equal(mck.effectiveUnitMicros, 70_000, "30% off the contract line");
+    assert.equal(ipc.effectiveUnitMicros, 95_000, "IPC has no ladder on file, so nothing comes off");
+  });
+
+  test("a rebated line with no rate on file is flagged rather than priced gross in silence", () => {
+    const rows = buildLedger({ ...base, invoiceLines: [], contract: { bySupplier: { mckesson: 0.3 }, genericRebateRate: null } });
+    assert.ok(rows[0].flags.includes("rebate_unknown"), "IPC's rebated line has no rate, and that is said out loud");
+  });
+
+  test("with no ladders at all, everything is compared at its gross price", () => {
+    const rows = buildLedger({ ...base, invoiceLines: [], contract: { genericRebateRate: null } });
+    assert.deepEqual(
+      rows[0].buys.map((b) => [b.supplier, b.effectiveUnitMicros]).sort(),
+      [["IPC", 95_000], ["McKesson", 100_000]],
+    );
+  });
+});

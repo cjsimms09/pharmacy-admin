@@ -18,6 +18,8 @@ import {
 import { rebateProgramsFor, returnPoliciesFor, saveRebateProgram, saveReturnPolicy, rebateProgramsInForce } from "@/lib/supplier-terms-store";
 import { rebateStatementFor } from "@/lib/rebate-report-store";
 import { rebateView, type ProgrammeView } from "@/lib/rebate-view";
+import { ratesFor } from "@/lib/rebate-rates";
+import { ratioForSupplier } from "@/lib/purchase-ratio";
 import { PageHeader, Card, Notice, Field } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import { getSettings, setSetting } from "@/lib/settings";
@@ -81,21 +83,16 @@ export default async function SupplierTermsPage({
    */
   const statement = await rebateStatementFor(id);
 
-  const view = rebateView(
-    inForce.map((p) => ({ id: p.row.id, name: p.row.name, effectiveFrom: p.row.effectiveFrom, terms: p.terms })),
-    statement
-      ? {
-          scrubbedGcrPercent: statement.scrubbedGcrPercent,
-          gprPercent: statement.gprPercent,
-          periodFrom: statement.periodFrom,
-          oneStopPurchasedCents: statement.oneStopPurchasedCents,
-          brandPurchasedCents: statement.brandPurchasedCents,
-          gcrRebateCents: statement.gcrRebateCents,
-          gprRebateCents: statement.gprRebateCents,
-          brandRebateCents: statement.brandRebateCents,
-        }
-      : null,
-  );
+  /*
+   * The bands are picked by the freshest ratio there is, not by the last statement.
+   *
+   * The daily drill down says where the compliance ratio has got to this month; the monthly
+   * statement says where it closed. An order placed this morning is discounted at the band the
+   * ratio is in now, so that is the one this page shows — and it says which it used.
+   */
+  const rates = await ratesFor(id);
+  const view = rates?.view ?? rebateView([], null);
+  const ratio = await ratioForSupplier(id);
 
   const superseded = allRebates.filter((r) => !inForce.some((p) => p.row.id === r.id));
   const currentReturn = returns.find((r) => r.effectiveFrom <= today && (r.effectiveTo === null || r.effectiveTo >= today)) ?? returns[0] ?? null;
@@ -363,9 +360,11 @@ export default async function SupplierTermsPage({
         tone={view.contractGenericPercent ? "ok" : undefined}
         title="What comes off this supplier's prices today"
         subtitle={
-          view.asOf
-            ? `Worked from the ${fmt(view.asOf)} statement. Every ladder that pays on the same kind of item is added together, because that is what the supplier does.`
-            : "Nothing has said which band this pharmacy is in, so no price is being discounted."
+          rates?.ratioSource === "daily report"
+            ? `From this supplier's own daily report${rates.ratioAsOf ? `, ${fmt(rates.ratioAsOf.length === 7 ? `${rates.ratioAsOf}-01` : rates.ratioAsOf)}` : ""}. Every ladder that pays on the same kind of item is added together, because that is what the supplier does.`
+            : view.asOf
+              ? `Worked from the ${fmt(view.asOf)} statement — the month that closed, not where the ratio stands today. Send the daily report and this follows it.`
+              : "Nothing has said which band this pharmacy is in, so no price is being discounted."
         }
       >
         <div className="grid gap-3 sm:grid-cols-3">
@@ -373,6 +372,38 @@ export default async function SupplierTermsPage({
           <Headline value={view.allGenericsPercent} label="off every generic" sub="Contract or not" hideWhenNull />
           <Headline value={view.brandPercent} label="off brand" sub="Brand-name items only" />
         </div>
+        {ratio && ratio.gcrPercent !== null && (
+          <div className="mt-3 rounded-md border border-line bg-ground p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-ink-3">Where the ratio stands</p>
+            <p className="mt-1 text-sm">
+              <b>{ratio.gcrPercent}%</b> generic compliance{ratio.month ? ` for ${ratio.month}` : ""}
+              {ratio.osRxPercent !== null ? `, OneStop ${ratio.osRxPercent}% of Rx` : ""}
+              {ratio.generatedOn ? `, read off the report generated ${fmt(ratio.generatedOn)}` : ""}.
+              {ratio.documentId && (
+                <>
+                  {" "}
+                  <a href={`/files/${ratio.documentId}`} target="_blank" rel="noreferrer" className="text-accent underline">Open it</a>
+                </>
+              )}
+            </p>
+            {ratio.months.length > 1 && (
+              <div className="mt-2 overflow-x-auto">
+                <table className="table max-w-md">
+                  <thead><tr><th>Month</th><th className="text-right">Compliance</th><th className="text-right">OneStop / Rx</th></tr></thead>
+                  <tbody>
+                    {ratio.months.slice(0, 6).map((m) => (
+                      <tr key={m.month}>
+                        <td>{m.month}</td>
+                        <td className="num">{m.gcrPercent === null ? "—" : `${m.gcrPercent}%`}</td>
+                        <td className="num">{m.osRxPercent === null ? "—" : `${m.osRxPercent}%`}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
         {view.nextBandWorthCents !== null && view.nextBandWorthCents > 0 && (
           <p className="mt-3 rounded-md border border-warn bg-ground p-3 text-sm">
             <b>${(view.nextBandWorthCents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} left on the table.</b>{" "}

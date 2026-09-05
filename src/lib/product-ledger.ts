@@ -90,8 +90,38 @@ export type Flag =
   | "rebate_unknown"
   | "pack_size_unknown";
 
-/** The tier rate, as a fraction, from the rebate report — never guessed. */
-export type Contract = { genericRebateRate: number | null };
+/**
+ * What each supplier takes off a rebated line, as a fraction, never guessed.
+ *
+ * Per supplier, because rebates are. One global rate applied McKesson's contract discount to an
+ * IPC line the moment IPC's catalogue marked something rebated, and a comparison then preferred
+ * the supplier with the discount it had borrowed from somebody else. `bySupplier` is keyed on the
+ * supplier's name folded to lower case, which is how invoices and catalogues both name them.
+ *
+ * `fallback` covers a line whose supplier is not named at all. Null everywhere means gross prices
+ * and a flag saying so, which understates the pharmacy's position rather than inventing a discount.
+ */
+export type Contract = {
+  bySupplier?: Record<string, number>;
+  /** The rate for a line whose supplier nothing names. */
+  genericRebateRate: number | null;
+};
+
+/** The rate that applies to a line, by who sold it. */
+function rateFor(contract: Contract, supplier: string | null): number | null {
+  if (supplier) {
+    const hit = contract.bySupplier?.[supplier.trim().toLowerCase()];
+    if (typeof hit === "number") return hit;
+    // A catalogue may spell a supplier differently from the register; a contained match settles it.
+    for (const [name, r] of Object.entries(contract.bySupplier ?? {})) {
+      const a = supplier.trim().toLowerCase();
+      if (a.includes(name) || name.includes(a)) return r;
+    }
+    // A named supplier with no rate on file earns nothing here, rather than borrowing another's.
+    return contract.bySupplier && Object.keys(contract.bySupplier).length > 0 ? null : contract.genericRebateRate;
+  }
+  return contract.genericRebateRate;
+}
 
 const MICROS = 1_000_000;
 
@@ -122,7 +152,7 @@ export type LedgerInput = {
  * taken off real invoices rather than only against whatever is in the database today.
  */
 export function buildLedger(input: LedgerInput): LedgerRow[] {
-  const rate = input.contract.genericRebateRate;
+  const contract = input.contract;
   const rows = new Map<string, LedgerRow>();
 
   const row = (ndc11: string): LedgerRow => {
@@ -167,7 +197,7 @@ export function buildLedger(input: LedgerInput): LedgerRow[] {
     const buy: Buy = {
       supplier: l.supplier ?? "our supplier",
       unitCostMicros: gross,
-      effectiveUnitMicros: effectiveMicros(gross, l.rebated, rate),
+      effectiveUnitMicros: effectiveMicros(gross, l.rebated, rateFor(contract, l.supplier)),
       rebated: l.rebated,
       source: "invoice",
       on: l.invoiceDate,
@@ -186,7 +216,7 @@ export function buildLedger(input: LedgerInput): LedgerRow[] {
     r.buys.push({
       supplier: c.supplier,
       unitCostMicros: c.unitCostMicros,
-      effectiveUnitMicros: effectiveMicros(c.unitCostMicros, rebated, rate),
+      effectiveUnitMicros: effectiveMicros(c.unitCostMicros, rebated, rateFor(contract, c.supplier)),
       rebated,
       source: "catalogue",
       on: c.pricedOn,
@@ -242,7 +272,7 @@ export function buildLedger(input: LedgerInput): LedgerRow[] {
     if (r.buys.length > 0 && r.buys.every((b) => b.shortDated)) r.flags.push("short_dated_only");
     // Named where it matters: a rebated line whose rate is unknown is being compared at its gross
     // price, which understates the pharmacy's position rather than overstating it.
-    if (rate === null && r.buys.some((b) => b.rebated === true)) r.flags.push("rebate_unknown");
+    if (r.buys.some((b) => b.rebated === true && rateFor(contract, b.supplier) === null)) r.flags.push("rebate_unknown");
   }
 
   return [...rows.values()];
@@ -282,8 +312,17 @@ export async function productLedger(): Promise<{ rows: LedgerRow[]; rate: number
     getSettings(),
   ]);
 
-  const pct = Number((s.mck_generic_rebate_rate ?? "").replace("%", "").trim());
-  const rate = Number.isFinite(pct) && pct > 0 && pct < 100 ? pct / 100 : null;
+  /*
+   * The discount each supplier is giving today, worked out rather than typed.
+   *
+   * It was a percentage copied off last month's statement into a settings box and applied to every
+   * supplier alike. Now it comes from each supplier's own ladders and the ratio they are currently
+   * in — from this morning's drill down where there is one. A supplier with no ladder on file
+   * discounts nothing here and the row says so.
+   */
+  const { contractRatesBySupplier } = await import("./rebate-rates");
+  const bySupplier = await contractRatesBySupplier();
+  const anyRate = Object.values(bySupplier).sort((a, b) => b - a)[0] ?? null;
   const materialityCents = Number(s.floor_materiality_cents ?? "") || 500;
 
   const rows = buildLedger({
@@ -294,11 +333,11 @@ export async function productLedger(): Promise<{ rows: LedgerRow[]; rate: number
     })),
     nadac,
     claims,
-    contract: { genericRebateRate: rate },
+    contract: { bySupplier, genericRebateRate: null },
     materialityCents,
   });
   void eq;
-  return { rows, rate, materialityCents };
+  return { rows, rate: anyRate, materialityCents };
 }
 
 export { MICROS };

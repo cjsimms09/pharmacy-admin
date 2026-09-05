@@ -974,3 +974,74 @@ export async function readReturnPolicy(
   return res.parsed_output;
 }
 
+
+/**
+ * Reading the daily Purchase Drill Down, which is where the rate the rebate turns on lives.
+ *
+ * The monthly rebate breakdown says what the pharmacy earned last month. This says where it stands
+ * today — and since the compliance rate selects the band, and the band sets the discount on every
+ * contract generic, it is the figure that decides what buying from this supplier actually costs.
+ * A month-old rate is a month-old answer to a question asked about today's order.
+ *
+ * It has to go to the model as a document. The extractor pulls the text out but the columns come
+ * back interleaved — eleven percentages in a row with no way to tell which column each belongs to,
+ * and month labels split across fragments. A rule written against that would be a rule that reads
+ * one month's figure as another's and never says so.
+ *
+ * The scrub is the point. McKesson excludes certain products — GLP-1s among them — from both sides
+ * of the ratio, and the figure printed here already has that done. Nothing here recomputes it.
+ */
+const ReadPurchaseDrillDown = z.object({
+  generatedOn: z.string().nullable().describe("The date the report says it was generated, as YYYY-MM-DD."),
+  currentMonth: z.string().nullable().describe("The month the most recent row covers, as YYYY-MM. This is the month in progress."),
+  currentGcrPercent: z.number().nullable().describe("The generic compliance ratio for that most recent month, as printed. This is the figure that selects the rebate band."),
+  currentOsRxPercent: z.number().nullable().describe("The OneStop / Rx percentage for that same month, where the report gives one."),
+  currentNetPurchasesCents: z.number().nullable().describe("Net purchases for that month, in cents."),
+  months: z
+    .array(
+      z.object({
+        month: z.string().describe("YYYY-MM"),
+        gcrPercent: z.number().nullable(),
+        osRxPercent: z.number().nullable(),
+        netPurchasesCents: z.number().nullable(),
+      }),
+    )
+    .describe("The by-month table, most recent first. This is the trend, and it is what says whether the next band is coming closer or going away."),
+  quotes: z.array(z.object({ field: z.string(), sentence: z.string() })).describe("For each figure, where on the report you read it — the table and row, and the value as printed."),
+  unclear: z.array(z.string()).describe("Anything the report does not settle. Leave the field null and say so here rather than guessing."),
+});
+export type ReadPurchaseDrillDownT = z.infer<typeof ReadPurchaseDrillDown>;
+
+export async function readPurchaseDrillDown(pdf: Buffer, ctx: { userId: string; userName: string }): Promise<ReadPurchaseDrillDownT> {
+  if (MOCK) {
+    return { generatedOn: null, currentMonth: null, currentGcrPercent: null, currentOsRxPercent: null, currentNetPurchasesCents: null, months: [], quotes: [], unclear: [] };
+  }
+  const { client: c, model } = await client();
+  const res = await c.messages.parse({
+    model,
+    max_tokens: 8_000,
+    thinking: { type: "adaptive" },
+    system:
+      "You read McKesson's Purchase Drill Down report and pull out the generic compliance ratio (GCR) and the OneStop " +
+      "per-Rx percentage, month by month. The report prints a Purchase Summary by Month table; read the figures from " +
+      "that table, not from the tiles, and give the month each one belongs to. Percentages come back as numbers: 9.74 " +
+      "for 9.74%. Money comes back in cents: 251,043 for $2,510.43.\\n\\n" +
+      "The GCR printed here is already scrubbed — McKesson excludes certain products from both sides of the ratio " +
+      "before working it out — so report it exactly as printed and never recompute it. Where a figure is not on the " +
+      "report, give null and say so in 'unclear'. A ratio guessed wrong moves the pharmacy a whole rebate band.",
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "document", source: { type: "base64", media_type: "application/pdf", data: pdf.toString("base64") } },
+          { type: "text", text: "This is the daily Purchase Drill Down. Read out the compliance ratio month by month, most recent first." },
+        ],
+      },
+    ],
+    output_config: { effort: "high", format: zodOutputFormat(ReadPurchaseDrillDown) },
+  });
+  await logUsage("ai.read_drill_down", ctx.userId, ctx.userName, res.usage, "Purchase Drill Down");
+  if (res.stop_reason === "refusal") throw new Error("Claude declined to read that document.");
+  if (!res.parsed_output) throw new Error("That report could not be read. It may be a scan of poor quality.");
+  return res.parsed_output;
+}

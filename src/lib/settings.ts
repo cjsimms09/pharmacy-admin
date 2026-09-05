@@ -114,6 +114,15 @@ export const SETTING_KEYS = [
   /* The last rebate breakdown read, so the page can say where the rate came from and when. */
   "mck_rebate_last_statement",
   /*
+   * Where the compliance ratio stands today, off the daily Purchase Drill Down.
+   *
+   * A different fact from the monthly settlement and it has to be kept apart from it. The
+   * settlement says what was earned last month; this says which band an order placed this morning
+   * will be discounted in. Pricing today's decision off last month's closed figure is the whole
+   * error this exists to prevent.
+   */
+  "rebate_ratio_latest",
+  /*
    * A returns policy read from a PDF but not yet confirmed.
    *
    * One at a time, holding the supplier it belongs to, because it is a step in a conversation
