@@ -91,24 +91,43 @@ export async function certificateFor(trainingId: string): Promise<CertificateDat
   // Signed by the person themselves, or recorded by the pharmacist-in-charge. An inspector can
   // tell those two apart at a glance and should be able to — dressing the weaker one up as the
   // stronger is how a whole training file stops being believed.
-  const signedOnline = Boolean(assignment?.completedAt && assignment.signedName);
-  const how = signedOnline
-    ? "Completed and signed by the person named, using a personal link sent to them."
-    : t.provider === "Signed online"
-      ? "Completed and signed by the person named."
-      : `Delivered by the pharmacy and recorded by ${t.createdBy}. The person named did not sign individually.`;
+  const byReply = assignment?.completedVia === "email_reply";
+  const signedOnline = Boolean(assignment?.completedAt && assignment.signedName && !byReply);
+  const how = byReply
+    ? `Confirmed by the person named in a reply sent from their own email address on ` +
+      `${assignment!.completedAt!.slice(0, 10)}, stating that they had been given and had read the material. ` +
+      `The reply is retained with this record.`
+    : signedOnline
+      ? "Completed and signed by the person named, using a personal link sent to them."
+      : t.provider === "Signed online"
+        ? "Completed and signed by the person named."
+        : `Delivered by the pharmacy and recorded by ${t.createdBy}. The person named did not sign individually.`;
 
   const quiz =
     assignment?.quizCorrect != null && assignment.quizTotal
       ? `${assignment.quizCorrect} of ${assignment.quizTotal} comprehension questions answered correctly.`
       : null;
 
-  const liveQuestions =
-    course?.liveQuestionsRequired && assignment?.liveQuestionsAcknowledged
-      ? `The opportunity for interactive questions and answers with ${pic ? `${pic.firstName} ${pic.lastName}` : "the pharmacist-in-charge"} was offered and acknowledged, as 29 CFR 1910.1030(g)(2)(vii) requires.`
-      : course?.liveQuestionsRequired
-        ? "No acknowledgement of the required opportunity for interactive questions and answers is on this record."
-        : null;
+  /*
+   * The interactive half, stated for what it actually is.
+   *
+   * Three different things can be true here and they are not equal, so the certificate says which
+   * one. The person ticking a box to say the opportunity was offered is the weakest. The trainer
+   * attesting, on a named date, that they went through it and answered questions is the strongest
+   * and is the one 29 CFR 1910.1030(g)(2)(vii)(N) actually describes. Nothing at all is the third,
+   * and it is printed rather than left off, because a certificate that is silent about a required
+   * element reads as though the element was met.
+   */
+  const liveQuestions = !course?.liveQuestionsRequired
+    ? null
+    : assignment?.qaAttestedOn
+      ? `On ${assignment.qaAttestedOn}, ${assignment.qaAttestedBy ?? "the pharmacist-in-charge"} attested that the ` +
+        `material was gone through with the person named and their questions answered, as ` +
+        `29 CFR 1910.1030(g)(2)(vii)(N) requires.` +
+        (assignment.qaNote ? ` ${assignment.qaNote}` : "")
+      : assignment?.liveQuestionsAcknowledged
+        ? `The opportunity for interactive questions and answers with ${pic ? `${pic.firstName} ${pic.lastName}` : "the pharmacist-in-charge"} was offered and acknowledged, as 29 CFR 1910.1030(g)(2)(vii) requires.`
+        : "No acknowledgement of the required opportunity for interactive questions and answers is on this record.";
 
   const material = course
     ? assignment?.materialVersion

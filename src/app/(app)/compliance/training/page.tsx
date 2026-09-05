@@ -19,7 +19,7 @@ import {
   recordGroupTraining,
   linkFor,
 } from "@/lib/training-assignments";
-import { REPLY_PHRASE } from "@/lib/training-replies";
+import { REPLY_PHRASE, awaitingQuestionsAndAnswers, attestQuestionsAndAnswers } from "@/lib/training-replies";
 import { courseFor } from "@/lib/courses";
 import { canSend, sendTestEmail } from "@/lib/send-mail";
 import { mailHealth, linkHealth } from "@/lib/mail-health";
@@ -45,13 +45,14 @@ const REQUIRED = Object.keys(TRAINING_CADENCE) as TrainingType[];
 export default async function TrainingPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
   await requireUser();
   const { ok, error } = await searchParams;
-  const [assignments, mailReady, people, trainings, settings, mail] = await Promise.all([
+  const [assignments, mailReady, people, trainings, settings, mail, qaQueue] = await Promise.all([
     openAssignments(),
     canSend(),
     onSiteToday(),
     db.query.trainings.findMany({ orderBy: (t, { desc }) => [desc(t.completedOn)] }),
     getSettings(),
     mailHealth(),
+    awaitingQuestionsAndAnswers(),
   ]);
   // Policy documents the pharmacy holds, so the acknowledgement can carry the actual manual
   // rather than a link somebody has to be on the network to open.
@@ -155,6 +156,41 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
     } catch (e) {
       if (e && typeof e === "object" && "digest" in e) throw e;
       redirect("/compliance/training?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not send that."));
+    }
+  }
+
+  /**
+   * The trainer's half of an email-attested training.
+   *
+   * Several people at once, because that is how it happens: the pharmacist-in-charge goes through
+   * it on a quiet afternoon with whoever is in. Recording it person by person on separate screens
+   * would guarantee it is recorded for the first person and nobody else.
+   */
+  async function attestQa(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const picks = fd.getAll("qa").map(String).filter(Boolean);
+    try {
+      const r = await attestQuestionsAndAnswers(
+        picks,
+        { on: String(fd.get("qaOn") ?? ""), note: String(fd.get("qaNote") ?? "") },
+        u,
+      );
+      await audit({ action: "training.qa_attested", userId: u.id, userName: u.name, details: r.names.join(", ") });
+      revalidatePath("/compliance/training");
+      revalidatePath("/compliance/training/records");
+      revalidatePath("/");
+      redirect(
+        "/compliance/training?ok=" +
+          encodeURIComponent(
+            r.completed === 0
+              ? "Nothing changed — those were already recorded."
+              : `Recorded for ${r.names.join(", ")}. ${r.completed === 1 ? "Their certificate is" : "Their certificates are"} ready.`,
+          ),
+      );
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/compliance/training?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not record that."));
     }
   }
 
@@ -633,6 +669,79 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
           </details>
         </div>
       </section>
+
+      {/*
+        ── The half an email cannot carry ──
+
+        A course that requires live questions and answers is not complete when the person replies.
+        The reply proves the material reached them and that they say they read it; the standard
+        (29 CFR 1910.1030(g)(2)(vii)(N)) asks for an opportunity to ask questions of somebody who
+        knows the subject, and no email can show a conversation happened.
+
+        So the reply is kept — the request was to strengthen that route, not to remove it — and it
+        parks here until the pharmacist-in-charge records the few minutes. Nothing is asked of the
+        employee again: they were told, when they replied, that nothing else was needed from them.
+        Until this is done there is no training record and no certificate, which is the correct
+        state of affairs and is now visible instead of silent.
+      */}
+      {qaQueue.length > 0 && (
+        <Card
+          title="Waiting on a few minutes with you"
+          tone="warn"
+          className="mb-6"
+          count={qaQueue.length}
+        >
+          <p className="text-sm text-ink-2">
+            These people replied to say they read the material, and that is on file. The bloodborne pathogens
+            standard also asks for a chance to ask questions of somebody who knows the subject &mdash; go through it
+            with them, then tick them off here. The record will say both halves happened and on what dates, and their
+            certificates are produced at that point.
+          </p>
+          <form action={attestQa} className="mt-3 space-y-3">
+            <div className="overflow-x-auto">
+              <table className="table">
+                <thead>
+                  <tr><th className="w-8"></th><th>Person</th><th>Training</th><th>Replied</th></tr>
+                </thead>
+                <tbody>
+                  {qaQueue.map((q) => (
+                    <tr key={q.assignmentId}>
+                      <td>
+                        <input type="checkbox" name="qa" value={q.assignmentId} id={`qa-${q.assignmentId}`} defaultChecked />
+                      </td>
+                      <td className="whitespace-nowrap">
+                        <label htmlFor={`qa-${q.assignmentId}`}>{q.name}</label>
+                      </td>
+                      <td>{TRAINING_LABEL[q.type]}</td>
+                      <td className="whitespace-nowrap text-xs text-ink-2">{fmt(q.repliedOn)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block text-sm">
+                The day you went through it with them
+                <input type="date" name="qaOn" defaultValue={today} className="field mt-1" required />
+              </label>
+              <label className="block text-sm">
+                Anything worth noting <span className="text-ink-3">(optional)</span>
+                <input
+                  name="qaNote"
+                  placeholder="Went through sharps handling and the exposure steps at the bench."
+                  className="field mt-1"
+                />
+              </label>
+            </div>
+            <p className="text-xs text-ink-3">
+              You are attesting that you, or another person knowledgeable in the subject, went through the material
+              with each person ticked and answered their questions on that date. That sentence is stored word for word
+              against each of their records.
+            </p>
+            <button className="btn btn-primary">Record it</button>
+          </form>
+        </Card>
+      )}
 
       {/* ── How the email reply route works, stated once, where it is relevant ── */}
       <Card title="Replying by email counts" tone={sweeping ? undefined : "crit"} className="mb-6">

@@ -1,6 +1,7 @@
 import "server-only";
-import { eq, isNull } from "drizzle-orm";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { db, schema } from "@/db";
+import type { TrainingType } from "@/db/schema";
 import { newId } from "./crypto";
 import { todayIso } from "./dates";
 import { addMonths, TRAINING_CADENCE } from "./due";
@@ -152,10 +153,27 @@ export async function completeByEmailReply(
    * owe the course with its questions, or a session with the pharmacist-in-charge, which is what
    * the standard actually asks for. Which means the reminders keep coming, correctly.
    */
+  /*
+   * Two halves, and the reply is one of them.
+   *
+   * 29 CFR 1910.1030(g)(2)(vii)(N) wants an opportunity for interactive questions and answers with
+   * somebody knowledgeable. The reply evidences that the material reached this person and that
+   * they read it; it cannot evidence a conversation. The pharmacist-in-charge can, and does — so
+   * the record is completed by both, not by refusing one.
+   *
+   * The person is finished at this point and is told so. What is outstanding is the trainer's
+   * attestation, which is the pharmacy's to make, so the chasing stops pointing at them.
+   */
   if (course?.liveQuestionsRequired) {
     await db
       .update(schema.trainingAssignments)
-      .set({ replyDocumentId: docId, replyFromAddress: reply.from })
+      .set({
+        completedAt: reply.receivedAt,
+        signedName: `${person.firstName} ${person.lastName}`,
+        completedVia: "email_reply",
+        replyDocumentId: docId,
+        replyFromAddress: reply.from,
+      })
       .where(eq(schema.trainingAssignments.id, a.id));
     await acknowledgePartly(person, a.token, TRAINING_LABEL[a.type]);
     return {
@@ -280,14 +298,14 @@ async function acknowledgePartly(
         `Thank you — your reply is on file, and it records that you were sent the ${label.toLowerCase()}`,
         "material and have read it.",
         "",
-        "One thing is still outstanding, and it is not a formality. The bloodborne pathogens",
-        "standard asks for a chance to ask questions of somebody who knows the subject, and for",
-        "the questions at the end to be answered. An email cannot show either of those.",
+        "Nothing else is needed from you.",
         "",
-        "So either open the course on a pharmacy computer and work through the questions, or ask",
-        `${s.pharmacy_name || "the pharmacy"} to go through it with you — five minutes, and it counts properly.`,
+        "One thing still has to happen at this end. The bloodborne pathogens standard asks for a",
+        "chance to ask questions of somebody who knows the subject, and an email cannot show that",
+        "a conversation happened. So the pharmacist-in-charge will have a few minutes with you",
+        "about it and record that — if he has not already.",
         "",
-        "You will keep getting the reminder until one of those happens. That is deliberate.",
+        "If anything in the material was unclear, that is the moment to say so.",
         "",
         `${s.pharmacy_name || "The pharmacy"}`,
         `Reference: ${token.slice(0, 8)}`,
@@ -296,4 +314,95 @@ async function acknowledgePartly(
   } catch {
     // Silent by design: the reply is on file either way.
   }
+}
+
+/**
+ * The trainer's half: that the questions and answers actually happened.
+ *
+ * Recorded for several people at once, because that is how it happens — the pharmacist-in-charge
+ * goes through it on a quiet afternoon with whoever is in, not person by person on separate days.
+ *
+ * This is what completes a training attested by email. The person's reply says the material
+ * reached them and they read it; this says a knowledgeable person went through it and answered
+ * their questions, which is what 29 CFR 1910.1030(g)(2)(vii)(N) asks for and what an email cannot
+ * carry. The statement stored against each person names both halves and both dates, so the record
+ * says what happened rather than implying it.
+ */
+export async function attestQuestionsAndAnswers(
+  assignmentIds: string[],
+  input: { on: string; note: string },
+  user: { id: string; name: string },
+): Promise<{ completed: number; names: string[] }> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.on)) throw new Error("Give the date you went through it with them.");
+  if (assignmentIds.length === 0) throw new Error("Nobody was selected.");
+
+  const names: string[] = [];
+  let completed = 0;
+
+  for (const id of assignmentIds) {
+    const a = await db.query.trainingAssignments.findFirst({ where: eq(schema.trainingAssignments.id, id) });
+    if (!a || !a.completedAt || a.qaAttestedOn) continue;
+    const person = await db.query.people.findFirst({ where: eq(schema.people.id, a.personId) });
+    if (!person) continue;
+
+    const course = courseFor(a.type);
+    const months = TRAINING_CADENCE[a.type]?.months;
+    const on = a.completedAt.slice(0, 10);
+    const trainingId = newId();
+
+    const statement =
+      `${person.firstName} ${person.lastName} confirmed by email on ${on}, from their own address, that they had ` +
+      `been given and had read the ${TRAINING_LABEL[a.type].toLowerCase()} material. On ${input.on} I went through ` +
+      `it with them and answered their questions, as 29 CFR 1910.1030(g)(2)(vii)(N) requires.` +
+      (input.note.trim() ? ` ${input.note.trim()}` : "") +
+      ` Attested by ${user.name}.`;
+
+    await db.insert(schema.trainings).values({
+      id: trainingId,
+      personId: a.personId,
+      type: a.type,
+      completedOn: input.on,
+      cycleYear: Number(input.on.slice(0, 4)),
+      expiresOn: months ? addMonths(input.on, months) : null,
+      provider: "Read by the employee, then gone through with the pharmacist-in-charge",
+      minutes: course?.minutes ?? null,
+      documentId: a.replyDocumentId ?? null,
+      notes: statement,
+      createdBy: user.name,
+    });
+
+    await db
+      .update(schema.trainingAssignments)
+      .set({ trainingId, qaAttestedOn: input.on, qaAttestedBy: user.name, qaNote: input.note.trim() || null })
+      .where(eq(schema.trainingAssignments.id, id));
+
+    names.push(`${person.firstName} ${person.lastName}`);
+    completed++;
+  }
+
+  return { completed, names };
+}
+
+/** Replies waiting on the trainer's half, so the pharmacist-in-charge can see the queue. */
+export async function awaitingQuestionsAndAnswers(): Promise<
+  { assignmentId: string; personId: string; name: string; type: TrainingType; repliedOn: string }[]
+> {
+  const rows = await db.query.trainingAssignments.findMany({
+    where: and(isNotNull(schema.trainingAssignments.completedAt), isNull(schema.trainingAssignments.qaAttestedOn)),
+  });
+  const out: { assignmentId: string; personId: string; name: string; type: TrainingType; repliedOn: string }[] = [];
+  for (const a of rows) {
+    if (a.trainingId) continue; // already a complete record by some other route
+    if (!courseFor(a.type)?.liveQuestionsRequired) continue;
+    const person = await db.query.people.findFirst({ where: eq(schema.people.id, a.personId) });
+    if (!person) continue;
+    out.push({
+      assignmentId: a.id,
+      personId: a.personId,
+      name: `${person.firstName} ${person.lastName}`,
+      type: a.type,
+      repliedOn: a.completedAt!.slice(0, 10),
+    });
+  }
+  return out;
 }

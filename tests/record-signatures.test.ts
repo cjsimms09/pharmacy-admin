@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { SIGNABLE, fingerprint, contentChanged } from "../src/lib/record-signatures";
+import { SIGNABLE, fingerprint, contentChanged, mayCertifyAgain } from "../src/lib/record-signatures";
 
 /**
  * What makes a signature on screen the equal of one in ink.
@@ -77,5 +77,52 @@ describe("binding a signature to what was signed", () => {
     assert.equal(contentChanged(null, content), false);
     assert.equal(contentChanged({ contentHash: null } as never, content), false);
     assert.equal(contentChanged({ contentHash: "abc" } as never, undefined), false);
+  });
+});
+
+/**
+ * Signing the same thing twice, and signing it again after it changed.
+ *
+ * These are different acts and the first version of this code treated them as one, which locked a
+ * record under its first signature for ever. The only escape was to withdraw a certification that
+ * was true of the version it covered — destroying real evidence to record more of it.
+ */
+describe("certifying a record more than once", () => {
+  const v1 = "Nicole|bloodborne:2026-01-04";
+  const v2 = "Nicole|bloodborne:2026-01-04\nDavid|bloodborne:2026-03-02";
+  const sig = (content: string) =>
+    ({ contentHash: fingerprint(content), signedName: "Cory Simms", signedAt: "2026-02-01T15:00:00.000Z" }) as never;
+
+  test("an unsigned record may be signed", () => {
+    assert.deepEqual(mayCertifyAgain(null, v1), { ok: true });
+  });
+
+  test("the same version may not be signed twice", () => {
+    const r = mayCertifyAgain(sig(v1), v1);
+    assert.equal(r.ok, false);
+    assert.match(r.ok === false ? r.why : "", /same version/);
+  });
+
+  test("a record that has moved on since it was signed may be signed again", () => {
+    // The whole point: the February signature stays, and March gets its own.
+    assert.deepEqual(mayCertifyAgain(sig(v1), v2), { ok: true });
+  });
+
+  test("a signature not bound to any content still has to be withdrawn first", () => {
+    // Nothing can prove it changed, so accumulating signatures nobody can tell apart is worse
+    // than making somebody say out loud that the old one no longer stands.
+    const r = mayCertifyAgain({ contentHash: null, signedName: "Cory Simms", signedAt: "x" } as never, v2);
+    assert.equal(r.ok, false);
+    assert.match(r.ok === false ? r.why : "", /Withdraw/);
+  });
+
+  test("signing a record whose content is not supplied is refused rather than guessed at", () => {
+    const r = mayCertifyAgain(sig(v1), undefined);
+    assert.equal(r.ok, false);
+  });
+
+  test("the refusal names who signed it, so nobody has to go looking", () => {
+    const r = mayCertifyAgain(sig(v1), v1);
+    assert.match(r.ok === false ? r.why : "", /Cory Simms/);
   });
 });

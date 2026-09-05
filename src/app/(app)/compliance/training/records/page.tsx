@@ -5,7 +5,7 @@ import { fmt, fmtLong } from "@/lib/dates";
 import { PrintFrame } from "@/components/print";
 import { SignBlock } from "@/components/sign-block";
 import { Notice } from "@/components/ui";
-import { signatureFor } from "@/lib/record-signatures";
+import { signaturesFor } from "@/lib/record-signatures";
 import { signRecordAction } from "../../../_actions/sign";
 
 export const dynamic = "force-dynamic";
@@ -39,7 +39,8 @@ export default async function TrainingRecordsPage({
    * have read.
    */
   const recordKey = `${f.preparedOn.slice(0, 4)}-${all === "1" ? "all" : "current"}`;
-  const signature = await signatureFor("training_file", recordKey);
+  const signatures = await signaturesFor("training_file", recordKey);
+  const signature = signatures[0] ?? null;
 
   // What the signature is bound to. Any change to who is on the file, or to what they have
   // completed, changes this — and the signed block then says so rather than standing silently.
@@ -216,15 +217,18 @@ export default async function TrainingRecordsPage({
         45 CFR 164.530(j)(1)(ii) for the privacy training, 29 CFR 1910.1030(h)(2) for bloodborne — and they exist
         whether or not anybody certifies them. Signing turns a printout of a database into a certified record, which
         is what makes it worth handing to an inspector. Two moments are worth it: once the year&rsquo;s file is
-        complete, and again whenever it has changed since you last signed. You will not be reminded to re-sign an
-        unchanged file, because that is a reminder nobody would read by the third month. You <i>will</i> be told when
-        the file has moved on underneath a signature you already gave.
+        complete, and again whenever it has changed since you last signed. Signing again does not replace the last
+        signature and does not need it withdrawn &mdash; the old one stays, still true of the version it covered, and
+        the new one covers the file as it stands now. You will not be reminded to re-sign an unchanged file, because
+        that is a reminder nobody would read by the third month. You <i>will</i> be told when the file has moved on
+        underneath a signature you already gave.
       </p>
 
       <SignBlock
         kind="training_file"
         recordKey={recordKey}
         signature={signature}
+        earlier={signatures.slice(1)}
         content={content}
         action={signRecordAction}
         canSign={user.role !== "staff"}

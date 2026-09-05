@@ -137,6 +137,24 @@ export async function signatureFor(kind: string, recordKey: string): Promise<Rec
   return rows.sort((a, b) => b.signedAt.localeCompare(a.signedAt))[0] ?? null;
 }
 
+/**
+ * Every standing signature on a record, newest first.
+ *
+ * A record that legitimately changes collects a chain of certifications rather than one, and the
+ * chain is worth printing: "certified 4 February, re-certified 11 March" says the file was kept
+ * under certification the whole time. One latest signature on its own cannot say that.
+ */
+export async function signaturesFor(kind: string, recordKey: string): Promise<RecordSignature[]> {
+  const rows = await db.query.recordSignatures.findMany({
+    where: and(
+      eq(schema.recordSignatures.kind, kind),
+      eq(schema.recordSignatures.recordKey, recordKey),
+      isNull(schema.recordSignatures.revokedAt),
+    ),
+  });
+  return rows.sort((a, b) => b.signedAt.localeCompare(a.signedAt));
+}
+
 export type SignInput = {
   kind: string;
   recordKey: string;
@@ -178,8 +196,24 @@ export async function signRecord(
   const wording = spec.dynamic ? (input.statement ?? "").trim() : spec.statement;
   if (!wording) throw new Error("Nothing was recorded — an attestation with no statement is not evidence.");
 
+  /*
+   * Signing the same thing twice is refused. Signing it again after it changed is the point.
+   *
+   * The first version of this refused any second signature outright, and that turned out to be
+   * wrong in the way that matters: these records move. Somebody finishes a training in March and
+   * the file certified in February no longer says what is true. The old rule left exactly one way
+   * out — withdraw the February signature — which throws away a true certification of a real
+   * version in order to make a new one, and leaves the year looking as though nobody signed it
+   * until March.
+   *
+   * So the rule is about the *version*, not the record. A record bound to its content may be
+   * signed again whenever that content has moved on; each signature stands against the version it
+   * was made on, and they accumulate rather than replace. Signing an identical version is still
+   * refused, because two signatures on one unchanged document invite the question of which counts.
+   */
   const already = await signatureFor(input.kind, input.recordKey);
-  if (already) throw new Error(`This record was already signed by ${already.signedName}.`);
+  const again = mayCertifyAgain(already, input.content);
+  if (!again.ok) throw new Error(again.why);
 
   // Best effort, and honest when it is not available: a signature with no address recorded is
   // still a signature, and pretending to know one would be worse than saying nothing.
@@ -225,6 +259,47 @@ export async function revokeSignature(id: string, reason: string, user: { name: 
     .update(schema.recordSignatures)
     .set({ revokedAt: new Date().toISOString(), revokedReason: `${why} — withdrawn by ${user.name}` })
     .where(eq(schema.recordSignatures.id, id));
+}
+
+/**
+ * Whether a record that already carries a signature may be signed again.
+ *
+ * The first version of this refused outright, and that turned out to be wrong in the way that
+ * matters: these records move. Somebody finishes a training in March and the file certified in
+ * February no longer says what is true. The old rule left exactly one way out — withdraw the
+ * February signature — which throws away a true certification of a real version in order to make a
+ * new one, and leaves the year looking as though nobody certified anything until March.
+ *
+ * So the rule is about the *version*, not the record. A record bound to its content may be signed
+ * again once that content has moved on; each signature stands against the version it was made on,
+ * and they accumulate rather than replace. Two refusals remain. Signing an identical version is
+ * refused, because two signatures on one unchanged document invite the question of which counts.
+ * And a record that was never bound to its content cannot prove it changed, so it still has to be
+ * withdrawn first rather than quietly collecting signatures nobody can tell apart.
+ */
+export function mayCertifyAgain(
+  existing: RecordSignature | null,
+  content: string | undefined,
+): { ok: true } | { ok: false; why: string } {
+  if (!existing) return { ok: true };
+  if (!content || !existing.contentHash) {
+    return {
+      ok: false,
+      why:
+        `This record was already signed by ${existing.signedName}. Withdraw that signature first if it needs to ` +
+        `change.`,
+    };
+  }
+  if (!contentChanged(existing, content)) {
+    return {
+      ok: false,
+      why:
+        `This is the same version ${existing.signedName} already signed on ` +
+        `${new Date(existing.signedAt).toLocaleDateString()}. Nothing has changed since, so there is nothing to ` +
+        `certify again.`,
+    };
+  }
+  return { ok: true };
 }
 
 /** True when the record has changed since it was signed, so the page can say so plainly. */

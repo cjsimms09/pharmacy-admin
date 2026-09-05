@@ -1611,6 +1611,21 @@ export const trainingAssignments = sqliteTable(
     replyDocumentId: text("reply_document_id"),
     replyFromAddress: text("reply_from_address"),
     /**
+     * The pharmacist-in-charge's attestation that the questions and answers happened.
+     *
+     * The half an email cannot carry. 29 CFR 1910.1030(g)(2)(vii)(N) asks for an opportunity for
+     * interactive questions and answers with a person knowledgeable in the subject — the person's
+     * reply evidences that they were given the material and read it, and this evidences the other
+     * half. Together they are a complete record; either alone is not.
+     *
+     * Deliberately separate from liveQuestionsAcknowledged, which is the person ticking a box on
+     * the course page. This is the trainer saying it, which is whose statement the standard wants.
+     */
+    qaAttestedOn: text("qa_attested_on"),
+    qaAttestedBy: text("qa_attested_by"),
+    /** What was gone through, in the trainer's words. */
+    qaNote: text("qa_note"),
+    /**
      * The version of the course material actually sent to this person.
      *
      * Stamped on the certificate. Without it a certificate says a person was trained and leaves

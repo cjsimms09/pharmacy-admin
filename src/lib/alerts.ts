@@ -300,6 +300,37 @@ export async function alerts(): Promise<Alert[]> {
   }
 
   /*
+   * Trainings that are one conversation away from being complete.
+   *
+   * A person who replied to a bloodborne email has done everything asked of them and has no record
+   * to show for it, because the standard also wants an opportunity to ask questions of somebody
+   * who knows the subject. That is the pharmacist-in-charge's few minutes, and it is the kind of
+   * thing that never happens if it is only visible on a page nobody opens. It is "soon" rather
+   * than "now": the person is not out of compliance for having replied, but the file is incomplete
+   * until this is done.
+   */
+  {
+    const { awaitingQuestionsAndAnswers } = await import("./training-replies");
+    const waiting = await awaitingQuestionsAndAnswers();
+    if (waiting.length > 0) {
+      out.push({
+        key: "training-qa-waiting",
+        level: "soon",
+        title:
+          waiting.length === 1
+            ? `${waiting[0].name} is waiting on a few minutes with you`
+            : `${waiting.length} people are waiting on a few minutes with you`,
+        why:
+          `They replied to say they read the material, and that is on file. The bloodborne standard also asks for a ` +
+          `chance to ask questions of somebody who knows the subject — 29 CFR 1910.1030(g)(2)(vii)(N). Until you go ` +
+          `through it with them and record it, there is no training record and no certificate.`,
+        href: "/compliance/training",
+        action: "Record it",
+      });
+    }
+  }
+
+  /*
    * A certified record that has stopped matching what it certifies.
    *
    * Never a nag to sign: nothing sets a cadence for certifying the training file, and a monthly
@@ -316,7 +347,7 @@ export async function alerts(): Promise<Alert[]> {
         key: "training-file-signature",
         level: "soon",
         title: "The workforce training record has changed since you certified it",
-        why: `Signed by ${sig.signedName} on ${sig.signedOn}. Training has been recorded since, so the certificate no longer covers what is on the file. Withdraw it and sign again, and it covers the current record.`,
+        why: `Signed by ${sig.signedName} on ${sig.signedOn}. Training has been recorded since, so that certificate no longer covers the whole file. It stays where it is — it is still true of the version it covered — and signing again adds a second certification covering the record as it stands now.`,
         href: "/compliance/training/records",
         action: "Look at it",
       });
