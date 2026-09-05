@@ -11,6 +11,8 @@ import { describeRebate, describeReturns } from "@/lib/supplier-terms";
 import { catalogSummaryBySupplier } from "@/lib/suppliers";
 import { fmt, todayIso, daysBetween } from "@/lib/dates";
 import { PageHeader, Card, Notice, Empty, Field } from "@/components/ui";
+import { ratesFor, earningSoFar } from "@/lib/rebate-rates";
+import { ratioForSupplier } from "@/lib/purchase-ratio";
 import { INVOICE_SCHEDULES, type InvoiceSchedule } from "@/db/schema";
 
 export const dynamic = "force-dynamic";
@@ -39,6 +41,23 @@ export default async function SuppliersPage({
   const canManage = user.role !== "staff";
 
   const [suppliers, all, s, terms, catalogs] = await Promise.all([allSuppliers(true), invoices(), getSettings(), termsSummaryBySupplier(), catalogSummaryBySupplier()]);
+  /*
+   * Where the rebate stands, above the list rather than two clicks inside it.
+   *
+   * The question a pharmacist opens this page with is what the buying is earning, and until now the
+   * answer was on a different screen per supplier and only in percentages. This is the position:
+   * the ratio as it stands today, the band it puts the pharmacy in, and what this month's actual
+   * invoices from that supplier are earning at those rates.
+   */
+  const positions = (
+    await Promise.all(
+      suppliers.filter((x) => x.active).map(async (x) => {
+        const rates = await ratesFor(x.id);
+        if (!rates || rates.view.programmes.length === 0) return null;
+        return { rates, earning: await earningSoFar(x.id), ratio: await ratioForSupplier(x.id) };
+      }),
+    )
+  ).filter((x): x is NonNullable<typeof x> => x !== null);
   const legacy = (s.mail_supplier_rules ?? "").trim();
   const editing = edit ? suppliers.find((x) => x.id === edit) : undefined;
   const today = todayIso();
@@ -129,6 +148,73 @@ export default async function SuppliersPage({
 
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
+
+      {positions.map(({ rates, earning, ratio }) => (
+        <Card
+          key={rates.supplierId}
+          className="mb-4"
+          tone={rates.view.contractGenericPercent ? "ok" : "warn"}
+          title={`${rates.supplierName} — where the rebate stands`}
+          subtitle={
+            rates.ratioSource === "daily report"
+              ? `Compliance ratio from their own daily report${rates.ratioAsOf ? `, ${rates.ratioAsOf}` : ""}. The band it falls in sets every rate below.`
+              : rates.ratioSource === "monthly statement"
+                ? `From the ${rates.ratioAsOf ?? "last"} statement — the month that closed. Have the daily report emailed here and this follows it instead.`
+                : "No ratio has been read, so no band applies and nothing is being discounted."
+          }
+          actions={<Link href={`/suppliers/${rates.supplierId}/terms`} className="btn btn-sm">The ladders</Link>}
+        >
+          <div className="grid gap-3 sm:grid-cols-4">
+            <Stat
+              value={ratio?.gcrPercent != null ? `${ratio.gcrPercent}%` : rates.view.asOf ? "—" : "—"}
+              label="Scrubbed compliance ratio"
+              sub={ratio?.month ? `as at ${ratio.month}` : "not read yet"}
+            />
+            <Stat
+              value={rates.view.contractGenericPercent != null ? `${rates.view.contractGenericPercent}%` : "—"}
+              label="On contract generics"
+              sub="Every ladder that pays on them, added"
+            />
+            <Stat
+              value={rates.view.brandPercent != null ? `${rates.view.brandPercent}%` : "—"}
+              label="On brand"
+              sub="The brand factor for that band"
+            />
+            <Stat
+              value={earning?.estimatedRebateCents != null ? money(earning.estimatedRebateCents) : "—"}
+              label={`Earned so far in ${earning?.month ?? "the month"}`}
+              sub="Estimated from this month's invoices"
+              strong
+            />
+          </div>
+          {earning && earning.totalPurchasedCents > 0 && (
+            <p className="mt-3 text-xs text-ink-2">
+              {money(earning.contractPurchasedCents)} of contract items
+              {earning.contractRatePercent != null && earning.contractRebateCents != null
+                ? ` at ${earning.contractRatePercent}% is ${money(earning.contractRebateCents)}`
+                : " — no rate on file"}
+              ; {money(earning.brandPurchasedCents)} of brand and off-contract
+              {earning.brandRatePercent != null && earning.brandRebateCents != null
+                ? ` at ${earning.brandRatePercent}% is ${money(earning.brandRebateCents)}`
+                : " — no rate on file"}
+              .
+              {earning.unmarkedLines > 0 && (
+                <>
+                  {" "}
+                  {earning.unmarkedLines} line{earning.unmarkedLines === 1 ? "" : "s"} worth{" "}
+                  {money(earning.unmarkedPurchasedCents)} carried no contract marking, so nothing is claimed for them
+                  rather than guessed either way.
+                </>
+              )}
+            </p>
+          )}
+          {rates.view.nextBandWorthCents !== null && rates.view.nextBandWorthCents > 0 && (
+            <p className="mt-2 text-xs text-warn">
+              One more band would have paid {money(rates.view.nextBandWorthCents)} more on last period&rsquo;s buying.
+            </p>
+          )}
+        </Card>
+      ))}
 
       {legacy && suppliers.length === 0 && canManage && (
         <Notice kind="warn">
@@ -335,4 +421,15 @@ function addressesFrom(raw: string): string {
     .map((x) => x.trim())
     .filter(Boolean);
   return list.length === 0 ? "them" : list.join(", ");
+}
+
+/** A figure with its label, small enough that four fit across a card. */
+function Stat({ value, label, sub, strong }: { value: string; label: string; sub?: string; strong?: boolean }) {
+  return (
+    <div className="rounded-lg border border-line p-3">
+      <div className={`text-2xl font-bold leading-none tabular-nums ${strong ? "text-accent" : value === "—" ? "text-ink-3" : "text-ink"}`}>{value}</div>
+      <div className="mt-1.5 text-xs font-semibold">{label}</div>
+      {sub && <div className="mt-0.5 text-[11px] text-ink-3">{sub}</div>}
+    </div>
+  );
 }

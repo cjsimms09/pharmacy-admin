@@ -101,3 +101,97 @@ export async function contractRatesBySupplier(on = todayIso()): Promise<Record<s
   }
   return out;
 }
+
+/**
+ * What this month's buying is earning, worked from the invoices themselves.
+ *
+ * The rebate statement is a month behind and the ladder alone says nothing about volume. What a
+ * pharmacist wants at a glance is the arithmetic on the buying already done: this much went on
+ * contract items and earns that rate, this much went on brand and earns the brand factor, and here
+ * is what that comes to.
+ *
+ * It is an estimate and is called one. The invoice marks which lines are on contract, and that
+ * marking is what the rebate is paid on — but McKesson settles against its own scrubbed figures,
+ * and a line the invoice did not mark either way contributes nothing here rather than being
+ * guessed into one side or the other.
+ */
+export type EarningSoFar = {
+  supplierId: string;
+  supplierName: string;
+  /** The month this covers, as YYYY-MM. */
+  month: string;
+  contractPurchasedCents: number;
+  brandPurchasedCents: number;
+  unmarkedPurchasedCents: number;
+  totalPurchasedCents: number;
+  contractRatePercent: number | null;
+  brandRatePercent: number | null;
+  contractRebateCents: number | null;
+  brandRebateCents: number | null;
+  estimatedRebateCents: number | null;
+  /** Lines whose contract marking the invoice did not print, so nothing is claimed for them. */
+  unmarkedLines: number;
+};
+
+export async function earningSoFar(supplierId: string, month?: string): Promise<EarningSoFar | null> {
+  const { db, schema } = await import("@/db");
+  const { and, eq, gte, lte } = await import("drizzle-orm");
+  const rows = await allSuppliers(true);
+  const supplier = rows.find((s) => s.id === supplierId);
+  if (!supplier) return null;
+
+  const m = month ?? todayIso().slice(0, 7);
+  const names = [supplier.name, supplier.catalogName].filter(Boolean).map((x) => x!.trim().toLowerCase());
+
+  const lines = await db.query.invoiceLines.findMany({
+    where: and(gte(schema.invoiceLines.invoiceDate, `${m}-01`), lte(schema.invoiceLines.invoiceDate, `${m}-31`)),
+  });
+  void eq;
+  const mine = lines.filter((l) => {
+    const n = (l.supplier ?? "").trim().toLowerCase();
+    return n !== "" && names.some((x) => n === x || n.includes(x) || x.includes(n));
+  });
+
+  let contract = 0;
+  let brand = 0;
+  let unmarked = 0;
+  let unmarkedLines = 0;
+  for (const l of mine) {
+    /*
+     * Brand or generic, decided by the invoice's own marking rather than by the drug name.
+     *
+     * A line marked as earning the contract rebate is a contract generic. A line the supplier
+     * marks and does not flag is a brand line or an off-contract one; McKesson's brand factor is
+     * paid on brand purchases, and the invoice does not separate those from off-contract generics,
+     * so both sit in the same bucket and the figure is called an estimate.
+     */
+    if (l.rebated === true) contract += l.extendedCents;
+    else if (l.rebated === false) brand += l.extendedCents;
+    else {
+      unmarked += l.extendedCents;
+      unmarkedLines++;
+    }
+  }
+
+  const rates = await ratesFor(supplierId);
+  const contractRate = rates?.view.contractGenericPercent ?? null;
+  const brandRate = rates?.view.brandPercent ?? null;
+  const contractRebate = contractRate === null ? null : Math.round((contract * contractRate) / 100);
+  const brandRebate = brandRate === null ? null : Math.round((brand * brandRate) / 100);
+
+  return {
+    supplierId,
+    supplierName: supplier.name,
+    month: m,
+    contractPurchasedCents: contract,
+    brandPurchasedCents: brand,
+    unmarkedPurchasedCents: unmarked,
+    totalPurchasedCents: contract + brand + unmarked,
+    contractRatePercent: contractRate,
+    brandRatePercent: brandRate,
+    contractRebateCents: contractRebate,
+    brandRebateCents: brandRebate,
+    estimatedRebateCents: contractRebate === null && brandRebate === null ? null : (contractRebate ?? 0) + (brandRebate ?? 0),
+    unmarkedLines,
+  };
+}

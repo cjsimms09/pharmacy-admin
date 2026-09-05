@@ -15,7 +15,16 @@ import {
   readReturnTerms,
   type ReturnTermsT,
 } from "@/lib/supplier-terms";
-import { rebateProgramsFor, returnPoliciesFor, saveRebateProgram, saveReturnPolicy, rebateProgramsInForce } from "@/lib/supplier-terms-store";
+import {
+  rebateProgramsFor,
+  returnPoliciesFor,
+  saveRebateProgram,
+  saveReturnPolicy,
+  rebateProgramsInForce,
+  deleteRebateProgram,
+  deleteReturnPolicy,
+  duplicateRebatePrograms,
+} from "@/lib/supplier-terms-store";
 import { rebateStatementFor } from "@/lib/rebate-report-store";
 import { rebateView, type ProgrammeView } from "@/lib/rebate-view";
 import { ratesFor } from "@/lib/rebate-rates";
@@ -97,6 +106,7 @@ export default async function SupplierTermsPage({
   const superseded = allRebates.filter((r) => !inForce.some((p) => p.row.id === r.id));
   const currentReturn = returns.find((r) => r.effectiveFrom <= today && (r.effectiveTo === null || r.effectiveTo >= today)) ?? returns[0] ?? null;
   const storedReturnTerms = currentReturn ? readReturnTerms(currentReturn.termsJson) : null;
+  const duplicates = await duplicateRebatePrograms(id);
   const editing = allRebates.find((r) => r.id === edit) ?? null;
   const editingTerms = editing ? readRebateTerms(editing.termsJson) : null;
 
@@ -170,6 +180,50 @@ export default async function SupplierTermsPage({
       if (e && typeof e === "object" && "digest" in e) throw e;
       redirect(`/suppliers/${id}/terms?error=` + encodeURIComponent(e instanceof Error ? e.message : "Could not read that report."));
     }
+  }
+
+  /**
+   * Removing a ladder or a policy.
+   *
+   * A versioned record is normally kept forever, because a rebate paid last quarter was earned
+   * under last quarter's ladder. That argument covers records of things that happened; it does not
+   * cover a duplicate created by a filing bug, and leaving one with no way out means this page
+   * shows six ladders where there are three and none of the arithmetic on it can be trusted.
+   */
+  async function removeProgram(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const which = String(fd.get("which") ?? "");
+    try {
+      const r = which.startsWith("policy:")
+        ? await deleteReturnPolicy(which.slice(7))
+        : await deleteRebateProgram(which);
+      await audit({ action: "supplier.terms.delete", userId: u.id, userName: u.name, entity: "supplier", entityId: id, details: `${r.name} from ${r.effectiveFrom}` });
+      revalidatePath(`/suppliers/${id}/terms`);
+      revalidatePath("/suppliers");
+      redirect(`/suppliers/${id}/terms?ok=` + encodeURIComponent(`Removed “${r.name}” taking effect ${r.effectiveFrom}.`));
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect(`/suppliers/${id}/terms?error=` + encodeURIComponent(e instanceof Error ? e.message : "Could not remove that."));
+    }
+  }
+
+  /** Clears every duplicate at once, keeping the first copy of each. */
+  async function clearDuplicates() {
+    "use server";
+    const u = await requireManager();
+    const dupes = await duplicateRebatePrograms(id);
+    let removed = 0;
+    for (const g of dupes) {
+      for (const d of g.drop) {
+        await deleteRebateProgram(d.id);
+        removed++;
+      }
+    }
+    await audit({ action: "supplier.terms.dedupe", userId: u.id, userName: u.name, entity: "supplier", entityId: id, details: `${removed} removed` });
+    revalidatePath(`/suppliers/${id}/terms`);
+    revalidatePath("/suppliers");
+    redirect(`/suppliers/${id}/terms?ok=` + encodeURIComponent(`${removed} duplicate ${removed === 1 ? "ladder" : "ladders"} removed. One copy of each is kept.`));
   }
 
   /**
@@ -354,6 +408,19 @@ export default async function SupplierTermsPage({
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
 
+      {duplicates.length > 0 && canManage && (
+        <Notice kind="warn">
+          <b>The same ladder is on file more than once.</b> {duplicates.reduce((n, g) => n + g.drop.length, 0)} extra{" "}
+          {duplicates.reduce((n, g) => n + g.drop.length, 0) === 1 ? "copy" : "copies"} of{" "}
+          {duplicates.length === 1 ? "one programme" : `${duplicates.length} programmes`} — identical terms, identical
+          start date. Reading the same report twice under a differently spelled supplier name did this. Nothing below
+          adds up correctly until they are gone.
+          <form action={clearDuplicates} className="mt-2">
+            <button className="btn btn-sm btn-primary">Keep one of each and remove the rest</button>
+          </form>
+        </Notice>
+      )}
+
       {/* ── 1. The answer ─────────────────────────────────────────────── */}
       <Card
         className="mt-4"
@@ -423,7 +490,7 @@ export default async function SupplierTermsPage({
       ) : (
         <div className="mt-4 space-y-4">
           {view.programmes.map((p) => (
-            <ProgrammeCard key={p.id} p={p} canManage={canManage} supplierId={id} editing={edit === p.id} />
+            <ProgrammeCard key={p.id} p={p} canManage={canManage} supplierId={id} editing={edit === p.id} onRemove={removeProgram} />
           ))}
         </div>
       )}
@@ -486,9 +553,17 @@ export default async function SupplierTermsPage({
               : "Nothing on file, so nothing can tell you when a bottle has to go back."
         }
         actions={
-          currentReturn?.documentId ? (
-            <a href={`/files/${currentReturn.documentId}`} target="_blank" rel="noreferrer" className="btn btn-sm">Open the policy</a>
-          ) : undefined
+          <>
+            {currentReturn?.documentId && (
+              <a href={`/files/${currentReturn.documentId}`} target="_blank" rel="noreferrer" className="btn btn-sm">Open the policy</a>
+            )}
+            {canManage && currentReturn && (
+              <form action={removeProgram}>
+                <input type="hidden" name="which" value={`policy:${currentReturn.id}`} />
+                <button className="btn btn-sm">Remove</button>
+              </form>
+            )}
+          </>
         }
       >
         {canManage && (
@@ -747,8 +822,16 @@ export default async function SupplierTermsPage({
         <Card className="mt-4" title="Superseded schedules" count={superseded.length} subtitle="Kept, because a rebate paid last quarter was earned under last quarter's ladder.">
           <ul className="rows text-sm">
             {superseded.map((r) => (
-              <li key={r.id} className="py-2">
-                <b>{r.name}</b> <span className="text-ink-3">· {fmt(r.effectiveFrom)} to {r.effectiveTo ? fmt(r.effectiveTo) : "open"}</span>
+              <li key={r.id} className="flex items-center justify-between gap-2 py-2">
+                <span>
+                  <b>{r.name}</b> <span className="text-ink-3">· {fmt(r.effectiveFrom)} to {r.effectiveTo ? fmt(r.effectiveTo) : "open"}</span>
+                </span>
+                {canManage && (
+                  <form action={removeProgram}>
+                    <input type="hidden" name="which" value={r.id} />
+                    <button className="btn btn-sm">Remove</button>
+                  </form>
+                )}
               </li>
             ))}
           </ul>
@@ -789,7 +872,19 @@ function Headline({ value, label, sub, hideWhenNull }: { value: number | null; l
  * applies is the answer; everything above it is what the money would be worth, and everything
  * below is what it used to be.
  */
-function ProgrammeCard({ p, canManage, supplierId, editing }: { p: ProgrammeView; canManage: boolean; supplierId: string; editing: boolean }) {
+function ProgrammeCard({
+  p,
+  canManage,
+  supplierId,
+  editing,
+  onRemove,
+}: {
+  p: ProgrammeView;
+  canManage: boolean;
+  supplierId: string;
+  editing: boolean;
+  onRemove: (fd: FormData) => Promise<void>;
+}) {
   const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   return (
     <Card
@@ -798,8 +893,18 @@ function ProgrammeCard({ p, canManage, supplierId, editing }: { p: ProgrammeView
       title={p.name}
       subtitle={p.headline}
       actions={
-        canManage && !editing ? (
-          <Link href={`/suppliers/${supplierId}/terms?edit=${p.id}#edit`} className="btn btn-sm">Change it</Link>
+        canManage ? (
+          <>
+            {!editing && (
+              <Link href={`/suppliers/${supplierId}/terms?edit=${p.id}#edit`} className="btn btn-sm">Change it</Link>
+            )}
+            <form action={onRemove}>
+              <input type="hidden" name="which" value={p.id} />
+              <button className="btn btn-sm" title="Removes this ladder outright. Use it for a duplicate or something filed by mistake.">
+                Remove
+              </button>
+            </form>
+          </>
         ) : undefined
       }
     >

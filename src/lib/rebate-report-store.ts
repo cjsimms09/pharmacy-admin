@@ -132,16 +132,19 @@ export async function fileRebateReport(
 
   if (supplier) {
     /*
-     * The programme names carry the supplier's own name from the register.
+     * Stable programme names, and deliberately not the supplier's.
      *
-     * Hard-coded, they read "McKesson …" against whatever supplier the report was filed to, which
-     * is the kind of wrong that nobody notices because it looks like a label rather than data.
+     * A version of a programme is identified by supplier, name and date, so the name is an
+     * identity rather than a label — and the first attempt at fixing the hard-coded "McKesson …"
+     * prefix built the name out of the register's spelling, which meant re-reading the same report
+     * against a row spelled "Mckesson" filed a second copy of all three ladders beside the first.
+     * The supplier is already the row these hang off; putting their name in the name again buys
+     * nothing and costs identity.
      */
-    const who = supplier.name;
     await saveRebateProgram(
       supplier.id,
       {
-        name: `${who} generics (OneStop) rebate`,
+        name: "Generics (OneStop) rebate",
         // The ladder is in force for the month the statement covers; without a period, today.
         effectiveFrom: s.periodFrom ?? new Date().toISOString().slice(0, 10),
         notes: `Read from the rebate breakdown for ${s.periodFrom ?? "an unnamed period"}, which checked out against its own figures.`,
@@ -165,7 +168,7 @@ export async function fileRebateReport(
       await saveRebateProgram(
         supplier.id,
         {
-          name: `${who} generic purchase ratio (GPR)`,
+          name: "Generic purchase ratio (GPR)",
           effectiveFrom: s.periodFrom ?? new Date().toISOString().slice(0, 10),
           notes: `Read from the same rebate breakdown for ${s.periodFrom ?? "an unnamed period"}.`,
           documentId: meta.documentId ?? null,
@@ -181,7 +184,7 @@ export async function fileRebateReport(
       await saveRebateProgram(
         supplier.id,
         {
-          name: `${who} brand factor`,
+          name: "Brand factor",
           effectiveFrom: s.periodFrom ?? new Date().toISOString().slice(0, 10),
           notes: `Read from the same rebate breakdown for ${s.periodFrom ?? "an unnamed period"}.`,
           documentId: meta.documentId ?? null,

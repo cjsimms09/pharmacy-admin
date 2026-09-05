@@ -232,3 +232,52 @@ export async function termsSummaryBySupplier(on = todayIso()): Promise<Map<strin
   }
   return out;
 }
+
+/**
+ * Removing a rebate programme or a return policy that should not be there.
+ *
+ * Versioned records are normally never deleted — a rebate paid last quarter was earned under last
+ * quarter's ladder, and losing it means losing the ability to explain a payment. But that argument
+ * only holds for records of something that happened. A duplicate created by a filing bug is a
+ * record of nothing, and leaving it in place with no way out means the supplier's page shows six
+ * ladders where there are three and no arithmetic on the screen can be trusted.
+ *
+ * So it deletes, it is audited by the caller, and it says what it removed.
+ */
+export async function deleteRebateProgram(id: string): Promise<{ name: string; effectiveFrom: string }> {
+  const row = await db.query.supplierRebatePrograms.findFirst({ where: eq(schema.supplierRebatePrograms.id, id) });
+  if (!row) throw new Error("That programme is no longer on file.");
+  await db.delete(schema.supplierRebatePrograms).where(eq(schema.supplierRebatePrograms.id, id));
+  return { name: row.name, effectiveFrom: row.effectiveFrom };
+}
+
+export async function deleteReturnPolicy(id: string): Promise<{ name: string; effectiveFrom: string }> {
+  const row = await db.query.supplierReturnPolicies.findFirst({ where: eq(schema.supplierReturnPolicies.id, id) });
+  if (!row) throw new Error("That policy is no longer on file.");
+  await db.delete(schema.supplierReturnPolicies).where(eq(schema.supplierReturnPolicies.id, id));
+  return { name: row.name, effectiveFrom: row.effectiveFrom };
+}
+
+/**
+ * Programmes that are the same ladder filed twice, so a page can offer to clear them up.
+ *
+ * Two rows count as duplicates when they hold the same terms and take effect on the same day. That
+ * is a filing accident, not two agreements — and it is worth finding rather than waiting for
+ * somebody to notice that the supplier's page has grown a second copy of everything.
+ */
+export async function duplicateRebatePrograms(supplierId: string): Promise<{ keep: RebateProgramRow; drop: RebateProgramRow[] }[]> {
+  const rows = await rebateProgramsFor(supplierId);
+  const groups = new Map<string, RebateProgramRow[]>();
+  for (const r of rows) {
+    const key = `${r.effectiveFrom}|${r.termsJson}`;
+    groups.set(key, [...(groups.get(key) ?? []), r]);
+  }
+  const out: { keep: RebateProgramRow; drop: RebateProgramRow[] }[] = [];
+  for (const g of groups.values()) {
+    if (g.length < 2) continue;
+    // Keep the earliest created, which is the one anything else may already point at.
+    const sorted = [...g].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    out.push({ keep: sorted[0], drop: sorted.slice(1) });
+  }
+  return out;
+}
