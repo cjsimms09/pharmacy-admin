@@ -317,6 +317,26 @@ export const FORMS: ManualForm[] = [
     ],
   },
   {
+    name: "Notice of Privacy Practices",
+    purpose:
+      "The notice itself — what this pharmacy does with a patient's health information, what they can ask of it, and how to complain. Not the acknowledgement, which is the signature saying they were given this.",
+    href: "/forms/privacy-notice",
+    cadence: "Displayed in the pharmacy, given to each patient at first service, and reissued whenever it is materially changed.",
+    fields: [
+      "The header in the words 45 CFR 164.520(b)(1)(i) prescribes",
+      "How information is used for treatment, payment and running the pharmacy",
+      "The disclosures the law permits or requires without authorisation, including K-TRACS and the immunization registry",
+      "That anything else needs written authorisation, which may be revoked",
+      "Each of the patient's rights, including the restriction a pharmacy must honour when a prescription is paid for in full",
+      "The pharmacy's own duties, including breach notification",
+      "How to complain to the pharmacy and to the Secretary, and that complaining carries no retaliation",
+      "The effective date",
+    ],
+    where: "Records -> Forms -> Notice of Privacy Practices",
+    authority: "45 CFR 164.520(a), (b)(1) and (c)(3).",
+    aliases: ["npp", "notice of privacy practices", "privacy notice", "hipaa notice", "privacy practices"],
+  },
+  {
     name: "Acknowledgement of receipt of the Notice of Privacy Practices",
     purpose:
       "The patient's acknowledgement that they were given the pharmacy's privacy notice — or, where it was not obtained, the record of the effort made.",

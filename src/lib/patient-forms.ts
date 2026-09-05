@@ -186,3 +186,96 @@ export const BAA_CLAUSES: { heading: string; body: string[] }[] = [
     ],
   },
 ];
+
+/**
+ * The Notice of Privacy Practices itself.
+ *
+ * Not the acknowledgement above — that is the patient's signature saying they were given this, and
+ * the two get confused because their names are nearly the same. The pharmacy had the
+ * acknowledgement and no Notice, which is a signature for a document that does not exist.
+ *
+ * 45 CFR 164.520(b)(1) sets out what a notice must contain, and it is a list rather than a style:
+ * the header in the exact words the rule prescribes, how protected health information is used and
+ * disclosed for treatment, payment and operations, the other uses the law permits without
+ * authorisation, that anything else needs written authorisation and may be revoked, each of the
+ * individual's rights, the pharmacy's own duties, how to complain both to the pharmacy and to the
+ * Secretary, that complaining carries no retaliation, a contact, and an effective date.
+ *
+ * Written to be handed to a patient at a counter, so short sentences and no defined terms the
+ * reader has to hold in their head. It is a starting document and says so: the pharmacy's lawyer
+ * or its PSAO should read it before it goes on the wall, because a notice is a promise about what
+ * the pharmacy does with people's records and this one was written without being told.
+ */
+export function noticeOfPrivacyPractices(p: {
+  pharmacy: string;
+  address: string | null;
+  phone: string | null;
+  privacyOfficer: string | null;
+  effectiveOn: string;
+}): { heading: string; sections: { title: string; paragraphs: string[] }[] } {
+  const us = p.pharmacy;
+  const contact = [p.privacyOfficer, p.phone].filter(Boolean).join(", ") || "the pharmacist-in-charge";
+
+  return {
+    heading:
+      "THIS NOTICE DESCRIBES HOW MEDICAL INFORMATION ABOUT YOU MAY BE USED AND DISCLOSED AND HOW YOU CAN GET ACCESS " +
+      "TO THIS INFORMATION. PLEASE REVIEW IT CAREFULLY.",
+    sections: [
+      {
+        title: "Who this notice covers",
+        paragraphs: [
+          `${us} keeps a record of the prescriptions we fill for you, the immunizations we give you, and the advice we give you about your medicines. This notice explains what we do with that record and what you can ask us to do with it.`,
+          `We are required by law to keep your health information private, to give you this notice, and to follow the terms of the notice that is currently in effect.`,
+        ],
+      },
+      {
+        title: "How we use and share your information without asking you first",
+        paragraphs: [
+          `For your treatment. We use your record to fill your prescriptions safely — to check for interactions, to contact your prescriber with a question, and to give another pharmacy or a hospital your medication history when they are treating you.`,
+          `To be paid. We send your prescription details to your insurance plan, to a pharmacy benefit manager, or to whoever else is paying, so that the prescription is covered and we are paid for it.`,
+          `To run the pharmacy. We use your record to check our own work, to review a dispensing error under our quality improvement programme, to train our staff, and to meet the requirements of the Kansas Board of Pharmacy and the Drug Enforcement Administration.`,
+          `The law also allows or requires us to share information in particular situations without your permission: to report a suspected reaction to a medicine, to report controlled substance dispensing to the Kansas prescription monitoring programme (K-TRACS), to public health authorities including an immunization registry, to health oversight agencies, in response to a court order or a lawful subpoena, to law enforcement in the narrow circumstances the law describes, to a coroner or funeral director, and where necessary to prevent a serious threat to somebody's health or safety.`,
+        ],
+      },
+      {
+        title: "When we will ask your permission first",
+        paragraphs: [
+          `Anything not described above needs your written authorisation. That includes any use of your information for marketing, and any sale of your information. We do not sell your information.`,
+          `You can take back an authorisation at any time, in writing. That stops any further use from the day we receive it; it cannot undo what we had already done while it was in force.`,
+          `If someone else — a family member, a carer, a neighbour — collects your prescriptions, we may give them what they need to do that, unless you tell us not to.`,
+        ],
+      },
+      {
+        title: "Your rights",
+        paragraphs: [
+          `You can see your record and get a copy of it. Ask us and we will give it to you within thirty days. We may charge a reasonable cost-based fee for copying.`,
+          `You can ask us to correct your record if you think it is wrong or incomplete. If we do not agree, we will tell you why in writing and you can add a statement of your own to the record.`,
+          `You can ask for a list of the times we have disclosed your information, other than for treatment, payment or running the pharmacy, going back six years.`,
+          `You can ask us to limit what we use or share. We do not have to agree, with one exception we must honour: if you pay for a prescription in full yourself, you can tell us not to send it to your health plan, and we will not.`,
+          `You can ask us to contact you a particular way, or at a particular address, and we will accommodate any reasonable request.`,
+          `You can ask for a paper copy of this notice at any time, even if you agreed to receive it electronically.`,
+          `You can name someone to act for you — a person with medical power of attorney, or a legal guardian — and we will treat them as we would treat you, once we have seen the paperwork.`,
+        ],
+      },
+      {
+        title: "Our duties",
+        paragraphs: [
+          `We must keep your health information private, and we must tell you promptly if a breach happens that compromises it.`,
+          `We must follow the terms of the notice currently in effect. We can change this notice, and a change applies to information we already hold as well as to information we receive afterwards. The current notice is displayed in the pharmacy and a copy is available on request.`,
+        ],
+      },
+      {
+        title: "If you think your privacy has not been respected",
+        paragraphs: [
+          `Tell us. Contact ${contact}${p.address ? ` at ${p.address}` : ""}. We would rather hear it from you than not hear it.`,
+          `You can also complain to the Secretary of the U.S. Department of Health and Human Services, Office for Civil Rights, 200 Independence Avenue SW, Washington DC 20201, by telephone on 1-877-696-6775, or at www.hhs.gov/ocr/privacy/hipaa/complaints.`,
+          `You will not be penalised, refused service, or treated any differently for making a complaint.`,
+        ],
+      },
+      {
+        title: "Effective date",
+        paragraphs: [`This notice takes effect on ${p.effectiveOn} and remains in effect until we replace it.`],
+      },
+    ],
+  };
+}

@@ -1,7 +1,7 @@
 import "server-only";
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
-import { todayIso, daysBetween } from "./dates";
+import { todayIso, daysBetween, fmt } from "./dates";
 import { complianceSummary } from "./compliance-status";
 import { staffMatrix } from "./staff-matrix";
 import { csInventoryStatus, cqiSnapshot } from "./compliance";
@@ -268,8 +268,10 @@ export async function inspectionReport(): Promise<InspectionReport> {
     asks: "Your Notice of Privacy Practices",
     authority: "45 CFR 164.520 — the notice must be provided and posted.",
     state: npp ? "ready" : "gap",
-    answer: npp ? `On file as "${npp.title}".` : "No Notice of Privacy Practices is filed under Documents.",
-    href: "/documents",
+    answer: npp
+      ? `On file as "${npp.title}".`
+      : "No Notice of Privacy Practices is filed under Documents. The site can print one — every part 45 CFR 164.520(b)(1) requires, written for a patient at the counter — for you to check, post, and upload here. Note that the privacy acknowledgement form is a different document: that is the patient's signature saying they were given the Notice.",
+    href: npp ? "/documents" : "/forms/privacy-notice",
   });
 
   // ── Everything the register says is outstanding ───────────────────
@@ -370,16 +372,35 @@ export async function inspectionReport(): Promise<InspectionReport> {
     printHref: "/inventory/pharmacist-log",
   });
 
+  /*
+   * Answered from the monthly screen, not from memory.
+   *
+   * This said the DEA half was untracked, which was wrong: the pharmacy screens every month — its
+   * PSAO runs it and sends a report — and attests to it here, and the attestation now names the
+   * DEA question as well as the OIG one. So the answer is the last attestation and its date,
+   * which is what an inspector would be shown.
+   */
+  const [allObligations, allCompletions] = await Promise.all([
+    db.query.obligations.findMany(),
+    db.query.obligationCompletions.findMany(),
+  ]);
+  const screeningId = allObligations.find((o) => o.seedKey === "exclusion_screening")?.id;
+  const screening = allCompletions
+    .filter((c) => c.obligationId === screeningId)
+    .sort((a, b) => a.completedOn.localeCompare(b.completedOn))
+    .at(-1);
+
   add({
     key: "cs_employee_screening",
     who: "dea",
     asks: "Whether anyone with access to controlled substances has been screened",
     authority:
       "21 CFR 1301.90 to 1301.93 on screening employees with access, and 1301.76(a) on employing anyone whose DEA registration has been denied or revoked, or who has been convicted of a controlled substance felony.",
-    state: "gap",
-    answer:
-      "Not tracked here. The OIG exclusion check is on the compliance calendar; DEA screening is a separate question and is currently answered from memory rather than from a record.",
-    href: "/staff",
+    state: screening ? "ready" : "gap",
+    answer: screening
+      ? `Screened monthly and signed for. Last attested ${fmt(screening.completedOn)} by ${screening.completedBy}, covering both the OIG and SAM exclusion lists and the DEA questions about access, revoked registrations and controlled substance felony convictions. The wording of every month's attestation is on file.`
+      : "Screened monthly on the compliance calendar, but nothing has been attested yet. The attestation covers the OIG and SAM lists and the DEA questions together — sign one and this reads from it.",
+    href: "/compliance/attestations",
   });
 
   const { openFindings } = await import("./self-inspection");

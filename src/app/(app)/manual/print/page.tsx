@@ -159,19 +159,34 @@ export default async function ManualPrintPage() {
       </section>
 
       {/*
-        A running header, on every printed page after the cover.
+        Everything after the cover sits in one table, for one reason: the running header.
 
-        Fixed positioning is how a browser repeats an element on each sheet. It matters more here
-        than on a one-page form: a hundred and forty loose pages with nothing on them but body text
-        cannot be put back in order, and a page that comes adrift of the binder cannot be identified
-        at all. The revision is on it, so two printings of a living document can be told apart.
+        A hundred and forty loose sheets carrying nothing but body text cannot be put back in
+        order, and a page adrift of the binder cannot be identified at all — so each one needs the
+        pharmacy's name and the revision on it. The obvious way to do that is a fixed-position
+        element, and it is wrong: fixed positioning repeats the header on every sheet but reserves
+        space for it on none, so it printed straight over the first line of text on all twenty
+        pages. Padding the body only makes room on the first.
+
+        A table header group is the one construction a browser genuinely repeats *and* makes room
+        for. So the contents and the body are the single cell of a one-column table whose thead
+        carries the running header. It looks like an odd way to lay out a document and it is the
+        only one that works.
       */}
-      <div className="running-header hidden print:block">
-        <div className="flex items-baseline justify-between border-b border-neutral-400 pb-1 text-[8px] text-neutral-600">
-          <span className="font-semibold">{pharmacy} — Policy and Procedure Manual</span>
-          <span className="font-mono">rev {revision.fingerprint}</span>
-        </div>
-      </div>
+      <table className="w-full border-separate border-spacing-0">
+        <thead className="hidden print:table-header-group">
+          <tr>
+            <th className="p-0">
+              <div className="mb-3 flex items-baseline justify-between border-b border-neutral-400 pb-1 text-[8px] font-normal text-neutral-600">
+                <span className="font-semibold">{pharmacy} — Policy and Procedure Manual</span>
+                <span className="font-mono">rev {revision.fingerprint}</span>
+              </div>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td className="p-0 align-top">
 
       {/* Contents */}
       <section className="print-page-break mt-8">
@@ -232,6 +247,11 @@ export default async function ManualPrintPage() {
           </article>
         ))}
       </section>
+
+            </td>
+          </tr>
+        </tbody>
+      </table>
 
       <footer className="mt-10 border-t-2 border-black pt-2 text-[10px] text-neutral-700">
         <div className="flex flex-wrap items-baseline justify-between gap-2">

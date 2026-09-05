@@ -160,12 +160,28 @@ export const CLOSURES: Record<string, Closure> = {
     witness: "A current immunization protocol on file for every immunizer. Upload each one on the person\u2019s page with its expiry; there is no separate training to record.",
   },
   backup_restore_test: { kind: "witnessed", witness: "A backup taken and verified under Settings → Backups." },
+  /*
+   * One monthly screen, covering both things it actually answers.
+   *
+   * The pharmacist-in-charge's PSAO runs this every month and sends a report; he reads it and
+   * attests here. That single act answers two separate requirements — the OIG and SAM exclusion
+   * check under 42 CFR 1001.1901, and the DEA's question about who has access to controlled
+   * substances under 21 CFR 1301.90 to 1301.93 and 1301.76(a) — and the wording only claimed the
+   * first. So an inspection screen reported the DEA half as untracked and answered from memory,
+   * when in fact it was being done monthly and signed for.
+   *
+   * Naming both in the sentence is what makes the attestation cover both. The record is the
+   * sentence, not the row.
+   */
   exclusion_screening: {
     kind: "attest",
     minutes: 5,
     statement:
       "On {date} I screened every member of staff against the OIG List of Excluded Individuals and Entities and the " +
-      "SAM exclusions list for {period}. No member of staff appeared on either list.",
+      "SAM exclusions list for {period}, and reviewed the screening report provided for that period. No member of " +
+      "staff appeared on either list. I also confirmed that no person with access to controlled substances at this " +
+      "pharmacy has had an application for DEA registration denied, has had a DEA registration revoked or " +
+      "surrendered for cause, or has been convicted of a felony offence relating to controlled substances.",
   },
 
   // ── Satisfied only by a document arriving ────────────────────────
@@ -291,9 +307,14 @@ export const OBLIGATION_SEEDS: ObligationSeed[] = [
   },
   {
     key: "exclusion_screening",
-    title: "Screen every employee against the OIG exclusion list and SAM",
-    detail: "Anyone excluded from federal health care programs cannot be paid, directly or indirectly, by a pharmacy that bills them. The OIG expects screening on hire and monthly thereafter. The LEIE is a free download; keep the dated result as the record.",
-    citation: "42 CFR 1001.1901 · OIG Special Advisory Bulletin",
+    title: "Screen every employee: OIG and SAM exclusions, and DEA access",
+    detail:
+      "Two requirements answered by one monthly screen. Anyone excluded from federal health care programs cannot be " +
+      "paid, directly or indirectly, by a pharmacy that bills them, and the OIG expects screening on hire and monthly " +
+      "thereafter. Separately, the DEA asks who has access to controlled substances and whether any of them has had a " +
+      "registration denied or revoked or a controlled substance felony conviction. Where a PSAO runs the screen and " +
+      "sends a report, reading that report and attesting here is the record — file the report against the month too.",
+    citation: "42 CFR 1001.1901 · OIG Special Advisory Bulletin · 21 CFR 1301.90-1301.93 · 21 CFR 1301.76(a)",
     cadence: "monthly",
     firstDueInDays: 7,
   },

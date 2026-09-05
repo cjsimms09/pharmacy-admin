@@ -140,19 +140,13 @@ body { @apply bg-ground text-ink antialiased; }
     second page is still readable on its own.
   */
   /*
-    A header repeated on every sheet.
+    The running header is a table header group, not a fixed element.
 
-    Fixed positioning is the only way a browser will repeat an element across printed pages. The
-    page's top padding makes room for it — without that it overprints the first lines of the body
-    on every sheet, which looks worse than having no header at all.
+    Fixed positioning repeats an element on every sheet and reserves space for it on none, so it
+    printed over the first line of text on every page of a twenty-page manual. Padding the body
+    makes room only on the first sheet. A thead is the one construction a browser both repeats and
+    makes room for, so the manual's body lives in a one-cell table and this is its heading.
   */
-  .running-header {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-  }
-  body:has(.running-header) { padding-top: 0.34in; }
 
   .print-block,
   .print-block * {
