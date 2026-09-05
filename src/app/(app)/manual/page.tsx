@@ -995,7 +995,15 @@ export default async function ManualPage({
             <p className="text-xs text-ink-3">
               This manual is <span className="font-mono">{ack.revision.fingerprint}</span> — {ack.revision.sections}{" "}
               sections, {ack.revision.words.toLocaleString("en-US")} words
-              {ack.revision.changedOn ? `, last edited ${fmt(ack.revision.changedOn)}` : ""}.
+              {ack.revision.changedOn ? `, last edited ${fmt(ack.revision.changedOn)}` : ""}. Each person acknowledges
+              it once a year, and again whenever it is revised in a way that changes what they are expected to do.
+              {ack.lapsed > 0 && (
+                <span className="text-crit">
+                  {" "}
+                  {ack.lapsed} {ack.lapsed === 1 ? "is" : "are"} more than a year old and due again regardless of what
+                  the manual says.
+                </span>
+              )}
             </p>
 
             {ack.people.length === 0 ? (
@@ -1012,14 +1020,31 @@ export default async function ManualPage({
                         {a.signedOn
                           ? `${a.stateLabel} · signed ${fmt(a.signedOn)}${a.signedRevision && a.signedRevision !== "legacy" ? ` for ${a.signedRevision}` : ""}`
                           : "Has not acknowledged the manual"}
+                        {/* An acknowledgement is an annual act. The date it comes round again is
+                            the half that was missing — a signature with no renewal date reads as
+                            settled for ever. */}
+                        {a.dueOn && (
+                          <span className={a.lapsed ? "text-crit" : ""}>
+                            {" · "}
+                            {a.lapsed ? `due again ${fmt(a.dueOn)} — overdue` : `due again ${fmt(a.dueOn)}`}
+                          </span>
+                        )}
                       </span>
                     </span>
                     <span
                       className={`badge shrink-0 ${
-                        a.state === "current" ? "badge-ok" : a.state === "none" ? "badge-crit" : "badge-warn"
+                        a.lapsed || a.state === "none" ? "badge-crit" : a.state === "current" ? "badge-ok" : "badge-warn"
                       }`}
                     >
-                      {a.state === "current" ? "current" : a.state === "none" ? "not signed" : a.state === "unknown" ? "version not recorded" : "earlier manual"}
+                      {a.lapsed
+                        ? "a year overdue"
+                        : a.state === "current"
+                          ? "current"
+                          : a.state === "none"
+                            ? "not signed"
+                            : a.state === "unknown"
+                              ? "version not recorded"
+                              : "earlier manual"}
                     </span>
                   </li>
                 ))}

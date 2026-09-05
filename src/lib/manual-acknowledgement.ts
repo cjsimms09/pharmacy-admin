@@ -34,6 +34,10 @@ export type PersonAck = {
   state: AckState;
   stateLabel: string;
   signedOn: string | null;
+  /** When it falls due again. An acknowledgement is an annual act, not a once-ever one. */
+  dueOn: string | null;
+  /** True where that date has passed, whatever the revision says. */
+  lapsed: boolean;
   signedRevision: string | null;
   /** Who recorded it, so a paper acknowledgement reads differently from one they signed online. */
   how: string | null;
@@ -50,6 +54,8 @@ export type AcknowledgementBoard = {
   current: number;
   superseded: number;
   missing: number;
+  /** Signed, but more than a year ago. Due again regardless of what the manual says. */
+  lapsed: number;
   /** Signed before revisions were recorded — an acknowledgement of nothing identifiable. */
   unknownCount: number;
   /** Of those, how many can be settled from the edit history without asking anybody again. */
@@ -63,6 +69,7 @@ export async function acknowledgementBoard(): Promise<AcknowledgementBoard> {
     db.query.trainings.findMany(),
   ]);
   const revision = revisionOf(sections);
+  const today = (await import("./dates")).todayIso();
 
   const rows: PersonAck[] = people.map((p) => {
     // The most recent acknowledgement is the one that counts; the earlier ones stay in the file.
@@ -80,6 +87,16 @@ export async function acknowledgementBoard(): Promise<AcknowledgementBoard> {
      * something they signed this morning and simply recording what is already known.
      */
     const settleable = state === "unknown" && provablyCurrent(last?.createdAt, revision);
+    /*
+     * Two independent reasons to sign again, and only one was being checked.
+     *
+     * The manual changing is one. A year passing is the other — the acknowledgement renews every
+     * twelve months like every other training here, and a signature from two years ago against
+     * text nobody has edited since would otherwise read as current for ever. The date it falls due
+     * is on the record already; it was simply never shown or tested.
+     */
+    const dueOn = last?.expiresOn ?? null;
+    const lapsed = Boolean(dueOn && dueOn < today);
     return {
       personId: p.id,
       name: `${p.firstName} ${p.lastName}`,
@@ -87,6 +104,8 @@ export async function acknowledgementBoard(): Promise<AcknowledgementBoard> {
       state,
       stateLabel: ACK_LABEL[state],
       signedOn: last?.completedOn ?? null,
+      dueOn,
+      lapsed,
       signedRevision: last?.manualRevision ?? null,
       how: last?.provider ?? null,
       trainingId: last?.id ?? null,
@@ -98,7 +117,9 @@ export async function acknowledgementBoard(): Promise<AcknowledgementBoard> {
     revision,
     described: describeRevision(revision),
     people: rows,
-    current: rows.filter((r) => r.state === "current").length,
+    // A lapsed one is not counted as current, whatever revision it names.
+    current: rows.filter((r) => r.state === "current" && !r.lapsed).length,
+    lapsed: rows.filter((r) => r.lapsed).length,
     superseded: rows.filter((r) => r.state === "superseded").length,
     missing: rows.filter((r) => r.state === "none").length,
     unknownCount: rows.filter((r) => r.state === "unknown").length,
