@@ -73,9 +73,9 @@ describe("courses", () => {
       const words = course.sections
         .flatMap((s) => [...s.body, ...(s.takeaways ?? [])])
         .reduce((n, p) => n + p.split(/\s+/).filter(Boolean).length, 0);
-      assert.ok(words >= 700, `${type} is only ${words} words — that is a summary, not a training`);
+      assert.ok(words >= 1400, `${type} is only ${words} words — that is a summary, not a training`);
       assert.ok(course.sections.length >= 4, `${type} has only ${course.sections.length} sections`);
-      assert.ok(course.questions.length >= 5, `${type} has only ${course.questions.length} questions`);
+      assert.ok(course.questions.length >= 7, `${type} has only ${course.questions.length} questions`);
     }
   });
 

@@ -92,6 +92,67 @@ export const cqi: Course = {
         "Concealment is the serious offence.",
       ],
     },
+    {
+      heading: "Why a system view, and not a careful-person view",
+      body: [
+        "The instinct after an error is to find who made it and ask them to be more careful. It is a natural instinct and it is the least effective thing a pharmacy can do, for a reason worth understanding rather than taking on trust: the person who made the error was already trying to be careful. Telling them to try harder changes nothing about the conditions that produced it, and it teaches everybody watching that the cost of a report is being blamed.",
+        "Errors come from conditions. Look-alike packaging. Two strengths of the same drug next to each other on the shelf. A direction that reads one way at speed and another way slowly. A check that happens before the step it is meant to catch. An interruption at the exact moment somebody is counting. A workflow that is fine at four prescriptions an hour and fails at forty.",
+        "Every one of those can be changed this afternoon. None of them requires anybody to become a different person. That is the whole argument for a system view, and it is why the reporting form asks what happened rather than who did it.",
+        "There is one place a person does come into it: a pattern. Where the same error keeps happening to the same person and the system change has not helped, that is a training question or a fitness question, and it is the pharmacist-in-charge's to handle. It is not what the CQI programme is for, and it is not what a single report triggers.",
+      ],
+      takeaways: [
+        "The person was already trying to be careful. Telling them to try harder changes nothing.",
+        "Conditions produce errors, and conditions can be changed today.",
+        "A pattern involving one person is a separate conversation, not a CQI finding.",
+      ],
+    },
+    {
+      heading: "The errors this pharmacy actually sees",
+      body: [
+        "Wrong drug. Almost always a look-alike or sound-alike pair, or two products adjacent on the shelf. Amlodipine and amiodarone. Hydralazine and hydroxyzine. Metoprolol succinate and tartrate. The countermeasure is physical — separate them, use shelf talkers, use tall-man lettering — because attention is not a countermeasure.",
+        "Wrong strength. The commonest of all, and usually two strengths of the same drug stocked next to each other. If a report names a pair, the pair gets separated.",
+        "Wrong quantity. Often a days-supply or package-size confusion rather than a miscount, so the report should say which.",
+        "Wrong directions. Frequently an ambiguous prescription that was interpreted rather than clarified. Report the prescription as well as the error — a prescriber who writes ambiguously will do it again next week.",
+        "Wrong patient. Two patients with the same or similar surname, or a bag handed over without confirming two identifiers. This one is both a dispensing error and a privacy breach, and it is reported under both.",
+        "A missed clinical issue. An interaction, a duplication, an allergy on file that the alert fired for and somebody clicked past. Alert fatigue is a system finding, not a personal failing, and it is worth reporting precisely because the fix is to reduce the noise rather than to click more carefully.",
+        "A delay that mattered. An out-of-stock nobody chased, a prior authorisation that sat, a transfer that did not happen. Harm from a medication not taken is as real as harm from the wrong one, and it is under-reported everywhere.",
+      ],
+      takeaways: [
+        "Wrong strength is the most common, and the fix is physical separation.",
+        "Wrong patient is a dispensing error and a privacy breach; report both.",
+        "A delay is an error. Not taking the drug harms people too.",
+      ],
+    },
+    {
+      heading: "Writing a report somebody can act on",
+      body: [
+        "Say what was supposed to happen, what actually happened, and where the two diverged. Three sentences is usually enough.",
+        "Name the products in full, with strengths. 'The 5 mg and the 50 mg' is actionable; 'the wrong strength' is not.",
+        "Say where it was caught and by what — the final check, the patient at the counter, a phone call two days later. Where it was caught tells you which defence held and which did not.",
+        "Say what the conditions were. Time of day, how busy, who was on, what else was happening. This is not an excuse and it is not treated as one; it is the pattern data, and three reports that all say 'the last hour before close' are a staffing finding that no single report contains.",
+        "Say what was done immediately — the patient contacted, the prescriber called, the product retrieved, the label reprinted. The immediate response is part of the record and is often the part an inspector asks about.",
+        "Do not write who to blame, and do not write 'I was careless'. Neither gives anybody something to change.",
+      ],
+      takeaways: [
+        "Name products and strengths in full.",
+        "Say where it was caught — that names the defence that held.",
+        "Conditions are data, not excuses.",
+      ],
+    },
+    {
+      heading: "What the law here actually requires",
+      body: [
+        "K.A.R. 68-19-1 requires every Kansas pharmacy to have a continuous quality improvement programme. The parts that bind: the programme is written; quality-related events are documented; review of a documented event begins within seven days and is completed within thirty; a summary is produced at least every two months; records are kept five years; and the staff are informed about the programme.",
+        "The summary is due by the fifteenth of February, April, June, August, October and December, covering the two months before it. The site produces it and tracks the deadline; the reports in it are the part that has to come from people.",
+        "Kansas also protects these records. The programme's documents and proceedings are confidential quality-assurance material and are not the same thing as the dispensing record. That protection is part of why the programme can be candid — and part of why what is written in a CQI report should be the analysis, while the clinical facts belong in the patient's record.",
+        "Everyone working here has to be informed about the programme, which is what this course is. Signing it is the evidence that the requirement was met for you.",
+      ],
+      takeaways: [
+        "Review begins in seven days, completes in thirty, summary every two months, records five years.",
+        "Summaries are due by the 15th of February, April, June, August, October and December.",
+        "The CQI file is confidential quality-assurance material and is not the dispensing record.",
+      ],
+    },
   ],
   questions: [
     {
@@ -132,6 +193,39 @@ export const cqi: Course = {
       ],
       answer: 1,
       why: "The second one names something that can be changed this afternoon. The others describe a person's state of mind, which nobody can act on.",
+    },
+    {
+      q: "Two strengths of the same drug are stocked side by side and a wrong-strength error is reported. What is the useful outcome?",
+      options: [
+        "The person who picked it is asked to slow down",
+        "The two products are physically separated and the change is checked later to see whether it worked",
+        "A note is added to the file",
+        "Everybody is reminded to be careful",
+      ],
+      answer: 1,
+      why: "Attention is not a countermeasure; separation is. And a corrective action nobody checked afterwards is a note, not a correction.",
+    },
+    {
+      q: "You clicked past an interaction alert because most of them are irrelevant, and this one was not. Should that be reported?",
+      options: [
+        "No — it would look bad",
+        "No — alert fatigue is not a real problem",
+        "Yes — alert fatigue is a system finding, and the fix is to reduce the noise",
+        "Only if the patient was harmed",
+      ],
+      answer: 2,
+      why: "This is one of the most valuable reports a pharmacy can get, and it is almost never made, because it feels like confessing. The fix is fewer and better alerts, which nobody can make without knowing.",
+    },
+    {
+      q: "How often is the CQI summary produced, and by when?",
+      options: [
+        "Monthly, by the end of the month",
+        "Every two months, by the fifteenth of February, April, June, August, October and December",
+        "Quarterly",
+        "Annually",
+      ],
+      answer: 1,
+      why: "Every two months. The site tracks the deadline and drafts the summary; the reports that go into it have to come from people.",
     },
     {
       q: "A patient was given the wrong directions and has already taken two doses. What comes first?",

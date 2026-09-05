@@ -123,8 +123,63 @@ export const hazcom: Course = {
         "Every exposure gets reported, however small.",
       ],
     },
+    {
+      heading: "Hazardous drugs, which are the real exposure here",
+      body: [
+        "The cleaning chemicals are the ones the standard is written about. The hazardous drugs are the ones that matter more, because the exposure is daily, invisible, and happens during work that feels routine.",
+        "NIOSH publishes a List of Hazardous Drugs in Healthcare Settings. It has three groups: antineoplastic drugs; non-antineoplastic drugs that meet at least one hazard criterion; and drugs with reproductive effects that may pose a risk to somebody who is pregnant or trying to conceive. A community pharmacy stocks drugs from all three — methotrexate, finasteride and dutasteride, misoprostol, spironolactone, valproic acid, warfarin, carbamazepine, mycophenolate, and several others.",
+        "The exposure route in retail is not what people imagine. It is not handling an intact tablet. It is dust: counting on a shared tray, crushing or splitting a tablet, opening a capsule, pouring a bulk bottle, and cleaning up a spill. Finasteride dust on a counting tray transfers to the next drug counted on it, and to the hands of the next person to use it.",
+        "So the practical rules here are short. Ask the pharmacist-in-charge which drugs we hold from that list, and know them. Use a dedicated counting tray and spatula for them, kept separate and cleaned after every use. Wear gloves, and use two pairs where the pharmacy's own procedure says so. Never crush, split or open a capsule of one of these outside the procedure — bring it to the pharmacist. Do not let a pregnant employee, or one trying to conceive, handle group three drugs; that is a conversation to have privately with the pharmacist-in-charge and it is nobody else's business.",
+        "USP <800> is the standard behind those rules. This pharmacy's own assessment of risk determines exactly which of them apply to which drug, and that assessment is the pharmacist-in-charge's — do not infer it from a label.",
+      ],
+      takeaways: [
+        "The real exposure is dust: counting trays, crushing, splitting, opening capsules.",
+        "Dedicated tray and spatula for hazardous drugs, cleaned after every use.",
+        "Ask which drugs we hold from the NIOSH list. Never guess from the label.",
+      ],
+    },
+    {
+      heading: "The other physical hazards in a pharmacy",
+      body: [
+        "Hazard communication is the chemical standard, but the general duty clause — 29 U.S.C. 654(a)(1) — obliges the pharmacy to provide a workplace free from recognised hazards likely to cause death or serious harm, and the ones here are not chemical.",
+        "Slips and falls. Water by the sink, a spilled liquid, a cable across a walkway, a step-stool used as a ladder. Clean it now rather than after; the pharmacy has mats and a wet-floor sign and both work only if used.",
+        "Lifting. Cases of fluids and bulk stock arrive heavy and at bad heights. Bend at the knees, keep the load close, do not twist under it, and ask for help rather than proving something. A back injury in a three-person pharmacy is everybody's problem for six weeks.",
+        "Reaching. Use the step-stool for the top shelf. Standing on a chair with castors is how people break wrists.",
+        "Repetitive strain and posture. Counting, typing and standing all day. Adjust the screen height, alternate tasks where you can, and say something early rather than after three months of pain.",
+        "Sharps and glass. Broken bottles get a dustpan, never hands. Needles are covered by the bloodborne training and never go anywhere but a sharps container.",
+        "Report every injury, and every near miss, to the pharmacist-in-charge. An unreported injury has no record if it turns into something, and the near miss is the free lesson.",
+      ],
+      takeaways: [
+        "Clean spills now; use the step-stool, never a chair.",
+        "Lift with the knees, keep it close, ask for help.",
+        "Report every injury and near miss, however small it seems.",
+      ],
+    },
   ],
   questions: [
+    {
+      q: "Where does hazardous drug exposure actually happen in a retail pharmacy?",
+      options: [
+        "Handling intact tablets in their bottles",
+        "Dust — counting on a shared tray, crushing, splitting, opening capsules, and spills",
+        "Only during compounding",
+        "It does not happen outside a hospital",
+      ],
+      answer: 1,
+      why: "The tablet in the bottle is not the problem. Finasteride dust left on a shared counting tray transfers to the next drug counted on it and to the next pair of hands.",
+    },
+    {
+      q: "You are asked to split a tablet you think may be on the hazardous drug list. What do you do?",
+      options: [
+        "Split it with gloves on",
+        "Split it and wash your hands afterwards",
+        "Stop and ask the pharmacist-in-charge — the pharmacy's own assessment decides what applies",
+        "Check the label; if it says nothing, it is fine",
+      ],
+      answer: 2,
+      why: "The NIOSH list and this pharmacy's risk assessment decide, not the label. Asking costs nothing and this is exactly the moment exposure would happen.",
+    },
+
     {
       q: "You decant a cleaning chemical into a spray bottle you will keep behind the counter. What is required?",
       options: [

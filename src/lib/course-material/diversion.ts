@@ -115,8 +115,87 @@ export const diversion: Course = {
         "A loss report cannot start until somebody speaks.",
       ],
     },
+    {
+      heading: "What the records are supposed to show",
+      body: [
+        "Diversion is found in the gap between what the records say should be on the shelf and what is on it. That only works if the records are complete, which makes the paperwork part of the control rather than an administrative chore.",
+        "Every controlled substance that comes in has an invoice, and 21 CFR 1304.04 requires those records to be kept for at least two years federally and five under Kansas law, with Schedule II records maintained separately from everything else. This site files them by schedule for exactly that reason.",
+        "Every controlled substance that goes out is on a prescription record. Every one that is destroyed, returned or transferred has its own document — a DEA Form 222 or CSOS order for a Schedule II transfer, a reverse distributor's receipt for a destruction, a Form 41 for an on-site destruction.",
+        "The inventory ties the two together. A biennial inventory is the federal minimum; Kansas requires one at least annually and within 375 days of the last. What the count is for is not the number itself but the comparison: receipts, minus dispensings, minus documented removals, should equal the count. Where it does not, that difference is the whole subject of this course.",
+        "A perpetual inventory on the fast-moving items is the single most effective internal control a small pharmacy can run, because it shortens the time between a loss and the moment somebody notices from a year to a day. A loss found a year later is almost never attributable to anybody.",
+        "Every discrepancy gets logged on this site the day it appears, with what was checked and what the explanation turned out to be. Most are counting or entry errors and the log will say so. The value is in the ones that are not, and in the pattern that only exists because the small ones were written down.",
+      ],
+      takeaways: [
+        "Receipts minus dispensings minus documented removals should equal the count.",
+        "A perpetual count on fast movers turns a year's delay into a day's.",
+        "Log every discrepancy the day it appears, including the ones that turn out to be nothing.",
+      ],
+    },
+    {
+      heading: "The physical controls, and why each one exists",
+      body: [
+        "21 CFR 1301.71 requires effective controls against diversion, and 1301.75 sets out how controlled substances are stored: Schedule II in a securely locked, substantially constructed cabinet, or dispersed through the stock in a way that obstructs theft. Whichever this pharmacy does, do it the same way every day — a cabinet left open 'just while I finish' is the whole control gone.",
+        "Keys and codes are personal. Do not share them, do not write them down, do not let somebody use yours because theirs is not working. The point of a code is to say who; a shared code says nobody.",
+        "Deliveries are checked in against the invoice by a second person where possible, immediately, before the box leaves the counter. A shortage found at the point of receipt is the supplier's problem. The same shortage found next week is the pharmacy's.",
+        "Waste, returns and destruction are witnessed and documented at the time. An undocumented waste is indistinguishable from a diversion, which is why the rule protects the honest person more than it catches the dishonest one.",
+        "Access after hours, alarm codes, and who has a key are the pharmacist-in-charge's to manage. 21 CFR 1301.76(a) requires the registrant not to allow access to controlled substances to somebody convicted of a felony offence relating to controlled substances, or who has had an application denied or a registration revoked or surrendered for cause — which is why employment screening happens before somebody is given a key, not afterwards.",
+      ],
+      takeaways: [
+        "Store it the same way every day. A cabinet left open is the control gone.",
+        "Keys and codes are personal — a shared code identifies nobody.",
+        "Check deliveries in against the invoice immediately, and witness every waste.",
+      ],
+    },
+    {
+      heading: "When somebody is caught, and what happens next",
+      body: [
+        "A significant loss or theft goes to the DEA on Form 106 and to the Kansas Board of Pharmacy. Significance is judged on the schedule and quantity, whether it is a candidate for abuse, whether it is part of a pattern, and whether it was a break-in or an inside loss. That judgement is the pharmacist-in-charge's, made in writing, and a decision that a loss was not significant is documented as carefully as a decision that it was.",
+        "Where a colleague is involved, they are removed from access immediately. That is not a punishment and not a finding of guilt; it is what 1301.76(a) and simple prudence both require while the facts are established.",
+        "There is a Kansas impaired-practitioner programme, and diversion by a healthcare worker is very often addiction rather than dealing. Reporting it early is what makes a route into treatment possible; reporting it late usually means it has already ended some other way. That is the honest reason to say something the first week rather than the fifth.",
+        "You will not be told what happens next. Personnel matters and Board proceedings are confidential, and hearing nothing does not mean nothing was done. The one thing you should hear is a thank-you.",
+      ],
+      takeaways: [
+        "A significant loss goes to the DEA on Form 106 and to the Board; the judgement is written down either way.",
+        "Access is removed immediately, which is prudence rather than a verdict.",
+        "Early reporting is what makes treatment possible. Hearing nothing back does not mean nothing happened.",
+      ],
+    },
   ],
   questions: [
+    {
+      q: "What is a perpetual inventory on fast-moving controlled substances actually for?",
+      options: [
+        "Satisfying the annual inventory requirement",
+        "Shortening the time between a loss and somebody noticing, from a year to a day",
+        "Ordering more accurately",
+        "Nothing; the annual count covers it",
+      ],
+      answer: 1,
+      why: "A loss found a year later is almost never attributable to anybody. The count itself is not the control — the speed of noticing is.",
+    },
+    {
+      q: "A colleague's login is not working and they ask to use yours to record a controlled substance count. What do you do?",
+      options: [
+        "Let them, since you are standing there",
+        "Let them and mention it later",
+        "Refuse — a shared code identifies nobody, and the record is what protects you both",
+        "Let them if you watch what they enter",
+      ],
+      answer: 2,
+      why: "The point of a code is to say who did it. Once two people have used one, the record cannot exonerate either of them.",
+    },
+    {
+      q: "A delivery of a Schedule II product is one bottle short of the invoice. When does this need to be found?",
+      options: [
+        "Whenever the discrepancy log is next reviewed",
+        "At the annual inventory",
+        "Immediately, at the point of receipt, before the box leaves the counter",
+        "Within 30 days",
+      ],
+      answer: 2,
+      why: "A shortage found at receipt is the supplier's problem. The same shortage found next week is the pharmacy's, and nobody can say where it went.",
+    },
+
     {
       q: "Which of these is the strongest early indicator of internal diversion?",
       options: [

@@ -134,8 +134,90 @@ export const fwa: Course = {
         "Finding a problem and not fixing it is worse than not looking.",
       ],
     },
+    {
+      heading: "What an audit actually does, and how to survive one",
+      body: [
+        "A pharmacy audit is not an investigation into whether you are honest. It is a comparison of a list of claims against the paper behind them, done by somebody who was not there, months later, with no ability to ask what you meant. Everything in this section follows from that.",
+        "There are three kinds. A desk audit asks for documents by mail or portal for a list of claims. An on-site audit sends somebody to the pharmacy, usually with a few days' notice and a list. An investigative audit follows a specific allegation and behaves differently — that one goes straight to the pharmacist-in-charge and, usually, to a lawyer.",
+        "What they ask for is always the same set: the hard copy or the electronic prescription, the signature log or delivery proof, the wholesaler invoices showing you bought enough of the product to have dispensed it, and any clarification notes.",
+        "The invoice check surprises people. If you billed 300 tablets of something over six months and your invoices show you bought 200, the difference is recouped regardless of what the prescriptions say. That is why receiving and filing invoices properly is an audit control and not just bookkeeping.",
+        "Respond by the deadline, keep a complete copy of everything sent, and never alter a document after the fact. Adding a missing quantity to a hard copy in the same pen you have in your hand converts a recoupment into an allegation of fraud. If something is missing, it is missing; say so.",
+        "Appeal findings you disagree with, in time, with the evidence attached. Most plans have a short appeal window and most pharmacies miss it. A finding not appealed is a finding accepted.",
+      ],
+      takeaways: [
+        "They compare claims to paper, months later, unable to ask what you meant.",
+        "Invoices are audited too: bill more than you bought and the difference comes back.",
+        "Never alter a document afterwards. Missing is recoverable; altered is not.",
+      ],
+    },
+    {
+      heading: "The paperwork that decides the audit, at the moment it is created",
+      body: [
+        "Almost every recoupment traces back to something that took ten seconds at the time and could not be fixed afterwards.",
+        "The hard copy is complete. Patient, drug, strength, quantity, directions, date, prescriber, and for a controlled substance everything 21 CFR 1306 requires. A prescription missing a quantity is not a valid prescription, whatever was dispensed.",
+        "Clarifications are written on the prescription, with the date, who was spoken to, and what they said. A verbal clarification that lives in somebody's memory is worth nothing four months later.",
+        "The days supply describes the prescription rather than the claim. This is the single most audited field and the one most often wrong on inhalers, insulins, eye drops, topicals and anything written 'as directed'.",
+        "The origin code says how the prescription actually arrived — written, telephone, electronic, fax. It is a field people set once and stop thinking about, and it is compared against the record.",
+        "The prescriber on the claim is the prescriber who wrote it, with their own NPI. Not the supervising physician, not the practice.",
+        "Proof of receipt exists: a signature, a delivery record, a shipping confirmation. An audit that cannot see the patient got it treats the claim as unsupported, and being certain they collected it is not evidence.",
+        "Refill-too-soon overrides, prior authorisations and DAW codes have a reason recorded. A code entered to make a claim pay is the definition of a false claim, whatever the clinical merits.",
+      ],
+      takeaways: [
+        "Write the clarification on the hard copy, with the date and who said it.",
+        "Days supply describes the prescription, not the claim.",
+        "Proof of receipt is part of the claim. No signature, no support.",
+      ],
+    },
+    {
+      heading: "Where the money comes from, and why the rules are what they are",
+      body: [
+        "It helps to know whose money this is. Part D is federal money administered by plans; Medicaid is federal and state money administered by KanCare's managed care organisations; commercial plans are the employer's money. The False Claims Act and the exclusion rules attach to the federal ones, which is why an ordinary billing error in a Medicare claim carries consequences a commercial billing error does not.",
+        "The pharmacy's contracts sit between it and the plans, usually through a PSAO. Those contracts carry the audit rights, the appeal windows, the reversal windows and the recoupment terms. They are not optional reading and they are not the same across plans.",
+        "That is also where the compliance obligations reach you: a Part D sponsor is required to make sure its downstream entities — that is us — train their staff, screen against the exclusion lists, and have a way for people to report concerns. A plan asking for evidence of this pharmacy's compliance programme is exercising a right it already has.",
+        "None of that changes what any of it asks of you. Bill what was dispensed, to the patient it was dispensed to, on the prescription that was written, and say something when it does not look right.",
+      ],
+      takeaways: [
+        "Federal money is why an error can become a False Claims Act matter.",
+        "The PSAO contracts carry the audit rights and the appeal windows.",
+        "A plan can require evidence of this pharmacy's compliance programme.",
+      ],
+    },
   ],
   questions: [
+    {
+      q: "An audit finds you billed 300 tablets over six months but the wholesaler invoices show 200 purchased. What happens?",
+      options: [
+        "Nothing, if every prescription is on file",
+        "The difference is recouped regardless of the prescriptions",
+        "The plan asks for an explanation and usually accepts it",
+        "Only the claims without signatures are recouped",
+      ],
+      answer: 1,
+      why: "Invoice reconciliation is a standard part of an audit. You cannot have dispensed what you never bought, and the prescriptions do not answer that question.",
+    },
+    {
+      q: "Preparing an audit response, you notice a hard copy is missing the quantity. What do you do?",
+      options: [
+        "Write it in — you know what was dispensed",
+        "Ask the prescriber to write it in now",
+        "Send it as it is and say the clarification was not documented",
+        "Leave that claim out of the response",
+      ],
+      answer: 2,
+      why: "Altering a document after the fact turns a recoupment into an allegation of fraud, and it is the one mistake that cannot be undone. Missing is survivable.",
+    },
+    {
+      q: "A finding you believe is wrong arrives with a 30-day appeal window and you are busy. What is the consequence of letting it pass?",
+      options: [
+        "None — you can appeal at the next audit",
+        "A finding not appealed in time is a finding accepted",
+        "The plan will re-open it automatically",
+        "It only matters for large amounts",
+      ],
+      answer: 1,
+      why: "Most appeal windows are short and most pharmacies miss them. The evidence you would have used is usually already on file, which makes it a particularly expensive thing to lose by default.",
+    },
+
     {
       q: "A prescription was billed, never collected, and has been returned to stock. What has to happen?",
       options: [
