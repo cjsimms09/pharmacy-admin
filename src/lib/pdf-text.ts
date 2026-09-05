@@ -52,7 +52,18 @@ function inflate(chunk: Buffer): string | null {
  * difference between this working for one supplier and working for the ones the pharmacy has
  * not signed up with yet, so it is worth the fifty lines.
  */
-type FontMaps = Map<string, Map<number, string>>;
+/**
+ * A font's character map, and how many bytes one character code takes.
+ *
+ * The width is not a detail. A Type0 font with Identity encoding — which is what every modern
+ * generator produces for anything but plain Latin — writes each character as **two** bytes, and a
+ * reader that takes them one at a time looks up the wrong glyph for every letter on the page. It
+ * does not fail: it returns confident nonsense. "Th", ".Tss:", "Fs;." was a McKesson returns policy
+ * read that way, and a purchase report came back as scrambled column headings with the figures
+ * shuffled between them.
+ */
+type FontMap = { map: Map<number, string>; width: 1 | 2 };
+type FontMaps = Map<string, FontMap>;
 
 /** Every "N 0 obj ... endobj" in the file, by object number. */
 function objects(buf: Buffer): Map<number, { body: string; stream: Buffer | null }> {
@@ -80,9 +91,19 @@ function objects(buf: Buffer): Map<number, { body: string; stream: Buffer | null
   return out;
 }
 
-/** bfchar and bfrange entries, turned into code to text. */
-function parseToUnicode(cmap: string): Map<number, string> {
+/**
+ * bfchar and bfrange entries, turned into code to text, with the width of a code.
+ *
+ * The width comes from the codespace range the CMap declares — "<0000> <FFFF>" is two bytes,
+ * "<00> <FF>" is one. Where a map declares none, the length of the codes it actually uses settles
+ * it, because a two-byte font's entries are written as four hex digits.
+ */
+function parseToUnicode(cmap: string): FontMap {
   const map = new Map<number, string>();
+  let width: 1 | 2 = 1;
+  const space = /begincodespacerange([\s\S]*?)endcodespacerange/.exec(cmap);
+  const firstCode = space ? /<([0-9A-Fa-f]+)>/.exec(space[1]) : null;
+  if (firstCode && firstCode[1].length >= 4) width = 2;
   const hexToStr = (h: string) => {
     let s = "";
     for (let i = 0; i + 3 < h.length + 1; i += 4) s += String.fromCharCode(parseInt(h.slice(i, i + 4), 16));
@@ -91,6 +112,7 @@ function parseToUnicode(cmap: string): Map<number, string> {
 
   for (const block of cmap.match(/beginbfchar([\s\S]*?)endbfchar/g) ?? []) {
     for (const m of block.matchAll(/<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>/g)) {
+      if (m[1].length >= 4) width = 2;
       map.set(parseInt(m[1], 16), hexToStr(m[2]));
     }
   }
@@ -101,16 +123,17 @@ function parseToUnicode(cmap: string): Map<number, string> {
       const base = parseInt(m[3], 16);
       // A range longer than a page of glyphs is a malformed map, not a font.
       if (hi < lo || hi - lo > 65535) continue;
+      if (m[1].length >= 4) width = 2;
       for (let c = lo; c <= hi; c++) map.set(c, String.fromCharCode(base + (c - lo)));
     }
   }
-  return map;
+  return { map, width };
 }
 
 /** Resource name (F1, TT2) to that font's character map, for every font that has one. */
 function fontMaps(buf: Buffer): FontMaps {
   const objs = objects(buf);
-  const byObject = new Map<number, Map<number, string>>();
+  const byObject = new Map<number, FontMap>();
 
   for (const [, o] of objs) {
     if (!/\/Type\s*\/Font\b/.test(o.body)) continue;
@@ -120,7 +143,7 @@ function fontMaps(buf: Buffer): FontMaps {
     if (!cmapObj?.stream) continue;
     const text = inflate(cmapObj.stream) ?? cmapObj.stream.toString("latin1");
     const parsed = parseToUnicode(text);
-    if (parsed.size > 0) byObject.set(Number(ref[1]), parsed);
+    if (parsed.map.size > 0) byObject.set(Number(ref[1]), parsed);
   }
   if (byObject.size === 0) return new Map();
 
@@ -188,7 +211,7 @@ export function pdfText(buf: Buffer): string {
     // is the same row of the table.
     const lines = new Map<string, [number, string][]>();
     let m: RegExpExecArray | null;
-    let font: Map<number, string> | undefined;
+    let font: FontMap | undefined;
     let x = 0;
     let y = 0;
     TOKENS.lastIndex = 0;
@@ -218,11 +241,12 @@ export function pdfText(buf: Buffer): string {
         : Buffer.from(unescape(m[7] ?? ""), "latin1");
       if (bytes.length === 0) continue;
 
-      // A subset font renumbers its glyphs, so the bytes are indexes rather than letters and the
-      // font's own map is the only thing that can turn them back into words.
-      const piece = font
-        ? [...bytes].map((c) => font!.get(c) ?? "").join("")
-        : bytes.toString("latin1");
+      /*
+       * A subset font renumbers its glyphs, so the bytes are indexes rather than letters and the
+       * font's own map is the only thing that can turn them back into words — read at the width
+       * that font uses, one byte or two.
+       */
+      const piece = font ? decode(bytes, font) : plain(bytes);
       if (!piece.trim()) continue;
 
       const key = y.toFixed(1);
@@ -244,3 +268,32 @@ export function pdfText(buf: Buffer): string {
 
   return out.join("\n");
 }
+
+/** Character codes to text, stepping through the bytes at the width the font declares. */
+function decode(bytes: Buffer, font: FontMap): string {
+  let out = "";
+  for (let i = 0; i + font.width <= bytes.length; i += font.width) {
+    const code = font.width === 2 ? bytes.readUInt16BE(i) : bytes[i];
+    out += font.map.get(code) ?? "";
+  }
+  return out;
+}
+
+/**
+ * A run in a font with no character map of its own.
+ *
+ * Usually plain bytes. But a two-byte font whose ToUnicode this could not find still writes two
+ * bytes per character, and read as single bytes that is every letter with a null between it —
+ * which survives a trim, joins into the line, and quietly corrupts the row. Where the run looks
+ * like that, it is read two bytes at a time instead.
+ */
+function plain(bytes: Buffer): string {
+  const evenNulls = bytes.length >= 4 && bytes.length % 2 === 0 && bytes.every((b, i) => (i % 2 === 0 ? b === 0 : true));
+  if (evenNulls) {
+    let out = "";
+    for (let i = 0; i + 1 < bytes.length; i += 2) out += String.fromCharCode(bytes.readUInt16BE(i));
+    return out;
+  }
+  return bytes.toString("latin1");
+}
+
