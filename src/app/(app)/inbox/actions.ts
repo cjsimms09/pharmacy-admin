@@ -10,7 +10,7 @@ import { requireManager } from "@/lib/auth";
 import { sendTestEmail } from "@/lib/send-mail";
 import { audit } from "@/lib/audit";
 import { setSetting } from "@/lib/settings";
-import { clearMailPassword, describeMailError, saveMailPassword, sweepMailbox, testMailbox } from "@/lib/mailbox";
+import { clearMailPassword, describeMailError, saveMailPassword, sweepMailbox, testMailbox, rereadInboxItem } from "@/lib/mailbox";
 
 function fail(path: string, msg: string): never {
   redirect(`${path}${path.includes("?") ? "&" : "?"}error=${encodeURIComponent(msg)}`);
@@ -253,4 +253,17 @@ export async function fileInboxItem(fd: FormData) {
   revalidatePath("/compliance");
   revalidatePath("/");
   redirect("/inbox?saved=1");
+}
+
+/** Reads a stored attachment again with today's rules — after a supplier's address was added, say. */
+export async function rereadItem(itemId: string) {
+  const user = await requireManager();
+  try {
+    const text = await rereadInboxItem(itemId, { userId: user.id, userName: user.name });
+    revalidatePath("/inbox");
+    redirect(`/inbox?ok=${encodeURIComponent(text)}`);
+  } catch (e) {
+    if (e && typeof e === "object" && "digest" in e) throw e;
+    fail("/inbox", e instanceof Error ? e.message : "Could not read that again.");
+  }
 }

@@ -5,7 +5,7 @@ import { requireManager } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
 import { hasMailPassword } from "@/lib/mailbox";
 import { PageHeader, Notice, Empty } from "@/components/ui";
-import { fileInboxItem, deleteInboxItem, sweepNow } from "./actions";
+import { fileInboxItem, deleteInboxItem, sweepNow, rereadItem } from "./actions";
 
 export const metadata = { title: "Inbox" };
 export const dynamic = "force-dynamic";
@@ -119,6 +119,20 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
                       says which — because the difference is a supplier invoice the pharmacy has to
                       keep for five years.
                     */}
+                    {/*
+                      The second reading. A report or invoice that was not recognised on arrival —
+                      because the supplier's address was not on the register yet, or automatic
+                      loading was off — is read again here with today's rules, by the same path the
+                      sweep takes. The sweep itself never touches a message twice, so this is the
+                      only way a stored file gets a second chance.
+                    */}
+                    {i.documentId && i.routedAs !== "invoice" && (
+                      <form action={rereadItem.bind(null, i.id)} className="mb-2">
+                        <button className="text-xs text-accent hover:underline" type="submit" title="Read this file again with the rules as they are now — after adding a supplier's address, or turning automatic loading on.">
+                          Read again with today&rsquo;s rules
+                        </button>
+                      </form>
+                    )}
                     <form action={deleteInboxItem.bind(null, i.id)}>
                       <button
                         className="text-xs text-ink-3 hover:text-ink hover:underline"
@@ -150,12 +164,13 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
  * Sunday. Derived from the recorded reason rather than stored, so a wording change here reaches
  * old lines too.
  */
-function whatToDo(i: { status: string; reason: string | null; routedAs: string | null; routeResult: string | null }): string | null {
+function whatToDo(i: { status: string; reason: string | null; routedAs: string | null; routeResult: string | null; fileName: string | null }): string | null {
   const text = `${i.reason ?? ""} ${i.routeResult ?? ""}`;
   if (/not on the allowed list/i.test(text)) return "Add this sender's address under Settings → Email → accepted senders, then press “Check for new mail now”.";
   if (/type this reads|no file extension/i.test(text)) return "Have the report emailed as a plain text or CSV attachment (not zipped, not in the body of the email).";
   if (/larger than 20 MB/i.test(text)) return "Schedule the report per supplier rather than all suppliers in one file, so each stays under the size limit.";
-  if (/automatic loading is switched off/i.test(text)) return "Turn on “Load recognised reports automatically” under Settings → Email, then load this one from Purchasing by hand.";
+  if (/automatic loading is switched off/i.test(text)) return "Turn on “Load recognised reports automatically” under Settings → Email, then press “Read again with today's rules” on this line.";
+  if (i.routedAs === "unrecognised" && /\.pdf$/i.test(i.fileName ?? "")) return "If this is a supplier invoice, add the sender's address to that supplier under Suppliers, then press “Read again with today's rules” on this line.";
   if (/named for .* but names/i.test(text)) return "The schedule that produces this file exports a different supplier's catalogue than its name says. Fix either the name or the supplier in the PioneerRx schedule.";
   if (/columns have changed/i.test(text)) return "The Daily report's columns were changed in PioneerRx. Put them back to the list shown on Reports, or send the file to be looked at; nothing from it was loaded.";
   if (/split across lines but .* price lines/i.test(text)) return "The report's layout changed. Send the file to be looked at; nothing from that supplier was replaced.";

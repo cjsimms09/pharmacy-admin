@@ -678,10 +678,32 @@ export async function reviewPolicy(
       output_config: { format: zodOutputFormat(PolicyReview) },
     });
 
-  let res = await ask();
+  /*
+   * The SDK throws, rather than returning nothing, when the answer is not valid JSON — "Unterminated
+   * string in JSON at position 2885" was the message on three sections of this manual, none of them
+   * long enough to have been cut off. A thrown parse error skipped the retry below entirely and
+   * surfaced as the raw SDK text. So a parse failure is caught, retried once, and if it fails
+   * again reported in words the pharmacist can act on.
+   */
+  const attempt = async () => {
+    try {
+      return { res: await ask(), parseError: null as string | null };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/parse|JSON/i.test(msg)) return { res: null, parseError: msg };
+      throw e;
+    }
+  };
+  let { res, parseError } = await attempt();
   // A truncated answer will truncate again; anything else is worth one more go.
-  if (!res.parsed_output && res.stop_reason !== "max_tokens" && res.stop_reason !== "refusal") {
-    res = await ask();
+  if (!res?.parsed_output && res?.stop_reason !== "max_tokens" && res?.stop_reason !== "refusal") {
+    ({ res, parseError } = await attempt());
+  }
+  if (!res) {
+    throw new Error(
+      `The review of “${input.title}” came back twice in a form this site could not read (${(parseError ?? "").split("\n")[0].slice(0, 160)}). ` +
+        "The rest of the manual is unaffected; try this section again later, or split it if it is long.",
+    );
   }
 
   /*

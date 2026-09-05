@@ -494,59 +494,10 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
               // arrives with the switch off looks identical to one that arrived and failed.
               routeResult = "Filed only: automatic loading is switched off under Settings → Email.";
             } else {
-              const cls = classify(fileName, buf);
-              routedAs = cls.kind;
-              try {
-                if (cls.kind === "claims") {
-                  const r = await importClaims(buf, fileName, ctx.userId ?? "mailbox-sweep");
-                  routeResult = `${r.claimsAdded} claims added, ${r.duplicates} already held, ${r.skipped} skipped`;
-                  result.imported++;
-                } else if (cls.kind === "rx_transactions") {
-                  // The daily claims feed. Paid rows become claims, reversals cancel the claims
-                  // they name, unsold rows wait for the day they sell.
-                  const r = await importRxTransactions(buf, fileName, ctx.userId ?? "mailbox-sweep");
-                  routeResult = describeTransactionImport(r);
-                  if (r.claimsAdded || r.reversed) result.imported++;
-                } else if (cls.kind === "pioneer_catalog") {
-                  // Names its own supplier inside the file, so no sender rule is needed — and the
-                  // filename is checked against it, so MCKCatalog carrying IPD prices is refused.
-                  const r = await importPioneerCatalog(buf, fileName, ctx.userId ?? "mailbox-sweep");
-                  const loaded = r.suppliers
-                    .map((x) => `${x.supplier}: ${x.itemsAdded.toLocaleString()} new, ${x.itemsUpdated.toLocaleString()} repriced${x.shortDated ? `, ${x.shortDated} short-dated lots noted` : ""}${x.rebated !== null ? `, ${x.rebated.toLocaleString()} rebated` : ", no rebate column"}`)
-                    .join("; ");
-                  const bits = [
-                    r.suppliers.length ? loaded + (r.pricedOn ? ` (prices as of ${r.pricedOn})` : "") : "Recognised as a PioneerRx catalogue but nothing could be loaded.",
-                    ...r.problems,
-                    describeFileName(fileName),
-                  ];
-                  routeResult = bits.join(" ");
-                  if (r.suppliers.length) result.imported++;
-                } else if (cls.kind === "supplier_catalog") {
-                  const supplier = supplierFor(parseSupplierRules(s.mail_supplier_rules ?? ""), from, subject);
-                  if (!supplier) {
-                    routeResult =
-                      "Recognised as a supplier price file, but no rule says which supplier it came from. " +
-                      "Add one in Settings → Email, then load it from Purchasing.";
-                  } else {
-                    const r = await importSupplierCatalog(buf, fileName, supplier, ctx.userId ?? "mailbox-sweep");
-                    routeResult = `${supplier}: ${r.itemsAdded} new, ${r.itemsUpdated} updated, ${r.skipped} skipped`;
-                    result.imported++;
-                  }
-                } else if (cls.kind === "nadac") {
-                  const dir = nadacDir();
-                  await fs.mkdir(dir, { recursive: true });
-                  await fs.writeFile(path.join(dir, path.basename(fileName).replace(/[^A-Za-z0-9._-]/g, "_")), buf);
-                  const reports = await loadNadacFiles();
-                  const added = reports.reduce((n, r) => n + r.added, 0);
-                  routeResult = `${added.toLocaleString()} NADAC prices added`;
-                  result.imported++;
-                } else {
-                  routeResult = cls.why;
-                }
-              } catch (e) {
-                // A failed import must not lose the document or stop the sweep.
-                routeResult = `Filed, but could not be loaded: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`;
-              }
+              const r = await importRecognised(buf, fileName, from, subject, s, ctx);
+              routedAs = r.routedAs;
+              routeResult = r.routeResult;
+              if (r.imported) result.imported++;
             }
 
             await db.insert(schema.inboxItems).values({
@@ -583,4 +534,133 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
   await setSetting("mail_last_result", result.errors.length ? `${summary} — ${result.errors[0]}` : summary);
   await audit({ action: "inbox.sweep", userId: ctx.userId, userName: ctx.userName, details: summary });
   return result;
+}
+
+/**
+ * Loads a stored attachment as whatever the site recognises it to be, and says what happened.
+ *
+ * Shared by the sweep, at the moment a message arrives, and by "Read again" on the Inbox, after
+ * somebody has changed a rule — so both take exactly the same path, and a file that failed on
+ * arrival and loads on a second reading did so for the reason the person changed, not because
+ * the two paths differ.
+ */
+async function importRecognised(
+  buf: Buffer,
+  fileName: string,
+  from: string,
+  subject: string,
+  s: Awaited<ReturnType<typeof getSettings>>,
+  ctx: { userId?: string | null; userName?: string | null },
+): Promise<{ routedAs: string; routeResult: string | null; imported: boolean }> {
+  const cls = classify(fileName, buf);
+  let routeResult: string | null = null;
+  let imported = false;
+  try {
+    if (cls.kind === "claims") {
+      const r = await importClaims(buf, fileName, ctx.userId ?? "mailbox-sweep");
+      routeResult = `${r.claimsAdded} claims added, ${r.duplicates} already held, ${r.skipped} skipped`;
+      imported = true;
+    } else if (cls.kind === "rx_transactions") {
+      // The daily claims feed. Paid rows become claims, reversals cancel the claims they name,
+      // unsold rows wait for the day they sell.
+      const r = await importRxTransactions(buf, fileName, ctx.userId ?? "mailbox-sweep");
+      routeResult = describeTransactionImport(r);
+      if (r.claimsAdded || r.reversed) imported = true;
+    } else if (cls.kind === "pioneer_catalog") {
+      // Names its own supplier inside the file, so no sender rule is needed — and the filename
+      // is checked against it, so MCKCatalog carrying IPD prices is refused.
+      const r = await importPioneerCatalog(buf, fileName, ctx.userId ?? "mailbox-sweep");
+      const loaded = r.suppliers
+        .map((x) => `${x.supplier}: ${x.itemsAdded.toLocaleString()} new, ${x.itemsUpdated.toLocaleString()} repriced${x.shortDated ? `, ${x.shortDated} short-dated lots noted` : ""}${x.rebated !== null ? `, ${x.rebated.toLocaleString()} rebated` : ", no rebate column"}`)
+        .join("; ");
+      const bits = [
+        r.suppliers.length ? loaded + (r.pricedOn ? ` (prices as of ${r.pricedOn})` : "") : "Recognised as a PioneerRx catalogue but nothing could be loaded.",
+        ...r.problems,
+        describeFileName(fileName),
+      ];
+      routeResult = bits.join(" ");
+      if (r.suppliers.length) imported = true;
+    } else if (cls.kind === "supplier_catalog") {
+      const supplier = supplierFor(parseSupplierRules(s.mail_supplier_rules ?? ""), from, subject);
+      if (!supplier) {
+        routeResult =
+          "Recognised as a supplier price file, but no rule says which supplier it came from. " +
+          "Add one in Settings → Email, then load it from Purchasing.";
+      } else {
+        const r = await importSupplierCatalog(buf, fileName, supplier, ctx.userId ?? "mailbox-sweep");
+        routeResult = `${supplier}: ${r.itemsAdded} new, ${r.itemsUpdated} updated, ${r.skipped} skipped`;
+        imported = true;
+      }
+    } else if (cls.kind === "nadac") {
+      const dir = nadacDir();
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(path.join(dir, path.basename(fileName).replace(/[^A-Za-z0-9._-]/g, "_")), buf);
+      const reports = await loadNadacFiles();
+      const added = reports.reduce((n, r) => n + r.added, 0);
+      routeResult = `${added.toLocaleString()} NADAC prices added`;
+      imported = true;
+    } else {
+      routeResult = cls.why;
+    }
+  } catch (e) {
+    // A failed import must not lose the document or stop the sweep.
+    routeResult = `Filed, but could not be loaded: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`;
+  }
+  return { routedAs: cls.kind, routeResult, imported };
+}
+
+/**
+ * Reads a stored attachment again, with today's rules.
+ *
+ * The case that needed it: an invoice from a supplier whose sending address was not yet on the
+ * register arrived, was not recognised as an invoice, and was filed as an ordinary report. The
+ * pharmacist then added the address. Nothing re-read the message — it was marked read, its id
+ * recorded, and the sweep rightly never touches a message twice. This is the second reading: the
+ * same bytes, the same decisions as on arrival, with whatever has changed since. An invoice
+ * recognised this time is filed where its schedule says and the misfiled copy is withdrawn; a
+ * report recognised this time is loaded; and the Inbox line is rewritten to say what happened.
+ */
+export async function rereadInboxItem(itemId: string, ctx: { userId: string; userName: string }): Promise<string> {
+  const item = await db.query.inboxItems.findFirst({ where: eq(schema.inboxItems.id, itemId) });
+  if (!item) throw new Error("That inbox line no longer exists.");
+  if (!item.documentId) throw new Error("Nothing was stored for this line, so there is nothing to read again. If the sender was not allowed, add the address and have the report sent again.");
+  const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, item.documentId) });
+  if (!doc) throw new Error("The stored document has been removed, so there is nothing to read again.");
+  if (doc.category.startsWith("invoice")) return "This is already filed as a supplier invoice.";
+
+  const { readFile, deleteFile } = await import("./files");
+  const buf = await readFile(doc.storageKey);
+  const s = await getSettings();
+  const register = await allSuppliers(true);
+  const from = item.fromAddress;
+  const subject = item.subject;
+  const fileName = item.fileName ?? doc.fileName;
+  const stamp = new Date().toLocaleString();
+
+  const matched = supplierForSender(register, from);
+  const supplierName = matched?.name ?? supplierFor(parseSupplierRules(s.mail_supplier_rules ?? ""), from, subject);
+  if (looksLikeInvoice({ fileName, mimeType: doc.mimeType, subject, supplier: supplierName })) {
+    const filed = await fileInvoice(
+      buf,
+      { fileName, mimeType: doc.mimeType || "application/pdf", supplier: supplierName, supplierId: matched?.id ?? null, from, subject },
+      ctx,
+    );
+    // Withdraw the misfiled copy. The row goes; the bytes go only if nothing else points at them.
+    const others = await db.query.documents.findMany({ where: eq(schema.documents.storageKey, doc.storageKey), columns: { id: true } });
+    await db.delete(schema.documents).where(eq(schema.documents.id, doc.id));
+    if (others.every((o) => o.id === doc.id)) await deleteFile(doc.storageKey).catch(() => {});
+    const where = filingFor(filed.schedule).label;
+    const text = filed.needsReview
+      ? `Read again ${stamp}: supplier invoice from ${supplierName ?? "a supplier"}, held with the Schedule II records until somebody confirms what it carries.`
+      : `Read again ${stamp}: supplier invoice from ${supplierName ?? "a supplier"}, filed under ${where}, kept apart from every other record.`;
+    await db.update(schema.inboxItems).set({ documentId: filed.documentId, routedAs: "invoice", routeResult: text, reason: null }).where(eq(schema.inboxItems.id, itemId));
+    await audit({ action: "invoice.filed", userId: ctx.userId, userName: ctx.userName, entity: "document", entityId: filed.documentId, details: `${supplierName ?? "supplier"} · ${filed.schedule} · read again from the inbox` });
+    return text;
+  }
+
+  const r = await importRecognised(buf, fileName, from, subject, s, ctx);
+  const text = `Read again ${stamp}: ${r.routeResult ?? (r.routedAs === "unrecognised" ? "still not recognised" : r.routedAs)}`;
+  await db.update(schema.inboxItems).set({ routedAs: r.routedAs, routeResult: text }).where(eq(schema.inboxItems.id, itemId));
+  await audit({ action: "inbox.reread", userId: ctx.userId, userName: ctx.userName, details: `${fileName}: ${text.slice(0, 200)}` });
+  return text;
 }
