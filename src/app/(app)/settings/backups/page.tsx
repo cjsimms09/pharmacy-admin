@@ -224,11 +224,24 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
 
       {clouds.length === 0 && s.destinations.length < 2 && (
         <Notice kind="warn">
-          <b>No synced folder was found on this computer.</b> If OneDrive is signed in, its folder is usually{" "}
-          <code>C:\Users\&lt;you&gt;\OneDrive</code> or <code>C:\Users\&lt;you&gt;\OneDrive - Your Company</code>. Put
-          that path with <code>\PharmacyAdminBackups</code> on the end into the second box below, and every verified
-          archive is written and read back there too. A work or school OneDrive is the right one: Microsoft will sign a
-          business associate agreement for those and not for a personal account.
+          <b>No synced folder was found on this computer.</b> A backup is a file, so something on this machine has to
+          give it a folder to be written into — the sync client is what carries that folder to the cloud afterwards.
+          There is no way to send one straight to an account without it.
+          <br />
+          <br />
+          <b>For Google Drive:</b> install <b>Google Drive for desktop</b> and sign in. It appears as a drive letter,
+          usually <code>G:</code>, with <code>My Drive</code> inside it, and this page will then offer it as a button.
+          It streams by default, which is the part worth knowing: the folder is on the computer but the files are not,
+          so backups take no disk space here and still sit in Drive.
+          <br />
+          <br />
+          <b>For OneDrive:</b> if it is signed in, its folder is usually <code>C:\Users\&lt;you&gt;\OneDrive</code> or{" "}
+          <code>C:\Users\&lt;you&gt;\OneDrive - Your Company</code>. Put that path with{" "}
+          <code>\PharmacyAdminBackups</code> on the end into one of the boxes below.
+          <br />
+          <br />
+          Whichever you use, the account decides the agreement: Microsoft will sign one for Microsoft 365 business and
+          Google for Google Workspace, and neither will for a personal account.
         </Notice>
       )}
 
