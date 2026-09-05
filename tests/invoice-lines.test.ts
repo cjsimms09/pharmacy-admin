@@ -1,6 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { parseInvoiceLines, splitQuantities, ndc11 } from "../src/lib/invoice-lines";
+import { readFileSync } from "node:fs";
 
 /**
  * Reading a wholesaler's invoice as figures rather than as text.
@@ -122,5 +123,32 @@ describe("NDCs", () => {
     assert.equal(ndc11("0002-1436-11"), "00002143611");
     assert.equal(ndc11("65862050220"), "65862050220");
     assert.equal(ndc11("not an ndc"), null);
+  });
+});
+
+describe("the two supplier layouts, on real files with the identifiers changed", () => {
+  test("IPC reads in full and adds up to the printed total", () => {
+    const text = readFileSync(new URL("../fixtures/invoice-ipc.txt", import.meta.url), "utf8");
+    const r = parseInvoiceLines(text, 29023);
+    assert.equal(r.format, "ipc");
+    assert.equal(r.lines.length, 21);
+    assert.equal(r.unreadable.length, 0);
+    assert.equal(r.reconciles, true, "every line read, and the sum is the invoice total");
+  });
+
+  test("IPD reads nothing, and that is the correct answer", () => {
+    /*
+     * Not a gap to be papered over with a looser pattern.
+     *
+     * This layout's columns do not survive text extraction: every NDC on a page comes out as one
+     * unbroken run of digits, every quantity in another. Which figure belongs to which product was
+     * in the geometry of the page. A regular expression that returned something from this would be
+     * returning a guess, and a guessed cost against a drug is acted on. The site reads this layout
+     * by sending the document itself to the model, and still requires the arithmetic to hold.
+     */
+    const text = readFileSync(new URL("../fixtures/invoice-ipd.txt", import.meta.url), "utf8");
+    const r = parseInvoiceLines(text, null);
+    assert.equal(r.lines.length, 0);
+    assert.equal(r.format, null);
   });
 });

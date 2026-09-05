@@ -253,14 +253,23 @@ export default async function InvoicesPage({
   async function readLines() {
     "use server";
     const u = await requireManager();
-    const r = await backfillInvoiceLines();
-    await audit({ action: "invoice.lines.backfill", userId: u.id, userName: u.name, details: `${r.invoices} invoices, ${r.linesRead} lines` });
+    /*
+     * The model is allowed here, and only where the cheap reader found nothing.
+     *
+     * IPD's invoices come out of text extraction with their columns shredded — every NDC on the
+     * page in one run of digits — so no rule can read them, and until now they contributed nothing
+     * to any purchasing question. This is a press somebody made deliberately, which is the right
+     * place for the one path that costs money.
+     */
+    const r = await backfillInvoiceLines({ allowModel: true, user: u });
+    await audit({ action: "invoice.lines.backfill", userId: u.id, userName: u.name, details: `${r.invoices} invoices, ${r.linesRead} lines, ${r.byModel} by model` });
     revalidatePath("/inventory/invoices");
     revalidatePath("/purchasing");
     const bits = [`${r.linesRead.toLocaleString()} item line${r.linesRead === 1 ? "" : "s"} read off ${r.invoices} invoice${r.invoices === 1 ? "" : "s"}`];
     // Named apart, because they are different problems: a scan has no text at all, while an
     // invoice whose lines do not add up to its printed total was read and deliberately not kept.
     if (r.unreconciled > 0) bits.push(`${r.unreconciled} did not add up to the total printed on them and were left out rather than counted short`);
+    if (r.byModel > 0) bits.push(`${r.byModel} ${r.byModel === 1 ? "was" : "were"} in a layout no rule can read — the page itself was read instead, and the figures still had to add up to the printed total`);
     if (r.unreadable > 0) bits.push(`${r.unreadable} ${r.unreadable === 1 ? "is a scan" : "are scans"} with no text to read`);
     redirect("/inventory/invoices?ok=" + encodeURIComponent(bits.join(". ") + "."));
   }

@@ -22,8 +22,8 @@ arrives rather than what somebody remembers arriving.
 | File | Source | Unlocks |
 |---|---|---|
 | `invoice-mckesson.txt` | text layer of a McKesson invoice PDF (`pdfText` output) | confirms the full-row reader; catches an extra column or flag |
-| `invoice-ipc.txt` | text layer of an IPC invoice | reading IPC lines in full (today: NDC + amount only) |
-| `invoice-ipd.txt` | text layer of an IPD invoice | same for IPD, plus the per-schedule subtotals |
+| `invoice-ipc.txt` | text layer of an IPC invoice | **committed** — 21 lines, all read, reconciling to the printed total; `tests/invoice-lines.test.ts` reads it |
+| `invoice-ipd.txt` | text layer of an IPD invoice | **committed** — and it shows why no rule can read this one: the columns do not survive extraction, so every NDC on a page arrives as one unbroken run of digits. The reader returns nothing from it, correctly; the site reads this layout by sending the document to the model and still requires the arithmetic to hold |
 | `catalog-mck.txt` | the scheduled `Mck9_6_2026` export, first supplier block | already covered by `tests/pioneer-catalog.test.ts`; a real header line is still worth having |
 | `rx-transactions.txt` | the daily "Rx Transaction Details By Submission Type" report | **committed** — cut from the real 5 Sept 2026 file, identifiers changed; `tests/rx-transactions.test.ts` reads it |
 | `nadac-weekly-head.csv` | first ten lines of a CMS weekly file | pins the column spelling the CSV download actually uses |
