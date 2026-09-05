@@ -496,7 +496,7 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
                   // filename is checked against it, so MCKCatalog carrying IPD prices is refused.
                   const r = await importPioneerCatalog(buf, fileName, ctx.userId ?? "mailbox-sweep");
                   routeResult = r.suppliers.length
-                    ? r.suppliers.map((x) => `${x.supplier}: ${x.itemsAdded} new, ${x.itemsUpdated} repriced${x.shortDated ? `, ${x.shortDated} short-dated lots noted` : ""}`).join("; ") +
+                    ? r.suppliers.map((x) => `${x.supplier}: ${x.itemsAdded} new, ${x.itemsUpdated} repriced${x.shortDated ? `, ${x.shortDated} short-dated lots noted` : ""}${x.rebated !== null ? `, ${x.rebated} rebated` : ", no rebate column"}`).join("; ") +
                       (r.pricedOn ? ` (prices as of ${r.pricedOn})` : "")
                     : `Recognised as a PioneerRx catalogue but nothing could be loaded: ${r.problems.join(" ")}`;
                   if (r.suppliers.length) result.imported++;

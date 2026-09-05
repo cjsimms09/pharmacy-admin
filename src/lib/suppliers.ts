@@ -107,7 +107,7 @@ export type SupplierImportReport = {
  */
 export type PioneerImportReport = {
   importIds: string[];
-  suppliers: { supplier: string; itemsAdded: number; itemsUpdated: number; shortDated: number }[];
+  suppliers: { supplier: string; itemsAdded: number; itemsUpdated: number; shortDated: number; rebated: number | null }[];
   rowsRead: number;
   skipped: number;
   skipReasons: Record<string, number>;
@@ -141,7 +141,7 @@ export async function importPioneerCatalog(file: Buffer, fileName: string, userI
   for (const section of parsed.sections) {
     const r = await writeSection(section, fileName, pricedOn, userId);
     importIds.push(r.importId);
-    suppliers.push({ supplier: section.supplier, itemsAdded: r.added, itemsUpdated: r.updated, shortDated: r.shortDated });
+    suppliers.push({ supplier: section.supplier, itemsAdded: r.added, itemsUpdated: r.updated, shortDated: r.shortDated, rebated: r.rebated });
     rowsRead += section.rows.length;
   }
 
@@ -153,7 +153,7 @@ async function writeSection(
   fileName: string,
   pricedOn: string | null,
   userId: string,
-): Promise<{ importId: string; added: number; updated: number; shortDated: number }> {
+): Promise<{ importId: string; added: number; updated: number; shortDated: number; rebated: number | null }> {
   const { supplier, rows } = section;
   const importId = newId();
   await db.insert(schema.supplierImports).values({
@@ -178,6 +178,7 @@ async function writeSection(
 
   const rows2: (typeof schema.supplierItems.$inferInsert)[] = [];
   let added = 0, updated = 0, shortDated = 0;
+  let rebated: number | null = null;
   const now = new Date().toISOString();
 
   for (const [ndc11, group] of byNdc) {
@@ -194,6 +195,10 @@ async function writeSection(
       : `Short-dated only (exp ${pick.shortDated})`;
 
     if (before.has(ndc11)) updated++; else added++;
+    // An NDC is rebated if any of its rows is: the flag is a property of the product, and a
+    // short-dated lot of a OneStop item is still a OneStop item.
+    const isRebated = group.some((r) => r.rebated === true) ? true : group.every((r) => r.rebated === null) ? null : false;
+    if (isRebated !== null) rebated = (rebated ?? 0) + (isRebated ? 1 : 0);
     rows2.push({
       id: newId(),
       supplier,
@@ -204,9 +209,13 @@ async function writeSection(
       packSize: pick.packQty !== null && pick.unit ? `${pick.orderMultiple && pick.orderMultiple > 1 ? `(${pick.orderMultiple}) ` : ""}${pick.packQty} ${pick.unit}` : null,
       unitCostMicros: pick.unitCostMicros,
       packCostCents: pick.unitCostMicros !== null && pick.packQty ? Math.round((pick.unitCostMicros * pick.packQty) / 10_000) : null,
-      // Gross, before rebates. Said here because the comparison has to know, and because a
-      // McKesson OneStop generic at gross is not the price the pharmacy pays.
-      contractFlag: "gross, before rebates",
+      /*
+       * Whether the tier rebate applies to this item — the one fact that lets a comparison take
+       * the rebate off a McKesson generic's gross price and nothing else's. Read from the file's
+       * rebate column. Null where the file had no such column, in which case the comparison has
+       * to say it is estimating.
+       */
+      contractFlag: isRebated === null ? null : isRebated ? "rebated" : "not rebated",
       availability,
       pricedOn,
       importId,
@@ -229,7 +238,7 @@ async function writeSection(
     pricedOn,
   }).where(eq(schema.supplierImports.id, importId));
 
-  return { importId, added, updated, shortDated };
+  return { importId, added, updated, shortDated, rebated };
 }
 
 export async function importSupplierCatalog(

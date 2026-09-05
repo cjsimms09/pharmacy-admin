@@ -35,6 +35,61 @@ const semi = (sep = ";") =>
     `Printed On: 9/5/2026 11:29 AM${sep}Page 2 of 2`,
   ].join("\r\n");
 
+/** The scheduled Monday file: a sixth "rebate package cost" column whose presence, not value, matters. */
+const withRebate = () =>
+  [
+    "﻿Supplier Catalog Item Search Results",
+    "McKesson",
+    ",Cost Per Unit,Rebate Package Cost",
+    "Supplier Item Number,Name,NDC,Order By Constant",
+    "721021,METFORMIN HCL 850 MG TAB 500,23155-0842-05, (1) 500.00 EA,0.0500,12.34",
+    "603510,DICLOFENAC SOD TOPICAL SL 2%,13107-0269-47, (1) 112.00 GM,0.4654,",
+    "740097,METFORMIN HCL 850 MG TAB (11/24EXP) 500,23155-0842-05, (1) 500.00 EA,0.0040,12.34",
+    "111111,ZERO FILLED NOT REBATED,00002-1436-11, (1) 1.00 EA,739.11,0.00",
+    '222222,"VIALS 13DR PUSH DOWN,TURN GRN",50242-0040-62, (1) 1.00 EA,0.5000,',
+    "Printed On: 9/8/2026 6:02 AM,Page 1 of 1",
+  ].join("\r\n");
+
+describe("the rebate column the pharmacy added", () => {
+  test("a six-column file reads every row — the five-column version would have skipped them all", () => {
+    const r = parsePioneerCatalog(withRebate());
+    assert.deepEqual(r.problems, []);
+    assert.equal(r.hasRebateColumn, true);
+    assert.equal(r.sections.length, 1);
+    assert.equal(r.sections[0].rows.length, 5, "every priced row should read");
+    assert.equal(r.printedOn, "2026-09-08");
+  });
+
+  test("a figure in the column marks the item rebated; a blank does not; the figure itself is ignored", () => {
+    const rows = parsePioneerCatalog(withRebate()).sections[0].rows;
+    const by = (item: string) => rows.find((x) => x.itemNumber === item)!;
+    assert.equal(by("721021").rebated, true);
+    assert.equal(by("603510").rebated, false);
+    assert.equal(by("740097").rebated, true, "a short-dated lot of a rebated item is still rebated");
+  });
+
+  test("a bare zero is treated as blank, so a system that fills empty cells with 0.00 does not mark everything rebated", () => {
+    const rows = parsePioneerCatalog(withRebate()).sections[0].rows;
+    assert.equal(rows.find((x) => x.itemNumber === "111111")!.rebated, false);
+  });
+
+  test("a quoted description containing a comma survives the extra column", () => {
+    const rows = parsePioneerCatalog(withRebate()).sections[0].rows;
+    const v = rows.find((x) => x.itemNumber === "222222")!;
+    assert.equal(v.description, "VIALS 13DR PUSH DOWN,TURN GRN");
+    assert.equal(v.ndc11, "50242004062");
+    assert.equal(v.unitCostMicros, 500_000);
+  });
+
+  test("the five-column file still reads, with rebated unknown rather than false", () => {
+    // Without the column nothing can be said either way, and saying "not rebated" would strip the
+    // discount from every McKesson generic in a comparison.
+    const r = parsePioneerCatalog(semi());
+    assert.equal(r.hasRebateColumn, false);
+    assert.ok(r.sections.flatMap((s) => s.rows).every((x) => x.rebated === null));
+  });
+});
+
 describe("recognising the file", () => {
   test("by its title, and by its header row with either separator", () => {
     assert.ok(looksLikePioneerCatalog(semi(";")));
