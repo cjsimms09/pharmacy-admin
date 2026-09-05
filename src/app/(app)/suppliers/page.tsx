@@ -6,6 +6,9 @@ import { audit } from "@/lib/audit";
 import { getSettings } from "@/lib/settings";
 import { allSuppliers, addSupplier, updateSupplier, retireSupplier, importLegacyRules, addressesOf, normaliseAddresses } from "@/lib/suppliers-registry";
 import { invoices, filingFor, money } from "@/lib/invoices";
+import { termsSummaryBySupplier } from "@/lib/supplier-terms-store";
+import { describeRebate, describeReturns } from "@/lib/supplier-terms";
+import { catalogSummaryBySupplier } from "@/lib/suppliers";
 import { fmt, todayIso, daysBetween } from "@/lib/dates";
 import { PageHeader, Card, Notice, Empty, Field } from "@/components/ui";
 import { INVOICE_SCHEDULES, type InvoiceSchedule } from "@/db/schema";
@@ -35,7 +38,7 @@ export default async function SuppliersPage({
   const { edit, ok, error } = await searchParams;
   const canManage = user.role !== "staff";
 
-  const [suppliers, all, s] = await Promise.all([allSuppliers(true), invoices(), getSettings()]);
+  const [suppliers, all, s, terms, catalogs] = await Promise.all([allSuppliers(true), invoices(), getSettings(), termsSummaryBySupplier(), catalogSummaryBySupplier()]);
   const legacy = (s.mail_supplier_rules ?? "").trim();
   const editing = edit ? suppliers.find((x) => x.id === edit) : undefined;
   const today = todayIso();
@@ -48,6 +51,7 @@ export default async function SuppliersPage({
     const input = {
       name: String(fd.get("name") ?? ""),
       senderEmails: String(fd.get("senderEmails") ?? ""),
+      catalogName: String(fd.get("catalogName") ?? ""),
       accountNumber: String(fd.get("accountNumber") ?? ""),
       deaNumber: String(fd.get("deaNumber") ?? ""),
       phone: String(fd.get("phone") ?? ""),
@@ -212,7 +216,30 @@ export default async function SuppliersPage({
                   <dd className={quiet !== null && quiet > 21 ? "text-warn" : ""}>
                     {last ? `${fmt(last)}${quiet !== null && quiet > 21 ? ` — ${quiet} days ago` : ""}` : "none yet"}
                   </dd>
+                  {/*
+                    The catalogue, the rebate schedule and the return policy, on the same card as
+                    the invoices — because they are facts about one supplier, and until they sat
+                    together nothing could say "McKesson: 31,000 prices as of Monday, 2.5% tier,
+                    returns to six months past expiry" in one place.
+                  */}
+                  <dt className="text-ink-3">Catalogue</dt>
+                  <dd>
+                    {(() => {
+                      const c = catalogs.get(sup.id);
+                      if (!c) return <span className="text-ink-3">none filed under this supplier{sup.catalogName ? "" : " — set the catalogue name to tie one"}</span>;
+                      return `${c.items.toLocaleString()} prices, file of ${c.pricedOn ? fmt(c.pricedOn) : fmt(c.lastAt.slice(0, 10))}`;
+                    })()}
+                  </dd>
+                  <dt className="text-ink-3">Rebate</dt>
+                  <dd>{terms.get(sup.id)?.rebate ? describeRebate(terms.get(sup.id)!.rebate!.terms) : <span className="text-ink-3">not recorded</span>}</dd>
+                  <dt className="text-ink-3">Returns</dt>
+                  <dd>{terms.get(sup.id)?.returns ? describeReturns(terms.get(sup.id)!.returns!.terms) : <span className="text-ink-3">not recorded</span>}</dd>
                 </dl>
+                <p className="mt-2 text-xs">
+                  <Link href={`/suppliers/${sup.id}/terms`} className="text-accent hover:underline">
+                    {terms.get(sup.id)?.rebate || terms.get(sup.id)?.returns ? "Rebate and return terms" : "Record their rebate schedule and return policy"}
+                  </Link>
+                </p>
 
                 {sup.notes && <p className="mt-2 text-xs text-ink-3">{sup.notes}</p>}
 
@@ -260,6 +287,12 @@ export default async function SuppliersPage({
                 />
               </Field>
             </div>
+            <Field
+              label="Name on the catalogue export"
+              hint='What the PioneerRx catalogue calls them inside the file — McKesson, IPD, IPC, ParMed. Ties Monday&apos;s prices to this supplier. Leave blank if it is the same as the name.'
+            >
+              <input name="catalogName" defaultValue={editing?.catalogName ?? ""} className="field" placeholder="McKesson" />
+            </Field>
             <Field label="Their DEA registration">
               <input name="deaNumber" defaultValue={editing?.deaNumber ?? ""} className="field font-mono" />
             </Field>

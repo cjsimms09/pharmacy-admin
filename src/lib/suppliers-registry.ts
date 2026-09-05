@@ -2,6 +2,7 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "./crypto";
+import { canonicalSupplier } from "./pioneer-catalog";
 import type { InvoiceSchedule } from "@/db/schema";
 
 /**
@@ -56,9 +57,35 @@ export function supplierForSender(suppliers: Supplier[], from: string): Supplier
   return best?.supplier ?? null;
 }
 
+/**
+ * Which register row a supplier *name* belongs to — the name a catalogue section or an invoice
+ * page uses, which is not obliged to be the name the register uses.
+ *
+ * Matched on the catalogue name the pharmacy recorded, then on the register name, then on the
+ * canonical spelling the catalogue reader produces for it, all case- and punctuation-blind. One
+ * hit is the answer; none is null; two is a register that names the same wholesaler twice, and
+ * the first by name wins so the result is at least stable.
+ */
+export function supplierRecordFor(suppliers: Supplier[], name: string | null | undefined): Supplier | null {
+  const key = squash(name);
+  if (!key) return null;
+  const canonical = squash(canonicalSupplier(name ?? ""));
+  const ranked = [...suppliers].sort((a, b) => a.name.localeCompare(b.name));
+  return (
+    ranked.find((s) => squash(s.catalogName) === key) ??
+    ranked.find((s) => squash(s.name) === key) ??
+    ranked.find((s) => squash(s.catalogName) === canonical || squash(s.name) === canonical) ??
+    ranked.find((s) => squash(canonicalSupplier(s.name)) === canonical) ??
+    null
+  );
+}
+
+const squash = (s: string | null | undefined) => (s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
 export type SupplierInput = {
   name: string;
   senderEmails: string;
+  catalogName?: string | null;
   accountNumber?: string | null;
   deaNumber?: string | null;
   phone?: string | null;
@@ -75,6 +102,7 @@ export async function addSupplier(input: SupplierInput): Promise<string> {
     id,
     name,
     senderEmails: normaliseAddresses(input.senderEmails),
+    catalogName: input.catalogName?.trim() || null,
     accountNumber: input.accountNumber?.trim() || null,
     deaNumber: input.deaNumber?.trim() || null,
     phone: input.phone?.trim() || null,
@@ -93,6 +121,7 @@ export async function updateSupplier(id: string, input: SupplierInput): Promise<
     .set({
       name,
       senderEmails: normaliseAddresses(input.senderEmails),
+      catalogName: input.catalogName?.trim() || null,
       accountNumber: input.accountNumber?.trim() || null,
       deaNumber: input.deaNumber?.trim() || null,
       phone: input.phone?.trim() || null,

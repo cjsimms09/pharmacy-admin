@@ -710,6 +710,16 @@ export const suppliers = sqliteTable(
     phone: text("phone"),
     website: text("website"),
     /**
+     * The name the PioneerRx catalogue export uses for them: "McKesson", "IPD", "IPC", "ParMed".
+     *
+     * The catalogue names its supplier inside the file and the invoice names its supplier on the
+     * page, and neither is obliged to spell it the way the register does. This is the join: a
+     * catalogue section whose name matches it is filed against this row, so prices, invoices,
+     * rebate terms and return terms all hang off one supplier rather than three spellings of one.
+     * Blank means "match on the register name alone".
+     */
+    catalogName: text("catalog_name"),
+    /**
      * What they are expected to ship, as the pharmacy states it.
      *
      * Never used to classify anything — used the other way round, to notice when a supplier sends
@@ -789,6 +799,119 @@ export const supplierInvoices = sqliteTable(
     index("supplier_invoices_date_idx").on(t.invoiceDate),
     index("supplier_invoices_supplier_idx").on(t.supplier),
   ],
+);
+
+/**
+ * What was actually bought, line by line.
+ *
+ * The invoice row records that a document arrived and what schedule it carries; the item lines
+ * were kept only as text, to be searched. That answers "did we buy oxycodone in March" and not
+ * "how many, at what price, and is that more than the catalogue said". Every purchasing question
+ * — what a rebate tier is measured on, what a return is worth, whether a supplier's invoice price
+ * matched its catalogue price — needs the line as numbers, keyed on the NDC.
+ *
+ * Read from the invoice text by a rule (invoice-lines.ts), in the layouts it knows. A line the
+ * rule cannot read is not invented; the invoice records how many were not read, so the total of
+ * the lines is never mistaken for the total of the invoice.
+ *
+ * Money in cents, quantity in whole packs. Null where the invoice did not print it.
+ */
+export const INVOICE_LINE_KINDS = ["product", "credit", "fee", "other"] as const;
+export type InvoiceLineKind = (typeof INVOICE_LINE_KINDS)[number];
+
+export const supplierInvoiceLines = sqliteTable(
+  "supplier_invoice_lines",
+  {
+    id: text("id").primaryKey(),
+    invoiceId: text("invoice_id").notNull().references(() => supplierInvoices.id, { onDelete: "cascade" }),
+    /** Position on the invoice, 1-based, in the order the lines were read. */
+    lineNumber: integer("line_number").notNull(),
+    kind: text("kind", { enum: INVOICE_LINE_KINDS }).notNull().default("product"),
+    /** Eleven digits when the printed NDC could be read exactly; null otherwise, with the printed text kept. */
+    ndc11: text("ndc11"),
+    rawNdc: text("raw_ndc"),
+    /** The supplier's own item number, where the layout carries one. */
+    supplierItemNumber: text("supplier_item_number"),
+    description: text("description"),
+    /** Packs invoiced. Negative on a credit line. */
+    quantity: integer("quantity"),
+    /** The unit of the quantity as printed: EA, CS, BX. */
+    unit: text("unit"),
+    unitPriceCents: integer("unit_price_cents"),
+    extendedCents: integer("extended_cents"),
+    /** The AWP the wholesaler printed beside the line, where it did. */
+    awpCents: integer("awp_cents"),
+    /** The supplier's one-letter item class (R, X, B, D, E …), verbatim, where printed. */
+    itemClass: text("item_class"),
+    createdAt: text("created_at").notNull().default(now()),
+  },
+  (t) => [
+    index("supplier_invoice_lines_invoice_idx").on(t.invoiceId),
+    index("supplier_invoice_lines_ndc_idx").on(t.ndc11),
+    uniqueIndex("supplier_invoice_lines_invoice_line_uq").on(t.invoiceId, t.lineNumber),
+  ],
+);
+
+/**
+ * A supplier's rebate programme, as the pharmacy has recorded it.
+ *
+ * The number that decides whether a McKesson generic is cheaper than an Anda generic is not on
+ * either catalogue: it is the tier the pharmacy's generic compliance ratio lands in this period,
+ * and that lives in a rebate schedule nobody has typed in anywhere. So it is typed in here, per
+ * supplier, with dates, and the terms are validated against a fixed shape before they are stored
+ * (supplier-terms.ts) so a comparison can rely on them.
+ *
+ * Versioned by row. A new schedule is a new row with its own effective date; the old row is kept
+ * with an end date, because a rebate paid last quarter was earned under last quarter's terms.
+ */
+export const supplierRebatePrograms = sqliteTable(
+  "supplier_rebate_programs",
+  {
+    id: text("id").primaryKey(),
+    supplierId: text("supplier_id").notNull().references(() => suppliers.id, { onDelete: "cascade" }),
+    /** The programme as the supplier names it: "OneStop generics", "IPC quarterly rebate". */
+    name: text("name").notNull(),
+    effectiveFrom: text("effective_from").notNull(),
+    /** Null while current. Set when a later schedule replaces it. */
+    effectiveTo: text("effective_to"),
+    /** Which version of the terms shape validated this row, so an old row can be read later. */
+    termsVersion: integer("terms_version").notNull().default(1),
+    /** The validated terms, as JSON. Shape: RebateTerms in supplier-terms.ts. */
+    termsJson: text("terms_json").notNull(),
+    /** The agreement or schedule the numbers came from, where one is on file. */
+    documentId: text("document_id"),
+    notes: text("notes"),
+    createdBy: text("created_by").notNull(),
+    createdAt: text("created_at").notNull().default(now()),
+    updatedAt: text("updated_at"),
+  },
+  (t) => [index("supplier_rebate_programs_supplier_idx").on(t.supplierId, t.effectiveFrom)],
+);
+
+/**
+ * A supplier's return policy, versioned the same way.
+ *
+ * What a bottle on the shelf is worth depends on who sold it: how long before expiry it can go
+ * back, whether it can go back after, what fraction is credited, what is never taken. None of
+ * that is on an invoice. Shape: ReturnTerms in supplier-terms.ts.
+ */
+export const supplierReturnPolicies = sqliteTable(
+  "supplier_return_policies",
+  {
+    id: text("id").primaryKey(),
+    supplierId: text("supplier_id").notNull().references(() => suppliers.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    effectiveFrom: text("effective_from").notNull(),
+    effectiveTo: text("effective_to"),
+    termsVersion: integer("terms_version").notNull().default(1),
+    termsJson: text("terms_json").notNull(),
+    documentId: text("document_id"),
+    notes: text("notes"),
+    createdBy: text("created_by").notNull(),
+    createdAt: text("created_at").notNull().default(now()),
+    updatedAt: text("updated_at"),
+  },
+  (t) => [index("supplier_return_policies_supplier_idx").on(t.supplierId, t.effectiveFrom)],
 );
 
 /**
@@ -1517,6 +1640,8 @@ export const planGroups = sqliteTable(
 export const supplierImports = sqliteTable("supplier_imports", {
   id: text("id").primaryKey(),
   supplier: text("supplier").notNull(),
+  /** The register row the file's supplier name matched, so the catalogue hangs off the same supplier as the invoices. Null when nothing matched. */
+  supplierId: text("supplier_id"),
   fileName: text("file_name").notNull(),
   rowsRead: integer("rows_read").notNull().default(0),
   itemsAdded: integer("items_added").notNull().default(0),
@@ -1534,6 +1659,8 @@ export const supplierItems = sqliteTable(
   {
     id: text("id").primaryKey(),
     supplier: text("supplier").notNull(),
+    /** The register row this supplier name matched at import time. Null when nothing matched. */
+    supplierId: text("supplier_id"),
     ndc11: text("ndc11").notNull(),
     description: text("description"),
     /** Derived from the description so items can be compared across suppliers and against claims. */

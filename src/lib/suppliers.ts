@@ -8,6 +8,7 @@ import { parseCsv } from "./reference";
 import { parseClaimDate } from "./claims";
 import { readNdc } from "./ndc";
 import { heldNdcs } from "./ndc-held";
+import { allSuppliers, supplierRecordFor } from "./suppliers-registry";
 import { productKey } from "./product-key";
 import { parsePioneerCatalog, supplierFromFileName, dateFromFileName, type CatalogSection } from "./pioneer-catalog";
 
@@ -140,8 +141,12 @@ export async function importPioneerCatalog(file: Buffer, fileName: string, userI
   const suppliers: PioneerImportReport["suppliers"] = [];
   let rowsRead = 0;
 
+  // The register, so each section's prices hang off the same supplier row as its invoices.
+  const register = await allSuppliers(true);
   for (const section of parsed.sections) {
-    const r = await writeSection(section, fileName, pricedOn, userId);
+    const rec = supplierRecordFor(register, section.supplier);
+    if (!rec) problems.push(`${section.supplier} is not on the supplier register, so its prices are stored under the name alone. Add the supplier (with "${section.supplier}" as its catalogue name) to tie the catalogue to their invoices and terms.`);
+    const r = await writeSection(section, fileName, pricedOn, userId, rec?.id ?? null);
     importIds.push(r.importId);
     suppliers.push({ supplier: section.supplier, itemsAdded: r.added, itemsUpdated: r.updated, shortDated: r.shortDated, rebated: r.rebated });
     rowsRead += section.rows.length;
@@ -155,11 +160,12 @@ async function writeSection(
   fileName: string,
   pricedOn: string | null,
   userId: string,
+  supplierId: string | null,
 ): Promise<{ importId: string; added: number; updated: number; shortDated: number; rebated: number | null }> {
   const { supplier, rows } = section;
   const importId = newId();
   await db.insert(schema.supplierImports).values({
-    id: importId, supplier, fileName, rowsRead: rows.length, createdBy: userId,
+    id: importId, supplier, supplierId, fileName, rowsRead: rows.length, createdBy: userId,
   });
 
   const before = new Set(
@@ -204,6 +210,7 @@ async function writeSection(
     rows2.push({
       id: newId(),
       supplier,
+      supplierId,
       ndc11,
       description: pick.description,
       productKey: pick.productKey,
@@ -256,9 +263,10 @@ export async function importSupplierCatalog(
   const importId = newId();
   const skipReasons: Record<string, number> = {};
   const skip = (why: string) => { skipReasons[why] = (skipReasons[why] ?? 0) + 1; };
+  const supplierId = supplierRecordFor(await allSuppliers(true), supplier)?.id ?? null;
 
   await db.insert(schema.supplierImports).values({
-    id: importId, supplier, fileName, rowsRead: rows.length, createdBy: userId,
+    id: importId, supplier, supplierId, fileName, rowsRead: rows.length, createdBy: userId,
   });
 
   // Rows are gathered first and written in bulk. Doing it one price at a time meant a large
@@ -292,6 +300,7 @@ export async function importSupplierCatalog(
     rows2.push({
       id: newId(),
       supplier,
+      supplierId,
       ndc11,
       description,
       productKey: key,
@@ -466,6 +475,30 @@ export async function catalogSchedule(): Promise<{ supplier: string; lastAt: str
     const i = seen.get(supplier);
     return { supplier, lastAt: i?.createdAt ?? null, fileName: i?.fileName ?? null, rowsRead: i?.rowsRead ?? null, pricedOn: i?.pricedOn ?? null };
   });
+}
+
+/**
+ * The catalogue as it stands per register supplier: how many prices, from which file, as of when.
+ *
+ * Keyed on the register row rather than the name, which is the whole point of the link — a
+ * McKesson catalogue and a McKesson invoice now answer to the same supplier on one card.
+ */
+export async function catalogSummaryBySupplier(): Promise<Map<string, { items: number; lastAt: string; pricedOn: string | null; fileName: string }>> {
+  const [counts, imports] = await Promise.all([
+    db
+      .select({ supplierId: schema.supplierItems.supplierId, items: sql<number>`count(*)` })
+      .from(schema.supplierItems)
+      .groupBy(schema.supplierItems.supplierId),
+    db.query.supplierImports.findMany({ orderBy: (i, { desc }) => [desc(i.createdAt)], limit: 500 }),
+  ]);
+  const out = new Map<string, { items: number; lastAt: string; pricedOn: string | null; fileName: string }>();
+  for (const c of counts) {
+    if (!c.supplierId) continue;
+    const latest = imports.find((i) => i.supplierId === c.supplierId);
+    if (!latest) continue;
+    out.set(c.supplierId, { items: Number(c.items), lastAt: latest.createdAt, pricedOn: latest.pricedOn, fileName: latest.fileName });
+  }
+  return out;
 }
 
 /** When a supplier price file last arrived, across every supplier. */
