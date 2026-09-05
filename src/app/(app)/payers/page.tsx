@@ -6,7 +6,9 @@ import { audit } from "@/lib/audit";
 import { importReference, referenceCounts, pbmDirectory, lookupBin, scanContracts } from "@/lib/reference";
 import { requireReimbursement } from "@/lib/features";
 import { PageHeader, Notice, Empty, Field } from "@/components/ui";
+import { SubmitButton } from "@/components/submit-button";
 import { unknownBins, nameBin } from "@/lib/unknown-bins";
+import { indexContracts, searchContracts, contractsForUnknownBins, contractIndexState, type ContractHit } from "@/lib/contract-search";
 
 export const metadata = { title: "Payers" };
 export const dynamic = "force-dynamic";
@@ -27,6 +29,18 @@ export default async function PayersPage({ searchParams }: { searchParams: Promi
    */
   const gaps = await unknownBins();
   const canManage = user.role !== "staff";
+  /*
+   * Which contract on file names each unnamed BIN.
+   *
+   * The numbers come from the claims and the answers are in the PDFs, and nothing had ever put the
+   * two in the same room — so eighteen BINs went unnamed while the contracts naming them sat on the
+   * same disk.
+   */
+  const [inContracts, indexState] = await Promise.all([
+    contractsForUnknownBins(gaps.map((g) => g.bin)),
+    contractIndexState(),
+  ]);
+  const found = q?.trim() ? await searchContracts(q) : null;
   const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   const needle = (q ?? "").trim().toLowerCase();
@@ -57,6 +71,26 @@ export default async function PayersPage({ searchParams }: { searchParams: Promi
       if (e && typeof e === "object" && "digest" in e) throw e; // redirect() throws; let it through
       redirect("/payers?error=" + encodeURIComponent(e instanceof Error ? e.message : "Import failed."));
     }
+  }
+
+  /** Reads every contract PDF in the data folder and keeps its words, so they can be searched. */
+  async function reindex() {
+    "use server";
+    const u = await requireManager();
+    const r = await indexContracts();
+    await audit({ action: "contracts.index", userId: u.id, userName: u.name, details: `${r.indexed} read of ${r.files}` });
+    revalidatePath("/payers");
+    redirect(
+      "/payers?imported=" +
+        encodeURIComponent(
+          r.files === 0
+            ? "No contract PDFs were found. They belong in the contracts folder inside the data directory."
+            : `${r.indexed} contract${r.indexed === 1 ? "" : "s"} read${r.unchanged ? `, ${r.unchanged} unchanged since last time` : ""}` +
+              (r.scans ? `. ${r.scans} ${r.scans === 1 ? "is a scan with no text in it and cannot be searched" : "are scans with no text in them and cannot be searched"}` : "") +
+              (r.problems.length ? `. ${r.problems[0]}` : "") +
+              ".",
+        ),
+    );
   }
 
   /** Names a BIN and attributes every claim already held under it. */
@@ -99,6 +133,69 @@ export default async function PayersPage({ searchParams }: { searchParams: Promi
         belongs to: a BIN wrongly attributed is worse than an unnamed one, because an appeal sent to
         the wrong PBM is a rate the pharmacy then believes it has challenged.
       */}
+      {/*
+        Searching the contracts, which until now were filed and never opened.
+
+        A filing cabinet is not a record. The question actually asked of a contract is "which one
+        covers this BIN", and answering it meant opening twenty PDFs by hand.
+      */}
+      <section className="mb-6 rounded-lg border border-line bg-surface p-4">
+        <h2 className="text-sm font-semibold">Search the contracts on file</h2>
+        <p className="mt-1 text-xs text-ink-2">
+          {indexState.files === 0 ? (
+            <>
+              Nothing has been read yet. The contract PDFs live in <code>data/contracts/</code>; press below and their
+              words are kept so a BIN, PCN or group number can be traced to the agreement that covers it.
+            </>
+          ) : (
+            <>
+              {indexState.withText} contract{indexState.withText === 1 ? "" : "s"} readable
+              {indexState.scans > 0 && (
+                <>
+                  , {indexState.scans} {indexState.scans === 1 ? "is a scan" : "are scans"} with no text in them — those
+                  cannot be searched and have to be read by eye
+                </>
+              )}
+              .
+            </>
+          )}
+        </p>
+        <div className="mt-2 flex flex-wrap items-end gap-2">
+          <form method="get" className="flex flex-wrap items-end gap-2">
+            <input name="q" defaultValue={q ?? ""} className="field w-72 py-1.5 text-sm" placeholder="A BIN, PCN, group number or a plan's name" />
+            <button className="btn btn-sm btn-primary">Search</button>
+          </form>
+          {canManage && (
+            <form action={reindex}>
+              <SubmitButton className="btn btn-sm" pendingLabel="Reading the contracts…">
+                {indexState.files === 0 ? "Read the contracts" : "Read them again"}
+              </SubmitButton>
+            </form>
+          )}
+        </div>
+        {found && (
+          <div className="mt-3">
+            {found.length === 0 ? (
+              <p className="text-sm text-ink-2">
+                Nothing on file contains &ldquo;{q}&rdquo;.
+                {indexState.withText === 0 && " Nothing has been read yet — press the button above first."}
+              </p>
+            ) : (
+              <ul className="rows text-sm">
+                {found.map((h) => (
+                  <li key={h.fileName} className="py-2">
+                    <b>{h.fileName}</b> <span className="text-xs text-ink-3">· {h.matches} mention{h.matches === 1 ? "" : "s"}</span>
+                    {h.snippets.map((sn, i) => (
+                      <p key={i} className="mt-0.5 text-xs text-ink-2">&hellip;{sn}&hellip;</p>
+                    ))}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </section>
+
       {gaps.length > 0 && (
         <section className="mb-6 rounded-lg border border-warn bg-surface p-4">
           <h2 className="text-sm font-semibold text-warn">
@@ -127,6 +224,20 @@ export default async function PayersPage({ searchParams }: { searchParams: Promi
                     <td className="text-xs text-ink-2">
                       {g.labels.length ? g.labels.join(", ") : <span className="text-ink-3">the claim carried no payer name</span>}
                       {g.lastSeen && <span className="block text-ink-3">last seen {g.lastSeen}</span>}
+                      {/*
+                        The answer, where it is already on this disk.
+
+                        A hit is a fact — this contract contains this number — and the sentence
+                        around it is shown so a person decides what it means. Nothing here concludes
+                        that the contract *is* the payer: a BIN wrongly attributed is worse than an
+                        unnamed one.
+                      */}
+                      {(inContracts.get(g.bin) ?? []).map((h: ContractHit) => (
+                        <span key={h.fileName} className="mt-1 block text-accent">
+                          in {h.fileName}
+                          {h.snippets[0] && <span className="block text-ink-3">&hellip;{h.snippets[0].slice(0, 160)}&hellip;</span>}
+                        </span>
+                      ))}
                     </td>
                     <td>
                       {canManage && (

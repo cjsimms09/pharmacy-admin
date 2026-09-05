@@ -1304,6 +1304,34 @@ export const payerBins = sqliteTable(
   (t) => [index("payer_bins_bin_idx").on(t.bin), index("payer_bins_pbm_idx").on(t.pbmName)],
 );
 
+/**
+ * The words inside each contract PDF, so the contracts can be searched.
+ *
+ * They were filed, matched to a checklist and never opened. That is a filing cabinet, not a
+ * record: the question actually asked of a contract is "which one covers BIN 610011", and the
+ * only way to answer it was to open twenty PDFs by hand — which is why eighteen BINs went unnamed
+ * while the contracts naming them sat on the same disk.
+ *
+ * Keyed on the file rather than on a checklist row, so a contract that arrived before anybody
+ * added it to the checklist is searchable too. The text is a copy of what is already on disk, so
+ * it can be rebuilt at any time and nothing is lost if it is dropped.
+ */
+export const contractText = sqliteTable(
+  "contract_text",
+  {
+    id: text("id").primaryKey(),
+    fileName: text("file_name").notNull(),
+    /** The checklist row this file was matched to, where it was matched to one. */
+    contractDocId: text("contract_doc_id"),
+    sha256: text("sha256").notNull(),
+    /** How many characters came out. Zero means a scan with no text layer. */
+    chars: integer("chars").notNull().default(0),
+    body: text("body").notNull().default(""),
+    indexedAt: text("indexed_at").notNull().default(now()),
+  },
+  (t) => [index("contract_text_file_idx").on(t.fileName)],
+);
+
 /** Every document known to exist, whether or not its file has arrived. Drives the checklist. */
 export const contractDocs = sqliteTable(
   "contract_docs",
