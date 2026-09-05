@@ -53,11 +53,39 @@ function inForce<T extends { effectiveFrom: string; effectiveTo: string | null }
   return rows.filter((r) => r.effectiveFrom <= on && (r.effectiveTo === null || r.effectiveTo >= on)).sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom))[0] ?? null;
 }
 
+/**
+ * The programme that prices a purchase, where a supplier runs more than one at once.
+ *
+ * McKesson runs two: a compliance ladder that pays on the items its catalogue marks as contract
+ * items, and a purchase-ratio ladder that pays on generics generally. Only the first can price a
+ * particular line, because only the first says which lines it applies to — so where several are in
+ * force, the one whose eligibility is the catalogue's own rebate flag wins, and the latest
+ * effective date breaks any remaining tie. Returning whichever happened to sort first would have
+ * meant a generic priced against a ladder that pays nothing below a seventy-five percent ratio.
+ */
 export async function currentRebateProgram(supplierId: string, on = todayIso()): Promise<{ row: RebateProgramRow; terms: RebateTermsT } | null> {
-  const row = inForce(await rebateProgramsFor(supplierId), on);
-  if (!row) return null;
-  const terms = readRebateTerms(row.termsJson);
-  return terms ? { row, terms } : null;
+  const rows = (await rebateProgramsFor(supplierId)).filter(
+    (r) => r.effectiveFrom <= on && (r.effectiveTo === null || r.effectiveTo >= on),
+  );
+  const withTerms = rows
+    .map((row) => ({ row, terms: readRebateTerms(row.termsJson) }))
+    .filter((x): x is { row: RebateProgramRow; terms: RebateTermsT } => x.terms !== null);
+  if (withTerms.length === 0) return null;
+  return (
+    withTerms
+      .sort((a, b) => {
+        const flag = (x: typeof a) => (x.terms.eligibility === "catalog_rebate_flag" ? 0 : 1);
+        return flag(a) - flag(b) || b.row.effectiveFrom.localeCompare(a.row.effectiveFrom);
+      })[0] ?? null
+  );
+}
+
+/** Every programme in force on a date — a supplier can run more than one. */
+export async function rebateProgramsInForce(supplierId: string, on = todayIso()): Promise<{ row: RebateProgramRow; terms: RebateTermsT }[]> {
+  return (await rebateProgramsFor(supplierId))
+    .filter((r) => r.effectiveFrom <= on && (r.effectiveTo === null || r.effectiveTo >= on))
+    .map((row) => ({ row, terms: readRebateTerms(row.termsJson) }))
+    .filter((x): x is { row: RebateProgramRow; terms: RebateTermsT } => x.terms !== null);
 }
 
 export async function currentReturnPolicy(supplierId: string, on = todayIso()): Promise<{ row: ReturnPolicyRow; terms: ReturnTermsT } | null> {
@@ -84,8 +112,21 @@ export async function saveRebateProgram(supplierId: string, input: SaveTermsInpu
   if (!name) throw new Error("Give the programme the name the supplier uses for it.");
   if (!isIsoDate(input.effectiveFrom)) throw new Error("Give the date the schedule takes effect.");
 
+  /*
+   * One supplier can run more than one programme at once, so a version is identified by its name
+   * as well as its date.
+   *
+   * McKesson pays on two ladders: a generic compliance rate and a generic purchase ratio, both
+   * effective the same month. Keyed on the date alone, filing the second silently replaced the
+   * first — and the one lost was the compliance ladder, the only one that actually pays. Nothing
+   * said so; the supplier's card simply showed one programme where there should have been two.
+   */
   const same = await db.query.supplierRebatePrograms.findFirst({
-    where: and(eq(schema.supplierRebatePrograms.supplierId, supplierId), eq(schema.supplierRebatePrograms.effectiveFrom, input.effectiveFrom)),
+    where: and(
+      eq(schema.supplierRebatePrograms.supplierId, supplierId),
+      eq(schema.supplierRebatePrograms.effectiveFrom, input.effectiveFrom),
+      eq(schema.supplierRebatePrograms.name, name),
+    ),
   });
   const json = JSON.stringify(parsed.data);
   if (same) {
@@ -95,10 +136,18 @@ export async function saveRebateProgram(supplierId: string, input: SaveTermsInpu
       .where(eq(schema.supplierRebatePrograms.id, same.id));
     return same.id;
   }
+  // Close only the earlier version *of this programme*, not every programme the supplier runs.
   await db
     .update(schema.supplierRebatePrograms)
     .set({ effectiveTo: dayBefore(input.effectiveFrom), updatedAt: new Date().toISOString() })
-    .where(and(eq(schema.supplierRebatePrograms.supplierId, supplierId), isNull(schema.supplierRebatePrograms.effectiveTo), lt(schema.supplierRebatePrograms.effectiveFrom, input.effectiveFrom)));
+    .where(
+      and(
+        eq(schema.supplierRebatePrograms.supplierId, supplierId),
+        eq(schema.supplierRebatePrograms.name, name),
+        isNull(schema.supplierRebatePrograms.effectiveTo),
+        lt(schema.supplierRebatePrograms.effectiveFrom, input.effectiveFrom),
+      ),
+    );
   const id = newId();
   await db.insert(schema.supplierRebatePrograms).values({
     id,

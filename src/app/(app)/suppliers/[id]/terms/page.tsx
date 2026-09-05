@@ -19,6 +19,7 @@ import {
   type ReturnTermsT,
 } from "@/lib/supplier-terms";
 import { rebateProgramsFor, returnPoliciesFor, saveRebateProgram, saveReturnPolicy } from "@/lib/supplier-terms-store";
+import { lastRebateStatement } from "@/lib/rebate-report-store";
 import { PageHeader, Card, Notice, Field } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -52,6 +53,9 @@ export default async function SupplierTermsPage({
   const canManage = user.role !== "staff";
 
   const [rebates, returns] = await Promise.all([rebateProgramsFor(id), returnPoliciesFor(id)]);
+  // The proof, where this supplier's ladder was read from a report rather than typed.
+  const filed = await lastRebateStatement();
+  const statement = filed && /mckesson/i.test(supplier.name) ? filed : null;
   const today = todayIso();
   const currentRebate = rebates.find((r) => r.effectiveFrom <= today && (r.effectiveTo === null || r.effectiveTo >= today)) ?? rebates[0] ?? null;
   const currentReturn = returns.find((r) => r.effectiveFrom <= today && (r.effectiveTo === null || r.effectiveTo >= today)) ?? returns[0] ?? null;
@@ -133,11 +137,57 @@ export default async function SupplierTermsPage({
       <PageHeader
         back={{ href: "/suppliers", label: "Suppliers" }}
         title={`${supplier.name} — rebate and return terms`}
-        subtitle="Typed in from the agreement, with the date each took effect. Earlier versions are kept: a rebate paid last quarter was earned under last quarter's schedule."
+        subtitle="From the agreement, or read off the supplier's own rebate report, with the date each took effect. Earlier versions are kept: a rebate paid last quarter was earned under last quarter's schedule."
       />
 
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
+
+      {/*
+        Where the ladder came from, and the arithmetic that says it was read correctly.
+        "How do I know it did it right" is a fair question about eleven bands nobody typed, and an
+        answer nobody can see is not an answer. So the checks the report passed are shown, with the
+        document beside them: the achieved rate must land in a band paying what the statement says
+        it paid, and that rate on those purchases must be the money at the bottom of the page.
+      */}
+      {statement && (
+        <Card
+          className="mb-4"
+          title="Read from the supplier's own rebate report"
+          subtitle={
+            statement.periodFrom
+              ? `The breakdown for ${fmt(statement.periodFrom)}${statement.filedAt ? `, filed ${fmt(statement.filedAt.slice(0, 10))}` : ""}. Nothing here was typed.`
+              : "Nothing here was typed."
+          }
+        >
+          <ul className="space-y-1 text-sm">
+            {(statement.checks ?? []).map((c) => (
+              <li key={c.what} className="flex gap-2">
+                <span className={`badge ${c.ok ? "badge-ok" : "badge-crit"}`}>{c.ok ? "agrees" : "does not agree"}</span>
+                <span className="text-ink-2">{c.detail}</span>
+              </li>
+            ))}
+          </ul>
+          {(statement.standing ?? []).length > 0 && (
+            <div className="mt-3 rounded-md border border-line bg-ground p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-ink-3">Where this leaves you</p>
+              <ul className="mt-1 space-y-1 text-sm text-ink-2">
+                {(statement.standing ?? []).map((l) => <li key={l}>{l}</li>)}
+              </ul>
+            </div>
+          )}
+          <p className="mt-3 text-xs text-ink-3">
+            {statement.tierCount ? `${statement.tierCount} bands were read off it. ` : ""}
+            {statement.documentId ? (
+              <a href={`/files/${statement.documentId}`} target="_blank" rel="noreferrer" className="text-accent underline">
+                Open the report this came from
+              </a>
+            ) : (
+              "The report itself was not kept as a document — it arrived before that was recorded."
+            )}
+          </p>
+        </Card>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card title="Rebate schedule" subtitle={rebateTerms ? `${currentRebate!.name}, in force from ${fmt(currentRebate!.effectiveFrom)}.` : "Nothing recorded yet, so a comparison cannot take any rebate off this supplier's prices."}>

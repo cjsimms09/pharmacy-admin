@@ -181,7 +181,24 @@ export async function fileRebateReport(
     );
   }
 
-  await setSetting("mck_rebate_last_statement", JSON.stringify({ ...s, filedAt: new Date().toISOString() }));
+  /*
+   * The statement, the checks it passed and where it leaves the pharmacy, kept together.
+   *
+   * The checks are the answer to "how do I know it read it right", and an answer nobody can see is
+   * not an answer. Stored beside the figures so the supplier's own page can show the arithmetic
+   * rather than asking anybody to take it on trust.
+   */
+  await setSetting(
+    "mck_rebate_last_statement",
+    JSON.stringify({
+      ...s,
+      filedAt: new Date().toISOString(),
+      documentId: meta.documentId ?? null,
+      checks: report.checks,
+      standing: whereYouStand(report).lines,
+      tierCount: report.ladder.gcr.length,
+    }),
+  );
 
   return {
     stored: true,
@@ -202,11 +219,19 @@ const dollarsOf = (c: number | null) =>
   c === null ? "an unread figure" : `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 /** The last statement filed, for the page that shows where the rate came from. */
-export async function lastRebateStatement(): Promise<(RebateReport["statement"] & { filedAt?: string }) | null> {
+export type FiledStatement = RebateReport["statement"] & {
+  filedAt?: string;
+  documentId?: string | null;
+  checks?: { what: string; ok: boolean; detail: string }[];
+  standing?: string[];
+  tierCount?: number;
+};
+
+export async function lastRebateStatement(): Promise<FiledStatement | null> {
   const raw = (await getSettings()).mck_rebate_last_statement;
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as RebateReport["statement"] & { filedAt: string };
+    return JSON.parse(raw) as FiledStatement;
   } catch {
     return null;
   }
