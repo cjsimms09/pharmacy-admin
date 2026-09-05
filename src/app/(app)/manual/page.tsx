@@ -39,6 +39,7 @@ import {
   requeueChapter,
 } from "@/lib/manual-audit";
 import { manualJob, startPutRight, runPutRight, isRunning, isStale, summarise, ago } from "@/lib/manual-job";
+import { decisionsOutstanding } from "@/lib/practice-decisions";
 import { acknowledgementBoard, settleVersions } from "@/lib/manual-acknowledgement";
 import { estimateSentence } from "@/lib/ai-spend";
 import { pharmacyFacts, namedRoles } from "@/lib/pharmacy-facts";
@@ -111,12 +112,13 @@ export default async function ManualPage({
    * against sections he cannot edit, and the only way to stop them was to know about a control he
    * had never seen. It belongs next to the findings, which is where the problem is felt.
    */
-  const [ack, stuck, facts, roles, blocked] = await Promise.all([
+  const [ack, stuck, facts, roles, blocked, undecided] = await Promise.all([
     acknowledgementBoard(),
     auditFailures(),
     pharmacyFacts(),
     namedRoles(),
     blockedOnFacts(),
+    decisionsOutstanding(),
   ]);
   const theirs = await findingsForOthers();
   const sections = outline(rows);
@@ -1194,21 +1196,49 @@ export default async function ManualPage({
               </form>
             )}
 
-            {canManage && blocked > 0 && (
+            {/*
+              The questions behind the findings, with somewhere to answer them.
+
+              "Decide this yourself" was the whole of what these findings said, and there was
+              nowhere to decide. So they came back unchanged on every pass and the list stopped
+              being read. The decisions page asks each one once, with the sentence it would put in
+              the manual, and answering puts the waiting sections straight back in the queue.
+            */}
+            {canManage && (blocked > 0 || undecided > 0) && (
               <div className="mt-4 rounded-md border border-accent bg-accent-soft p-3">
                 <p className="text-sm font-semibold text-accent">
-                  {blocked} finding{blocked === 1 ? "" : "s"} said only &ldquo;decide this yourself&rdquo;
+                  {undecided > 0
+                    ? `${undecided} thing${undecided === 1 ? "" : "s"} only you can settle`
+                    : `${blocked} finding${blocked === 1 ? "" : "s"} said only “decide this yourself”`}
                 </p>
                 <p className="mt-1 text-xs text-ink-2">
-                  Those are the ones the reviewer could not write because a fact was missing. Supplying the facts does
-                  not re-open them on its own — the sections were read, so they are not due again for a year. This puts
-                  exactly those sections back in the queue and closes the findings as superseded rather than dismissed.
+                  {undecided > 0 ? (
+                    <>
+                      How often expiry is checked, what date the biennial inventory is anchored to, whether a second
+                      person verifies a count — the reviewer will not invent any of these, and raises each one as a
+                      finding until it is told. Answer them once and it writes the text instead of asking.
+                    </>
+                  ) : (
+                    <>
+                      Those are the ones the reviewer could not write because a fact was missing. Supplying the facts
+                      does not re-open them on its own — the sections were read, so they are not due again for a year.
+                      This puts exactly those sections back in the queue and closes the findings as superseded rather
+                      than dismissed.
+                    </>
+                  )}
                 </p>
-                <form action={rereadAction} className="mt-2">
-                  <SubmitButton className="btn btn-sm btn-primary" pendingLabel="Putting them back…">
-                    Read those sections again
-                  </SubmitButton>
-                </form>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <Link href="/manual/decisions" className="btn btn-sm btn-primary">
+                    {undecided > 0 ? `Answer ${undecided === 1 ? "it" : "them"}` : "How this pharmacy works"}
+                  </Link>
+                  {blocked > 0 && (
+                    <form action={rereadAction}>
+                      <SubmitButton className="btn btn-sm" pendingLabel="Putting them back…">
+                        Read those sections again
+                      </SubmitButton>
+                    </form>
+                  )}
+                </div>
               </div>
             )}
           </Card>

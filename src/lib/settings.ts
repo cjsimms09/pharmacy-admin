@@ -116,6 +116,12 @@ export const SETTING_KEYS = [
    * the panel says where the record is rather than that there is none, and stops asking.
    */
   "receipt_record_kept_in",
+  /*
+   * How this pharmacy actually works, on the handful of points its manual depends on — one JSON
+   * row rather than a column per question, because the list changes as the manual does and a
+   * migration per question is a reason not to ask one. See practice-decisions.ts.
+   */
+  "practice_decisions",
   "mail_supplier_rules", // one per line: a sender or subject fragment, then "=", then a supplier name
   // Off by default. The reimbursement side is built and tested but waiting on data that has to
   // come from outside, and half-working pages in the daily path are a daily irritation.

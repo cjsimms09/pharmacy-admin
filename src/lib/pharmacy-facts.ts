@@ -167,5 +167,25 @@ export async function pharmacyFacts(): Promise<FactSheet> {
       "rotation. It does not provide medical care to anyone, including its own employees.",
   );
 
+  /*
+   * How the pharmacy actually works, where it has said.
+   *
+   * These are the answers to the questions the reviewer kept having to ask back — the inventory
+   * anniversary, whether a perpetual count is kept, how often expiry is checked. Each answered one
+   * arrives as a sentence in the pharmacy's own voice; an unanswered one contributes nothing, so
+   * the reviewer goes on refusing to guess rather than being handed a default.
+   */
+  const { decisionFacts, decisionsOutstanding } = await import("./practice-decisions");
+  const decided = await decisionFacts();
+  if (decided.length) lines.push("How this pharmacy works, as it has decided:", ...decided);
+  const outstanding = await decisionsOutstanding();
+  if (outstanding > 0) {
+    missing.push({
+      what: `${outstanding} decision${outstanding === 1 ? "" : "s"} about how this pharmacy works`,
+      why: "Sections of the manual that depend on them cannot be written, and the reviewer will keep raising them as things the pharmacy has to settle.",
+      href: "/manual/decisions",
+    });
+  }
+
   return { text: lines.join(" "), missing };
 }
