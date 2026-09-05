@@ -55,5 +55,7 @@ CREATE TABLE `supplier_return_policies` (
 --> statement-breakpoint
 CREATE INDEX `supplier_return_policies_supplier_idx` ON `supplier_return_policies` (`supplier_id`,`effective_from`);--> statement-breakpoint
 ALTER TABLE `supplier_imports` ADD `supplier_id` text;--> statement-breakpoint
+ALTER TABLE `supplier_invoices` ADD `lines_read` integer;--> statement-breakpoint
+ALTER TABLE `supplier_invoices` ADD `lines_unread` integer;--> statement-breakpoint
 ALTER TABLE `supplier_items` ADD `supplier_id` text;--> statement-breakpoint
 ALTER TABLE `suppliers` ADD `catalog_name` text;

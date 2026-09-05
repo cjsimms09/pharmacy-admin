@@ -401,14 +401,8 @@ export async function fileInvoice(
    * true of inferring a schedule from drug names. The model is the fallback for the cases the
    * rule cannot settle: a scan, an unfamiliar layout, a supplier who prints no class at all.
    */
-  const fromText = (() => {
-    try {
-      const text = pdfText(buf);
-      return text.length > 200 ? classifyInvoiceText(text) : null;
-    } catch {
-      return null;
-    }
-  })();
+  const text = textOf(buf);
+  const fromText = text ? classifyInvoiceText(text) : null;
 
   if (fromText?.confident) {
     schedule = fromText.schedule;
@@ -483,8 +477,101 @@ export async function fileInvoice(
     needsReview: !confident,
     receivedFrom: meta.from,
   });
+  if (text) await writeInvoiceLines(id, text);
 
   return { id, documentId, schedule, needsReview: !confident };
+}
+
+/** The invoice as text, or null for a scan with no text layer. Short text is treated as none. */
+function textOf(buf: Buffer): string | null {
+  try {
+    const text = pdfText(buf);
+    return text.length > 200 ? text : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reads the item lines as numbers and stores them against the invoice.
+ *
+ * Replaces whatever lines the invoice had, so reading again after the reader improves gives the
+ * improved answer and never two copies. The counts on the invoice say how far the read got: an
+ * invoice with twelve lines read and three unread is a different fact from one with twelve lines.
+ */
+export async function writeInvoiceLines(invoiceId: string, text: string): Promise<{ read: number; unread: number }> {
+  const { parseInvoiceLines } = await import("./invoice-lines");
+  const parsed = parseInvoiceLines(text);
+  await db.delete(schema.supplierInvoiceLines).where(eq(schema.supplierInvoiceLines.invoiceId, invoiceId));
+  const rows = parsed.lines.map((l) => ({
+    id: newId(),
+    invoiceId,
+    lineNumber: l.lineNumber,
+    kind: l.kind,
+    ndc11: l.ndc11,
+    rawNdc: l.rawNdc,
+    supplierItemNumber: null,
+    description: l.description,
+    quantity: l.quantity,
+    unit: l.unit,
+    unitPriceCents: l.unitPriceCents,
+    extendedCents: l.extendedCents,
+    awpCents: l.awpCents,
+    itemClass: l.itemClass,
+  }));
+  for (let i = 0; i < rows.length; i += 200) await db.insert(schema.supplierInvoiceLines).values(rows.slice(i, i + 200));
+  await db
+    .update(schema.supplierInvoices)
+    .set({ linesRead: parsed.lines.length, linesUnread: parsed.unread })
+    .where(eq(schema.supplierInvoices.id, invoiceId));
+  return { read: parsed.lines.length, unread: parsed.unread };
+}
+
+/** The lines of one invoice, in printed order. */
+export async function invoiceLines(invoiceId: string) {
+  return db.query.supplierInvoiceLines.findMany({
+    where: eq(schema.supplierInvoiceLines.invoiceId, invoiceId),
+    orderBy: (l, { asc }) => [asc(l.lineNumber)],
+  });
+}
+
+/**
+ * Reads the lines off every invoice the line reader has not been run on.
+ *
+ * Every invoice filed before lines were kept has none, and the PDF is still here to ask. The same
+ * reader runs, so an invoice in a layout it does not know comes back with partial lines or none,
+ * and says so on the row rather than pretending.
+ */
+export async function backfillInvoiceLines(): Promise<{ invoices: number; linesRead: number; unreadable: number }> {
+  const rows = await db.query.supplierInvoices.findMany({ where: isNull(schema.supplierInvoices.linesRead) });
+  const { readFile } = await import("./files");
+  let invoicesDone = 0;
+  let linesRead = 0;
+  let unreadable = 0;
+  for (const row of rows) {
+    const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, row.documentId) });
+    if (!doc) continue;
+    try {
+      const text = textOf(await readFile(doc.storageKey));
+      if (!text) {
+        // A scan. Recorded as read with nothing found, so it is not asked again every time.
+        await db.update(schema.supplierInvoices).set({ linesRead: 0, linesUnread: 0 }).where(eq(schema.supplierInvoices.id, row.id));
+        unreadable++;
+        continue;
+      }
+      const r = await writeInvoiceLines(row.id, text);
+      invoicesDone++;
+      linesRead += r.read;
+    } catch {
+      unreadable++;
+    }
+  }
+  return { invoices: invoicesDone, linesRead, unreadable };
+}
+
+/** How many invoices the line reader has never been run on. */
+export async function invoicesWithoutLines(): Promise<number> {
+  return (await db.query.supplierInvoices.findMany({ where: isNull(schema.supplierInvoices.linesRead), columns: { id: true } })).length;
 }
 
 /** Corrects, or confirms, what an invoice carries. The one action that must always be available. */
@@ -1022,14 +1109,8 @@ export async function adoptDocument(documentId: string, ctx: { userId: string; u
   const { readFile } = await import("./files");
   const buf = await readFile(doc.storageKey);
 
-  const fromText = (() => {
-    try {
-      const text = pdfText(buf);
-      return text.length > 200 ? classifyInvoiceText(text) : null;
-    } catch {
-      return null;
-    }
-  })();
+  const text = textOf(buf);
+  const fromText = text ? classifyInvoiceText(text) : null;
 
   let schedule: InvoiceSchedule = fromText?.confident ? fromText.schedule : "unknown";
   let basis = fromText?.confident
@@ -1088,6 +1169,7 @@ export async function adoptDocument(documentId: string, ctx: { userId: string; u
     needsReview: !(fromText?.confident ?? false) && schedule === "unknown",
     receivedFrom: doc.notes ?? null,
   });
+  if (text) await writeInvoiceLines(id, text);
 
   return { id, documentId, schedule, needsReview: schedule === "unknown" };
 }

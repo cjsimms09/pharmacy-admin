@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "744c9577-95f1-4eaa-8057-f2d95011cd16",
+  "id": "0a3c6372-db6f-444c-a0c0-b75281ad63a8",
   "prevId": "ed391f41-e0e4-4cad-a531-e8262e46f477",
   "tables": {
     "audit_events": {
@@ -4931,6 +4931,20 @@
         },
         "total_cents": {
           "name": "total_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lines_read": {
+          "name": "lines_read",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lines_unread": {
+          "name": "lines_unread",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,

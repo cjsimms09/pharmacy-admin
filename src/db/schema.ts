@@ -768,6 +768,13 @@ export const supplierInvoices = sqliteTable(
      * up.
      */
     totalCents: integer("total_cents"),
+    /**
+     * How many item lines were read as numbers into supplier_invoice_lines, and how many carried
+     * an NDC the reader could not place. Null on an invoice the line reader has not been run on,
+     * which is different from zero lines read. See invoice-lines.ts.
+     */
+    linesRead: integer("lines_read"),
+    linesUnread: integer("lines_unread"),
     /** The supplier record this came from, where one is known. */
     supplierId: text("supplier_id"),
     /** Set until a person has confirmed anything the reader was unsure about. */

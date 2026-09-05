@@ -23,6 +23,8 @@ import {
   setInvoiceTotal,
   backfillTotals,
   missingTotals,
+  backfillInvoiceLines,
+  invoicesWithoutLines,
   recordReceipt,
   awaitingReceipt,
   sumOf,
@@ -129,6 +131,7 @@ export default async function InvoicesPage({
     invoiceCompliance(),
   ]);
   const noAmountCount = await missingTotals();
+  const noLinesCount = await invoicesWithoutLines();
   const unreceipted = await awaitingReceipt();
   const onlyUnreceipted = sp.unreceipted === "1";
   const compliance = complianceRows;
@@ -221,6 +224,27 @@ export default async function InvoicesPage({
               (r.stillMissing > 0
                 ? ` ${r.stillMissing} still print no total that can be read — type those in below.`
                 : " Every invoice now has an amount."),
+        ),
+    );
+  }
+
+  /**
+   * Reads the item lines as numbers off every invoice they have not been read from.
+   *
+   * The lines were kept as text to be searched; what was bought — NDC, quantity, price — is what
+   * every purchasing question starts from, and the PDFs are still here to ask.
+   */
+  async function readLines() {
+    "use server";
+    const u = await requireManager();
+    const r = await backfillInvoiceLines();
+    await audit({ action: "invoice.lines.backfill", userId: u.id, userName: u.name, details: `${r.invoices} invoices, ${r.linesRead} lines` });
+    revalidatePath("/inventory/invoices");
+    redirect(
+      "/inventory/invoices?ok=" +
+        encodeURIComponent(
+          `${r.linesRead.toLocaleString()} item line${r.linesRead === 1 ? "" : "s"} read off ${r.invoices} invoice${r.invoices === 1 ? "" : "s"}.` +
+            (r.unreadable > 0 ? ` ${r.unreadable} ${r.unreadable === 1 ? "is a scan" : "are scans"} with no text to read.` : ""),
         ),
     );
   }
@@ -465,6 +489,29 @@ export default async function InvoicesPage({
         </Card>
       )}
 
+      {noLinesCount > 0 && canManage && (
+        <Card
+          tone="warn"
+          title={`${noLinesCount} invoice${noLinesCount === 1 ? " has" : "s have"} not had ${noLinesCount === 1 ? "its" : "their"} item lines read as numbers`}
+          subtitle="What was bought — NDC, quantity, unit price, extended amount — is kept per line so purchases can be added up by product, checked against the catalogue price, and counted toward a rebate tier. Invoices filed before this existed have only the text."
+          className="mt-4 mb-6"
+          actions={
+            <form action={readLines}>
+              <SubmitButton className="btn btn-sm btn-primary" pendingLabel="Reading…">
+                Read the lines off the invoices
+              </SubmitButton>
+            </form>
+          }
+        >
+          <p className="text-xs text-ink-3">
+            Every column is read only in a layout this knows, which today is McKesson&apos;s. Other wholesalers&apos; lines are
+            read for the NDC and the amount, and marked as partial; nothing is assumed for a quantity or a price the
+            page did not print. Each invoice records how many lines were read and how many could not be, so a sum of
+            lines is never mistaken for the total of the invoice.
+          </p>
+        </Card>
+      )}
+
       <div className="mt-4 grid gap-3 sm:grid-cols-5">
         <Figure value={counts.schedule_2} label="Schedule II" sub="Kept apart from everything" href="/inventory/invoices?tab=schedule_2" tone={counts.schedule_2 ? "ok" : "muted"} />
         <Figure value={counts.schedule_3_5} label="Schedule III-V" sub="Also kept apart" href="/inventory/invoices?tab=schedule_3_5" tone="muted" />
@@ -674,6 +721,14 @@ export default async function InvoicesPage({
                             {filingFor(i.schedule).label}
                           </span>
                           {i.needsReview && !i.reviewedAt && <span className="badge badge-warn ml-1">unconfirmed</span>}
+                          {/* How much of the invoice is held as numbers, so a blank total on a
+                              product-by-product page traces back to this row. */}
+                          {i.linesRead !== null && (
+                            <span className="mt-1 block text-[11px] text-ink-3">
+                              {i.linesRead} line{i.linesRead === 1 ? "" : "s"} as numbers
+                              {i.linesUnread ? `, ${i.linesUnread} not read` : ""}
+                            </span>
+                          )}
                         </td>
                         <td className="max-w-[24rem] align-top whitespace-pre-wrap text-xs text-ink-2">
                           {i.controlledItems || <span className="text-ink-3">no controlled lines</span>}
