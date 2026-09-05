@@ -664,3 +664,32 @@ export async function rereadInboxItem(itemId: string, ctx: { userId: string; use
   await audit({ action: "inbox.reread", userId: ctx.userId, userName: ctx.userName, details: `${fileName}: ${text.slice(0, 200)}` });
   return text;
 }
+
+/**
+ * Reads again every stored, un-filed line from the given sender addresses.
+ *
+ * Called when a supplier's addresses are saved, so that setting the address once is the whole
+ * job: the invoice that arrived before the address was known is filed the moment the address is,
+ * with nobody pressing anything on the Inbox. Only lines that were stored and not already filed as
+ * invoices are touched; a bare domain matches the way it does on arrival.
+ */
+export async function rereadFromSenders(addresses: string[], ctx: { userId: string; userName: string }): Promise<{ read: number; filed: number }> {
+  const wanted = addresses.map((a) => a.trim().toLowerCase()).filter(Boolean);
+  if (wanted.length === 0) return { read: 0, filed: 0 };
+  const items = await db.query.inboxItems.findMany({ where: eq(schema.inboxItems.status, "stored"), orderBy: (i, { desc }) => [desc(i.receivedAt)], limit: 500 });
+  let read = 0;
+  let filed = 0;
+  for (const it of items) {
+    if (!it.documentId || it.routedAs === "invoice") continue;
+    const from = it.fromAddress.toLowerCase();
+    if (!wanted.some((a) => from.includes(a))) continue;
+    try {
+      const text = await rereadInboxItem(it.id, ctx);
+      read++;
+      if (/supplier invoice/i.test(text)) filed++;
+    } catch {
+      // One line that cannot be re-read must not stop the others.
+    }
+  }
+  return { read, filed };
+}

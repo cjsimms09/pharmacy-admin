@@ -36,6 +36,7 @@ import {
   applyFinding,
   dismissFinding,
   applyAllFindings,
+  requeueChapter,
 } from "@/lib/manual-audit";
 import { manualJob, startPutRight, runPutRight, isRunning, isStale, summarise, ago } from "@/lib/manual-job";
 import { acknowledgementBoard, settleVersions } from "@/lib/manual-acknowledgement";
@@ -602,6 +603,23 @@ export default async function ManualPage({
   }
 
   /** Puts the sections that were only waiting on a fact back into the queue. */
+  async function readChapterNow(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const id = String(fd.get("chapter") ?? "");
+    const n = await requeueChapter(id);
+    await audit({ action: "manual.chapter.reread", userId: u.id, userName: u.name, details: `${id}: ${n} sections` });
+    revalidatePath("/manual");
+    redirect(
+      "/manual?ok=" +
+        encodeURIComponent(
+          n === 0
+            ? "That chapter has no sections of the pharmacy's own to read."
+            : `${n} section${n === 1 ? "" : "s"} put back in the queue. Press “Put it right” and they are read in this pass.`,
+        ),
+    );
+  }
+
   async function rereadAction() {
     "use server";
     const u = await requireManager();
@@ -1246,62 +1264,89 @@ export default async function ManualPage({
           ))}
 
           {/*
-            Whose chapter is this, asked where the findings are.
+            What the audit reads, chapter by chapter, and how to change it.
 
-            Every finding here names a section. If a run of them is landing in a chapter the
-            pharmacy does not write, the answer is not to fix them one at a time — it is to say so
-            once. Marking a chapter takes it out of the audit, out of this list and out of the
-            annual review, and moves what was already found into the panel addressed to whoever
-            does maintain it. Nothing is deleted and the chapter still prints as part of the manual.
+            The earlier version of this asked "is any of this somebody else's?" only once findings
+            had piled up in a chapter, and offered one button whose meaning depended on whether a
+            box was filled in. The pharmacist could not tell which chapters were being read, could
+            not exclude one that had no findings yet, and could not ask for one to be read. So this
+            is the whole list, always: every chapter, what the audit does with it, and two plain
+            actions — hand it to whoever maintains it, or read it now.
           */}
-          {findings.length > 0 && canManage && (() => {
-            const byChapter = new Map<string, { title: string; count: number }>();
+          {canManage && (() => {
+            const chapters = sections.filter((x) => x.depth === 0);
+            if (chapters.length === 0) return null;
+            const known = others.map((o) => o.name);
+            const openIn = new Map<string, number>();
             for (const f of findings) {
               const node = sections.find((x) => x.id === f.sectionId);
-              const chapterId = node?.chapterId ?? f.sectionId;
-              const chapter = sections.find((x) => x.id === chapterId);
-              if (!chapter || chapter.managedBy) continue;
-              const cur = byChapter.get(chapterId) ?? { title: chapter.title, count: 0 };
-              byChapter.set(chapterId, { title: cur.title, count: cur.count + 1 });
+              const cid = node?.chapterId ?? f.sectionId;
+              openIn.set(cid, (openIn.get(cid) ?? 0) + 1);
             }
-            const rows = [...byChapter.entries()].filter(([, v]) => v.count >= 2).sort((a, b) => b[1].count - a[1].count);
-            if (rows.length === 0) return null;
-            // Names already in use elsewhere in this manual, so the usual answer is one press.
-            const known = others.map((o) => o.name);
             return (
               <Card
-                title="Is any of this somebody else's to fix?"
-                subtitle="A chapter the pharmacy is bound by but does not write — an employment handbook from a practice next door, for instance — should not be on this list at all. Say so once and every finding in it moves to a panel addressed to them."
+                title="What the audit reads"
+                subtitle="Every chapter of the manual, and what the reviewer does with it. A chapter the pharmacy is bound by but does not write is handed to whoever maintains it: it still prints as part of the manual, its findings move to a panel addressed to them, and nothing is deleted. A chapter of yours can be read again on request."
                 className="mb-4"
               >
                 <ul className="rows">
-                  {rows.map(([id, v]) => (
-                    <li key={id} className="flex flex-wrap items-center justify-between gap-3 py-2">
-                      <span className="min-w-0">
-                        <span className="block text-sm font-medium">{v.title}</span>
-                        <span className="block text-xs text-ink-3">
-                          {v.count} of the findings below are in this chapter
+                  {chapters.map((ch) => {
+                    const within = sections.filter((x) => x.chapterId === ch.id);
+                    const ours = within.filter((x) => x.source === "pharmacy" && !x.managedBy && !x.retiredOn).length;
+                    const site = within.filter((x) => x.source === "site").length;
+                    const open = openIn.get(ch.id) ?? 0;
+                    const state = ch.managedBy
+                      ? { badge: "badge-muted", text: `maintained by ${ch.managedBy} — not read as yours` }
+                      : ch.source === "site"
+                        ? { badge: "badge-muted", text: "written by the site — kept current automatically, not audited" }
+                        : { badge: "badge-ok", text: `read by the audit — ${ours} section${ours === 1 ? "" : "s"}${site ? `, ${site} written by the site` : ""}${open ? `, ${open} open finding${open === 1 ? "" : "s"}` : ""}` };
+                    return (
+                      <li key={ch.id} className="flex flex-wrap items-center justify-between gap-3 py-2">
+                        <span className="min-w-0">
+                          <span className="block text-sm font-medium">{ch.number ? `${ch.number} ` : ""}{ch.title}</span>
+                          <span className="mt-0.5 flex items-center gap-1.5 text-xs text-ink-3">
+                            <span className={`badge ${state.badge}`}>{ch.managedBy ? "theirs" : ch.source === "site" ? "site" : "ours"}</span>
+                            {state.text}
+                          </span>
                         </span>
-                      </span>
-                      <form action={setManager} className="flex flex-wrap items-center gap-1.5">
-                        <input type="hidden" name="chapter" value={id} />
-                        <input
-                          name="manager"
-                          list="known-managers"
-                          placeholder="Who maintains it"
-                          className="field w-56 py-1 text-xs"
-                        />
-                        <button className="btn btn-sm">Not ours</button>
-                      </form>
-                    </li>
-                  ))}
+                        {ch.source !== "site" && (
+                          <span className="flex flex-wrap items-center gap-1.5">
+                            {ch.managedBy ? (
+                              <form action={setManager}>
+                                <input type="hidden" name="chapter" value={ch.id} />
+                                <input type="hidden" name="manager" value="" />
+                                <button className="btn btn-sm" title="Take this chapter back: the audit reads it again as the pharmacy's own.">
+                                  Ours — read it
+                                </button>
+                              </form>
+                            ) : (
+                              <>
+                                <form action={readChapterNow}>
+                                  <input type="hidden" name="chapter" value={ch.id} />
+                                  <SubmitButton className="btn btn-sm" pendingLabel="Queueing…">Read now</SubmitButton>
+                                </form>
+                                <form action={setManager} className="flex items-center gap-1.5">
+                                  <input type="hidden" name="chapter" value={ch.id} />
+                                  <input name="manager" list="known-managers" placeholder="Who maintains it" className="field w-44 py-1 text-xs" required />
+                                  <button className="btn btn-sm" title="Hand this chapter to whoever writes it. It still prints; its findings go to them.">
+                                    Not ours
+                                  </button>
+                                </form>
+                              </>
+                            )}
+                          </span>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
                 <datalist id="known-managers">
                   {known.map((n) => <option key={n} value={n} />)}
                 </datalist>
                 <p className="mt-2 text-xs text-ink-3">
-                  Leave the box empty and press it to hand a chapter back to the pharmacy again. Nothing is deleted
-                  either way — the chapter still prints as part of the manual, because you are still bound by it.
+                  &ldquo;Read now&rdquo; puts every section of that chapter back in the queue; press &ldquo;Put it
+                  right&rdquo; above and they are read in this pass. &ldquo;Not ours&rdquo; needs the name of who
+                  maintains it, so the findings have somebody to be addressed to.
                 </p>
               </Card>
             );

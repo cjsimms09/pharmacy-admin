@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { getSettings } from "@/lib/settings";
-import { allSuppliers, addSupplier, updateSupplier, retireSupplier, importLegacyRules, addressesOf } from "@/lib/suppliers-registry";
+import { allSuppliers, addSupplier, updateSupplier, retireSupplier, importLegacyRules, addressesOf, normaliseAddresses } from "@/lib/suppliers-registry";
 import { invoices, filingFor, money } from "@/lib/invoices";
 import { fmt, todayIso, daysBetween } from "@/lib/dates";
 import { PageHeader, Card, Notice, Empty, Field } from "@/components/ui";
@@ -59,12 +59,18 @@ export default async function SuppliersPage({
       if (id) await updateSupplier(id, input);
       else await addSupplier(input);
       await audit({ action: id ? "supplier.update" : "supplier.add", userId: u.id, userName: u.name, details: input.name });
+      // Setting the address once is the whole job: anything this sender already sent that was
+      // filed as an ordinary report is read again now and filed as their invoice.
+      const { rereadFromSenders } = await import("@/lib/mailbox");
+      const again = await rereadFromSenders(normaliseAddresses(input.senderEmails).split(/[\s,;]+/), { userId: u.id, userName: u.name });
       revalidatePath("/suppliers");
       revalidatePath("/inventory/invoices");
+      revalidatePath("/inbox");
       redirect(
         "/suppliers?ok=" +
           encodeURIComponent(
-            `${input.name} saved. Invoices from ${addressesFrom(input.senderEmails)} will be filed under their name from now on.`,
+            `${input.name} saved. Invoices from ${addressesFrom(input.senderEmails)} will be filed under their name from now on.` +
+              (again.filed ? ` ${again.filed} already received ${again.filed === 1 ? "was" : "were"} filed under their name just now.` : again.read ? ` ${again.read} earlier message${again.read === 1 ? "" : "s"} from them ${again.read === 1 ? "was" : "were"} read again; none was an invoice.` : ""),
           ),
       );
     } catch (e) {

@@ -7,7 +7,7 @@ import { getSettings, setSetting } from "./settings";
 import { hasApiKey, reviewPolicy, describeError } from "./ai";
 import { policies, suggestForm, appendixReference } from "./manual";
 import { pharmacyFacts } from "./pharmacy-facts";
-import { allSections, saveSection } from "./manual-store";
+import { allSections, saveSection, outline } from "./manual-store";
 
 /**
  * Reading the manual against the rules, a few sections at a time, for ever.
@@ -665,4 +665,24 @@ export async function retryParked(): Promise<number> {
     await db.update(schema.manualSections).set({ auditFailCount: 0 }).where(eq(schema.manualSections.id, r.id));
   }
   return parked.length;
+}
+
+/**
+ * Puts one chapter's sections back in the queue, because somebody asked for that chapter.
+ *
+ * The queue is otherwise driven by dates — a section read this year is not due — and the only
+ * way to say "read this one now" was to wait. A chapter the pharmacy has just rewritten, or one it
+ * has just taken back from the practice, deserves a reading on request. Sections the practice
+ * maintains and sections the site writes are never queued by this, whatever chapter they sit in.
+ */
+export async function requeueChapter(chapterId: string): Promise<number> {
+  const rows = outline(await allSections());
+  const mine = rows.filter((r) => r.chapterId === chapterId && r.source === "pharmacy" && !r.managedBy && !r.retiredOn);
+  for (const r of mine) {
+    await db
+      .update(schema.manualSections)
+      .set({ auditedOn: null, auditFailedOn: null, auditError: null, auditFailCount: 0 })
+      .where(eq(schema.manualSections.id, r.id));
+  }
+  return mine.length;
 }

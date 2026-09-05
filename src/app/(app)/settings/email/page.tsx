@@ -119,23 +119,23 @@ export default async function EmailSettingsPage({ searchParams }: { searchParams
           </p>
         </div>
 
-        <Field
-          label="Which supplier a price file came from"
-          hint={
-            "One rule per line, written as: something that appears in the sender or subject, then =, then the supplier name. " +
-            "A price file with no matching rule is filed but not loaded — prices under the wrong supplier would make the " +
-            "purchasing comparison quietly wrong, and a spreadsheet gives no way to tell."
-          }
-          className="sm:col-span-2"
-        >
-          <textarea
-            name="mail_supplier_rules"
-            className="field font-mono"
-            rows={4}
-            defaultValue={s.mail_supplier_rules}
-            placeholder={"mckesson.com = McKesson\norders@topsecondary = Top Rx\nweekly price file = Value Drug"}
-          />
-        </Field>
+        {/*
+          Supplier addresses live in one place: the Suppliers register.
+
+          They used to be set here as well, as free-text rules, and an address set in one place
+          and not the other filed invoices under nobody. The register is what the sweep reads
+          first; this box now only points there. Rules already typed here keep working until they
+          are brought across, which the Suppliers page offers to do in one press.
+        */}
+        <div className="sm:col-span-2 rounded-md border border-line bg-ground px-3 py-2 text-xs text-ink-2">
+          <b>Where invoices come from</b> is set once, under{" "}
+          <Link href="/suppliers" className="text-accent underline">Suppliers</Link>: each wholesaler and the addresses
+          it sends from. Save an address there and anything that sender already sent is filed under their name at once.
+          {s.mail_supplier_rules?.trim() ? (
+            <> Old rules typed here are still honoured; <Link href="/suppliers" className="text-accent underline">bring them across</Link> so there is one list.</>
+          ) : null}
+          <input type="hidden" name="mail_supplier_rules" value={s.mail_supplier_rules ?? ""} />
+        </div>
         <details className="sm:col-span-2">
           <summary className="cursor-pointer text-xs text-ink-3">Mail server settings (only change these if you're not using Gmail)</summary>
           <div className="mt-2 grid gap-3 sm:grid-cols-2">
