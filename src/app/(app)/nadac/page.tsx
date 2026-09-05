@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { loadNadacFiles, nadacCoverage, nadacClaimCoverage, nadacWeekGaps, nadacDir } from "@/lib/nadac";
-import { fetchNadac, fetchNadacFrom } from "@/lib/nadac-fetch";
+import { fetchNadac, fetchNadacFrom, yearArchiveUrl, archiveYears } from "@/lib/nadac-fetch";
 import { getSettings, setSetting } from "@/lib/settings";
 import { PageHeader, Notice, Empty } from "@/components/ui";
 
@@ -62,6 +62,25 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
     await audit({ action: "nadac.fetch_url", userId: u.id, userName: u.name, details: `${url} — ${r.message.slice(0, 160)}` });
     revalidatePath("/nadac");
     redirect(`/nadac?${r.ok ? "ok" : "error"}=` + encodeURIComponent(r.message));
+  }
+
+  /**
+   * Pulling a whole calendar year in one go.
+   *
+   * CMS keeps a dataset per year holding every weekly file for that year, which is the thing that
+   * turns "hunt down ten weekly files" into one button. Same load path and the same refusals as
+   * everything else: parsed before it is written, so a page that is not NADAC never lands.
+   */
+  async function pullYear(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const year = String(fd.get("year") ?? "");
+    const url = yearArchiveUrl(year);
+    if (!url) redirect("/nadac?error=" + encodeURIComponent(`No archive address is known for ${year}.`));
+    const r = await fetchNadacFrom([url]);
+    await audit({ action: "nadac.fetch_year", userId: u.id, userName: u.name, details: `${year} — ${r.message.slice(0, 160)}` });
+    revalidatePath("/nadac");
+    redirect(`/nadac?${r.ok ? "ok" : "error"}=` + encodeURIComponent(`${year}: ${r.message}`));
   }
 
   async function upload(fd: FormData) {
@@ -181,6 +200,34 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
           </div>
         </section>
       )}
+
+      {/*
+        A whole year in one download.
+
+        The weekly pull only ever carries this week. CMS also publishes a dataset per calendar
+        year holding every weekly file for that year — which is what makes back-filling the
+        history a single button rather than ten trips to a download page.
+      */}
+      <section className="my-4 rounded-lg border border-line bg-surface p-4">
+        <h2 className="text-sm font-semibold">Back-fill a whole year</h2>
+        <p className="mt-1 text-sm text-ink-2">
+          Each year&rsquo;s dataset holds every weekly file CMS published that year, so one download covers every
+          effective date in it. This is how you price claims from months ago &mdash; fetching the current file again
+          never will, because it carries only this week&rsquo;s prices.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {archiveYears().map((y) => (
+            <form key={y} action={pullYear}>
+              <input type="hidden" name="year" value={y} />
+              <button className="rounded-md border border-line px-3 py-2 text-sm hover:bg-ground">Fetch {y}</button>
+            </form>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-ink-3">
+          A year is a large file and may take a few minutes. If it comes back saying it is too large to load in one
+          piece, download it in a browser and use the file box below &mdash; the result is identical.
+        </p>
+      </section>
 
       <section className="my-4 rounded-lg border border-line bg-surface p-4">
         <h2 className="text-sm font-semibold">Load one file from an address</h2>
