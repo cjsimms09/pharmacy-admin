@@ -21,6 +21,7 @@ export function SubmitButton({
   className = "btn btn-primary",
   hint,
   disabled,
+  formNoValidate,
 }: {
   children: React.ReactNode;
   /** What it says while it works. Name the work, not the wait. */
@@ -29,12 +30,20 @@ export function SubmitButton({
   /** A line under the button while it runs — how long, and that leaving is safe. */
   hint?: string;
   disabled?: boolean;
+  /**
+   * Skip the browser's validation of the surrounding form.
+   *
+   * For a button that shares a form with fields it has nothing to do with — the invoice page has
+   * one form around the whole table, so a button about filing was demanding the email address
+   * belonging to the button about sending.
+   */
+  formNoValidate?: boolean;
 }) {
   const { pending } = useFormStatus();
 
   return (
     <span className="inline-flex flex-col gap-1">
-      <button className={className} disabled={pending || disabled} aria-busy={pending}>
+      <button className={className} disabled={pending || disabled} aria-busy={pending} formNoValidate={formNoValidate}>
         {pending ? (
           <span className="inline-flex items-center gap-2">
             {/*

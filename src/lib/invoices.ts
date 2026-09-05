@@ -591,7 +591,11 @@ function textOf(buf: Buffer): string | null {
  * read is the outcome that does damage — every figure that was read looks perfectly sound, and the
  * product whose line was dropped simply appears cheaper than the pharmacy actually paid.
  */
-export async function writeInvoiceLines(invoiceId: string, text: string): Promise<{ read: number; unread: number; reconciles: boolean | null }> {
+export async function writeInvoiceLines(
+  invoiceId: string,
+  text: string,
+  opts: { allowModel?: boolean; user?: { id?: string | null; name: string } } = {},
+): Promise<{ read: number; unread: number; reconciles: boolean | null; readBy: "rule" | "model" | null }> {
   const inv = await db.query.supplierInvoices.findFirst({ where: eq(schema.supplierInvoices.id, invoiceId) });
   const r = await storeInvoiceLines(invoiceId, {
     supplier: inv?.supplier ?? null,
@@ -599,11 +603,104 @@ export async function writeInvoiceLines(invoiceId: string, text: string): Promis
     text,
     printedTotalCents: inv?.totalCents ?? null,
   });
+
+  /*
+   * The layout no regular expression can read.
+   *
+   * McKesson and IPC print item lines that survive text extraction as lines. IPD does not: its
+   * columns come out shredded and interleaved, every NDC on the page in one unbroken run of
+   * digits, every price in another. The information saying which figure belongs to which product
+   * was never in the text — it was in the geometry of the page. So where the cheap reader finds
+   * nothing at all, the document itself goes to the model, which can still see the layout.
+   *
+   * Only where nothing was read. A partial read is a different problem and a model second opinion
+   * on it would quietly replace figures that reconciled with figures that might not.
+   */
+  let readBy: "rule" | "model" | null = r.stored > 0 ? "rule" : null;
+  let out = r;
+  if (r.stored === 0 && opts.allowModel && inv) {
+    try {
+      const buf = await readStoredFile((await db.query.documents.findFirst({ where: eq(schema.documents.id, inv.documentId) }))!.storageKey);
+      const { readInvoiceLines } = await import("./ai");
+      const read = await readInvoiceLines(buf, inv.supplier, {
+        userId: opts.user?.id ?? "invoice-reader",
+        userName: opts.user?.name ?? "Automatic check",
+      });
+      const stored = await storeModelInvoiceLines(invoiceId, inv, read);
+      if (stored.stored > 0) {
+        out = stored;
+        readBy = "model";
+      }
+    } catch {
+      // The cheap read already failed; a failed expensive one leaves the invoice exactly as it was.
+    }
+  }
+
   await db
     .update(schema.supplierInvoices)
-    .set({ linesRead: r.stored, linesUnread: r.unread })
+    .set({ linesRead: out.stored, linesUnread: out.unread })
     .where(eq(schema.supplierInvoices.id, invoiceId));
-  return { read: r.stored, unread: r.unread, reconciles: r.reconciles };
+  return { read: out.stored, unread: out.unread, reconciles: out.reconciles, readBy };
+}
+
+/**
+ * Stores lines the model read, held to exactly the same arithmetic as lines read by rule.
+ *
+ * Each line must multiply out and the lines must add to the printed total. A model that misreads a
+ * digit produces a line that does not reconcile, and a line that does not reconcile is not stored —
+ * which is the same rule that caught a real McKesson line worth eighty-three dollars going missing.
+ */
+async function storeModelInvoiceLines(
+  invoiceId: string,
+  inv: SupplierInvoice,
+  read: import("./ai").ReadInvoiceLinesT,
+): Promise<{ stored: number; unread: number; reconciles: boolean | null; readCents: number }> {
+  const { ndc11: toNdc11 } = await import("./invoice-lines");
+  const good: typeof read.lines = [];
+  let unread = read.unreadable.length;
+  for (const l of read.lines) {
+    const key = toNdc11(l.ndc11);
+    if (!key || !Number.isFinite(l.quantity) || l.quantity <= 0) {
+      unread++;
+      continue;
+    }
+    if (Math.round(l.quantity * l.unitCostCents) !== l.extendedCents) {
+      unread++;
+      continue;
+    }
+    good.push({ ...l, ndc11: key });
+  }
+  if (good.length === 0) return { stored: 0, unread, reconciles: null, readCents: 0 };
+
+  const sum = good.reduce((n, l) => n + l.extendedCents, 0);
+  const printed = inv.totalCents ?? read.totalCents;
+  const reconciles = printed === null ? null : sum === printed;
+  // Nothing is stored from a reading that does not add up to what the invoice says it came to.
+  if (reconciles === false) return { stored: 0, unread: good.length + unread, reconciles: false, readCents: sum };
+
+  await db.delete(schema.invoiceLines).where(eq(schema.invoiceLines.invoiceId, invoiceId));
+  const rows = good.map((l) => ({
+    id: newId(),
+    invoiceId,
+    supplier: inv.supplier,
+    invoiceDate: inv.invoiceDate ?? read.invoiceDate,
+    ndc11: l.ndc11,
+    description: l.description,
+    itemNumber: l.itemNumber,
+    quantity: l.quantity,
+    unitOfMeasure: l.unitOfMeasure,
+    unitCostCents: l.unitCostCents,
+    extendedCents: l.extendedCents,
+    awpCents: null,
+    itemClass: l.itemClass,
+    rebated: l.rebated,
+  }));
+  for (let i = 0; i < rows.length; i += 200) await db.insert(schema.invoiceLines).values(rows.slice(i, i + 200));
+  // A total read off the page where none was held is worth keeping: it is the figure to reconcile against.
+  if (inv.totalCents === null && read.totalCents !== null) {
+    await db.update(schema.supplierInvoices).set({ totalCents: read.totalCents }).where(eq(schema.supplierInvoices.id, invoiceId));
+  }
+  return { stored: rows.length, unread, reconciles, readCents: sum };
 }
 
 /** The lines of one invoice, in printed order. */
@@ -621,13 +718,16 @@ export async function invoiceLines(invoiceId: string) {
  * reader runs, so an invoice in a layout it does not know comes back with partial lines or none,
  * and says so on the row rather than pretending.
  */
-export async function backfillInvoiceLines(): Promise<{ invoices: number; linesRead: number; unreadable: number; unreconciled: number }> {
+export async function backfillInvoiceLines(
+  opts: { allowModel?: boolean; user?: { id?: string | null; name: string } } = {},
+): Promise<{ invoices: number; linesRead: number; unreadable: number; unreconciled: number; byModel: number }> {
   const rows = await db.query.supplierInvoices.findMany({ where: isNull(schema.supplierInvoices.linesRead) });
   const { readFile } = await import("./files");
   let invoicesDone = 0;
   let linesRead = 0;
   let unreadable = 0;
   let unreconciled = 0;
+  let byModel = 0;
   for (const row of rows) {
     const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, row.documentId) });
     if (!doc) continue;
@@ -639,9 +739,10 @@ export async function backfillInvoiceLines(): Promise<{ invoices: number; linesR
         unreadable++;
         continue;
       }
-      const r = await writeInvoiceLines(row.id, text);
+      const r = await writeInvoiceLines(row.id, text, opts);
       invoicesDone++;
       linesRead += r.read;
+      if (r.readBy === "model") byModel++;
       // Read, but the lines did not add up to the printed total, so none were kept. Named
       // separately: it is a layout this reader does not fully know, not a scan.
       if (r.reconciles === false) unreconciled++;
@@ -649,7 +750,7 @@ export async function backfillInvoiceLines(): Promise<{ invoices: number; linesR
       unreadable++;
     }
   }
-  return { invoices: invoicesDone, linesRead, unreadable, unreconciled };
+  return { invoices: invoicesDone, linesRead, unreadable, unreconciled, byModel };
 }
 
 /** How many invoices the line reader has never been run on. */
@@ -1153,23 +1254,50 @@ export async function adoptableDocuments(): Promise<
   ]);
   const claimed = new Set(already.map((i) => i.documentId));
 
-  return docs
+  const candidates = docs
     .filter((d) => !claimed.has(d.id))
     .filter((d) => d.category !== "invoice_schedule_2" && d.category !== "invoice_schedule_3_5" && d.category !== "invoice")
+    /*
+     * A document already filed as what it is, is not waiting to be filed as something else.
+     *
+     * The rebate breakdown and the returned goods policy were both sitting on this list under
+     * "already received, but not filed as invoices", with a button offering to file them as
+     * invoices — because the rule that built the list matched the word "McKesson" in a title. They
+     * are not invoices, nothing is wrong with them, and there was no way to say so. A list of
+     * outstanding work that contains finished work is worse than no list: it cannot be emptied.
+     */
+    .filter((d) => d.category !== "supplier_statement" && d.category !== "supplier_agreement")
     .filter((d) => /\.pdf$/i.test(d.fileName) || d.mimeType === "application/pdf")
     .filter((d) =>
       /invoice|inv\b|statement of account|packing (list|slip)|mckesson|independent pharmacy|cardinal|cencora|amerisource/i.test(
         `${d.title} ${d.fileName} ${d.notes ?? ""}`,
       ),
-    )
-    .map((d) => ({
+    );
+
+  /*
+   * And what the document itself says beats what its title contains.
+   *
+   * Matching a supplier's name in a title is how a rebate breakdown gets offered as an invoice. The
+   * words settle it, at the cost of reading each candidate once — and this list is short by
+   * construction, being only what has not been filed.
+   */
+  const out: { id: string; title: string; fileName: string; receivedFrom: string | null; effectiveOn: string | null }[] = [];
+  for (const d of candidates) {
+    try {
+      const kind = classifySupplierDocument(pdfText(await readStoredFile(d.storageKey)), d.fileName, d.title).kind;
+      if (kind !== "invoice" && kind !== "unknown") continue;
+    } catch {
+      // Unreadable as text — a scan. Those are exactly what this list is for.
+    }
+    out.push({
       id: d.id,
       title: d.title || d.fileName,
       fileName: d.fileName,
       receivedFrom: d.notes?.match(/from ([^\s.]+@[^\s.]+\.\S+)/i)?.[1] ?? null,
       effectiveOn: d.effectiveOn,
-    }))
-    .sort((a, b) => (b.effectiveOn ?? "").localeCompare(a.effectiveOn ?? ""));
+    });
+  }
+  return out.sort((a, b) => (b.effectiveOn ?? "").localeCompare(a.effectiveOn ?? ""));
 }
 
 /**
@@ -1193,6 +1321,27 @@ export async function adoptDocument(documentId: string, ctx: { userId: string; u
   const buf = await readFile(doc.storageKey);
 
   const text = textOf(buf);
+
+  /*
+   * Refuse outright to file something that is not an invoice.
+   *
+   * Reached by URL rather than from the list, or from a list built before this check existed. A
+   * rebate breakdown filed as an invoice ends up held with the Schedule II records — a document
+   * recording no receipt of anything, in the file an inspector reads first.
+   */
+  if (text) {
+    const kind = classifySupplierDocument(text, doc.fileName, doc.title);
+    if (kind.kind !== "invoice" && kind.kind !== "unknown") {
+      const word = kind.kind === "rebate_report" ? "rebate breakdown" : kind.kind === "credit_memo" ? "credit memo" : "statement of account";
+      throw new Error(
+        `That is a ${word}, not an invoice — ${kind.why} It is already filed where it belongs and nothing needs doing to it. ` +
+          (kind.kind === "rebate_report"
+            ? "To read the tier ladder off it, open the supplier's rebate and return terms page."
+            : "It records no receipt of goods, so it is deliberately kept out of the invoice files."),
+      );
+    }
+  }
+
   const fromText = text ? classifyInvoiceText(text) : null;
 
   let schedule: InvoiceSchedule = fromText?.confident ? fromText.schedule : "unknown";
@@ -1466,7 +1615,17 @@ export async function unfileInvoice(
   user: { id?: string | null; name: string },
 ): Promise<{ message: string; documentId: string | null }> {
   const inv = await db.query.supplierInvoices.findFirst({ where: eq(schema.supplierInvoices.id, invoiceId) });
-  if (!inv) throw new Error("That invoice is no longer on file.");
+  /*
+   * Already done is not an error.
+   *
+   * Pressing this twice — which is what anybody does when the first press looks as though it did
+   * nothing — produced "That invoice is no longer on file", which reads as a failure and is in
+   * fact a report of success. The first press had worked; the document had simply moved into the
+   * list below, where it was then offered for filing as an invoice all over again.
+   */
+  if (!inv) {
+    return { message: "That was already taken out of the invoice file — nothing further to do.", documentId: null };
+  }
   const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, inv.documentId) });
 
   await db.delete(schema.invoiceLines).where(eq(schema.invoiceLines.invoiceId, invoiceId));
@@ -1519,4 +1678,50 @@ export async function unfileInvoice(
         : "Nothing read off it is counted as a purchase any more."),
     documentId: inv.documentId,
   };
+}
+
+/**
+ * Reads every filed invoice again and finds the ones that were never invoices.
+ *
+ * The recognition rule now reads the document rather than the subject line, but it only runs on
+ * arrival — so everything filed before it existed stays wrong, and the pharmacist is left clicking
+ * through a list correcting them one at a time. That is the software asking a person to do its
+ * job. This does the pass: open each filed invoice, classify it on its own words, and take out
+ * anything that turns out to be a statement, a rebate breakdown or a credit memo.
+ *
+ * It only ever moves things *out* of the invoice file, which is the safe direction. A statement
+ * sitting among the Schedule II records is a document that proves no receipt in the file an
+ * inspector reads first; an invoice this misjudged and removed would be a missing record, so
+ * nothing is removed on a maybe — only where the document's own words settle it.
+ */
+export async function recheckFiledInvoices(
+  user: { id?: string | null; name: string },
+  opts: { apply?: boolean } = {},
+): Promise<{ checked: number; found: { id: string; supplier: string | null; kind: SupplierDocumentKind; why: string }[]; moved: number; unreadable: number }> {
+  const rows = await db.query.supplierInvoices.findMany();
+  const found: { id: string; supplier: string | null; kind: SupplierDocumentKind; why: string }[] = [];
+  let unreadable = 0;
+  let moved = 0;
+
+  for (const inv of rows) {
+    const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, inv.documentId) });
+    if (!doc) continue;
+    let text: string;
+    try {
+      text = pdfText(await readStoredFile(doc.storageKey));
+    } catch {
+      unreadable++;
+      continue;
+    }
+    // The stored item text is a better witness than a re-extraction that came back empty.
+    const words = text.trim() ? text : inv.itemsText;
+    const c = classifySupplierDocument(words, doc.fileName, doc.title);
+    if (c.kind === "invoice" || c.kind === "unknown") continue;
+    found.push({ id: inv.id, supplier: inv.supplier, kind: c.kind, why: c.why });
+    if (opts.apply) {
+      await unfileInvoice(inv.id, { kind: c.kind as "statement" | "rebate_report" | "credit_memo" }, user);
+      moved++;
+    }
+  }
+  return { checked: rows.length, found, moved, unreadable };
 }

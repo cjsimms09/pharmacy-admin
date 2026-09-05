@@ -89,11 +89,15 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
             <h2 className="text-sm font-semibold">What to ask for</h2>
             <p className="mt-1 text-sm text-ink-2">
               The daily feed is PioneerRx&rsquo;s <b>Rx Transaction Details By Submission Type</b> report, scheduled
-              to email at 6:30 each evening as <span className="font-mono">Daily (date)</span>, with these columns:
-              Rx Number, Status, Amount, Group, Ntw Reim. Id, Copay, Dispensing Fee, Total, Completed Date, Date
-              Filled, BIN, Tax, QTY, Acq. Inv. Cost, PCN, NDC, GrossProfit. The site reads it directly: a paid row
-              becomes a claim, a reversal cancels the claim it names, and a row with no completed date (transmitted,
-              not yet sold) waits for the day it sells. Ingredient cost paid is worked out as plan paid plus copay less
+              to email each evening as <span className="font-mono">Daily (date)</span>, covering <b>yesterday</b> — a
+              report printed mid-day cannot contain that afternoon&rsquo;s transactions, and the report is drawn by the
+              day a claim was transmitted, so anything it misses never comes round again. Columns: Rx Number, Status,
+              Amount, Group, Ntw Reim. Id, Copay, Dispensing Fee, Total, Completed Date, Date Filled, BIN, Tax, QTY,
+              Acq. Inv. Cost, PCN, NDC, GrossProfit. The site reads it directly: a paid row becomes a claim and a
+              reversal cancels the claim it names. A row with no completed date — transmitted but not yet picked up —
+              is kept too, as a claim with no sale date against it, rather than skipped; it was being dropped, and on
+              the real 5 September file that was 65 of 97 paid rows, none of which any later report would have sent
+              again. Ingredient cost paid is worked out as plan paid plus copay less
               the dispensing fee. If the columns are ever changed in PioneerRx the file is refused with the change named,
               so change them here first. The list below is the fuller one-row-per-fill export, kept for reference; the
               transaction report lacks plan type, basis of reimbursement and days supply, which the floor check does

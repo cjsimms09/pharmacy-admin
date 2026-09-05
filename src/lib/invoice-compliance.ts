@@ -31,6 +31,17 @@ export type Requirement = {
   /** What to do, when it is not satisfied. */
   fix?: string;
   href?: string;
+  /**
+   * The thing that actually clears this line, offered where it is raised.
+   *
+   * A panel that names a shortfall and links to a page is a panel that has done half the job. Every
+   * one of these links landed on a screen with the control somewhere on it — the receipt setting at
+   * the top of a long invoice page, the sending address behind an Edit on a supplier card — and the
+   * reading, fairly, was "no way to fix these". The finding and the fix belong in the same place.
+   */
+  settle?:
+    | { kind: "receipt_kept_in"; current: string }
+    | { kind: "supplier_address"; suppliers: { id: string; name: string }[] };
 };
 
 /** Kansas requires pharmacy records for five years; the DEA requires two. The longer one governs. */
@@ -257,6 +268,7 @@ export async function invoiceCompliance(): Promise<Requirement[]> {
         ? `${unreceipted} invoice${unreceipted === 1 ? " has" : "s have"} no record that the goods arrived. Until that is here, the initialled packing slip in the tote is the pharmacy's receipt record and must be kept — which is the whole reason to record it. If you confirm receipt in the wholesaler's own system instead, say so on the Invoices page and this stops asking.`
         : undefined,
     href: "/inventory/invoices?unreceipted=1",
+    settle: { kind: "receipt_kept_in", current: receiptElsewhere },
   });
 
   /*
@@ -304,6 +316,9 @@ export async function invoiceCompliance(): Promise<Requirement[]> {
           ? `${active.filter((x) => !x.senderEmails.trim()).map((x) => x.name).join(", ")} ${active.filter((x) => !x.senderEmails.trim()).length === 1 ? "has" : "have"} no sending address recorded, so their invoices will not be recognised.`
           : undefined,
     href: "/suppliers",
+    settle: active.some((x) => !x.senderEmails.trim())
+      ? { kind: "supplier_address", suppliers: active.filter((x) => !x.senderEmails.trim()).map((x) => ({ id: x.id, name: x.name })) }
+      : undefined,
   });
 
   void todayIso;

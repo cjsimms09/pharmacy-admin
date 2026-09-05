@@ -28,6 +28,7 @@ import {
   recordReceipt,
   awaitingReceipt,
   unfileInvoice,
+  recheckFiledInvoices,
   sumOf,
   money,
 } from "@/lib/invoices";
@@ -252,14 +253,23 @@ export default async function InvoicesPage({
   async function readLines() {
     "use server";
     const u = await requireManager();
-    const r = await backfillInvoiceLines();
-    await audit({ action: "invoice.lines.backfill", userId: u.id, userName: u.name, details: `${r.invoices} invoices, ${r.linesRead} lines` });
+    /*
+     * The model is allowed here, and only where the cheap reader found nothing.
+     *
+     * IPD's invoices come out of text extraction with their columns shredded — every NDC on the
+     * page in one run of digits — so no rule can read them, and until now they contributed nothing
+     * to any purchasing question. This is a press somebody made deliberately, which is the right
+     * place for the one path that costs money.
+     */
+    const r = await backfillInvoiceLines({ allowModel: true, user: u });
+    await audit({ action: "invoice.lines.backfill", userId: u.id, userName: u.name, details: `${r.invoices} invoices, ${r.linesRead} lines, ${r.byModel} by model` });
     revalidatePath("/inventory/invoices");
     revalidatePath("/purchasing");
     const bits = [`${r.linesRead.toLocaleString()} item line${r.linesRead === 1 ? "" : "s"} read off ${r.invoices} invoice${r.invoices === 1 ? "" : "s"}`];
     // Named apart, because they are different problems: a scan has no text at all, while an
     // invoice whose lines do not add up to its printed total was read and deliberately not kept.
     if (r.unreconciled > 0) bits.push(`${r.unreconciled} did not add up to the total printed on them and were left out rather than counted short`);
+    if (r.byModel > 0) bits.push(`${r.byModel} ${r.byModel === 1 ? "was" : "were"} in a layout no rule can read — the page itself was read instead, and the figures still had to add up to the printed total`);
     if (r.unreadable > 0) bits.push(`${r.unreadable} ${r.unreadable === 1 ? "is a scan" : "are scans"} with no text to read`);
     redirect("/inventory/invoices?ok=" + encodeURIComponent(bits.join(". ") + "."));
   }
@@ -358,6 +368,119 @@ export default async function InvoicesPage({
     } catch (e) {
       if (e && typeof e === "object" && "digest" in e) throw e;
       redirect(`${back}${back.includes("?") ? "&" : "?"}error=` + encodeURIComponent(e instanceof Error ? e.message : "Could not take that out of the invoice file."));
+    }
+  }
+
+  /**
+   * Recording a supplier's sending address from the compliance panel.
+   *
+   * The same save the Suppliers page does, offered where the shortfall is named — and it re-reads
+   * what has already arrived from that address, so setting it once is the whole job rather than
+   * the first half of it.
+   */
+  async function supplierAddress(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const supplierId = String(fd.get("supplierId") ?? "");
+    const addresses = String(fd.get("senderEmails") ?? "").trim();
+    if (!addresses) redirect("/inventory/invoices?error=" + encodeURIComponent("Give an address, or a bare domain.") + "#compliance");
+    try {
+      const { updateSupplier, allSuppliers, addressesOf } = await import("@/lib/suppliers-registry");
+      const rows = await allSuppliers(true);
+      const sup = rows.find((x) => x.id === supplierId);
+      if (!sup) throw new Error("That supplier is no longer on the register.");
+      // Everything else about the supplier is carried across unchanged; only the address is added.
+      await updateSupplier(supplierId, {
+        name: sup.name,
+        senderEmails: [sup.senderEmails, addresses].filter(Boolean).join("\n"),
+        catalogName: sup.catalogName ?? "",
+        accountNumber: sup.accountNumber ?? "",
+        deaNumber: sup.deaNumber ?? "",
+        phone: sup.phone ?? "",
+        website: sup.website ?? "",
+        expectedSchedule: sup.expectedSchedule,
+        notes: sup.notes ?? "",
+      });
+      const { rereadFromSenders } = await import("@/lib/mailbox");
+      const back = await rereadFromSenders(addressesOf({ ...sup, senderEmails: addresses }), { userId: u.id, userName: u.name });
+      await audit({ action: "supplier.address", userId: u.id, userName: u.name, entity: "supplier", entityId: supplierId, details: addresses });
+      revalidatePath("/inventory/invoices");
+      revalidatePath("/suppliers");
+      redirect(
+        "/inventory/invoices?ok=" +
+          encodeURIComponent(
+            `${sup.name} will now be recognised by that address.` +
+              (back.filed ? ` ${back.filed} message${back.filed === 1 ? "" : "s"} already received from it ${back.filed === 1 ? "has" : "have"} been filed.` : ""),
+          ) + "#compliance",
+      );
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/inventory/invoices?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not save that.") + "#compliance");
+    }
+  }
+
+  /**
+   * Finds everything already filed as an invoice that never was one, in one press.
+   *
+   * The recognition rule reads the document rather than the subject line now, but it only runs on
+   * arrival — so anything filed before it existed stays wrong, and correcting them one at a time is
+   * the software asking a person to do its job.
+   */
+  async function recheckAll() {
+    "use server";
+    const u = await requireManager();
+    try {
+      const r = await recheckFiledInvoices(u, { apply: true });
+      await audit({ action: "invoice.recheck", userId: u.id, userName: u.name, details: `${r.moved} moved out of ${r.checked}` });
+      revalidatePath("/inventory/invoices");
+      revalidatePath("/documents");
+      redirect(
+        "/inventory/invoices?ok=" +
+          encodeURIComponent(
+            r.moved === 0
+              ? `${r.checked} invoice${r.checked === 1 ? "" : "s"} read again; every one of them is an invoice.${r.unreadable ? ` ${r.unreadable} could not be read as text — those were left alone.` : ""}`
+              : `${r.moved} taken out of the invoice file: ${r.found.map((f) => `${f.supplier ?? "a supplier"} ${f.kind === "rebate_report" ? "rebate breakdown" : f.kind === "credit_memo" ? "credit memo" : "statement of account"}`).join(", ")}. They are filed under supplier statements, and everything read off them as purchases is gone.`,
+          ),
+      );
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/inventory/invoices?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not re-read those."));
+    }
+  }
+
+  /**
+   * Says of a document in the vault that it is not an invoice, and means it.
+   *
+   * The adoption list is built from titles and file names, so a rebate breakdown and a returned
+   * goods policy both landed on it under a heading saying they had not been filed — with a button
+   * offering to file them as invoices and no way to say otherwise. A list of outstanding work that
+   * contains finished work cannot be emptied, so it stops being read.
+   */
+  async function notAnInvoiceDocument(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const documentId = String(fd.get("documentId") ?? "");
+    try {
+      const { db, schema } = await import("@/db");
+      const { eq } = await import("drizzle-orm");
+      const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, documentId) });
+      if (!doc) redirect("/inventory/invoices?error=" + encodeURIComponent("That document no longer exists."));
+      // Filed as a supplier document rather than deleted: the paper still exists, it is just not an
+      // invoice, and the category is what keeps this list from offering it again.
+      await db
+        .update(schema.documents)
+        .set({ category: "supplier_statement", notes: [doc!.notes, `Marked as not an invoice by ${u.name}.`].filter(Boolean).join(" ") })
+        .where(eq(schema.documents.id, documentId));
+      await audit({ action: "invoice.not_an_invoice", userId: u.id, userName: u.name, entity: "document", entityId: documentId, details: doc!.title });
+      revalidatePath("/inventory/invoices");
+      revalidatePath("/documents");
+      redirect(
+        "/inventory/invoices?ok=" +
+          encodeURIComponent(`“${doc!.title}” is filed under supplier statements and will not be offered as an invoice again.`),
+      );
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/inventory/invoices?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not do that."));
     }
   }
 
@@ -565,6 +688,19 @@ export default async function InvoicesPage({
                     {[d.fileName, d.receivedFrom, d.effectiveOn ? fmt(d.effectiveOn) : ""].filter(Boolean).join(" · ")}
                   </span>
                 </span>
+                {/*
+                  A way off this list for something that is not an invoice.
+
+                  The list is built from a document's title and file name, so anything with a
+                  supplier's name on it lands here — and without this, a document that is not an
+                  invoice can never leave, and the list can never be emptied.
+                */}
+                <form action={notAnInvoiceDocument} className="shrink-0">
+                  <input type="hidden" name="documentId" value={d.id} />
+                  <button className="btn btn-sm" formNoValidate title="Leaves the document where it is and stops offering it here.">
+                    Not an invoice
+                  </button>
+                </form>
               </li>
             ))}
           </ul>
@@ -791,6 +927,17 @@ export default async function InvoicesPage({
           subtitle={onlyUndated ? "In the archive, but not retrievable by date — which is what an inspector asks for." : TABS.find((t) => t.key === active)!.blurb}
           className="mt-3"
         >
+          {canManage && (
+            <form action={recheckAll} className="mb-3">
+              <SubmitButton className="btn btn-sm" pendingLabel="Reading them again…" formNoValidate>
+                Check these are all really invoices
+              </SubmitButton>
+              <span className="ml-2 text-xs text-ink-3">
+                Reads each filed document again on its own words and takes out anything that turns out to be a statement,
+                a rebate breakdown or a credit memo. It only ever moves things out of the invoice file.
+              </span>
+            </form>
+          )}
           {shown.length === 0 ? (
             <Empty>
               {filtered
@@ -867,6 +1014,14 @@ export default async function InvoicesPage({
                                 </select>
                                 <button
                                   formAction={notAnInvoice}
+                                  /*
+                                    The surrounding form is the one that emails invoices on, and its
+                                    address box is required — so pressing this asked for an email
+                                    address before it would do anything, which is nonsense on a
+                                    button about filing. The browser validates the whole form on any
+                                    submit unless the button opts out.
+                                  */
+                                  formNoValidate
                                   name="unfileId"
                                   value={i.id}
                                   className="btn btn-sm text-[11px]"
@@ -1114,6 +1269,56 @@ export default async function InvoicesPage({
               <p className="mt-1 text-sm">{c.requires}</p>
               <p className="mt-1 text-xs text-ink-2">{c.how}</p>
               {c.fix && <p className="mt-1 text-xs text-warn">{c.fix}</p>}
+
+              {/*
+                The fix, where the shortfall is raised.
+
+                Every one of these used to be a sentence and a link to a page with the control
+                somewhere on it — the receipt setting at the top of this page, the sending address
+                behind an Edit on a supplier card — and the reading, fairly, was that there was no
+                way to fix any of them. A finding and its remedy belong in the same place.
+              */}
+              {canManage && c.state !== "ok" && c.settle?.kind === "receipt_kept_in" && (
+                <form action={receiptKeptIn} className="mt-2 flex flex-wrap items-end gap-2 rounded-md border border-line bg-ground p-2">
+                  <label className="text-xs text-ink-2">
+                    <span className="block">Where receipt is actually recorded</span>
+                    <input
+                      name="system"
+                      className="field mt-1 w-64 py-1 text-xs"
+                      defaultValue={c.settle.current}
+                      placeholder="McKesson Connect"
+                    />
+                  </label>
+                  <button className="btn btn-sm btn-primary">Save, and stop asking here</button>
+                  <span className="text-[11px] text-ink-3">
+                    Name the wholesaler&rsquo;s own system if that is where you check totes in. Leave it empty to record
+                    receipt against each invoice here instead.
+                  </span>
+                </form>
+              )}
+
+              {canManage && c.state !== "ok" && c.settle?.kind === "supplier_address" && (
+                <div className="mt-2 space-y-2 rounded-md border border-line bg-ground p-2">
+                  {c.settle.suppliers.map((sup) => (
+                    <form key={sup.id} action={supplierAddress} className="flex flex-wrap items-end gap-2">
+                      <input type="hidden" name="supplierId" value={sup.id} />
+                      <label className="text-xs text-ink-2">
+                        <span className="block">The address {sup.name} sends invoices from</span>
+                        <input
+                          name="senderEmails"
+                          className="field mt-1 w-72 py-1 text-xs"
+                          placeholder="invoices@mckesson.com, or just mckesson.com"
+                        />
+                      </label>
+                      <button className="btn btn-sm btn-primary">Save</button>
+                    </form>
+                  ))}
+                  <p className="text-[11px] text-ink-3">
+                    A bare domain matches every address at it. Anything already received from that address is filed the
+                    moment this is saved — you do not have to ask for it to be sent again.
+                  </p>
+                </div>
+              )}
             </li>
           ))}
         </ul>

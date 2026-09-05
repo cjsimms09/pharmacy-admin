@@ -1127,3 +1127,74 @@ export async function writeFindingFix(
   if (!res.parsed_output) throw new Error("The rewrite could not be read back. Try again, or open the section and write it.");
   return res.parsed_output;
 }
+
+/**
+ * Reading the item lines off an invoice whose columns cannot be put back together.
+ *
+ * The rule-based reader handles McKesson and IPC because their lines survive text extraction as
+ * lines. IPD's do not. Its PDF is laid out in columns that come out of the extractor shredded and
+ * interleaved: every NDC on the page in one unbroken run, every quantity in another, every price
+ * in a third — "64850051301701650200307016500153064850051501" is four NDCs, and nothing in the text
+ * says where one ends. No regular expression can recover that, because the information about which
+ * figure belongs to which product is not in the text at all; it was in the geometry.
+ *
+ * So this one goes to the model as a document, where the geometry is still there. It is the
+ * expensive path and it is used only where the cheap one reads nothing — which on this pharmacy's
+ * feed is one supplier out of four.
+ *
+ * The arithmetic still decides. Every line must multiply out, and the lines must add to the
+ * printed total, exactly as for a line read by rule. A model that mis-reads a digit produces a
+ * line that does not reconcile, and a line that does not reconcile is not stored.
+ */
+const ReadInvoiceLines = z.object({
+  invoiceNumber: z.string().nullable(),
+  invoiceDate: z.string().nullable().describe("YYYY-MM-DD."),
+  totalCents: z.number().nullable().describe("What the invoice comes to, in cents, as printed on it. Null where no total is printed."),
+  lines: z.array(
+    z.object({
+      ndc11: z.string().describe("The NDC exactly as printed, hyphens and all. Do not pad or reformat it."),
+      description: z.string().nullable(),
+      itemNumber: z.string().nullable(),
+      quantity: z.number().describe("Units shipped, not units ordered. Where the invoice prints both, take the shipped one."),
+      unitOfMeasure: z.string().nullable(),
+      unitCostCents: z.number().describe("Price for one unit, in cents."),
+      extendedCents: z.number().describe("The extended amount for the line, in cents, as printed."),
+      itemClass: z.string().nullable().describe("The supplier's own class or schedule marking for the line, e.g. 'C-2', 'R'."),
+      rebated: z.boolean().nullable().describe("True only where the invoice marks the line as earning a contract rebate. Null where the invoice prints no such marking at all — never guess."),
+    }),
+  ),
+  unreadable: z.array(z.string()).describe("Any line you could see but could not read into figures, quoted."),
+});
+export type ReadInvoiceLinesT = z.infer<typeof ReadInvoiceLines>;
+
+export async function readInvoiceLines(pdf: Buffer, supplier: string | null, ctx: { userId: string; userName: string }): Promise<ReadInvoiceLinesT> {
+  if (MOCK) return { invoiceNumber: null, invoiceDate: null, totalCents: null, lines: [], unreadable: [] };
+  const { client: c, model } = await client();
+  const res = await c.messages.parse({
+    model,
+    max_tokens: 16_000,
+    thinking: { type: "adaptive" },
+    system:
+      "You read the item table off a pharmaceutical wholesaler's invoice and return it as figures. Take the shipped " +
+      "quantity, not the ordered one, where the invoice prints both. Money in cents: $538.70 is 53870. Check each " +
+      "line multiplies out — shipped quantity times unit price is the extended amount — and where it does not, put " +
+      "the line in 'unreadable' rather than returning figures that do not agree with each other. Then check the lines " +
+      "add up to the total printed on the invoice, and say so in 'unreadable' if they do not.\n\n" +
+      "Never invent a line, a quantity or an NDC. A wrong cost against a drug is worse than a missing one: it is " +
+      "acted on.",
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "document", source: { type: "base64", media_type: "application/pdf", data: pdf.toString("base64") } },
+          { type: "text", text: `This is an invoice${supplier ? ` from ${supplier}` : ""}. Read its item table.` },
+        ],
+      },
+    ],
+    output_config: { effort: "high", format: zodOutputFormat(ReadInvoiceLines) },
+  });
+  await logUsage("ai.read_invoice_lines", ctx.userId, ctx.userName, res.usage, supplier ?? "invoice");
+  if (res.stop_reason === "refusal") throw new Error("Claude declined to read that invoice.");
+  if (!res.parsed_output) throw new Error("The item table could not be read back into figures.");
+  return res.parsed_output;
+}
