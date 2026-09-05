@@ -1520,3 +1520,49 @@ export async function unfileInvoice(
     documentId: inv.documentId,
   };
 }
+
+/**
+ * Reads every filed invoice again and finds the ones that were never invoices.
+ *
+ * The recognition rule now reads the document rather than the subject line, but it only runs on
+ * arrival — so everything filed before it existed stays wrong, and the pharmacist is left clicking
+ * through a list correcting them one at a time. That is the software asking a person to do its
+ * job. This does the pass: open each filed invoice, classify it on its own words, and take out
+ * anything that turns out to be a statement, a rebate breakdown or a credit memo.
+ *
+ * It only ever moves things *out* of the invoice file, which is the safe direction. A statement
+ * sitting among the Schedule II records is a document that proves no receipt in the file an
+ * inspector reads first; an invoice this misjudged and removed would be a missing record, so
+ * nothing is removed on a maybe — only where the document's own words settle it.
+ */
+export async function recheckFiledInvoices(
+  user: { id?: string | null; name: string },
+  opts: { apply?: boolean } = {},
+): Promise<{ checked: number; found: { id: string; supplier: string | null; kind: SupplierDocumentKind; why: string }[]; moved: number; unreadable: number }> {
+  const rows = await db.query.supplierInvoices.findMany();
+  const found: { id: string; supplier: string | null; kind: SupplierDocumentKind; why: string }[] = [];
+  let unreadable = 0;
+  let moved = 0;
+
+  for (const inv of rows) {
+    const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, inv.documentId) });
+    if (!doc) continue;
+    let text: string;
+    try {
+      text = pdfText(await readStoredFile(doc.storageKey));
+    } catch {
+      unreadable++;
+      continue;
+    }
+    // The stored item text is a better witness than a re-extraction that came back empty.
+    const words = text.trim() ? text : inv.itemsText;
+    const c = classifySupplierDocument(words, doc.fileName, doc.title);
+    if (c.kind === "invoice" || c.kind === "unknown") continue;
+    found.push({ id: inv.id, supplier: inv.supplier, kind: c.kind, why: c.why });
+    if (opts.apply) {
+      await unfileInvoice(inv.id, { kind: c.kind as "statement" | "rebate_report" | "credit_memo" }, user);
+      moved++;
+    }
+  }
+  return { checked: rows.length, found, moved, unreadable };
+}
