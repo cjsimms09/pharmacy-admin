@@ -46,7 +46,25 @@ export const RebateTerms = z.object({
    * What counts. "catalog_rebate_flag": the items the catalogue marks rebated (McKesson OneStop).
    * "all_generics": every generic. "all_purchases": everything on the invoice.
    */
-  eligibility: z.enum(["catalog_rebate_flag", "all_generics", "all_purchases"]),
+  /*
+   * What the ladder pays on.
+   *
+   * "brand_purchases" is a fourth because McKesson pays a separate factor on brand, off the same
+   * compliance bands but a different column: nil at the bottom, one percent at the top. Folded in
+   * with generics it would either inflate a generic's discount or vanish; kept apart it can price
+   * the brand line it actually applies to.
+   */
+  eligibility: z.enum(["catalog_rebate_flag", "all_generics", "all_purchases", "brand_purchases"]),
+  /*
+   * Which measured figure drives this ladder.
+   *
+   * Two of McKesson's three programmes run off the scrubbed generic compliance rate and the third
+   * off the generic purchase ratio, and the statement prints both. Without this the site cannot
+   * pair a ladder with the figure that selects a band on it, so it cannot say which band the
+   * pharmacy is in — which is the only thing anybody actually wants to know from a ladder.
+   * Null for a programme typed in by hand whose driver was never stated.
+   */
+  ratioMeasure: z.enum(["generic_compliance", "generic_purchase_ratio"]).nullable().default(null),
   /** The supplier's own definition of the ratio, in its words, where it has one. */
   ratioDefinition: z.string().nullable(),
   /** Ascending by threshold. At least one tier. */
@@ -64,6 +82,23 @@ export const CreditStep = z.object({
   creditPercent: percent,
 });
 
+/**
+ * A credit step counted from the invoice date rather than from expiry.
+ *
+ * This is the window that actually decides most returns, and the one the pharmacy asked for:
+ * McKesson credits a saleable return in full where the authorisation is raised within thirty days
+ * of the invoice, and three quarters after that. Nothing about expiry enters into it — a bottle
+ * bought last week and not wanted is going back on the invoice's clock, and the only question is
+ * how many days are left before the credit drops.
+ *
+ * `withinDays` null means "after every window named above", which is how a policy expresses its
+ * final, lower rate.
+ */
+export const InvoiceCreditStep = z.object({
+  withinDays: z.number().min(0).max(3650).nullable(),
+  creditPercent: percent,
+});
+
 export const ReturnTerms = z.object({
   /** The earliest a product can go back, in months before its expiry date. Null when not stated. */
   windowMonthsBeforeExpiry: z.number().min(0).max(120).nullable(),
@@ -71,6 +106,15 @@ export const ReturnTerms = z.object({
   windowMonthsAfterExpiry: z.number().min(0).max(60).nullable(),
   /** Credit as a percentage of what was paid, stepping down with the months left. Descending by months. */
   creditSteps: z.array(CreditStep),
+  /**
+   * Credit counted from the invoice date, which is what most returns actually turn on.
+   *
+   * Ascending by days; a final step with withinDays null is the rate beyond every named window.
+   * Empty where the policy says nothing about an invoice-date deadline.
+   */
+  creditStepsFromInvoice: z.array(InvoiceCreditStep).default([]),
+  /** The last day a return can be raised at all, in days from the invoice. Null where not stated. */
+  returnableWithinDaysOfInvoice: z.number().min(0).max(3650).nullable().default(null),
   restockingFeePercent: percent.nullable(),
   /** Categories the supplier will not take back, in the policy's own words. */
   nonReturnable: z.array(z.string()),
@@ -185,10 +229,43 @@ export function returnCreditPercent(terms: ReturnTermsT, monthsToExpiry: number)
   return Math.max(0, Math.round((step.creditPercent - fee) * 100) / 100);
 }
 
+/**
+ * What a programme pays on, in the words a pharmacist would use.
+ *
+ * The enum name is the site's word for it; this is the pharmacy's. "catalog_rebate_flag" on a
+ * screen tells nobody that the ladder pays on the OneStop items and nothing else, and a rebate
+ * whose scope is not obvious is a rebate somebody will assume applies to everything.
+ */
+export function paysOn(terms: RebateTermsT): string {
+  return {
+    catalog_rebate_flag: "contract items only — the ones the catalogue marks rebated",
+    all_generics: "every generic, contract or not",
+    all_purchases: "everything bought from this supplier",
+    brand_purchases: "brand-name items only",
+  }[terms.eligibility];
+}
+
+/** The short form, for a badge. */
+export function paysOnShort(terms: RebateTermsT): string {
+  return {
+    catalog_rebate_flag: "Contract items only",
+    all_generics: "All generics",
+    all_purchases: "Everything",
+    brand_purchases: "Brand only",
+  }[terms.eligibility];
+}
+
+/** Which measured figure picks the band on this ladder, in words. */
+export function measuredBy(terms: RebateTermsT): string | null {
+  if (terms.ratioMeasure === "generic_compliance") return "your scrubbed generic compliance rate";
+  if (terms.ratioMeasure === "generic_purchase_ratio") return "your generic purchase ratio";
+  return null;
+}
+
 /** One sentence for a supplier card. */
 export function describeRebate(terms: RebateTermsT): string {
   const period = { month: "monthly", quarter: "quarterly", year: "annual" }[terms.period];
-  const on = { catalog_rebate_flag: "the items the catalogue marks rebated", all_generics: "all generics", all_purchases: "all purchases" }[terms.eligibility];
+  const on = paysOn(terms);
   if (terms.kind === "flat_percent" || terms.tiers.length === 1) {
     return `${terms.tiers[0].rebatePercent}% on ${on}, ${period}.`;
   }

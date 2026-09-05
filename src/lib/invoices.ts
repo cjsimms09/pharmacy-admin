@@ -1,14 +1,16 @@
 import "server-only";
-import { and, eq, gte, lte, isNull } from "drizzle-orm";
+import { and, eq, gte, lte, isNull, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "./crypto";
 import { todayIso, daysBetween } from "./dates";
-import { storeFile } from "./files";
+import { storeFile, readFile as readStoredFile } from "./files";
 import { readInvoice } from "./ai";
 import { getSettings } from "./settings";
 import { pdfText } from "./pdf-text";
+import { looksLikeRebateReport } from "./rebate-report";
 import { allSuppliers, supplierForSender } from "./suppliers-registry";
 import { scheduleFromNames, linesMatching } from "./controlled-names";
+import { audit } from "./audit";
 import type { InvoiceSchedule, DocumentCategory } from "@/db/schema";
 
 /**
@@ -55,15 +57,99 @@ export type SupplierInvoice = typeof schema.supplierInvoices.$inferSelect;
  * subject or file name says invoice. Everything else stays on the path it was on. A rule that
  * swept up too much would file the wrong things under a heading an inspector reads first.
  */
+export type SupplierDocumentKind = "invoice" | "statement" | "rebate_report" | "credit_memo" | "unknown";
+
+/**
+ * What a supplier actually sent, read off the document rather than off the subject line.
+ *
+ * A wholesaler sends four kinds of paper and they are not interchangeable. An **invoice** is a
+ * record of goods received, and its Schedule II copy has to be held apart from every other record
+ * the registrant keeps (21 CFR 1304.04(h)(1)). A **statement** is a summary of an account: it
+ * records no receipt of anything, and filing one under the invoice headings puts a document that
+ * proves nothing into the file an inspector reads first. A **rebate breakdown** carries the tier
+ * ladder. A **credit memo** is money coming back, usually for a return.
+ *
+ * The distinction that does the work is the item table. Every invoice lists what was shipped, with
+ * an NDC against each line; a statement lists invoice numbers and balances and carries no NDC at
+ * all. So a document that talks like a statement and has no item lines is a statement, whatever
+ * the subject line says — and a document with item lines is not demoted to a statement merely for
+ * printing the word "statement" in a footer.
+ */
+export function classifySupplierDocument(text: string | null | undefined, fileName = "", subject = ""): { kind: SupplierDocumentKind; why: string } {
+  const words = text ?? "";
+  if (words && looksLikeRebateReport(words)) {
+    return { kind: "rebate_report", why: "It is a rebate breakdown: it carries the tier table and the month's settlement, not goods." };
+  }
+
+  // How many lines look like an item shipped: an NDC and a price on the same line.
+  const itemLines = words
+    .split(/\r?\n/)
+    .filter((l) => /(?:\d{11}|\d{4,5}-\d{3,4}-\d{1,2})/.test(l) && /\$?\d[\d,]*\.\d{2}/.test(l)).length;
+
+  const said = `${subject} ${fileName}`;
+  const creditWords = /\bcredit (?:memo|memorandum|note|invoice)\b|\bRGA\b|\breturn(?:ed)? goods authorisation\b|\breturn(?:ed)? goods authorization\b/i;
+  if (creditWords.test(words.slice(0, 4000)) || creditWords.test(said)) {
+    return { kind: "credit_memo", why: "It is a credit memo — money coming back, not goods going out." };
+  }
+
+  /*
+   * Statement wording. Aging buckets are the giveaway that nothing else prints: a statement of
+   * account sets out what is current, 30, 60 and 90 days old, and no invoice has any reason to.
+   */
+  const statementWords =
+    /statement of account|\bremittance advice\b|balance forward|previous balance|amount enclosed|\baging\b|past due summary/i.test(words) ||
+    /\b(?:31|30)[\s-]*(?:to|-)?\s*60\s*days?\b/i.test(words) ||
+    (/\bstatement\b/i.test(words.slice(0, 1500)) && /\bbalance\b/i.test(words));
+
+  if (statementWords && itemLines < 2) {
+    return {
+      kind: "statement",
+      why:
+        "It reads as a statement of account — balances and invoice numbers — and carries no item lines with NDCs on them, " +
+        "so it is a summary of the account rather than a record that goods were received.",
+    };
+  }
+  if (itemLines >= 2) {
+    return { kind: "invoice", why: `It lists ${itemLines} item lines with NDCs and prices, which is what an invoice is.` };
+  }
+  if (statementWords) {
+    return { kind: "statement", why: "It reads as a statement of account." };
+  }
+  return { kind: "unknown", why: "Nothing in it settles what kind of document it is." };
+}
+
+/**
+ * Whether an attachment should be filed as a supplier invoice.
+ *
+ * Deliberately narrow: a PDF, from a sender the pharmacy has already named as a supplier, whose
+ * subject or file name says invoice — and which, where its words can be read, is not something
+ * else. Everything else stays on the path it was on. A rule that swept up too much would file the
+ * wrong things under a heading an inspector reads first.
+ */
 export function looksLikeInvoice(opts: {
   fileName: string;
   mimeType: string;
   subject: string;
   supplier: string | null;
+  /** The document's own words, where they could be read. A statement is never an invoice. */
+  text?: string | null;
 }): boolean {
   const isPdf = /\.pdf$/i.test(opts.fileName) || opts.mimeType === "application/pdf";
   if (!isPdf) return false;
   if (!opts.supplier) return false;
+  /*
+   * What the document says beats what the subject line calls it.
+   *
+   * McKesson's monthly rebate breakdown is a PDF from a known supplier, and a subject line reading
+   * "statement of account" matched the words below — so it was filed as an invoice with an
+   * unreadable schedule and held with the Schedule II records, and the tier ladder inside it was
+   * never read. Then an IPD statement of account did the same thing for the same reason. The
+   * subject is written by whoever sent the email; the document is the document.
+   */
+  if (opts.text) {
+    const kind = classifySupplierDocument(opts.text, opts.fileName, opts.subject).kind;
+    if (kind !== "invoice" && kind !== "unknown") return false;
+  }
   return /invoice|inv\b|statement of account|packing (list|slip)/i.test(`${opts.subject} ${opts.fileName}`);
 }
 
@@ -479,6 +565,8 @@ export async function fileInvoice(
   });
   if (text) await writeInvoiceLines(id, text);
 
+  await storeInvoiceLines(id, { supplier, invoiceDate, text: text ?? "", printedTotalCents: totalCents });
+
   return { id, documentId, schedule, needsReview: !confident };
 }
 
@@ -498,40 +586,31 @@ function textOf(buf: Buffer): string | null {
  * Replaces whatever lines the invoice had, so reading again after the reader improves gives the
  * improved answer and never two copies. The counts on the invoice say how far the read got: an
  * invoice with twelve lines read and three unread is a different fact from one with twelve lines.
+ *
+ * Nothing is stored unless the lines add up to the total printed on the invoice's face. A partial
+ * read is the outcome that does damage — every figure that was read looks perfectly sound, and the
+ * product whose line was dropped simply appears cheaper than the pharmacy actually paid.
  */
-export async function writeInvoiceLines(invoiceId: string, text: string): Promise<{ read: number; unread: number }> {
-  const { parseInvoiceLines } = await import("./invoice-lines");
-  const parsed = parseInvoiceLines(text);
-  await db.delete(schema.supplierInvoiceLines).where(eq(schema.supplierInvoiceLines.invoiceId, invoiceId));
-  const rows = parsed.lines.map((l) => ({
-    id: newId(),
-    invoiceId,
-    lineNumber: l.lineNumber,
-    kind: l.kind,
-    ndc11: l.ndc11,
-    rawNdc: l.rawNdc,
-    supplierItemNumber: null,
-    description: l.description,
-    quantity: l.quantity,
-    unit: l.unit,
-    unitPriceCents: l.unitPriceCents,
-    extendedCents: l.extendedCents,
-    awpCents: l.awpCents,
-    itemClass: l.itemClass,
-  }));
-  for (let i = 0; i < rows.length; i += 200) await db.insert(schema.supplierInvoiceLines).values(rows.slice(i, i + 200));
+export async function writeInvoiceLines(invoiceId: string, text: string): Promise<{ read: number; unread: number; reconciles: boolean | null }> {
+  const inv = await db.query.supplierInvoices.findFirst({ where: eq(schema.supplierInvoices.id, invoiceId) });
+  const r = await storeInvoiceLines(invoiceId, {
+    supplier: inv?.supplier ?? null,
+    invoiceDate: inv?.invoiceDate ?? null,
+    text,
+    printedTotalCents: inv?.totalCents ?? null,
+  });
   await db
     .update(schema.supplierInvoices)
-    .set({ linesRead: parsed.lines.length, linesUnread: parsed.unread })
+    .set({ linesRead: r.stored, linesUnread: r.unread })
     .where(eq(schema.supplierInvoices.id, invoiceId));
-  return { read: parsed.lines.length, unread: parsed.unread };
+  return { read: r.stored, unread: r.unread, reconciles: r.reconciles };
 }
 
 /** The lines of one invoice, in printed order. */
 export async function invoiceLines(invoiceId: string) {
-  return db.query.supplierInvoiceLines.findMany({
-    where: eq(schema.supplierInvoiceLines.invoiceId, invoiceId),
-    orderBy: (l, { asc }) => [asc(l.lineNumber)],
+  return db.query.invoiceLines.findMany({
+    where: eq(schema.invoiceLines.invoiceId, invoiceId),
+    orderBy: (l, { asc }) => [asc(l.createdAt)],
   });
 }
 
@@ -542,12 +621,13 @@ export async function invoiceLines(invoiceId: string) {
  * reader runs, so an invoice in a layout it does not know comes back with partial lines or none,
  * and says so on the row rather than pretending.
  */
-export async function backfillInvoiceLines(): Promise<{ invoices: number; linesRead: number; unreadable: number }> {
+export async function backfillInvoiceLines(): Promise<{ invoices: number; linesRead: number; unreadable: number; unreconciled: number }> {
   const rows = await db.query.supplierInvoices.findMany({ where: isNull(schema.supplierInvoices.linesRead) });
   const { readFile } = await import("./files");
   let invoicesDone = 0;
   let linesRead = 0;
   let unreadable = 0;
+  let unreconciled = 0;
   for (const row of rows) {
     const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, row.documentId) });
     if (!doc) continue;
@@ -562,11 +642,14 @@ export async function backfillInvoiceLines(): Promise<{ invoices: number; linesR
       const r = await writeInvoiceLines(row.id, text);
       invoicesDone++;
       linesRead += r.read;
+      // Read, but the lines did not add up to the printed total, so none were kept. Named
+      // separately: it is a layout this reader does not fully know, not a scan.
+      if (r.reconciles === false) unreconciled++;
     } catch {
       unreadable++;
     }
   }
-  return { invoices: invoicesDone, linesRead, unreadable };
+  return { invoices: invoicesDone, linesRead, unreadable, unreconciled };
 }
 
 /** How many invoices the line reader has never been run on. */
@@ -1171,6 +1254,8 @@ export async function adoptDocument(documentId: string, ctx: { userId: string; u
   });
   if (text) await writeInvoiceLines(id, text);
 
+  await storeInvoiceLines(id, { supplier, invoiceDate, text: text ?? "", printedTotalCents: totalCents });
+
   return { id, documentId, schedule, needsReview: schedule === "unknown" };
 }
 
@@ -1311,4 +1396,127 @@ export async function awaitingReceipt(): Promise<SupplierInvoice[]> {
   return rows
     .filter((r) => r.schedule !== "none")
     .sort((a, b) => (b.invoiceDate ?? "").localeCompare(a.invoiceDate ?? ""));
+}
+
+/**
+ * Stores the item lines of an invoice, where they can be read and where they add up.
+ *
+ * Only when they reconcile against the total printed on the invoice's face. A partial read is the
+ * outcome that does damage: every figure that was read looks perfectly sound, and the product
+ * whose line was dropped simply appears cheaper than the pharmacy actually paid. Where the sum does
+ * not match, nothing is stored and the count of unread lines is left for the invoice page to say,
+ * because a purchasing recommendation built on three quarters of an invoice is worse than one built
+ * on none of it.
+ */
+export async function storeInvoiceLines(
+  invoiceId: string,
+  meta: { supplier: string | null; invoiceDate: string | null; text: string; printedTotalCents: number | null },
+): Promise<{ stored: number; unread: number; reconciles: boolean | null; readCents: number }> {
+  const { parseInvoiceLines } = await import("./invoice-lines");
+  if (!meta.text || meta.text.length < 200) return { stored: 0, unread: 0, reconciles: null, readCents: 0 };
+  const parsed = parseInvoiceLines(meta.text, meta.printedTotalCents);
+  if (parsed.lines.length === 0) return { stored: 0, unread: parsed.unreadable.length, reconciles: parsed.reconciles, readCents: 0 };
+  if (parsed.reconciles === false) return { stored: 0, unread: parsed.lines.length + parsed.unreadable.length, reconciles: false, readCents: parsed.totalCents };
+
+  await db.delete(schema.invoiceLines).where(eq(schema.invoiceLines.invoiceId, invoiceId));
+  const rows = parsed.lines.map((l) => ({
+    id: newId(),
+    invoiceId,
+    supplier: meta.supplier,
+    invoiceDate: meta.invoiceDate,
+    ndc11: l.ndc11,
+    description: l.description,
+    itemNumber: l.itemNumber,
+    quantity: l.quantity,
+    unitOfMeasure: l.unitOfMeasure,
+    unitCostCents: l.unitCostCents,
+    extendedCents: l.extendedCents,
+    awpCents: l.awpCents,
+    itemClass: l.itemClass,
+    rebated: l.rebated,
+  }));
+  for (let i = 0; i < rows.length; i += 200) await db.insert(schema.invoiceLines).values(rows.slice(i, i + 200));
+  return { stored: rows.length, unread: parsed.unreadable.length, reconciles: parsed.reconciles, readCents: parsed.totalCents };
+}
+
+
+
+/**
+ * Taking a document back out of the invoice file, because it was never an invoice.
+ *
+ * A statement of account arrived from IPD, matched the words on the front of it, and was filed as
+ * an invoice — and then there was nothing anybody could do about it. No way to correct it, no way
+ * to remove it. That is the worse half of the mistake: every automatic filing rule will be wrong
+ * about something eventually, and a rule with no undo turns a five-second correction into a
+ * permanent wrong record.
+ *
+ * Two outcomes, and they are different. **Re-filing** keeps the document and moves it to the
+ * category it belongs in — the paper still exists, it is just not an invoice. **Discarding**
+ * removes it altogether, for the duplicate or the thing that should never have been kept, and it
+ * takes the bytes with it only when no other record points at them.
+ *
+ * The invoice row and its item lines go either way. Leaving the lines behind would leave a
+ * statement's figures sitting in the purchasing comparison as though they were prices paid.
+ */
+export type Unfiling = { kind: "statement" | "rebate_report" | "credit_memo" | "other" } | { kind: "discard" };
+
+export async function unfileInvoice(
+  invoiceId: string,
+  outcome: Unfiling,
+  user: { id?: string | null; name: string },
+): Promise<{ message: string; documentId: string | null }> {
+  const inv = await db.query.supplierInvoices.findFirst({ where: eq(schema.supplierInvoices.id, invoiceId) });
+  if (!inv) throw new Error("That invoice is no longer on file.");
+  const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, inv.documentId) });
+
+  await db.delete(schema.invoiceLines).where(eq(schema.invoiceLines.invoiceId, invoiceId));
+  await db.delete(schema.supplierInvoices).where(eq(schema.supplierInvoices.id, invoiceId));
+
+  const named = inv.supplier ?? "the supplier";
+  if (outcome.kind === "discard") {
+    if (doc) {
+      const { deleteFile } = await import("./files");
+      const others = await db.query.documents.findMany({ where: eq(schema.documents.storageKey, doc.storageKey), columns: { id: true } });
+      await db.delete(schema.documents).where(eq(schema.documents.id, doc.id));
+      if (others.every((o) => o.id === doc.id)) await deleteFile(doc.storageKey).catch(() => {});
+    }
+    await audit({
+      action: "invoice.discarded",
+      userId: user.id ?? null,
+      userName: user.name,
+      entity: "document",
+      entityId: inv.documentId,
+      details: `${named} · ${inv.invoiceNumber ?? "no number"} · removed from the invoice file and deleted`,
+    });
+    return { message: `Removed. The document and everything read off it are gone.`, documentId: null };
+  }
+
+  const word =
+    outcome.kind === "rebate_report" ? "rebate breakdown" : outcome.kind === "credit_memo" ? "credit memo" : outcome.kind === "statement" ? "statement of account" : "document";
+  if (doc) {
+    await db
+      .update(schema.documents)
+      .set({
+        category: outcome.kind === "other" ? "other" : "supplier_statement",
+        title: outcome.kind === "other" ? doc.title : `${named} ${word}${inv.invoiceDate ? ` — ${inv.invoiceDate}` : ""}`,
+        notes: [doc.notes, `Taken out of the invoice file by ${user.name}: it is a ${word}, not an invoice.`].filter(Boolean).join(" "),
+      })
+      .where(eq(schema.documents.id, doc.id));
+  }
+  await audit({
+    action: "invoice.unfiled",
+    userId: user.id ?? null,
+    userName: user.name,
+    entity: "document",
+    entityId: inv.documentId,
+    details: `${named} · ${inv.invoiceNumber ?? "no number"} · re-filed as ${word}`,
+  });
+  return {
+    message:
+      `Taken out of the invoice file and kept as a ${word} from ${named}. ` +
+      (outcome.kind === "rebate_report"
+        ? "It carries a tier ladder — read it from the supplier's terms page and the ladder is filed with it."
+        : "Nothing read off it is counted as a purchase any more."),
+    documentId: inv.documentId,
+  };
 }

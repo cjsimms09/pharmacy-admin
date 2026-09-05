@@ -27,9 +27,21 @@ file is how they talk.
 
 ## What the cloud session added (branch `claude/repo-audit-catalog-claims-2l37sj`, September 2026)
 
-Built on `feature/compliance` at `cf2e71a`. `npm run typecheck` clean; `npm test` 996 passing
-with the same 6 failures the base branch had (all in `tests/alerts.test.ts`, "finding things by
-name" — not touched here). Two migrations, `0048` and `0049`, both additive.
+Built on `feature/compliance` at `cf2e71a`. The pharmacy session merged the first five commits
+in `4ee3e66` (renumbering the migration to `0049`, and keeping its own `invoice_lines` table in
+place of `supplier_invoice_lines` — see the note in `0049_supplier_terms_and_invoice_lines.sql`).
+The transaction-feed commit below came after that merge; its migration is `0052`, which follows
+the pharmacy session's `0050` and `0051` and has been applied cleanly on top of them.
+
+Pull request #2 is where the two sessions talk: results of live checks, and a word before either
+side edits a file the other is working in.
+
+**CI on `feature/compliance` is red on its own** (run 322): six failures in `tests/alerts.test.ts`
+("finding things by name") that predate both sessions' work, and
+`tests/supplier-terms-store.test.ts`, which runs against the real database and so fails on a
+runner that has none. The store test passes on a migrated database. It would pass in CI if its
+`before` hook pointed `DATABASE_PATH` at a scratch file and ran `scripts/migrate.ts` before
+importing `src/db`.
 
 ### NDC handling — a correctness fix
 - `src/lib/ndc.ts` is now the one converter. Every hyphenated FDA layout converts exactly; a
@@ -113,13 +125,24 @@ skipped for the same reason. That is where the "reversals that matched nothing" 
 `tests/{ndc,supplier-terms,invoice-lines,nadac-datasets}.test.ts` (new), `tests/{claims,suppliers-registry,rx-transactions}.test.ts`,
 `docs/HANDOFF.md`, `docs/reference/nadac-api.md`, `fixtures/README.md`, `fixtures/rx-transactions.txt` (new).
 
-## What the cloud session would do next, in order
-1. Read IPC and IPD invoice layouts in full (needs fixtures).
-2. Purchases by product: a page that adds `supplier_invoice_lines` up by NDC and month, beside
-   the catalogue price for the same NDC and supplier — the first "is the invoice price what the
-   catalogue said" check, and the base of the rebate-tier ratio.
-3. Apply the rebate tier to the purchasing comparison (`purchasingOpportunities` in
-   `suppliers.ts`) using `rebateTierFor` and the catalogue's rebated flag.
-4. A returns list from on-hand/expiry data once that report is scheduled out of PioneerRx.
-5. Contract comparison ("what would each supplier's terms have cost on last quarter's actual
-   lines") once two quarters of lines are held — PLAN.md §4.5 "contract replay".
+## Who owns what now
+
+The list that used to be here ("what the cloud session would do next") is withdrawn: the pharmacy
+session built those things while the branch was open — invoice lines reconciled to the printed
+total (`invoice-lines.ts`, `invoice_lines`), the product ledger (`product-ledger.ts`), the rebate
+report and rates read off McKesson's own statement (`rebate-report.ts`, `rebate-rates.ts`,
+`purchase-ratio.ts`), returns due (`returns-due.ts`). Those, and everything that needs the real
+site, mailbox, database or CMS, are the pharmacy session's.
+
+The cloud session keeps to what can be proved on fixtures: the feed readers and the rules that
+decide what a row means (`rx-transactions.ts`, `pioneer-catalog.ts`, `ndc.ts`, the claims
+importer, the NADAC source discovery), and reading real files through them when the pharmacy
+sends them. It asks on pull request #2 before touching anything else.
+
+Open on the cloud side, waiting on the pharmacy session:
+- The live checks listed above (NADAC listing and one week's fetch; catalogue name on each
+  register row; the `/reports` sentence; the scheduled report's window).
+- Redacted IPC and IPD invoice fixtures, if their layouts are not already read in full.
+- Once a few days of the transaction feed have loaded under the new rule: how many claims have
+  no `completed_at`, and how many reversals matched nothing — both should fall towards zero as
+  earlier days are held.

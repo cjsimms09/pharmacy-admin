@@ -1,106 +1,126 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { parseInvoiceLines, sumLines } from "../src/lib/invoice-lines";
+import { parseInvoiceLines, splitQuantities, ndc11 } from "../src/lib/invoice-lines";
 
 /**
- * The item lines as numbers. The McKesson rows below are in the shape the pharmacy's own
- * invoices print (the same fixture the schedule reader is tested on); the drug names and figures
- * are invented, the layout is not.
+ * Reading a wholesaler's invoice as figures rather than as text.
+ *
+ * Every line here is copied from a real invoice this pharmacy received. Both formats run fields
+ * together with no separator, so the only defence against a plausible-looking wrong number is the
+ * line's own arithmetic: shipped quantity times unit price is the extended amount.
  */
-const mck = (ndc: string, qty: string, um: string, desc: string, awp: string, cls: string, price: string, ext: string, flag = "") =>
-  `${ndc}257-9894973485930            ${qty} ${um} ${desc}      ${awp} ${cls}      ${price}        ${ext} ${flag}`;
+const MCK = [
+  "00002-1436-11257-9894973485930            1EA EMGALITY INJ PEN 120MG/ML 1      916.73 R      739.11       739.11",
+  "24208-0463-25211-3991973485930            1EA LATANOPROST OPH.005% B&L2.5ML@       24.38 R        2.32 K        2.32",
+  "00169-6339-10137-9593973485930            2CT NOVOLOG F/PEN PREF SYR 3ML   5      167.65 R      131.02       262.04",
+  "23155-0689-41265-6098973485930            1*CT OCTREOTIDE SDV500MCG/MLAVET10@      234.00 R      233.99 K      233.99",
+  "45802-0281-39398-2303973485932            1EA TESTOS GEL 1.62%PERR1.25G  30@      403.16 D       83.20 K       83.20 3.0",
+].join("\n");
+
+const IPC = [
+  "5128541Amoxicillin/Clav Pot Tabs 500/125mg Auro 65862050220$8.80$75.6911$2.91$2.91",
+  "5309497Estradiol Vaginal 10mcg Inserts Auro 1859651043918$349.17$436.4611$53.00$53.00",
+].join("\n");
 
 describe("a McKesson invoice", () => {
-  const text = [
-    "Billing No.:7656147106",
-    "NDC/UPC/UDI#ITEM#DEL DOC#QTYUM    ITEM DESCRIPTIONRETAIL XPRICEDAMOUNT   M",
-    mck("00002-1436-11", "1", "EA", "EMGALITY INJ PEN 120MG/ML 1", "916.73", "R", "739.11", "739.11"),
-    mck("00228-2031-96", "2", "EA", "ALPRAZOL TAB 1MG    ACTA 1000@", "1,079.00", "D", "31.20", "62.40", "H"),
-    mck("00406-0522-01", "-1", "EA", "OXYCOD+ACE TB 7.5/325 SGX 100@", "271.54", "X", "18.90", "-18.90"),
-    "TOTAL RX PURCHASES: $782.61",
-  ].join("\n");
+  const r = parseInvoiceLines(MCK);
 
-  test("every column is read, and the NDC is the eleven-digit form", () => {
-    const r = parseInvoiceLines(text);
-    assert.equal(r.layout, "mckesson");
-    assert.equal(r.unread, 0);
-    assert.equal(r.lines.length, 3);
-    const first = r.lines[0];
-    assert.equal(first.ndc11, "00002143611");
-    assert.equal(first.rawNdc, "00002-1436-11");
-    assert.equal(first.quantity, 1);
-    assert.equal(first.unit, "EA");
-    assert.equal(first.description, "EMGALITY INJ PEN 120MG/ML 1");
-    assert.equal(first.awpCents, 91673);
-    assert.equal(first.itemClass, "R");
-    assert.equal(first.unitPriceCents, 73911);
-    assert.equal(first.extendedCents, 73911);
-    assert.equal(first.confidence, "full");
+  test("every line is read, and none is guessed at", () => {
+    assert.equal(r.format, "mckesson");
+    assert.equal(r.lines.length, 5);
+    assert.deepEqual(r.unreadable, []);
   });
 
-  test("a thousands separator in the AWP and a trailing flag letter do not break the row", () => {
-    const r = parseInvoiceLines(text);
-    const alp = r.lines[1];
-    assert.equal(alp.awpCents, 107900);
-    assert.equal(alp.quantity, 2);
-    assert.equal(alp.extendedCents, 6240);
-    assert.equal(alp.itemClass, "D");
+  test("the NDC, quantity, unit price and extended amount come off correctly", () => {
+    const l = r.lines[0];
+    assert.equal(l.ndc11, "00002143611");
+    assert.equal(l.description, "EMGALITY INJ PEN 120MG/ML 1");
+    assert.equal(l.quantity, 1);
+    assert.equal(l.unitCostCents, 73_911);
+    assert.equal(l.extendedCents, 73_911);
+    assert.equal(l.awpCents, 91_673);
+    assert.equal(l.itemClass, "R");
   });
 
-  test("a negative quantity is a credit line", () => {
-    const r = parseInvoiceLines(text);
-    const credit = r.lines[2];
-    assert.equal(credit.kind, "credit");
-    assert.equal(credit.quantity, -1);
-    assert.equal(credit.extendedCents, -1890);
+  test("a quantity greater than one multiplies out", () => {
+    const novolog = r.lines.find((l) => l.ndc11 === "00169633910")!;
+    assert.equal(novolog.quantity, 2);
+    assert.equal(novolog.unitCostCents, 13_102);
+    assert.equal(novolog.extendedCents, 26_204);
   });
 
-  test("the total line carries no NDC and is not a line", () => {
-    assert.ok(parseInvoiceLines(text).lines.every((l) => !/TOTAL/.test(l.description ?? "")));
+  test("the K marks the line as earning the contract rebate, and its absence marks the opposite", () => {
+    // The single fact that decides whether a gross price gets the tier rate taken off it.
+    assert.equal(r.lines.find((l) => l.ndc11 === "24208046325")!.rebated, true);
+    assert.equal(r.lines.find((l) => l.ndc11 === "00002143611")!.rebated, false);
   });
 
-  test("lines are numbered in the order printed", () => {
-    assert.deepEqual(parseInvoiceLines(text).lines.map((l) => l.lineNumber), [1, 2, 3]);
-  });
-});
-
-describe("a layout this does not know column by column", () => {
-  const text = ["INVOICE 1004797", "59651038401 METFORMIN HCL 500MG TAB 100 12.50 25.00", "0093-7212-56 SIMVASTATIN 20MG TAB $8.10", "Sub Total $33.10"].join("\n");
-
-  test("reads the NDC and the last amount, and says the read is partial", () => {
-    const r = parseInvoiceLines(text);
-    assert.equal(r.layout, "ndc-and-amount");
-    assert.equal(r.lines.length, 2);
-    assert.equal(r.lines[0].ndc11, "59651038401");
-    assert.equal(r.lines[0].extendedCents, 2500);
-    assert.equal(r.lines[0].quantity, null, "a quantity is never assumed");
-    assert.equal(r.lines[0].unitPriceCents, null);
-    assert.equal(r.lines[0].confidence, "partial");
-    assert.equal(r.lines[1].ndc11, "00093721256");
-    assert.equal(r.lines[1].extendedCents, 810);
-    assert.match(r.lines[1].description ?? "", /SIMVASTATIN/);
+  test("a line carrying an extra figure after the extended amount is still read", () => {
+    // Eighty-three dollars went missing from an invoice that otherwise reconciled, because the
+    // pattern was anchored hard to the end of the line.
+    const gel = r.lines.find((l) => l.ndc11 === "45802028139");
+    assert.ok(gel, "the testosterone gel line must not be dropped for its trailing figure");
+    assert.equal(gel!.extendedCents, 8_320);
   });
 
-  test("the subtotal is not a line", () => {
-    assert.ok(parseInvoiceLines(text).lines.every((l) => !/Sub Total/.test(l.description ?? "")));
+  test("an asterisk before the unit of measure does not break the line", () => {
+    assert.equal(r.lines.find((l) => l.ndc11 === "23155068941")!.unitCostCents, 23_399);
+  });
+
+  test("a line whose arithmetic does not balance is refused rather than read wrongly", () => {
+    // The extended amount changed to something that is not quantity times unit price. A parser
+    // that shrugged would put a wrong cost against a drug and nothing would say so.
+    const bent = MCK.split("\n")[2].replace("       262.04", "       999.99");
+    const bad = parseInvoiceLines(bent);
+    assert.equal(bad.lines.length, 0);
+    assert.equal(bad.unreadable.length, 1);
   });
 });
 
-describe("what is refused", () => {
-  test("a page with no NDCs reads nothing, and says the layout is none", () => {
-    const r = parseInvoiceLines("a scanned page\nwith nothing that parses\n$12.00");
-    assert.equal(r.lines.length, 0);
-    assert.equal(r.layout, "none");
+describe("an IPD invoice", () => {
+  const r = parseInvoiceLines(IPC);
+
+  test("the NDC run onto the end of the description is separated out", () => {
+    assert.equal(r.lines[0].ndc11, "65862050220");
+    assert.equal(r.lines[0].unitCostCents, 291);
+    assert.equal(r.lines[1].ndc11, "59651043918");
+    assert.equal(r.lines[1].unitCostCents, 5_300);
   });
 
-  test("an NDC with no amount beside it is not a line", () => {
-    const r = parseInvoiceLines("00002-1436-11 EMGALITY backordered");
-    assert.equal(r.lines.length, 0);
+  test("this invoice prints no contract marking, so nothing is claimed either way", () => {
+    // Saying "not rebated" here would strip a discount off the price in every later comparison.
+    assert.ok(r.lines.every((l) => l.rebated === null));
+  });
+
+  test("the order and ship quantities, printed with no separator, are split by the arithmetic", () => {
+    assert.deepEqual(splitQuantities("11", 291, 291), { ordered: 1, shipped: 1 });
+    assert.deepEqual(splitQuantities("122", 100, 2200), { ordered: 1, shipped: 22 });
+    assert.equal(splitQuantities("11", 291, 999), null, "a split that does not balance is no split");
   });
 });
 
-describe("summing lines", () => {
-  test("adds what it has and counts what it could not", () => {
-    assert.deepEqual(sumLines([{ extendedCents: 100 }, { extendedCents: null }, { extendedCents: -20 }]), { totalCents: 80, missing: 1 });
+describe("adding up to the invoice", () => {
+  test("lines that match the printed total reconcile", () => {
+    const r = parseInvoiceLines(MCK, 73_911 + 232 + 26_204 + 23_399 + 8_320);
+    assert.equal(r.reconciles, true);
+  });
+
+  test("a line silently dropped shows as a failure to reconcile, not as a clean read", () => {
+    // The dangerous outcome: four plausible lines, no errors, and the pharmacy short on a drug.
+    const r = parseInvoiceLines(MCK, 73_911 + 232 + 26_204 + 23_399 + 8_320 + 5_000);
+    assert.equal(r.reconciles, false);
+  });
+
+  test("with no printed total to check against, it says so rather than claiming success", () => {
+    assert.equal(parseInvoiceLines(MCK).reconciles, null);
+  });
+});
+
+describe("NDCs", () => {
+  test("hyphenated and plain forms both land on the eleven-digit billing form", () => {
+    assert.equal(ndc11("00002-1436-11"), "00002143611");
+    assert.equal(ndc11("0002-1436-11"), "00002143611");
+    assert.equal(ndc11("65862050220"), "65862050220");
+    assert.equal(ndc11("not an ndc"), null);
   });
 });

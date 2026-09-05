@@ -86,11 +86,11 @@ describe("the rebate earned at a ratio", () => {
   test("a flat programme is one tier and reads as one", () => {
     const flat = RebateTerms.parse({ ...terms, kind: "flat_percent", period: "month", eligibility: "all_generics", tiers: [{ thresholdPercent: 0, rebatePercent: 2 }] });
     assert.equal(rebateTierFor(flat, 0)?.rebatePercent, 2);
-    assert.equal(describeRebate(flat), "2% on all generics, monthly.");
+    assert.equal(describeRebate(flat), "2% on every generic, contract or not, monthly.");
   });
 
   test("the ladder is described in order", () => {
-    assert.equal(describeRebate(terms), "quarterly ladder on the items the catalogue marks rebated: 0% → 1%, 14% → 2.5%, 16% → 3.5%.");
+    assert.equal(describeRebate(terms), "quarterly ladder on contract items only — the ones the catalogue marks rebated: 0% → 1%, 14% → 2.5%, 16% → 3.5%.");
   });
 
   test("the shape refuses a programme with no tiers", () => {
@@ -156,11 +156,14 @@ describe("the return policy", () => {
 describe("what is stored is read back through the same shape", () => {
   test("valid JSON round-trips; anything that no longer fits reads as nothing", () => {
     const terms = { kind: "flat_percent", period: "month", eligibility: "all_purchases", ratioDefinition: null, tiers: [{ thresholdPercent: 0, rebatePercent: 2 }], paidAs: null, notes: null };
-    assert.deepEqual(readRebateTerms(JSON.stringify(terms)), terms);
+    // Fields added since a programme was stored fill in at their defaults rather than refusing the
+    // row — a ladder typed in last year does not stop pricing because a newer one records which
+    // measured figure picks its band.
+    assert.deepEqual(readRebateTerms(JSON.stringify(terms)), { ...terms, ratioMeasure: null });
     assert.equal(readRebateTerms('{"kind":"flat_percent"}'), null);
     assert.equal(readRebateTerms("not json"), null);
     const ret = { windowMonthsBeforeExpiry: 6, windowMonthsAfterExpiry: 0, creditSteps: [], restockingFeePercent: null, nonReturnable: [], reverseDistributor: null, notes: null };
-    assert.deepEqual(readReturnTerms(JSON.stringify(ret)), ret);
+    assert.deepEqual(readReturnTerms(JSON.stringify(ret)), { ...ret, creditStepsFromInvoice: [], returnableWithinDaysOfInvoice: null });
     assert.equal(readReturnTerms("[]"), null);
   });
 });

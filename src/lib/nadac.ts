@@ -157,7 +157,10 @@ export function looksLikeNadacHeader(firstLines: string): boolean {
 
 export type LoadReport = {
   file: string;
+  /** Rows CMS had not published before: a new product, or a price that changed and so carries a new effective date. */
   added: number;
+  /** Prices CMS revised for an effective date already held — the same date, a different figure. */
+  revised: number;
   alreadyHad: number;
   skipped: number;
   reasons: Record<string, number>;
@@ -239,6 +242,39 @@ async function loadNadacFilesNow(opts: LoadOpts): Promise<LoadReport[]> {
 
 const BATCH = 400;
 
+/**
+ * Which rows of a batch are new, and which are corrections to a price already held.
+ *
+ * The three cases a weekly file carries, told apart:
+ *   - a key we hold nothing for — a product CMS has not priced before, or a price that changed and
+ *     so arrives under a new effective date. Either way it is a new row.
+ *   - a key we hold, with the same figure — the ordinary case, the same price republished. Nothing.
+ *   - a key we hold, with a different figure — CMS has corrected a price for a date already
+ *     published. The held figure has been withdrawn and must be replaced, or the floor check goes
+ *     on using a number that no longer exists.
+ *
+ * Pure, and given the map rather than the database, so all three can be tested without one. The map
+ * is updated as it goes so that a file repeating a row does not count as correcting itself.
+ */
+export function splitAgainstHeld<T extends { ndc11: string; effectiveOn: string; unitMicros: number }>(
+  rows: T[],
+  held: Map<string, number>,
+): { fresh: T[]; changed: T[] } {
+  const fresh: T[] = [];
+  const changed: T[] = [];
+  for (const row of rows) {
+    const k = `${row.ndc11}|${row.effectiveOn}`;
+    if (!held.has(k)) {
+      fresh.push(row);
+      held.set(k, row.unitMicros);
+    } else if (held.get(k) !== row.unitMicros) {
+      changed.push(row);
+      held.set(k, row.unitMicros);
+    }
+  }
+  return { fresh, changed };
+}
+
 async function hashFile(full: string): Promise<string> {
   const h = createHash("sha256");
   for await (const chunk of createReadStream(full)) h.update(chunk as Buffer);
@@ -250,19 +286,54 @@ async function loadOneFile(full: string, file: string, size: number, onProgress?
   let headers: string[] | null = null;
   let rows = 0;
   let added = 0;
+  let revised = 0;
   let batch: (typeof schema.nadacPrices.$inferInsert)[] = [];
   let lastReport = Date.now();
 
+  /*
+   * Insert what is new, correct what has been revised, and count the three cases apart.
+   *
+   * The three things a weekly file can carry are a product CMS has never priced, a price that has
+   * changed — which arrives with a new effective date, so it is a new row — and a correction to a
+   * price already published, which arrives with the *same* effective date and a different figure.
+   * The first version handled the first two and silently dropped the third: the unique index
+   * refused the row and the pharmacy went on holding a number CMS had withdrawn, on a benchmark
+   * that decides whether a claim was underpaid. Nothing anywhere would have said so.
+   *
+   * So each batch is compared against what is held before it is written. One select, one insert of
+   * genuinely new rows, and an update for each figure that actually changed — and the counts that
+   * come out are true rather than inferred from how many rows a statement happened to touch.
+   */
   const flush = async () => {
     if (batch.length === 0) return;
-    const r = await db.insert(schema.nadacPrices).values(batch).onConflictDoNothing();
-    added += Number(r.rowsAffected ?? 0);
+    const keys = batch.map((b) => b.ndc11);
+    const existing = await db
+      .select({ ndc11: schema.nadacPrices.ndc11, effectiveOn: schema.nadacPrices.effectiveOn, unitMicros: schema.nadacPrices.unitMicros })
+      .from(schema.nadacPrices)
+      .where(inArray(schema.nadacPrices.ndc11, [...new Set(keys)]));
+    const held = new Map(existing.map((e) => [`${e.ndc11}|${e.effectiveOn}`, e.unitMicros]));
+
+    const { fresh, changed } = splitAgainstHeld(batch, held);
+
+    if (fresh.length) {
+      await db.insert(schema.nadacPrices).values(fresh).onConflictDoNothing();
+      added += fresh.length;
+    }
+    for (const row of changed) {
+      await db
+        .update(schema.nadacPrices)
+        .set({ unitMicros: row.unitMicros, pricingUnit: row.pricingUnit, description: row.description, classification: row.classification, otc: row.otc, explanationCode: row.explanationCode, fileAsOf: row.fileAsOf })
+        .where(and(eq(schema.nadacPrices.ndc11, row.ndc11), eq(schema.nadacPrices.effectiveOn, row.effectiveOn)));
+      revised++;
+    }
     batch = [];
     // Hand the thread back so a page requested mid-load is served between batches.
     await new Promise<void>((resolve) => setImmediate(resolve));
     if (onProgress && Date.now() - lastReport > 2000) {
       lastReport = Date.now();
-      await onProgress(`Loading ${file}: ${rows.toLocaleString()} rows read, ${added.toLocaleString()} new`);
+      await onProgress(
+        `Loading ${file}: ${rows.toLocaleString()} rows read, ${added.toLocaleString()} new${revised ? `, ${revised.toLocaleString()} corrected` : ""}`,
+      );
     }
   };
 
@@ -284,12 +355,17 @@ async function loadOneFile(full: string, file: string, size: number, onProgress?
     if (batch.length >= BATCH) await flush();
   }
   await flush();
-  if (onProgress) await onProgress(`Loaded ${file}: ${rows.toLocaleString()} rows, ${added.toLocaleString()} new (${(size / 1_048_576).toFixed(1)} MB)`);
+  if (onProgress) {
+    await onProgress(
+      `Loaded ${file}: ${rows.toLocaleString()} rows, ${added.toLocaleString()} new${revised ? `, ${revised.toLocaleString()} corrected` : ""} (${(size / 1_048_576).toFixed(1)} MB)`,
+    );
+  }
 
   return {
     file,
     added,
-    alreadyHad: rows - ctx.skipped - added,
+    revised,
+    alreadyHad: rows - ctx.skipped - added - revised,
     skipped: ctx.skipped,
     reasons: ctx.reasons,
     fileAsOf: ctx.fileAsOf,
@@ -435,6 +511,81 @@ export async function nadacCoverage() {
     .groupBy(schema.nadacPrices.effectiveOn)
     .orderBy(schema.nadacPrices.effectiveOn);
   return { ...agg, weeks };
+}
+
+/** The effective dates already held, so a weekly file for one of them need never be downloaded. */
+export async function heldWeeks(): Promise<Set<string>> {
+  const rows = await db
+    .selectDistinct({ effectiveOn: schema.nadacPrices.effectiveOn })
+    .from(schema.nadacPrices);
+  return new Set(rows.map((r) => r.effectiveOn));
+}
+
+/**
+ * The one question the NADAC page has to answer before any other: are we holding prices current
+ * enough to check today's claims against the floor?
+ *
+ * Everything else on that page — rows held, distinct NDCs, weeks loaded, the address it downloads
+ * from — is detail that only means something once this is answered, and the pharmacist reading it
+ * had no way to tell. A fetch that reported "720,000 rows read, 0 new" is in fact the best possible
+ * outcome (every price CMS has published since 2021 was already held) and read like a failure.
+ *
+ * CMS publishes on a Wednesday. Ten days of grace covers a publication that slipped and a machine
+ * switched off over a long weekend; beyond that something has stopped and the claims filled since
+ * are being priced against last month's NADAC.
+ */
+export type NadacHealth = {
+  prices: number;
+  ndcs: number;
+  earliest: string | null;
+  latest: string | null;
+  ageDays: number | null;
+  state: "none" | "current" | "behind";
+  headline: string;
+  detail: string;
+};
+
+export async function nadacHealth(today = new Date()): Promise<NadacHealth> {
+  const [agg] = await db
+    .select({
+      prices: sql<number>`count(*)`,
+      ndcs: sql<number>`count(distinct ${schema.nadacPrices.ndc11})`,
+      earliest: sql<string | null>`min(${schema.nadacPrices.effectiveOn})`,
+      latest: sql<string | null>`max(${schema.nadacPrices.effectiveOn})`,
+    })
+    .from(schema.nadacPrices);
+
+  const prices = Number(agg?.prices ?? 0);
+  const ndcs = Number(agg?.ndcs ?? 0);
+  const latest = agg?.latest ?? null;
+  const earliest = agg?.earliest ?? null;
+  if (prices === 0 || !latest) {
+    return {
+      prices: 0, ndcs: 0, earliest: null, latest: null, ageDays: null, state: "none",
+      headline: "No NADAC prices are held",
+      detail: "Until some are, no claim can be checked against the Kansas floor — the engine declines to price rather than estimate. Press “Fetch now” below.",
+    };
+  }
+
+  const ms = Date.parse(`${latest}T00:00:00Z`);
+  const now = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  const ageDays = Math.max(0, Math.round((now - ms) / 86_400_000));
+  const held = `${prices.toLocaleString()} prices covering ${ndcs.toLocaleString()} products${earliest ? `, from ${earliest}` : ""}.`;
+
+  if (ageDays <= 10) {
+    return {
+      prices, ndcs, earliest, latest, ageDays, state: "current",
+      headline: `Up to date — prices in force ${latest}`,
+      detail: `Every claim filled on or before that date can be priced against the floor. ${held}`,
+    };
+  }
+  return {
+    prices, ndcs, earliest, latest, ageDays, state: "behind",
+    headline: `Behind by ${ageDays} days — the newest prices held are from ${latest}`,
+    detail:
+      `CMS publishes every Wednesday, so a claim filled since ${latest} is being priced against prices that old. ` +
+      `Press “Fetch now”, and if that fails the message will say which addresses it tried. ${held}`,
+  };
 }
 
 /** The price the statute pointed at on a given fill date, or null with nothing invented. */

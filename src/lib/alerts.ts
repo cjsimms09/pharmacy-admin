@@ -258,14 +258,53 @@ export async function alerts(): Promise<Alert[]> {
    * request; it is the difference between running the software that was fixed and the software
    * that was not.
    */
-  const behind = Number(s.updates_behind ?? 0);
+  /*
+   * Counted against this copy, not remembered from the last network check.
+   *
+   * The stored figure was not rewritten when updates were installed, so this said ten were waiting
+   * on a computer already running them — and named one from a week earlier. A wrong notice on the
+   * first screen of the day teaches the reader to scroll past the right one.
+   */
+  /*
+   * The ceiling that has stopped everything, said out loud before somebody presses a button.
+   *
+   * With prices being read as zero this could never fire; now that they are read properly it can,
+   * and the first anybody would otherwise know is a button that appears to fail. A limit reached
+   * is not a fault, but it is indistinguishable from one unless something says so first.
+   */
+  try {
+    const { monthlyCap, dollars: money } = await import("./ai-spend");
+    const limit = await monthlyCap();
+    if (limit.over) {
+      out.push({
+        key: "ai-cap",
+        level: "now",
+        title: `Claude has stopped at the ${money(limit.cap!)} monthly ceiling`,
+        why:
+          `${money(limit.spent)} has been spent in the last month, so nothing further is being sent — the manual will not be read, ` +
+          `invoices needing judgement will not be read, and any button that asks Claude something will refuse. ` +
+          (limit.isDefault
+            ? "Nothing here chose that figure; it is the built-in limit, so that software spending your money on a computer you are not sitting at cannot run away."
+            : "It is the ceiling you set.") +
+          " Raise it or turn it off under Settings → Claude.",
+        href: "/settings#claude",
+        action: "Raise it",
+      });
+    }
+  } catch {
+    // No key, no settings, nothing to say. A cost ceiling is never the reason a page fails to load.
+  }
+
+  const { pendingUpdates } = await import("./updates");
+  const pending = await pendingUpdates();
+  const behind = pending.behind;
   if (behind > 0) {
     out.push({
       key: "updates",
       level: behind >= 5 ? "now" : "soon",
       title: `${behind} update${behind === 1 ? "" : "s"} ${behind === 1 ? "is" : "are"} waiting to be installed`,
       why:
-        (s.updates_newest ? `The newest is “${s.updates_newest}”. ` : "") +
+        (pending.newest ? `The newest is “${pending.newest}”. ` : "") +
         "Nothing on this computer changes until they are installed, so anything already repaired is still broken here.",
       href: "/settings/updates",
       action: "Install",

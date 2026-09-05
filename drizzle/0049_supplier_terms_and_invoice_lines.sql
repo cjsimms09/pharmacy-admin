@@ -1,25 +1,9 @@
-CREATE TABLE `supplier_invoice_lines` (
-	`id` text PRIMARY KEY NOT NULL,
-	`invoice_id` text NOT NULL,
-	`line_number` integer NOT NULL,
-	`kind` text DEFAULT 'product' NOT NULL,
-	`ndc11` text,
-	`raw_ndc` text,
-	`supplier_item_number` text,
-	`description` text,
-	`quantity` integer,
-	`unit` text,
-	`unit_price_cents` integer,
-	`extended_cents` integer,
-	`awp_cents` integer,
-	`item_class` text,
-	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) NOT NULL,
-	FOREIGN KEY (`invoice_id`) REFERENCES `supplier_invoices`(`id`) ON UPDATE no action ON DELETE cascade
-);
---> statement-breakpoint
-CREATE INDEX `supplier_invoice_lines_invoice_idx` ON `supplier_invoice_lines` (`invoice_id`);--> statement-breakpoint
-CREATE INDEX `supplier_invoice_lines_ndc_idx` ON `supplier_invoice_lines` (`ndc11`);--> statement-breakpoint
-CREATE UNIQUE INDEX `supplier_invoice_lines_invoice_line_uq` ON `supplier_invoice_lines` (`invoice_id`,`line_number`);--> statement-breakpoint
+-- The cloud branch's `supplier_invoice_lines` table is deliberately not created here.
+-- Both sessions built an invoice line reader in the same week. The one kept is `invoice_lines`
+-- from migration 0048, because it reconciles each invoice against the total printed on its face
+-- and carries the K flag McKesson prints against a line bought on the generics contract — the one
+-- fact that decides whether a price gets the tier rate taken off it. Two tables holding the same
+-- lines would drift, and the comparison would read whichever it happened to be pointed at.
 CREATE TABLE `supplier_rebate_programs` (
 	`id` text PRIMARY KEY NOT NULL,
 	`supplier_id` text NOT NULL,

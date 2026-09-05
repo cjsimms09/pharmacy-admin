@@ -686,3 +686,104 @@ export async function requeueChapter(chapterId: string): Promise<number> {
   }
   return mine.length;
 }
+
+/**
+ * Answering the question a finding is waiting on, and then writing the text.
+ *
+ * Almost every finding with no suggested text is not asking for judgement, it is asking a
+ * question — and there was nowhere to answer it. "The pharmacy must decide who the driver may
+ * release a controlled substance to." Nothing but the pharmacist could settle that, the reviewer
+ * was right to refuse to invent it, and it came back unchanged on every pass for want of a text
+ * box. Twenty-three of them, and the list stopped being read.
+ */
+export async function answerFinding(id: string, answer: string, user: { name: string }): Promise<void> {
+  const text = answer.trim();
+  const f = await db.query.manualFindings.findFirst({ where: eq(schema.manualFindings.id, id) });
+  if (!f) throw new Error("That finding no longer exists.");
+  await db
+    .update(schema.manualFindings)
+    .set({
+      answer: text || null,
+      answeredAt: text ? new Date().toISOString() : null,
+      // An answer supersedes whatever was drafted before it, which was drafted without it.
+      suggestedBody: text ? "" : f.suggestedBody,
+    })
+    .where(eq(schema.manualFindings.id, id));
+  void user;
+}
+
+export type FixDraft = { wrote: boolean; changed: string; stillNeeded: string | null };
+
+/**
+ * Writes the replacement text for one finding, from the finding and whatever the pharmacy has said.
+ *
+ * The step that was missing between "here is what is wrong and what the manual should say" and a
+ * manual that says it. The result is stored as the finding's suggested text, so the existing
+ * "Put the fix in" applies it through the ordinary save — the same protections, the same byline
+ * saying the audit wrote it and nobody has read it yet.
+ */
+export async function draftFindingFix(id: string, user: { id: string; name: string }): Promise<FixDraft> {
+  const f = await db.query.manualFindings.findFirst({ where: eq(schema.manualFindings.id, id) });
+  if (!f) throw new Error("That finding no longer exists.");
+  if (f.appliedAt || f.dismissedAt) throw new Error("That finding is already closed.");
+  if (!(await hasApiKey())) throw new Error("No API key is set, so nothing can be written. Settings → Claude.");
+
+  const sections = await allSections();
+  const sec = sections.find((x) => x.id === f.sectionId);
+  if (!sec) throw new Error("The section this finding belongs to no longer exists.");
+  if (sec.managedBy) throw new Error(`${sec.managedBy} maintains that section, so this pharmacy does not rewrite it.`);
+
+  const s = await getSettings();
+  const pharmacy = s.pharmacy_name || "This pharmacy";
+  const context = (await pharmacyFacts()).text;
+  const siteDoes = policies(pharmacy).map((x) => `${x.title}: ${x.text[0]}`).join("\n");
+
+  const { writeFindingFix } = await import("./ai");
+  const r = await writeFindingFix(
+    { title: sec.title, body: sec.body, what: f.what, why: f.why, answer: f.answer, context, siteDoes },
+    { userId: user.id, userName: user.name },
+  );
+
+  if (r.body.trim()) {
+    await db.update(schema.manualFindings).set({ suggestedBody: r.body }).where(eq(schema.manualFindings.id, id));
+    return { wrote: true, changed: r.changed, stillNeeded: null };
+  }
+  return { wrote: false, changed: r.changed, stillNeeded: r.stillNeeded ?? "It still turns on a fact about this pharmacy that nobody has supplied." };
+}
+
+/** Every open finding that has no text yet — the ones the list used to leave nowhere to go. */
+export async function findingsNeedingText(): Promise<Finding[]> {
+  return (await openFindings()).filter((f) => !f.suggestedBody.trim());
+}
+
+/**
+ * Writes the text for as many findings as will fit in the time given.
+ *
+ * Bounded like every other press on this page: a request that takes minutes reads as a frozen
+ * site. Whatever finishes is saved as it goes, so stopping early loses nothing and pressing again
+ * continues.
+ */
+export async function draftAllFindingFixes(
+  user: { id: string; name: string },
+  opts: { limit?: number; budgetMs?: number } = {},
+): Promise<{ wrote: number; stillNeedFacts: number; left: number; problems: string[] }> {
+  const deadline = Date.now() + (opts.budgetMs ?? 30_000);
+  const limit = opts.limit ?? 6;
+  const pending = await findingsNeedingText();
+  let wrote = 0;
+  let stillNeedFacts = 0;
+  const problems: string[] = [];
+  let done = 0;
+  for (const f of pending) {
+    if (done >= limit || Date.now() > deadline) break;
+    done++;
+    try {
+      const r = await draftFindingFix(f.id, user);
+      if (r.wrote) wrote++;
+      else stillNeedFacts++;
+    } catch (e) {
+      problems.push(`${f.sectionTitle}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  return { wrote, stillNeedFacts, left: Math.max(0, pending.length - done), problems };
+}

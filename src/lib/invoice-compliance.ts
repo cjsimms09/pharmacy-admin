@@ -223,20 +223,38 @@ export async function invoiceCompliance(): Promise<Requirement[]> {
    *
    * Recorded here instead, the electronic record carries the same facts and the paper is redundant.
    */
+  /*
+   * Where the receipt record actually lives.
+   *
+   * This pharmacy checks its totes in against the wholesaler's own ordering system, which is where
+   * receipt is recorded and has been all along. Asking for it a second time here was duplicate work
+   * with a regulation attached, and the panel sat permanently red about a record that exists. So
+   * the pharmacy names the system once and this line reports the truth: the record is kept, and
+   * where. What it does not do is pretend the location is unimportant — 1304.04(a) wants records
+   * produced at the registered location on request, so the fix names that as the thing to be able
+   * to do, rather than another form to fill in here.
+   */
+  const receiptElsewhere = (s.receipt_record_kept_in ?? "").trim();
   out.push({
     key: "receipt",
     citation: "21 CFR 1304.22(c)",
     requires:
       "The record for controlled substances received must show the date received and the quantity, and for Schedule " +
       "II, the number of commercial containers received.",
-    how:
-      `The invoice records what was shipped. Whether it arrived, on what date and whether it matched is recorded ` +
-      `against the invoice here: ${rows.length - unreceipted} of ${rows.length} confirmed received, with the name of ` +
-      "whoever checked it in and a note where anything was short or damaged.",
-    state: unreceipted > 0 ? "attention" : "ok",
-    fix:
-      unreceipted > 0
-        ? `${unreceipted} invoice${unreceipted === 1 ? " has" : "s have"} no record that the goods arrived. Until that is here, the initialled packing slip in the tote is the pharmacy's receipt record and must be kept — which is the whole reason to record it.`
+    how: receiptElsewhere
+      ? `Receipt is confirmed in ${receiptElsewhere} as each order is checked in, which is where this pharmacy's ` +
+        "record of what arrived and when is held. The invoice held here is the record of what was shipped; the two " +
+        "together are the account of the order. Receipt can also be recorded against an invoice here where it is " +
+        "useful, but nothing is asked for."
+      : `The invoice records what was shipped. Whether it arrived, on what date and whether it matched is recorded ` +
+        `against the invoice here: ${rows.length - unreceipted} of ${rows.length} confirmed received, with the name of ` +
+        "whoever checked it in and a note where anything was short or damaged.",
+    state: receiptElsewhere ? "ok" : unreceipted > 0 ? "attention" : "ok",
+    fix: receiptElsewhere
+      ? `Be able to produce ${receiptElsewhere}'s receipt history at the pharmacy during an inspection — printed or on ` +
+        "screen. That is what 1304.04(a) asks of a record kept electronically, wherever it is kept."
+      : unreceipted > 0
+        ? `${unreceipted} invoice${unreceipted === 1 ? " has" : "s have"} no record that the goods arrived. Until that is here, the initialled packing slip in the tote is the pharmacy's receipt record and must be kept — which is the whole reason to record it. If you confirm receipt in the wholesaler's own system instead, say so on the Invoices page and this stops asking.`
         : undefined,
     href: "/inventory/invoices?unreceipted=1",
   });

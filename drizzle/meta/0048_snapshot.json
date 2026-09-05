@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "0a3c6372-db6f-444c-a0c0-b75281ad63a8",
+  "id": "2f0e2d3b-3248-4aa6-a925-8414d269d033",
   "prevId": "ed391f41-e0e4-4cad-a531-e8262e46f477",
   "tables": {
     "audit_events": {
@@ -2690,6 +2690,158 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "invoice_lines": {
+      "name": "invoice_lines",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "invoice_id": {
+          "name": "invoice_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "supplier": {
+          "name": "supplier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "invoice_date": {
+          "name": "invoice_date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "ndc11": {
+          "name": "ndc11",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "item_number": {
+          "name": "item_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "quantity": {
+          "name": "quantity",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "unit_of_measure": {
+          "name": "unit_of_measure",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "unit_cost_cents": {
+          "name": "unit_cost_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "extended_cents": {
+          "name": "extended_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "awp_cents": {
+          "name": "awp_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "item_class": {
+          "name": "item_class",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "rebated": {
+          "name": "rebated",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
+        }
+      },
+      "indexes": {
+        "invoice_lines_invoice_idx": {
+          "name": "invoice_lines_invoice_idx",
+          "columns": [
+            "invoice_id"
+          ],
+          "isUnique": false
+        },
+        "invoice_lines_ndc_idx": {
+          "name": "invoice_lines_ndc_idx",
+          "columns": [
+            "ndc11"
+          ],
+          "isUnique": false
+        },
+        "invoice_lines_supplier_idx": {
+          "name": "invoice_lines_supplier_idx",
+          "columns": [
+            "supplier"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "invoice_lines_invoice_id_supplier_invoices_id_fk": {
+          "name": "invoice_lines_invoice_id_supplier_invoices_id_fk",
+          "tableFrom": "invoice_lines",
+          "tableTo": "supplier_invoices",
+          "columnsFrom": [
+            "invoice_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "mac_appeal_terms": {
       "name": "mac_appeal_terms",
       "columns": {
@@ -4615,13 +4767,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "supplier_id": {
-          "name": "supplier_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "file_name": {
           "name": "file_name",
           "type": "text",
@@ -4706,160 +4851,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "supplier_invoice_lines": {
-      "name": "supplier_invoice_lines",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "invoice_id": {
-          "name": "invoice_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "line_number": {
-          "name": "line_number",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'product'"
-        },
-        "ndc11": {
-          "name": "ndc11",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "raw_ndc": {
-          "name": "raw_ndc",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "supplier_item_number": {
-          "name": "supplier_item_number",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "description": {
-          "name": "description",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "quantity": {
-          "name": "quantity",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "unit": {
-          "name": "unit",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "unit_price_cents": {
-          "name": "unit_price_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "extended_cents": {
-          "name": "extended_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "awp_cents": {
-          "name": "awp_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "item_class": {
-          "name": "item_class",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
-        }
-      },
-      "indexes": {
-        "supplier_invoice_lines_invoice_idx": {
-          "name": "supplier_invoice_lines_invoice_idx",
-          "columns": [
-            "invoice_id"
-          ],
-          "isUnique": false
-        },
-        "supplier_invoice_lines_ndc_idx": {
-          "name": "supplier_invoice_lines_ndc_idx",
-          "columns": [
-            "ndc11"
-          ],
-          "isUnique": false
-        },
-        "supplier_invoice_lines_invoice_line_uq": {
-          "name": "supplier_invoice_lines_invoice_line_uq",
-          "columns": [
-            "invoice_id",
-            "line_number"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {
-        "supplier_invoice_lines_invoice_id_supplier_invoices_id_fk": {
-          "name": "supplier_invoice_lines_invoice_id_supplier_invoices_id_fk",
-          "tableFrom": "supplier_invoice_lines",
-          "tableTo": "supplier_invoices",
-          "columnsFrom": [
-            "invoice_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "supplier_invoices": {
       "name": "supplier_invoices",
       "columns": {
@@ -4931,20 +4922,6 @@
         },
         "total_cents": {
           "name": "total_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "lines_read": {
-          "name": "lines_read",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "lines_unread": {
-          "name": "lines_unread",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
@@ -5061,13 +5038,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "supplier_id": {
-          "name": "supplier_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "ndc11": {
           "name": "ndc11",
           "type": "text",
@@ -5182,244 +5152,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "supplier_rebate_programs": {
-      "name": "supplier_rebate_programs",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "supplier_id": {
-          "name": "supplier_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "effective_from": {
-          "name": "effective_from",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "effective_to": {
-          "name": "effective_to",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "terms_version": {
-          "name": "terms_version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 1
-        },
-        "terms_json": {
-          "name": "terms_json",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "document_id": {
-          "name": "document_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "notes": {
-          "name": "notes",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "supplier_rebate_programs_supplier_idx": {
-          "name": "supplier_rebate_programs_supplier_idx",
-          "columns": [
-            "supplier_id",
-            "effective_from"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "supplier_rebate_programs_supplier_id_suppliers_id_fk": {
-          "name": "supplier_rebate_programs_supplier_id_suppliers_id_fk",
-          "tableFrom": "supplier_rebate_programs",
-          "tableTo": "suppliers",
-          "columnsFrom": [
-            "supplier_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "supplier_return_policies": {
-      "name": "supplier_return_policies",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "supplier_id": {
-          "name": "supplier_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "effective_from": {
-          "name": "effective_from",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "effective_to": {
-          "name": "effective_to",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "terms_version": {
-          "name": "terms_version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 1
-        },
-        "terms_json": {
-          "name": "terms_json",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "document_id": {
-          "name": "document_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "notes": {
-          "name": "notes",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "supplier_return_policies_supplier_idx": {
-          "name": "supplier_return_policies_supplier_idx",
-          "columns": [
-            "supplier_id",
-            "effective_from"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "supplier_return_policies_supplier_id_suppliers_id_fk": {
-          "name": "supplier_return_policies_supplier_id_suppliers_id_fk",
-          "tableFrom": "supplier_return_policies",
-          "tableTo": "suppliers",
-          "columnsFrom": [
-            "supplier_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "suppliers": {
       "name": "suppliers",
       "columns": {
@@ -5468,13 +5200,6 @@
         },
         "website": {
           "name": "website",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "catalog_name": {
-          "name": "catalog_name",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

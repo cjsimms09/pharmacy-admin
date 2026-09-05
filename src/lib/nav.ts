@@ -79,6 +79,9 @@ export const NAV: NavGroup[] = [
       { href: "/inventory/pharmacist-log", label: "Daily pharmacist log", blurb: "The C-III/IV refill statement and signature sheet" },
       { href: "/inventory/power-of-attorney", label: "Power of attorney", blurb: "Who may execute a Form 222 or a CSOS order" },
       { href: "/inventory/invoices", label: "Supplier invoices", blurb: "Filed by schedule, with the C2s kept apart" },
+      // Beside the invoices because that is what it counts from: the return clock starts on the
+      // invoice date, not at expiry.
+      { href: "/inventory/returns", label: "What to send back", blurb: "Return deadlines counted from the invoice, and what each is worth" },
       // Next to the invoices because that is what it is for: an invoice files itself only if the
       // address it came from is recognised, and this is where the addresses live.
       { href: "/suppliers", label: "Suppliers", blurb: "Who we buy from, and the addresses their invoices arrive from" },

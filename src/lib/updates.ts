@@ -125,14 +125,37 @@ export async function refreshUpdateCheck(): Promise<void> {
 
 export type PendingUpdates = { behind: number; newest: string | null; checkedAt: string | null; error: string | null };
 
-/** What the last background check found. Reads settings only — never touches the network. */
+/**
+ * What is actually waiting, counted against this copy rather than remembered from last time.
+ *
+ * The count was read straight out of settings, written by whatever check last ran over the
+ * network. Install the updates and nothing rewrote it — so the first screen of the day went on
+ * saying ten updates were waiting, naming one from a week ago, on a computer already running them.
+ * A notice that is wrong on the front page is worse than no notice: it teaches the reader to
+ * scroll past the one that is right.
+ *
+ * The count is now taken from the local remote-tracking ref, which the last fetch already left on
+ * disk. No network, a few milliseconds, and correct the moment an update is installed. The stored
+ * figures stay as the fallback for a copy that is not a git checkout at all.
+ */
 export async function pendingUpdates(): Promise<PendingUpdates> {
   const { getSettings } = await import("./settings");
   const s = await getSettings();
-  return {
+  const stored = {
     behind: Number(s.updates_behind ?? "0") || 0,
     newest: s.updates_newest?.trim() || null,
     checkedAt: s.updates_last_check || null,
     error: s.updates_check_error?.trim() || null,
   };
+
+  try {
+    const branch = await trackedBranch();
+    // Local only: this reads the ref the last fetch wrote, and fails fast where there is none.
+    const out = await git(["log", "--format=%s", `HEAD..origin/${branch}`], 5_000);
+    const subjects = out.split("\n").filter(Boolean);
+    return { ...stored, behind: subjects.length, newest: subjects[0] ?? null };
+  } catch {
+    // Not a checkout, no remote ref yet, or git unavailable — the last check is all there is.
+    return stored;
+  }
 }

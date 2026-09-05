@@ -51,10 +51,21 @@ export async function apiKeyHint(): Promise<string | null> {
 
 /** Thrown when the month's ceiling has been reached. Its own class, so it reads as a choice. */
 export class AiCapReachedError extends Error {
-  constructor(spent: string, cap: string) {
+  /*
+   * The message has to say whose ceiling it is.
+   *
+   * It read "the ceiling you set" whether or not anybody had set one — and the built-in fifty
+   * dollars is the one most pharmacies will meet first, having never chosen it. Being stopped by a
+   * limit you did not know existed, and told you set it, is the kind of message that sends
+   * somebody looking for a fault that is not there.
+   */
+  constructor(spent: string, cap: string, isDefault = false) {
     super(
-      `Claude has cost ${spent} in the last month, which is the ceiling you set (${cap}). Nothing further will be ` +
-        "sent until the month rolls on or you raise it under Settings → Claude. Everything already done is saved.",
+      `Claude has cost ${spent} in the last month, against a ceiling of ${cap}` +
+        (isDefault
+          ? " — which nothing here chose deliberately; it is the built-in limit, there so that software spending your money on a computer you are not sitting at cannot run away. Raise it or turn it off under Settings → Claude."
+          : ", which is the ceiling you set. Raise it under Settings → Claude, or wait for the month to roll on.") +
+        " Everything already done is saved, and nothing further is sent until then.",
     );
     this.name = "AiCapReachedError";
   }
@@ -72,7 +83,7 @@ async function client(): Promise<{ client: Anthropic; model: string }> {
   if (!s.anthropic_api_key_enc) throw new AiNotConfiguredError();
   const { monthlyCap, dollars } = await import("./ai-spend");
   const limit = await monthlyCap();
-  if (limit.over) throw new AiCapReachedError(dollars(limit.spent), dollars(limit.cap!));
+  if (limit.over) throw new AiCapReachedError(dollars(limit.spent), dollars(limit.cap!), limit.isDefault);
   return { client: new Anthropic({ apiKey: decryptText(s.anthropic_api_key_enc), maxRetries: 2, timeout: 10 * 60 * 1000 }), model: s.ai_model || DEFAULT_MODEL };
 }
 
@@ -594,6 +605,26 @@ const PolicyReview = z.object({
 export type PolicyReviewT = z.infer<typeof PolicyReview>;
 
 /**
+ * The same review, asked small, for a section whose full answer will not fit.
+ *
+ * Four findings at most and no rewrite. A structured answer that runs out of room does not come
+ * back short — it comes back as an unparseable fragment — so when the full question fails twice
+ * this is asked instead. Four real findings on a long section beat an error on it for ever.
+ */
+const PolicyReviewBrief = z.object({
+  findings: z
+    .array(
+      z.object({
+        what: z.string().describe("What is wrong with this section as it stands, in two sentences at most."),
+        why: z.string().describe("The requirement it falls short of, cited exactly."),
+        severity: z.enum(["blocking", "should", "note"]),
+      }),
+    )
+    .max(4)
+    .describe("Empty when the section is adequate. Do not manufacture work."),
+});
+
+/**
  * Reads one section of the manual against the requirements and against what this site does.
  *
  * Separate from drafting, and deliberately so. Drafting is asked for by somebody who has already
@@ -627,7 +658,7 @@ export async function reviewPolicy(
    * something anybody reviews as a wholesale replacement anyway; the findings are what is wanted,
    * and they always fit.
    */
-  const TOO_LONG_TO_REWRITE = 9_000;
+  const TOO_LONG_TO_REWRITE = 4_000;
   const longSection = input.body.length > TOO_LONG_TO_REWRITE;
 
   /*
@@ -640,9 +671,9 @@ export async function reviewPolicy(
   const ask = async () =>
     c.messages.parse({
       model,
-      // Generous enough to carry findings and a full rewrite of an ordinary section. The old
-      // limit of 4,000 truncated the long ones, which is a separate failure of the same shape.
-      max_tokens: 12_000,
+      // Headroom, because the answer that does not fit does not come back short — it comes back
+      // as an unparseable fragment, which is a far worse failure than a long reply.
+      max_tokens: 32_000,
     system:
       "You audit sections of an independent Kansas community pharmacy's policy and procedure manual against Kansas " +
       "Board of Pharmacy regulations (K.S.A. 65-16xx, K.A.R. 68-x), DEA requirements (21 CFR 1300-1317), HIPAA " +
@@ -699,10 +730,54 @@ export async function reviewPolicy(
   if (!res?.parsed_output && res?.stop_reason !== "max_tokens" && res?.stop_reason !== "refusal") {
     ({ res, parseError } = await attempt());
   }
+  /*
+   * The last resort: ask for less.
+   *
+   * Three sections of this pharmacy's manual failed every pass with an unterminated string — the
+   * answer running out part-way through, which is what a structured reply does when it does not
+   * fit. Retrying the same question produced the same answer. So the question gets smaller: the
+   * findings alone, at most four, each a couple of sentences, and no replacement text at all.
+   * Findings without a rewrite are most of the value and a fraction of the length, and a section
+   * that yields four real findings is far better than one that yields an error for ever.
+   */
+  if (!res?.parsed_output) {
+    try {
+      const small = await c.messages.parse({
+        model,
+        max_tokens: 8_000,
+        system:
+          "You audit one section of a Kansas community pharmacy's policy manual against Kansas Board of Pharmacy " +
+          "regulations, DEA requirements (21 CFR 1300-1317), HIPAA and OSHA. Report at most the four most important " +
+          "problems, each in two sentences at most. Do not rewrite the section. A section that is adequate gets no " +
+          "findings at all — do not manufacture work. Never invent a fact about this pharmacy.",
+        messages: [
+          {
+            role: "user",
+            content: `The pharmacy: ${input.context}\n\nSection title: ${input.title}\n\nCurrent text:\n${input.body.slice(0, 30_000)}`,
+          },
+        ],
+        output_config: { format: zodOutputFormat(PolicyReviewBrief) },
+      });
+      if (small.parsed_output) {
+        await logUsage("ai.policy.review.brief", ctx.userId, ctx.userName, small.usage, input.title.slice(0, 120));
+        return {
+          verdict: small.parsed_output.findings.length === 0 ? "ok" : "gap",
+          // No replacement text, which is exactly what an empty suggestedBody means everywhere
+          // else: the reviewer had a finding and could not write the fix.
+          findings: small.parsed_output.findings.map((f) => ({ ...f, severity: f.severity, suggestedBody: "" })),
+          suggestedBody: "",
+        } as PolicyReviewT;
+      }
+    } catch {
+      // Fall through to the error below, which now names both attempts.
+    }
+  }
+
   if (!res) {
     throw new Error(
-      `The review of “${input.title}” came back twice in a form this site could not read (${(parseError ?? "").split("\n")[0].slice(0, 160)}). ` +
-        "The rest of the manual is unaffected; try this section again later, or split it if it is long.",
+      `The review of “${input.title}” came back twice in a form this site could not read (${(parseError ?? "").split("\n")[0].slice(0, 160)}), ` +
+        "and a shorter question failed too. The rest of the manual is unaffected. This section is long enough that " +
+        "splitting it into smaller ones is worth doing anyway — nobody reads a four-thousand-word policy either.",
     );
   }
 
@@ -815,5 +890,240 @@ export async function draftPolicy(
     throw new Error(`Claude returned an answer that could not be read for “${input.title}”. Try again.`);
   }
   await logUsage("ai.policy.draft", ctx.userId, ctx.userName, res.usage, input.title.slice(0, 120));
+  return res.parsed_output;
+}
+
+/**
+ * Reading a supplier's returned-goods policy, which is prose rather than a table.
+ *
+ * The rebate breakdown is read by rule because it is a grid of figures that checks itself. A
+ * returns policy is neither: it is paragraphs of conditions, and two of them — McKesson's and
+ * IPC's — do not even yield readable text to the extractor, coming back as twenty-seven characters
+ * of fragments. So the document goes to the model as a document, which is what the model is for.
+ *
+ * What comes back is a proposal, not a fact. Every field is quoted back to the sentence it came
+ * from so the pharmacist can check it against the page in front of him, and nothing is stored until
+ * he says so. A returns policy decides whether a bottle is worth sending back or throwing away;
+ * a figure nobody checked is not worth having.
+ */
+const ReadReturnPolicy = z.object({
+  /*
+   * The clock that starts at the invoice, which is the one that decides most returns.
+   *
+   * The first version of this schema had nowhere to put it, and McKesson's policy states it as
+   * plainly as anything in the document — "Standard customer return 0-30 days 100%, 31+ days 75%".
+   * With no field for it the model did the only thing left and wrote it into the notes as loose
+   * prose, where nothing can count down from it. The most important two numbers in the policy came
+   * back as a paragraph.
+   */
+  creditStepsFromInvoice: z
+    .array(
+      z.object({
+        withinDays: z.number().nullable().describe("Credit at this rate when the return is raised within this many days of the invoice date. Null for the final, lower rate that applies after every window above."),
+        creditPercent: z.number(),
+      }),
+    )
+    .describe(
+      "Credit by days from the invoice date to the return authorisation being raised — e.g. '0-30 days 100%, 31+ days 75%' " +
+        "becomes [{withinDays:30,creditPercent:100},{withinDays:null,creditPercent:75}]. This is the schedule most policies " +
+        "actually use. Where a policy gives a different schedule for damaged or short-dated goods, give the standard one here " +
+        "and put the other in notes.",
+    ),
+  returnableWithinDaysOfInvoice: z.number().nullable().describe("The last day a return can be raised at all, in days from the invoice. Null where the policy sets no final cut-off."),
+  windowMonthsBeforeExpiry: z.number().nullable().describe("Earliest a product can go back, in months before its expiry date. Null where the policy does not say."),
+  windowMonthsAfterExpiry: z.number().nullable().describe("Latest, in months after expiry. 0 where nothing goes back after expiry. Null where not stated."),
+  creditSteps: z
+    .array(z.object({ monthsToExpiryMin: z.number(), creditPercent: z.number() }))
+    .describe("Credit as a percentage of what was paid, by how many months remain to expiry. Empty where the policy keys credit to days from the invoice instead, which most do."),
+  restockingFeePercent: z.number().nullable(),
+  nonReturnable: z.array(z.string()).describe("Categories the supplier will not take back, in the policy's own words."),
+  reverseDistributor: z.string().nullable(),
+  notes: z.string().nullable().describe("Anything else that changes what a return is worth: deadlines for a return authorisation, who pays freight, minimum values."),
+  quotes: z
+    .array(z.object({ field: z.string(), sentence: z.string() }))
+    .describe("For every field you filled in, the sentence from the policy it came from, quoted exactly. This is how the pharmacist checks you."),
+  unclear: z.array(z.string()).describe("Anything the policy does not settle. Leave the field null and say so here rather than guessing."),
+});
+export type ReadReturnPolicyT = z.infer<typeof ReadReturnPolicy>;
+
+export async function readReturnPolicy(
+  pdf: Buffer,
+  supplier: string,
+  ctx: { userId: string; userName: string },
+): Promise<ReadReturnPolicyT> {
+  if (MOCK) return { creditStepsFromInvoice: [], returnableWithinDaysOfInvoice: null, windowMonthsBeforeExpiry: null, windowMonthsAfterExpiry: null, creditSteps: [], restockingFeePercent: null, nonReturnable: [], reverseDistributor: null, notes: null, quotes: [], unclear: [] };
+  const { client: c, model } = await client();
+  const res = await c.messages.parse({
+    model,
+    max_tokens: 8_000,
+    thinking: { type: "adaptive" },
+    system:
+      "You read a pharmaceutical wholesaler's returned-goods policy and set out its terms. Quote the sentence behind " +
+      "every figure you give, exactly as written. Where the policy does not settle something, leave the field null " +
+      "and say so in 'unclear' — never infer a number that is not there. Dating windows are often written as " +
+      "'current month plus six months', which means a product is returnable while at least six months of shelf life " +
+      "remain; convert such phrasing to months and quote the sentence.\n\n" +
+      "The single most important thing in the document is the credit schedule keyed to days from the date of invoice — " +
+      "it is what decides whether a bottle on the shelf is worth sending back this week. It is usually printed as a small " +
+      "table of the form 'Standard customer return 0-30 days 100% / 31+ days 75%'. Put it in creditStepsFromInvoice as " +
+      "structured steps, never only in the notes. A percentage left in prose cannot be counted down from and is the same " +
+      "as not having read it at all.",
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "document", source: { type: "base64", media_type: "application/pdf", data: pdf.toString("base64") } },
+          { type: "text", text: `This is ${supplier}'s returned goods policy. Set out its terms.` },
+        ],
+      },
+    ],
+    output_config: { effort: "high", format: zodOutputFormat(ReadReturnPolicy) },
+  });
+  await logUsage("ai.read_return_policy", ctx.userId, ctx.userName, res.usage, supplier);
+  if (res.stop_reason === "refusal") throw new Error("Claude declined to read that document.");
+  if (!res.parsed_output) throw new Error("That policy could not be read into terms. It may be a scan of poor quality.");
+  return res.parsed_output;
+}
+
+
+/**
+ * Reading the daily Purchase Drill Down, which is where the rate the rebate turns on lives.
+ *
+ * The monthly rebate breakdown says what the pharmacy earned last month. This says where it stands
+ * today — and since the compliance rate selects the band, and the band sets the discount on every
+ * contract generic, it is the figure that decides what buying from this supplier actually costs.
+ * A month-old rate is a month-old answer to a question asked about today's order.
+ *
+ * It has to go to the model as a document. The extractor pulls the text out but the columns come
+ * back interleaved — eleven percentages in a row with no way to tell which column each belongs to,
+ * and month labels split across fragments. A rule written against that would be a rule that reads
+ * one month's figure as another's and never says so.
+ *
+ * The scrub is the point. McKesson excludes certain products — GLP-1s among them — from both sides
+ * of the ratio, and the figure printed here already has that done. Nothing here recomputes it.
+ */
+const ReadPurchaseDrillDown = z.object({
+  generatedOn: z.string().nullable().describe("The date the report says it was generated, as YYYY-MM-DD."),
+  currentMonth: z.string().nullable().describe("The month the most recent row covers, as YYYY-MM. This is the month in progress."),
+  currentGcrPercent: z.number().nullable().describe("The generic compliance ratio for that most recent month, as printed. This is the figure that selects the rebate band."),
+  currentOsRxPercent: z.number().nullable().describe("The OneStop / Rx percentage for that same month, where the report gives one."),
+  currentNetPurchasesCents: z.number().nullable().describe("Net purchases for that month, in cents."),
+  months: z
+    .array(
+      z.object({
+        month: z.string().describe("YYYY-MM"),
+        gcrPercent: z.number().nullable(),
+        osRxPercent: z.number().nullable(),
+        netPurchasesCents: z.number().nullable(),
+      }),
+    )
+    .describe("The by-month table, most recent first. This is the trend, and it is what says whether the next band is coming closer or going away."),
+  quotes: z.array(z.object({ field: z.string(), sentence: z.string() })).describe("For each figure, where on the report you read it — the table and row, and the value as printed."),
+  unclear: z.array(z.string()).describe("Anything the report does not settle. Leave the field null and say so here rather than guessing."),
+});
+export type ReadPurchaseDrillDownT = z.infer<typeof ReadPurchaseDrillDown>;
+
+export async function readPurchaseDrillDown(pdf: Buffer, ctx: { userId: string; userName: string }): Promise<ReadPurchaseDrillDownT> {
+  if (MOCK) {
+    return { generatedOn: null, currentMonth: null, currentGcrPercent: null, currentOsRxPercent: null, currentNetPurchasesCents: null, months: [], quotes: [], unclear: [] };
+  }
+  const { client: c, model } = await client();
+  const res = await c.messages.parse({
+    model,
+    max_tokens: 8_000,
+    thinking: { type: "adaptive" },
+    system:
+      "You read McKesson's Purchase Drill Down report and pull out the generic compliance ratio (GCR) and the OneStop " +
+      "per-Rx percentage, month by month. The report prints a Purchase Summary by Month table; read the figures from " +
+      "that table, not from the tiles, and give the month each one belongs to. Percentages come back as numbers: 9.74 " +
+      "for 9.74%. Money comes back in cents: 251,043 for $2,510.43.\\n\\n" +
+      "The GCR printed here is already scrubbed — McKesson excludes certain products from both sides of the ratio " +
+      "before working it out — so report it exactly as printed and never recompute it. Where a figure is not on the " +
+      "report, give null and say so in 'unclear'. A ratio guessed wrong moves the pharmacy a whole rebate band.",
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "document", source: { type: "base64", media_type: "application/pdf", data: pdf.toString("base64") } },
+          { type: "text", text: "This is the daily Purchase Drill Down. Read out the compliance ratio month by month, most recent first." },
+        ],
+      },
+    ],
+    output_config: { effort: "high", format: zodOutputFormat(ReadPurchaseDrillDown) },
+  });
+  await logUsage("ai.read_drill_down", ctx.userId, ctx.userName, res.usage, "Purchase Drill Down");
+  if (res.stop_reason === "refusal") throw new Error("Claude declined to read that document.");
+  if (!res.parsed_output) throw new Error("That report could not be read. It may be a scan of poor quality.");
+  return res.parsed_output;
+}
+
+/**
+ * Turning one finding into the text that answers it.
+ *
+ * The reviewer already knows what should be written. Read its findings back: "This pharmacy has
+ * decided that staff are not given advance notice of a controlled substance inventory; the manual
+ * should say that, and should say that the date and time are recorded on the inventory record."
+ * That is an instruction, complete and specific — and nothing turned instructions into text, so
+ * they came back on every pass with a note saying the section needed a decision, and the findings
+ * list stopped being read.
+ *
+ * The step that was missing. One finding, the section as it stands, and where the pharmacy has
+ * supplied a fact the reviewer was waiting on, that fact. Out comes the section rewritten so that
+ * this finding no longer applies — and nothing else changed, because a rewrite that quietly
+ * improves three other paragraphs is one nobody can check.
+ */
+const FindingFix = z.object({
+  body: z
+    .string()
+    .describe(
+      "The whole section, rewritten so this one finding no longer applies. Everything the finding does not touch " +
+        "must survive word for word. Empty string only where the finding still turns on a fact you were not given.",
+    ),
+  changed: z.string().describe("What you changed, in one sentence, so a person can check it without reading the whole section."),
+  stillNeeded: z
+    .string()
+    .nullable()
+    .describe("Where you could not write it, the question the pharmacy has to answer, asked plainly and in one sentence. Null where the text is complete."),
+});
+export type FindingFixT = z.infer<typeof FindingFix>;
+
+export async function writeFindingFix(
+  input: { title: string; body: string; what: string; why: string; answer?: string | null; context: string; siteDoes: string },
+  ctx: { userId: string; userName: string },
+): Promise<FindingFixT> {
+  if (MOCK) return { body: "", changed: "", stillNeeded: "Mock mode writes nothing." };
+  const { client: c, model } = await client();
+  const res = await c.messages.parse({
+    model,
+    max_tokens: 32_000,
+    thinking: { type: "adaptive" },
+    system:
+      "You rewrite one section of a community pharmacy's policy and procedure manual so that a single named finding " +
+      "no longer applies, and change nothing else. Everything the finding does not touch survives word for word — a " +
+      "rewrite that quietly improves three other paragraphs is one nobody can check, in a document an inspector holds " +
+      "the pharmacy to.\n\n" +
+      "Where the finding itself states what the pharmacy has decided, that is your instruction: write it. Where the " +
+      "pharmacy has supplied an answer below, use it and write the text. Only where the finding still turns on a fact " +
+      "nobody has given you do you return an empty body and ask for that fact in one plain sentence — never invent a " +
+      "fact about this pharmacy to produce text, because the invented sentence becomes the standard it is held to.\n\n" +
+      "Write in the manual's own register: plain, direct, present tense, no hedging, no 'as appropriate' or 'per " +
+      "policy'. Cite a regulation only where the finding cites one, and cite it exactly as the finding does.",
+    messages: [
+      {
+        role: "user",
+        content:
+          `Section: ${input.title}\n\n` +
+          `--- The section as it stands ---\n${input.body}\n\n` +
+          `--- The finding ---\nWhat is wrong: ${input.what}\nWhy: ${input.why}\n\n` +
+          (input.answer ? `--- What the pharmacy says about this ---\n${input.answer}\n\n` : "") +
+          `--- About this pharmacy ---\n${input.context}\n\n` +
+          `--- What the compliance system already does ---\n${input.siteDoes}\n`,
+      },
+    ],
+    output_config: { effort: "high", format: zodOutputFormat(FindingFix) },
+  });
+  await logUsage("ai.finding_fix", ctx.userId, ctx.userName, res.usage, input.title);
+  if (res.stop_reason === "refusal") throw new Error("Claude declined to rewrite that section.");
+  if (!res.parsed_output) throw new Error("The rewrite could not be read back. Try again, or open the section and write it.");
   return res.parsed_output;
 }

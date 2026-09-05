@@ -261,6 +261,17 @@ export const DOCUMENT_CATEGORIES = [
    * together makes the BAA register — which is reviewed annually and must be complete — wrong.
    */
   "supplier_agreement",
+  /**
+   * A statement of account, rebate breakdown or credit memo from a supplier.
+   *
+   * Not an invoice, and the distinction is not cosmetic. An invoice is a receipt record under
+   * 21 CFR 1304.22(c) and its Schedule II copy has to be held apart from everything else; a
+   * statement is a summary of an account and is a record of nothing that was received. Filed
+   * together, the controlled-substance filing fills up with documents that record no receipt, and
+   * the one question the category exists to answer — show me every invoice for these goods —
+   * stops having a clean answer.
+   */
+  "supplier_statement",
   "cqi_summary",
   "cqi_incident",
   "ce_certificate",
@@ -652,6 +663,19 @@ export const manualFindings = sqliteTable(
     why: text("why").notNull(),
     /** The replacement text, where the audit could write one. Empty where it could not. */
     suggestedBody: text("suggested_body").notNull().default(""),
+    /**
+     * What the pharmacy says about this, where the finding was waiting on a fact.
+     *
+     * Most findings that carry no suggested text are not asking for judgement — they are asking a
+     * question. "The manual sets a standard for release that delivery cannot meet; the pharmacy
+     * must decide who the driver may release to." Nothing could answer that but the pharmacist,
+     * and there was nowhere for him to answer it, so twenty-three findings came back unchanged on
+     * every pass until the list stopped being read. This is the answer, kept against the finding
+     * that asked, and it is what the rewrite is then written from.
+     */
+    answer: text("answer"),
+    /** When the answer was given, so a stale rewrite can be told from a current one. */
+    answeredAt: text("answered_at"),
     appliedAt: text("applied_at"),
     dismissedAt: text("dismissed_at"),
     /** Why it was dismissed. A finding waved away with no reason is not closed, it is hidden. */
@@ -727,6 +751,16 @@ export const suppliers = sqliteTable(
      * catching.
      */
     expectedSchedule: text("expected_schedule", { enum: INVOICE_SCHEDULES }),
+    /**
+     * The last rebate settlement read from this supplier's own report, as JSON.
+     *
+     * Against the supplier rather than in a setting, because it belongs to them: the achieved
+     * compliance rate, the purchases it was earned on and the arithmetic that checked it are facts
+     * about one trading relationship. Held in a global setting it was McKesson's by assumption —
+     * the page that showed it tested the supplier's name with a regular expression — and a second
+     * supplier sending a rebate report would have overwritten the first one's figures.
+     */
+    rebateStatementJson: text("rebate_statement_json"),
     notes: text("notes"),
     active: integer("active", { mode: "boolean" }).notNull().default(true),
     createdAt: text("created_at").notNull().default(now()),
@@ -735,6 +769,58 @@ export const suppliers = sqliteTable(
   (t) => [index("suppliers_name_idx").on(t.name)],
 );
 
+
+/**
+ * What was actually bought, line by line, off the invoices the pharmacy is already keeping.
+ *
+ * The invoices were being filed and searched as text, which answers "when did we last buy
+ * oxycodone" and nothing else. This is the same document read as figures: the NDC, what was paid
+ * for it, how many, and — on a McKesson invoice, from the K it prints — whether that line earned
+ * the generics contract rebate. It is the only record of what this pharmacy *actually* paid, as
+ * against what a catalogue lists, and every question about margin, returns and where to buy runs
+ * through it.
+ *
+ * Lines are only stored where the invoice reconciles: the extended amounts must add to the total
+ * printed on its face. A partial read is the dangerous outcome, because the figures that were read
+ * look perfectly good on their own and the product whose line was dropped simply appears cheaper
+ * than it was.
+ */
+export const invoiceLines = sqliteTable(
+  "invoice_lines",
+  {
+    id: text("id").primaryKey(),
+    invoiceId: text("invoice_id").notNull().references(() => supplierInvoices.id, { onDelete: "cascade" }),
+    supplier: text("supplier"),
+    /** The date on the invoice, copied here so a price can be placed in time without a join. */
+    invoiceDate: text("invoice_date"),
+    ndc11: text("ndc11").notNull(),
+    description: text("description"),
+    itemNumber: text("item_number"),
+    quantity: integer("quantity").notNull(),
+    unitOfMeasure: text("unit_of_measure"),
+    /** What was paid for one unit of the pack, in cents, as printed. Before any rebate. */
+    unitCostCents: integer("unit_cost_cents").notNull(),
+    extendedCents: integer("extended_cents").notNull(),
+    awpCents: integer("awp_cents"),
+    /** The supplier's own class letter: R legend, X Schedule II, B/D/E Schedule III-V. */
+    itemClass: text("item_class"),
+    /**
+     * Whether the line was marked as earning the supplier's contract rebate.
+     *
+     * True where the invoice printed the mark, false where the invoice prints marks and this line
+     * had none, and null where the invoice prints no such mark at all — which is not the same as
+     * "not rebated", and treating it as such would strip a discount off a price in every
+     * comparison that followed.
+     */
+    rebated: integer("rebated", { mode: "boolean" }),
+    createdAt: text("created_at").notNull().default(now()),
+  },
+  (t) => [
+    index("invoice_lines_invoice_idx").on(t.invoiceId),
+    index("invoice_lines_ndc_idx").on(t.ndc11),
+    index("invoice_lines_supplier_idx").on(t.supplier),
+  ],
+);
 
 export const supplierInvoices = sqliteTable(
   "supplier_invoices",
@@ -808,56 +894,16 @@ export const supplierInvoices = sqliteTable(
   ],
 );
 
-/**
- * What was actually bought, line by line.
+/*
+ * The cloud branch's `supplierInvoiceLines` is deliberately absent.
  *
- * The invoice row records that a document arrived and what schedule it carries; the item lines
- * were kept only as text, to be searched. That answers "did we buy oxycodone in March" and not
- * "how many, at what price, and is that more than the catalogue said". Every purchasing question
- * — what a rebate tier is measured on, what a return is worth, whether a supplier's invoice price
- * matched its catalogue price — needs the line as numbers, keyed on the NDC.
- *
- * Read from the invoice text by a rule (invoice-lines.ts), in the layouts it knows. A line the
- * rule cannot read is not invented; the invoice records how many were not read, so the total of
- * the lines is never mistaken for the total of the invoice.
- *
- * Money in cents, quantity in whole packs. Null where the invoice did not print it.
+ * Both sessions built an invoice line reader in the same week. `invoiceLines` above is the one
+ * kept: it reconciles each invoice against the total printed on its face before storing anything,
+ * and it carries the K McKesson prints against a line bought on the generics contract — the single
+ * fact that decides whether a price gets the tier rate taken off it. Two tables holding the same
+ * lines would drift apart, and a comparison would read whichever it happened to be pointed at.
  */
-export const INVOICE_LINE_KINDS = ["product", "credit", "fee", "other"] as const;
-export type InvoiceLineKind = (typeof INVOICE_LINE_KINDS)[number];
 
-export const supplierInvoiceLines = sqliteTable(
-  "supplier_invoice_lines",
-  {
-    id: text("id").primaryKey(),
-    invoiceId: text("invoice_id").notNull().references(() => supplierInvoices.id, { onDelete: "cascade" }),
-    /** Position on the invoice, 1-based, in the order the lines were read. */
-    lineNumber: integer("line_number").notNull(),
-    kind: text("kind", { enum: INVOICE_LINE_KINDS }).notNull().default("product"),
-    /** Eleven digits when the printed NDC could be read exactly; null otherwise, with the printed text kept. */
-    ndc11: text("ndc11"),
-    rawNdc: text("raw_ndc"),
-    /** The supplier's own item number, where the layout carries one. */
-    supplierItemNumber: text("supplier_item_number"),
-    description: text("description"),
-    /** Packs invoiced. Negative on a credit line. */
-    quantity: integer("quantity"),
-    /** The unit of the quantity as printed: EA, CS, BX. */
-    unit: text("unit"),
-    unitPriceCents: integer("unit_price_cents"),
-    extendedCents: integer("extended_cents"),
-    /** The AWP the wholesaler printed beside the line, where it did. */
-    awpCents: integer("awp_cents"),
-    /** The supplier's one-letter item class (R, X, B, D, E …), verbatim, where printed. */
-    itemClass: text("item_class"),
-    createdAt: text("created_at").notNull().default(now()),
-  },
-  (t) => [
-    index("supplier_invoice_lines_invoice_idx").on(t.invoiceId),
-    index("supplier_invoice_lines_ndc_idx").on(t.ndc11),
-    uniqueIndex("supplier_invoice_lines_invoice_line_uq").on(t.invoiceId, t.lineNumber),
-  ],
-);
 
 /**
  * A supplier's rebate programme, as the pharmacy has recorded it.

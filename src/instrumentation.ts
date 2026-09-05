@@ -142,10 +142,24 @@ export async function register() {
     try {
       const { getSettings } = await import("./lib/settings");
       const s = await getSettings();
-      const { fetchDue, fetchNadac, nadacAuto } = await import("./lib/nadac-fetch");
+      const { fetchDue, nadacAuto } = await import("./lib/nadac-fetch");
       if (!nadacAuto(s)) return;
       if (!fetchDue(s.nadac_last_fetch || null)) return;
-      await fetchNadac();
+      /*
+       * Through the job, exactly as the button is.
+       *
+       * Two reasons. The lock: a weekly check starting while somebody is watching a fetch they
+       * pressed would have two downloads writing to the same folder. And visibility: the automatic
+       * pull is the one that matters most and used to leave no trace but a settings line — so when
+       * somebody asked "is this actually running?", the honest answer was to go and read the
+       * database. Now it writes its progress where the button's does, and the page shows it.
+       */
+      const { nadacJob, nadacJobRunning, startNadacFetch, runNadacFetch } = await import("./lib/nadac-job");
+      if (nadacJobRunning(await nadacJob())) return;
+      const who = { id: "scheduler", name: "Automatic weekly check" };
+      const started = await startNadacFetch(who, "this week's NADAC file");
+      if (!started.started) return;
+      await runNadacFetch(who, started.runId!, "this week's NADAC file", []);
     } catch {
       // The outcome is recorded in settings and shown on the NADAC page.
     }

@@ -101,6 +101,35 @@ export const SETTING_KEYS = [
    * lines invites an argument about rounding instead of an argument about the statute.
    */
   "floor_materiality_cents",
+  /*
+   * The generic rebate tier rate from the McKesson rebate report, as a percentage.
+   *
+   * Read off the report rather than modelled: the rate depends on a scrubbed generic compliance
+   * rate with drugs carved out of it, and a figure this site worked out for itself would be a
+   * guess sitting inside a purchasing recommendation. Left empty, every comparison uses gross
+   * invoice prices and says so, which understates the pharmacy's position rather than inventing a
+   * discount it may not earn.
+   */
+  "mck_generic_rebate_rate",
+  /* The last rebate breakdown read, so the page can say where the rate came from and when. */
+  "mck_rebate_last_statement",
+  /*
+   * Where the compliance ratio stands today, off the daily Purchase Drill Down.
+   *
+   * A different fact from the monthly settlement and it has to be kept apart from it. The
+   * settlement says what was earned last month; this says which band an order placed this morning
+   * will be discounted in. Pricing today's decision off last month's closed figure is the whole
+   * error this exists to prevent.
+   */
+  "rebate_ratio_latest",
+  /*
+   * A returns policy read from a PDF but not yet confirmed.
+   *
+   * One at a time, holding the supplier it belongs to, because it is a step in a conversation
+   * rather than a record: read the policy, check each figure against its quote, save. A draft left
+   * behind is replaced by the next read, and saving clears it.
+   */
+  "returns_policy_draft",
   // ── iMonnit temperature monitoring ──
   "imonnit_key_id_enc",
   "imonnit_secret_enc",
@@ -109,6 +138,22 @@ export const SETTING_KEYS = [
   "imonnit_last_result",
   "mail_allowed_senders", // one per line
   "mail_auto_import", // "yes" | "no" — load recognised reports rather than only filing them
+  /*
+   * Where the record of receipt for controlled substances is kept, when it is not kept here.
+   *
+   * 21 CFR 1304.22(c) wants a record of what arrived and when. Most pharmacies confirm receipt in
+   * the wholesaler's own ordering system as the tote is checked in — this pharmacy does — and
+   * asking them to do it a second time here is duplicate work that would go undone within a week,
+   * leaving a panel permanently red about a record that does exist. Naming the system settles it:
+   * the panel says where the record is rather than that there is none, and stops asking.
+   */
+  "receipt_record_kept_in",
+  /*
+   * How this pharmacy actually works, on the handful of points its manual depends on — one JSON
+   * row rather than a column per question, because the list changes as the manual does and a
+   * migration per question is a reason not to ask one. See practice-decisions.ts.
+   */
+  "practice_decisions",
   "mail_supplier_rules", // one per line: a sender or subject fragment, then "=", then a supplier name
   // Off by default. The reimbursement side is built and tested but waiting on data that has to
   // come from outside, and half-working pages in the daily path are a daily irritation.

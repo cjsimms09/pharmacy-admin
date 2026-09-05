@@ -37,8 +37,12 @@ import {
   dismissFinding,
   applyAllFindings,
   requeueChapter,
+  draftFindingFix,
+  draftAllFindingFixes,
+  answerFinding,
 } from "@/lib/manual-audit";
 import { manualJob, startPutRight, runPutRight, isRunning, isStale, summarise, ago } from "@/lib/manual-job";
+import { decisionsOutstanding } from "@/lib/practice-decisions";
 import { acknowledgementBoard, settleVersions } from "@/lib/manual-acknowledgement";
 import { estimateSentence } from "@/lib/ai-spend";
 import { pharmacyFacts, namedRoles } from "@/lib/pharmacy-facts";
@@ -111,12 +115,13 @@ export default async function ManualPage({
    * against sections he cannot edit, and the only way to stop them was to know about a control he
    * had never seen. It belongs next to the findings, which is where the problem is felt.
    */
-  const [ack, stuck, facts, roles, blocked] = await Promise.all([
+  const [ack, stuck, facts, roles, blocked, undecided] = await Promise.all([
     acknowledgementBoard(),
     auditFailures(),
     pharmacyFacts(),
     namedRoles(),
     blockedOnFacts(),
+    decisionsOutstanding(),
   ]);
   const theirs = await findingsForOthers();
   const sections = outline(rows);
@@ -369,6 +374,87 @@ export default async function ManualPage({
     } catch (e) {
       if (e && typeof e === "object" && "digest" in e) throw e;
       redirect("/manual?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not apply that.") + "#audit");
+    }
+  }
+
+  /**
+   * Writes the text for one finding, from the finding and whatever the pharmacy has said about it.
+   *
+   * The step that was missing. The reviewer already knew what should be written — read its
+   * findings back and most of them end "the manual should say X" — but nothing turned that into
+   * text, so they came back on every pass with a note that the section needed a decision, and the
+   * list stopped being read.
+   */
+  async function writeFixAction(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const id = String(fd.get("id") ?? "");
+    try {
+      const r = await draftFindingFix(id, u);
+      await audit({ action: "manual.finding.draft", userId: u.id, userName: u.name, entity: "manual", entityId: id });
+      revalidatePath("/manual");
+      redirect(
+        `/manual?${r.wrote ? "ok" : "error"}=` +
+          encodeURIComponent(
+            r.wrote
+              ? `Written: ${r.changed} Read it below, then put it in — nothing has changed in the manual yet.`
+              : `Still waiting on you: ${r.stillNeeded} Answer it on the finding and press this again.`,
+          ) + "#audit",
+      );
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/manual?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not write that.") + "#audit");
+    }
+  }
+
+  /** Answers the question a finding is waiting on, then writes the text from the answer. */
+  async function answerFindingAction(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const id = String(fd.get("id") ?? "");
+    const answer = String(fd.get("answer") ?? "");
+    try {
+      await answerFinding(id, answer, u);
+      await audit({ action: "manual.finding.answer", userId: u.id, userName: u.name, entity: "manual", entityId: id, details: answer.slice(0, 200) });
+      // Answering and then having to press a second button is the loop left half open.
+      const r = answer.trim() ? await draftFindingFix(id, u) : { wrote: false, changed: "", stillNeeded: null };
+      revalidatePath("/manual");
+      redirect(
+        "/manual?ok=" +
+          encodeURIComponent(
+            !answer.trim()
+              ? "Answer cleared."
+              : r.wrote
+                ? `Recorded, and the text is written from it: ${r.changed} Read it below, then put it in.`
+                : `Recorded. ${r.stillNeeded ?? "The text could not be written from it yet."}`,
+          ) + "#audit",
+      );
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/manual?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not record that.") + "#audit");
+    }
+  }
+
+  /** Writes the text for as many of the waiting findings as will fit in half a minute. */
+  async function writeAllFixesAction() {
+    "use server";
+    const u = await requireManager();
+    try {
+      const r = await draftAllFindingFixes(u);
+      await audit({ action: "manual.finding.draft_all", userId: u.id, userName: u.name, details: `${r.wrote} written` });
+      revalidatePath("/manual");
+      redirect(
+        "/manual?ok=" +
+          encodeURIComponent(
+            `${r.wrote} written and waiting for you to read.` +
+              (r.stillNeedFacts ? ` ${r.stillNeedFacts} still need a fact about this pharmacy — each says which, on the finding.` : "") +
+              (r.left ? ` ${r.left} left; press again to carry on.` : "") +
+              (r.problems.length ? ` ${r.problems[0]}` : ""),
+          ) + "#audit",
+      );
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/manual?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not write those.") + "#audit");
     }
   }
 
@@ -1194,21 +1280,49 @@ export default async function ManualPage({
               </form>
             )}
 
-            {canManage && blocked > 0 && (
+            {/*
+              The questions behind the findings, with somewhere to answer them.
+
+              "Decide this yourself" was the whole of what these findings said, and there was
+              nowhere to decide. So they came back unchanged on every pass and the list stopped
+              being read. The decisions page asks each one once, with the sentence it would put in
+              the manual, and answering puts the waiting sections straight back in the queue.
+            */}
+            {canManage && (blocked > 0 || undecided > 0) && (
               <div className="mt-4 rounded-md border border-accent bg-accent-soft p-3">
                 <p className="text-sm font-semibold text-accent">
-                  {blocked} finding{blocked === 1 ? "" : "s"} said only &ldquo;decide this yourself&rdquo;
+                  {undecided > 0
+                    ? `${undecided} thing${undecided === 1 ? "" : "s"} only you can settle`
+                    : `${blocked} finding${blocked === 1 ? "" : "s"} said only “decide this yourself”`}
                 </p>
                 <p className="mt-1 text-xs text-ink-2">
-                  Those are the ones the reviewer could not write because a fact was missing. Supplying the facts does
-                  not re-open them on its own — the sections were read, so they are not due again for a year. This puts
-                  exactly those sections back in the queue and closes the findings as superseded rather than dismissed.
+                  {undecided > 0 ? (
+                    <>
+                      How often expiry is checked, what date the biennial inventory is anchored to, whether a second
+                      person verifies a count — the reviewer will not invent any of these, and raises each one as a
+                      finding until it is told. Answer them once and it writes the text instead of asking.
+                    </>
+                  ) : (
+                    <>
+                      Those are the ones the reviewer could not write because a fact was missing. Supplying the facts
+                      does not re-open them on its own — the sections were read, so they are not due again for a year.
+                      This puts exactly those sections back in the queue and closes the findings as superseded rather
+                      than dismissed.
+                    </>
+                  )}
                 </p>
-                <form action={rereadAction} className="mt-2">
-                  <SubmitButton className="btn btn-sm btn-primary" pendingLabel="Putting them back…">
-                    Read those sections again
-                  </SubmitButton>
-                </form>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <Link href="/manual/decisions" className="btn btn-sm btn-primary">
+                    {undecided > 0 ? `Answer ${undecided === 1 ? "it" : "them"}` : "How this pharmacy works"}
+                  </Link>
+                  {blocked > 0 && (
+                    <form action={rereadAction}>
+                      <SubmitButton className="btn btn-sm" pendingLabel="Putting them back…">
+                        Read those sections again
+                      </SubmitButton>
+                    </form>
+                  )}
+                </div>
               </div>
             )}
           </Card>
@@ -1359,8 +1473,17 @@ export default async function ManualPage({
               tone={audit_.blocking > 0 ? "crit" : "warn"}
               title="What the audit found"
               count={findings.length}
-              subtitle="Each one names the requirement it falls short of. Where the fix could be written it comes with the text; where it turns on a fact about this pharmacy nobody supplied, it deliberately does not, because an invented sentence in a manual is a standard you are then held to."
+              subtitle="Each one names the requirement it falls short of. Where the fix needs no fact this pharmacy has not given, press Write the fix and it is written; where it does, say how you do it and the wording follows from that. Nothing is invented — a sentence nobody meant is a standard you are then held to."
               className="mb-6"
+              actions={
+                canManage && findings.some((f) => !f.suggestedBody.trim()) ? (
+                  <form action={writeAllFixesAction}>
+                    <SubmitButton className="btn btn-sm btn-primary" pendingLabel="Writing…">
+                      Write every fix that needs no answer
+                    </SubmitButton>
+                  </form>
+                ) : undefined
+              }
             >
               <ul className="rows">
                 {findings.map((f) => (
@@ -1377,19 +1500,72 @@ export default async function ManualPage({
                     </div>
                     <p className="mt-1 text-sm text-ink-2">{f.what}</p>
                     <p className="mt-0.5 text-xs text-ink-3">{f.why}</p>
+                    {f.answer && (
+                      <p className="mt-1 rounded-md border border-line bg-ground px-2 py-1 text-xs text-ink-2">
+                        <b>You said:</b> {f.answer}
+                      </p>
+                    )}
                     {canManage && (
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        {f.suggestedBody.trim() ? (
-                          <form action={applyFindingAction}>
+                      <div className="mt-2 space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          {f.suggestedBody.trim() ? (
+                            <>
+                              <form action={applyFindingAction}>
+                                <input type="hidden" name="id" value={f.id} />
+                                <button className="btn btn-sm btn-primary">Put this in the manual</button>
+                              </form>
+                              <details className="text-xs">
+                                <summary className="cursor-pointer text-ink-3 hover:text-accent">Read it first</summary>
+                                <pre className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap rounded-md border border-line bg-ground p-2 text-[11px] leading-relaxed text-ink-2">
+                                  {f.suggestedBody}
+                                </pre>
+                              </details>
+                            </>
+                          ) : (
+                            /*
+                              The button that was missing.
+
+                              Almost every one of these findings ends by saying what the manual
+                              should say — and nothing turned that sentence into text, so the same
+                              finding came back on every pass with a note that a decision was
+                              needed, and the list stopped being read.
+                            */
+                            <form action={writeFixAction}>
+                              <input type="hidden" name="id" value={f.id} />
+                              <SubmitButton className="btn btn-sm btn-primary" pendingLabel="Writing…">
+                                Write the fix
+                              </SubmitButton>
+                            </form>
+                          )}
+                          <Link href={`/manual?edit=${f.sectionId}#${f.sectionId}`} className="btn btn-sm">Open the section</Link>
+                        </div>
+
+                        {/*
+                          Where the finding is waiting on a fact, the place to give it.
+
+                          The reviewer is right to refuse to invent how this pharmacy works, and it
+                          was right to keep saying so. What it could not do was ask anybody. This
+                          asks — and writing the text follows from answering, in the same press,
+                          because answering and then hunting for a second button is the loop left
+                          half open.
+                        */}
+                        <details open={Boolean(f.answer)}>
+                          <summary className="cursor-pointer text-xs text-ink-3 hover:text-accent">
+                            {f.answer ? "Change what you told it" : "This turns on how we do it here — tell it"}
+                          </summary>
+                          <form action={answerFindingAction} className="mt-1 flex flex-wrap items-start gap-1.5">
                             <input type="hidden" name="id" value={f.id} />
-                            <button className="btn btn-sm btn-primary">Put the fix in</button>
+                            <textarea
+                              name="answer"
+                              rows={2}
+                              className="field min-w-[20rem] flex-1 py-1 text-xs"
+                              defaultValue={f.answer ?? ""}
+                              placeholder="How this pharmacy actually does it, in your own words. It writes the manual's wording from this."
+                            />
+                            <SubmitButton className="btn btn-sm" pendingLabel="Writing…">Save and write it</SubmitButton>
                           </form>
-                        ) : (
-                          <span className="text-xs text-ink-3">
-                            Needs a decision about this pharmacy —{" "}
-                            <Link href={`/manual?edit=${f.sectionId}#${f.sectionId}`} className="underline">open the section</Link>.
-                          </span>
-                        )}
+                        </details>
+
                         <form action={dismissFindingAction} className="flex flex-wrap items-center gap-1.5">
                           <input type="hidden" name="id" value={f.id} />
                           <input name="reason" required className="field w-56 py-1 text-xs" placeholder="Why this is not a problem here" />

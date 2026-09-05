@@ -5,6 +5,8 @@ import { mapColumns } from "./claims";
 import { mapSupplierColumns } from "./suppliers";
 import { looksLikePioneerCatalog } from "./pioneer-catalog";
 import { looksLikeRxTransactions } from "./rx-transactions";
+import { pdfText } from "./pdf-text";
+import { looksLikeRebateReport } from "./rebate-report";
 import { ALLOWED_MIME } from "./files";
 
 /**
@@ -22,7 +24,7 @@ import { ALLOWED_MIME } from "./files";
  * behaviour we already had and is never wrong, only unhelpful.
  */
 
-export type RouteKind = "claims" | "rx_transactions" | "supplier_catalog" | "pioneer_catalog" | "nadac" | "unrecognised";
+export type RouteKind = "claims" | "rx_transactions" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "return_policy" | "nadac" | "unrecognised";
 
 export type Classification = {
   kind: RouteKind;
@@ -33,6 +35,18 @@ export type Classification = {
 };
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/**
+ * Whether a PDF is McKesson's daily Purchase Drill Down, before anything is spent reading it.
+ *
+ * The extracted text comes back with its columns interleaved and its words split across fragments,
+ * so only the most robust markers are worth testing. These two labels appear on no other report
+ * the pharmacy receives.
+ */
+export function looksLikeDrillDown(text: string, fileName = ""): boolean {
+  if (/purchase[_\s-]*drill[_\s-]*down/i.test(fileName)) return true;
+  return /GCR/.test(text) && /OS\/Rx/.test(text);
+}
 
 /** Reads just the header row, whatever the format. Returns [] for anything unreadable. */
 export function headersOf(fileName: string, buf: Buffer): string[] {
@@ -64,6 +78,53 @@ export function headersOf(fileName: string, buf: Buffer): string[] {
  * would otherwise match the looser catalogue rule.
  */
 export function classify(fileName: string, buf: Buffer): Classification {
+  /*
+   * A PDF, which is the one shape here that is not text at all.
+   *
+   * McKesson's monthly rebate breakdown is the document that carries the tier ladder and the rate
+   * actually earned. It arrives as a generated PDF, so its words have to be pulled out before
+   * anything can be told about it — and it is worth the trouble, because the alternative is
+   * somebody typing eleven bands of a contract into a form and one of them being wrong.
+   */
+  if (/^%PDF/.test(buf.subarray(0, 8).toString("latin1"))) {
+    /*
+     * A returned goods policy, known by its name rather than its words.
+     *
+     * The two real ones yield almost nothing to the extractor — twenty-seven characters of
+     * fragments out of McKesson's — so there is no content rule to write. The file name is what
+     * there is, and it is enough: nothing else a wholesaler sends is called a returns policy.
+     */
+    if (/return(ed)?[_\s-]*goods|returns?[_\s-]*polic/i.test(fileName)) {
+      return { kind: "return_policy", why: "Named as a returned goods policy. Read against the supplier it came from.", headers: [] };
+    }
+    try {
+      const text = pdfText(buf);
+      if (looksLikeRebateReport(text)) {
+        return {
+          kind: "rebate_report",
+          why: "A McKesson rebate breakdown: it carries the tier table and the compliance rate the month was paid at.",
+          headers: [],
+        };
+      }
+      /*
+       * The daily Purchase Drill Down, which carries the ratio every rebate band turns on.
+       *
+       * Recognised here, read by the model later: the extractor pulls its text out but returns the
+       * columns interleaved — eleven percentages in a row with nothing saying which month each
+       * belongs to. Enough to know what the document is; not enough to read a figure off it that
+       * a purchasing decision will be made on.
+       */
+      if (looksLikeDrillDown(text, fileName)) {
+        return { kind: "purchase_drilldown", why: "McKesson's Purchase Drill Down: it carries the compliance ratio and the OneStop share, month by month.", headers: [] };
+      }
+    } catch {
+      // Not readable as text — a scan. It is filed as a document like anything else.
+    }
+    if (/purchase[_\s-]*drill[_\s-]*down/i.test(fileName)) {
+      return { kind: "purchase_drilldown", why: "Named as a Purchase Drill Down.", headers: [] };
+    }
+    return { kind: "unrecognised", why: "A PDF this does not recognise. Filed as a document.", headers: [] };
+  }
   /*
    * The daily "Rx Transaction Details By Submission Type" report — the claims feed — is, like the
    * catalogue, a printed report whose first line is its title, so it is known by that title.

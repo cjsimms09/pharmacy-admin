@@ -18,11 +18,12 @@ import { importSupplierCatalog } from "./suppliers";
 import { allSuppliers, supplierForSender } from "./suppliers-registry";
 import { loadNadacFiles, nadacDir } from "./nadac";
 import { gateFile } from "./phi-gate";
+import { pdfText } from "./pdf-text";
 import { audit } from "./audit";
 import { matchTrainingReplies, completeByEmailReply } from "./training-replies";
 import { matchCertificateReply, fileCertificateReply } from "./credential-requests";
 import { isBounce, parseBounce, describeBounce } from "./bounces";
-import { looksLikeInvoice, fileInvoice, filingFor } from "./invoices";
+import { looksLikeInvoice, classifySupplierDocument, fileInvoice, filingFor } from "./invoices";
 
 /**
  * Sweeps the pharmacy's admin mailbox for scheduled reports.
@@ -407,12 +408,27 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
             const matched = supplierForSender(register, from);
             const supplierName =
               matched?.name ?? supplierFor(parseSupplierRules(s.mail_supplier_rules ?? ""), from, subject);
+            /*
+             * The document's own words, where it is a PDF and they can be read.
+             *
+             * Read once, here, because two decisions below need them: whether this is really an
+             * invoice, and if not, what else it is.
+             */
+            const pdfWords = (() => {
+              if (!/\.pdf$/i.test(fileName) && att.contentType !== "application/pdf") return null;
+              try {
+                return pdfText(buf);
+              } catch {
+                return null;
+              }
+            })();
             if (
               looksLikeInvoice({
                 fileName,
                 mimeType: att.contentType ?? "",
                 subject,
                 supplier: supplierName,
+                text: pdfWords,
               })
             ) {
               try {
@@ -466,13 +482,27 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
               }
             }
 
+            /*
+             * What a supplier sent that is not an invoice, filed as what it is.
+             *
+             * A statement of account and a rebate breakdown were both landing under "report", the
+             * heading for everything the site has no better word for — which is how a statement
+             * came to be filed as an invoice in the first place and then had nowhere to go when it
+             * was taken back out. Naming it costs nothing and means the Documents list can be
+             * asked for the account statements without anybody remembering the file name.
+             */
+            const supplierKind = supplierName ? classifySupplierDocument(pdfWords, fileName, subject).kind : "unknown";
+            const asStatement = supplierKind === "statement" || supplierKind === "rebate_report" || supplierKind === "credit_memo";
+            const kindWord =
+              supplierKind === "rebate_report" ? "rebate breakdown" : supplierKind === "credit_memo" ? "credit memo" : "statement of account";
+
             const file = new File([new Uint8Array(buf)], fileName, { type: att.contentType || "application/octet-stream" });
             const stored = await storeFile(file, { allowReportTypes: true });
             const docId = newId();
             await db.insert(schema.documents).values({
               id: docId,
-              category: "report",
-              title: subject || fileName,
+              category: asStatement ? "supplier_statement" : "report",
+              title: asStatement ? `${supplierName} ${kindWord}${subject ? ` — ${subject}` : ""}` : subject || fileName,
               fileName,
               mimeType: stored.mimeType,
               sizeBytes: stored.sizeBytes,
@@ -494,7 +524,7 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
               // arrives with the switch off looks identical to one that arrived and failed.
               routeResult = "Filed only: automatic loading is switched off under Settings → Email.";
             } else {
-              const r = await importRecognised(buf, fileName, from, subject, s, ctx);
+              const r = await importRecognised(buf, fileName, from, subject, s, ctx, { documentId: docId, supplierId: matched?.id ?? null, supplierName: supplierName ?? null });
               routedAs = r.routedAs;
               routeResult = r.routeResult;
               if (r.imported) result.imported++;
@@ -510,7 +540,11 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
               documentId: docId,
               status: "stored",
               scanned: gate.scanned,
-              reason: gate.note ?? null,
+              reason:
+                gate.note ??
+                (asStatement
+                  ? `Not an invoice: a ${kindWord} from ${supplierName}, filed under supplier statements. It records no goods received, so it is kept out of the invoice files.`
+                  : null),
               routedAs,
               routeResult,
             });
@@ -551,6 +585,14 @@ async function importRecognised(
   subject: string,
   s: Awaited<ReturnType<typeof getSettings>>,
   ctx: { userId?: string | null; userName?: string | null },
+  /*
+   * The document already filed for these bytes, and the supplier who sent them.
+   *
+   * Both were missing, and both mattered. Without the document id a rebate report was filed with
+   * its ladder and no page behind it — the supplier's own screen then said "the report itself was
+   * not kept". Without the supplier the ladder went to whichever row matched /mckesson/i.
+   */
+  filed?: { documentId?: string | null; supplierId?: string | null; supplierName?: string | null },
 ): Promise<{ routedAs: string; routeResult: string | null; imported: boolean }> {
   const cls = classify(fileName, buf);
   let routeResult: string | null = null;
@@ -589,6 +631,63 @@ async function importRecognised(
       } else {
         const r = await importSupplierCatalog(buf, fileName, supplier, ctx.userId ?? "mailbox-sweep");
         routeResult = `${supplier}: ${r.itemsAdded} new, ${r.itemsUpdated} updated, ${r.skipped} skipped`;
+        imported = true;
+      }
+    } else if (cls.kind === "rebate_report") {
+      // The tier ladder and the month's achieved rate, filed without anybody typing either — with
+      // the report kept beside it so the bands can be checked against the page they came from.
+      const { fileRebateReport } = await import("./rebate-report-store");
+      const { pdfText } = await import("./pdf-text");
+      const r = await fileRebateReport(
+        pdfText(buf),
+        { documentId: filed?.documentId ?? null, supplierId: filed?.supplierId ?? null },
+        { name: ctx.userName ?? "Automatic check" },
+      );
+      routeResult = r.message;
+      imported = r.stored;
+    } else if (cls.kind === "purchase_drilldown") {
+      /*
+       * Where the compliance ratio stands today.
+       *
+       * This arrives every day and it is the figure that prices an order: the band it falls in
+       * sets the discount on every contract generic. Read on arrival so the answer is already
+       * right the first time anybody asks it, rather than a month behind.
+       */
+      const { readPurchaseDrillDown } = await import("./ai");
+      const { filePurchaseDrillDown } = await import("./purchase-ratio");
+      const read = await readPurchaseDrillDown(buf, { userId: ctx.userId ?? "mailbox-sweep", userName: ctx.userName ?? "Automatic check" });
+      const r = await filePurchaseDrillDown(read, { documentId: filed?.documentId ?? null, supplierId: filed?.supplierId ?? null });
+      routeResult = r.message + (read.unclear.length ? ` Left unsettled: ${read.unclear.join("; ")}` : "");
+      imported = r.stored;
+    } else if (cls.kind === "return_policy") {
+      /*
+       * A returned goods policy, read against the supplier who sent it.
+       *
+       * It proposes; it never stores. A return window decides whether a bottle goes back or into
+       * the bin, and the terms are set from the supplier's own page once somebody has checked each
+       * figure against the sentence it was read from. The PDF is kept either way.
+       */
+      if (!filed?.supplierId) {
+        routeResult =
+          "Recognised as a returned goods policy, but the address it came from is not on any supplier's record, so there is " +
+          "nobody to file it against. Add the address under Suppliers and press Read again.";
+      } else {
+        const { readReturnPolicy } = await import("./ai");
+        const read = await readReturnPolicy(buf, filed.supplierName ?? "this supplier", {
+          userId: ctx.userId ?? "mailbox-sweep",
+          userName: ctx.userName ?? "Automatic check",
+        });
+        await setSetting(
+          "returns_policy_draft",
+          JSON.stringify({ ...read, supplierId: filed.supplierId, fileName, readAt: new Date().toISOString(), documentId: filed.documentId ?? null }),
+        );
+        const steps = read.creditStepsFromInvoice.length;
+        routeResult =
+          `Read as ${filed.supplierName ?? "the supplier"}'s returned goods policy. ` +
+          (steps
+            ? `${steps} credit step${steps === 1 ? "" : "s"} from the invoice date, ${read.nonReturnable.length} things they will not take back. `
+            : "") +
+          "Nothing is stored yet — open the supplier's terms page, check each figure against the sentence it came from, and save.";
         imported = true;
       }
     } else if (cls.kind === "nadac") {
@@ -639,7 +738,35 @@ export async function rereadInboxItem(itemId: string, ctx: { userId: string; use
 
   const matched = supplierForSender(register, from);
   const supplierName = matched?.name ?? supplierFor(parseSupplierRules(s.mail_supplier_rules ?? ""), from, subject);
-  if (looksLikeInvoice({ fileName, mimeType: doc.mimeType, subject, supplier: supplierName })) {
+  /*
+   * The document's own words, on this path too.
+   *
+   * Reading again used to ask only the file name and the subject, so every guard that depends on
+   * what the document actually says was skipped here — and this is the path a pharmacist presses
+   * after adding a supplier's address, which is exactly when a statement of account gets filed as
+   * an invoice.
+   */
+  const words = (() => {
+    if (!/\.pdf$/i.test(fileName) && doc.mimeType !== "application/pdf") return null;
+    try {
+      return pdfText(buf);
+    } catch {
+      return null;
+    }
+  })();
+  const kind = supplierName ? classifySupplierDocument(words, fileName, subject) : { kind: "unknown" as const, why: "" };
+  if (kind.kind === "statement" || kind.kind === "rebate_report" || kind.kind === "credit_memo") {
+    const word = kind.kind === "rebate_report" ? "rebate breakdown" : kind.kind === "credit_memo" ? "credit memo" : "statement of account";
+    await db
+      .update(schema.documents)
+      .set({ category: "supplier_statement", title: `${supplierName} ${word}${subject ? ` — ${subject}` : ""}` })
+      .where(eq(schema.documents.id, doc.id));
+    const text = `Read again ${stamp}: this is a ${word} from ${supplierName}, not an invoice. ${kind.why} Filed under supplier statements.`;
+    await db.update(schema.inboxItems).set({ routedAs: "supplier_statement", routeResult: text, reason: null }).where(eq(schema.inboxItems.id, itemId));
+    await audit({ action: "inbox.reread", userId: ctx.userId, userName: ctx.userName, entity: "document", entityId: doc.id, details: text.slice(0, 200) });
+    return text;
+  }
+  if (looksLikeInvoice({ fileName, mimeType: doc.mimeType, subject, supplier: supplierName, text: words })) {
     const filed = await fileInvoice(
       buf,
       { fileName, mimeType: doc.mimeType || "application/pdf", supplier: supplierName, supplierId: matched?.id ?? null, from, subject },
@@ -658,7 +785,7 @@ export async function rereadInboxItem(itemId: string, ctx: { userId: string; use
     return text;
   }
 
-  const r = await importRecognised(buf, fileName, from, subject, s, ctx);
+  const r = await importRecognised(buf, fileName, from, subject, s, ctx, { documentId: doc.id, supplierId: matched?.id ?? null, supplierName: supplierName ?? null });
   const text = `Read again ${stamp}: ${r.routeResult ?? (r.routedAs === "unrecognised" ? "still not recognised" : r.routedAs)}`;
   await db.update(schema.inboxItems).set({ routedAs: r.routedAs, routeResult: text }).where(eq(schema.inboxItems.id, itemId));
   await audit({ action: "inbox.reread", userId: ctx.userId, userName: ctx.userName, details: `${fileName}: ${text.slice(0, 200)}` });
