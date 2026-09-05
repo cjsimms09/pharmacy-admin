@@ -117,13 +117,49 @@ skipped for the same reason. That is where the "reversals that matched nothing" 
   1:51 PM cannot contain the afternoon's transactions, and one run at 6:30 PM for "today" loses
   everything after 6:30.
 
+### The daily Purchase Drill Down — what it is, and what it must not select
+The real 5 September report (six months, "GCR Denominator Exclusions is Flu or Dropship") settles
+the ratio definitions from its own money, to the printed hundredth on every month:
+GCR = Generic Rx (excluding MPB) ÷ (Total Rx − exclusions); OS/Rx = One Stop ÷ Total Rx;
+OS/Gx = One Stop ÷ Total Generic; Total Brand + Total Generic = Net Purchases. **The GCR is the
+generic share of purchases, not anything to do with OneStop.** June's implied denominator sits
+$2,300 under Total Rx: the drop-shipped flu pre-book, which is the exclusion the header names.
+
+**The drill-down's GCR is not the statement's scrubbed GCR.** May: 10.13% on this report, 20.64%
+on the rebate breakdown. The band is selected by the statement's figure. `rebate-rates.ts`
+prefers the daily ratio over the statement ("today's ratio beats last month's"); with this report
+as scheduled that selects the bottom band while McKesson pays the top one, and every contract
+generic is then priced fourteen points too dear. Until the scheduled report carries McKesson's
+own exclusions (check the report's exclusion filter for the scrub list; GLP-1s are in it), the
+daily figure should not select the band — see `docs/reference/buying-logic.md`, Rule 3.
+
+- `src/lib/drill-down.ts` (pure, new): `checkMonth` refuses a month row whose money does not
+  reproduce its printed ratios (the misread-column failure the AI reader's comment fears);
+  `positionFrom` gives the GCR position; `FIELDS_WANTED` lists every field the reader should
+  return. The current `ReadPurchaseDrillDown` schema in `ai.ts` records GCR, OS/Rx and net
+  purchases only. It needs, per month: Total Rx, Total Brand, Total Generic, Generic Rx
+  (excluding MPB), One Stop, MultiSource, OS/Gx — and from the header, the exclusions line and
+  "Generated on". Without the exclusions line the figure cannot be told from the scrubbed one.
+  `ai.ts` is the pharmacy session's file; the schema change is proposed on PR #2, not made here.
+- The reader's prompt says "read the figures from the Purchase Summary by Month table"; the table
+  is titled "Purchase Drill by Month" on the real report.
+
+### Buying logic — pure modules, nothing wired yet
+`docs/reference/buying-logic.md` is the reasoning. Modules, all pure, all under test:
+`product-groups.ts` (which NDCs are one product, keyed on NADAC's description), `pay-basis.ts`
+(how each plan pays, read off its claims against NADAC: tracks NADAC, flat per product, or
+unknown), `ndc-choice.ts` (which NDC of a product pays the most on this pharmacy's plan mix,
+or "cannot say" with the reason), `ratio-effect.ts` (what an order does to the ratio and the
+band, in money). None of them touches the database or a page. Wiring them to the product ledger
+and an order screen is the next step, and is the pharmacy session's call on where.
+
 ### Files this branch touched
-`src/db/schema.ts`, `drizzle/0048_*`, `drizzle/0049_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources}.ts` (new),
+`src/db/schema.ts`, `drizzle/0048_*`, `drizzle/0049_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources,product-groups,pay-basis,ndc-choice,ratio-effect,drill-down}.ts` (new),
 `src/lib/{claims,rx-transactions,suppliers,suppliers-registry,pioneer-catalog,invoices,nadac-fetch,settings}.ts`,
 `src/app/(app)/suppliers/page.tsx`, `src/app/(app)/suppliers/[id]/terms/page.tsx` (new),
 `src/app/(app)/inventory/invoices/page.tsx`, `src/app/(app)/nadac/page.tsx`, `src/app/(app)/claims/page.tsx`,
-`tests/{ndc,supplier-terms,invoice-lines,nadac-datasets}.test.ts` (new), `tests/{claims,suppliers-registry,rx-transactions}.test.ts`,
-`docs/HANDOFF.md`, `docs/reference/nadac-api.md`, `fixtures/README.md`, `fixtures/rx-transactions.txt` (new).
+`tests/{ndc,supplier-terms,invoice-lines,nadac-datasets,product-groups,pay-basis,ndc-choice,ratio-effect,drill-down}.test.ts` (new), `tests/{claims,suppliers-registry,rx-transactions}.test.ts`,
+`docs/HANDOFF.md`, `docs/reference/nadac-api.md`, `docs/reference/buying-logic.md` (new), `fixtures/README.md`, `fixtures/rx-transactions.txt` (new).
 
 ## Who owns what now
 
