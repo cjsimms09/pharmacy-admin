@@ -896,11 +896,34 @@ export async function draftPolicy(
  * a figure nobody checked is not worth having.
  */
 const ReadReturnPolicy = z.object({
+  /*
+   * The clock that starts at the invoice, which is the one that decides most returns.
+   *
+   * The first version of this schema had nowhere to put it, and McKesson's policy states it as
+   * plainly as anything in the document — "Standard customer return 0-30 days 100%, 31+ days 75%".
+   * With no field for it the model did the only thing left and wrote it into the notes as loose
+   * prose, where nothing can count down from it. The most important two numbers in the policy came
+   * back as a paragraph.
+   */
+  creditStepsFromInvoice: z
+    .array(
+      z.object({
+        withinDays: z.number().nullable().describe("Credit at this rate when the return is raised within this many days of the invoice date. Null for the final, lower rate that applies after every window above."),
+        creditPercent: z.number(),
+      }),
+    )
+    .describe(
+      "Credit by days from the invoice date to the return authorisation being raised — e.g. '0-30 days 100%, 31+ days 75%' " +
+        "becomes [{withinDays:30,creditPercent:100},{withinDays:null,creditPercent:75}]. This is the schedule most policies " +
+        "actually use. Where a policy gives a different schedule for damaged or short-dated goods, give the standard one here " +
+        "and put the other in notes.",
+    ),
+  returnableWithinDaysOfInvoice: z.number().nullable().describe("The last day a return can be raised at all, in days from the invoice. Null where the policy sets no final cut-off."),
   windowMonthsBeforeExpiry: z.number().nullable().describe("Earliest a product can go back, in months before its expiry date. Null where the policy does not say."),
   windowMonthsAfterExpiry: z.number().nullable().describe("Latest, in months after expiry. 0 where nothing goes back after expiry. Null where not stated."),
   creditSteps: z
     .array(z.object({ monthsToExpiryMin: z.number(), creditPercent: z.number() }))
-    .describe("Credit as a percentage of what was paid, by how many months remain to expiry. Empty where the policy states one flat rate or none."),
+    .describe("Credit as a percentage of what was paid, by how many months remain to expiry. Empty where the policy keys credit to days from the invoice instead, which most do."),
   restockingFeePercent: z.number().nullable(),
   nonReturnable: z.array(z.string()).describe("Categories the supplier will not take back, in the policy's own words."),
   reverseDistributor: z.string().nullable(),
@@ -917,7 +940,7 @@ export async function readReturnPolicy(
   supplier: string,
   ctx: { userId: string; userName: string },
 ): Promise<ReadReturnPolicyT> {
-  if (MOCK) return { windowMonthsBeforeExpiry: null, windowMonthsAfterExpiry: null, creditSteps: [], restockingFeePercent: null, nonReturnable: [], reverseDistributor: null, notes: null, quotes: [], unclear: [] };
+  if (MOCK) return { creditStepsFromInvoice: [], returnableWithinDaysOfInvoice: null, windowMonthsBeforeExpiry: null, windowMonthsAfterExpiry: null, creditSteps: [], restockingFeePercent: null, nonReturnable: [], reverseDistributor: null, notes: null, quotes: [], unclear: [] };
   const { client: c, model } = await client();
   const res = await c.messages.parse({
     model,
@@ -928,7 +951,12 @@ export async function readReturnPolicy(
       "every figure you give, exactly as written. Where the policy does not settle something, leave the field null " +
       "and say so in 'unclear' — never infer a number that is not there. Dating windows are often written as " +
       "'current month plus six months', which means a product is returnable while at least six months of shelf life " +
-      "remain; convert such phrasing to months and quote the sentence.",
+      "remain; convert such phrasing to months and quote the sentence.\n\n" +
+      "The single most important thing in the document is the credit schedule keyed to days from the date of invoice — " +
+      "it is what decides whether a bottle on the shelf is worth sending back this week. It is usually printed as a small " +
+      "table of the form 'Standard customer return 0-30 days 100% / 31+ days 75%'. Put it in creditStepsFromInvoice as " +
+      "structured steps, never only in the notes. A percentage left in prose cannot be counted down from and is the same " +
+      "as not having read it at all.",
     messages: [
       {
         role: "user",

@@ -108,7 +108,7 @@ describe("reading the ladder", () => {
 describe("the report checking itself", () => {
   test("every check passes on a real statement, so the tiers can be trusted", () => {
     const r = parseRebateReport(REPORT);
-    assert.equal(r.checks.length, 4);
+    assert.equal(r.checks.length, 7);
     assert.ok(r.checks.every((c) => c.ok), r.checks.filter((c) => !c.ok).map((c) => c.detail).join(" | "));
     assert.equal(r.trustworthy, true);
     assert.deepEqual(r.problems, []);
@@ -183,7 +183,17 @@ describe("the purchase-ratio ladder", () => {
     assert.deepEqual(gpr.tiers[0], { thresholdPercent: 0, rebatePercent: 0 });
     assert.deepEqual(gpr.tiers[1], { thresholdPercent: 75, rebatePercent: 1 });
     assert.deepEqual(gpr.tiers[10], { thresholdPercent: 95, rebatePercent: 10 });
-    assert.equal(gpr.eligibility, "all_generics", "a different measure from the OneStop contract flag");
+    /*
+     * A different measurement, the same purchases.
+     *
+     * The statement's own arithmetic settles it: the generic rebate is the compliance rebate plus
+     * the purchase-ratio rebate, and the compliance rebate is the OneStop purchases times its
+     * rate. Two rebates that add together are two rebates on the same money. Recorded as paying on
+     * generics at large, this ladder promised a discount on every generic on the shelf.
+     */
+    assert.equal(gpr.eligibility, "catalog_rebate_flag", "paid on the contract items, on top of the compliance rebate");
+    assert.equal(gpr.ratioMeasure, "generic_purchase_ratio", "but the band is picked by a different figure");
+    assert.equal(termsFromReport(r).ratioMeasure, "generic_compliance");
     assert.equal(RebateTerms.safeParse(gpr).success, true);
   });
 

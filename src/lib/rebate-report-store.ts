@@ -84,9 +84,20 @@ export function whereYouStand(r: RebateReport): Standing {
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-/** Which register row this report belongs to. McKesson prints no supplier name on it. */
-async function mckesson(): Promise<{ id: string; name: string } | null> {
+/**
+ * Which register row this report belongs to.
+ *
+ * Named outright where the caller knows — the supplier's own page, or the address the email came
+ * from. The McKesson guess is the fallback for a report that arrived with nothing to attribute it
+ * by, and it is a guess about the format rather than about the pharmacy: this layout is McKesson's
+ * and prints no supplier name anywhere on it.
+ */
+async function supplierFor(supplierId?: string | null): Promise<{ id: string; name: string } | null> {
   const rows = await allSuppliers(true);
+  if (supplierId) {
+    const named = rows.find((s) => s.id === supplierId);
+    if (named) return { id: named.id, name: named.name };
+  }
   const hit =
     rows.find((s) => /mckesson/i.test(s.name)) ??
     rows.find((s) => /mckesson/i.test(s.catalogName ?? "")) ??
@@ -96,7 +107,7 @@ async function mckesson(): Promise<{ id: string; name: string } | null> {
 
 export async function fileRebateReport(
   text: string,
-  meta: { documentId?: string | null },
+  meta: { documentId?: string | null; supplierId?: string | null },
   user: { name: string },
 ): Promise<FiledRebateReport> {
   const report = parseRebateReport(text);
@@ -116,14 +127,21 @@ export async function fileRebateReport(
     };
   }
 
-  const supplier = await mckesson();
+  const supplier = await supplierFor(meta.supplierId);
   const parts: string[] = [];
 
   if (supplier) {
+    /*
+     * The programme names carry the supplier's own name from the register.
+     *
+     * Hard-coded, they read "McKesson …" against whatever supplier the report was filed to, which
+     * is the kind of wrong that nobody notices because it looks like a label rather than data.
+     */
+    const who = supplier.name;
     await saveRebateProgram(
       supplier.id,
       {
-        name: "McKesson generics (OneStop) rebate",
+        name: `${who} generics (OneStop) rebate`,
         // The ladder is in force for the month the statement covers; without a period, today.
         effectiveFrom: s.periodFrom ?? new Date().toISOString().slice(0, 10),
         notes: `Read from the rebate breakdown for ${s.periodFrom ?? "an unnamed period"}, which checked out against its own figures.`,
@@ -147,7 +165,7 @@ export async function fileRebateReport(
       await saveRebateProgram(
         supplier.id,
         {
-          name: "McKesson generic purchase ratio (GPR)",
+          name: `${who} generic purchase ratio (GPR)`,
           effectiveFrom: s.periodFrom ?? new Date().toISOString().slice(0, 10),
           notes: `Read from the same rebate breakdown for ${s.periodFrom ?? "an unnamed period"}.`,
           documentId: meta.documentId ?? null,
@@ -163,7 +181,7 @@ export async function fileRebateReport(
       await saveRebateProgram(
         supplier.id,
         {
-          name: "McKesson brand factor",
+          name: `${who} brand factor`,
           effectiveFrom: s.periodFrom ?? new Date().toISOString().slice(0, 10),
           notes: `Read from the same rebate breakdown for ${s.periodFrom ?? "an unnamed period"}.`,
           documentId: meta.documentId ?? null,
@@ -175,8 +193,8 @@ export async function fileRebateReport(
     }
   } else {
     parts.push(
-      "No McKesson row exists on the Suppliers page yet, so the tier ladder has nowhere to be filed — " +
-        "add them and load this again",
+      "No supplier on the Suppliers page could be matched to this report, so the tier ladder has nowhere to be filed — " +
+        "add the supplier and load it again, or upload it from their own terms page",
     );
   }
 
@@ -204,17 +222,19 @@ export async function fileRebateReport(
    * not an answer. Stored beside the figures so the supplier's own page can show the arithmetic
    * rather than asking anybody to take it on trust.
    */
-  await setSetting(
-    "mck_rebate_last_statement",
-    JSON.stringify({
-      ...s,
-      filedAt: new Date().toISOString(),
-      documentId: meta.documentId ?? null,
-      checks: report.checks,
-      standing: whereYouStand(report).lines,
-      tierCount: report.ladder.gcr.length,
-    }),
-  );
+  const settlement = JSON.stringify({
+    ...s,
+    filedAt: new Date().toISOString(),
+    documentId: meta.documentId ?? null,
+    checks: report.checks,
+    standing: whereYouStand(report).lines,
+    tierCount: report.ladder.gcr.length,
+  });
+  await setSetting("mck_rebate_last_statement", settlement);
+  // And against the supplier it belongs to, which is where every screen now reads it from.
+  if (supplier) {
+    await db.update(schema.suppliers).set({ rebateStatementJson: settlement }).where(eq(schema.suppliers.id, supplier.id));
+  }
 
   return {
     stored: true,
@@ -243,6 +263,17 @@ export type FiledStatement = RebateReport["statement"] & {
   tierCount?: number;
 };
 
+/** The last settlement filed against one supplier, which is what their own page shows. */
+export async function rebateStatementFor(supplierId: string): Promise<FiledStatement | null> {
+  const row = await db.query.suppliers.findFirst({ where: eq(schema.suppliers.id, supplierId), columns: { rebateStatementJson: true } });
+  if (!row?.rebateStatementJson) return null;
+  try {
+    return JSON.parse(row.rebateStatementJson) as FiledStatement;
+  } catch {
+    return null;
+  }
+}
+
 export async function lastRebateStatement(): Promise<FiledStatement | null> {
   const raw = (await getSettings()).mck_rebate_last_statement;
   if (!raw) return null;
@@ -256,12 +287,12 @@ export async function lastRebateStatement(): Promise<FiledStatement | null> {
 export { looksLikeRebateReport };
 
 /** Reads a rebate breakdown out of a document already filed, for the ones that arrived before this existed. */
-export async function fileRebateReportFromDocument(documentId: string, user: { name: string }): Promise<FiledRebateReport> {
+export async function fileRebateReportFromDocument(documentId: string, user: { name: string }, supplierId?: string | null): Promise<FiledRebateReport> {
   const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, documentId) });
   if (!doc) throw new Error("That document no longer exists.");
   const { readFile } = await import("./files");
   const { pdfText } = await import("./pdf-text");
   const text = pdfText(await readFile(doc.storageKey));
   if (!looksLikeRebateReport(text)) throw new Error("That document does not look like a McKesson rebate breakdown.");
-  return fileRebateReport(text, { documentId }, user);
+  return fileRebateReport(text, { documentId, supplierId }, user);
 }

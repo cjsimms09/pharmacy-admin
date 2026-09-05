@@ -858,7 +858,7 @@ export default async function InvoicesPage({
                             <details className="mt-1">
                               <summary className="cursor-pointer text-[11px] text-ink-3 hover:text-accent">Not an invoice?</summary>
                               <div className="mt-1 flex flex-col gap-1">
-                                <select name={`as_${i.id}`} className="field field-sm text-[11px]" defaultValue="statement">
+                                <select name={`as_${i.id}`} className="field px-2 py-1 text-[11px]" defaultValue="statement">
                                   <option value="statement">It is a statement of account</option>
                                   <option value="rebate_report">It is a rebate breakdown</option>
                                   <option value="credit_memo">It is a credit memo</option>

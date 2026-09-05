@@ -738,6 +738,16 @@ export const suppliers = sqliteTable(
      * catching.
      */
     expectedSchedule: text("expected_schedule", { enum: INVOICE_SCHEDULES }),
+    /**
+     * The last rebate settlement read from this supplier's own report, as JSON.
+     *
+     * Against the supplier rather than in a setting, because it belongs to them: the achieved
+     * compliance rate, the purchases it was earned on and the arithmetic that checked it are facts
+     * about one trading relationship. Held in a global setting it was McKesson's by assumption —
+     * the page that showed it tested the supplier's name with a regular expression — and a second
+     * supplier sending a rebate report would have overwritten the first one's figures.
+     */
+    rebateStatementJson: text("rebate_statement_json"),
     notes: text("notes"),
     active: integer("active", { mode: "boolean" }).notNull().default(true),
     createdAt: text("created_at").notNull().default(now()),

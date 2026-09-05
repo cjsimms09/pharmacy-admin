@@ -225,6 +225,56 @@ export function parseRebateReport(text: string): RebateReport {
     });
   }
 
+  /*
+   * 5. The purchase-ratio rebate, against the same purchases the compliance rebate is paid on.
+   *
+   * This is the check that says what the second ladder pays on, and it matters because the answer
+   * was wrong: the ladder was recorded as paying on generics generally, which would have promised
+   * a discount on every generic on the shelf. Two rebates that add together are two rebates on the
+   * same money.
+   */
+  if (statement.oneStopPurchasedCents !== null && statement.gprRatePercent !== null && statement.gprRebateCents !== null) {
+    const expected = Math.round((statement.oneStopPurchasedCents * statement.gprRatePercent) / 100);
+    const ok = near(expected, statement.gprRebateCents);
+    checks.push({
+      what: "The purchase-ratio rebate against the same OneStop purchases",
+      ok,
+      detail: `${dollars(statement.oneStopPurchasedCents)} at ${statement.gprRatePercent}% is ${dollars(expected)}; the statement paid ${dollars(statement.gprRebateCents)}. Both generic rebates are paid on the contract items, not on generics at large.`,
+    });
+  }
+
+  // 6. And the two of them are the generic rebate.
+  if (statement.gcrRebateCents !== null && statement.gprRebateCents !== null && statement.genericRebateCents !== null) {
+    const expected = statement.gcrRebateCents + statement.gprRebateCents;
+    const ok = near(expected, statement.genericRebateCents);
+    checks.push({
+      what: "The two generic rebates added together",
+      ok,
+      detail: `${dollars(statement.gcrRebateCents)} on the compliance ladder plus ${dollars(statement.gprRebateCents)} on the purchase-ratio ladder is ${dollars(expected)}; the statement's generic rebate is ${dollars(statement.genericRebateCents)}.`,
+    });
+  }
+
+  /*
+   * 7. Everything on the statement adds up to what was paid.
+   *
+   * Generic rebate, brand rebate and the fee reimbursement — which is the third component and not
+   * a rebate at all, so it is named rather than folded in. This is the check that says the whole
+   * statement is understood rather than three figures out of it, and the one that would notice
+   * McKesson adding a fourth line nobody here knows about.
+   */
+  if (statement.genericRebateCents !== null && statement.brandRebateCents !== null && statement.totalPaidCents !== null) {
+    const fees = statement.totalFeesCents ?? 0;
+    const expected = statement.genericRebateCents + statement.brandRebateCents + fees;
+    const ok = near(expected, statement.totalPaidCents);
+    checks.push({
+      what: "Everything added up against what was paid",
+      ok,
+      detail:
+        `${dollars(statement.genericRebateCents)} generic plus ${dollars(statement.brandRebateCents)} brand` +
+        `${fees ? ` plus ${dollars(fees)} in fees reimbursed` : ""} is ${dollars(expected)}; the statement paid ${dollars(statement.totalPaidCents)}.`,
+    });
+  }
+
   const trustworthy = gcr.length > 0 && checks.length > 0 && checks.every((c) => c.ok);
   if (!trustworthy && gcr.length > 0 && checks.some((c) => !c.ok)) {
     problems.push(
