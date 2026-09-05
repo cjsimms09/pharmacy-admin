@@ -113,14 +113,53 @@ export async function uploadDocument(formData: FormData): Promise<ActionResult> 
   return { ok: true };
 }
 
+/**
+ * Deletes a document, and everything else that only exists because of it.
+ *
+ * It used to delete the row and the file and nothing else, which left two wrecks behind.
+ *
+ * A document filed as a supplier invoice has an invoice record pointing at it, and item lines
+ * pointing at that. Deleting the document alone left the invoice on the Invoices page with a
+ * document id that no longer resolved: "Open" gave nothing, taking it out of the invoice file said
+ * it was no longer on file, and its item lines went on counting as purchases in every comparison.
+ * That is the statement that would not go away.
+ *
+ * And the file was unlinked whatever else pointed at it. Two document rows can share a stored file
+ * — the same bytes arriving twice are stored once — so deleting one took the other's contents with
+ * it and left a row that opens to nothing.
+ */
 export async function deleteDocument(id: string, redirectTo?: string): Promise<ActionResult> {
   const user = await requireManager();
   const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, id) });
   if (!doc) return { ok: false, error: "Document not found." };
+
+  // Anything filed off the back of this document goes with it, or it outlives its own evidence.
+  const invoices = await db.query.supplierInvoices.findMany({ where: eq(schema.supplierInvoices.documentId, id) });
+  for (const inv of invoices) {
+    await db.delete(schema.invoiceLines).where(eq(schema.invoiceLines.invoiceId, inv.id));
+    await db.delete(schema.supplierInvoices).where(eq(schema.supplierInvoices.id, inv.id));
+  }
+
   await db.delete(schema.documents).where(eq(schema.documents.id, id));
-  await deleteFile(doc.storageKey);
-  await audit({ action: "document.delete", userId: user.id, userName: user.name, entity: "document", entityId: id, details: doc.title });
+
+  // The bytes go only when nothing else points at them.
+  const others = await db.query.documents.findMany({
+    where: eq(schema.documents.storageKey, doc.storageKey),
+    columns: { id: true },
+  });
+  if (others.length === 0) await deleteFile(doc.storageKey).catch(() => {});
+
+  await audit({
+    action: "document.delete",
+    userId: user.id,
+    userName: user.name,
+    entity: "document",
+    entityId: id,
+    details: `${doc.title}${invoices.length ? ` · and the invoice record filed from it` : ""}`,
+  });
   revalidatePath("/documents");
+  revalidatePath("/inventory/invoices");
+  revalidatePath("/purchasing");
   if (redirectTo) revalidatePath(redirectTo);
   return { ok: true };
 }
