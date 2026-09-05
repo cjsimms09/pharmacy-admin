@@ -139,7 +139,12 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
         <>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Stat label="Claims held" value={flags.total.toLocaleString()} />
-            <Stat label="Dispensed at a loss" value={String(flags.belowCost.length)} tone={flags.belowCost.length ? "warn" : undefined} sub={formatCents(flags.belowCostTotalCents)} />
+            <Stat
+              label="Dispensed at a loss"
+              value={String(flags.lossFills.length)}
+              tone={flags.lossFills.length ? "warn" : undefined}
+              sub={`${formatCents(flags.lossFillsTotalCents)} · per dispensing`}
+            />
             <Stat
               label="In-scope under $10.50"
               value={String(flags.underFee.length)}
@@ -222,28 +227,72 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
           </div>
 
           <h2 className="mt-8 text-sm font-semibold">Dispensed at a loss</h2>
-          {flags.belowCost.length === 0 ? (
-            <Empty>None.</Empty>
+          {/*
+            Per dispensing, not per transmission.
+
+            A prescription billed to a primary plan and then a secondary is one bottle and two
+            rows, and both rows carry the same acquisition cost. Counted as two claims the cost is
+            counted twice, and the primary row alone — a plan paying eight dollars towards a
+            six-hundred-dollar pen — reads as a catastrophic loss when the secondary paid the rest.
+          */}
+          <p className="mt-1 text-xs text-ink-2">
+            One row per dispensing. Where a fill went to a primary and then a secondary plan, both
+            plans&rsquo; payments are added and the bottle is counted once — the two rows are one bottle, and reading
+            them as two claims doubles the cost and turns a paid fill into an invented loss.
+            {flags.coordination.coordinatedFills > 0 && (
+              <>
+                {" "}
+                <b>
+                  {flags.coordination.coordinatedFills} fill{flags.coordination.coordinatedFills === 1 ? "" : "s"} here went to
+                  more than one plan
+                </b>
+                {flags.coordination.falseLosses > 0 && (
+                  <>
+                    , and {flags.coordination.falseLosses} of them would have shown{" "}
+                    {formatCents(flags.coordination.falseLossCents)} of losses that were never real
+                  </>
+                )}
+                .
+              </>
+            )}{" "}
+            A reversal matching no claim held is left out entirely: it reverses a dispensing from before this feed
+            began, whose revenue was never counted here.
+          </p>
+          {flags.lossFills.length === 0 ? (
+            <Empty>None — every dispensing brought in at least what the drug cost.</Empty>
           ) : (
-            <div className="overflow-x-auto rounded-lg border border-line">
+            <div className="mt-2 overflow-x-auto rounded-lg border border-line">
               <table className="w-full text-sm">
                 <thead className="bg-ground text-left text-xs uppercase tracking-wide text-ink-3">
                   <tr>
                     <th className="px-3 py-2">Filled</th>
                     <th className="px-3 py-2">Drug</th>
-                    <th className="px-3 py-2">Payer</th>
-                    <th className="px-3 py-2">Network</th>
+                    <th className="px-3 py-2">Paid by</th>
+                    <th className="px-3 py-2 text-right">Came in</th>
+                    <th className="px-3 py-2 text-right">Cost</th>
                     <th className="px-3 py-2 text-right">Loss</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {[...flags.belowCost].sort((a, b) => (a.grossProfitCents ?? 0) - (b.grossProfitCents ?? 0)).slice(0, 50).map((c) => (
-                    <tr key={c.id} className="border-t border-line">
-                      <td className="px-3 py-2 whitespace-nowrap text-xs">{c.dateFilled}</td>
-                      <td className="px-3 py-2">{c.itemName ?? c.ndc11 ?? "—"}</td>
-                      <td className="px-3 py-2">{c.pbmName ?? c.payerLabel ?? "—"}</td>
-                      <td className="px-3 py-2 text-xs text-ink-3">{c.networkId ?? "—"}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-red-700">{formatCents(c.grossProfitCents ?? 0)}</td>
+                  {flags.lossFills.slice(0, 50).map((f) => (
+                    <tr key={f.key} className="border-t border-line">
+                      <td className="px-3 py-2 whitespace-nowrap text-xs">{f.dateFilled}</td>
+                      <td className="px-3 py-2">
+                        {f.itemName ?? f.ndc11 ?? "—"}
+                        <span className="block font-mono text-[11px] text-ink-3">Rx {f.rxNumber}{f.fillNumber !== null ? `-${f.fillNumber}` : ""}</span>
+                      </td>
+                      <td className="px-3 py-2 text-xs">
+                        {f.payers.map((p) => p.name ?? p.bin ?? "—").join(" then ")}
+                        {f.coordinated && <span className="badge badge-muted ml-1">two plans</span>}
+                        {f.patientShareUncertain && (
+                          <span className="badge badge-warn ml-1" title="The plans disagree about what the patient owed and the report does not say which came last. The smaller figure is used.">
+                            patient share unclear
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums">{formatCents(f.revenueCents)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{formatCents(f.acquisitionCents ?? 0)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-red-700">{formatCents(f.marginCents ?? 0)}</td>
                     </tr>
                   ))}
                 </tbody>

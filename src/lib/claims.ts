@@ -495,6 +495,45 @@ export async function claimFlags() {
     orderBy: (c, { asc }) => [asc(c.dateFilled)],
   });
 
+  /*
+   * Losses are counted per dispensing, not per transmission.
+   *
+   * A prescription billed to a primary plan and then a secondary appears twice in the report, and
+   * both rows carry the same acquisition cost, because it is the same bottle. Read as two claims,
+   * the cost is counted twice and the primary row alone — a plan paying eight dollars towards a
+   * six-hundred-dollar pen — reads as a catastrophic loss. And a reversal matching no claim held
+   * reverses a dispensing from before this feed began, whose revenue was never counted here, so
+   * subtracting it invents a loss out of a correction to a figure the site never had.
+   *
+   * Both together put a real day $459 in the red on this pharmacy's first live file.
+   */
+  const { groupIntoFills, fillsAtALoss, coordinationEffect } = await import("./fills");
+  const heldKeys = new Set(rows.filter((c) => c.status === "paid").map((c) => c.transactionKey ?? c.id));
+  const fills = groupIntoFills(
+    rows.map((c) => ({
+      id: c.id,
+      rxNumber: c.rxNumber,
+      fillNumber: c.fillNumber,
+      dateFilled: c.dateFilled,
+      ndc11: c.ndc11,
+      itemName: c.itemName,
+      bin: c.bin,
+      pbmName: c.pbmName,
+      payerLabel: c.payerLabel,
+      quantityThousandths: c.quantityThousandths,
+      remitCents: c.remitCents,
+      copayCents: c.copayCents,
+      acquisitionCents: c.acquisitionCents,
+      status: c.status,
+      // A reversal kept because it matched nothing: negative money against a fill never counted.
+      unmatchedReversal: (c.remitCents ?? 0) < 0 && !c.reversalKey,
+    })),
+  );
+  void heldKeys;
+  const lossFills = fillsAtALoss(fills);
+  const coordination = coordinationEffect(fills);
+
+  // Kept for the per-claim view, which is still how somebody looks a single claim up.
   const belowCost = rows.filter((c) => c.grossProfitCents !== null && c.grossProfitCents < 0);
 
   // Which claims are candidates for the statutory floor is a question about the plan, not about
@@ -532,6 +571,11 @@ export async function claimFlags() {
     total: rows.length,
     belowCost,
     belowCostTotalCents: sum(belowCost),
+    /** One row per dispensing, with every payer that priced it. */
+    fills,
+    lossFills,
+    lossFillsTotalCents: lossFills.reduce((n, f) => n + (f.marginCents ?? 0), 0),
+    coordination,
     inScope: inScope.length,
     undetermined: undetermined.length,
     underFeeUndetermined: underFeeUndetermined.length,
