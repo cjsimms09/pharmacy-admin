@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { TRAINING_CADENCE, addMonths } from "@/lib/due";
+import { TRAINING_CADENCE, addMonths, trainingApplies } from "@/lib/due";
 import { TRAINING_LABEL, TRAINING_SHORT, PERSON_ROLE_LABEL } from "@/lib/labels";
 import { type TrainingType } from "@/db/schema";
 import { todayIso, fmt, daysUntil } from "@/lib/dates";
@@ -100,7 +100,17 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
     return { label: dueOn.slice(5), tone: "badge-ok", due: false, sent, certificate };
   };
 
-  const cells = people.flatMap((p) => REQUIRED.map((t) => ({ p, t, st: state(p.id, t) })));
+  /*
+   * Only the cells that mean something.
+   *
+   * The Kansas technician course applies to technicians; the immunization protocol review applies
+   * to immunizers. A grid that shows a cell for every person against every training implies a gap
+   * where none exists, and a red square nobody can ever clear is how a compliance screen stops
+   * being believed.
+   */
+  const cells = people.flatMap((p) =>
+    REQUIRED.filter((t) => trainingApplies(t, p)).map((t) => ({ p, t, st: state(p.id, t) })),
+  );
   const owed = cells.filter((c) => c.st.due).length;
   const awaiting = cells.filter((c) => c.st.sent).length;
   const toSend = cells.filter((c) => c.st.due && !c.st.sent).length;
@@ -477,6 +487,15 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
                       </div>
                     </td>
                     {REQUIRED.map((t) => {
+                      // Not everybody owes every training; a cell that can never be cleared is
+                      // worse than no cell, so it renders as plainly not applicable.
+                      if (!trainingApplies(t, p)) {
+                        return (
+                          <td key={t} className="text-center text-xs text-ink-3">
+                            —
+                          </td>
+                        );
+                      }
                       const st = state(p.id, t);
                       // Three visually distinct states, because the only question asked of this
                       // grid is what is left to do: current, owed and not yet sent, owed and

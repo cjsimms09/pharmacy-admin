@@ -2,7 +2,7 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { onSiteToday } from "./roster";
-import { todayIso, daysBetween } from "./dates";
+import { todayIso, daysBetween, addDays } from "./dates";
 import { CREDENTIAL_LABEL, TRAINING_LABEL, PERSON_ROLE_LABEL } from "./labels";
 import type { CredentialType, TrainingType } from "@/db/schema";
 
@@ -65,7 +65,27 @@ function severityOf(daysLeft: number | null, kind: DueKind): DueItem["severity"]
  * Anything not listed here is recorded but not chased — a one-off certificate does not lapse and
  * a reminder about it is noise that trains people to ignore the list.
  */
-export const TRAINING_CADENCE: Partial<Record<TrainingType, { months: number; why: string; what: string }>> = {
+/**
+ * What each training costs a person, and how often.
+ *
+ * `months` is the repeat interval. One entry does not repeat at all — the Kansas technician
+ * training course is completed once, within a deadline measured from the day the person started
+ * rather than from their last completion — so the shape carries `once` and `withinDaysOfHire`
+ * instead of pretending 180 days is an annual cycle.
+ */
+export type Cadence = {
+  months: number;
+  why: string;
+  what: string;
+  /** Completed once and never chased again. */
+  once?: boolean;
+  /** For a `once` training: the deadline, counted from the person's hire date. */
+  withinDaysOfHire?: number;
+  /** Who it applies to. Absent means everybody. */
+  appliesTo?: "immunizers" | "technicians";
+};
+
+export const TRAINING_CADENCE: Partial<Record<TrainingType, Cadence>> = {
   fwa_general_compliance: {
     months: 12,
     why: "Annual, required of everyone who touches a Medicare or Medicaid claim.",
@@ -96,12 +116,40 @@ export const TRAINING_CADENCE: Partial<Record<TrainingType, { months: number; wh
     why: "The manual itself says every employee signs an acknowledgement and that it is retained in their file.",
     what: "This pharmacy's own policy and procedure manual — how we do things here, what is expected, and where to find the answer when something is not covered.",
   },
+  technician_initial_training: {
+    months: 0,
+    once: true,
+    withinDaysOfHire: 180,
+    appliesTo: "technicians",
+    why: "K.A.R. 68-5-15 — completed within 180 days of employment, before which the technician may not perform tasks the pharmacy act authorises a technician to perform.",
+    what: "This pharmacy's own technician training course: the layout and the shelf sections, what a technician may and may not do, the laws behind the work, abbreviations, calculations, storage and recalls, filing and retention, and compounding.",
+  },
   cqi_program_review: {
     months: 12,
     why: "The written CQI programme is read and signed off annually.",
     what: "Everyone reads the pharmacy's written quality programme and confirms they know how to report an error and that reporting is expected of them.",
   },
 };
+
+/**
+ * Who a training applies to.
+ *
+ * Was an inline check for one special case. A second one — the Kansas technician course, which is
+ * for technicians and says nothing about pharmacists or interns — is the point at which a special
+ * case becomes a rule, and chasing a pharmacist for a technician's training would be noise on a
+ * screen whose whole value is that everything on it is real.
+ */
+export function trainingApplies(
+  type: TrainingType,
+  person: { role: string; administersVaccines: boolean },
+): boolean {
+  const to = TRAINING_CADENCE[type]?.appliesTo;
+  if (to === "immunizers") return person.administersVaccines;
+  if (to === "technicians") return person.role === "technician";
+  // Kept for the one type that has no cadence entry but is still filtered elsewhere.
+  if (type === "immunization_protocol_review") return person.administersVaccines;
+  return true;
+}
 
 /** Credentials that are only required of some people, and the condition that makes them required. */
 function credentialApplies(type: CredentialType, person: { administersVaccines: boolean }): boolean {
@@ -224,8 +272,8 @@ export async function dueList(opts: { horizonDays?: number } = {}): Promise<DueI
   // one thing to arrange, and listing it four times with no button on any of them is how a
   // screen stops being read. The people are carried on the item so it can be assigned to all of
   // them in a single click.
-  for (const [type, cadence] of Object.entries(TRAINING_CADENCE) as [TrainingType, { months: number; why: string; what: string }][]) {
-    const applies = people.filter((p) => type !== "immunization_protocol_review" || p.administersVaccines);
+  for (const [type, cadence] of Object.entries(TRAINING_CADENCE) as [TrainingType, Cadence][]) {
+    const applies = people.filter((p) => trainingApplies(type, p));
     if (applies.length === 0) continue;
     const label = TRAINING_LABEL[type];
 
@@ -234,6 +282,23 @@ export async function dueList(opts: { horizonDays?: number } = {}): Promise<DueI
       const last = trainings
         .filter((t) => t.personId === p.id && t.type === type)
         .sort((a, b) => b.completedOn.localeCompare(a.completedOn))[0];
+
+      /*
+       * A training completed once and never again.
+       *
+       * The deadline runs from the day the person started, not from their last completion, so it
+       * cannot be expressed as a repeat interval. Once it is done it disappears from this list for
+       * good — chasing somebody annually for their initial training would be the kind of false
+       * alarm that teaches people to stop reading the list.
+       */
+      if (cadence.once) {
+        if (last) continue;
+        const by =
+          cadence.withinDaysOfHire && p.hiredOn ? addDays(p.hiredOn, cadence.withinDaysOfHire) : null;
+        outstanding.push({ person: p, due: by, last: null });
+        continue;
+      }
+
       if (!last) {
         outstanding.push({ person: p, due: null, last: null });
         continue;

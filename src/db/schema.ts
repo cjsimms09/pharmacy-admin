@@ -321,6 +321,16 @@ export const TRAINING_TYPES = [
    * to follow up on. It is theirs, written down, and unmet.
    */
   "policy_manual_acknowledgement",
+  /**
+   * The pharmacy's own technician training course, required by K.A.R. 68-5-15.
+   *
+   * Unlike everything else in this list it is not an annual refresher. It is the course the
+   * pharmacist-in-charge must maintain — "designed for the functioning of that pharmacy" — which a
+   * technician must complete within 180 days of employment, and before which they may not perform
+   * tasks the pharmacy act authorises a technician to perform. Technicians only: it says nothing
+   * about pharmacists or interns and chasing them for it would be noise.
+   */
+  "technician_initial_training",
   "other",
 ] as const;
 export type TrainingType = (typeof TRAINING_TYPES)[number];

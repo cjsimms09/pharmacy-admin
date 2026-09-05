@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { addMonths, TRAINING_CADENCE } from "../src/lib/due";
+import { addMonths, TRAINING_CADENCE, trainingApplies } from "../src/lib/due";
 
 /**
  * The due list is the only place the pharmacy looks, so a date computed wrongly here is a
@@ -35,10 +35,25 @@ describe("addMonths", () => {
 });
 
 describe("training cadence", () => {
-  test("every chased training states why it is chased", () => {
+  test("every chased training states why it is chased, and when", () => {
     for (const [type, c] of Object.entries(TRAINING_CADENCE)) {
-      assert.ok(c.months > 0, `${type} has no interval`);
       assert.ok(c.why.length > 20, `${type} does not say why it is required`);
+      // Either it repeats on an interval, or it is completed once against a deadline measured
+      // from the hire date. A training with neither would sit on the due list for ever with
+      // nothing that could ever satisfy it.
+      if (c.once) {
+        assert.ok(c.withinDaysOfHire, `${type} is a one-off with no deadline`);
+      } else {
+        assert.ok(c.months > 0, `${type} has no interval`);
+      }
+    }
+  });
+
+  test("a one-off training is chased on a deadline somebody could actually meet", () => {
+    for (const [type, c] of Object.entries(TRAINING_CADENCE)) {
+      if (!c.once) continue;
+      assert.ok(c.withinDaysOfHire! >= 30, `${type} gives a new hire only ${c.withinDaysOfHire} days`);
+      assert.ok(c.withinDaysOfHire! <= 365, `${type} gives ${c.withinDaysOfHire} days, which is not a deadline`);
     }
   });
 
@@ -50,7 +65,20 @@ describe("training cadence", () => {
 
   test("nothing is chased more often than annually — noise trains people to ignore the list", () => {
     for (const [type, c] of Object.entries(TRAINING_CADENCE)) {
+      if (c.once) continue; // Not chased on a cycle at all: done once and gone from the list.
       assert.ok(c.months >= 12, `${type} is chased every ${c.months} months`);
     }
+  });
+
+  test("a training restricted to some people says who, rather than being filtered somewhere else", () => {
+    // The Kansas technician course applies to technicians and says nothing about pharmacists or
+    // interns. Chasing a pharmacist for it would be a false alarm on a list whose whole value is
+    // that everything on it is real.
+    assert.equal(TRAINING_CADENCE.technician_initial_training?.appliesTo, "technicians");
+    assert.ok(trainingApplies("technician_initial_training", { role: "technician", administersVaccines: false }));
+    assert.ok(!trainingApplies("technician_initial_training", { role: "pharmacist", administersVaccines: true }));
+    assert.ok(!trainingApplies("technician_initial_training", { role: "intern", administersVaccines: false }));
+    // Everything else still applies to everybody.
+    assert.ok(trainingApplies("hipaa_privacy_security", { role: "intern", administersVaccines: false }));
   });
 });

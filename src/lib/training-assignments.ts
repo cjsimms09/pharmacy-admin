@@ -60,6 +60,13 @@ export const STATEMENTS: Partial<Record<TrainingType, string>> = {
     "work in accordance with it, that it covers my conduct as well as my duties, and that where something is not " +
     "covered I am expected to ask rather than to decide alone. I understand this acknowledgement is retained in my " +
     "employee file.",
+  technician_initial_training:
+    "I confirm that I have completed the pharmacy technician training course for this pharmacy, including the tour " +
+    "of the pharmacy with the pharmacist-in-charge. I understand the duties I may perform, and that I must never " +
+    "give medical advice, counsel a patient on a medication, recommend an over-the-counter product, perform the " +
+    "final check on a prescription, or take a new prescription from a prescriber or nurse. I understand that every " +
+    "task I perform is under the direct supervision of the pharmacist, and that any problem or discrepancy has to " +
+    "be brought to the pharmacist immediately.",
   cqi_program_review:
     "I confirm that I have read the pharmacy's written continuous quality improvement programme. I understand how " +
     "to report a quality-related event, that reporting is expected of me rather than held against me, and that the " +

@@ -6,6 +6,7 @@ import { bloodborne } from "./course-material/bloodborne";
 import { hazcom } from "./course-material/hazcom";
 import { diversion } from "./course-material/diversion";
 import { cqi } from "./course-material/cqi";
+import { technician } from "./course-material/technician";
 
 /**
  * The training itself, written out.
@@ -53,6 +54,7 @@ export const COURSES: Partial<Record<TrainingType, Course>> = {
   osha_hazard_communication: timed(hazcom),
   controlled_substance_diversion: timed(diversion),
   cqi_program_review: timed(cqi),
+  technician_initial_training: timed(technician),
 };
 
 export function courseFor(type: TrainingType): Course | null {

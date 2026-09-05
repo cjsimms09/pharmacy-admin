@@ -6,6 +6,7 @@ import { TRAINING_LABEL, CREDENTIAL_LABEL } from "./labels";
 import { courseFor } from "./courses";
 import { courseVersion } from "./course-packet";
 import { todayIso, daysBetween } from "./dates";
+import { trainingApplies } from "./due";
 import type { TrainingType } from "@/db/schema";
 
 /**
@@ -114,6 +115,7 @@ const REQUIRED: TrainingType[] = [
   "controlled_substance_diversion",
   "cqi_program_review",
   "policy_manual_acknowledgement",
+  "technician_initial_training",
 ];
 
 export async function trainingFile(opts: { includeFormer?: boolean } = {}): Promise<TrainingFile> {
@@ -174,7 +176,11 @@ export async function trainingFile(opts: { includeFormer?: boolean } = {}): Prom
             : `Employed${p.hiredOn ? ` since ${p.hiredOn}` : ""}`
           : `Left${p.endedOn ? ` ${p.endedOn}` : ""}`,
         lines,
-        missing: REQUIRED.filter((t) => !mine.some((x) => x.type === t)).map((t) => TRAINING_LABEL[t]),
+        // Missing means missing for this person. A pharmacist has no technician course to be
+        // short of, and listing one on their record would be a finding invented by the software.
+        missing: REQUIRED.filter((t) => trainingApplies(t, p) && !mine.some((x) => x.type === t)).map(
+          (t) => TRAINING_LABEL[t],
+        ),
         /*
          * The gap between starting and being trained, which "current" hides.
          *

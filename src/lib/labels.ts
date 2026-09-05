@@ -174,6 +174,7 @@ export const TRAINING_SHORT: Record<TrainingType, string> = {
   immunization_protocol_review: "Protocol",
   cqi_program_review: "CQI",
   policy_manual_acknowledgement: "P&P manual",
+  technician_initial_training: "Tech training",
   other: "Other",
 };
 
@@ -186,5 +187,6 @@ export const TRAINING_LABEL: Record<TrainingType, string> = {
   immunization_protocol_review: "Immunization protocol review",
   cqi_program_review: "CQI program review",
   policy_manual_acknowledgement: "Policy and procedure manual — read and acknowledged",
+  technician_initial_training: "Pharmacy technician training (initial)",
   other: "Other training",
 };

@@ -160,6 +160,21 @@ export const CLOSURES: Record<string, Closure> = {
     witness: "A current immunization protocol on file for every immunizer. Upload each one on the person\u2019s page with its expiry; there is no separate training to record.",
   },
   backup_restore_test: { kind: "witnessed", witness: "A backup taken and verified under Settings → Backups." },
+  technician_course_review: {
+    kind: "attest",
+    statement:
+      "On {date} I carried out the review for {period} of the pharmacy technician training course written for this " +
+      "pharmacy, as K.A.R. 68-5-15(d)(1) requires. I read it in full, it reflects how this pharmacy currently " +
+      "operates, and any change I made to it is in the version now in force on this system.",
+  },
+  technician_board_notice: {
+    kind: "attest",
+    statement:
+      "On {date}, within {period}, I notified the Kansas Board of Pharmacy of a pharmacy technician's employment " +
+      "at this pharmacy, giving their full name and current residence address, the date they began this pharmacy's " +
+      "technician training course, and the name and address of the pharmacy, as K.A.R. 68-5-15(d)(3) requires and " +
+      "within the 30 days it allows.",
+  },
   /*
    * One monthly screen, covering both things it actually answers.
    *
@@ -260,6 +275,38 @@ export const OBLIGATION_SEEDS: ObligationSeed[] = [
     citation: "K.S.A. 65-1683 · K-TRACS",
     cadence: "monthly",
     firstDueInDays: 7,
+  },
+  /*
+   * The two duties K.A.R. 68-5-15 puts on the pharmacy rather than on the technician.
+   *
+   * The technician's own duty — completing the course within 180 days — is chased through the
+   * training register, person by person. These two are the pharmacist-in-charge's and attach to
+   * the course itself, which is exactly why they get forgotten: the training screen goes green
+   * when everybody has done it, and nothing on it ever mentions that the course has to be reviewed
+   * every year or that the Board has to be told a technician started.
+   */
+  {
+    key: "technician_course_review",
+    title: "Review the pharmacy technician training course",
+    detail:
+      "K.A.R. 68-5-15(d)(1) requires an annual review of the technician training course written for this pharmacy. " +
+      "Read it through, change anything the pharmacy no longer does that way — shelf sections, filing, the " +
+      "refrigerator policy — and record the review. The course lives on this site under Training material, so a " +
+      "change to it changes the version code and every certificate issued afterwards names the new version.",
+    citation: "K.A.R. 68-5-15(d)(1)",
+    cadence: "annual",
+    firstDueInDays: 30,
+  },
+  {
+    key: "technician_board_notice",
+    title: "Notify the Board when a pharmacy technician starts",
+    detail:
+      "K.A.R. 68-5-15(d)(3) requires the Board to be told, within 30 days of a technician's employment, of their " +
+      "full name and current residence address, the date they began the pharmacy's technician training course, and " +
+      "the name and address of the pharmacy. Keep this switched on as a reminder of the duty; complete it when it " +
+      "happens.",
+    citation: "K.A.R. 68-5-15(d)(3)",
+    cadence: "as_needed",
   },
   {
     key: "self_inspection",
