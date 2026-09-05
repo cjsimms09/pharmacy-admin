@@ -47,6 +47,9 @@ export default async function CoursePage({ params }: { params: Promise<{ type: s
             somebody asks.
           </p>
         )}
+        <h2 className="mt-4 font-semibold">Who is allowed to deliver it</h2>
+        <p className="mt-1 text-sm text-ink-2">{course.whoMayTeach}</p>
+
         <p className="mt-2 text-xs text-ink-3">
           This is in-house training, which is what the rules contemplate: they require training on this pharmacy&rsquo;s
           own policies and name no accreditor. It is not continuing education and does not claim to be. Where a Part D

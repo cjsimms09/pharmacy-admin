@@ -75,6 +75,20 @@ export default async function TrainingRecordsPage({
         <p className="mt-1 text-xs">
           <b>Training delivered by:</b> {f.trainer.name} — {f.trainer.qualifications}.
         </p>
+        {/*
+          The question an inspector asks second, answered on the page rather than reconstructed.
+
+          Only one of these courses says anything at all about who may deliver it — the bloodborne
+          standard, which asks for a person knowledgeable in the subject matter and specifies no
+          credential. Saying so here, with the citation, is cheaper than being asked.
+        */}
+        <p className="mt-1 text-[10px]">
+          None of this material is continuing education and none of it claims to be. Of the requirements addressed
+          below, only 29 CFR 1910.1030(g)(2)(viii) speaks to the trainer at all, and it asks for a person
+          knowledgeable in the subject matter as it relates to this workplace rather than any credential. The
+          qualifications recorded above are what satisfies it, and 29 CFR 1910.1030(h)(2)(i) requires them to appear
+          on the record. The right-hand column states the position for each course.
+        </p>
       </div>
 
       {/* ── Who has done what ── */}
@@ -116,6 +130,7 @@ export default async function TrainingRecordsPage({
             <th className="border border-black px-1.5 py-1 text-left">Length</th>
             <th className="border border-black px-1.5 py-1 text-left">Version in force</th>
             <th className="border border-black px-1.5 py-1 text-left">Requirement it addresses</th>
+            <th className="border border-black px-1.5 py-1 text-left">Who the rule allows to deliver it</th>
           </tr>
         </thead>
         <tbody>
@@ -125,6 +140,7 @@ export default async function TrainingRecordsPage({
               <td className="border border-black px-1.5 py-1 align-top">~{c.minutes} min</td>
               <td className="border border-black px-1.5 py-1 align-top font-mono">{c.version}</td>
               <td className="border border-black px-1.5 py-1 align-top">{c.authority}</td>
+              <td className="border border-black px-1.5 py-1 align-top">{c.whoMayTeach}</td>
             </tr>
           ))}
         </tbody>

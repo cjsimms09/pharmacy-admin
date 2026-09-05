@@ -14,6 +14,10 @@ export const hazcom: Course = {
   authority:
     "29 CFR 1910.1200(h) — information and training on hazardous chemicals in the work area, at initial " +
     "assignment and whenever a new hazard is introduced.",
+  whoMayTeach:
+    "29 CFR 1910.1200(h) requires the employer to provide the information and training and names no qualification " +
+    "for the trainer. This is in-house training delivered by the pharmacist-in-charge and it is not continuing " +
+    "education.",
   intro:
     "There are hazardous chemicals in this pharmacy. Not many, and none exotic, but the standard applies and the " +
     "three things it really asks of you are that you can read a label, can find and use a safety data sheet, and " +

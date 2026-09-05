@@ -79,6 +79,33 @@ describe("courses", () => {
     }
   });
 
+  /*
+   * "Am I allowed to teach all those things?"
+   *
+   * A fair question, and the honest answer differs per course: most of these rules name no
+   * qualification for the trainer at all, and exactly one — 29 CFR 1910.1030(g)(2)(viii) — asks
+   * for a person knowledgeable in the subject matter. Answering it on the course and on the
+   * printed file is much cheaper than reconstructing it under questioning, so a course that does
+   * not answer it fails here.
+   */
+  test("every course says who the rule allows to deliver it", () => {
+    for (const [type, course] of entries) {
+      assert.ok(course.whoMayTeach.length > 80, `${type} does not say who may deliver it`);
+      assert.match(
+        course.whoMayTeach,
+        /continuing education|CFR|K\.A\.R\.|no rule|No federal/i,
+        `${type} answers the question without grounding it in anything`,
+      );
+    }
+  });
+
+  test("only the bloodborne standard is described as naming a trainer qualification", () => {
+    // Overstating this would be the expensive error: claiming a credential requirement that does
+    // not exist invites the question of whether the pharmacy met it.
+    assert.match(String(COURSES.osha_bloodborne?.whoMayTeach), /knowledgeable in the subject matter/);
+    assert.match(String(COURSES.osha_bloodborne?.whoMayTeach), /1910\.1030\(g\)\(2\)\(viii\)/);
+  });
+
   test("every course says what it will teach and where it got it", () => {
     for (const [type, course] of entries) {
       assert.ok((course.objectives ?? []).length >= 3, `${type} states no learning objectives`);

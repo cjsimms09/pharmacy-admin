@@ -94,7 +94,15 @@ export type TrainingFile = {
   trainer: TrainerIdentity;
   people: PersonFile[];
   /** The courses this pharmacy uses, with the version currently in force. */
-  courses: { type: TrainingType; title: string; authority: string; minutes: number; version: string }[];
+  courses: {
+    type: TrainingType;
+    title: string;
+    authority: string;
+    minutes: number;
+    version: string;
+    /** What the rule says about who may deliver it — the question asked right after "who trained them". */
+    whoMayTeach: string;
+  }[];
   retention: string[];
 };
 
@@ -203,13 +211,23 @@ export async function trainingFile(opts: { includeFormer?: boolean } = {}): Prom
       // The policy manual has no course written into the site — the material is the pharmacy's
       // own manual, which cannot live in the software and is attached to the email instead.
       return c
-        ? { type: t, title: c.title, authority: c.authority, minutes: c.minutes ?? 0, version: courseVersion(c) }
+        ? {
+            type: t,
+            title: c.title,
+            authority: c.authority,
+            minutes: c.minutes ?? 0,
+            version: courseVersion(c),
+            whoMayTeach: c.whoMayTeach,
+          }
         : {
             type: t,
             title: TRAINING_LABEL[t],
             authority: "The pharmacy's own policy and procedure manual, which the manual itself requires every employee to acknowledge.",
             minutes: 0,
             version: "the manual as attached",
+            whoMayTeach:
+              "The manual is this pharmacy's own document and the acknowledgement is of the pharmacy's own rules. " +
+              "No rule specifies who may issue it; the pharmacist-in-charge does.",
           };
     }),
     retention: [

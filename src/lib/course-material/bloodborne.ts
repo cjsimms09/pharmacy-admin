@@ -15,6 +15,12 @@ export const bloodborne: Course = {
     "29 CFR 1910.1030(g)(2) — annual bloodborne pathogens training, covering the elements at (g)(2)(vii)(A)–(N), " +
     "with the exposure control plan accessible to every employee.",
   liveQuestionsRequired: true,
+  whoMayTeach:
+    "This is the one course where the standard speaks to the trainer. 29 CFR 1910.1030(g)(2)(viii) requires the " +
+    "person conducting the training to be knowledgeable in the subject matter as it relates to this workplace. No " +
+    "certification, licence or accreditation is specified. A pharmacist-in-charge who administers vaccines, handles " +
+    "sharps and wrote this pharmacy's exposure control plan is plainly that person — and 1910.1030(h)(2)(i) " +
+    "requires his name and qualifications to appear on the training record, which they do on every one.",
   intro:
     "This pharmacy administers vaccines and handles sharps, so there is reasonably anticipated exposure to blood " +
     "and other potentially infectious material. This training is required annually and within a year of the last " +

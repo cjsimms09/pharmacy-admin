@@ -12,6 +12,10 @@ export const cqi: Course = {
   type: "cqi_program_review",
   title: "The pharmacy's continuous quality improvement programme",
   authority: "K.A.R. 68-19-1 — every Kansas pharmacy must have a continuous quality improvement programme.",
+  whoMayTeach:
+    "K.A.R. 68-19-1 requires the pharmacy to have a continuous quality improvement programme and to ensure its " +
+    "personnel understand it. The pharmacist-in-charge is responsible for the programme, which makes him the right " +
+    "person to deliver this. No qualification is specified and this is not continuing education.",
   intro:
     "Kansas requires this pharmacy to run a CQI programme, and requires everyone working here to understand it. " +
     "The short version: when something goes wrong, we write it down and fix the system, and nobody is punished " +

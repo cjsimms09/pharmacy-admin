@@ -14,6 +14,11 @@ export const fwa: Course = {
   authority:
     "42 CFR 422.503(b)(4)(vi) and 423.504(b)(4)(vi) — compliance and FWA training for entities providing " +
     "benefits to Medicare enrollees. Note: a Part D plan or PSAO may require its own FWA module in addition.",
+  whoMayTeach:
+    "42 CFR 423.504(b)(4)(vi)(C) requires the training and names no qualification for the trainer. A pharmacy " +
+    "enrolled in Medicare Part A or B, or accredited as a DMEPOS supplier, is deemed to have met the fraud, waste " +
+    "and abuse training requirement by virtue of that enrolment — but the general compliance obligation remains, " +
+    "and a plan or PSAO may still require its own module. This is in-house training and is not continuing education.",
   intro:
     "This covers what fraud, waste and abuse look like in a pharmacy, the laws behind them, and exactly how to " +
     "raise something you are worried about. If a plan or PSAO also sends you their own FWA module, do that one " +

@@ -14,6 +14,11 @@ export const hipaa: Course = {
   authority:
     "45 CFR 164.530(b)(1) — workforce training on the covered entity's privacy policies and procedures; " +
     "45 CFR 164.308(a)(5) — security awareness and training.",
+  whoMayTeach:
+    "45 CFR 164.530(b)(1) requires the covered entity to train its workforce on its own policies and procedures. It " +
+    "names no accreditor, no credential and no qualification for whoever delivers it — the pharmacy is required to " +
+    "train, and to document that it did. This is in-house training delivered by the pharmacist-in-charge and it is " +
+    "not continuing education.",
   intro:
     "This is training on how this pharmacy handles patient information. It is not a general lecture on privacy — " +
     "everything in it describes what you are expected to do here, at this counter, on these computers. Work " +

@@ -66,6 +66,8 @@ export function packetText(course: Course, pharmacyName: string): string {
     RULE,
   );
 
+  out.push("WHO IS ALLOWED TO DELIVER THIS TRAINING", "", wrap(course.whoMayTeach), "");
+
   if (course.seeAlso?.length) {
     out.push("THIS PHARMACY'S OWN RULES ON THE SUBJECT", "");
     for (const r of course.seeAlso) out.push(indent(wrap("- " + r, 70), "  "));
@@ -323,11 +325,15 @@ function packetPages(course: Course, pharmacyName: string): Draw[][] {
   });
 
   // ── Where it comes from ────────────────────────────────────────
-  if (course.seeAlso?.length || course.references?.length) {
+  {
     gap(22);
     need(120);
     para("Where this comes from", { size: 13, bold: true });
     gap(8);
+    para("Who is allowed to deliver this training", { size: 10, bold: true });
+    gap(4);
+    para(course.whoMayTeach, { size: 9.5, indent: 6 });
+    gap(10);
     if (course.seeAlso?.length) {
       para("This pharmacy's own rules on the subject", { size: 10, bold: true });
       gap(4);

@@ -14,6 +14,10 @@ export const diversion: Course = {
     "Not a standalone Kansas or federal training mandate. It is the first thing asked about after a loss, and " +
     "21 CFR 1301.71 requires effective controls against diversion — which means the people at the counter " +
     "knowing what to look for.",
+  whoMayTeach:
+    "No federal or Kansas rule mandates this training, so nothing specifies who may give it. It exists because " +
+    "21 CFR 1301.71 requires effective controls against diversion and those controls live in what the people at " +
+    "the counter notice. Delivered in-house by the pharmacist-in-charge; not continuing education.",
   intro:
     "Diversion in a pharmacy is usually not dramatic. It is small, patient, and done by someone trusted. This is " +
     "about noticing it early, in all three of the places it comes from — inside the pharmacy, from prescribers, " +

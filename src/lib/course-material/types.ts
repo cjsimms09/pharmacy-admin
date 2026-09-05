@@ -64,6 +64,16 @@ export type Course = {
   seeAlso?: string[];
   /** The sources, named, so a reader can go and check rather than take it on faith. */
   references?: string[];
+  /**
+   * What the rule says about who is allowed to deliver this training.
+   *
+   * The question behind this field is a fair one and the answer is different for each course, so
+   * it is answered per course rather than in a paragraph somewhere: most of these name no
+   * qualification for the trainer at all, one asks for a person "knowledgeable in the subject
+   * matter", and none of them is continuing education. Printing the answer on the training file
+   * means the pharmacy does not have to reconstruct it under questioning.
+   */
+  whoMayTeach: string;
 };
 
 export type { TrainingType };
