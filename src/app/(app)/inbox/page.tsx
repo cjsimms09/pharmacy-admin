@@ -10,9 +10,9 @@ import { fileInboxItem, deleteInboxItem, sweepNow } from "./actions";
 export const metadata = { title: "Inbox" };
 export const dynamic = "force-dynamic";
 
-export default async function InboxPage({ searchParams }: { searchParams: Promise<{ saved?: string; error?: string; detail?: string }> }) {
+export default async function InboxPage({ searchParams }: { searchParams: Promise<{ saved?: string; error?: string; detail?: string; ok?: string }> }) {
   await requireManager();
-  const { saved, error, detail } = await searchParams;
+  const { saved, error, detail, ok } = await searchParams;
   const [s, configured, items, people] = await Promise.all([
     getSettings(),
     hasMailPassword(),
@@ -33,6 +33,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
         }
       />
       {saved && <Notice>{detail || "Done."}</Notice>}
+      {ok && <Notice>{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
 
       {!configured ? (
@@ -104,8 +105,24 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
                         </form>
                       </details>
                     )}
+                    {/*
+                      "Delete" used to mean "destroy the document this was filed as, and its file".
+                      It now means what somebody clearing an inbox thinks it means, and the label
+                      says which — because the difference is a supplier invoice the pharmacy has to
+                      keep for five years.
+                    */}
                     <form action={deleteInboxItem.bind(null, i.id)}>
-                      <button className="text-xs text-crit hover:underline" type="submit">Delete</button>
+                      <button
+                        className="text-xs text-ink-3 hover:text-ink hover:underline"
+                        type="submit"
+                        title={
+                          i.documentId
+                            ? "Takes this line off the list. The stored document is kept and stays filed wherever it was filed."
+                            : "Takes this line off the list. Nothing was stored for it."
+                        }
+                      >
+                        Clear from list
+                      </button>
                     </form>
                   </td>
                 </tr>

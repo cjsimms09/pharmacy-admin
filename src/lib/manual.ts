@@ -527,6 +527,26 @@ export function policies(pharmacy: string): ManualPolicy[] {
         "The dated result of each screening is filed as the record of that month's check.",
       ],
     },
+    /*
+     * The Notice, described where the reviewer will see it.
+     *
+     * It is already in Appendix A as a form this site produces, which tells a reader it exists. It
+     * was not in this list, which is what the audit is given as "what the compliance system
+     * already does" — so nothing could check the manual's own privacy section against it. A manual
+     * that describes a different notice from the one the pharmacy hands out is exactly the kind of
+     * conflict this audit exists to find, and it could not see one half of it.
+     */
+    {
+      key: "npp",
+      title: "Notice of Privacy Practices",
+      authority: "45 CFR 164.520(a), (b)(1) and (c)(3); 45 CFR 164.520(c)(2)(ii) for the acknowledgement.",
+      text: [
+        `${pharmacy} maintains a Notice of Privacy Practices carrying every element 45 CFR 164.520(b)(1) requires: the prescribed header, the uses and disclosures made for treatment, payment and health care operations, the disclosures permitted or required without authorisation, that any other use requires written authorisation which may be revoked, each of the individual's rights, the pharmacy's own duties including breach notification, how to complain to the pharmacy and to the Secretary, that complaining carries no retaliation, a contact, and an effective date.`,
+        "The Notice is displayed where patients can see it, given at first service, and produced from the compliance system so that the copy on the wall and the copy on file are the same document.",
+        "A patient's acknowledgement of receipt is recorded on a separate form, which also records the effort made and the reason where an acknowledgement was not obtained — the rule asks for a good faith effort, not for a signature every time.",
+        "Where the Notice is materially changed, the revised version is displayed and made available, and it applies to information already held as well as to information received afterwards.",
+      ],
+    },
     {
       key: "baa",
       title: "Business associate agreements",

@@ -9,7 +9,6 @@ import { newId } from "@/lib/crypto";
 import { requireManager } from "@/lib/auth";
 import { sendTestEmail } from "@/lib/send-mail";
 import { audit } from "@/lib/audit";
-import { deleteFile } from "@/lib/files";
 import { setSetting } from "@/lib/settings";
 import { clearMailPassword, describeMailError, saveMailPassword, sweepMailbox, testMailbox } from "@/lib/mailbox";
 
@@ -139,21 +138,46 @@ export async function sweepNow(from: "inbox" | "settings" = "inbox") {
   redirect(`${here}?saved=1&detail=${encodeURIComponent(`${r.stored} stored, ${r.rejected} rejected, ${r.ignored} ignored`)}`);
 }
 
+/**
+ * Takes an item off this list. It does not destroy what was stored.
+ *
+ * It used to. Pressing Delete deleted the document the attachment had been filed as, and its file
+ * off the disk, with a button that said only "Delete" — so tidying an inbox threw away a supplier
+ * invoice this pharmacy is required to keep for five years, left the invoice record pointing at a
+ * document that no longer existed, and put a hole in the Schedule II archive that nothing on any
+ * screen would have revealed.
+ *
+ * The inbox is a log of what arrived and what was made of it. Clearing a line off it is a
+ * housekeeping act. Destroying a record the pharmacy is required to hold is not the same act and
+ * must not be reachable from the same button — a document that should genuinely go is deleted from
+ * the document vault, where what depends on it can be seen.
+ */
 export async function deleteInboxItem(id: string) {
   const user = await requireManager();
   const item = await db.query.inboxItems.findFirst({ where: eq(schema.inboxItems.id, id) });
   if (!item) redirect("/inbox");
-  if (item.documentId) {
-    const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, item.documentId) });
-    if (doc) {
-      await db.delete(schema.documents).where(eq(schema.documents.id, doc.id));
-      await deleteFile(doc.storageKey).catch(() => {});
-    }
-  }
+
+  /*
+   * Nothing was ever stored, so there is nothing to keep.
+   *
+   * A rejected or ignored item has no document behind it — the attachment was never accepted. The
+   * row is the whole of it, and removing the row loses nothing but the line.
+   */
   await db.delete(schema.inboxItems).where(eq(schema.inboxItems.id, id));
-  await audit({ action: "inbox.delete", userId: user.id, userName: user.name, entity: "inbox_item", entityId: id, details: item.fileName ?? item.subject });
+  await audit({
+    action: "inbox.clear",
+    userId: user.id,
+    userName: user.name,
+    entity: "inbox_item",
+    entityId: id,
+    details: `${item.fileName ?? item.subject}${item.documentId ? " — the stored document was kept" : ""}`,
+  });
   revalidatePath("/inbox");
-  redirect("/inbox");
+  redirect("/inbox?ok=" + encodeURIComponent(
+    item.documentId
+      ? "Taken off this list. What was stored is untouched — it is still in the document vault and still filed wherever it was filed."
+      : "Taken off this list. Nothing was stored for it, so nothing was lost.",
+  ));
 }
 
 /**
