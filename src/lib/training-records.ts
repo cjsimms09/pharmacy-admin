@@ -203,7 +203,7 @@ export async function trainingFile(opts: { includeFormer?: boolean } = {}): Prom
       // The policy manual has no course written into the site — the material is the pharmacy's
       // own manual, which cannot live in the software and is attached to the email instead.
       return c
-        ? { type: t, title: c.title, authority: c.authority, minutes: c.minutes, version: courseVersion(c) }
+        ? { type: t, title: c.title, authority: c.authority, minutes: c.minutes ?? 0, version: courseVersion(c) }
         : {
             type: t,
             title: TRAINING_LABEL[t],

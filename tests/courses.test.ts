@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { COURSES, courseFor } from "../src/lib/courses";
+import { COURSES, courseFor, readingMinutes } from "../src/lib/courses";
 import { packetText, courseVersion, packetFileName } from "../src/lib/course-packet";
 import type { TrainingType } from "../src/db/schema";
 import { TRAINING_CADENCE } from "../src/lib/due";
@@ -54,6 +54,62 @@ describe("courses", () => {
         assert.ok(s.body.length > 0, `${type} section "${s.heading}" is empty`);
         for (const p of s.body) assert.ok(p.length > 20, `${type} has a stub paragraph: "${p}"`);
       }
+    }
+  });
+
+  /*
+   * "Litterally 3 paragraphs each."
+   *
+   * That was the verdict on the first version, and it was right: the courses averaged six hundred
+   * words, which is three minutes of reading standing in for an annual training requirement. A
+   * record of that is defensible only until somebody reads what was delivered.
+   *
+   * So the floor is checked rather than trusted. These numbers are deliberately well below what
+   * the material now runs to — the test is there to catch a course being gutted, not to police
+   * the word count of a good edit.
+   */
+  test("every course is long enough to be a training rather than a summary", () => {
+    for (const [type, course] of entries) {
+      const words = course.sections
+        .flatMap((s) => [...s.body, ...(s.takeaways ?? [])])
+        .reduce((n, p) => n + p.split(/\s+/).filter(Boolean).length, 0);
+      assert.ok(words >= 700, `${type} is only ${words} words — that is a summary, not a training`);
+      assert.ok(course.sections.length >= 4, `${type} has only ${course.sections.length} sections`);
+      assert.ok(course.questions.length >= 5, `${type} has only ${course.questions.length} questions`);
+    }
+  });
+
+  test("every course says what it will teach and where it got it", () => {
+    for (const [type, course] of entries) {
+      assert.ok((course.objectives ?? []).length >= 3, `${type} states no learning objectives`);
+      assert.ok((course.references ?? []).length >= 2, `${type} cites nothing a reader could go and check`);
+      assert.ok((course.seeAlso ?? []).length >= 1, `${type} does not point at the pharmacy's own rule on the subject`);
+    }
+  });
+
+  test("every section ends with the part people actually retain", () => {
+    // A section whose takeaways cannot be written in a few lines was throat-clearing.
+    for (const [type, course] of entries) {
+      for (const s of course.sections) {
+        assert.ok((s.takeaways ?? []).length >= 1, `${type}: "${s.heading}" has no takeaways`);
+        for (const t of s.takeaways ?? []) {
+          assert.ok(t.length > 15, `${type}: "${s.heading}" has a stub takeaway: "${t}"`);
+        }
+      }
+    }
+  });
+
+  /*
+   * The stated reading time is computed, never typed.
+   *
+   * It used to be typed, and expanding the material left four of six numbers wrong by a factor of
+   * two. A person told "about eight minutes" who finds twenty minutes of reading either stops
+   * early or resents it, and both of those damage the record more than the honest number would.
+   */
+  test("the stated minutes match the material", () => {
+    for (const [type, course] of entries) {
+      assert.equal(course.minutes, readingMinutes(course), `${type} states a reading time it does not have`);
+      assert.ok((course.minutes ?? 0) >= 5, `${type} claims to take ${course.minutes} minutes`);
     }
   });
 

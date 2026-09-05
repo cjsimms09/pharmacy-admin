@@ -57,16 +57,55 @@ export default async function CoursePage({ params }: { params: Promise<{ type: s
 
       <section className="card mb-6">
         <p className="text-sm italic text-ink-2">{course.intro}</p>
-        <div className="mt-4 space-y-5">
+
+        {course.objectives && course.objectives.length > 0 && (
+          <div className="mt-4 rounded-md border border-line bg-ground p-3">
+            <h2 className="text-sm font-semibold">What they should be able to do afterwards</h2>
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-ink-2">
+              {course.objectives.map((o) => <li key={o}>{o}</li>)}
+            </ul>
+          </div>
+        )}
+
+        <div className="mt-5 space-y-6">
           {course.sections.map((sec, i) => (
             <div key={sec.heading}>
               <h2 className="font-semibold">{i + 1}. {sec.heading}</h2>
               <div className="mt-1 space-y-2 text-sm leading-relaxed text-ink-2">
                 {sec.body.map((p) => <p key={p}>{p}</p>)}
               </div>
+              {sec.takeaways && sec.takeaways.length > 0 && (
+                <div className="mt-3 rounded-md bg-ground px-3 py-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">Key points</p>
+                  <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm text-ink-2">
+                    {sec.takeaways.map((t) => <li key={t}>{t}</li>)}
+                  </ul>
+                </div>
+              )}
             </div>
           ))}
         </div>
+
+        {(course.seeAlso?.length || course.references?.length) && (
+          <div className="mt-6 border-t border-line pt-4 text-xs text-ink-3">
+            {course.seeAlso && course.seeAlso.length > 0 && (
+              <>
+                <p className="font-semibold">This pharmacy&rsquo;s own rules on the subject</p>
+                <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                  {course.seeAlso.map((r) => <li key={r}>{r}</li>)}
+                </ul>
+              </>
+            )}
+            {course.references && course.references.length > 0 && (
+              <>
+                <p className="mt-3 font-semibold">The regulations and sources behind it</p>
+                <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                  {course.references.map((r) => <li key={r}>{r}</li>)}
+                </ul>
+              </>
+            )}
+          </div>
+        )}
       </section>
 
       <section className="card mb-6">

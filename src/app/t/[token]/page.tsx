@@ -137,6 +137,22 @@ export default async function TrainingLinkPage({
             </p>
           )}
 
+          {/*
+            What they will be able to do, before the material rather than after it.
+
+            A person about to spend twenty minutes on a required course is owed the reason in their
+            own terms. It also gives the reader something to hold the sections against, which is
+            most of the difference between reading and skimming.
+          */}
+          {course.objectives && course.objectives.length > 0 && (
+            <section className="mt-6 rounded-lg border border-line bg-surface p-4">
+              <h2 className="font-semibold">What you should be able to do afterwards</h2>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-ink-2">
+                {course.objectives.map((o) => <li key={o}>{o}</li>)}
+              </ul>
+            </section>
+          )}
+
           <div className="mt-6 space-y-5">
             {course.sections.map((sec, i) => (
               <section key={sec.heading} className="rounded-lg border border-line bg-surface p-4">
@@ -146,9 +162,38 @@ export default async function TrainingLinkPage({
                 <div className="mt-2 space-y-2 text-sm leading-relaxed text-ink-2">
                   {sec.body.map((para) => <p key={para}>{para}</p>)}
                 </div>
+                {sec.takeaways && sec.takeaways.length > 0 && (
+                  <div className="mt-3 rounded-md bg-ground px-3 py-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">Key points</p>
+                    <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm text-ink-2">
+                      {sec.takeaways.map((t) => <li key={t}>{t}</li>)}
+                    </ul>
+                  </div>
+                )}
               </section>
             ))}
           </div>
+
+          {(course.seeAlso?.length || course.references?.length) && (
+            <section className="mt-6 rounded-lg border border-line bg-surface p-4 text-xs text-ink-3">
+              {course.seeAlso && course.seeAlso.length > 0 && (
+                <>
+                  <p className="font-semibold">Where this pharmacy&rsquo;s own rule on this lives</p>
+                  <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                    {course.seeAlso.map((r) => <li key={r}>{r}</li>)}
+                  </ul>
+                </>
+              )}
+              {course.references && course.references.length > 0 && (
+                <>
+                  <p className="mt-3 font-semibold">The rules this is drawn from, if you want to read them</p>
+                  <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                    {course.references.map((r) => <li key={r}>{r}</li>)}
+                  </ul>
+                </>
+              )}
+            </section>
+          )}
 
           <form action={sign} className="mt-8">
             <section className="rounded-lg border border-line bg-surface p-4">
