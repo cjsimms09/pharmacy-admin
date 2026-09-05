@@ -135,6 +135,8 @@ export const DOCUMENT_CATEGORY_LABEL: Record<DocumentCategory, string> = {
   cs_discrepancy: "Inventory discrepancy",
   insurance: "Insurance policy / certificate",
   agreement: "Agreement / contract",
+  board_inspection: "Kansas Board inspection report",
+  supplier_agreement: "Supplier agreement / rebate schedule",
   cqi_summary: "CQI bimonthly summary (C-550)",
   cqi_incident: "CQI incident report / evaluation (C-650)",
   // Kept only so documents filed before CE tracking was removed still have a name. Not offered

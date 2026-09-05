@@ -1188,3 +1188,39 @@ export async function missingTotals(): Promise<number> {
   const rows = await db.query.supplierInvoices.findMany({ where: isNull(schema.supplierInvoices.totalCents) });
   return rows.length;
 }
+
+/**
+ * Records that the goods on an invoice actually arrived, and matched.
+ *
+ * This is the step that lets the paper go. An emailed invoice is the original record and there is
+ * no paper copy of it to keep — but the packing slip in the tote usually carries something the PDF
+ * does not: somebody's initials, the date it was checked in, and a note where the count was short.
+ * The moment anyone writes on that paper it stops being a duplicate and becomes the pharmacy's
+ * record of receipt, which 21 CFR 1304.22(c) requires and which cannot then be thrown away.
+ *
+ * Recorded here, the electronic record carries the same three facts against the same invoice, so
+ * the paper is genuinely redundant rather than merely inconvenient.
+ */
+export async function recordReceipt(
+  id: string,
+  input: { receivedOn: string; note: string },
+  user: { name: string },
+): Promise<void> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.receivedOn)) throw new Error("Give the date the goods arrived.");
+  const inv = await db.query.supplierInvoices.findFirst({ where: eq(schema.supplierInvoices.id, id) });
+  if (!inv) throw new Error("That invoice no longer exists.");
+  await db
+    .update(schema.supplierInvoices)
+    .set({
+      receivedOn: input.receivedOn,
+      receivedBy: user.name,
+      receiptNote: input.note.trim() || null,
+    })
+    .where(eq(schema.supplierInvoices.id, id));
+}
+
+/** Invoices whose goods nobody has confirmed arrived. */
+export async function awaitingReceipt(): Promise<SupplierInvoice[]> {
+  const rows = await db.query.supplierInvoices.findMany({ where: isNull(schema.supplierInvoices.receivedOn) });
+  return rows.sort((a, b) => (b.invoiceDate ?? "").localeCompare(a.invoiceDate ?? ""));
+}

@@ -245,6 +245,22 @@ export const DOCUMENT_CATEGORIES = [
   "driver_invoice",
   "insurance",
   "agreement",
+  /**
+   * A Kansas Board of Pharmacy inspection report, past or present.
+   *
+   * Worth its own category rather than living under "other": the first thing the next inspector
+   * asks is what the last one found, and an answer that involves opening a filing cabinet is a
+   * worse answer than one that does not.
+   */
+  "board_inspection",
+  /**
+   * A wholesaler or supplier agreement, including a rebate schedule.
+   *
+   * Kept apart from a business associate agreement, which is a HIPAA instrument about access to
+   * protected health information. A purchasing contract is a commercial one, and filing them
+   * together makes the BAA register — which is reviewed annually and must be complete — wrong.
+   */
+  "supplier_agreement",
   "cqi_summary",
   "cqi_incident",
   "ce_certificate",
@@ -739,6 +755,23 @@ export const supplierInvoices = sqliteTable(
     reviewedBy: text("reviewed_by"),
     reviewedAt: text("reviewed_at"),
     receivedFrom: text("received_from"),
+    /**
+     * That the goods actually arrived, and matched.
+     *
+     * The question this answers is whether the pharmacy can stop keeping paper. An emailed invoice
+     * is the original record and there is no paper to keep — but the paper packing slip in the
+     * tote often carries something the PDF does not: somebody's initials, the date it was checked
+     * in, and a note where the count was short. Once anybody writes on that paper it stops being a
+     * duplicate of the emailed invoice and becomes the record of receipt, which 21 CFR 1304.22(c)
+     * asks for and which cannot then be thrown away.
+     *
+     * Recording it here is what makes the paper genuinely redundant: the electronic record carries
+     * the same three facts, against the same invoice, signed by the same person.
+     */
+    receivedOn: text("received_on"),
+    receivedBy: text("received_by"),
+    /** Anything that did not match — short counts, damage, a substitution. */
+    receiptNote: text("receipt_note"),
     createdAt: text("created_at").notNull().default(now()),
   },
   (t) => [

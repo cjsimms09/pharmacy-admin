@@ -23,6 +23,8 @@ import {
   setInvoiceTotal,
   backfillTotals,
   missingTotals,
+  recordReceipt,
+  awaitingReceipt,
   sumOf,
   money,
 } from "@/lib/invoices";
@@ -87,6 +89,7 @@ export default async function InvoicesPage({
     noamount?: string;
     unconfirmed?: string;
     undated?: string;
+    unreceipted?: string;
     ok?: string;
     error?: string;
   }>;
@@ -126,6 +129,8 @@ export default async function InvoicesPage({
     invoiceCompliance(),
   ]);
   const noAmountCount = await missingTotals();
+  const unreceipted = await awaitingReceipt();
+  const onlyUnreceipted = sp.unreceipted === "1";
   const compliance = complianceRows;
   const unmet = compliance.filter((c) => c.state === "attention");
 
@@ -218,6 +223,29 @@ export default async function InvoicesPage({
                 : " Every invoice now has an amount."),
         ),
     );
+  }
+
+  /**
+   * Records that the goods arrived, which is what lets the paper go.
+   *
+   * The emailed invoice proves what the wholesaler shipped. It does not prove what arrived — that
+   * is what the initials and the date on the paper packing slip are, and the moment anybody writes
+   * on that paper it becomes the pharmacy's record of receipt under 21 CFR 1304.22(c) rather than
+   * a duplicate of the PDF, and cannot be thrown away. Recorded here, it can be.
+   */
+  async function receipt(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const id = String(fd.get("id") ?? "");
+    try {
+      await recordReceipt(id, { receivedOn: String(fd.get("receivedOn") ?? ""), note: String(fd.get("note") ?? "") }, u);
+      await audit({ action: "invoice.receipt", userId: u.id, userName: u.name, entity: "invoice", entityId: id });
+      revalidatePath("/inventory/invoices");
+      redirect("/inventory/invoices?unreceipted=1&ok=" + encodeURIComponent("Receipt recorded against the invoice, in your name."));
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/inventory/invoices?unreceipted=1&error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not record that."));
+    }
   }
 
   async function send(fd: FormData) {
@@ -437,10 +465,17 @@ export default async function InvoicesPage({
         </Card>
       )}
 
-      <div className="mt-4 grid gap-3 sm:grid-cols-4">
+      <div className="mt-4 grid gap-3 sm:grid-cols-5">
         <Figure value={counts.schedule_2} label="Schedule II" sub="Kept apart from everything" href="/inventory/invoices?tab=schedule_2" tone={counts.schedule_2 ? "ok" : "muted"} />
         <Figure value={counts.schedule_3_5} label="Schedule III-V" sub="Also kept apart" href="/inventory/invoices?tab=schedule_3_5" tone="muted" />
         <Figure value={counts.none} label="No controlled lines" sub="Ordinary business records" href="/inventory/invoices?tab=none" tone="muted" />
+        <Figure
+          value={unreceipted.length}
+          label="Not confirmed received"
+          sub={unreceipted.length ? "The paper slip is still the record" : "All confirmed"}
+          href="/inventory/invoices?unreceipted=1"
+          tone={unreceipted.length ? "warn" : "ok"}
+        />
         <Figure
           value={counts.review}
           label="Waiting on you"
@@ -723,6 +758,44 @@ export default async function InvoicesPage({
               </li>
             ))}
           </ul>
+        </Card>
+      )}
+
+      {/*
+        Confirming the goods arrived, per invoice.
+
+        Deliberately a date and a note rather than a tick: 21 CFR 1304.22(c) asks for the date and
+        the quantity, and a short count is exactly the thing somebody writes on the paper slip and
+        then cannot throw away. The name comes from whoever is signed in.
+      */}
+      {onlyUnreceipted && canManage && unreceipted.length > 0 && (
+        <Card
+          title="Confirm what actually arrived"
+          count={unreceipted.length}
+          className="mt-4"
+          subtitle="The invoice proves what the wholesaler shipped. This is the record that it arrived, on what date, and whether it matched — the thing initials on a paper packing slip are for. Once it is here, that slip is a duplicate rather than the record, and does not have to be kept."
+        >
+          <ul className="rows">
+            {unreceipted.slice(0, 25).map((i) => (
+              <li key={i.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                <a href={`/files/${i.documentId}`} target="_blank" rel="noreferrer" className="text-sm text-accent hover:underline">
+                  {[i.supplier, i.invoiceNumber, i.invoiceDate ? fmt(i.invoiceDate) : null].filter(Boolean).join(" · ") || "Invoice"}
+                  <span className={`badge ml-2 ${i.schedule === "schedule_2" ? "badge-crit" : i.schedule === "schedule_3_5" ? "badge-warn" : "badge-muted"}`}>
+                    {filingFor(i.schedule).label}
+                  </span>
+                </a>
+                <form action={receipt} className="flex flex-wrap items-center gap-1.5">
+                  <input type="hidden" name="id" value={i.id} />
+                  <input type="date" name="receivedOn" required className="field w-auto py-1 text-xs" aria-label="Date received" />
+                  <input name="note" placeholder="Anything short or damaged?" className="field w-56 py-1 text-xs" />
+                  <button className="btn btn-sm">Received</button>
+                </form>
+              </li>
+            ))}
+          </ul>
+          {unreceipted.length > 25 && (
+            <p className="mt-2 text-xs text-ink-3">and {unreceipted.length - 25} more.</p>
+          )}
         </Card>
       )}
 

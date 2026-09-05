@@ -191,6 +191,7 @@ export async function invoiceCompliance(): Promise<Requirement[]> {
    */
   const emailed = rows.filter((r) => /@/.test(r.receivedFrom ?? "")).length;
   const uploaded = rows.length - emailed;
+  const unreceipted = rows.filter((r) => !r.receivedOn).length;
 
   out.push({
     key: "originals",
@@ -210,6 +211,34 @@ export async function invoiceCompliance(): Promise<Requirement[]> {
           "Kansas Board will both answer it, and the answer is worth having in writing before anything is thrown away."
         : undefined,
     href: "/inventory/invoices",
+  });
+
+  /*
+   * ── The record of receipt ─────────────────────────────────────────
+   *
+   * The half that decides whether the paper can actually go. An emailed invoice proves what the
+   * wholesaler shipped; it does not prove what arrived. That is what the initials and the date on
+   * a paper packing slip are, and once somebody has written on it, that paper is the record of
+   * receipt rather than a duplicate — so it has to be kept.
+   *
+   * Recorded here instead, the electronic record carries the same facts and the paper is redundant.
+   */
+  out.push({
+    key: "receipt",
+    citation: "21 CFR 1304.22(c)",
+    requires:
+      "The record for controlled substances received must show the date received and the quantity, and for Schedule " +
+      "II, the number of commercial containers received.",
+    how:
+      `The invoice records what was shipped. Whether it arrived, on what date and whether it matched is recorded ` +
+      `against the invoice here: ${rows.length - unreceipted} of ${rows.length} confirmed received, with the name of ` +
+      "whoever checked it in and a note where anything was short or damaged.",
+    state: unreceipted > 0 ? "attention" : "ok",
+    fix:
+      unreceipted > 0
+        ? `${unreceipted} invoice${unreceipted === 1 ? " has" : "s have"} no record that the goods arrived. Until that is here, the initialled packing slip in the tote is the pharmacy's receipt record and must be kept — which is the whole reason to record it.`
+        : undefined,
+    href: "/inventory/invoices?unreceipted=1",
   });
 
   /*
