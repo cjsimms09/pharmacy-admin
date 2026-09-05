@@ -2,7 +2,8 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { importSupplierCatalog, purchasingOpportunities, supplierSummary } from "@/lib/suppliers";
+import { importSupplierCatalog, importPioneerCatalog, purchasingOpportunities, supplierSummary } from "@/lib/suppliers";
+import { looksLikePioneerCatalog } from "@/lib/pioneer-catalog";
 import { formatCents } from "@/lib/money";
 import { requireReimbursement } from "@/lib/features";
 import { PageHeader, Notice, Empty, Field } from "@/components/ui";
@@ -24,10 +25,25 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
     const u = await requireManager();
     const supplier = String(fd.get("supplier") ?? "").trim();
     const file = fd.get("file");
-    if (!supplier) redirect("/purchasing?error=" + encodeURIComponent("Name the supplier this file came from."));
     if (!(file instanceof File) || file.size === 0) redirect("/purchasing?error=" + encodeURIComponent("Choose a file."));
+    const buf = Buffer.from(await file.arrayBuffer());
     try {
-      const r = await importSupplierCatalog(Buffer.from(await file.arrayBuffer()), file.name, supplier, u.id);
+      /*
+       * PioneerRx's own export names its suppliers inside the file, so it needs no supplier typed
+       * and may carry several at once. Detected from the content, not the name somebody gave it.
+       */
+      if (looksLikePioneerCatalog(buf.subarray(0, 8192).toString("utf8"))) {
+        const r = await importPioneerCatalog(buf, file.name, u.id);
+        await audit({ action: "supplier.import", userId: u.id, userName: u.name, details: `${file.name}: ${r.suppliers.map((x) => `${x.supplier} ${x.itemsAdded}+${x.itemsUpdated}`).join(", ")}` });
+        revalidatePath("/purchasing");
+        if (r.suppliers.length === 0) redirect("/purchasing?error=" + encodeURIComponent(r.problems.join(" ") || "Nothing could be loaded from that file."));
+        const bits = r.suppliers.map((x) => `${x.supplier}: ${x.itemsAdded} new, ${x.itemsUpdated} repriced${x.shortDated ? `, ${x.shortDated} short-dated lots noted` : ""}`);
+        if (r.pricedOn) bits.push(`prices as of ${r.pricedOn}`);
+        if (r.skipped) bits.push(`${r.skipped.toLocaleString()} rows skipped (${Object.entries(r.skipReasons).map(([k, v]) => `${v} ${k}`).join(", ")})`);
+        redirect("/purchasing?ok=" + encodeURIComponent(bits.join(". ") + "."));
+      }
+      if (!supplier) redirect("/purchasing?error=" + encodeURIComponent("Name the supplier this file came from."));
+      const r = await importSupplierCatalog(buf, file.name, supplier, u.id);
       await audit({ action: "supplier.import", userId: u.id, userName: u.name, details: `${supplier}: ${r.itemsAdded} added, ${r.itemsUpdated} updated, ${r.skipped} skipped` });
       revalidatePath("/purchasing");
       const bits = [`${r.itemsAdded} new and ${r.itemsUpdated} updated for ${supplier}`];

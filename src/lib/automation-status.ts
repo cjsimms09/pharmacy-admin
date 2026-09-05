@@ -49,6 +49,9 @@ const MAX_QUIET_HOURS: Record<string, number> = {
    * quietly goes stale while continuing to look right.
    */
   claims: 9 * 24,
+  // Weekly, Monday, one file per supplier. Nine days catches a missed Monday without crying wolf
+  // over a bank holiday.
+  catalogs: 9 * 24,
 };
 
 function ageHours(iso: string | null | undefined): number | null {
@@ -175,6 +178,31 @@ export async function automationStatus(): Promise<JobStatus[]> {
         : "No claims export has ever been loaded. Schedule the PioneerRx report to email the pharmacy address and it lands here on its own.",
       href: "/claims",
     });
+  }
+
+  /*
+   * The Monday supplier catalogues.
+   *
+   * Shown once any catalogue has ever arrived, whether or not the purchasing pages are switched
+   * on — the pharmacy scheduled the feed, so a Monday with nothing on it is news even before the
+   * screen that uses the prices exists. Judged on the newest import across all suppliers, because
+   * one missing supplier is a smaller problem than the whole feed having stopped.
+   */
+  {
+    const { latestSupplierImport } = await import("./suppliers");
+    const last = await latestSupplierImport();
+    if (last || s.feature_reimbursement === "yes") {
+      jobs.push({
+        key: "catalogs",
+        label: "Supplier price files",
+        state: judge("catalogs", true, last),
+        lastAt: last,
+        detail: last
+          ? `Last catalogue loaded ${last.slice(0, 10)}.`
+          : "No supplier catalogue has arrived yet. The PioneerRx export is scheduled for Mondays; it files itself when it lands.",
+        href: "/purchasing",
+      });
+    }
   }
 
   /*

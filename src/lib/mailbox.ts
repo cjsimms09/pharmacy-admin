@@ -10,6 +10,7 @@ import { decryptText, encryptText, newId } from "./crypto";
 import { storeFile, ALLOWED_MIME, MAX_FILE_BYTES } from "./files";
 import { classify, parseSupplierRules, supplierFor } from "./autoroute";
 import { importClaims } from "./claims";
+import { importPioneerCatalog } from "./suppliers";
 import { importSupplierCatalog } from "./suppliers";
 import { allSuppliers, supplierForSender } from "./suppliers-registry";
 import { loadNadacFiles, nadacDir } from "./nadac";
@@ -490,6 +491,15 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
                   const r = await importClaims(buf, fileName, ctx.userId ?? "mailbox-sweep");
                   routeResult = `${r.claimsAdded} claims added, ${r.duplicates} already held, ${r.skipped} skipped`;
                   result.imported++;
+                } else if (cls.kind === "pioneer_catalog") {
+                  // Names its own supplier inside the file, so no sender rule is needed — and the
+                  // filename is checked against it, so MCKCatalog carrying IPD prices is refused.
+                  const r = await importPioneerCatalog(buf, fileName, ctx.userId ?? "mailbox-sweep");
+                  routeResult = r.suppliers.length
+                    ? r.suppliers.map((x) => `${x.supplier}: ${x.itemsAdded} new, ${x.itemsUpdated} repriced${x.shortDated ? `, ${x.shortDated} short-dated lots noted` : ""}`).join("; ") +
+                      (r.pricedOn ? ` (prices as of ${r.pricedOn})` : "")
+                    : `Recognised as a PioneerRx catalogue but nothing could be loaded: ${r.problems.join(" ")}`;
+                  if (r.suppliers.length) result.imported++;
                 } else if (cls.kind === "supplier_catalog") {
                   const supplier = supplierFor(parseSupplierRules(s.mail_supplier_rules ?? ""), from, subject);
                   if (!supplier) {

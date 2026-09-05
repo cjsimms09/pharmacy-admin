@@ -3,6 +3,7 @@ import { parseCsvRows } from "./reference";
 import { readSheet } from "./xlsx";
 import { mapColumns } from "./claims";
 import { mapSupplierColumns } from "./suppliers";
+import { looksLikePioneerCatalog } from "./pioneer-catalog";
 
 /**
  * Working out what an emailed report actually is, and loading it.
@@ -19,7 +20,7 @@ import { mapSupplierColumns } from "./suppliers";
  * behaviour we already had and is never wrong, only unhelpful.
  */
 
-export type RouteKind = "claims" | "supplier_catalog" | "nadac" | "unrecognised";
+export type RouteKind = "claims" | "supplier_catalog" | "pioneer_catalog" | "nadac" | "unrecognised";
 
 export type Classification = {
   kind: RouteKind;
@@ -61,6 +62,22 @@ export function headersOf(fileName: string, buf: Buffer): string[] {
  * would otherwise match the looser catalogue rule.
  */
 export function classify(fileName: string, buf: Buffer): Classification {
+  /*
+   * PioneerRx's supplier catalogue export, checked before anything that reads a header row.
+   *
+   * Its first line is a report title, not a header, so headersOf() would return the title as a
+   * one-column header and the file would fall through as unrecognised — which is what happened to
+   * the first one. It is also the one report here that names its own supplier, in a section line
+   * inside the file, so unlike a generic price list it needs no sender rule to be filed correctly.
+   */
+  if (/\.(txt|csv)$/i.test(fileName) && looksLikePioneerCatalog(buf.subarray(0, 8192).toString("utf8"))) {
+    return {
+      kind: "pioneer_catalog",
+      why: "Begins with PioneerRx's \"Supplier Catalog Item Search Results\" header; the supplier is named inside the file.",
+      headers: ["Supplier Item Number", "Name", "NDC", "Order By Constant", "Cost Per Unit"],
+    };
+  }
+
   const headers = headersOf(fileName, buf);
   if (headers.length === 0) return { kind: "unrecognised", why: "No header row could be read.", headers };
   const set = new Set(headers.map(norm));

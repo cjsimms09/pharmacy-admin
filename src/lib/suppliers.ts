@@ -7,6 +7,7 @@ import { readSheetAsObjects } from "./xlsx";
 import { parseCsv } from "./reference";
 import { normalizeClaimNdc, parseClaimDate } from "./claims";
 import { productKey } from "./product-key";
+import { parsePioneerCatalog, supplierFromFileName, dateFromFileName, type CatalogSection } from "./pioneer-catalog";
 
 /**
  * Supplier price files, and what they say we should be buying.
@@ -91,6 +92,146 @@ export type SupplierImportReport = {
  * Loads one supplier's price file, replacing that supplier's previous prices for the NDCs it
  * covers. Other suppliers are untouched, so files can be loaded one at a time as they arrive.
  */
+/**
+ * Loading PioneerRx's own supplier catalogue export — the one that arrives every Monday.
+ *
+ * Different from importSupplierCatalog in two ways that matter. The supplier is read from the
+ * section header inside the file rather than from a sender rule, because the file names it; and
+ * a file may carry several suppliers at once (the first one exported by hand carried twenty-four),
+ * each of which is stored under its own name. The writing is identical: replace only the NDCs the
+ * file covers, so a partial list never deletes what it does not mention.
+ *
+ * Where the filename claims one supplier and the file names another, the file is refused. A
+ * McKesson price list stored under IPD is a purchasing recommendation to buy from the wrong place,
+ * and the cost of refusing is a message somebody reads on Monday morning.
+ */
+export type PioneerImportReport = {
+  importIds: string[];
+  suppliers: { supplier: string; itemsAdded: number; itemsUpdated: number; shortDated: number }[];
+  rowsRead: number;
+  skipped: number;
+  skipReasons: Record<string, number>;
+  pricedOn: string | null;
+  problems: string[];
+};
+
+export async function importPioneerCatalog(file: Buffer, fileName: string, userId: string): Promise<PioneerImportReport> {
+  const text = file.toString("utf8");
+  const parsed = parsePioneerCatalog(text);
+  const problems = [...parsed.problems];
+  const pricedOn = parsed.printedOn ?? dateFromFileName(fileName);
+
+  if (parsed.sections.length === 0) {
+    return { importIds: [], suppliers: [], rowsRead: 0, skipped: parsed.skipped, skipReasons: parsed.reasons, pricedOn, problems };
+  }
+
+  const claimed = supplierFromFileName(fileName);
+  const named = parsed.sections.map((x) => x.supplier);
+  if (claimed && !(named.length === 1 && named[0] === claimed)) {
+    throw new Error(
+      `The file is named for ${claimed} but names ${named.join(", ")} inside. Nothing was loaded — a price list stored ` +
+        `under the wrong supplier would recommend buying from the wrong place.`,
+    );
+  }
+
+  const importIds: string[] = [];
+  const suppliers: PioneerImportReport["suppliers"] = [];
+  let rowsRead = 0;
+
+  for (const section of parsed.sections) {
+    const r = await writeSection(section, fileName, pricedOn, userId);
+    importIds.push(r.importId);
+    suppliers.push({ supplier: section.supplier, itemsAdded: r.added, itemsUpdated: r.updated, shortDated: r.shortDated });
+    rowsRead += section.rows.length;
+  }
+
+  return { importIds, suppliers, rowsRead, skipped: parsed.skipped, skipReasons: parsed.reasons, pricedOn, problems };
+}
+
+async function writeSection(
+  section: CatalogSection,
+  fileName: string,
+  pricedOn: string | null,
+  userId: string,
+): Promise<{ importId: string; added: number; updated: number; shortDated: number }> {
+  const { supplier, rows } = section;
+  const importId = newId();
+  await db.insert(schema.supplierImports).values({
+    id: importId, supplier, fileName, rowsRead: rows.length, createdBy: userId,
+  });
+
+  const before = new Set(
+    (await db.query.supplierItems.findMany({ where: eq(schema.supplierItems.supplier, supplier), columns: { ndc11: true } })).map((e) => e.ndc11),
+  );
+
+  /*
+   * One NDC, several rows: keep the one a comparison should see.
+   *
+   * The same NDC appears under several item numbers within one supplier — a full-dated pack, a
+   * short-dated lot at a fraction of the price, a repackager. A comparison that sees the cheapest
+   * of these recommends the short-dated lot every time, so the rows are collapsed to one per NDC:
+   * the cheapest *full-dated* price, with the short-dated alternative noted in availability so it
+   * is visible but never wins by default.
+   */
+  const byNdc = new Map<string, typeof rows>();
+  for (const r of rows) byNdc.set(r.ndc11, [...(byNdc.get(r.ndc11) ?? []), r]);
+
+  const rows2: (typeof schema.supplierItems.$inferInsert)[] = [];
+  let added = 0, updated = 0, shortDated = 0;
+  const now = new Date().toISOString();
+
+  for (const [ndc11, group] of byNdc) {
+    const dated = group.filter((r) => !r.shortDated && r.unitCostMicros !== null);
+    const sd = group.filter((r) => r.shortDated && r.unitCostMicros !== null);
+    shortDated += sd.length;
+    const pick = (dated.length ? dated : sd).sort((a, b) => (a.unitCostMicros ?? 0) - (b.unitCostMicros ?? 0))[0];
+    if (!pick) continue;
+
+    const availability = dated.length
+      ? sd.length
+        ? `Short-dated lot also offered at ${(Math.min(...sd.map((r) => r.unitCostMicros!)) / 1_000_000).toFixed(4)}/unit (exp ${sd.map((r) => r.shortDated).join(", ")})`
+        : null
+      : `Short-dated only (exp ${pick.shortDated})`;
+
+    if (before.has(ndc11)) updated++; else added++;
+    rows2.push({
+      id: newId(),
+      supplier,
+      ndc11,
+      description: pick.description,
+      productKey: pick.productKey,
+      manufacturer: null,
+      packSize: pick.packQty !== null && pick.unit ? `${pick.orderMultiple && pick.orderMultiple > 1 ? `(${pick.orderMultiple}) ` : ""}${pick.packQty} ${pick.unit}` : null,
+      unitCostMicros: pick.unitCostMicros,
+      packCostCents: pick.unitCostMicros !== null && pick.packQty ? Math.round((pick.unitCostMicros * pick.packQty) / 10_000) : null,
+      // Gross, before rebates. Said here because the comparison has to know, and because a
+      // McKesson OneStop generic at gross is not the price the pharmacy pays.
+      contractFlag: "gross, before rebates",
+      availability,
+      pricedOn,
+      importId,
+      updatedAt: now,
+    });
+  }
+
+  const covered = [...new Set(rows2.map((r) => r.ndc11))];
+  for (let i = 0; i < covered.length; i += 300) {
+    await db
+      .delete(schema.supplierItems)
+      .where(and(eq(schema.supplierItems.supplier, supplier), inArray(schema.supplierItems.ndc11, covered.slice(i, i + 300))));
+  }
+  for (let i = 0; i < rows2.length; i += 300) await db.insert(schema.supplierItems).values(rows2.slice(i, i + 300));
+
+  await db.update(schema.supplierImports).set({
+    itemsAdded: added, itemsUpdated: updated, skipped: 0,
+    skipReasons: JSON.stringify({}),
+    unmappedColumns: JSON.stringify([]),
+    pricedOn,
+  }).where(eq(schema.supplierImports.id, importId));
+
+  return { importId, added, updated, shortDated };
+}
+
 export async function importSupplierCatalog(
   file: Buffer,
   fileName: string,
@@ -293,3 +434,13 @@ export async function supplierSummary() {
 }
 
 export { formatCents };
+
+/** When a supplier price file last arrived, across every supplier. */
+export async function latestSupplierImport(): Promise<string | null> {
+  const rows = await db.query.supplierImports.findMany({
+    columns: { createdAt: true },
+    orderBy: (i, { desc }) => [desc(i.createdAt)],
+    limit: 1,
+  });
+  return rows[0]?.createdAt ?? null;
+}
