@@ -7,14 +7,20 @@ import { audit } from "@/lib/audit";
 import { loadNadacFiles, nadacCoverage, nadacClaimCoverage, nadacDir } from "@/lib/nadac";
 import { fetchNadac } from "@/lib/nadac-fetch";
 import { getSettings, setSetting } from "@/lib/settings";
-import { requireReimbursement } from "@/lib/features";
 import { PageHeader, Notice, Empty } from "@/components/ui";
 
 export const metadata = { title: "NADAC" };
 export const dynamic = "force-dynamic";
 
 export default async function NadacPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
-  await requireReimbursement();
+  /*
+   * Reachable whether or not the reimbursement pages are switched on.
+   *
+   * It used to be guarded like the rest of that section, which made the alert telling somebody
+   * their price history had stopped collecting point at a page that redirected them home. The
+   * collection deliberately runs regardless — a week not collected cannot be fetched later — so
+   * the one screen that can diagnose and restart it has to be reachable regardless too.
+   */
   await requireUser();
   const { ok, error } = await searchParams;
   const s = await getSettings();
@@ -104,7 +110,7 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
         </p>
         <form action={saveAuto} className="mt-3 space-y-3">
           <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" name="auto" defaultChecked={s.nadac_auto === "yes"} />
+            <input type="checkbox" name="auto" defaultChecked={s.nadac_auto !== "no"} />
             Keep NADAC up to date automatically
           </label>
           <label className="block text-xs text-ink-3">

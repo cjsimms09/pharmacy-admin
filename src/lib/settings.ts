@@ -80,6 +80,8 @@ export const SETTING_KEYS = [
   "nadac_source_url",
   "nadac_last_fetch",
   "nadac_last_result",
+  // When it last actually succeeded, which is a different question from when it last ran.
+  "nadac_last_ok",
   // ── iMonnit temperature monitoring ──
   "imonnit_key_id_enc",
   "imonnit_secret_enc",

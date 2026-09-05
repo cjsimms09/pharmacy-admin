@@ -131,8 +131,8 @@ export async function register() {
     try {
       const { getSettings } = await import("./lib/settings");
       const s = await getSettings();
-      if (s.nadac_auto !== "yes") return;
-      const { fetchDue, fetchNadac } = await import("./lib/nadac-fetch");
+      const { fetchDue, fetchNadac, nadacAuto } = await import("./lib/nadac-fetch");
+      if (!nadacAuto(s)) return;
       if (!fetchDue(s.nadac_last_fetch || null)) return;
       await fetchNadac();
     } catch {

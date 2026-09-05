@@ -30,6 +30,19 @@ const KNOWN_SOURCES = [
   "https://download.medicaid.gov/data/NADAC%20(National%20Average%20Drug%20Acquisition%20Cost).csv",
 ];
 
+/**
+ * Whether the automatic pull is on.
+ *
+ * Unset means on. That is deliberate and it is the one setting here that defaults to doing
+ * something: each weekly file carries only the prices in force that week, so a month with this
+ * off is a month of history that cannot be recovered later — CMS's current file has forgotten it.
+ * The cost of being wrong in this direction is one free public download a week; the cost of being
+ * wrong in the other is a gap nobody can fill.
+ */
+export function nadacAuto(s: { nadac_auto?: string }): boolean {
+  return s.nadac_auto !== "no";
+}
+
 export type FetchResult = {
   ok: boolean;
   source: string | null;
@@ -85,6 +98,7 @@ export async function fetchNadac(): Promise<FetchResult> {
           : `Up to date — the file published ${stamp} holds nothing we did not already have.`;
       await setSetting("nadac_last_fetch", new Date().toISOString());
       await setSetting("nadac_last_result", message);
+      await setSetting("nadac_last_ok", new Date().toISOString());
       return { ok: true, source: url, message, added, rowsParsed: parsed.rows.length, fileAsOf: stamp };
     } catch (e) {
       tried.push(`${short(url)} → ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`);

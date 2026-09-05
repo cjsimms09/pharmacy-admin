@@ -145,15 +145,27 @@ export async function automationStatus(): Promise<JobStatus[]> {
     },
   ];
 
-  // The reimbursement side is switched off by default, and a status line for a page that is not
-  // in the navigation is just clutter.
-  if (s.feature_reimbursement === "yes") {
+  /*
+   * NADAC is on this strip whether or not the reimbursement pages are.
+   *
+   * It used to be hidden behind that flag, which was a mistake of exactly the kind this strip
+   * exists to catch. The collection runs regardless — deliberately, because each weekly file
+   * carries only the prices in force that week and a month not collected cannot be recovered —
+   * so hiding its status meant a job that had quietly stopped had nowhere to say so. A silent
+   * failure of a thing that is supposed to be building history is the worst case, not a tidier
+   * dashboard.
+   */
+  {
+    const { nadacAuto } = await import("./nadac-fetch");
+    const auto = nadacAuto(s);
     jobs.push({
       key: "nadac",
       label: "NADAC prices",
-      state: judge("nadac", on(s.nadac_auto), s.nadac_last_fetch),
-      lastAt: s.nadac_last_fetch ?? null,
-      detail: s.nadac_last_result ?? "Automatic pulls are off.",
+      state: judge("nadac", auto, s.nadac_last_ok || null),
+      lastAt: s.nadac_last_ok ?? s.nadac_last_fetch ?? null,
+      detail: auto
+        ? (s.nadac_last_result ?? "Switched on, but it has not run yet.")
+        : "Automatic pulls are off, so the weekly price history is not being collected.",
       href: "/nadac",
     });
   }

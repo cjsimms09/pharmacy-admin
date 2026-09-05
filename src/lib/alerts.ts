@@ -354,6 +354,45 @@ export async function alerts(): Promise<Alert[]> {
     }
   }
 
+  /*
+   * The weekly price history, quietly not being collected.
+   *
+   * This one earns an alert where most background jobs do not, because the damage is not
+   * recoverable by noticing later. Each weekly NADAC file carries only the prices in force that
+   * week; CMS's current file has forgotten July. A month during which this was failing is a month
+   * of prices that cannot be fetched afterwards at any price, and the first anybody would know is
+   * when a claim from that month could not be checked against the floor.
+   *
+   * So: only where it is switched on, and only once it has actually gone quiet for a fortnight —
+   * CMS publishes weekly, so a single missed Wednesday is not news.
+   */
+  {
+    const { getSettings } = await import("./settings");
+    const { nadacAuto } = await import("./nadac-fetch");
+    const s = await getSettings();
+    if (nadacAuto(s)) {
+      const lastOk = s.nadac_last_ok ? Date.parse(s.nadac_last_ok) : NaN;
+      const quietDays = Number.isFinite(lastOk) ? (Date.now() - lastOk) / 86_400_000 : null;
+      if (quietDays === null || quietDays > 14) {
+        out.push({
+          key: "nadac-quiet",
+          level: "soon",
+          title:
+            quietDays === null
+              ? "NADAC prices have never been downloaded"
+              : `NADAC prices have not downloaded for ${Math.floor(quietDays)} days`,
+          why:
+            (s.nadac_last_result ? `${s.nadac_last_result} ` : "") +
+            "Each weekly file from CMS holds only the prices in force that week, so a month not collected cannot " +
+            "be fetched later — the current file has forgotten it. It is a free public download needing no account. " +
+            "Open the page and press Fetch now; if CMS has moved the file, paste the new address in the box there.",
+          href: "/nadac",
+          action: "Fetch it",
+        });
+      }
+    }
+  }
+
   // ── A pharmacy with nobody in charge of it ────────────────────────
   if (people.length > 0 && !people.some((p) => p.isPic)) {
     out.push({

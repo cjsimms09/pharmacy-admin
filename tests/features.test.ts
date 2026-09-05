@@ -13,12 +13,35 @@ const PAGES = [
   "payers/[pbm]/page.tsx",
   "claims/page.tsx",
   "plans/page.tsx",
-  "nadac/page.tsx",
   "purchasing/page.tsx",
   "reports/page.tsx",
   "remits/mtf/page.tsx",
   "tools/page.tsx",
 ];
+
+/*
+ * NADAC is the exception, and the reason is worth stating so nobody "fixes" it back.
+ *
+ * The weekly collection runs whether or not the reimbursement pages are switched on, because each
+ * CMS file carries only the prices in force that week and a month not collected cannot be fetched
+ * afterwards at any price. That makes NADAC the one job here whose failure is unrecoverable by
+ * noticing later — so it alerts when it goes quiet, and the page that diagnoses and restarts it
+ * has to be reachable when that alert is followed. Guarding it made the alert point at a redirect.
+ */
+const UNGUARDED = ["nadac/page.tsx"];
+
+describe("the one page that stays reachable, and why", () => {
+  for (const p of UNGUARDED) {
+    test(`${p} is reachable with the area switched off`, () => {
+      const src = fs.readFileSync(path.join("src/app/(app)", p), "utf8");
+      assert.ok(
+        !src.includes("requireReimbursement"),
+        `${p} is guarded, so the alert telling somebody their price history has stopped points at a redirect`,
+      );
+      assert.ok(src.includes("requireUser"), `${p} must still require a signed-in user`);
+    });
+  }
+});
 
 describe("the reimbursement area is guarded, not just unlinked", () => {
   for (const p of PAGES) {
