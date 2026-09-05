@@ -49,6 +49,34 @@ export const KNOWN_SOURCES = [
 ];
 
 /**
+ * The plain weekly files, by date, tried before anything else.
+ *
+ * CMS publishes each week's file at a fixed address ending in the Wednesday it was published:
+ * nadac-national-average-drug-acquisition-cost-01-07-2026.csv. It is a single week, a few
+ * megabytes, an ordinary static file — no API, no query, nothing to go wrong. The datastore
+ * addresses above are the fallback now rather than the first thing tried, because they answer
+ * with the whole dataset through a query endpoint that has been slow, large, and on at least one
+ * occasion refused outright.
+ *
+ * Several weeks are offered because "the last published file" is not knowable from here: CMS
+ * publishes on a Wednesday, but not every Wednesday, and a holiday moves it. The most recent
+ * Wednesday is tried, then the one before, and the first that exists is the current file.
+ */
+export function weeklyFileUrls(today: Date = new Date(), weeks = 8): string[] {
+  const d = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+  // Back up to the most recent Wednesday (day 3), today included.
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() - 3 + 7) % 7));
+  const out: string[] = [];
+  for (let i = 0; i < weeks; i++) {
+    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(d.getUTCDate()).padStart(2, "0");
+    out.push(`https://download.medicaid.gov/data/nadac-national-average-drug-acquisition-cost-${mm}-${dd}-${d.getUTCFullYear()}.csv`);
+    d.setUTCDate(d.getUTCDate() - 7);
+  }
+  return out;
+}
+
+/**
  * The one whole-year download this offers, and why it is one.
  *
  * The weekly pull only ever carries this week. CMS also publishes a dataset per calendar year
@@ -113,9 +141,14 @@ export type FetchResult = {
  * Safe to run repeatedly: prices are keyed on NDC plus effective date, so re-fetching the same
  * week adds nothing, and the weekly files overlap enough to fill each other's gaps.
  */
-export async function fetchNadac(): Promise<FetchResult> {
+export async function fetchNadac(onProgress?: (text: string) => void | Promise<void>): Promise<FetchResult> {
   const s = await getSettings();
-  return fetchNadacFrom([s.nadac_source_url?.trim(), ...KNOWN_SOURCES].filter(Boolean) as string[]);
+  return fetchNadacFrom(weeklySources(s.nadac_source_url), onProgress);
+}
+
+/** Where "Fetch now" looks, in order: the pharmacy's own address, this week's file, then the rest. */
+export function weeklySources(override?: string | null): string[] {
+  return [override?.trim(), ...weeklyFileUrls(), ...KNOWN_SOURCES].filter(Boolean) as string[];
 }
 
 /**
@@ -139,7 +172,9 @@ export async function fetchNadacFrom(sources: string[], onProgress?: (text: stri
       const res = await fetch(url, {
         redirect: "follow",
         headers: { accept: "text/csv,application/octet-stream,*/*" },
-        signal: AbortSignal.timeout(180_000),
+        // Thirty minutes: the body is streamed and the signal covers the whole read, so this has
+        // to allow for a year archive over a pharmacy's internet connection, not just the headers.
+        signal: AbortSignal.timeout(30 * 60_000),
       });
       if (!res.ok) {
         tried.push(`${short(url)} → HTTP ${res.status}`);
@@ -216,8 +251,21 @@ export async function fetchNadacFrom(sources: string[], onProgress?: (text: stri
     }
   }
 
+  /*
+   * The message says what was tried, without eight lines of "not published yet".
+   *
+   * Most of the addresses are dated weekly files that do not exist — that is the design, not a
+   * fault — so a plain list of them buries the one failure that matters. Missing weeks are
+   * counted in a phrase and everything else is named.
+   */
+  const missing = tried.filter((t) => /HTTP 40[34]$/.test(t)).length;
+  const notable = tried.filter((t) => !/HTTP 40[34]$/.test(t));
+  const parts = [
+    missing > 0 ? `${missing} weekly file${missing === 1 ? "" : "s"} were not there (that is normal for a week CMS has not published)` : null,
+    ...notable,
+  ].filter(Boolean);
   const message =
-    `Could not fetch NADAC. Tried ${tried.length} address${tried.length === 1 ? "" : "es"}: ${tried.join("; ")}. ` +
+    `Could not fetch NADAC. ${parts.join("; ")}. ` +
     `If CMS has moved the file, find its address on data.medicaid.gov and paste it in — everything else keeps working.`;
   await setSetting("nadac_last_fetch", new Date().toISOString());
   await setSetting("nadac_last_result", message);
@@ -241,7 +289,11 @@ const KNOWN_IDS: Record<string, string> = {
   "dfa2ab14-06c2-457a-9e36-5cb6d80f8d93": "2022 archive",
 };
 
+const WEEKLY_FILE = /nadac-national-average-drug-acquisition-cost-(\d{2})-(\d{2})-(\d{4})\.csv/i;
+
 const short = (u: string) => {
+  const w = WEEKLY_FILE.exec(u);
+  if (w) return `the weekly file for ${w[1]}/${w[2]}/${w[3]}`;
   try {
     const url = new URL(u);
     const id = url.pathname.split("/").find((p) => /^[0-9a-f-]{36}$/i.test(p));

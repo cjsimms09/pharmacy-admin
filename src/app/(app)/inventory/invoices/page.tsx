@@ -786,7 +786,7 @@ export default async function InvoicesPage({
                 </a>
                 <form action={receipt} className="flex flex-wrap items-center gap-1.5">
                   <input type="hidden" name="id" value={i.id} />
-                  <input type="date" name="receivedOn" required className="field w-auto py-1 text-xs" aria-label="Date received" />
+                  <input type="date" name="receivedOn" required defaultValue={new Date().toISOString().slice(0, 10)} className="field w-auto py-1 text-xs" aria-label="Date received" />
                   <input name="note" placeholder="Anything short or damaged?" className="field w-56 py-1 text-xs" />
                   <button className="btn btn-sm">Received</button>
                 </form>

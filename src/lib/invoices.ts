@@ -1221,6 +1221,12 @@ export async function recordReceipt(
 
 /** Invoices whose goods nobody has confirmed arrived. */
 export async function awaitingReceipt(): Promise<SupplierInvoice[]> {
+  // Controlled invoices only. 21 CFR 1304.22(c) wants a receipt record for controlled substances;
+  // an invoice for bottles and vitamins needs none, and asking for one is work with no record
+  // behind it. An invoice read as carrying nothing controlled ("none") is left out; one whose
+  // schedule could not be read is asked about, because unknown is not the same as no.
   const rows = await db.query.supplierInvoices.findMany({ where: isNull(schema.supplierInvoices.receivedOn) });
-  return rows.sort((a, b) => (b.invoiceDate ?? "").localeCompare(a.invoiceDate ?? ""));
+  return rows
+    .filter((r) => r.schedule !== "none")
+    .sort((a, b) => (b.invoiceDate ?? "").localeCompare(a.invoiceDate ?? ""));
 }

@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { yearArchiveUrl, archiveYears } from "../src/lib/nadac-fetch";
+import { yearArchiveUrl, archiveYears, weeklyFileUrls, weeklySources } from "../src/lib/nadac-fetch";
 
 /**
  * Which CMS dataset each address actually points at.
@@ -53,5 +53,40 @@ describe("the year archives", () => {
 
   test("every offered year actually resolves to an address", () => {
     for (const y of archiveYears()) assert.ok(yearArchiveUrl(y), `${y} is offered but has no address`);
+  });
+});
+
+describe("the plain weekly files", () => {
+  test("the most recent Wednesday first, then the weeks before it", () => {
+    // A Saturday: the current file is Wednesday the 2nd.
+    const urls = weeklyFileUrls(new Date("2026-09-05T12:00:00Z"), 3);
+    assert.deepEqual(urls, [
+      "https://download.medicaid.gov/data/nadac-national-average-drug-acquisition-cost-09-02-2026.csv",
+      "https://download.medicaid.gov/data/nadac-national-average-drug-acquisition-cost-08-26-2026.csv",
+      "https://download.medicaid.gov/data/nadac-national-average-drug-acquisition-cost-08-19-2026.csv",
+    ]);
+  });
+
+  test("on a Wednesday, that Wednesday is the first tried", () => {
+    const [first] = weeklyFileUrls(new Date("2026-09-02T09:00:00Z"), 1);
+    assert.match(first, /09-02-2026\.csv$/);
+  });
+
+  test("a month and a year boundary are crossed correctly", () => {
+    const urls = weeklyFileUrls(new Date("2026-01-03T12:00:00Z"), 2);
+    assert.match(urls[0], /12-31-2025\.csv$/);
+    assert.match(urls[1], /12-24-2025\.csv$/);
+  });
+
+  test("the pharmacy's own address is tried before any of them", () => {
+    const s = weeklySources("https://example.test/mine.csv");
+    assert.equal(s[0], "https://example.test/mine.csv");
+    assert.match(s[1], /nadac-national-average-drug-acquisition-cost-/);
+    assert.ok(s.length > 8, "the datastore addresses are still there as a fallback");
+  });
+
+  test("with no address of their own, the weekly files come first", () => {
+    assert.match(weeklySources("")[0], /nadac-national-average-drug-acquisition-cost-/);
+    assert.match(weeklySources(null)[0], /nadac-national-average-drug-acquisition-cost-/);
   });
 });

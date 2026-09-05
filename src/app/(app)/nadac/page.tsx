@@ -68,9 +68,9 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
 
   async function pullNow() {
     "use server";
-    const { KNOWN_SOURCES } = await import("@/lib/nadac-fetch");
+    const { weeklySources } = await import("@/lib/nadac-fetch");
     const s2 = await getSettings();
-    await begin("the current weekly file", [s2.nadac_source_url?.trim(), ...KNOWN_SOURCES].filter(Boolean) as string[]);
+    await begin("the current weekly file", weeklySources(s2.nadac_source_url));
   }
 
   async function pullFrom(fd: FormData) {
@@ -144,8 +144,10 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
         <h2 className="text-sm font-semibold">Fetch it automatically</h2>
         <p className="mt-1 text-sm text-ink-2">
           NADAC is free and public and needs no account. CMS publishes one file a week, on a Wednesday, of a few
-          megabytes. Press <b>Fetch now</b> once to start from the current file; from then on this checks a couple of
-          times a week and does nothing when there is nothing new.
+          megabytes, at a fixed address ending in that Wednesday&rsquo;s date. Press <b>Fetch now</b> once to take the
+          most recent one; from then on this checks a couple of times a week and does nothing when there is nothing
+          new. If a week was not published, the week before it is taken instead, so there is always something to price
+          against.
         </p>
         <p className="mt-1 text-xs text-ink-3">
           Worth leaving on even while the reimbursement pages are switched off: each weekly file carries only the

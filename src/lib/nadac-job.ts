@@ -21,6 +21,8 @@ export type NadacJob = {
   state: "running" | "done" | "failed";
   runId: string;
   startedAt: string;
+  /** When the job last wrote a step. Staleness is judged on this, not on when it began. */
+  updatedAt?: string;
   finishedAt?: string;
   by: string;
   /** What is being fetched, in words: "the current weekly file", "the 2026 archive". */
@@ -30,8 +32,15 @@ export type NadacJob = {
   error?: string;
 };
 
-/** A fetch that has gone quiet this long is presumed dead — the computer was switched off mid-run. */
-const STALE_MS = 30 * 60 * 1000;
+/**
+ * A fetch that has written nothing for this long is presumed dead.
+ *
+ * Judged on the last step written, not on when the job began: a year archive legitimately runs
+ * for many minutes, but it reports progress every few seconds while it does. Thirty minutes from
+ * the start was the old rule, and after a restart it hid the button for half an hour with a job
+ * that no longer existed — which read as "NADAC is broken again".
+ */
+const STALE_MS = 5 * 60 * 1000;
 
 export async function nadacJob(): Promise<NadacJob | null> {
   const s = await getSettings();
@@ -50,12 +59,28 @@ export function parseNadacJob(raw: string | undefined): NadacJob | null {
 
 export function nadacJobRunning(job: NadacJob | null, now = Date.now()): boolean {
   if (!job || job.state !== "running") return false;
-  const started = Date.parse(job.startedAt);
-  return Number.isFinite(started) && now - started < STALE_MS;
+  const last = Date.parse(job.updatedAt ?? job.startedAt);
+  return Number.isFinite(last) && now - last < STALE_MS;
 }
 
 async function write(job: NadacJob): Promise<void> {
-  await setSetting("nadac_job", JSON.stringify(job));
+  await setSetting("nadac_job", JSON.stringify({ ...job, updatedAt: new Date().toISOString() }));
+}
+
+/**
+ * Called once when the site starts: a job cannot survive a restart, so one still marked running
+ * was killed mid-way. It is marked failed with a reason, and the button is back at once.
+ */
+export async function failOrphanedNadacJob(): Promise<void> {
+  const j = await nadacJob();
+  if (!j || j.state !== "running") return;
+  await write({
+    ...j,
+    state: "failed",
+    finishedAt: new Date().toISOString(),
+    step: "The site restarted while this was running, so it did not finish. Press Fetch now again.",
+    error: "interrupted by a restart",
+  });
 }
 
 /**

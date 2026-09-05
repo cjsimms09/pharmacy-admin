@@ -25,6 +25,17 @@ export async function register() {
    * worth exactly what one taken during it is worth, and the pharmacy computer is idle almost
    * all day.
    */
+  // A job cannot survive a restart. One still marked running was killed mid-way, and leaving it
+  // that way hides the Fetch button behind a job that no longer exists.
+  void (async () => {
+    try {
+      const { failOrphanedNadacJob } = await import("./lib/nadac-job");
+      await failOrphanedNadacJob();
+    } catch {
+      // Nothing here is worth failing a boot over.
+    }
+  })();
+
   let busy = false;
   const whenIdle = async (name: string, job: () => Promise<void>) => {
     if (busy) return;
