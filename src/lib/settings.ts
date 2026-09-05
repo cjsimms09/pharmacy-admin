@@ -82,6 +82,22 @@ export const SETTING_KEYS = [
   "nadac_last_result",
   // When it last actually succeeded, which is a different question from when it last ran.
   "nadac_last_ok",
+  /*
+   * The Kansas Medicaid professional dispensing fee, in cents.
+   *
+   * SB 20 sets the floor at NADAC plus the *greater* of $10.50 or this fee, so leaving it unset
+   * is safe — the statutory minimum applies — but it understates the floor if the state fee is
+   * higher. Entered rather than hard-coded because the state changes it and a figure that drifts
+   * silently is worse than one somebody had to type.
+   */
+  "ks_medicaid_dispensing_fee_cents",
+  /*
+   * The smallest shortfall worth putting in front of the Insurance Department, in cents.
+   *
+   * Not a legal threshold — there is none. It exists because a schedule padded with eleven-cent
+   * lines invites an argument about rounding instead of an argument about the statute.
+   */
+  "floor_materiality_cents",
   // ── iMonnit temperature monitoring ──
   "imonnit_key_id_enc",
   "imonnit_secret_enc",
