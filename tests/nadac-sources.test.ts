@@ -30,13 +30,19 @@ describe("the year archives", () => {
     assert.equal(new Set(urls).size, urls.length, "two years point at the same dataset");
   });
 
-  test("the 2022 dataset is only ever offered as 2022", () => {
+  test("the 2022 dataset is never offered under any year", () => {
     // The exact mix-up that was in the source list.
-    const twentyTwo = yearArchiveUrl(2022);
     for (const y of archiveYears()) {
-      if (y === "2022") continue;
-      assert.notEqual(yearArchiveUrl(y), twentyTwo, `${y} points at the 2022 dataset`);
+      assert.ok(!yearArchiveUrl(y)!.includes("dfa2ab14-06c2-457a-9e36-5cb6d80f8d93"), `${y} points at the 2022 dataset`);
     }
+    assert.equal(yearArchiveUrl(2022), null);
+  });
+
+  test("nothing before the year the Kansas floor took effect is offered", () => {
+    // 1 July 2026. No claim before it can have been paid under the floor, and the pharmacy is
+    // starting its claim history from scratch, so an older archive is a large download of prices no
+    // check will ever ask for.
+    for (const y of archiveYears()) assert.ok(Number(y) >= 2026, `${y} is offered`);
   });
 
   test("years are offered newest first, because that is the one somebody wants", () => {

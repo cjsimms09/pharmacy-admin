@@ -1,11 +1,14 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { loadNadacFiles, nadacCoverage, nadacClaimCoverage, nadacWeekGaps, nadacDir } from "@/lib/nadac";
-import { fetchNadac, fetchNadacFrom, yearArchiveUrl, archiveYears } from "@/lib/nadac-fetch";
+import { yearArchiveUrl, archiveYears, nadacAuto } from "@/lib/nadac-fetch";
+import { nadacJob, startNadacFetch, runNadacFetch, nadacJobRunning } from "@/lib/nadac-job";
+import { JobPanel } from "@/components/job-panel";
 import { getSettings, setSetting } from "@/lib/settings";
 import { PageHeader, Notice, Empty } from "@/components/ui";
 
@@ -27,15 +30,9 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
   const cov = await nadacCoverage();
   const claimCov = cov.prices > 0 ? await nadacClaimCoverage() : null;
   const gaps = claimCov && claimCov.priced < claimCov.withNdc ? await nadacWeekGaps() : [];
+  const job = await nadacJob();
+  const running = nadacJobRunning(job);
 
-  async function pullNow() {
-    "use server";
-    const u = await requireManager();
-    const r = await fetchNadac();
-    await audit({ action: "nadac.fetch", userId: u.id, userName: u.name, details: r.message.slice(0, 200) });
-    revalidatePath("/nadac");
-    redirect(`/nadac?${r.ok ? "ok" : "error"}=` + encodeURIComponent(r.message));
-  }
 
   async function saveAuto(fd: FormData) {
     "use server";
@@ -47,40 +44,44 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
     redirect("/nadac?ok=" + encodeURIComponent("Saved."));
   }
 
-  /**
-   * Loading one named file, from an address pasted in.
+
+
+  /*
+   * Every fetch is a background job.
    *
-   * The weekly pull can only ever fetch this week. Everything before it has to come from a back
-   * file, and making somebody download ten of them by hand is how the history never gets loaded.
+   * The button used to do the download, parse and load inside its own request, and it froze the
+   * site: the browser's router waits on a pending action, so nothing else answered until a
+   * multi-megabyte download had finished. Now the press claims the job and returns at once; the
+   * work runs after the response and the panel below shows where it has got to.
    */
-  async function pullFrom(fd: FormData) {
-    "use server";
+  async function begin(what: string, sources: string[]) {
     const u = await requireManager();
-    const url = String(fd.get("url") ?? "").trim();
-    if (!url) redirect("/nadac?error=" + encodeURIComponent("Paste the address of the file first."));
-    const r = await fetchNadacFrom([url]);
-    await audit({ action: "nadac.fetch_url", userId: u.id, userName: u.name, details: `${url} — ${r.message.slice(0, 160)}` });
+    const r = await startNadacFetch(u, what);
+    if (r.started) after(() => runNadacFetch(u, r.runId!, what, sources));
     revalidatePath("/nadac");
-    redirect(`/nadac?${r.ok ? "ok" : "error"}=` + encodeURIComponent(r.message));
+    redirect(`/nadac?${r.started ? "ok" : "error"}=` + encodeURIComponent(r.message));
   }
 
-  /**
-   * Pulling a whole calendar year in one go.
-   *
-   * CMS keeps a dataset per year holding every weekly file for that year, which is the thing that
-   * turns "hunt down ten weekly files" into one button. Same load path and the same refusals as
-   * everything else: parsed before it is written, so a page that is not NADAC never lands.
-   */
+  async function pullNow() {
+    "use server";
+    const { KNOWN_SOURCES } = await import("@/lib/nadac-fetch");
+    const s2 = await getSettings();
+    await begin("the current weekly file", [s2.nadac_source_url?.trim(), ...KNOWN_SOURCES].filter(Boolean) as string[]);
+  }
+
+  async function pullFrom(fd: FormData) {
+    "use server";
+    const url = String(fd.get("url") ?? "").trim();
+    if (!url) redirect("/nadac?error=" + encodeURIComponent("Paste the address of the file first."));
+    await begin("the file at the address you pasted", [url]);
+  }
+
   async function pullYear(fd: FormData) {
     "use server";
-    const u = await requireManager();
     const year = String(fd.get("year") ?? "");
     const url = yearArchiveUrl(year);
     if (!url) redirect("/nadac?error=" + encodeURIComponent(`No archive address is known for ${year}.`));
-    const r = await fetchNadacFrom([url]);
-    await audit({ action: "nadac.fetch_year", userId: u.id, userName: u.name, details: `${year} — ${r.message.slice(0, 160)}` });
-    revalidatePath("/nadac");
-    redirect(`/nadac?${r.ok ? "ok" : "error"}=` + encodeURIComponent(`${year}: ${r.message}`));
+    await begin(`the ${year} archive`, [url]);
   }
 
   async function upload(fd: FormData) {
@@ -138,8 +139,9 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
       <section className="my-4 rounded-lg border border-line bg-surface p-4">
         <h2 className="text-sm font-semibold">Fetch it automatically</h2>
         <p className="mt-1 text-sm text-ink-2">
-          NADAC is free and public and needs no account. CMS publishes weekly, on a Wednesday, so this checks a couple
-          of times a week and does nothing when there is nothing new.
+          NADAC is free and public and needs no account. CMS publishes one file a week, on a Wednesday, of a few
+          megabytes. Press <b>Fetch now</b> once to start from the current file; from then on this checks a couple of
+          times a week and does nothing when there is nothing new.
         </p>
         <p className="mt-1 text-xs text-ink-3">
           Worth leaving on even while the reimbursement pages are switched off: each weekly file carries only the
@@ -162,7 +164,7 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
         )}
         <form action={saveAuto} className="mt-3 space-y-3">
           <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" name="auto" defaultChecked={s.nadac_auto !== "no"} />
+            <input type="checkbox" name="auto" defaultChecked={nadacAuto(s)} />
             Keep NADAC up to date automatically
           </label>
           <label className="block text-xs text-ink-3">
@@ -171,14 +173,26 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
           </label>
           <button className="rounded-md border border-line px-3 py-2 text-sm hover:bg-ground">Save</button>
         </form>
-        <form action={pullNow} className="mt-3 border-t border-line pt-3">
-          <button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Fetch now</button>
-          {s.nadac_last_fetch && (
+        <div className="mt-3 border-t border-line pt-3">
+          {running ? (
+            <JobPanel step={`Fetching ${job!.what} — ${job!.step}`} done={0} total={0} startedAt={job!.startedAt} by={job!.by} />
+          ) : (
+            <form action={pullNow}>
+              <button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Fetch now</button>
+            </form>
+          )}
+          {!running && job && job.state !== "running" && (
+            <p className={`mt-2 text-xs ${job.state === "failed" ? "text-crit" : "text-ink-3"}`}>
+              {job.state === "failed" ? "Last fetch failed" : "Last fetch"}
+              {job.finishedAt ? ` ${new Date(job.finishedAt).toLocaleString()}` : ""} — {job.step}
+            </p>
+          )}
+          {!job && s.nadac_last_fetch && (
             <p className="mt-2 text-xs text-ink-3">
               Last checked {new Date(s.nadac_last_fetch).toLocaleString()} — {s.nadac_last_result}
             </p>
           )}
-        </form>
+        </div>
       </section>
 
       {/*
@@ -217,31 +231,35 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
       )}
 
       {/*
-        A whole year in one download.
+        Earlier weeks of this year, and nothing older.
 
-        The weekly pull only ever carries this week. CMS also publishes a dataset per calendar
-        year holding every weekly file for that year — which is what makes back-filling the
-        history a single button rather than ten trips to a download page.
+        The weekly pull only ever carries this week. The 2026 dataset holds every weekly file CMS
+        has published this year, so one download fills in the weeks between 1 July — when the
+        Kansas floor took effect — and the first weekly pull. That is the only back-fill anyone
+        will ever need: no claim before 1 July can have been paid under the floor, and the claim
+        history starts from scratch. It is deliberately one quiet button rather than a row of
+        years.
       */}
       <section className="my-4 rounded-lg border border-line bg-surface p-4">
-        <h2 className="text-sm font-semibold">Back-fill a whole year</h2>
+        <h2 className="text-sm font-semibold">Earlier weeks of {archiveYears()[0]}</h2>
         <p className="mt-1 text-sm text-ink-2">
-          Each year&rsquo;s dataset holds every weekly file CMS published that year, so one download covers every
-          effective date in it. This is how you price claims from months ago &mdash; fetching the current file again
-          never will, because it carries only this week&rsquo;s prices.
+          Only needed to price claims filled <b>before the first weekly pull</b>. The floor took effect on 1 July
+          2026, so nothing earlier than that is ever wanted, and once the weekly fetch has been running there is no
+          reason to press this again.
         </p>
-        <div className="mt-3 flex flex-wrap gap-2">
+        <div className="mt-3 flex flex-wrap items-center gap-3">
           {archiveYears().map((y) => (
             <form key={y} action={pullYear}>
               <input type="hidden" name="year" value={y} />
-              <button className="rounded-md border border-line px-3 py-2 text-sm hover:bg-ground">Fetch {y}</button>
+              <button className="rounded-md border border-line px-3 py-2 text-sm hover:bg-ground" disabled={running}>
+                Fetch the {y} archive
+              </button>
             </form>
           ))}
+          <span className="text-xs text-ink-3">
+            A large file: it runs in the background and takes several minutes. The panel above shows it going.
+          </span>
         </div>
-        <p className="mt-2 text-xs text-ink-3">
-          A year is a large file and may take a few minutes. If it comes back saying it is too large to load in one
-          piece, download it in a browser and use the file box below &mdash; the result is identical.
-        </p>
       </section>
 
       <section className="my-4 rounded-lg border border-line bg-surface p-4">

@@ -179,6 +179,8 @@ export const SETTING_KEYS = [
    * starts the job and this is where the job says where it has got to.
    */
   "manual_job",
+  // The NADAC fetch as a background job, for the same reason the manual audit is one.
+  "nadac_job",
   "backup_last_result",
   "backup_last_failure",
   // The rehearsal: an archive already on disk, opened and restored to a scratch database, to prove

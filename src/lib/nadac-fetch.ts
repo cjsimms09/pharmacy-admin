@@ -40,30 +40,28 @@ import { loadNadacFiles, nadacDir, parseNadacCsv } from "./nadac";
  * and reported success. It is replaced rather than kept as a fallback, because a fallback that
  * silently returns the wrong year is worse than having no fallback at all.
  */
-const KNOWN_SOURCES = [
+export const KNOWN_SOURCES = [
   "https://data.medicaid.gov/api/1/datastore/query/d5eaf378-dcef-5779-83de-acdd8347d68e/0/download?format=csv",
   "https://download.medicaid.gov/data/nadac-national-average-drug-acquisition-cost.csv",
   "https://download.medicaid.gov/data/NADAC%20(National%20Average%20Drug%20Acquisition%20Cost).csv",
 ];
 
 /**
- * One dataset per calendar year, each holding that year's weekly files together.
+ * The one whole-year download this offers, and why it is one.
  *
- * This is the part that solves the history problem, and it took looking at how CMS organises the
- * data to see it. The weekly file only ever carries the prices in force this week — so pricing a
- * July claim looked like it needed the July file, hunted down by hand, one week at a time. It does
- * not: the year dataset carries every weekly effective date for that year, so a single download
- * covers the lot.
+ * The weekly pull only ever carries this week. CMS also publishes a dataset per calendar year
+ * holding every weekly file for that year, which is what makes filling in earlier weeks a single
+ * button. But only this year's matters: the Kansas floor took effect on 1 July 2026, no claim
+ * before that date can have been paid under it, and the pharmacy is starting its claim history from
+ * scratch rather than carrying anything over. The 2022, 2023 and 2024 datasets were offered for a
+ * while; each is a hundred-megabyte download of prices no check will ever ask for, and one of them
+ * was the fallback that quietly loaded four-year-old prices as current. Nothing earlier is offered.
  *
- * The ids are per year and CMS mints a new one each January, so an unknown year returns nothing
- * rather than guessing at a URL — a guessed id would either 404 or, far worse, quietly fetch a
- * different year, which is the mistake already made once above.
+ * CMS mints a new id each January, so an unknown year returns nothing rather than guessing at a
+ * URL — a guessed id would either 404 or, far worse, quietly fetch a different year.
  */
 const YEAR_DATASETS: Record<string, string> = {
   "2026": "fbb83258-11c7-47f5-8b18-5f8e79f7e704",
-  "2024": "99315a95-37ac-4eee-946a-3c523b4c481e",
-  "2023": "4a00010a-132b-4e4d-a611-543c9521280f",
-  "2022": "dfa2ab14-06c2-457a-9e36-5cb6d80f8d93",
 };
 
 /** The bulk download for a calendar year, or null where we do not know that year's dataset. */
