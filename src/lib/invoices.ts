@@ -1141,3 +1141,50 @@ export const money = (cents: number | null): string =>
   cents === null
     ? "—"
     : `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/**
+ * Reads the amount off invoices that were filed before amounts were recorded.
+ *
+ * Every invoice already on file when the total column was added has no total and never will: the
+ * reading happens once, as the invoice is filed, and nothing goes back. So the list showed blanks
+ * against invoices whose PDFs plainly print a figure, which reads as the reader being broken
+ * rather than as it never having been asked.
+ *
+ * The PDF is still here, so the answer is to ask it now. The same labelled-total rule applies —
+ * net payable, total due, amount due, invoice total, balance due, in that order — so an invoice
+ * that genuinely does not print one still comes back empty and still has to be typed in. That is
+ * the honest outcome, not a failure: one of this pharmacy's three wholesalers prints subtotals by
+ * schedule and no invoice total at all.
+ */
+export async function backfillTotals(): Promise<{ read: number; stillMissing: number; unreadable: number }> {
+  const rows = await db.query.supplierInvoices.findMany({ where: isNull(schema.supplierInvoices.totalCents) });
+  const { readFile } = await import("./files");
+  let read = 0;
+  let unreadable = 0;
+
+  for (const row of rows) {
+    const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, row.documentId) });
+    if (!doc) continue;
+    try {
+      const text = pdfText(await readFile(doc.storageKey));
+      const cents = readTotalCents(text);
+      if (cents === null) continue;
+      await db
+        .update(schema.supplierInvoices)
+        .set({ totalCents: cents })
+        .where(eq(schema.supplierInvoices.id, row.id));
+      read++;
+    } catch {
+      // A scan with no text layer. Not an error — it simply has to be typed in like the others.
+      unreadable++;
+    }
+  }
+
+  return { read, stillMissing: rows.length - read, unreadable };
+}
+
+/** How many invoices have no amount, so the page can offer to do something about it. */
+export async function missingTotals(): Promise<number> {
+  const rows = await db.query.supplierInvoices.findMany({ where: isNull(schema.supplierInvoices.totalCents) });
+  return rows.length;
+}

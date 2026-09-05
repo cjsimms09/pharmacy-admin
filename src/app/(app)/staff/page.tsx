@@ -9,8 +9,6 @@ import { endEmploymentAction, reinstateAction } from "./actions";
 import { todayIso } from "@/lib/dates";
 import { trainingsFor } from "@/lib/onboarding";
 import { TRAINING_CADENCE, addMonths } from "@/lib/due";
-import { staffMatrix } from "@/lib/staff-matrix";
-import { StaffBoard } from "@/components/staff-board";
 
 export const metadata = { title: "Staff & licenses" };
 
@@ -19,7 +17,6 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
   const { all, saved, error } = await searchParams;
   const people = await db.query.people.findMany({ orderBy: (p, { asc }) => [asc(p.lastName), asc(p.firstName)] });
   const creds = await db.query.credentials.findMany();
-  const matrix = await staffMatrix();
   /*
    * Training belongs on the list of people, not only inside each person.
    *
@@ -48,15 +45,6 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
       />
       {saved && <Notice kind="ok">{saved}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
-
-      {/*
-        Is my staff covered, on the page about staff.
-
-        It used to sit on the dashboard directly beneath a list that had already named every one of
-        the same gaps, which is two renderings of the same forty-two things on one screen. Here it
-        is the summary of the list underneath it rather than a duplicate of something else.
-      */}
-      <StaffBoard m={matrix} back="/staff" />
 
       {shown.length === 0 ? (
         <Empty>No staff yet. {canManage && <Link href="/staff/new" className="text-accent underline">Add the first person.</Link>}</Empty>

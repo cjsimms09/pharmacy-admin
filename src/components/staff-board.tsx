@@ -64,19 +64,42 @@ export function StaffBoard({ m, back = "/staff" }: { m: StaffMatrix; back?: stri
                   {c.short}
                 </th>
               ))}
-              <th className="border-b border-line py-2 pl-3 text-right font-semibold">Outstanding</th>
             </tr>
           </thead>
           <tbody>
             {m.rows.map((r: MatrixRow) => (
               <tr key={r.id} className="group">
+                {/*
+                  The name, what they owe, and the button that chases it — all in the pinned column.
+
+                  The action used to be the last column, which on eleven requirements is off the
+                  right-hand edge of the screen: the one control on the board you actually press was
+                  the one you had to scroll to find. It travels with the name now, so it is reachable
+                  wherever the grid has been scrolled to.
+                */}
                 <td className="sticky left-0 z-10 whitespace-nowrap border-b border-line bg-surface py-2.5 pr-4 align-middle shadow-[6px_0_6px_-6px_rgba(27,42,42,.10)]">
-                  <Link href={`/staff/${r.id}`} className="text-sm font-medium text-accent hover:underline">
-                    {r.name}
-                  </Link>
-                  <div className="text-[11px] text-ink-3">
-                    {PERSON_ROLE_LABEL[r.role as keyof typeof PERSON_ROLE_LABEL] ?? r.role}
-                    {r.isPic ? " · PIC" : ""}
+                  <div className="flex items-center gap-2.5">
+                    <span className="min-w-0">
+                      <Link href={`/staff/${r.id}`} className="text-sm font-medium text-accent hover:underline">
+                        {r.name}
+                      </Link>
+                      <span className="block text-[11px] text-ink-3">
+                        {PERSON_ROLE_LABEL[r.role as keyof typeof PERSON_ROLE_LABEL] ?? r.role}
+                        {r.isPic ? " · PIC" : ""}
+                      </span>
+                    </span>
+                    {r.gaps === 0 ? (
+                      <span className="badge badge-ok shrink-0">clear</span>
+                    ) : (
+                      <form action={sendTrainingAction} className="ml-auto flex shrink-0 items-center gap-1.5">
+                        <input type="hidden" name="personId" value={r.id} />
+                        <input type="hidden" name="trainingType" value="" />
+                        <input type="hidden" name="followUp" value="1" />
+                        <input type="hidden" name="back" value={back} />
+                        <span className="badge badge-crit" title={`${r.gaps} outstanding`}>{r.gaps}</span>
+                        <button className="btn btn-sm">Chase</button>
+                      </form>
+                    )}
                   </div>
                 </td>
 
@@ -86,27 +109,6 @@ export function StaffBoard({ m, back = "/staff" }: { m: StaffMatrix; back?: stri
                   </td>
                 ))}
 
-                {/*
-                  One button per person, not one per requirement.
-                  
-                  It sends a single email covering everything they still owe, which is what the
-                  site has always done best and what a person actually responds to — eight separate
-                  emails on one afternoon get one reply at most.
-                */}
-                <td className="whitespace-nowrap border-b border-line py-2.5 pl-3 text-right align-middle">
-                  {r.gaps === 0 ? (
-                    <span className="badge badge-ok">clear</span>
-                  ) : (
-                    <form action={sendTrainingAction} className="inline-flex items-center gap-2">
-                      <input type="hidden" name="personId" value={r.id} />
-                      <input type="hidden" name="trainingType" value="" />
-                      <input type="hidden" name="followUp" value="1" />
-                      <input type="hidden" name="back" value={back} />
-                      <span className="badge badge-crit" title={`${r.gaps} outstanding`}>{r.gaps}</span>
-                      <button className="btn btn-sm">Chase</button>
-                    </form>
-                  )}
-                </td>
               </tr>
             ))}
           </tbody>
@@ -126,7 +128,7 @@ export function StaffBoard({ m, back = "/staff" }: { m: StaffMatrix; back?: stri
         <span className="inline-flex items-center gap-1.5"><span className="text-ink-3">—</span> does not apply</span>
       </div>
       <p className="mt-2 text-[11px] text-ink-3">
-        Scrolls sideways; the name stays put. A badge with something behind it opens the evidence — the certificate, or
+        Scrolls sideways; the name, what each person owes and the button that chases it all stay put. A badge with something behind it opens the evidence — the certificate, or
         the record a credential was read from — because &ldquo;it says they did it&rdquo; and &ldquo;here is the
         certificate&rdquo; are different claims, and only the second is worth anything with an inspector in the room.
       </p>

@@ -3,6 +3,7 @@ import { cqiSnapshot, csInventoryStatus } from "@/lib/compliance";
 import { dueList, type DueItem } from "@/lib/due";
 import { complianceSummary, type OpenItem } from "@/lib/compliance-status";
 import { staffMatrix } from "@/lib/staff-matrix";
+import { StaffBoard } from "@/components/staff-board";
 import { invoiceIssues } from "@/lib/invoices";
 import { alerts, SOON_DAYS } from "@/lib/alerts";
 import { automationStatus, type JobStatus } from "@/lib/automation-status";
@@ -417,14 +418,15 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       )}
 
       {/*
-        The staff board is not here any more.
+        Is my staff covered — second, and prominent, because it is the question an inspector asks
+        and the only view that answers it in one look.
 
-        It answered "is my staff covered" a second time, in a grid, directly under a list that had
-        just named every one of the same gaps with a button beside each. Two renderings of forty-two
-        gaps on one screen is not thoroughness, it is noise — and it pushed everything else on this
-        page below the fold. It lives on the staff page, which is where somebody goes to look at
-        people.
+        It was briefly moved off this page on a misreading, and it belongs here: the list above
+        names what is late one thing at a time, and this says whether the people are covered. The
+        overlap is the point rather than the problem — one is a queue of work, the other is the
+        board you turn round to show somebody.
       */}
+      <StaffBoard m={matrix} back="/" />
 
       {/* ── One-click closures ── */}
       {quick.length > 0 && (

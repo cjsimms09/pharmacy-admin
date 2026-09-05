@@ -21,6 +21,8 @@ import {
   uploadInvoice,
   filingFor,
   setInvoiceTotal,
+  backfillTotals,
+  missingTotals,
   sumOf,
   money,
 } from "@/lib/invoices";
@@ -28,6 +30,7 @@ import { invoiceCompliance, RETENTION_YEARS } from "@/lib/invoice-compliance";
 import { setSetting } from "@/lib/settings";
 import { getSettings } from "@/lib/settings";
 import { PageHeader, Card, Figure, Notice, Empty } from "@/components/ui";
+import { SubmitButton } from "@/components/submit-button";
 import { INVOICE_SCHEDULES, type InvoiceSchedule } from "@/db/schema";
 
 export const dynamic = "force-dynamic";
@@ -122,6 +125,7 @@ export default async function InvoicesPage({
     adoptableDocuments(),
     invoiceCompliance(),
   ]);
+  const noAmountCount = await missingTotals();
   const compliance = complianceRows;
   const unmet = compliance.filter((c) => c.state === "attention");
 
@@ -188,6 +192,32 @@ export default async function InvoicesPage({
       if (e && typeof e === "object" && "digest" in e) throw e;
       redirect("/inventory/invoices?noamount=1&error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not save that amount."));
     }
+  }
+
+  /**
+   * Reads the amounts off invoices filed before amounts were recorded.
+   *
+   * The reading happens once, as an invoice is filed, and nothing went back for the ones already
+   * on file — so their totals were blank for good, against PDFs that plainly print a figure. That
+   * looks like a broken reader rather than a question never asked.
+   */
+  async function readAmounts() {
+    "use server";
+    const u = await requireManager();
+    const r = await backfillTotals();
+    await audit({ action: "invoice.totals.backfill", userId: u.id, userName: u.name, details: `${r.read}` });
+    revalidatePath("/inventory/invoices");
+    redirect(
+      "/inventory/invoices?ok=" +
+        encodeURIComponent(
+          r.read === 0
+            ? `No amount could be read off ${r.stillMissing} invoice${r.stillMissing === 1 ? "" : "s"}. Some wholesalers print subtotals by schedule and no invoice total — those have to be typed in.`
+            : `${r.read} amount${r.read === 1 ? "" : "s"} read off the invoices themselves.` +
+              (r.stillMissing > 0
+                ? ` ${r.stillMissing} still print no total that can be read — type those in below.`
+                : " Every invoice now has an amount."),
+        ),
+    );
   }
 
   async function send(fd: FormData) {
@@ -370,6 +400,40 @@ export default async function InvoicesPage({
           {adoptable.length > 12 && (
             <p className="mt-2 text-xs text-ink-3">and {adoptable.length - 12} more — all of them are filed by the one button.</p>
           )}
+        </Card>
+      )}
+
+      {/*
+        Amounts that were never read, offered as one press rather than a filter to discover.
+        
+        The entry form existed but only appeared behind a query string nobody would guess at, and
+        the reason the amounts were blank — that nothing ever went back over invoices filed before
+        the column existed — was invisible. Both are said here, where the blanks are seen.
+      */}
+      {noAmountCount > 0 && canManage && (
+        <Card
+          tone="warn"
+          title={`${noAmountCount} invoice${noAmountCount === 1 ? " has" : "s have"} no amount`}
+          subtitle="Anything filed before this system recorded amounts has a blank one, because the reading happens as an invoice is filed and nothing went back over the older ones. The PDFs are still here, so they can be read now."
+          className="mt-4 mb-6"
+          actions={
+            <>
+              <form action={readAmounts}>
+                <SubmitButton className="btn btn-sm btn-primary" pendingLabel="Reading…">
+                  Read them off the invoices
+                </SubmitButton>
+              </form>
+              <Link href="/inventory/invoices?noamount=1" className="btn btn-sm">Type them in</Link>
+            </>
+          }
+        >
+          <p className="text-xs text-ink-3">
+            Only a labelled total is ever read — net payable, total due, amount due, invoice total, balance due — and
+            in that order, because one wholesaler prints both a purchases figure and a payable and only the second is
+            what you are billed. An invoice that prints no total at all comes back blank and has to be typed in: that
+            is IPD, which shows subtotals by schedule and no single figure. A number assembled from parts would be one
+            this system invented, on a record that gets reconciled against a payment.
+          </p>
         </Card>
       )}
 
