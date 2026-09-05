@@ -1,9 +1,10 @@
 import { DOCUMENT_CATEGORIES } from "@/db/schema";
 import { DOCUMENT_CATEGORY_LABEL } from "@/lib/labels";
-import { fmt } from "@/lib/dates";
+import { fmt, todayIso } from "@/lib/dates";
 import { deleteDocument, uploadDocument } from "@/app/(app)/documents/actions";
 import { redirect } from "next/navigation";
-import { Field } from "./ui";
+import { Field, History } from "./ui";
+import { splitSuperseded } from "@/lib/superseded";
 
 type Doc = {
   id: string;
@@ -17,8 +18,38 @@ type Doc = {
   notes: string | null;
 };
 
+/**
+ * Documents, with the ones a newer version has replaced folded away.
+ *
+ * A vault where last year's expired certificate sits next to this year's is a vault where nobody
+ * can tell which is the one in force — and the more diligently the pharmacy keeps its records, the
+ * worse that gets. Nothing is deleted and nothing moves; the superseded ones go behind a fold with
+ * their count on it.
+ *
+ * A document that has expired with no replacement is not folded away. That is a gap, and it is the
+ * thing somebody opening this list needs to see.
+ */
 export function DocumentList({ docs, redirectTo, canManage }: { docs: Doc[]; redirectTo: string; canManage: boolean }) {
   if (docs.length === 0) return <p className="text-sm text-ink-3">No documents yet.</p>;
+  const split = splitSuperseded(docs, todayIso(), {
+    // Two documents are the same thing over time when they are the same kind of record about the
+    // same subject. Title is part of the key on purpose: two different agreements in the same
+    // category are not versions of each other.
+    key: (d) => `${d.category}:${d.title.toLowerCase().replace(/\s*\b(19|20)\d{2}\b\s*/g, " ").trim()}`,
+    endsOn: (d) => d.expiresOn ?? null,
+  });
+  return (
+    <div className="overflow-x-auto">
+      <Table docs={split.current} redirectTo={redirectTo} canManage={canManage} />
+      <History label="Replaced by a newer version" count={split.history.length}>
+        <Table docs={split.history} redirectTo={redirectTo} canManage={canManage} />
+      </History>
+    </div>
+  );
+}
+
+function Table({ docs, redirectTo, canManage }: { docs: Doc[]; redirectTo: string; canManage: boolean }) {
+  if (docs.length === 0) return <p className="text-sm text-ink-3">Nothing here that has not been replaced.</p>;
   return (
     <div className="overflow-x-auto">
       <table className="table">

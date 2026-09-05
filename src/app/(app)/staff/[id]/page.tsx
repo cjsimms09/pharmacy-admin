@@ -3,7 +3,7 @@ import Link from "next/link";
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requireUser } from "@/lib/auth";
-import { daysUntil, fmt } from "@/lib/dates";
+import { daysUntil, fmt, todayIso } from "@/lib/dates";
 import {
   CREDENTIAL_HINT,
   CREDENTIAL_LABEL,
@@ -12,7 +12,8 @@ import {
   TRAINING_LABEL,
   requiredCredentials,
 } from "@/lib/labels";
-import { PageHeader, Card, Figure, Notice, StatusBadge, Field } from "@/components/ui";
+import { PageHeader, Card, Figure, Notice, StatusBadge, Field, History } from "@/components/ui";
+import { splitSuperseded } from "@/lib/superseded";
 import { DocumentList, UploadForm } from "@/components/documents";
 import { retentionFor } from "@/lib/offboarding";
 import { openRequestsFor } from "@/lib/credential-requests";
@@ -84,11 +85,38 @@ export default async function PersonPage({
   }).length;
 
   const extras = creds.filter((c) => !required.includes(c.type) || creds.filter((x) => x.type === c.type).length > 1);
+
+  /*
+   * Replaced records, folded away — not expired ones.
+   *
+   * Every renewal leaves the previous certificate behind, and after a few years the page is mostly
+   * history. It all has to be kept and has to be findable; it does not have to be at eye level.
+   *
+   * The line is drawn at replacement rather than expiry, deliberately. A licence that ran out and
+   * was renewed is history. A licence that ran out and was never renewed is the most important
+   * thing on this page and stays exactly where it is.
+   */
+  const today = todayIso();
+  const extraSplit = splitSuperseded(extras, today, {
+    key: (c) => `${c.type}:${c.label ?? ""}`,
+    endsOn: (c) => (c.noExpiry ? null : (c.expiresOn ?? null)),
+  });
+  const trainingSplit = splitSuperseded(trainings, today, {
+    key: (t) => t.type,
+    endsOn: (t) => t.expiresOn ?? null,
+  });
   const fixing = fix ? creds.find((c) => c.id === fix) : undefined;
 
   const license = heldFor(person.role === "pharmacist" ? "pharmacist_license" : "technician_registration");
 
-  const trainingDue = trainings.filter((t) => t.expiresOn && daysUntil(t.expiresOn)! < 0).length;
+  /*
+   * Counted on the current record, not on the history behind it.
+   *
+   * Annual training means somebody who is perfectly up to date still has four expired HIPAA rows
+   * on file. Counting those as lapsed made a compliant person look overdue, and a figure that
+   * cries wolf every year is one nobody reads.
+   */
+  const trainingDue = trainingSplit.current.filter((t) => t.expiresOn && daysUntil(t.expiresOn)! < 0).length;
 
   return (
     <>
@@ -134,9 +162,17 @@ export default async function PersonPage({
           tone={gaps === 0 ? "ok" : "crit"}
         />
         <Figure
-          value={trainings.length === 0 ? "none" : String(trainings.length)}
+          value={trainings.length === 0 ? "none" : String(trainingSplit.current.length)}
           label="Trainings recorded"
-          sub={trainingDue > 0 ? `${trainingDue} lapsed` : trainings.length === 0 ? "Nothing recorded yet" : "All current"}
+          sub={
+            trainingDue > 0
+              ? `${trainingDue} lapsed`
+              : trainings.length === 0
+                ? "Nothing recorded yet"
+                : trainingSplit.history.length > 0
+                  ? `All current · ${trainingSplit.history.length} earlier on file`
+                  : "All current"
+          }
           tone={trainings.length === 0 || trainingDue > 0 ? "warn" : "ok"}
         />
         <Figure value={docs.length} label="Documents on file" tone="muted" />
@@ -327,29 +363,15 @@ export default async function PersonPage({
 
       {/* ── Anything else on file ───────────────────────────────────── */}
       {extras.length > 0 && (
-        <Card title="Other credentials on file" count={extras.length} className="mb-6">
-          <div className="overflow-x-auto">
-            <table className="table">
-              <thead><tr><th>Credential</th><th>Number</th><th>Issued</th><th>Expires</th><th>Status</th><th></th></tr></thead>
-              <tbody>
-                {extras.map((c) => (
-                  <tr key={c.id}>
-                    <td>
-                      <div className="font-medium">{c.type === "other" && c.label ? c.label : CREDENTIAL_LABEL[c.type]}</div>
-                      {c.issuer && <div className="text-xs text-ink-3">{c.issuer}</div>}
-                    </td>
-                    <td className="font-mono text-xs">{c.number ?? "—"}</td>
-                    <td className="whitespace-nowrap text-xs">{fmt(c.issuedOn)}</td>
-                    <td className="whitespace-nowrap text-xs">{c.noExpiry ? "does not expire" : fmt(c.expiresOn)}</td>
-                    <td>{c.noExpiry ? <span className="badge badge-ok">no expiry</span> : <StatusBadge days={daysUntil(c.expiresOn)} iso={c.expiresOn} />}</td>
-                    <td className="whitespace-nowrap">
-                      {canManage && <Link href={`${here}?fix=${c.id}#credential-form`} className="btn btn-sm">Edit</Link>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        <Card title="Other credentials on file" count={extraSplit.current.length} className="mb-6">
+          {extraSplit.current.length > 0 ? (
+            <CredentialTable rows={extraSplit.current} here={here} canManage={canManage} />
+          ) : (
+            <p className="text-sm text-ink-3">Everything else on file has been replaced by a newer version.</p>
+          )}
+          <History label="Replaced by a newer one" count={extraSplit.history.length}>
+            <CredentialTable rows={extraSplit.history} here={here} canManage={canManage} />
+          </History>
         </Card>
       )}
 
@@ -357,7 +379,7 @@ export default async function PersonPage({
       <Card
         id="training"
         title="Training"
-        count={trainings.length}
+        count={trainingSplit.current.length}
         actions={<Link href="/compliance/training" className="btn btn-sm">Send training</Link>}
         subtitle="Every completion here has a certificate behind it, generated from the record itself."
         className="mb-6"
@@ -365,46 +387,22 @@ export default async function PersonPage({
         {trainings.length === 0 ? (
           <p className="text-sm text-ink-3">Nothing recorded yet. Send them their required training and it lands here signed.</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="table">
-              <thead><tr><th>Training</th><th>Completed</th><th>Next due</th><th>How</th><th>Certificate</th></tr></thead>
-              <tbody>
-                {trainings.map((t) => {
-                  const a = assignments.find((x) => x.trainingId === t.id);
-                  return (
-                    <tr key={t.id}>
-                      <td className="font-medium">{TRAINING_LABEL[t.type]}</td>
-                      <td className="whitespace-nowrap text-xs">{fmt(t.completedOn)}</td>
-                      <td className="whitespace-nowrap">
-                        {t.expiresOn ? (
-                          <span className="flex items-center gap-2">
-                            <StatusBadge days={daysUntil(t.expiresOn)} iso={t.expiresOn} />
-                            <span className="text-xs text-ink-2">{fmt(t.expiresOn)}</span>
-                          </span>
-                        ) : (
-                          <span className="text-xs text-ink-3">does not repeat</span>
-                        )}
-                      </td>
-                      <td className="text-xs text-ink-2">
-                        {a?.completedVia === "email_reply"
-                          ? `Email reply${a.replyFromAddress ? ` from ${a.replyFromAddress}` : ""}`
-                          : a?.completedVia === "pic_recorded"
-                            ? "Recorded by the PIC"
-                            : a?.completedVia === "signed"
-                              ? `Signed${a.quizTotal ? ` · ${a.quizCorrect}/${a.quizTotal} correct` : ""}`
-                              : t.provider ?? "—"}
-                      </td>
-                      <td className="whitespace-nowrap text-xs">
-                        <Link href={`/certificates/${t.id}`} className="btn btn-sm">Certificate</Link>
-                        {t.documentId && (
-                          <a href={`/files/${t.documentId}`} target="_blank" rel="noreferrer" className="btn btn-sm ml-1">Evidence</a>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div>
+            <TrainingTable rows={trainingSplit.current} assignments={assignments} />
+            {/*
+              Last year's training, folded away.
+
+              Annual training means a person accumulates one superseded record a year, per course.
+              After three years the page is mostly records nobody needs to look at — but every one
+              of them has to be kept: HIPAA training documentation for six years (45 CFR 164.530(j))
+              and bloodborne records for three (29 CFR 1910.1030(h)(2)(ii)).
+
+              A training that has lapsed with nothing after it is not in here. That is an overdue
+              training, and it stays on the page in red where it belongs.
+            */}
+            <History label="Earlier years, superseded by a later completion" count={trainingSplit.history.length}>
+              <TrainingTable rows={trainingSplit.history} assignments={assignments} />
+            </History>
           </div>
         )}
       </Card>
@@ -544,5 +542,102 @@ function CredentialForm({
       <Field label="Notes"><input name="notes" className="field" defaultValue={cred?.notes ?? ""} /></Field>
       <div className="sm:col-span-3"><button className="btn btn-primary">{cred ? "Save" : "Add it"}</button></div>
     </form>
+  );
+}
+
+/**
+ * One credential row, written once.
+ *
+ * Used for the records on the page and for the ones folded away behind them. Two copies of this
+ * markup would have diverged the first time a column was added, and the version nobody looks at
+ * is the one that would have been left behind.
+ */
+function CredentialTable({
+  rows,
+  here,
+  canManage,
+}: {
+  rows: typeof schema.credentials.$inferSelect[];
+  here: string;
+  canManage: boolean;
+}) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="overflow-x-auto">
+      <table className="table">
+        <thead><tr><th>Credential</th><th>Number</th><th>Issued</th><th>Expires</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          {rows.map((c) => (
+            <tr key={c.id}>
+              <td>
+                <div className="font-medium">{c.type === "other" && c.label ? c.label : CREDENTIAL_LABEL[c.type]}</div>
+                {c.issuer && <div className="text-xs text-ink-3">{c.issuer}</div>}
+              </td>
+              <td className="font-mono text-xs">{c.number ?? "—"}</td>
+              <td className="whitespace-nowrap text-xs">{fmt(c.issuedOn)}</td>
+              <td className="whitespace-nowrap text-xs">{c.noExpiry ? "does not expire" : fmt(c.expiresOn)}</td>
+              <td>{c.noExpiry ? <span className="badge badge-ok">no expiry</span> : <StatusBadge days={daysUntil(c.expiresOn)} iso={c.expiresOn} />}</td>
+              <td className="whitespace-nowrap">
+                {canManage && <Link href={`${here}?fix=${c.id}#credential-form`} className="btn btn-sm">Edit</Link>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** One training row, for the same reason. */
+function TrainingTable({
+  rows,
+  assignments,
+}: {
+  rows: typeof schema.trainings.$inferSelect[];
+  assignments: typeof schema.trainingAssignments.$inferSelect[];
+}) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="overflow-x-auto">
+      <table className="table">
+        <thead><tr><th>Training</th><th>Completed</th><th>Next due</th><th>How</th><th>Certificate</th></tr></thead>
+        <tbody>
+          {rows.map((t) => {
+            const a = assignments.find((x) => x.trainingId === t.id);
+            return (
+              <tr key={t.id}>
+                <td className="font-medium">{TRAINING_LABEL[t.type]}</td>
+                <td className="whitespace-nowrap text-xs">{fmt(t.completedOn)}</td>
+                <td className="whitespace-nowrap">
+                  {t.expiresOn ? (
+                    <span className="flex items-center gap-2">
+                      <StatusBadge days={daysUntil(t.expiresOn)} iso={t.expiresOn} />
+                      <span className="text-xs text-ink-2">{fmt(t.expiresOn)}</span>
+                    </span>
+                  ) : (
+                    <span className="text-xs text-ink-3">does not repeat</span>
+                  )}
+                </td>
+                <td className="text-xs text-ink-2">
+                  {a?.completedVia === "email_reply"
+                    ? `Email reply${a.replyFromAddress ? ` from ${a.replyFromAddress}` : ""}`
+                    : a?.completedVia === "pic_recorded"
+                      ? "Recorded by the PIC"
+                      : a?.completedVia === "signed"
+                        ? `Signed${a.quizTotal ? ` · ${a.quizCorrect}/${a.quizTotal} correct` : ""}`
+                        : t.provider ?? "—"}
+                </td>
+                <td className="whitespace-nowrap text-xs">
+                  <Link href={`/certificates/${t.id}`} className="btn btn-sm">Certificate</Link>
+                  {t.documentId && (
+                    <a href={`/files/${t.documentId}`} target="_blank" rel="noreferrer" className="btn btn-sm ml-1">Evidence</a>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }

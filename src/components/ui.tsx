@@ -188,3 +188,41 @@ export function Row({
     </li>
   );
 }
+
+/**
+ * Records that have been replaced: kept, findable, and out of the eye line.
+ *
+ * The instruction was precise — hide but retain, not prominent but findable if looking. A fold is
+ * the honest shape for that: nothing is deleted, nothing is on another screen, and the count is on
+ * the label so somebody can see there is history there without opening it.
+ *
+ * What goes in here is deliberately narrow. Only records that something newer has taken over. A
+ * licence that expired and was never renewed is not history, it is a live gap, and it stays at
+ * full weight on the page above — hiding that would be the expensive mistake this component could
+ * easily cause if it were used to mean "expired".
+ */
+export function History({
+  label,
+  count,
+  children,
+  className,
+}: {
+  label: string;
+  count: number;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  if (count === 0) return null;
+  return (
+    <details className={`mt-4 rounded-md border border-line bg-ground px-3 py-2 ${className ?? ""}`}>
+      <summary className="cursor-pointer select-none text-sm text-ink-3">
+        {label} <span className="text-ink-3">({count})</span>
+      </summary>
+      <div className="mt-3 border-t border-line pt-3 opacity-90">{children}</div>
+      <p className="mt-2 text-xs text-ink-3">
+        Kept in full and never deleted. These are records something newer has replaced — anything that has lapsed
+        without a replacement stays on the page above.
+      </p>
+    </details>
+  );
+}
