@@ -10,6 +10,31 @@
  *
  * Plain data rather than markup, so the same structure drives the sidebar, the hub pages and
  * anywhere else that needs to know what belongs with what.
+ *
+ * ── The rules this has to keep obeying as the site grows ──
+ *
+ * Everything built so far is compliance. What is coming is not — the schedule, the money side,
+ * purchasing, the patient-facing work — and a menu grows badly by accident rather than by
+ * decision. Adding a thirteenth group and a ninth item to four of them is never a choice anybody
+ * makes; it is what happens when nobody wrote the rule down. So:
+ *
+ *   1. Ten groups, and a hard ceiling of twelve. A sidebar somebody has to scan rather than
+ *      recognise has stopped being navigation. A new area of the business earns a group; a new
+ *      page almost never does.
+ *
+ *   2. Eight items per group. Past that, the group is really two groups, or some of its pages
+ *      belong one level down inside a page that already exists. The test enforces both numbers,
+ *      so exceeding them is a decision somebody has to make deliberately.
+ *
+ *   3. Group by what somebody came to do, not by what the thing is made of. "Invoices" is in
+ *      Records because that is the word people go looking for, even though supplier invoices are
+ *      really a controlled substance record. The word wins.
+ *
+ *   4. A page belongs to exactly one group. Cross-link from anywhere; list it once. Two homes
+ *      means neither is the home, and the sidebar highlight goes wrong.
+ *
+ *   5. If a page is only ever reached from another page — a person's record, one month's
+ *      temperatures, one incident — it is not in the menu at all. The menu lists starting points.
  */
 export type NavItem = { href: string; label: string; blurb?: string };
 export type NavGroup = { href: string; label: string; blurb: string; items: NavItem[] };

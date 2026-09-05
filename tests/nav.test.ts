@@ -29,6 +29,36 @@ describe("navigation", () => {
     }
   });
 
+  /*
+   * The rules that keep a menu navigable while the site doubles.
+   *
+   * Everything built so far is compliance; the schedule, the money side and the purchasing work
+   * are still to come. Nobody ever decides to add a thirteenth group — it is what happens when the
+   * ceiling was never written down. Both numbers are deliberately close to where the site already
+   * sits, so the next addition that would break them is a decision somebody has to make on
+   * purpose rather than a drift nobody notices.
+   */
+  test("the sidebar stays something you recognise rather than scan", () => {
+    assert.ok(NAV.length <= 12, `${NAV.length} top-level groups — a new area of the business earns one, a page does not`);
+  });
+
+  test("no group has grown into two groups", () => {
+    for (const g of NAV) {
+      assert.ok(
+        g.items.length <= 8,
+        `${g.label} has ${g.items.length} items — it is either two groups now, or some of these belong one level down`,
+      );
+    }
+  });
+
+  test("every item says what it is for, so the menu teaches the site", () => {
+    for (const g of NAV) {
+      for (const i of g.items) {
+        assert.ok(i.blurb && i.blurb.length > 15, `${g.label} → ${i.label} has no blurb`);
+      }
+    }
+  });
+
   test("the dashboard does not swallow every path", () => {
     assert.equal(groupFor("/")?.label, "Today");
     assert.notEqual(groupFor("/staff")?.label, "Today");
