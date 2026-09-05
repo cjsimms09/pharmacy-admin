@@ -2,7 +2,9 @@ import "server-only";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { getSettings, setSetting } from "./settings";
-import { loadNadacFiles, nadacDir, parseNadacCsv } from "./nadac";
+import { loadNadacFiles, loadedFiles, looksLikeNadacHeader, nadacDir } from "./nadac";
+import { createWriteStream } from "node:fs";
+import { createHash } from "node:crypto";
 
 /**
  * Pulling NADAC from CMS automatically.
@@ -129,7 +131,7 @@ export async function fetchNadac(): Promise<FetchResult> {
  * parsed before it is written, so an HTML error page saved as a .csv cannot sit in the folder
  * looking like data.
  */
-export async function fetchNadacFrom(sources: string[]): Promise<FetchResult> {
+export async function fetchNadacFrom(sources: string[], onProgress?: (text: string) => void | Promise<void>): Promise<FetchResult> {
   const tried: string[] = [];
 
   for (const url of sources) {
@@ -145,58 +147,62 @@ export async function fetchNadacFrom(sources: string[]): Promise<FetchResult> {
       }
 
       /*
-       * A size check before the whole thing is pulled into memory.
+       * Streamed to disk, never held in memory.
        *
-       * A weekly file is a few tens of megabytes. A year archive is that times fifty-odd, and
-       * reading it with res.text() means holding the entire CSV as one string — enough to take
-       * out a pharmacy computer with four gigabytes in it. Refusing with the actual size named is
-       * far better than a process that dies silently halfway through and leaves somebody
-       * wondering why the button does nothing.
+       * The first version did res.text() and parsed the whole thing before writing it. A weekly
+       * file survived that; a year archive is a hundred megabytes of text, which is gigabytes of
+       * objects, on the one thread that also serves every page — and that is what kept stopping
+       * the site. Now the body goes straight to a file in chunks, with a running byte count that
+       * stops a download larger than the ceiling, and the first chunk is checked for a NADAC header
+       * so an HTML error page never gets saved as a .csv. Loading is the streaming loader's job.
        */
       const declared = Number(res.headers.get("content-length") ?? "0");
       if (declared > MAX_DOWNLOAD_BYTES) {
-        tried.push(
-          `${short(url)} → ${(declared / 1_048_576).toFixed(0)} MB, larger than this loads in one piece. ` +
-            `Download it in a browser and load the file from the page instead.`,
-        );
+        tried.push(`${short(url)} → ${(declared / 1_048_576).toFixed(0)} MB, larger than this will download.`);
         continue;
       }
+      if (!res.body) { tried.push(`${short(url)} → empty response`); continue; }
 
-      const text = await res.text();
+      const dir = nadacDir();
+      await fs.mkdir(dir, { recursive: true });
+      await onProgress?.(`Downloading ${short(url)}`);
+      const dl = await streamToFile(res.body, dir, (bytes) => onProgress?.(`Downloading ${short(url)}: ${(bytes / 1_048_576).toFixed(0)} MB`));
+      if (!dl.ok) { tried.push(`${short(url)} → ${dl.why}`); continue; }
 
-      // Parse before writing. An HTML error page saved as a .csv sits in the folder looking like
-      // data and quietly prices nothing.
-      const parsed = parseNadacCsv(text);
-      if (parsed.rows.length === 0) {
+      // Already on disk under another name: the same bytes, loaded before. Nothing to do.
+      const manifest = await loadedFiles();
+      if (Object.values(manifest).some((m) => m.sha256 === dl.sha256)) {
+        await fs.unlink(dl.path).catch(() => {});
+        const message = `Nothing new — the file at ${short(url)} is one already loaded.`;
+        await setSetting("nadac_last_fetch", new Date().toISOString());
+        await setSetting("nadac_last_result", message);
+        await setSetting("nadac_last_ok", new Date().toISOString());
+        return { ok: true, source: url, message, added: 0, rowsParsed: 0, fileAsOf: null };
+      }
+
+      const finalName = `nadac-${new Date().toISOString().slice(0, 10)}-${dl.sha256.slice(0, 8)}.csv`;
+      await fs.rename(dl.path, path.join(dir, finalName));
+
+      const reports = await loadNadacFiles({ onProgress, sha256: { [finalName]: dl.sha256 } });
+      const mine = reports.find((r) => r.file === finalName);
+      const added = mine?.added ?? 0;
+      if (!mine || mine.rows === 0) {
         tried.push(`${short(url)} → downloaded, but no NADAC rows could be read from it`);
         continue;
       }
 
-      const stamp = parsed.fileAsOf ?? new Date().toISOString().slice(0, 10);
-      const dir = nadacDir();
-      await fs.mkdir(dir, { recursive: true });
-      await fs.writeFile(path.join(dir, `nadac-${stamp}.csv`), text);
-
-      const reports = await loadNadacFiles();
-      const added = reports.reduce((n, r) => n + r.added, 0);
-
       /*
        * What was fetched, and from where.
        *
-       * The old message said "the file published 2022-01-05" and stopped there. Both halves of
-       * what somebody needs were missing: it never named the address, so a source list quietly
-       * falling through to the wrong dataset was invisible; and it reported the first as-of date
-       * in the file, so a whole year of 2022 announced itself as a single January file. Somebody
-       * reading it had no way to tell they were looking at four-year-old prices.
-       *
-       * So the message now says the span it covers, how many weeks are in it, and which address
-       * it came from. A wrong source becomes obvious on the first read instead of never.
+       * The message says the span it covers, how many weeks are in it, and which address it came
+       * from, so a wrong source becomes obvious on the first read instead of never — a whole year
+       * of 2022 once announced itself as "the file published 2022-01-05".
        */
+      const stamp = mine.fileAsOf ?? new Date().toISOString().slice(0, 10);
       const covers =
-        parsed.weeks > 1 && parsed.fileAsOfLatest && parsed.fileAsOfLatest !== stamp
-          ? `${parsed.weeks} weekly files, ${stamp} to ${parsed.fileAsOfLatest}`
+        mine.weeks > 1 && mine.fileAsOfLatest && mine.fileAsOfLatest !== stamp
+          ? `${mine.weeks} weekly files, ${stamp} to ${mine.fileAsOfLatest}`
           : `the file published ${stamp}`;
-
       const message =
         (added > 0
           ? `${added.toLocaleString()} new prices from ${covers}.`
@@ -204,7 +210,7 @@ export async function fetchNadacFrom(sources: string[]): Promise<FetchResult> {
       await setSetting("nadac_last_fetch", new Date().toISOString());
       await setSetting("nadac_last_result", message);
       await setSetting("nadac_last_ok", new Date().toISOString());
-      return { ok: true, source: url, message, added, rowsParsed: parsed.rows.length, fileAsOf: stamp };
+      return { ok: true, source: url, message, added, rowsParsed: mine.rows, fileAsOf: stamp };
     } catch (e) {
       tried.push(`${short(url)} → ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`);
     }
@@ -258,4 +264,50 @@ export function fetchDue(lastIso: string | null, now = Date.now()): boolean {
   const last = Date.parse(lastIso);
   if (!Number.isFinite(last)) return true;
   return now - last >= 3.5 * 24 * 60 * 60 * 1000;
+}
+
+/**
+ * Writes a response body to a temporary file in chunks, hashing as it goes.
+ *
+ * Refuses on the first chunk if it does not begin with a NADAC header, and part-way through if the
+ * byte count passes the ceiling — in both cases the partial file is removed. Memory use is one
+ * chunk, whatever the file's size.
+ */
+async function streamToFile(
+  body: ReadableStream<Uint8Array>,
+  dir: string,
+  onBytes?: (bytes: number) => void | Promise<void>,
+): Promise<{ ok: true; path: string; bytes: number; sha256: string } | { ok: false; why: string }> {
+  const tmp = path.join(dir, `.download-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tmp`);
+  const out = createWriteStream(tmp);
+  const hash = createHash("sha256");
+  let bytes = 0;
+  let first = true;
+  let lastTick = Date.now();
+  const reader = body.getReader();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      if (first) {
+        first = false;
+        if (!looksLikeNadacHeader(Buffer.from(value.subarray(0, 8192)).toString("utf8"))) {
+          throw new Error("the response does not begin with a NADAC header (NDC, NADAC Per Unit, Effective Date)");
+        }
+      }
+      bytes += value.length;
+      if (bytes > MAX_DOWNLOAD_BYTES) throw new Error(`larger than ${(MAX_DOWNLOAD_BYTES / 1_048_576).toFixed(0)} MB`);
+      hash.update(value);
+      if (!out.write(value)) await new Promise<void>((r) => out.once("drain", () => r()));
+      if (onBytes && Date.now() - lastTick > 2000) { lastTick = Date.now(); await onBytes(bytes); }
+    }
+    await new Promise<void>((resolve, reject) => { out.end(); out.on("finish", () => resolve()); out.on("error", reject); });
+    return { ok: true, path: tmp, bytes, sha256: hash.digest("hex") };
+  } catch (e) {
+    await reader.cancel().catch(() => {});
+    out.destroy();
+    await fs.unlink(tmp).catch(() => {});
+    return { ok: false, why: e instanceof Error ? e.message : String(e) };
+  }
 }

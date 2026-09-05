@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real, index } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, index, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 const now = () => sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`;
@@ -1178,7 +1178,9 @@ export const nadacPrices = sqliteTable(
     loadedAt: text("loaded_at").notNull().default(now()),
   },
   (t) => [
-    index("nadac_ndc_eff_idx").on(t.ndc11, t.effectiveOn),
+    // Unique, so the loader can insert and let the database refuse a price it already holds:
+    // no set of every key in memory, no lookup per row, and a file loaded twice adds nothing.
+    uniqueIndex("nadac_ndc_eff_idx").on(t.ndc11, t.effectiveOn),
     index("nadac_file_idx").on(t.fileAsOf),
   ],
 );
@@ -1420,12 +1422,32 @@ export const claims = sqliteTable(
     dispensingFeePaidCents: integer("dispensing_fee_paid_cents"),
     daw: text("daw"),
 
+    /*
+     * Whether the money on this row was kept.
+     *
+     * The transaction report carries a paid claim, its reversal and the resubmission as three
+     * rows. A reversal does not delete the claim it cancels — the record stays, marked reversed,
+     * with the date — so the floor check prices only what the pharmacy actually kept, and the
+     * history still shows what was billed and taken back.
+     */
+    status: text("status", { enum: ["paid", "reversed"] }).notNull().default("paid"),
+    reversedOn: text("reversed_on"),
+    /** Identifies one row of the transaction report, so a re-sent day is not loaded twice. */
+    transactionKey: text("transaction_key"),
+    /** The transaction-report row that reversed this claim, so a re-sent reversal is recognised too. */
+    reversalKey: text("reversal_key"),
+    /** Which report the row came from: "export" (one row per fill) or "transaction_report". */
+    source: text("source").notNull().default("export"),
+
     /** Everything the export carried, kept verbatim so a later question needs no re-import. */
     rawJson: text("raw_json"),
     createdAt: text("created_at").notNull().default(now()),
   },
   (t) => [
     index("claims_import_idx").on(t.importId),
+    index("claims_txn_idx").on(t.transactionKey),
+    index("claims_reversal_idx").on(t.reversalKey),
+    index("claims_status_idx").on(t.status),
     index("claims_pbm_idx").on(t.pbmName),
     index("claims_bin_idx").on(t.bin),
     index("claims_date_idx").on(t.dateFilled),

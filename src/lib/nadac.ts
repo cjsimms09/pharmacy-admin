@@ -1,10 +1,14 @@
 import "server-only";
 import fs from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { createHash } from "node:crypto";
+import readline from "node:readline";
 import path from "node:path";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "./crypto";
 import { parseCsv, referenceDir } from "./reference";
+import { splitRow } from "./pioneer-catalog";
 import { isPricingUnit, parseUnitMicros } from "./money";
 import type { NadacRecord } from "./reimbursement-rules";
 
@@ -87,104 +91,212 @@ export type ParseReport = {
   weeks: number;
 };
 
-/** Reads one CMS NADAC CSV. Never throws on a bad row — it counts it and moves on. */
-export function parseNadacCsv(text: string): ParseReport {
-  const raw = parseCsv(text);
-  const rows: ParsedNadacRow[] = [];
-  const reasons: Record<string, number> = {};
-  let skipped = 0;
-  let fileAsOf: string | null = null;
-  let fileAsOfLatest: string | null = null;
-  const asOfSeen = new Set<string>();
+type RowCtx = {
+  rows: ParsedNadacRow[];
+  skipped: number;
+  reasons: Record<string, number>;
+  fileAsOf: string | null;
+  fileAsOfLatest: string | null;
+  asOfSeen: Set<string>;
+};
+
+const newCtx = (): RowCtx => ({ rows: [], skipped: 0, reasons: {}, fileAsOf: null, fileAsOfLatest: null, asOfSeen: new Set() });
+
+/** One CMS row, as an object keyed by header, into a price or a counted reason. */
+function readNadacRow(r: Record<string, string>, ctx: RowCtx): ParsedNadacRow | null {
   const skip = (why: string) => {
-    skipped++;
-    reasons[why] = (reasons[why] ?? 0) + 1;
+    ctx.skipped++;
+    ctx.reasons[why] = (ctx.reasons[why] ?? 0) + 1;
+    return null;
   };
+  const ndc11 = normalizeNdc(pick(r, "ndc"));
+  const unitMicros = parseUnitMicros(pick(r, "nadac per unit"));
+  const unit = (pick(r, "pricing unit") ?? "").trim().toUpperCase();
+  const effectiveOn = parseNadacDate(pick(r, "effective date"));
+  const asOf = parseNadacDate(pick(r, "as of date"));
 
-  for (const r of raw) {
-    const ndc11 = normalizeNdc(pick(r, "ndc"));
-    const unitMicros = parseUnitMicros(pick(r, "nadac per unit"));
-    const unit = (pick(r, "pricing unit") ?? "").trim().toUpperCase();
-    const effectiveOn = parseNadacDate(pick(r, "effective date"));
-    const asOf = parseNadacDate(pick(r, "as of date"));
+  if (!ndc11) return skip("NDC missing or not 11 digits");
+  if (unitMicros === null) return skip("no readable NADAC per unit");
+  if (!isPricingUnit(unit)) return skip(`unrecognised pricing unit (${unit || "blank"})`);
+  if (!effectiveOn) return skip("no readable effective date");
 
-    if (!ndc11) { skip("NDC missing or not 11 digits"); continue; }
-    if (unitMicros === null) { skip("no readable NADAC per unit"); continue; }
-    if (!isPricingUnit(unit)) { skip(`unrecognised pricing unit (${unit || "blank"})`); continue; }
-    if (!effectiveOn) { skip("no readable effective date"); continue; }
-
-    if (asOf) {
-      asOfSeen.add(asOf);
-      if (!fileAsOf || asOf < fileAsOf) fileAsOf = asOf;
-      if (!fileAsOfLatest || asOf > fileAsOfLatest) fileAsOfLatest = asOf;
-    }
-    rows.push({
-      ndc11,
-      description: (pick(r, "ndc description") ?? "").trim() || null,
-      unitMicros,
-      pricingUnit: unit,
-      effectiveOn,
-      classification: (pick(r, "classification for rate setting") ?? "").trim() || null,
-      otc: (pick(r, "otc") ?? "").trim().toUpperCase().startsWith("Y"),
-      explanationCode: (pick(r, "explanation code") ?? "").trim() || null,
-      fileAsOf: asOf ?? effectiveOn,
-    });
+  if (asOf) {
+    ctx.asOfSeen.add(asOf);
+    if (!ctx.fileAsOf || asOf < ctx.fileAsOf) ctx.fileAsOf = asOf;
+    if (!ctx.fileAsOfLatest || asOf > ctx.fileAsOfLatest) ctx.fileAsOfLatest = asOf;
   }
-  return { rows, skipped, reasons, fileAsOf, fileAsOfLatest, weeks: asOfSeen.size };
+  return {
+    ndc11,
+    description: (pick(r, "ndc description") ?? "").trim() || null,
+    unitMicros,
+    pricingUnit: unit,
+    effectiveOn,
+    classification: (pick(r, "classification for rate setting") ?? "").trim() || null,
+    otc: (pick(r, "otc") ?? "").trim().toUpperCase().startsWith("Y"),
+    explanationCode: (pick(r, "explanation code") ?? "").trim() || null,
+    fileAsOf: asOf ?? effectiveOn,
+  };
 }
 
-export type LoadReport = { file: string; added: number; alreadyHad: number; skipped: number; reasons: Record<string, number>; fileAsOf: string | null };
+/** Reads one CMS NADAC CSV held in memory. Never throws on a bad row — it counts it and moves on. */
+export function parseNadacCsv(text: string): ParseReport {
+  const ctx = newCtx();
+  for (const r of parseCsv(text)) {
+    const row = readNadacRow(r, ctx);
+    if (row) ctx.rows.push(row);
+  }
+  return { rows: ctx.rows, skipped: ctx.skipped, reasons: ctx.reasons, fileAsOf: ctx.fileAsOf, fileAsOfLatest: ctx.fileAsOfLatest, weeks: ctx.asOfSeen.size };
+}
+
+/** Whether the first lines of a file are a CMS NADAC header. Cheap, so it can run on a download's first chunk. */
+export function looksLikeNadacHeader(firstLines: string): boolean {
+  const head = firstLines.replace(/^﻿/, "").split(/\r?\n/).find((l) => l.trim()) ?? "";
+  const cols = splitRow(head, ",").map((c) => c.trim().toLowerCase().replace(/[\s_]+/g, " "));
+  return cols.includes("ndc") && cols.includes("nadac per unit") && cols.includes("effective date");
+}
+
+export type LoadReport = {
+  file: string;
+  added: number;
+  alreadyHad: number;
+  skipped: number;
+  reasons: Record<string, number>;
+  fileAsOf: string | null;
+  fileAsOfLatest: string | null;
+  weeks: number;
+  rows: number;
+};
 
 /**
- * Loads every NADAC CSV sitting in data/reference/nadac/.
+ * Which files in the folder have been loaded, and as what.
  *
- * Re-running is safe: a price is keyed on NDC plus effective date, so the same file loaded twice
- * adds nothing, and overlapping weekly files simply fill in each other's gaps.
+ * Without this, every fetch re-read every file in the folder — including a year archive of a
+ * million rows that had been loaded weeks before — and that, not the button, is what kept
+ * stopping the site. A file is loaded once; it is read again only if its size or modified time
+ * has changed, which is what happens when somebody drops a corrected copy over it.
  */
-export async function loadNadacFiles(): Promise<LoadReport[]> {
+type Manifest = Record<string, { size: number; mtimeMs: number; sha256: string | null; loadedAt: string; added: number; rows: number }>;
+const MANIFEST = ".loaded.json";
+
+/** The files already loaded, by name, with the hash of each — so a re-download of the same bytes is recognised. */
+export async function loadedFiles(): Promise<Manifest> {
+  return readManifest(nadacDir());
+}
+
+async function readManifest(dir: string): Promise<Manifest> {
+  try {
+    return JSON.parse(await fs.readFile(path.join(dir, MANIFEST), "utf8")) as Manifest;
+  } catch {
+    return {};
+  }
+}
+
+let loading: Promise<LoadReport[]> | null = null;
+
+/**
+ * Loads every NADAC CSV in data/reference/nadac/ that has not been loaded already.
+ *
+ * Streams. The first version read a whole file into a string, parsed it into an array of objects
+ * and then inserted; a weekly file survived that, a year archive did not — a hundred megabytes of
+ * text becomes gigabytes of objects, and the parse ran on the one thread that also serves every
+ * page. This reads a line at a time, inserts four hundred rows at a time, and hands the thread back
+ * between batches, so a page requested while a million rows load waits for one batch, not for the
+ * file. Duplicates are the database's job: the unique index on NDC and effective date refuses a
+ * price already held, and the count of refusals is the "already had" figure.
+ *
+ * One load at a time: the weekly check and the button can both ask, and the second waits for the
+ * first rather than reading the same file alongside it.
+ */
+type LoadOpts = { onProgress?: (text: string) => void | Promise<void>; sha256?: Record<string, string> };
+
+export async function loadNadacFiles(opts: LoadOpts = {}): Promise<LoadReport[]> {
+  if (loading) return loading;
+  loading = loadNadacFilesNow(opts).finally(() => { loading = null; });
+  return loading;
+}
+
+async function loadNadacFilesNow(opts: LoadOpts): Promise<LoadReport[]> {
   const dir = nadacDir();
   await fs.mkdir(dir, { recursive: true });
   const files = (await fs.readdir(dir)).filter((f) => /\.(csv|txt)$/i.test(f)).sort();
+  const manifest = await readManifest(dir);
   const reports: LoadReport[] = [];
 
-  // Every price already held, read once.
-  //
-  // The first version of this asked the database whether each row existed and then inserted it
-  // one at a time — sixty thousand round trips for a single weekly file, which made the page
-  // look frozen for several minutes. A CMS file is about thirty thousand rows and the whole set
-  // of keys is a few megabytes, so holding them in memory is the obvious trade.
-  const seen = new Set<string>(
-    (await db.select({ ndc11: schema.nadacPrices.ndc11, effectiveOn: schema.nadacPrices.effectiveOn }).from(schema.nadacPrices))
-      .map((r) => `${r.ndc11}|${r.effectiveOn}`),
-  );
-
   for (const file of files) {
-    const text = await fs.readFile(path.join(dir, file), "utf8");
-    const parsed = parseNadacCsv(text);
-    let added = 0;
-    let alreadyHad = 0;
+    const full = path.join(dir, file);
+    const stat = await fs.stat(full);
+    const done = manifest[file];
+    if (done && done.size === stat.size && Math.abs(done.mtimeMs - stat.mtimeMs) < 1) continue;
 
-    // Dedupe within the file as well as against the database. CMS files can repeat an NDC, and
-    // two rows for the same NDC and date are the same price whichever arrives first.
-    const fresh: ParsedNadacRow[] = [];
-    for (const row of parsed.rows) {
-      const key = `${row.ndc11}|${row.effectiveOn}`;
-      if (seen.has(key)) { alreadyHad++; continue; }
-      seen.add(key);
-      fresh.push(row);
-    }
-
-    // Multi-row inserts, sized so the statement stays well inside SQLite's variable limit:
-    // eleven columns a row, so 400 rows is about 4,400 bound values against a ceiling of 32,766.
-    for (let i = 0; i < fresh.length; i += 400) {
-      const chunk = fresh.slice(i, i + 400).map((row) => ({ id: newId(), ...row }));
-      await db.insert(schema.nadacPrices).values(chunk);
-      added += chunk.length;
-    }
-
-    reports.push({ file, added, alreadyHad, skipped: parsed.skipped, reasons: parsed.reasons, fileAsOf: parsed.fileAsOf });
+    const report = await loadOneFile(full, file, stat.size, opts.onProgress);
+    reports.push(report);
+    const sha256 = opts.sha256?.[file] ?? (await hashFile(full));
+    manifest[file] = { size: stat.size, mtimeMs: stat.mtimeMs, sha256, loadedAt: new Date().toISOString(), added: report.added, rows: report.rows };
+    await fs.writeFile(path.join(dir, MANIFEST), JSON.stringify(manifest, null, 2));
   }
   return reports;
+}
+
+const BATCH = 400;
+
+async function hashFile(full: string): Promise<string> {
+  const h = createHash("sha256");
+  for await (const chunk of createReadStream(full)) h.update(chunk as Buffer);
+  return h.digest("hex");
+}
+
+async function loadOneFile(full: string, file: string, size: number, onProgress?: (text: string) => void | Promise<void>): Promise<LoadReport> {
+  const ctx = newCtx();
+  let headers: string[] | null = null;
+  let rows = 0;
+  let added = 0;
+  let batch: (typeof schema.nadacPrices.$inferInsert)[] = [];
+  let lastReport = Date.now();
+
+  const flush = async () => {
+    if (batch.length === 0) return;
+    const r = await db.insert(schema.nadacPrices).values(batch).onConflictDoNothing();
+    added += Number(r.rowsAffected ?? 0);
+    batch = [];
+    // Hand the thread back so a page requested mid-load is served between batches.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    if (onProgress && Date.now() - lastReport > 2000) {
+      lastReport = Date.now();
+      await onProgress(`Loading ${file}: ${rows.toLocaleString()} rows read, ${added.toLocaleString()} new`);
+    }
+  };
+
+  const rl = readline.createInterface({ input: createReadStream(full, { encoding: "utf8", highWaterMark: 1 << 16 }), crlfDelay: Infinity });
+  for await (const rawLine of rl) {
+    const line = rawLine.replace(/^﻿/, "");
+    if (!line.trim()) continue;
+    const cells = splitRow(line, ",");
+    if (!headers) {
+      headers = cells.map((c) => c.trim());
+      continue;
+    }
+    rows++;
+    const obj: Record<string, string> = {};
+    headers.forEach((h, i) => { obj[h] = cells[i] ?? ""; });
+    const row = readNadacRow(obj, ctx);
+    if (!row) continue;
+    batch.push({ id: newId(), ...row });
+    if (batch.length >= BATCH) await flush();
+  }
+  await flush();
+  if (onProgress) await onProgress(`Loaded ${file}: ${rows.toLocaleString()} rows, ${added.toLocaleString()} new (${(size / 1_048_576).toFixed(1)} MB)`);
+
+  return {
+    file,
+    added,
+    alreadyHad: rows - ctx.skipped - added,
+    skipped: ctx.skipped,
+    reasons: ctx.reasons,
+    fileAsOf: ctx.fileAsOf,
+    fileAsOfLatest: ctx.fileAsOfLatest,
+    weeks: ctx.asOfSeen.size,
+    rows,
+  };
 }
 
 /**

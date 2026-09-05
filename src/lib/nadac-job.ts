@@ -94,8 +94,8 @@ export async function runNadacFetch(
     if (j?.runId === runId) await write({ ...j, step: text });
   };
   try {
-    await step(`Downloading ${what}`);
-    const r = await fetchNadacFrom(sources);
+    await step(`Fetching ${what}`);
+    const r = await fetchNadacFrom(sources, step);
     if (!(await ours())) return;
     const j = await nadacJob();
     await write({ ...j!, state: r.ok ? "done" : "failed", finishedAt: new Date().toISOString(), step: r.message, result: r, error: r.ok ? undefined : r.message });
