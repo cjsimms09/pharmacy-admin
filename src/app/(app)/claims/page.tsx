@@ -83,8 +83,10 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
         <p className="mt-1 text-xs text-ink-3">
           PioneerRx emails the <b>Rx Transaction Details By Submission Type</b> report at 6:30 each evening, named{" "}
           <span className="font-mono">Daily (date)</span>. The site recognises it by its title line, not its name. A paid
-          row becomes a claim, a reversal cancels the claim it names, and a row with no completed date is not yet sold
-          and waits. If it does not load, the <Link href="/inbox" className="text-accent underline">Inbox</Link> line
+          row becomes a claim and a reversal cancels the claim it names. A paid row with no completed date had not been
+          picked up when the report ran; it is kept, because the report is drawn by the day a claim was transmitted and
+          that row will not come round again — if the patient never comes, the return to stock arrives as a reversal.
+          If it does not load, the <Link href="/inbox" className="text-accent underline">Inbox</Link> line
           says how it came and what to change.
         </p>
         <ul className="mt-3 grid gap-1 text-xs sm:grid-cols-3">

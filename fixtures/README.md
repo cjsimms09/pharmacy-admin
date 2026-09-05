@@ -25,7 +25,7 @@ arrives rather than what somebody remembers arriving.
 | `invoice-ipc.txt` | text layer of an IPC invoice | reading IPC lines in full (today: NDC + amount only) |
 | `invoice-ipd.txt` | text layer of an IPD invoice | same for IPD, plus the per-schedule subtotals |
 | `catalog-mck.txt` | the scheduled `Mck9_6_2026` export, first supplier block | already covered by `tests/pioneer-catalog.test.ts`; a real header line is still worth having |
-| `rx-transactions.txt` | the daily "Rx Transaction Details By Submission Type" report | already covered by `tests/rx-transactions.test.ts` |
+| `rx-transactions.txt` | the daily "Rx Transaction Details By Submission Type" report | **committed** — cut from the real 5 Sept 2026 file, identifiers changed; `tests/rx-transactions.test.ts` reads it |
 | `nadac-weekly-head.csv` | first ten lines of a CMS weekly file | pins the column spelling the CSV download actually uses |
 | `rebate-schedule-mckesson.md` | the OneStop tier ladder, in words, with the ratio definition as the agreement states it | fills in `/suppliers/[id]/terms` correctly; the numbers can be real, they are commercial not personal |
 | `return-policy-*.md` | each supplier's return policy, in words | same |

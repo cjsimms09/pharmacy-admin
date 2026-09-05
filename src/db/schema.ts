@@ -1608,6 +1608,15 @@ export const claims = sqliteTable(
      */
     status: text("status", { enum: ["paid", "reversed"] }).notNull().default("paid"),
     reversedOn: text("reversed_on"),
+    /**
+     * The day the fill was sold, as the transaction report had it.
+     *
+     * Null means the claim had been transmitted but not picked up when the report was drawn. The
+     * report is drawn by transmission day, so this stays null unless a later file (a report run
+     * over a window that reaches back) carries the same row with the date filled in. A claim never
+     * picked up is not deleted; its reversal arrives in a later day's file and marks it reversed.
+     */
+    completedAt: text("completed_at"),
     /** Identifies one row of the transaction report, so a re-sent day is not loaded twice. */
     transactionKey: text("transaction_key"),
     /** The transaction-report row that reversed this claim, so a re-sent reversal is recognised too. */

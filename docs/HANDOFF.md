@@ -27,9 +27,21 @@ file is how they talk.
 
 ## What the cloud session added (branch `claude/repo-audit-catalog-claims-2l37sj`, September 2026)
 
-Built on `feature/compliance` at `cf2e71a`. `npm run typecheck` clean; `npm test` 991 passing
-with the same 6 failures the base branch had (all in `tests/alerts.test.ts`, "finding things by
-name" — not touched here).
+Built on `feature/compliance` at `cf2e71a`. The pharmacy session merged the first five commits
+in `4ee3e66` (renumbering the migration to `0049`, and keeping its own `invoice_lines` table in
+place of `supplier_invoice_lines` — see the note in `0049_supplier_terms_and_invoice_lines.sql`).
+The transaction-feed commit below came after that merge; its migration is `0052`, which follows
+the pharmacy session's `0050` and `0051` and has been applied cleanly on top of them.
+
+Pull request #2 is where the two sessions talk: results of live checks, and a word before either
+side edits a file the other is working in.
+
+**CI on `feature/compliance` is red on its own** (run 322): six failures in `tests/alerts.test.ts`
+("finding things by name") that predate both sessions' work, and
+`tests/supplier-terms-store.test.ts`, which runs against the real database and so fails on a
+runner that has none. The store test passes on a migrated database. It would pass in CI if its
+`before` hook pointed `DATABASE_PATH` at a scratch file and ran `scripts/migrate.ts` before
+importing `src/db`.
 
 ### NDC handling — a correctness fix
 - `src/lib/ndc.ts` is now the one converter. Every hyphenated FDA layout converts exactly; a
@@ -81,21 +93,56 @@ name" — not touched here).
   which address answered. Nothing here was run against CMS from the cloud (its network is
   blocked for those hosts).
 
+### The daily transaction report — a row that never comes back
+The real 5 September file (period "transmitted/processed from 9/5 12:00 AM to 9/6 12:00 AM",
+printed 1:51 PM) was run through `parseRxTransactions` and `planTransactions`: 135 rows read, no
+NDC or column problems. But **72 of them were being thrown away**, 65 of the 97 paid rows, as
+"not yet sold (no completed date)". The report is drawn by the day a claim was *transmitted*, and
+the completed date is a property of the fill, not of the row (a rejected retry on 5 September of a
+fill sold on 27 June prints the June date). So a claim sent Tuesday and picked up Thursday is in
+Tuesday's file without a completed date and in no later file at all — and the reversal that arrives
+if the patient never comes is in *its* day's file, also without a completed date, and was being
+skipped for the same reason. That is where the "reversals that matched nothing" were coming from.
+
+- `planTransactions` now stores every paid row and applies every reversal, whatever the completed
+  date; `requireCompleted: true` restores the old rule for a report drawn by sale date.
+- `claims.completed_at` (migration `0049`) holds the sale date when the report had it. A re-sent
+  row that now carries one fills it in (`plan.markSold`), so a report run over a window that
+  reaches back a few days (duplicates are keyed and cost nothing) would complete the picture.
+- PCNs are read upper-case; the file prints them as typed per plan ("meddprime", "MEDDPRIME").
+- `fixtures/rx-transactions.txt` is the real shape with identifiers changed, and is now under test.
+- **For the pharmacy session:** the sentence on `/reports` that says an unsold row "waits for the
+  day it sells" is now wrong (that page is under a path the cloud session may not open). And the
+  scheduled report should cover *yesterday*, or a window ending yesterday — a report printed at
+  1:51 PM cannot contain the afternoon's transactions, and one run at 6:30 PM for "today" loses
+  everything after 6:30.
+
 ### Files this branch touched
-`src/db/schema.ts`, `drizzle/0048_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources}.ts` (new),
+`src/db/schema.ts`, `drizzle/0048_*`, `drizzle/0049_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources}.ts` (new),
 `src/lib/{claims,rx-transactions,suppliers,suppliers-registry,pioneer-catalog,invoices,nadac-fetch,settings}.ts`,
 `src/app/(app)/suppliers/page.tsx`, `src/app/(app)/suppliers/[id]/terms/page.tsx` (new),
-`src/app/(app)/inventory/invoices/page.tsx`, `src/app/(app)/nadac/page.tsx`,
-`tests/{ndc,supplier-terms,invoice-lines,nadac-datasets}.test.ts` (new), `tests/{claims,suppliers-registry}.test.ts`,
-`docs/HANDOFF.md`, `docs/reference/nadac-api.md`, `fixtures/README.md`.
+`src/app/(app)/inventory/invoices/page.tsx`, `src/app/(app)/nadac/page.tsx`, `src/app/(app)/claims/page.tsx`,
+`tests/{ndc,supplier-terms,invoice-lines,nadac-datasets}.test.ts` (new), `tests/{claims,suppliers-registry,rx-transactions}.test.ts`,
+`docs/HANDOFF.md`, `docs/reference/nadac-api.md`, `fixtures/README.md`, `fixtures/rx-transactions.txt` (new).
 
-## What the cloud session would do next, in order
-1. Read IPC and IPD invoice layouts in full (needs fixtures).
-2. Purchases by product: a page that adds `supplier_invoice_lines` up by NDC and month, beside
-   the catalogue price for the same NDC and supplier — the first "is the invoice price what the
-   catalogue said" check, and the base of the rebate-tier ratio.
-3. Apply the rebate tier to the purchasing comparison (`purchasingOpportunities` in
-   `suppliers.ts`) using `rebateTierFor` and the catalogue's rebated flag.
-4. A returns list from on-hand/expiry data once that report is scheduled out of PioneerRx.
-5. Contract comparison ("what would each supplier's terms have cost on last quarter's actual
-   lines") once two quarters of lines are held — PLAN.md §4.5 "contract replay".
+## Who owns what now
+
+The list that used to be here ("what the cloud session would do next") is withdrawn: the pharmacy
+session built those things while the branch was open — invoice lines reconciled to the printed
+total (`invoice-lines.ts`, `invoice_lines`), the product ledger (`product-ledger.ts`), the rebate
+report and rates read off McKesson's own statement (`rebate-report.ts`, `rebate-rates.ts`,
+`purchase-ratio.ts`), returns due (`returns-due.ts`). Those, and everything that needs the real
+site, mailbox, database or CMS, are the pharmacy session's.
+
+The cloud session keeps to what can be proved on fixtures: the feed readers and the rules that
+decide what a row means (`rx-transactions.ts`, `pioneer-catalog.ts`, `ndc.ts`, the claims
+importer, the NADAC source discovery), and reading real files through them when the pharmacy
+sends them. It asks on pull request #2 before touching anything else.
+
+Open on the cloud side, waiting on the pharmacy session:
+- The live checks listed above (NADAC listing and one week's fetch; catalogue name on each
+  register row; the `/reports` sentence; the scheduled report's window).
+- Redacted IPC and IPD invoice fixtures, if their layouts are not already read in full.
+- Once a few days of the transaction feed have loaded under the new rule: how many claims have
+  no `completed_at`, and how many reversals matched nothing — both should fall towards zero as
+  earlier days are held.

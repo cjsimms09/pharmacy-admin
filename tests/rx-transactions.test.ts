@@ -1,5 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import {
   parseRxTransactions,
   planTransactions,
@@ -153,9 +154,38 @@ describe("deciding what each transaction does", () => {
     assert.ok(plan.insertPaid.some((t) => t.rxNumber === "336853"));
   });
 
-  test("a row with no completed date is not yet sold and waits", () => {
-    assert.ok(!plan.insertPaid.some((t) => t.rxNumber === "321666"));
-    assert.ok(plan.skipped.some((s) => s.txn.rxNumber === "321666" && /not yet sold/.test(s.why)));
+  test("a paid row with no completed date is stored too, with the sale date blank: the report is drawn by transmission day and it will not come round again", () => {
+    const t = plan.insertPaid.find((x) => x.rxNumber === "321666");
+    assert.ok(t);
+    assert.equal(t.completedAt, null);
+    assert.ok(!plan.skipped.some((s) => s.txn.rxNumber === "321666"));
+  });
+
+  test("a reversal with no completed date still takes back the claim it names — that is how a return to stock arrives", () => {
+    const unsoldThenReturned = file(
+      "Third Party:,610455 (KSPDP) - 610455",
+      "334136-0,A,$0.00,10198268F,,($0.62),$0.00,($0.62),,09/02/26,610455,-5.0000,($0.68),KSPDP,72603070102,($0.42)",
+    );
+    const earlier = { id: "c9", rxNumber: "334136", fillNumber: 0, bin: "610455", ndc11: "72603070102", remitCents: 0, copayCents: 62 };
+    const p = planTransactions(parseRxTransactions(unsoldThenReturned).rows, { keys: new Set(), paid: [earlier] });
+    assert.deepEqual(p.reverseExisting.map((r) => r.claimId), ["c9"]);
+  });
+
+  test("a re-sent row that now carries a completed date fills the sale date in, and nothing else changes", () => {
+    const unsoldKey = rows.find((x) => x.rxNumber === "321666")!.transactionKey;
+    const later = SAMPLE.replace(
+      "321666-4,P,$11.36,2CYA,EN45,$0.00,$10.50,$0.00,,09/05/26",
+      "321666-4,P,$11.36,2CYA,EN45,$0.00,$10.50,$0.00,9/7/2026 4:10:00 PM,09/05/26",
+    );
+    const p = planTransactions(parseRxTransactions(later).rows, { keys: new Set([unsoldKey]), paid: [], unsold: new Map([[unsoldKey, "c7"]]) }, { ignoreBins: ["028249"] });
+    assert.deepEqual(p.markSold, [{ claimId: "c7", completedAt: "9/7/2026 4:10:00 PM" }]);
+    assert.equal(p.duplicates, 1);
+    assert.ok(!p.insertPaid.some((t) => t.rxNumber === "321666"));
+  });
+
+  test("the PCN is read in one case however the plan was typed", () => {
+    const typed = file("Third Party:,610014 (MEDDPRIME) - 610014", "330001-0,P,$5.00,G1,,$0.00,$1.00,$0.00,,09/05/26,610014,30.0000,$1.00,meddprime,00093505698,$3.00");
+    assert.equal(parseRxTransactions(typed).rows[0].pcn, "MEDDPRIME");
   });
 
   test("a rejected row and the cash plan are set aside with reasons", () => {
@@ -206,8 +236,33 @@ describe("deciding what each transaction does", () => {
     assert.equal(again.duplicates, keys.size);
   });
 
-  test("with the completed-date rule switched off, unsold rows load too", () => {
-    const all = planTransactions(rows, { keys: new Set(), paid: [] }, { ignoreBins: ["028249"], requireCompleted: false });
-    assert.ok(all.insertPaid.some((t: Transaction) => t.rxNumber === "321666"));
+  test("with the completed-date rule switched on, unsold rows wait instead", () => {
+    const sold = planTransactions(rows, { keys: new Set(), paid: [] }, { ignoreBins: ["028249"], requireCompleted: true });
+    assert.ok(!sold.insertPaid.some((t: Transaction) => t.rxNumber === "321666"));
+    assert.ok(sold.skipped.some((s) => s.txn.rxNumber === "321666" && /not yet sold/.test(s.why)));
+  });
+});
+
+describe("the fixture cut from a real day's report", () => {
+  const text = fs.readFileSync(new URL("../fixtures/rx-transactions.txt", import.meta.url), "utf8");
+  const r = parseRxTransactions(text);
+
+  test("reads with no problems, across a page break, and every row kind lands", () => {
+    assert.deepEqual(r.problems, []);
+    assert.deepEqual(r.period, { from: "2026-09-05", to: "2026-09-06" });
+    const by = (rx: string) => r.rows.filter((t) => t.rxNumber === rx);
+    assert.equal(by("400001").length, 1); // sold
+    assert.equal(by("400002").length, 1); // not picked up
+    assert.equal(by("400005").length, 2); // primary and secondary payer for one fill
+    assert.equal(by("400009")[0].completedAt, "6/27/2026 3:12:40 PM"); // completed date is the fill's, whatever day the row is from
+    assert.equal(by("400006")[0].groupNumber, "714553005");
+    assert.ok(r.rows.filter((t) => t.status === "A").length >= 4);
+  });
+
+  test("planned against nothing held: money is kept from the day the plan agreed to it", () => {
+    const plan = planTransactions(r.rows, { keys: new Set(), paid: [] }, { ignoreBins: ["028249"] });
+    assert.ok(plan.insertPaid.some((t) => t.rxNumber === "400002" && t.completedAt === null));
+    assert.equal(plan.insertReversedPaid.filter((x) => x.paid.rxNumber === "400004").length, 1);
+    assert.ok(plan.skipped.every((s) => /rejected|cash plan/.test(s.why)));
   });
 });
