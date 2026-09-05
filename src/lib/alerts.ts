@@ -299,6 +299,30 @@ export async function alerts(): Promise<Alert[]> {
     }
   }
 
+  /*
+   * A certified record that has stopped matching what it certifies.
+   *
+   * Never a nag to sign: nothing sets a cadence for certifying the training file, and a monthly
+   * reminder to re-sign a record that has not changed is exactly the kind of alert that teaches
+   * somebody to ignore the rest. This fires only where a signature already exists and the file has
+   * moved on underneath it — which is the state worth knowing about, because a certificate against
+   * a document that has since changed is worse than no certificate at all.
+   */
+  if (people.length > 0) {
+    const { trainingFileSignature } = await import("./record-signatures");
+    const sig = await trainingFileSignature();
+    if (sig.changed) {
+      out.push({
+        key: "training-file-signature",
+        level: "soon",
+        title: "The workforce training record has changed since you certified it",
+        why: `Signed by ${sig.signedName} on ${sig.signedOn}. Training has been recorded since, so the certificate no longer covers what is on the file. Withdraw it and sign again, and it covers the current record.`,
+        href: "/compliance/training/records",
+        action: "Look at it",
+      });
+    }
+  }
+
   // ── A pharmacy with nobody in charge of it ────────────────────────
   if (people.length > 0 && !people.some((p) => p.isPic)) {
     out.push({

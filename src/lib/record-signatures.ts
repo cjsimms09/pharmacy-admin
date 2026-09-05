@@ -232,3 +232,49 @@ export function contentChanged(sig: RecordSignature | null, content: string | un
   if (!sig?.contentHash || !content) return false;
   return sig.contentHash !== fingerprint(content);
 }
+
+/**
+ * Whether the workforce training record needs signing, and why.
+ *
+ * The question asked was whether this is a monthly job. It is not, and nothing in the rules sets a
+ * cadence for it at all — the pharmacy is required to *document* training (45 CFR 164.530(j)(1)(ii)
+ * for HIPAA, 29 CFR 1910.1030(h)(2) for bloodborne) and those records exist whether or not anybody
+ * certifies them. Signing turns a printout of a database into a certified record, which is what
+ * makes it worth handing over.
+ *
+ * So there are exactly two moments worth signing: when the year's file is complete, and when
+ * something has changed since the last signature. The second is the one that was invisible. The
+ * page said so if you opened it, and nothing anywhere said to open it — so a certified record
+ * quietly stopped matching what it certified, which is worse than never having signed it.
+ */
+export type TrainingFileSignatureState = {
+  recordKey: string;
+  signed: boolean;
+  signedOn: string | null;
+  signedName: string | null;
+  /** Signed, but people or completions have changed since. */
+  changed: boolean;
+  completions: number;
+};
+
+export async function trainingFileSignature(): Promise<TrainingFileSignatureState> {
+  const { trainingFile } = await import("./training-records");
+  const file = await trainingFile();
+  const recordKey = `${file.preparedOn.slice(0, 4)}-current`;
+  const signature = await signatureFor("training_file", recordKey);
+
+  // The same string the page binds the signature to. Kept in step deliberately: two different
+  // ideas of "what was signed" would make the whole mechanism lie.
+  const content = file.people
+    .map((p) => `${p.name}|${p.lines.map((l) => `${l.type}:${l.completedOn ?? ""}`).join(",")}`)
+    .join("\n");
+
+  return {
+    recordKey,
+    signed: Boolean(signature),
+    signedOn: signature?.signedAt?.slice(0, 10) ?? null,
+    signedName: signature?.signedName ?? null,
+    changed: contentChanged(signature, content),
+    completions: file.people.reduce((n, p) => n + p.lines.length, 0),
+  };
+}

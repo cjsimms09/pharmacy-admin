@@ -204,6 +204,23 @@ export default async function TrainingRecordsPage({
         </ul>
       </div>
 
+      {/*
+        When this needs signing, said on the page.
+
+        The question was whether it is a monthly job. It is not, and nothing sets a cadence for it
+        — so the page should say that rather than leaving somebody to wonder and either sign it
+        twelve times a year for nothing or never sign it at all.
+      */}
+      <p className="no-print mt-6 text-xs text-ink-3">
+        <b>When to sign this.</b> There is no required cadence. The pharmacy is required to keep these records —
+        45 CFR 164.530(j)(1)(ii) for the privacy training, 29 CFR 1910.1030(h)(2) for bloodborne — and they exist
+        whether or not anybody certifies them. Signing turns a printout of a database into a certified record, which
+        is what makes it worth handing to an inspector. Two moments are worth it: once the year&rsquo;s file is
+        complete, and again whenever it has changed since you last signed. You will not be reminded to re-sign an
+        unchanged file, because that is a reminder nobody would read by the third month. You <i>will</i> be told when
+        the file has moved on underneath a signature you already gave.
+      </p>
+
       <SignBlock
         kind="training_file"
         recordKey={recordKey}
