@@ -69,7 +69,13 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
                     {i.status === "stored" && !i.scanned && <div className="text-xs text-ink-3">Stored without a column check (not a text report).</div>}
                     {i.routedAs && i.routedAs !== "unrecognised" && (
                       <div className="mt-1 text-xs">
-                        <span className="badge badge-ok">loaded as {i.routedAs.replace(/_/g, " ")}</span>
+                        {/* Recognised is not loaded. A catalogue refused for naming the wrong supplier was
+                            recognised perfectly well, and a green badge on it would say the opposite. */}
+                        {/could not be loaded|nothing could be loaded/i.test(i.routeResult ?? "") ? (
+                          <span className="badge badge-crit">recognised as {i.routedAs.replace(/_/g, " ")}, not loaded</span>
+                        ) : (
+                          <span className="badge badge-ok">loaded as {i.routedAs.replace(/_/g, " ")}</span>
+                        )}
                         {i.routeResult && <div className="mt-0.5 max-w-md text-ink-2">{i.routeResult}</div>}
                       </div>
                     )}
