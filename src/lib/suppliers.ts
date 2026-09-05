@@ -444,6 +444,24 @@ export async function supplierSummary() {
 
 export { formatCents };
 
+/**
+ * The scheduled catalogues, one line per supplier the pharmacy expects: when each last arrived and
+ * from what file. The four names are the pharmacy's own schedule (Mck, IPD, IPC, Parmed, one file
+ * each, Sundays), so a supplier that has never arrived is a row saying so rather than an absence.
+ */
+export async function catalogSchedule(): Promise<{ supplier: string; lastAt: string | null; fileName: string | null; rowsRead: number | null; pricedOn: string | null }[]> {
+  const { FILE_NAME_CODES, canonicalSupplier } = await import("./pioneer-catalog");
+  const expected = FILE_NAME_CODES.map((c) => canonicalSupplier(c));
+  const imports = await db.query.supplierImports.findMany({ orderBy: (i, { desc }) => [desc(i.createdAt)], limit: 200 });
+  const seen = new Map<string, (typeof imports)[number]>();
+  for (const i of imports) if (!seen.has(i.supplier)) seen.set(i.supplier, i);
+  const names = [...expected, ...[...seen.keys()].filter((n) => !expected.includes(n))];
+  return names.map((supplier) => {
+    const i = seen.get(supplier);
+    return { supplier, lastAt: i?.createdAt ?? null, fileName: i?.fileName ?? null, rowsRead: i?.rowsRead ?? null, pricedOn: i?.pricedOn ?? null };
+  });
+}
+
 /** When a supplier price file last arrived, across every supplier. */
 export async function latestSupplierImport(): Promise<string | null> {
   const rows = await db.query.supplierImports.findMany({

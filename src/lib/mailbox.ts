@@ -11,6 +11,8 @@ import { storeFile, ALLOWED_MIME, MAX_FILE_BYTES } from "./files";
 import { classify, parseSupplierRules, supplierFor } from "./autoroute";
 import { importClaims } from "./claims";
 import { importPioneerCatalog } from "./suppliers";
+import { describeFileName } from "./pioneer-catalog";
+import { acceptableAttachment } from "./autoroute";
 import { importSupplierCatalog } from "./suppliers";
 import { allSuppliers, supplierForSender } from "./suppliers-registry";
 import { loadNadacFiles, nadacDir } from "./nadac";
@@ -43,7 +45,6 @@ const ATTACHMENT_MIME = new Set([
   "application/octet-stream", // Gmail sends some report types this way; the extension check below decides
 ]);
 const ATTACHMENT_EXT = /\.(pdf|csv|tsv|txt|xls|xlsx|jpg|jpeg|png)$/i;
-
 export class MailNotConfiguredError extends Error {
   constructor() {
     super("The mailbox isn't set up yet. Add the address and app password under Settings → Email.");
@@ -347,10 +348,12 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
             continue;
           }
 
-          const attachments = (parsed.attachments ?? []).filter(
-            (a) => a.filename && ATTACHMENT_EXT.test(a.filename) && ATTACHMENT_MIME.has(a.contentType ?? ""),
-          );
+          const verdicts = (parsed.attachments ?? []).map((a) => ({ a, v: acceptableAttachment({ filename: a.filename, contentType: a.contentType, content: a.content as Buffer }) }));
+          const attachments = verdicts.filter((x) => x.v.ok).map((x) => x.a);
           if (attachments.length === 0) {
+            // Say what was on the message, not just that nothing usable was. On the first Sunday
+            // the scheduled files arrive, this line is how somebody finds out they came as a zip.
+            const declined = verdicts.filter((x) => !x.v.ok).map((x) => (x.v as { why: string }).why);
             await db.insert(schema.inboxItems).values({
               id: newId(),
               messageId,
@@ -358,7 +361,9 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
               fromAddress: from,
               subject,
               status: "ignored",
-              reason: "No report attachment on this message.",
+              reason: declined.length
+                ? `Nothing on this message was a type this reads: ${declined.slice(0, 5).join("; ")}${declined.length > 5 ? "; …" : ""}.`
+                : "No attachment on this message.",
             });
             result.ignored++;
             await client.messageFlagsAdd(String(uid), ["\\Seen"], { uid: true });
@@ -483,7 +488,11 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
             // the document exactly as it was — the fallback is the behaviour we already had.
             let routedAs: string | null = null;
             let routeResult: string | null = null;
-            if ((s.mail_auto_import ?? "").toLowerCase() === "yes") {
+            if ((s.mail_auto_import ?? "").toLowerCase() !== "yes") {
+              // Filed, and the line says why it went no further — otherwise a scheduled report that
+              // arrives with the switch off looks identical to one that arrived and failed.
+              routeResult = "Filed only: automatic loading is switched off under Settings → Email.";
+            } else {
               const cls = classify(fileName, buf);
               routedAs = cls.kind;
               try {
@@ -495,10 +504,15 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
                   // Names its own supplier inside the file, so no sender rule is needed — and the
                   // filename is checked against it, so MCKCatalog carrying IPD prices is refused.
                   const r = await importPioneerCatalog(buf, fileName, ctx.userId ?? "mailbox-sweep");
-                  routeResult = r.suppliers.length
-                    ? r.suppliers.map((x) => `${x.supplier}: ${x.itemsAdded} new, ${x.itemsUpdated} repriced${x.shortDated ? `, ${x.shortDated} short-dated lots noted` : ""}${x.rebated !== null ? `, ${x.rebated} rebated` : ", no rebate column"}`).join("; ") +
-                      (r.pricedOn ? ` (prices as of ${r.pricedOn})` : "")
-                    : `Recognised as a PioneerRx catalogue but nothing could be loaded: ${r.problems.join(" ")}`;
+                  const loaded = r.suppliers
+                    .map((x) => `${x.supplier}: ${x.itemsAdded.toLocaleString()} new, ${x.itemsUpdated.toLocaleString()} repriced${x.shortDated ? `, ${x.shortDated} short-dated lots noted` : ""}${x.rebated !== null ? `, ${x.rebated.toLocaleString()} rebated` : ", no rebate column"}`)
+                    .join("; ");
+                  const bits = [
+                    r.suppliers.length ? loaded + (r.pricedOn ? ` (prices as of ${r.pricedOn})` : "") : "Recognised as a PioneerRx catalogue but nothing could be loaded.",
+                    ...r.problems,
+                    describeFileName(fileName),
+                  ];
+                  routeResult = bits.join(" ");
                   if (r.suppliers.length) result.imported++;
                 } else if (cls.kind === "supplier_catalog") {
                   const supplier = supplierFor(parseSupplierRules(s.mail_supplier_rules ?? ""), from, subject);

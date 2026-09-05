@@ -1,8 +1,13 @@
+import type React from "react";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { importSupplierCatalog, importPioneerCatalog, purchasingOpportunities, supplierSummary } from "@/lib/suppliers";
+import { importSupplierCatalog, importPioneerCatalog, purchasingOpportunities, supplierSummary, catalogSchedule } from "@/lib/suppliers";
+import { getSettings } from "@/lib/settings";
+import { hasMailPassword } from "@/lib/mailbox";
+import { FILE_NAME_CODES } from "@/lib/pioneer-catalog";
+import Link from "next/link";
 import { looksLikePioneerCatalog } from "@/lib/pioneer-catalog";
 import { formatCents } from "@/lib/money";
 import { requireReimbursement } from "@/lib/features";
@@ -18,7 +23,9 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
   await requireReimbursement();
   await requireUser();
   const { ok, error } = await searchParams;
-  const [opps, summary] = await Promise.all([purchasingOpportunities(), supplierSummary()]);
+  const [opps, summary, schedule, s, mailReady] = await Promise.all([purchasingOpportunities(), supplierSummary(), catalogSchedule(), getSettings(), hasMailPassword()]);
+  const autoImport = (s.mail_auto_import ?? "").toLowerCase() === "yes";
+  const mailOn = s.mail_enabled === "yes";
 
   async function upload(fd: FormData) {
     "use server";
@@ -80,7 +87,7 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
           <Field label="Supplier">
             <input name="supplier" placeholder="McKesson" className="w-48 rounded-md border border-line px-3 py-2 text-sm" />
           </Field>
-          <input type="file" name="file" accept=".xlsx,.csv" className="text-sm" />
+          <input type="file" name="file" accept=".xlsx,.csv,.txt" className="text-sm" />
           <button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Load</button>
         </form>
 
@@ -94,6 +101,70 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
             ))}
           </ul>
         )}
+      </section>
+
+      {/*
+        The Sunday files, and whether the door is open for them.
+
+        Four scheduled PioneerRx exports, one per supplier, named Supplier + run date, emailed to
+        the site's mailbox. Everything that has to be true for them to load on their own is listed
+        here with its state, and each supplier has a row saying when its file last came — so on the
+        Monday after the first Sunday, "did it work" is answered by one glance at this panel, and
+        "what went wrong" by the Inbox line it points to.
+      */}
+      <section className="my-4 rounded-lg border border-line bg-surface p-4">
+        <h2 className="text-sm font-semibold">Scheduled catalogues</h2>
+        <p className="mt-1 text-xs text-ink-3">
+          PioneerRx emails one file per supplier, named <span className="font-mono">Supplier</span> + run date
+          &mdash; {FILE_NAME_CODES.map((c) => <span key={c} className="font-mono">{c}9_6_2026</span>).reduce<React.ReactNode[]>((acc, x, i) => (i ? [...acc, ", ", x] : [x]), [])}.
+          The site reads the supplier from inside the file and checks it against the name; a file named for one supplier
+          that carries another is refused, and the <Link href="/inbox" className="text-accent underline">Inbox</Link> line
+          says so.
+        </p>
+        <ul className="mt-3 grid gap-1 text-xs sm:grid-cols-3">
+          <li className="flex items-center gap-2">
+            <span className={`badge ${mailReady ? "badge-ok" : "badge-crit"}`}>{mailReady ? "ready" : "not set up"}</span>
+            Mailbox connected {!mailReady && <Link href="/settings/email" className="text-accent underline">(set up)</Link>}
+          </li>
+          <li className="flex items-center gap-2">
+            <span className={`badge ${mailOn ? "badge-ok" : "badge-crit"}`}>{mailOn ? "on" : "off"}</span>
+            Checked automatically {!mailOn && <Link href="/settings/email" className="text-accent underline">(turn on)</Link>}
+          </li>
+          <li className="flex items-center gap-2">
+            <span className={`badge ${autoImport ? "badge-ok" : "badge-crit"}`}>{autoImport ? "on" : "off"}</span>
+            Loaded on arrival {!autoImport && <Link href="/settings/email" className="text-accent underline">(turn on)</Link>}
+          </li>
+        </ul>
+        {s.mail_allowed_senders?.trim() && (
+          <p className="mt-2 text-xs text-ink-3">
+            Only listed senders are read. The address PioneerRx sends from must be on the list under Settings → Email, or
+            the message is left unread and the Inbox says &ldquo;sender is not on the allowed list&rdquo;.
+          </p>
+        )}
+        <div className="mt-3 overflow-x-auto">
+          <table className="table">
+            <thead>
+              <tr><th>Supplier</th><th>Last file</th><th>Received</th><th className="text-right">Items read</th><th>Prices as of</th></tr>
+            </thead>
+            <tbody>
+              {schedule.map((row) => {
+                const age = row.lastAt ? (Date.now() - Date.parse(row.lastAt)) / 86_400_000 : null;
+                const tone = age === null ? "badge-muted" : age > 9 ? "badge-warn" : "badge-ok";
+                return (
+                  <tr key={row.supplier}>
+                    <td className="font-medium">{row.supplier}</td>
+                    <td className="font-mono text-xs">{row.fileName ?? <span className="text-ink-3">never arrived</span>}</td>
+                    <td className="whitespace-nowrap text-xs">
+                      {row.lastAt ? <><span className={`badge ${tone}`}>{age! < 1 ? "today" : `${Math.floor(age!)}d ago`}</span> {row.lastAt.slice(0, 10)}</> : <span className="badge badge-muted">waiting</span>}
+                    </td>
+                    <td className="text-right tabular-nums">{row.rowsRead === null ? "—" : row.rowsRead.toLocaleString()}</td>
+                    <td className="text-xs">{row.pricedOn ?? "—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       {!opps.ready ? (

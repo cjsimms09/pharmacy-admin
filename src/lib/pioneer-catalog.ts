@@ -106,17 +106,60 @@ export function canonicalSupplier(name: string): string {
   return SUPPLIER_ALIASES[k] ?? name.trim();
 }
 
-/** The supplier a filename like MCKCatalog_9_5_2026.txt claims to be for, or null. */
+/** The supplier codes the pharmacy uses at the front of a scheduled file's name. */
+export const FILE_NAME_CODES = ["Mck", "IPD", "IPC", "Parmed"] as const;
+
+/**
+ * The supplier a filename claims to be for, or null where it claims nothing.
+ *
+ * The scheduled export is named Supplier + run date: Mck9_6_2026, IPD_9_6_2026, ParmedCatalog_9_6_2026
+ * — the pharmacy's abbreviation first, then whatever PioneerRx puts after it. The abbreviation has
+ * to be one this knows (the alias table above); a name that begins with anything else, including
+ * the "Supplier_Catalog_Item_Search_Results" the report is called by default, claims nothing, and
+ * the supplier named inside the file stands alone. Claiming on an unknown prefix once refused the
+ * hand export for being "named for Supplier".
+ */
 export function supplierFromFileName(fileName: string): string | null {
-  const m = /^([A-Za-z&. ]+?)[-_ ]?catalog/i.exec(fileName.trim());
-  return m ? canonicalSupplier(m[1]) : null;
+  const base = fileName.trim().replace(/^.*[\\/]/, "");
+  const m = /^([A-Za-z&. ]+?)(?:[-_ ]?catalog(?![a-z])|[-_ ]?\d|[-_ .]|$)/i.exec(base);
+  if (!m) return null;
+  const key = m[1].trim().toLowerCase().replace(/\s+/g, " ");
+  return key in SUPPLIER_ALIASES ? SUPPLIER_ALIASES[key] : null;
 }
 
-/** The date a filename like MCKCatalog_9_5_2026 carries, as ISO, or null. */
+/**
+ * The run date a filename carries, as ISO, or null.
+ *
+ * PioneerRx's report-run date has been seen as 9_5_2026; it may equally come as 9-5-2026,
+ * 2026-09-05, 20260905 or 09052026, so all of those are read. An eight-digit run of numbers is
+ * taken as year-first when it begins with 20, month-first otherwise.
+ */
 export function dateFromFileName(fileName: string): string | null {
-  const m = /(\d{1,2})[_-](\d{1,2})[_-](\d{4})/.exec(fileName);
-  if (!m) return null;
-  return `${m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
+  const base = fileName.replace(/^.*[\\/]/, "");
+  let m = /(\d{4})[-_.](\d{1,2})[-_.](\d{1,2})/.exec(base);
+  if (m && Number(m[2]) <= 12 && Number(m[3]) <= 31) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+  m = /(\d{1,2})[-_.](\d{1,2})[-_.](\d{4})/.exec(base);
+  if (m && Number(m[1]) <= 12 && Number(m[2]) <= 31) return `${m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
+  m = /(?<!\d)(\d{8})(?!\d)/.exec(base);
+  if (m) {
+    const d = m[1];
+    const yearFirst = d.startsWith("20");
+    const [y, mo, da] = yearFirst ? [d.slice(0, 4), d.slice(4, 6), d.slice(6, 8)] : [d.slice(4, 8), d.slice(0, 2), d.slice(2, 4)];
+    if (Number(mo) >= 1 && Number(mo) <= 12 && Number(da) >= 1 && Number(da) <= 31) return `${y}-${mo}-${da}`;
+  }
+  return null;
+}
+
+/**
+ * What a filename told us, in a sentence, for the inbox line — so that on the first Sunday
+ * somebody can see how the file came named and whether that name did its job.
+ */
+export function describeFileName(fileName: string): string {
+  const supplier = supplierFromFileName(fileName);
+  const date = dateFromFileName(fileName);
+  const codes = FILE_NAME_CODES.join(", ");
+  if (supplier) return `Named for ${supplier}${date ? `, run ${date}` : ", with no run date in the name"}.`;
+  return `The name does not begin with a supplier code (${codes}), so it was not checked against the supplier named inside${date ? `; run ${date}` : ""}.`;
 }
 
 const TITLE = "Supplier Catalog Item Search Results";

@@ -76,6 +76,8 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
                     {i.routedAs === "unrecognised" && (
                       <div className="mt-1 max-w-md text-xs text-ink-3">Filed only — {i.routeResult}</div>
                     )}
+                    {!i.routedAs && i.routeResult && <div className="mt-1 max-w-md text-xs text-ink-3">{i.routeResult}</div>}
+                    {whatToDo(i) && <div className="mt-1 max-w-md rounded-md border border-warn bg-warn-soft px-2 py-1 text-xs text-warn">{whatToDo(i)}</div>}
                   </td>
                   <td>
                     {/* An emailed CPR card is useless sitting here. This is where it becomes a
@@ -133,4 +135,24 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
       )}
     </>
   );
+}
+
+/**
+ * The fix, in a sentence, for a line that did not end in a loaded report.
+ *
+ * The line above it says what happened; this says what to change so it does not happen next
+ * Sunday. Derived from the recorded reason rather than stored, so a wording change here reaches
+ * old lines too.
+ */
+function whatToDo(i: { status: string; reason: string | null; routedAs: string | null; routeResult: string | null }): string | null {
+  const text = `${i.reason ?? ""} ${i.routeResult ?? ""}`;
+  if (/not on the allowed list/i.test(text)) return "Add this sender's address under Settings → Email → accepted senders, then press “Check for new mail now”.";
+  if (/type this reads|no file extension/i.test(text)) return "Have the report emailed as a plain text or CSV attachment (not zipped, not in the body of the email).";
+  if (/larger than 20 MB/i.test(text)) return "Schedule the report per supplier rather than all suppliers in one file, so each stays under the size limit.";
+  if (/automatic loading is switched off/i.test(text)) return "Turn on “Load recognised reports automatically” under Settings → Email, then load this one from Purchasing by hand.";
+  if (/named for .* but names/i.test(text)) return "The schedule that produces this file exports a different supplier's catalogue than its name says. Fix either the name or the supplier in the PioneerRx schedule.";
+  if (/split across lines but .* price lines/i.test(text)) return "The report's layout changed. Send the file to be looked at; nothing from that supplier was replaced.";
+  if (/nothing could be loaded/i.test(text)) return "The file was recognised as a catalogue but held no readable prices. Open it and check that it is the full Supplier Catalog Item Search Results export.";
+  if (i.routedAs === "unrecognised" && /catalog/i.test(text)) return "The file was not recognised as the PioneerRx catalogue export. It must begin with its own title line, “Supplier Catalog Item Search Results”.";
+  return null;
 }

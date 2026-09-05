@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { classify, headersOf, parseSupplierRules, supplierFor } from "../src/lib/autoroute";
+import { classify, headersOf, parseSupplierRules, supplierFor, acceptableAttachment } from "../src/lib/autoroute";
 
 /**
  * This runs unattended, overnight, with nobody watching. A file loaded as the wrong kind of
@@ -103,5 +103,37 @@ describe("supplier rules", () => {
 
   test("a line with no separator is ignored rather than half-read", () => {
     assert.equal(parseSupplierRules("just some text\n").length, 0);
+  });
+});
+
+describe("the scheduled PioneerRx catalogue, however it is named", () => {
+  const catalogue = Buffer.from("\ufeffSupplier Catalog Item Search Results\r\nMcKesson\r\nSupplier: McKessonStatus: Available\r\nSupplier Item Number\tName\tNDC\tPackage Size\tCost Per Unit\r\n", "utf8");
+
+  test("recognised by its title line whatever the extension, including none", () => {
+    assert.equal(classify("Mck9_6_2026.txt", catalogue).kind, "pioneer_catalog");
+    assert.equal(classify("Mck9_6_2026", catalogue).kind, "pioneer_catalog", "no extension");
+    assert.equal(classify("Mck9_6_2026.dat", catalogue).kind, "pioneer_catalog", "an odd extension");
+  });
+
+  test("an attachment with no extension is accepted when it is text, or when it is the catalogue", () => {
+    assert.ok(acceptableAttachment({ filename: "Mck9_6_2026", contentType: "text/plain" }).ok);
+    assert.ok(acceptableAttachment({ filename: "Mck9_6_2026", contentType: "application/octet-stream", content: catalogue }).ok);
+    const zip = acceptableAttachment({ filename: "Mck9_6_2026", contentType: "application/octet-stream", content: Buffer.from("PK\u0003\u0004") });
+    assert.equal(zip.ok, false);
+  });
+
+  test("what was declined is named, so the inbox can say how the file came", () => {
+    const v = acceptableAttachment({ filename: "catalogues.zip", contentType: "application/zip" });
+    assert.equal(v.ok, false);
+    assert.match((v as { why: string }).why, /catalogues\.zip/);
+    const t = acceptableAttachment({ filename: "Mck9_6_2026.txt", contentType: "application/zip" });
+    assert.equal(t.ok, false);
+    assert.match((t as { why: string }).why, /sent as application\/zip/);
+  });
+
+  test("the ordinary cases are unchanged", () => {
+    assert.ok(acceptableAttachment({ filename: "Mck9_6_2026.txt", contentType: "text/plain" }).ok);
+    assert.ok(acceptableAttachment({ filename: "claims.csv", contentType: "application/octet-stream" }).ok, "Gmail's octet-stream with a known extension");
+    assert.equal(acceptableAttachment({ filename: "", contentType: "text/plain" }).ok, false);
   });
 });

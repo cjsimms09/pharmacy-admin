@@ -9,6 +9,7 @@ import {
   dateFromFileName,
   canonicalSupplier,
   looksLikePioneerCatalog,
+  describeFileName,
 } from "../src/lib/pioneer-catalog";
 
 /**
@@ -304,6 +305,28 @@ describe("the filename the pharmacy chose", () => {
 
   test("an unknown supplier name passes through rather than being guessed", () => {
     assert.equal(canonicalSupplier("Some New Wholesaler"), "Some New Wholesaler");
+  });
+
+  test("Supplier + run date, the format the scheduled export will actually use", () => {
+    // "will come in this format Supplier{ReportRunDate}. Suppliers are Mck, IPD, IPC, Parmed."
+    assert.equal(supplierFromFileName("Mck9_6_2026.txt"), "McKesson");
+    assert.equal(supplierFromFileName("IPD9_6_2026.txt"), "IPD");
+    assert.equal(supplierFromFileName("IPC_9_6_2026"), "IPC");
+    assert.equal(supplierFromFileName("Parmed9-6-2026.txt"), "ParMed");
+    assert.equal(dateFromFileName("Mck9_6_2026.txt"), "2026-09-06");
+    assert.equal(dateFromFileName("Mck2026-09-06.txt"), "2026-09-06", "year first");
+    assert.equal(dateFromFileName("Mck20260906.txt"), "2026-09-06", "eight digits, year first");
+    assert.equal(dateFromFileName("Mck09062026.txt"), "2026-09-06", "eight digits, month first");
+  });
+
+  test("the report's default name claims no supplier, so the hand export is never refused for being 'named for Supplier'", () => {
+    assert.equal(supplierFromFileName("Supplier_Catalog_Item_Search_Results.txt"), null);
+    assert.equal(supplierFromFileName("Mck_Catalog_Item_Search_Results.txt"), "McKesson");
+  });
+
+  test("the inbox line says what the name told us", () => {
+    assert.match(describeFileName("Mck9_6_2026.txt"), /Named for McKesson, run 2026-09-06/);
+    assert.match(describeFileName("Supplier_Catalog_Item_Search_Results.txt"), /does not begin with a supplier code \(Mck, IPD, IPC, Parmed\)/);
   });
 
   test("a filename that is not a catalogue claims nothing", () => {
