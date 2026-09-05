@@ -204,7 +204,15 @@ export function parseRxTransactions(text: string): TransactionParse {
     }
     if (/^Uses invoice cost/i.test(line)) continue;
 
-    if (!RX_FILL.test(parts[0] ?? "")) { skip("a line that is not a transaction"); continue; }
+    if (!RX_FILL.test(parts[0] ?? "")) {
+      // A payer's totals: the label line is caught above, and this is the row of figures beneath
+      // it — every cell a money amount or blank, no prescription number. Counted under its own
+      // reason rather than lumped in with anything unrecognised, so that a transaction row this
+      // reader genuinely could not read stands out instead of hiding among thirty totals.
+      const allMoney = parts.every((c) => c.trim() === "" || /^\(?\$[\d,]+\.\d{2}\)?$/.test(c.trim()));
+      skip(allMoney ? "a payer's totals line" : "a line that is not a transaction");
+      continue;
+    }
     if (!headerSeen) { skip("a transaction before the header row"); continue; }
     if (parts.length !== FIELD_COUNT) { skip(`a transaction with ${parts.length} fields where ${FIELD_COUNT} were expected`); continue; }
     if (!section) { skip("a transaction under no Third Party line"); continue; }

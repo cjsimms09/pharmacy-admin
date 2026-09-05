@@ -384,6 +384,42 @@ export default async function InvoicesPage({
       {sp.ok && <Notice kind="ok">{sp.ok}</Notice>}
       {sp.error && <Notice kind="crit">{sp.error}</Notice>}
 
+      {/*
+        Where the receipt record is kept — asked once, not per invoice.
+
+        This sits above the per-invoice list deliberately: for a pharmacy that checks its totes in
+        against the wholesaler's own system, the whole list below is the wrong question, and being
+        told so first saves the scrolling.
+      */}
+      {onlyUnreceipted && canManage && (
+        <Card
+          title="Where receipt is recorded"
+          className="mt-4"
+          subtitle="21 CFR 1304.22(c) wants a record of what arrived and when. Most pharmacies confirm receipt in the wholesaler's own ordering system as the tote is checked in. If that is what you do, name it here and this stops asking — the compliance panel will say where the record is kept rather than that there is none."
+        >
+          <form action={receiptKeptIn} className="flex flex-wrap items-end gap-2">
+            <label className="text-xs text-ink-3">
+              Confirmed in
+              <input
+                name="where"
+                defaultValue={s.receipt_record_kept_in ?? ""}
+                placeholder="McKesson Connect, IPD portal"
+                className="field w-72 text-sm"
+              />
+            </label>
+            <button className="btn btn-primary">Save</button>
+            <span className="text-xs text-ink-3">Leave it empty to go back to recording receipt against each invoice here.</span>
+          </form>
+          {(s.receipt_record_kept_in ?? "").trim() && (
+            <p className="mt-2 text-xs text-ink-3">
+              Be able to produce that system&rsquo;s receipt history at the pharmacy during an inspection, printed or on
+              screen &mdash; that is what 21 CFR 1304.04(a) asks of a record kept electronically, wherever it is kept.
+            </p>
+          )}
+        </Card>
+      )}
+
+
       {noSenders ? (
         <Notice kind="warn">
           <b>No sender is named as a supplier yet, so nothing will be filed as an invoice.</b> Add your wholesalers
@@ -817,41 +853,6 @@ export default async function InvoicesPage({
         the quantity, and a short count is exactly the thing somebody writes on the paper slip and
         then cannot throw away. The name comes from whoever is signed in.
       */}
-      {/*
-        Where the receipt record is kept — asked once, not per invoice.
-
-        This sits above the per-invoice list deliberately: for a pharmacy that checks its totes in
-        against the wholesaler's own system, the whole list below is the wrong question, and being
-        told so first saves the scrolling.
-      */}
-      {onlyUnreceipted && canManage && (
-        <Card
-          title="Where receipt is recorded"
-          className="mt-4"
-          subtitle="21 CFR 1304.22(c) wants a record of what arrived and when. Most pharmacies confirm receipt in the wholesaler's own ordering system as the tote is checked in. If that is what you do, name it here and this stops asking — the compliance panel will say where the record is kept rather than that there is none."
-        >
-          <form action={receiptKeptIn} className="flex flex-wrap items-end gap-2">
-            <label className="text-xs text-ink-3">
-              Confirmed in
-              <input
-                name="where"
-                defaultValue={s.receipt_record_kept_in ?? ""}
-                placeholder="McKesson Connect, IPD portal"
-                className="field w-72 text-sm"
-              />
-            </label>
-            <button className="btn btn-primary">Save</button>
-            <span className="text-xs text-ink-3">Leave it empty to go back to recording receipt against each invoice here.</span>
-          </form>
-          {(s.receipt_record_kept_in ?? "").trim() && (
-            <p className="mt-2 text-xs text-ink-3">
-              Be able to produce that system&rsquo;s receipt history at the pharmacy during an inspection, printed or on
-              screen &mdash; that is what 21 CFR 1304.04(a) asks of a record kept electronically, wherever it is kept.
-            </p>
-          )}
-        </Card>
-      )}
-
       {onlyUnreceipted && canManage && !(s.receipt_record_kept_in ?? "").trim() && unreceipted.length > 0 && (
         <Card
           title="Confirm what actually arrived"

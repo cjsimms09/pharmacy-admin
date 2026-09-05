@@ -158,9 +158,10 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
         <p className="mt-1 text-sm text-ink-2">
           NADAC is free and public and needs no account. CMS publishes one file a week, on a Wednesday, of a few
           megabytes, at a fixed address ending in that Wednesday&rsquo;s date. Press <b>Fetch now</b> once to take the
-          most recent one; from then on this checks a couple of times a week and does nothing when there is nothing
-          new. If a week was not published, the week before it is taken instead, so there is always something to price
-          against.
+          most recent one; after that it looks every day and downloads only a week it does not already hold. The
+          Wednesday is in the address, so a week already here is never asked for again and the ordinary daily check
+          costs nothing at all. If a week was not published, the week before it is taken instead, so there is always
+          something to price against.
         </p>
         <p className="mt-1 text-xs text-ink-3">
           Worth leaving on even while the reimbursement pages are switched off: each weekly file carries only the
