@@ -27,9 +27,9 @@ file is how they talk.
 
 ## What the cloud session added (branch `claude/repo-audit-catalog-claims-2l37sj`, September 2026)
 
-Built on `feature/compliance` at `cf2e71a`. `npm run typecheck` clean; `npm test` 991 passing
+Built on `feature/compliance` at `cf2e71a`. `npm run typecheck` clean; `npm test` 996 passing
 with the same 6 failures the base branch had (all in `tests/alerts.test.ts`, "finding things by
-name" — not touched here).
+name" — not touched here). Two migrations, `0048` and `0049`, both additive.
 
 ### NDC handling — a correctness fix
 - `src/lib/ndc.ts` is now the one converter. Every hyphenated FDA layout converts exactly; a
@@ -81,13 +81,37 @@ name" — not touched here).
   which address answered. Nothing here was run against CMS from the cloud (its network is
   blocked for those hosts).
 
+### The daily transaction report — a row that never comes back
+The real 5 September file (period "transmitted/processed from 9/5 12:00 AM to 9/6 12:00 AM",
+printed 1:51 PM) was run through `parseRxTransactions` and `planTransactions`: 135 rows read, no
+NDC or column problems. But **72 of them were being thrown away**, 65 of the 97 paid rows, as
+"not yet sold (no completed date)". The report is drawn by the day a claim was *transmitted*, and
+the completed date is a property of the fill, not of the row (a rejected retry on 5 September of a
+fill sold on 27 June prints the June date). So a claim sent Tuesday and picked up Thursday is in
+Tuesday's file without a completed date and in no later file at all — and the reversal that arrives
+if the patient never comes is in *its* day's file, also without a completed date, and was being
+skipped for the same reason. That is where the "reversals that matched nothing" were coming from.
+
+- `planTransactions` now stores every paid row and applies every reversal, whatever the completed
+  date; `requireCompleted: true` restores the old rule for a report drawn by sale date.
+- `claims.completed_at` (migration `0049`) holds the sale date when the report had it. A re-sent
+  row that now carries one fills it in (`plan.markSold`), so a report run over a window that
+  reaches back a few days (duplicates are keyed and cost nothing) would complete the picture.
+- PCNs are read upper-case; the file prints them as typed per plan ("meddprime", "MEDDPRIME").
+- `fixtures/rx-transactions.txt` is the real shape with identifiers changed, and is now under test.
+- **For the pharmacy session:** the sentence on `/reports` that says an unsold row "waits for the
+  day it sells" is now wrong (that page is under a path the cloud session may not open). And the
+  scheduled report should cover *yesterday*, or a window ending yesterday — a report printed at
+  1:51 PM cannot contain the afternoon's transactions, and one run at 6:30 PM for "today" loses
+  everything after 6:30.
+
 ### Files this branch touched
-`src/db/schema.ts`, `drizzle/0048_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources}.ts` (new),
+`src/db/schema.ts`, `drizzle/0048_*`, `drizzle/0049_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources}.ts` (new),
 `src/lib/{claims,rx-transactions,suppliers,suppliers-registry,pioneer-catalog,invoices,nadac-fetch,settings}.ts`,
 `src/app/(app)/suppliers/page.tsx`, `src/app/(app)/suppliers/[id]/terms/page.tsx` (new),
-`src/app/(app)/inventory/invoices/page.tsx`, `src/app/(app)/nadac/page.tsx`,
-`tests/{ndc,supplier-terms,invoice-lines,nadac-datasets}.test.ts` (new), `tests/{claims,suppliers-registry}.test.ts`,
-`docs/HANDOFF.md`, `docs/reference/nadac-api.md`, `fixtures/README.md`.
+`src/app/(app)/inventory/invoices/page.tsx`, `src/app/(app)/nadac/page.tsx`, `src/app/(app)/claims/page.tsx`,
+`tests/{ndc,supplier-terms,invoice-lines,nadac-datasets}.test.ts` (new), `tests/{claims,suppliers-registry,rx-transactions}.test.ts`,
+`docs/HANDOFF.md`, `docs/reference/nadac-api.md`, `fixtures/README.md`, `fixtures/rx-transactions.txt` (new).
 
 ## What the cloud session would do next, in order
 1. Read IPC and IPD invoice layouts in full (needs fixtures).

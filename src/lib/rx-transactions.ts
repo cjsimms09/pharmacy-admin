@@ -263,7 +263,10 @@ function readRow(parts: string[], section: ReturnType<typeof parseSectionLabel>,
     remitCents !== null && copayCents !== null && dispensingFeeCents !== null ? remitCents + copayCents - dispensingFeeCents : null;
 
   const bin = binRaw || section.bin;
-  const pcn = parts[POS.pcn] || section.pcnHint || null;
+  // PioneerRx prints the PCN as it was typed into the plan ("meddprime" on one plan, "MEDDPRIME"
+  // on the section line for the same BIN). A processor control number is not case-sensitive and
+  // nothing should have to remember which spelling a plan was typed with, so it is read in one case.
+  const pcn = (parts[POS.pcn] || section.pcnHint || null)?.toUpperCase() ?? null;
   const groupNumber = repairNumericId(parts[POS.group]) || null;
   const networkId = repairNumericId(parts[POS.network]) || null;
   const ndc11 = ndcRaw.length === 11 ? ndcRaw : null;
@@ -328,6 +331,8 @@ export type TransactionPlan = {
   reverseExisting: { claimId: string; reversal: Transaction }[];
   /** Reversals that matched nothing we hold: stored as reversed rows so the money is not lost from view. */
   insertUnmatchedReversal: Transaction[];
+  /** Rows already held without a sale date that this file now shows sold: the claim and the date. */
+  markSold: { claimId: string; completedAt: string }[];
   skipped: { txn: Transaction; why: string }[];
   duplicates: number;
 };
@@ -343,17 +348,27 @@ export type TransactionPlan = {
  * silently vanished would leave a paid claim standing that the plan has taken back.
  *
  * `existing.keys` holds every transaction key already stored — paid rows and the reversals that
- * cancelled them alike — so a day's report sent twice changes nothing the second time.
+ * cancelled them alike — so a day's report sent twice changes nothing the second time. The one
+ * thing a re-sent row can change is the sale: `existing.unsold` maps the keys of held claims that
+ * had no completed date to their ids, and a duplicate that now carries one fills it in.
  *
- * Rows the pharmacy has said to disregard — its own cash plan — are skipped by name and BIN, and
- * so, by default, are rows with no completed date: transmitted, not yet sold, not yet money.
+ * Rows the pharmacy has said to disregard — its own cash plan — are skipped by name and BIN.
+ *
+ * A row with no completed date is a claim transmitted but not yet picked up. It is stored all the
+ * same, because the report is drawn by the day the claim was *transmitted*: a claim sent on
+ * Tuesday and sold on Thursday is in Tuesday's file without a completed date and in no later file
+ * at all. Skipping it would lose the claim for good, and with it the reversal that arrives if the
+ * patient never comes — which does turn up, in its own day's file, again without a completed
+ * date. So the money is kept from the day the plan agreed to pay it, a return to stock takes it
+ * back through the ordinary reversal path, and the completed date is recorded when the report has
+ * it. `requireCompleted: true` restores the old behaviour for a report drawn by sale date instead.
  */
 export function planTransactions(
   txns: Transaction[],
-  existing: { keys: Set<string>; paid: PaidClaimRef[] },
+  existing: { keys: Set<string>; paid: PaidClaimRef[]; unsold?: Map<string, string> },
   opts: { ignoreBins?: string[]; ignoreLabels?: RegExp; requireCompleted?: boolean } = {},
 ): TransactionPlan {
-  const plan: TransactionPlan = { insertPaid: [], insertReversedPaid: [], reverseExisting: [], insertUnmatchedReversal: [], skipped: [], duplicates: 0 };
+  const plan: TransactionPlan = { insertPaid: [], insertReversedPaid: [], reverseExisting: [], insertUnmatchedReversal: [], markSold: [], skipped: [], duplicates: 0 };
   const ignoreBins = new Set(opts.ignoreBins ?? []);
   const ignore = opts.ignoreLabels ?? /pharmd/i;
   const usedExisting = new Set<string>();
@@ -361,12 +376,15 @@ export function planTransactions(
   const negate = (n: number | null) => (n === null ? null : -n);
 
   for (const t of txns) {
-    if (existing.keys.has(t.transactionKey)) { plan.duplicates++; continue; }
+    if (existing.keys.has(t.transactionKey)) {
+      plan.duplicates++;
+      const id = t.completedAt ? existing.unsold?.get(t.transactionKey) : undefined;
+      if (id) plan.markSold.push({ claimId: id, completedAt: t.completedAt! });
+      continue;
+    }
     if ((t.bin && ignoreBins.has(t.bin)) || ignore.test(t.payerLabel)) { plan.skipped.push({ txn: t, why: "cash plan (PharmD), not a third-party claim" }); continue; }
     if (t.status === "R") { plan.skipped.push({ txn: t, why: "rejected by the plan, nothing paid" }); continue; }
-    // A row with no completed date is a claim transmitted but not yet sold: the pharmacy's
-    // instruction is to leave those until they are, and to price only what has gone out the door.
-    if (opts.requireCompleted !== false && !t.completedAt) { plan.skipped.push({ txn: t, why: "not yet sold (no completed date)" }); continue; }
+    if (opts.requireCompleted === true && !t.completedAt) { plan.skipped.push({ txn: t, why: "not yet sold (no completed date)" }); continue; }
     if (t.status === "P") { plan.insertPaid.push(t); continue; }
 
     // A reversal. Its figures are the negation of the claim it cancels.
