@@ -40,6 +40,15 @@ const MAX_QUIET_HOURS: Record<string, number> = {
   manual_audit: 31 * 24,
   // Weekly, with a day of slack for a computer that was switched off over a weekend.
   digest: 8 * 24,
+  /*
+   * The claims export, scheduled out of PioneerRx and swept in from the mailbox.
+   *
+   * Nine days: a report scheduled weekly, plus slack for a bank holiday and a closed weekend.
+   * The failure worth catching is not a late file — it is a scheduled report somebody deleted or
+   * that started bouncing, after which claims simply stop arriving and every figure downstream
+   * quietly goes stale while continuing to look right.
+   */
+  claims: 9 * 24,
 };
 
 function ageHours(iso: string | null | undefined): number | null {
@@ -144,6 +153,29 @@ export async function automationStatus(): Promise<JobStatus[]> {
       href: "/compliance/training",
     },
   ];
+
+  /*
+   * Claims arriving on their own.
+   *
+   * Only where the reimbursement side is switched on, because a pharmacy that is not doing this
+   * work has no scheduled report to have stopped. Where it is on, silence is the whole point: the
+   * floor review reads perfectly well against a month-old file, and would go on reading well for
+   * a year.
+   */
+  if (s.feature_reimbursement === "yes") {
+    const { latestClaimImport } = await import("./claims");
+    const last = await latestClaimImport();
+    jobs.push({
+      key: "claims",
+      label: "Claims export",
+      state: judge("claims", true, last),
+      lastAt: last,
+      detail: last
+        ? `Last export loaded ${last.slice(0, 10)}.`
+        : "No claims export has ever been loaded. Schedule the PioneerRx report to email the pharmacy address and it lands here on its own.",
+      href: "/claims",
+    });
+  }
 
   /*
    * NADAC is on this strip whether or not the reimbursement pages are.

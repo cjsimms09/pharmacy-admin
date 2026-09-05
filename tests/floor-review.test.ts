@@ -206,3 +206,20 @@ describe("the review is honest about what it is assuming", () => {
     assert.equal(r.filable.length + r.paidAtOrAbove + r.outOfScope + r.blocked.length, r.examined);
   });
 });
+
+describe("the week a claim was filled", () => {
+  test("Monday to Sunday all report the same week", async () => {
+    const { weekStart } = await import("../src/lib/nadac");
+    // 2026-07-13 is a Monday.
+    for (const d of ["2026-07-13", "2026-07-14", "2026-07-17", "2026-07-19"]) {
+      assert.equal(weekStart(d), "2026-07-13", `${d} landed in the wrong week`);
+    }
+    assert.equal(weekStart("2026-07-20"), "2026-07-20", "the next Monday should start a new week");
+    assert.equal(weekStart("2026-07-12"), "2026-07-06", "Sunday belongs to the week that started six days earlier");
+  });
+
+  test("something that is not a date comes back unchanged rather than as 1970", async () => {
+    const { weekStart } = await import("../src/lib/nadac");
+    assert.equal(weekStart("not-a-date"), "not-a-date");
+  });
+});

@@ -4,8 +4,8 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { loadNadacFiles, nadacCoverage, nadacClaimCoverage, nadacDir } from "@/lib/nadac";
-import { fetchNadac } from "@/lib/nadac-fetch";
+import { loadNadacFiles, nadacCoverage, nadacClaimCoverage, nadacWeekGaps, nadacDir } from "@/lib/nadac";
+import { fetchNadac, fetchNadacFrom } from "@/lib/nadac-fetch";
 import { getSettings, setSetting } from "@/lib/settings";
 import { PageHeader, Notice, Empty } from "@/components/ui";
 
@@ -26,6 +26,7 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
   const s = await getSettings();
   const cov = await nadacCoverage();
   const claimCov = cov.prices > 0 ? await nadacClaimCoverage() : null;
+  const gaps = claimCov && claimCov.priced < claimCov.withNdc ? await nadacWeekGaps() : [];
 
   async function pullNow() {
     "use server";
@@ -44,6 +45,23 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
     await audit({ action: "nadac.settings", userId: u.id, userName: u.name });
     revalidatePath("/nadac");
     redirect("/nadac?ok=" + encodeURIComponent("Saved."));
+  }
+
+  /**
+   * Loading one named file, from an address pasted in.
+   *
+   * The weekly pull can only ever fetch this week. Everything before it has to come from a back
+   * file, and making somebody download ten of them by hand is how the history never gets loaded.
+   */
+  async function pullFrom(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const url = String(fd.get("url") ?? "").trim();
+    if (!url) redirect("/nadac?error=" + encodeURIComponent("Paste the address of the file first."));
+    const r = await fetchNadacFrom([url]);
+    await audit({ action: "nadac.fetch_url", userId: u.id, userName: u.name, details: `${url} — ${r.message.slice(0, 160)}` });
+    revalidatePath("/nadac");
+    redirect(`/nadac?${r.ok ? "ok" : "error"}=` + encodeURIComponent(r.message));
   }
 
   async function upload(fd: FormData) {
@@ -126,6 +144,54 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
               Last checked {new Date(s.nadac_last_fetch).toLocaleString()} — {s.nadac_last_result}
             </p>
           )}
+        </form>
+      </section>
+
+      {/*
+        The weeks that are actually missing, named.
+
+        "184 claims have no NADAC" is a fact nobody can act on. One file per week is how CMS
+        publishes, so naming the weeks turns the problem into a shopping list — and downloading a
+        single file closes a whole row of this table.
+      */}
+      {gaps.length > 0 && (
+        <section className="my-4 rounded-lg border border-warn bg-warn-soft p-4">
+          <h2 className="text-sm font-semibold text-warn">The weeks you are missing</h2>
+          <p className="mt-1 text-sm text-ink-2">
+            These claims were filled in weeks no loaded file covers. Get the CMS weekly file published on or just
+            before each date below and the whole row prices. Fetching the current file again will not help — it
+            carries only this week&rsquo;s prices, and any that have changed since are gone from it.
+          </p>
+          <div className="mt-3 overflow-x-auto">
+            <table className="table">
+              <thead>
+                <tr><th>Week beginning</th><th className="text-right">Claims</th><th className="text-right">Products</th><th>For example</th></tr>
+              </thead>
+              <tbody>
+                {gaps.map((g) => (
+                  <tr key={g.weekStart}>
+                    <td className="whitespace-nowrap font-medium">{g.weekStart}</td>
+                    <td className="text-right">{g.claims}</td>
+                    <td className="text-right text-ink-2">{g.distinctNdcs}</td>
+                    <td className="text-xs text-ink-3">{g.examples.join(", ") || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      <section className="my-4 rounded-lg border border-line bg-surface p-4">
+        <h2 className="text-sm font-semibold">Load one file from an address</h2>
+        <p className="mt-1 text-sm text-ink-2">
+          For back files. Find the week you need on <code>data.medicaid.gov</code>, copy the link to its CSV, and
+          paste it here — it is loaded through exactly the same checks as the automatic pull, so a page that is not a
+          NADAC file is refused rather than saved.
+        </p>
+        <form action={pullFrom} className="mt-3 flex flex-wrap items-center gap-2">
+          <input name="url" placeholder="https://download.medicaid.gov/…" className="field flex-1 font-mono text-xs" />
+          <button className="rounded-md border border-line px-3 py-2 text-sm hover:bg-ground">Fetch it</button>
         </form>
       </section>
 

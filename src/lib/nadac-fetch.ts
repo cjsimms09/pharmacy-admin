@@ -60,7 +60,23 @@ export type FetchResult = {
  */
 export async function fetchNadac(): Promise<FetchResult> {
   const s = await getSettings();
-  const sources = [s.nadac_source_url?.trim(), ...KNOWN_SOURCES].filter(Boolean) as string[];
+  return fetchNadacFrom([s.nadac_source_url?.trim(), ...KNOWN_SOURCES].filter(Boolean) as string[]);
+}
+
+/**
+ * Loads NADAC from wherever it is told to, trying the addresses in order.
+ *
+ * Separated from the weekly pull so the same well-tested path can be pointed at a back file. The
+ * weekly download only ever carries the prices in force this week, so a claim from July can only
+ * be priced from a file published around July — and no amount of fetching the current file will
+ * ever produce one. CMS publishes the older files; this is how they get in without somebody
+ * downloading ten of them by hand.
+ *
+ * Every guard that applies to the weekly pull applies here, and for the same reason: a download is
+ * parsed before it is written, so an HTML error page saved as a .csv cannot sit in the folder
+ * looking like data.
+ */
+export async function fetchNadacFrom(sources: string[]): Promise<FetchResult> {
   const tried: string[] = [];
 
   for (const url of sources) {

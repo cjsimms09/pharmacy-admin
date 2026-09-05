@@ -372,3 +372,19 @@ export async function claimsByPayer() {
 export async function claimImports() {
   return db.query.claimImports.findMany({ orderBy: (i, { desc }) => [desc(i.createdAt)] });
 }
+
+/**
+ * When a claims export last arrived.
+ *
+ * The figure the automation strip judges silence against. A scheduled report that somebody
+ * deleted, or that started bouncing, does not announce itself — claims simply stop and every
+ * number downstream goes stale while continuing to look perfectly reasonable.
+ */
+export async function latestClaimImport(): Promise<string | null> {
+  const rows = await db.query.claimImports.findMany({
+    columns: { createdAt: true },
+    orderBy: (i, { desc }) => [desc(i.createdAt)],
+    limit: 1,
+  });
+  return rows[0]?.createdAt ?? null;
+}

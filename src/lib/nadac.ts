@@ -222,6 +222,66 @@ export async function nadacClaimCoverage() {
   };
 }
 
+/**
+ * Which weeks the pharmacy is missing prices for, in the order of how much it costs to be missing them.
+ *
+ * "184 claims have no NADAC" is a fact nobody can act on. The actionable version names the weeks,
+ * because that is what a CMS file is: one file per week, and to price a claim filled on 15 July
+ * you need a file published around 15 July. Today's file has forgotten any price that has changed
+ * since — that is the whole reason this gap exists and cannot be closed by fetching again.
+ *
+ * Grouped by the week the claim was filled rather than by NDC, because that is the unit the fix
+ * comes in. Downloading one file closes a whole row of this table.
+ */
+export async function nadacWeekGaps(): Promise<
+  { weekStart: string; claims: number; distinctNdcs: number; examples: string[] }[]
+> {
+  const claims = await db.query.claims.findMany({
+    columns: { ndc11: true, dateFilled: true, itemName: true },
+  });
+  const withNdc = claims.filter((c) => c.ndc11);
+  if (withNdc.length === 0) return [];
+
+  const wanted = [...new Set(withNdc.map((c) => c.ndc11!))];
+  const dates = new Map<string, string[]>();
+  for (let i = 0; i < wanted.length; i += 400) {
+    const rows = await db
+      .select({ ndc11: schema.nadacPrices.ndc11, effectiveOn: schema.nadacPrices.effectiveOn })
+      .from(schema.nadacPrices)
+      .where(inArray(schema.nadacPrices.ndc11, wanted.slice(i, i + 400)));
+    for (const r of rows) {
+      const a = dates.get(r.ndc11) ?? [];
+      a.push(r.effectiveOn);
+      dates.set(r.ndc11, a);
+    }
+  }
+
+  const byWeek = new Map<string, { claims: number; ndcs: Set<string>; examples: Set<string> }>();
+  for (const c of withNdc) {
+    const inForce = (dates.get(c.ndc11!) ?? []).some((d) => d <= c.dateFilled);
+    if (inForce) continue;
+    const w = weekStart(c.dateFilled);
+    const e = byWeek.get(w) ?? { claims: 0, ndcs: new Set<string>(), examples: new Set<string>() };
+    e.claims++;
+    e.ndcs.add(c.ndc11!);
+    if (e.examples.size < 3 && c.itemName) e.examples.add(c.itemName);
+    byWeek.set(w, e);
+  }
+
+  return [...byWeek.entries()]
+    .map(([weekStart, e]) => ({ weekStart, claims: e.claims, distinctNdcs: e.ndcs.size, examples: [...e.examples] }))
+    .sort((a, b) => b.claims - a.claims || a.weekStart.localeCompare(b.weekStart));
+}
+
+/** The Monday of the week an ISO date falls in. */
+export function weekStart(iso: string): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return iso;
+  const day = d.getUTCDay(); // 0 = Sunday
+  d.setUTCDate(d.getUTCDate() - ((day + 6) % 7));
+  return d.toISOString().slice(0, 10);
+}
+
 /** What is loaded, and whether it actually covers the period we need to price. */
 export async function nadacCoverage() {
   const [agg] = await db
