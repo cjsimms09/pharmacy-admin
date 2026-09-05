@@ -13,6 +13,7 @@ export const metadata = { title: "Tools" };
  * useful than a menu item that opens an empty page.
  */
 const TOOLS = [
+  { href: "/money", title: "Where the money is", state: "ready", what: "One list, in dollars, of everything this site can see that is worth acting on — what to buy elsewhere, what a rebate band is worth, what stock has to go back this week, what a plan underpaid — with what to do about each. Nothing estimated." },
   { href: "/payers", title: "Payers", state: "ready", what: "Every BIN we bill, its contracted rates, MAC appeal route and payment routing. Look up a BIN from a claim, or search the contracts on file for one." },
   { href: "/payers/performance", title: "Who pays best", state: "ready", what: "Every claim followed through to the money — BIN and group, to plan, to PBM, to the contract and rate sheet behind it. Which payers pay well, which drugs are reimbursed best, and where the chain breaks." },
   { href: "/claims", title: "Claims", state: "waiting", what: "Loads a PioneerRx export and matches each claim to its payer. Waiting on dispensed quantity, which comes through blank." },

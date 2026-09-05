@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { requireReimbursement } from "@/lib/features";
 import { formatCents } from "@/lib/money";
-import { payerMap, GAP_MEANS, type ChainGap } from "@/lib/payer-map";
+import { payerMap, payerTree, GAP_MEANS, type ChainGap, type CompanyNode } from "@/lib/payer-map";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireManager } from "@/lib/auth";
@@ -39,6 +39,7 @@ export default async function PayerPerformancePage({ searchParams }: { searchPar
   const { ok, error } = await searchParams;
   const canManage = user.role !== "staff";
   const { links, scores, ndcs, totals } = await payerMap();
+  const { companies, unnamedRevenueCents } = await payerTree();
 
   /*
    * Settling one of these, once.
@@ -210,6 +211,89 @@ export default async function PayerPerformancePage({ searchParams }: { searchPar
                 </p>
               </div>
             )}
+          </Card>
+
+          {/* ── The hierarchy, as it actually is ───────────────────────── */}
+          <Card
+            className="mt-4"
+            title="Company, BIN, group, contract"
+            count={companies.length}
+            subtitle="Four levels, and each answers a different question. Which company is worth negotiating with. Which processing route is underpaying. Which employer's plan is the problem — that is the level ERISA or Part D is decided at, never the BIN. And which contract priced the fill, which is what an appeal has to cite."
+          >
+            {unnamedRevenueCents > 0 && (
+              <Notice kind="warn">
+                {formatCents(unnamedRevenueCents)} of it comes through routes no company has been named for. Until one is,
+                the money cannot be added up by who owes it.
+              </Notice>
+            )}
+            <ul className="mt-2 space-y-2">
+              {companies.map((c: CompanyNode) => (
+                <li key={c.company} className="rounded-lg border border-line">
+                  <details open={companies.length <= 3}>
+                    <summary className="cursor-pointer px-3 py-2">
+                      <span className="text-sm font-semibold">{c.company}</span>
+                      {!c.named && <span className="badge badge-warn ml-2">not named</span>}
+                      <span className="ml-2 text-xs text-ink-3">
+                        {Math.round(c.fills)} fill{Math.round(c.fills) === 1 ? "" : "s"} · {formatCents(c.revenueCents)} in ·{" "}
+                        <span className={c.marginPerFillCents < 0 ? "text-crit" : "text-accent"}>{formatCents(c.marginPerFillCents)} a fill</span>
+                      </span>
+                    </summary>
+                    <div className="border-t border-line px-3 py-2">
+                      {c.bins.map((b) => (
+                        <div key={b.bin ?? "none"} className="mb-2 last:mb-0">
+                          <p className="font-mono text-xs">
+                            BIN {b.bin ?? "—"}
+                            <span className="ml-2 font-sans text-ink-3">
+                              {Math.round(b.fills)} fill{Math.round(b.fills) === 1 ? "" : "s"} · {formatCents(b.revenueCents)}
+                            </span>
+                            {b.mixedClassification && (
+                              <span className="badge badge-muted ml-2 font-sans" title="This BIN carries plans of more than one kind, which is why the Kansas floor can never be decided at BIN level.">
+                                more than one kind of plan
+                              </span>
+                            )}
+                          </p>
+                          <ul className="ml-4 mt-1 space-y-1">
+                            {b.groups.map((g) => (
+                              <li key={g.groupNumber ?? "none"} className="text-xs">
+                                <span className="font-mono">group {g.groupNumber ?? "—"}</span>
+                                {g.sponsorName && <span className="ml-1 text-ink-2">{g.sponsorName}</span>}
+                                {g.classification && g.classification !== "unknown" ? (
+                                  <span className="badge badge-muted ml-1">{g.classification.replace(/_/g, " ")}</span>
+                                ) : (
+                                  <Link href="/plans" className="badge badge-warn ml-1">not classified</Link>
+                                )}
+                                <span className="ml-1 text-ink-3">
+                                  {formatCents(g.revenueCents)} in ·{" "}
+                                  <span className={g.marginCents < 0 ? "text-crit" : "text-accent"}>{formatCents(g.marginCents)}</span>
+                                </span>
+                                <ul className="ml-4">
+                                  {g.contracts.map((ct) => (
+                                    <li key={ct.contractId ?? "none"} className="text-[11px] text-ink-3">
+                                      contract {ct.contractId ?? "— none on the claim"}
+                                      {ct.contractFileName ? (
+                                        <span className="text-accent"> → {ct.contractFileName}</span>
+                                      ) : (
+                                        <span className="text-warn"> → no agreement linked</span>
+                                      )}
+                                      {" · "}{formatCents(ct.revenueCents)}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-xs text-ink-3">
+              A BIN is a processing route, not a plan: the same BIN carries a fully-insured commercial plan the Kansas
+              floor applies to and a self-funded ERISA plan it cannot touch. The group number separates them, and the
+              contract id printed on the claim names the agreement that priced it.
+            </p>
           </Card>
 
           {/* ── Where the line stops ────────────────────────────────────── */}

@@ -235,6 +235,11 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         subtitle={fmtLong(today)}
         actions={
           <>
+            {/*
+              The one thing on this page that is about making money rather than keeping out of
+              trouble. Everything else here protects revenue; this is where it is found.
+            */}
+            <Link href="/money" className="btn btn-primary">Where the money is</Link>
             <Link href="/compliance" className="btn">Compliance</Link>
             <Link href="/compliance/training" className="btn">Training</Link>
             {lateCount > 0 && <Link href="#now" className="btn btn-primary">Work through {lateCount}</Link>}

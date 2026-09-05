@@ -320,3 +320,213 @@ export const GAP_MEANS: Record<ChainGap, string> = {
   no_contract: "no contract on file for that PBM",
   no_rates: "no rate sheet, so nothing says what they agreed to pay",
 };
+
+/**
+ * The hierarchy as it actually is: company, then BIN, then group, then contract id.
+ *
+ * The first cut of this flattened everything to "a payer", which is wrong at every level and wrong
+ * in a way that costs money.
+ *
+ * A **company** — Express Scripts, Caremark, Optum — runs many BINs. A **BIN** is a processing
+ * route, not a plan: the same BIN carries a fully-insured commercial plan the Kansas floor applies
+ * to and a self-funded ERISA plan it cannot touch. The **group number** is what separates those,
+ * and it is the level a plan is actually classified at. And the **contract id** printed on the
+ * claim — PioneerRx calls it the network reimbursement id — is the thing that names which agreement
+ * priced the fill, which is what an appeal has to cite.
+ *
+ * Four levels, and each answers a different question. Which company is worth negotiating with.
+ * Which route is underpaying. Which employer's plan is the problem. And which contract to open.
+ * Collapsed into one, none of those can be asked — and a rate argued from the wrong level is an
+ * argument lost.
+ */
+
+export type ContractNode = {
+  contractId: string | null;
+  /** The contract document this id has been linked to, once somebody confirmed it. */
+  contractFileName: string | null;
+  fills: number;
+  revenueCents: number;
+  marginCents: number;
+  /** True where nothing says which agreement priced these fills. */
+  unlinked: boolean;
+};
+
+export type GroupNode = {
+  groupNumber: string | null;
+  /** What the plan register says this BIN-and-group is — the level ERISA or Part D is decided at. */
+  classification: string | null;
+  sponsorName: string | null;
+  contracts: ContractNode[];
+  fills: number;
+  revenueCents: number;
+  marginCents: number;
+};
+
+export type BinNode = {
+  bin: string | null;
+  groups: GroupNode[];
+  fills: number;
+  revenueCents: number;
+  marginCents: number;
+  /** True where one BIN carries plans of more than one kind, which is the usual case. */
+  mixedClassification: boolean;
+};
+
+export type CompanyNode = {
+  company: string;
+  /** False where nothing has named the company yet. */
+  named: boolean;
+  bins: BinNode[];
+  fills: number;
+  revenueCents: number;
+  marginCents: number;
+  marginPerFillCents: number;
+};
+
+export async function payerTree(): Promise<{ companies: CompanyNode[]; unnamedRevenueCents: number }> {
+  const [claims, bins, groups, confirmed] = await Promise.all([
+    db.query.claims.findMany(),
+    db.query.payerBins.findMany(),
+    db.query.planGroups.findMany(),
+    allPayerLinks(),
+  ]);
+
+  const fills = groupIntoFills(
+    claims.map(
+      (c): ClaimRow => ({
+        id: c.id,
+        rxNumber: c.rxNumber,
+        fillNumber: c.fillNumber,
+        dateFilled: c.dateFilled,
+        ndc11: c.ndc11,
+        itemName: c.itemName,
+        bin: c.bin,
+        groupNumber: c.groupNumber,
+        pbmName: c.pbmName,
+        payerLabel: c.payerLabel,
+        quantityThousandths: c.quantityThousandths,
+        remitCents: c.remitCents,
+        copayCents: c.copayCents,
+        acquisitionCents: c.acquisitionCents,
+        status: c.status,
+        unmatchedReversal: (c.remitCents ?? 0) < 0 && !c.reversalKey,
+      }),
+    ),
+  );
+
+  // The claim carries the contract id and PCN; the fill carries the payers. Join on the claim.
+  const extraByClaim = new Map<string, { pcn: string | null; contractId: string | null }>();
+  for (const c of claims) {
+    extraByClaim.set(`${c.rxNumber}|${c.fillNumber ?? ""}|${c.dateFilled}|${c.bin ?? ""}`, { pcn: c.pcn, contractId: c.networkId });
+  }
+
+  const companyOfBin = new Map<string, string[]>();
+  for (const b of bins) companyOfBin.set(b.bin, [...new Set([...(companyOfBin.get(b.bin) ?? []), b.pbmName])]);
+  const planByKey = new Map(groups.map((g) => [`${g.bin ?? ""}|${(g.groupNumber ?? "").toUpperCase()}`, g]));
+
+  type Acc = { fills: number; revenueCents: number; marginCents: number };
+  const add = (a: Acc, share: number, f: Fill) => {
+    a.fills += share;
+    a.revenueCents += Math.round(f.revenueCents * share);
+    a.marginCents += Math.round((f.marginCents ?? 0) * share);
+  };
+
+  const companies = new Map<string, { node: CompanyNode; bins: Map<string, { node: BinNode; groups: Map<string, { node: GroupNode; contracts: Map<string, ContractNode> }> }> }>();
+
+  for (const f of fills) {
+    const share = 1 / f.payers.length;
+    for (const p of f.payers) {
+      const extra = extraByClaim.get(`${f.rxNumber}|${f.fillNumber ?? ""}|${f.dateFilled}|${p.bin ?? ""}`) ?? { pcn: null, contractId: null };
+      const link = linkFor(confirmed, { bin: p.bin, pcn: extra.pcn, groupNumber: p.groupNumber, contractId: extra.contractId });
+      const listed = p.bin ? (companyOfBin.get(p.bin) ?? []) : [];
+      const plan = planByKey.get(`${p.bin ?? ""}|${(p.groupNumber ?? "").toUpperCase()}`) ?? null;
+      /*
+       * The company, settled in the order the answers can be trusted.
+       *
+       * A confirmed link is somebody's decision. A listing naming exactly one PBM is a fact about
+       * the BIN. A listing naming several is not an answer at all, and the plan register may know
+       * which. Falling back to the label the claim printed is a last resort — it is whatever the
+       * switch happened to echo — so it is marked as unnamed rather than treated as settled.
+       */
+      const settled = link?.pbmName ?? (listed.length === 1 ? listed[0] : (plan?.pbmName ?? null));
+      const company = settled ?? p.name ?? p.bin ?? "not yet named";
+
+      let c = companies.get(company);
+      if (!c) {
+        c = {
+          node: { company, named: settled !== null, bins: [], fills: 0, revenueCents: 0, marginCents: 0, marginPerFillCents: 0 },
+          bins: new Map(),
+        };
+        companies.set(company, c);
+      }
+      add(c.node, share, f);
+
+      const binKey = p.bin ?? "";
+      let b = c.bins.get(binKey);
+      if (!b) {
+        b = { node: { bin: p.bin, groups: [], fills: 0, revenueCents: 0, marginCents: 0, mixedClassification: false }, groups: new Map() };
+        c.bins.set(binKey, b);
+      }
+      add(b.node, share, f);
+
+      const gKey = (p.groupNumber ?? "").toUpperCase();
+      let g = b.groups.get(gKey);
+      if (!g) {
+        g = {
+          node: {
+            groupNumber: p.groupNumber,
+            classification: plan?.classification ?? null,
+            sponsorName: plan?.sponsorName ?? null,
+            contracts: [],
+            fills: 0,
+            revenueCents: 0,
+            marginCents: 0,
+          },
+          contracts: new Map(),
+        };
+        b.groups.set(gKey, g);
+      }
+      add(g.node, share, f);
+
+      const cid = extra.contractId ?? null;
+      const cKey = cid ?? "";
+      let ct = g.contracts.get(cKey);
+      if (!ct) {
+        ct = {
+          contractId: cid,
+          contractFileName: link?.contractFileName ?? null,
+          fills: 0,
+          revenueCents: 0,
+          marginCents: 0,
+          unlinked: !link?.contractFileName,
+        };
+        g.contracts.set(cKey, ct);
+      }
+      ct.fills += share;
+      ct.revenueCents += Math.round(f.revenueCents * share);
+      ct.marginCents += Math.round((f.marginCents ?? 0) * share);
+    }
+  }
+
+  const out: CompanyNode[] = [];
+  for (const c of companies.values()) {
+    for (const b of c.bins.values()) {
+      for (const g of b.groups.values()) {
+        g.node.contracts = [...g.contracts.values()].sort((x, y) => y.revenueCents - x.revenueCents);
+        b.node.groups.push(g.node);
+      }
+      b.node.groups.sort((x, y) => y.revenueCents - x.revenueCents);
+      // One BIN carrying an ERISA plan and a fully-insured one is the usual case, and the reason
+      // the floor can never be decided at BIN level.
+      const kinds = new Set(b.node.groups.map((g) => g.classification).filter(Boolean));
+      b.node.mixedClassification = kinds.size > 1;
+      c.node.bins.push(b.node);
+    }
+    c.node.bins.sort((x, y) => y.revenueCents - x.revenueCents);
+    c.node.marginPerFillCents = c.node.fills > 0 ? Math.round(c.node.marginCents / c.node.fills) : 0;
+    out.push(c.node);
+  }
+  out.sort((a, b) => b.revenueCents - a.revenueCents);
+
+  return { companies: out, unnamedRevenueCents: out.filter((c) => !c.named).reduce((n, c) => n + c.revenueCents, 0) };
+}
