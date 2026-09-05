@@ -307,7 +307,11 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
                   receivedAt,
                   raw: msg.source.toString("utf8"),
                 });
-                closed.push(`${done.label} for ${done.personName}`);
+                closed.push(
+                  done.insufficient
+                    ? `${done.label} for ${done.personName} — reply filed, but this training is not closed by it: the bloodborne standard asks for questions and answers with somebody who knows the subject, which an email cannot show. They have been told what is still needed and the reminders continue.`
+                    : `${done.label} for ${done.personName}`,
+                );
               } catch (e) {
                 result.errors.push(`Training reply from ${from}: ${e instanceof Error ? e.message : String(e)}`);
               }
@@ -320,7 +324,7 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
                 fromAddress: from,
                 subject,
                 status: "stored",
-                reason: `Training attestation recorded — ${closed.join("; ")}. The reply itself is filed as the evidence.`,
+                reason: `Training reply handled — ${closed.join("; ")}. The reply itself is filed as the evidence.`,
               });
               result.stored++;
             }

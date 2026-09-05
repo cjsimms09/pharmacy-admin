@@ -108,7 +108,7 @@ export async function matchTrainingReplies(msg: {
 export async function completeByEmailReply(
   assignmentId: string,
   reply: { from: string; subject: string; text: string; receivedAt: string; raw: string },
-): Promise<{ trainingId: string; label: string; personName: string }> {
+): Promise<{ trainingId: string | null; label: string; personName: string; insufficient: boolean }> {
   const a = await db.query.trainingAssignments.findFirst({ where: eq(schema.trainingAssignments.id, assignmentId) });
   if (!a) throw new Error("That assignment no longer exists.");
   if (a.completedAt) throw new Error("That assignment is already complete.");
@@ -136,6 +136,36 @@ export async function completeByEmailReply(
   const today = todayIso();
   const months = TRAINING_CADENCE[a.type]?.months;
   const course = courseFor(a.type);
+
+  /*
+   * A reply is a person saying they did it. For most trainings that is the record; for one it is
+   * not enough, and pretending otherwise is the weakest thing this system could do.
+   *
+   * 29 CFR 1910.1030(g)(2)(vii)(N) requires an opportunity for interactive questions and answers
+   * with a person knowledgeable in the subject. An email saying "read it, done" evidences neither
+   * that nor comprehension — and it was being accepted as a complete bloodborne pathogens record,
+   * marked current, and counted as covered on every screen. That is a training file that looks
+   * satisfied and would not survive being read.
+   *
+   * So the reply is kept — it is real evidence that the material reached them and that they say
+   * they read it, and losing it would be worse — but it does not close the training. They still
+   * owe the course with its questions, or a session with the pharmacist-in-charge, which is what
+   * the standard actually asks for. Which means the reminders keep coming, correctly.
+   */
+  if (course?.liveQuestionsRequired) {
+    await db
+      .update(schema.trainingAssignments)
+      .set({ replyDocumentId: docId, replyFromAddress: reply.from })
+      .where(eq(schema.trainingAssignments.id, a.id));
+    await acknowledgePartly(person, a.token, TRAINING_LABEL[a.type]);
+    return {
+      trainingId: null,
+      label: TRAINING_LABEL[a.type],
+      personName: `${person.firstName} ${person.lastName}`,
+      insufficient: true,
+    };
+  }
+
   const trainingId = newId();
   await db.insert(schema.trainings).values({
     id: trainingId,
@@ -165,7 +195,12 @@ export async function completeByEmailReply(
 
   await acknowledge(person, a.token, TRAINING_LABEL[a.type]);
 
-  return { trainingId, label: TRAINING_LABEL[a.type], personName: `${person.firstName} ${person.lastName}` };
+  return {
+    trainingId,
+    label: TRAINING_LABEL[a.type],
+    personName: `${person.firstName} ${person.lastName}`,
+    insufficient: false,
+  };
 }
 
 /**
@@ -211,5 +246,54 @@ async function acknowledge(
   } catch {
     // Deliberately silent. The training is recorded either way, and an acknowledgement that
     // could not be sent is not a reason to lose it.
+  }
+}
+
+/**
+ * Tells somebody their reply landed and what is still outstanding.
+ *
+ * A reply into silence is read as "that probably did not work". A reply answered with "recorded,
+ * nothing else to do" when there *is* something else to do is worse — it is the pharmacy telling
+ * a member of staff they are finished when they are not, and it is the pharmacy's problem when an
+ * inspector finds the gap, not theirs.
+ *
+ * So this thanks them, says the material reached them and is on file, and says plainly what still
+ * has to happen and why the rule asks for it.
+ */
+async function acknowledgePartly(
+  person: { firstName: string; lastName: string; email: string | null },
+  token: string,
+  label: string,
+): Promise<void> {
+  if (!person.email) return;
+  try {
+    const { sendMail } = await import("./send-mail");
+    const { linkFor } = await import("./training-assignments");
+    const { getSettings } = await import("./settings");
+    const s = await getSettings();
+    await sendMail(
+      person.email,
+      `Received — one thing still to do: ${label}`,
+      [
+        `${person.firstName},`,
+        "",
+        `Thank you — your reply is on file, and it records that you were sent the ${label.toLowerCase()}`,
+        "material and have read it.",
+        "",
+        "One thing is still outstanding, and it is not a formality. The bloodborne pathogens",
+        "standard asks for a chance to ask questions of somebody who knows the subject, and for",
+        "the questions at the end to be answered. An email cannot show either of those.",
+        "",
+        "So either open the course on a pharmacy computer and work through the questions, or ask",
+        `${s.pharmacy_name || "the pharmacy"} to go through it with you — five minutes, and it counts properly.`,
+        "",
+        "You will keep getting the reminder until one of those happens. That is deliberate.",
+        "",
+        `${s.pharmacy_name || "The pharmacy"}`,
+        `Reference: ${token.slice(0, 8)}`,
+      ].join("\n"),
+    );
+  } catch {
+    // Silent by design: the reply is on file either way.
   }
 }
