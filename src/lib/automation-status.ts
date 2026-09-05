@@ -48,7 +48,9 @@ const MAX_QUIET_HOURS: Record<string, number> = {
    * that started bouncing, after which claims simply stop arriving and every figure downstream
    * quietly goes stale while continuing to look right.
    */
-  claims: 9 * 24,
+  // Daily, 6:30 in the evening. Two days and a bit catches a missed evening without crying wolf
+  // over a Sunday the pharmacy is closed.
+  claims: 2 * 24 + 8,
   // Weekly, Monday, one file per supplier. Nine days catches a missed Monday without crying wolf
   // over a bank holiday.
   catalogs: 9 * 24,

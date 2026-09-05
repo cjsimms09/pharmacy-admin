@@ -1,5 +1,5 @@
 import "server-only";
-import { sql } from "drizzle-orm";
+import { sql, eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "./crypto";
 import { parseCents, parseQuantityThousandths, isPricingUnit, receivedCents } from "./money";
@@ -7,6 +7,7 @@ import { readSheetAsObjects, excelSerialToIso } from "./xlsx";
 import { parseCsv, buildPbmResolver } from "./reference";
 import { SB20_MIN_DISPENSING_FEE_CENTS } from "./reimbursement-rules";
 import { CLASS_INFO, planKey } from "./plans";
+import type { Transaction } from "./rx-transactions";
 
 /**
  * Loading a PioneerRx export and attaching every claim to the payer that priced it.
@@ -91,6 +92,8 @@ export function parseClaimDate(raw: string | undefined): string | null {
   if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
   const us = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(s);
   if (us) return `${us[3]}-${us[1].padStart(2, "0")}-${us[2].padStart(2, "0")}`;
+  const us2 = /^(\d{1,2})\/(\d{1,2})\/(\d{2})(?!\d)/.exec(s);
+  if (us2) return `20${us2[3]}-${us2[1].padStart(2, "0")}-${us2[2].padStart(2, "0")}`;
   if (/^\d+(\.\d+)?$/.test(s)) return excelSerialToIso(Number(s));
   return null;
 }
@@ -247,6 +250,150 @@ export async function importClaims(file: Buffer, fileName: string, userId: strin
     skipReasons, unmappedColumns: unmapped, unresolvedBins: [...unresolvedBins].sort(),
     periodFrom: from, periodTo: to,
   };
+}
+
+export type TransactionImportReport = ImportReport & {
+  reversed: number;
+  unmatchedReversals: number;
+  notYetSold: number;
+  period: { from: string; to: string } | null;
+  problems: string[];
+};
+
+/**
+ * Reads the daily "Rx Transaction Details By Submission Type" report and stores it.
+ *
+ * Every row is a transaction; the parser reads them and planTransactions decides what each one
+ * does: a paid row becomes a claim, a reversal marks the claim it cancels as reversed (whether
+ * that claim is in this file or was stored on an earlier day), a rejected row is counted, and a
+ * row with no completed date — transmitted, not yet sold — is left for a later day at the
+ * pharmacy's instruction. Every transaction key, including a reversal's, is stored, so the same
+ * day's report arriving twice changes nothing the second time.
+ *
+ * The drug name is not in the report. It is filled in from the supplier catalogues, then from
+ * NADAC, by NDC — so a claim reads as "ATORVASTATIN 40MG TAB" on every page rather than an NDC.
+ */
+export async function importRxTransactions(file: Buffer, fileName: string, userId: string): Promise<TransactionImportReport> {
+  const { parseRxTransactions, planTransactions } = await import("./rx-transactions");
+  const parsed = parseRxTransactions(file.toString("utf8"));
+  const importId = newId();
+  const rowsRead = parsed.rows.length;
+
+  await db.insert(schema.claimImports).values({ id: importId, fileName, rowsRead, createdBy: userId });
+
+  const base: TransactionImportReport = {
+    importId, rowsRead, claimsAdded: 0, duplicates: 0, skipped: parsed.skipped, skipReasons: { ...parsed.reasons },
+    unmappedColumns: [], unresolvedBins: [], periodFrom: parsed.period?.from ?? null, periodTo: parsed.period?.to ?? null,
+    reversed: 0, unmatchedReversals: 0, notYetSold: 0, period: parsed.period, problems: [...parsed.problems],
+  };
+  const finish = async (r: TransactionImportReport) => {
+    await db.update(schema.claimImports).set({
+      claimsAdded: r.claimsAdded, duplicates: r.duplicates, skipped: r.skipped, skipReasons: JSON.stringify(r.skipReasons),
+      unmappedColumns: JSON.stringify([]), periodFrom: r.periodFrom, periodTo: r.periodTo,
+    }).where(sql`${schema.claimImports.id} = ${importId}`);
+    return r;
+  };
+  if (parsed.rows.length === 0) return finish(base);
+
+  // What is already held: every transaction key (paid rows and the reversals that cancelled
+  // them), and the paid claims a reversal in this file might cancel.
+  const held = await db.query.claims.findMany({
+    where: eq(schema.claims.source, "transaction_report"),
+    columns: { id: true, transactionKey: true, reversalKey: true, status: true, rxNumber: true, fillNumber: true, bin: true, ndc11: true, remitCents: true, copayCents: true },
+  });
+  const keys = new Set<string>();
+  for (const c of held) { if (c.transactionKey) keys.add(c.transactionKey); if (c.reversalKey) keys.add(c.reversalKey); }
+  const paid = held.filter((c) => c.status === "paid");
+
+  const plan = planTransactions(parsed.rows, { keys, paid }, { ignoreBins: ["028249"] });
+  const skipReasons = { ...parsed.reasons };
+  for (const s of plan.skipped) skipReasons[s.why] = (skipReasons[s.why] ?? 0) + 1;
+
+  const resolver = buildPbmResolver(await db.query.payerBins.findMany({ columns: { pbmName: true, aliases: true } }), null);
+  const binRows = await db.query.payerBins.findMany({ columns: { bin: true, pbmName: true } });
+  const byBin = new Map<string, Set<string>>();
+  for (const b of binRows) {
+    if (!byBin.has(b.bin)) byBin.set(b.bin, new Set());
+    byBin.get(b.bin)!.add(b.pbmName);
+  }
+  const names = await drugNamesByNdc([
+    ...plan.insertPaid, ...plan.insertReversedPaid.map((x) => x.paid), ...plan.insertUnmatchedReversal,
+  ].map((t) => t.ndc11).filter((x): x is string => !!x));
+  const unresolvedBins = new Set<string>();
+  const reversedOn = parsed.period?.from ?? new Date().toISOString().slice(0, 10);
+
+  const toClaim = (t: Transaction, status: "paid" | "reversed", reversal?: Transaction): typeof schema.claims.$inferInsert => {
+    const resolved = resolvePayer(t.bin, t.payerLabel, byBin, resolver);
+    if (t.bin && !resolved.pbmName) unresolvedBins.add(t.bin);
+    return {
+      id: newId(), importId, rxNumber: t.rxNumber, fillNumber: t.fillNumber, dateFilled: t.dateFilled,
+      ndc11: t.ndc11, itemName: t.ndc11 ? names.get(t.ndc11) ?? null : null,
+      bin: t.bin, pcn: t.pcn, groupNumber: t.groupNumber, networkId: t.networkId,
+      payerLabel: t.payerLabel, pbmName: resolved.pbmName, matchMethod: resolved.method, payerAmbiguous: resolved.ambiguous,
+      quantityThousandths: t.quantityThousandths, quantityUnit: null,
+      remitCents: t.remitCents, copayCents: t.copayCents, acquisitionCents: t.acquisitionCents, grossProfitCents: t.grossProfitCents,
+      ingredientPaidCents: t.ingredientPaidCents, dispensingFeePaidCents: t.dispensingFeeCents,
+      status, reversedOn: status === "reversed" ? reversedOn : null,
+      transactionKey: t.transactionKey, reversalKey: reversal?.transactionKey ?? (status === "reversed" && !reversal ? t.transactionKey : null),
+      source: "transaction_report", rawJson: JSON.stringify(t.raw),
+    };
+  };
+
+  const inserts: (typeof schema.claims.$inferInsert)[] = [
+    ...plan.insertPaid.map((t) => toClaim(t, "paid")),
+    ...plan.insertReversedPaid.map(({ paid, reversal }) => toClaim(paid, "reversed", reversal)),
+    ...plan.insertUnmatchedReversal.map((t) => toClaim(t, "reversed")),
+  ];
+  for (let i = 0; i < inserts.length; i += 300) await db.insert(schema.claims).values(inserts.slice(i, i + 300));
+  for (const r of plan.reverseExisting) {
+    await db.update(schema.claims).set({ status: "reversed", reversedOn, reversalKey: r.reversal.transactionKey }).where(eq(schema.claims.id, r.claimId));
+  }
+
+  const dates = inserts.map((c) => c.dateFilled).sort();
+  return finish({
+    ...base,
+    claimsAdded: plan.insertPaid.length,
+    duplicates: plan.duplicates,
+    skipped: parsed.skipped + plan.skipped.length,
+    skipReasons,
+    unresolvedBins: [...unresolvedBins].sort(),
+    periodFrom: parsed.period?.from ?? dates[0] ?? null,
+    periodTo: parsed.period?.to ?? dates[dates.length - 1] ?? null,
+    reversed: plan.insertReversedPaid.length + plan.reverseExisting.length,
+    unmatchedReversals: plan.insertUnmatchedReversal.length,
+    notYetSold: plan.skipped.filter((s) => /not yet sold/.test(s.why)).length,
+  });
+}
+
+/** Drug names by NDC from what we already hold: the supplier catalogues first, then NADAC. */
+async function drugNamesByNdc(ndcs: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const want = [...new Set(ndcs)];
+  for (let i = 0; i < want.length; i += 300) {
+    const slice = want.slice(i, i + 300);
+    const items = await db.query.supplierItems.findMany({ where: inArray(schema.supplierItems.ndc11, slice), columns: { ndc11: true, description: true } });
+    for (const it of items) if (it.description && !out.has(it.ndc11)) out.set(it.ndc11, it.description);
+    const missing = slice.filter((n) => !out.has(n));
+    if (missing.length) {
+      const nad = await db.query.nadacPrices.findMany({ where: inArray(schema.nadacPrices.ndc11, missing), columns: { ndc11: true, description: true } });
+      for (const n of nad) if (n.description && !out.has(n.ndc11)) out.set(n.ndc11, n.description);
+    }
+  }
+  return out;
+}
+
+/** A one-line account of a transaction-report import, for the inbox and the claims page. */
+export function describeTransactionImport(r: TransactionImportReport): string {
+  const bits = [`${r.claimsAdded.toLocaleString()} paid claim${r.claimsAdded === 1 ? "" : "s"} added`];
+  if (r.reversed) bits.push(`${r.reversed} reversed`);
+  if (r.unmatchedReversals) bits.push(`${r.unmatchedReversals} reversal${r.unmatchedReversals === 1 ? "" : "s"} matched no claim we hold (kept, marked reversed)`);
+  if (r.notYetSold) bits.push(`${r.notYetSold} not yet sold (left for a later day)`);
+  if (r.duplicates) bits.push(`${r.duplicates} already held`);
+  const other = Object.entries(r.skipReasons).filter(([k]) => !/not yet sold/.test(k));
+  if (other.length) bits.push(other.map(([k, v]) => `${v} ${k}`).join(", "));
+  if (r.period) bits.push(`claims transmitted ${r.period.from}${r.period.to !== r.period.from ? ` to ${r.period.to}` : ""}`);
+  if (r.unresolvedBins.length) bits.push(`BINs not on the listing: ${r.unresolvedBins.join(", ")}`);
+  return bits.join(". ") + "." + (r.problems.length ? " " + r.problems.join(" ") : "");
 }
 
 export type PayerMatch = {

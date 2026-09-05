@@ -11,6 +11,7 @@ import { storeFile, ALLOWED_MIME, MAX_FILE_BYTES } from "./files";
 import { classify, parseSupplierRules, supplierFor } from "./autoroute";
 import { importClaims } from "./claims";
 import { importPioneerCatalog } from "./suppliers";
+import { importRxTransactions, describeTransactionImport } from "./claims";
 import { describeFileName } from "./pioneer-catalog";
 import { acceptableAttachment } from "./autoroute";
 import { importSupplierCatalog } from "./suppliers";
@@ -500,6 +501,12 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
                   const r = await importClaims(buf, fileName, ctx.userId ?? "mailbox-sweep");
                   routeResult = `${r.claimsAdded} claims added, ${r.duplicates} already held, ${r.skipped} skipped`;
                   result.imported++;
+                } else if (cls.kind === "rx_transactions") {
+                  // The daily claims feed. Paid rows become claims, reversals cancel the claims
+                  // they name, unsold rows wait for the day they sell.
+                  const r = await importRxTransactions(buf, fileName, ctx.userId ?? "mailbox-sweep");
+                  routeResult = describeTransactionImport(r);
+                  if (r.claimsAdded || r.reversed) result.imported++;
                 } else if (cls.kind === "pioneer_catalog") {
                   // Names its own supplier inside the file, so no sender rule is needed — and the
                   // filename is checked against it, so MCKCatalog carrying IPD prices is refused.

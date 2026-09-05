@@ -3,6 +3,7 @@ import { parseCsvRows } from "./reference";
 import { readSheet } from "./xlsx";
 import { classify, type RouteKind } from "./autoroute";
 import { mapColumns } from "./claims";
+import { parseRxTransactions, type Transaction } from "./rx-transactions";
 import { mapSupplierColumns } from "./suppliers";
 
 /**
@@ -103,6 +104,7 @@ function readRows(fileName: string, buf: Buffer): string[][] {
  */
 export function checkReport(fileName: string, buf: Buffer): ReportCheck {
   const cls = classify(fileName, buf);
+  if (cls.kind === "rx_transactions") return checkTransactionReport(cls.why, buf);
   const rows = readRows(fileName, buf).filter((r) => r.some((c) => c.trim() !== ""));
   const [head, ...body] = rows;
   const headers = (head ?? []).map((h) => h.trim());
@@ -161,4 +163,39 @@ function buildAsk(results: FieldResult[]): string {
   }
   if (parts.length === 0) return "Everything needed is present and populated. Nothing further required.";
   return parts.join("\n\n");
+}
+
+/**
+ * The daily transaction report, judged by what its reader actually gets out of it.
+ *
+ * Its columns cannot be mapped by name — the header is split across lines and one named column
+ * has no cell — so the ordinary check would call everything absent. The reader knows where each
+ * field is; this asks it, and reports fill rates over the transactions it read. Fields the report
+ * cannot carry (plan type, basis of reimbursement, days supply) are reported absent, which is
+ * honest: the floor check runs without them, and an appeal is weaker for their absence.
+ */
+function checkTransactionReport(why: string, buf: Buffer): ReportCheck {
+  const parsed = parseRxTransactions(buf.toString("utf8"));
+  const rows = parsed.rows;
+  const supplied: Record<string, (t: Transaction) => unknown> = {
+    rxNumber: (t) => t.rxNumber, fillNumber: (t) => t.fillNumber, dateFilled: (t) => t.dateFilled, ndc11: (t) => t.ndc11,
+    quantity: (t) => t.quantityThousandths, bin: (t) => t.bin, pcn: (t) => t.pcn, groupNumber: (t) => t.groupNumber,
+    networkId: (t) => t.networkId, remit: (t) => t.remitCents, copay: (t) => t.copayCents, ingredientPaid: (t) => t.ingredientPaidCents,
+    dispensingFeePaid: (t) => t.dispensingFeeCents, acquisition: (t) => t.acquisitionCents, grossProfit: (t) => t.grossProfitCents,
+  };
+  const columnFor: Record<string, string> = {
+    rxNumber: "Rx Number", fillNumber: "Rx Number (after the dash)", dateFilled: "Date Filled", ndc11: "NDC", quantity: "QTY", bin: "BIN", pcn: "PCN",
+    groupNumber: "Group", networkId: "Ntw Reim. Id", remit: "Amount", copay: "Copay", ingredientPaid: "Amount + Copay − Dispensing Fee (derived)",
+    dispensingFeePaid: "Dispensing Fee", acquisition: "Acq. Inv. Cost", grossProfit: "GrossProfit",
+  };
+  const results: FieldResult[] = CLAIM_NEEDS.map((n) => {
+    const get = supplied[n.field];
+    if (!get) return { ...n, column: null, present: false, filled: 0, rows: rows.length, fillRate: 0, state: "absent" as const };
+    const filled = rows.filter((t) => { const v = get(t); return v !== null && v !== undefined && v !== ""; }).length;
+    const fillRate = rows.length === 0 ? 0 : filled / rows.length;
+    const state = filled === 0 ? "empty" : fillRate >= 0.99 ? "populated" : "partial";
+    return { ...n, column: columnFor[n.field] ?? n.field, present: true, filled, rows: rows.length, fillRate, state };
+  });
+  const problems = parsed.problems.length ? ` ${parsed.problems.join(" ")}` : "";
+  return { kind: "rx_transactions", why: why + problems, rows: rows.length, headers: parsed.headers, results, extraColumns: [], askBack: buildAsk(results) };
 }

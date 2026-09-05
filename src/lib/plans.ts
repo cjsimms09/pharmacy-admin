@@ -122,6 +122,7 @@ export async function planRegister(): Promise<PlanRow[]> {
   const [groups, claims] = await Promise.all([
     db.query.planGroups.findMany(),
     db.query.claims.findMany({
+      where: eq(schema.claims.status, "paid"),
       columns: { bin: true, groupNumber: true, remitCents: true, copayCents: true, planType: true },
     }),
   ]);
@@ -220,6 +221,6 @@ export async function inScopeClaims() {
   const inScope = new Set(
     groups.filter((g) => CLASS_INFO[g.classification].inScope).map((g) => planKey(g.bin, g.groupNumber)),
   );
-  const claims = await db.query.claims.findMany();
+  const claims = await db.query.claims.findMany({ where: eq(schema.claims.status, "paid") });
   return claims.filter((c) => inScope.has(planKey(c.bin, c.groupNumber)));
 }

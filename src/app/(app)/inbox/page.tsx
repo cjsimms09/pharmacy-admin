@@ -157,6 +157,7 @@ function whatToDo(i: { status: string; reason: string | null; routedAs: string |
   if (/larger than 20 MB/i.test(text)) return "Schedule the report per supplier rather than all suppliers in one file, so each stays under the size limit.";
   if (/automatic loading is switched off/i.test(text)) return "Turn on “Load recognised reports automatically” under Settings → Email, then load this one from Purchasing by hand.";
   if (/named for .* but names/i.test(text)) return "The schedule that produces this file exports a different supplier's catalogue than its name says. Fix either the name or the supplier in the PioneerRx schedule.";
+  if (/columns have changed/i.test(text)) return "The Daily report's columns were changed in PioneerRx. Put them back to the list shown on Reports, or send the file to be looked at; nothing from it was loaded.";
   if (/split across lines but .* price lines/i.test(text)) return "The report's layout changed. Send the file to be looked at; nothing from that supplier was replaced.";
   if (/nothing could be loaded/i.test(text)) return "The file was recognised as a catalogue but held no readable prices. Open it and check that it is the full Supplier Catalog Item Search Results export.";
   if (i.routedAs === "unrecognised" && /catalog/i.test(text)) return "The file was not recognised as the PioneerRx catalogue export. It must begin with its own title line, “Supplier Catalog Item Search Results”.";

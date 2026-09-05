@@ -137,3 +137,11 @@ describe("the scheduled PioneerRx catalogue, however it is named", () => {
     assert.equal(acceptableAttachment({ filename: "", contentType: "text/plain" }).ok, false);
   });
 });
+
+describe("the daily transaction report", () => {
+  test("is known by its title line, whatever it is named", () => {
+    const buf = Buffer.from("Rx Transaction Details By Submission Type (BETA)\r\nWest Wichita Family Pharmacy\r\n", "utf8");
+    assert.equal(classify("Daily (9_5_2026).txt", buf).kind, "rx_transactions");
+    assert.equal(classify("Daily (9_5_2026)", buf).kind, "rx_transactions");
+  });
+});

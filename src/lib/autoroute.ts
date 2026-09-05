@@ -4,6 +4,7 @@ import { readSheet } from "./xlsx";
 import { mapColumns } from "./claims";
 import { mapSupplierColumns } from "./suppliers";
 import { looksLikePioneerCatalog } from "./pioneer-catalog";
+import { looksLikeRxTransactions } from "./rx-transactions";
 import { ALLOWED_MIME } from "./files";
 
 /**
@@ -21,7 +22,7 @@ import { ALLOWED_MIME } from "./files";
  * behaviour we already had and is never wrong, only unhelpful.
  */
 
-export type RouteKind = "claims" | "supplier_catalog" | "pioneer_catalog" | "nadac" | "unrecognised";
+export type RouteKind = "claims" | "rx_transactions" | "supplier_catalog" | "pioneer_catalog" | "nadac" | "unrecognised";
 
 export type Classification = {
   kind: RouteKind;
@@ -63,6 +64,17 @@ export function headersOf(fileName: string, buf: Buffer): string[] {
  * would otherwise match the looser catalogue rule.
  */
 export function classify(fileName: string, buf: Buffer): Classification {
+  /*
+   * The daily "Rx Transaction Details By Submission Type" report — the claims feed — is, like the
+   * catalogue, a printed report whose first line is its title, so it is known by that title.
+   */
+  if (looksLikeRxTransactions(buf.subarray(0, 8192).toString("utf8"))) {
+    return {
+      kind: "rx_transactions",
+      why: "Begins with PioneerRx's \"Rx Transaction Details By Submission Type\" title; one row per claim transaction.",
+      headers: ["Rx Number", "Status", "Amount", "Group", "Ntw Reim. Id", "Copay", "Dispensing Fee", "Completed Date", "Date Filled", "BIN", "QTY", "Acq. Inv. Cost", "PCN", "NDC", "GrossProfit"],
+    };
+  }
   /*
    * PioneerRx's supplier catalogue export, checked before anything that reads a header row.
    *

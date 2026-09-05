@@ -88,10 +88,16 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           <section className="mt-6 rounded-lg border border-line bg-surface p-4">
             <h2 className="text-sm font-semibold">What to ask for</h2>
             <p className="mt-1 text-sm text-ink-2">
-              Ask for the <b>Completed Prescriptions</b> report, one row per fill, with the primary third-party
-              columns added — that report is one row per dispensing, which is the unit the statutory floor is
-              calculated on. A transaction-level claims report carries a submission, a reversal and a resubmission as
-              three rows for the same fill, which has to be unpicked before anything can be priced.
+              The daily feed is PioneerRx&rsquo;s <b>Rx Transaction Details By Submission Type</b> report, scheduled
+              to email at 6:30 each evening as <span className="font-mono">Daily (date)</span>, with these columns:
+              Rx Number, Status, Amount, Group, Ntw Reim. Id, Copay, Dispensing Fee, Total, Completed Date, Date
+              Filled, BIN, Tax, QTY, Acq. Inv. Cost, PCN, NDC, GrossProfit. The site reads it directly: a paid row
+              becomes a claim, a reversal cancels the claim it names, and a row with no completed date (transmitted,
+              not yet sold) waits for the day it sells. Ingredient cost paid is worked out as plan paid plus copay less
+              the dispensing fee. If the columns are ever changed in PioneerRx the file is refused with the change named,
+              so change them here first. The list below is the fuller one-row-per-fill export, kept for reference; the
+              transaction report lacks plan type, basis of reimbursement and days supply, which the floor check does
+              not need and an appeal would like.
             </p>
             <div className="mt-3 overflow-x-auto rounded-lg border border-line">
               <table className="w-full text-sm">

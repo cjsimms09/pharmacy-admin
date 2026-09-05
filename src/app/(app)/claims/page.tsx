@@ -3,7 +3,10 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { importClaims, claimFlags, claimsByPayer, claimImports } from "@/lib/claims";
+import { importClaims, importRxTransactions, describeTransactionImport, claimFlags, claimsByPayer, claimImports } from "@/lib/claims";
+import { looksLikeRxTransactions } from "@/lib/rx-transactions";
+import { getSettings } from "@/lib/settings";
+import { hasMailPassword } from "@/lib/mailbox";
 import { formatCents } from "@/lib/money";
 import { requireReimbursement } from "@/lib/features";
 import { PageHeader, Notice, Empty } from "@/components/ui";
@@ -15,7 +18,11 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
   await requireReimbursement();
   await requireUser();
   const { ok, error } = await searchParams;
-  const [flags, byPayer, imports] = await Promise.all([claimFlags(), claimsByPayer(), claimImports()]);
+  const [flags, byPayer, imports, s, mailReady] = await Promise.all([claimFlags(), claimsByPayer(), claimImports(), getSettings(), hasMailPassword()]);
+  const autoImport = (s.mail_auto_import ?? "").toLowerCase() === "yes";
+  const mailOn = s.mail_enabled === "yes";
+  const lastImport = imports[0] ?? null;
+  const lastAgeDays = lastImport ? (Date.now() - Date.parse(lastImport.createdAt)) / 86_400_000 : null;
 
   async function upload(fd: FormData) {
     "use server";
@@ -23,7 +30,15 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
     const file = fd.get("file");
     if (!(file instanceof File) || file.size === 0) redirect("/claims?error=" + encodeURIComponent("Choose a file first."));
     try {
-      const r = await importClaims(Buffer.from(await file.arrayBuffer()), file.name, u.id);
+      const buf = Buffer.from(await file.arrayBuffer());
+      if (looksLikeRxTransactions(buf.subarray(0, 8192).toString("utf8"))) {
+        const t = await importRxTransactions(buf, file.name, u.id);
+        const text = describeTransactionImport(t);
+        await audit({ action: "claims.import", userId: u.id, userName: u.name, details: `${file.name}: ${text.slice(0, 200)}` });
+        revalidatePath("/claims");
+        redirect(`/claims?${t.problems.length && !t.claimsAdded ? "error" : "ok"}=` + encodeURIComponent(text));
+      }
+      const r = await importClaims(buf, file.name, u.id);
       await audit({
         action: "claims.import",
         userId: u.id,
@@ -54,15 +69,64 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
 
+      {/*
+        The daily feed, and whether the door is open for it.
+
+        PioneerRx emails the "Rx Transaction Details By Submission Type" report at 6:30 every evening
+        as "Daily (date)". Everything that has to be true for it to load on its own is listed here
+        with its state, and the last file that came is named with what was made of it — so the
+        morning after, "did it come in right" is one glance here, and "what went wrong" is the Inbox
+        line this points to.
+      */}
       <section className="my-4 rounded-lg border border-line bg-surface p-4">
-        <h2 className="text-sm font-semibold">Load a claims export</h2>
+        <h2 className="text-sm font-semibold">Daily claims feed</h2>
         <p className="mt-1 text-xs text-ink-3">
-          The PioneerRx Completed Prescriptions export, as .xlsx or .csv. Loading an overlapping file again is safe —
-          a claim is identified by prescription number, fill number and fill date, so anything already held is
-          counted rather than added twice.
+          PioneerRx emails the <b>Rx Transaction Details By Submission Type</b> report at 6:30 each evening, named{" "}
+          <span className="font-mono">Daily (date)</span>. The site recognises it by its title line, not its name. A paid
+          row becomes a claim, a reversal cancels the claim it names, and a row with no completed date is not yet sold
+          and waits. If it does not load, the <Link href="/inbox" className="text-accent underline">Inbox</Link> line
+          says how it came and what to change.
+        </p>
+        <ul className="mt-3 grid gap-1 text-xs sm:grid-cols-3">
+          <li className="flex items-center gap-2">
+            <span className={`badge ${mailReady ? "badge-ok" : "badge-crit"}`}>{mailReady ? "ready" : "not set up"}</span>
+            Mailbox connected {!mailReady && <Link href="/settings/email" className="text-accent underline">(set up)</Link>}
+          </li>
+          <li className="flex items-center gap-2">
+            <span className={`badge ${mailOn ? "badge-ok" : "badge-crit"}`}>{mailOn ? "on" : "off"}</span>
+            Checked automatically {!mailOn && <Link href="/settings/email" className="text-accent underline">(turn on)</Link>}
+          </li>
+          <li className="flex items-center gap-2">
+            <span className={`badge ${autoImport ? "badge-ok" : "badge-crit"}`}>{autoImport ? "on" : "off"}</span>
+            Loaded on arrival {!autoImport && <Link href="/settings/email" className="text-accent underline">(turn on)</Link>}
+          </li>
+        </ul>
+        <div className="mt-3 text-xs">
+          {lastImport ? (
+            <>
+              <span className={`badge ${lastAgeDays !== null && lastAgeDays > 2.3 ? "badge-warn" : "badge-ok"}`}>
+                {lastAgeDays !== null && lastAgeDays < 1 ? "today" : `${Math.floor(lastAgeDays ?? 0)}d ago`}
+              </span>{" "}
+              Last file <span className="font-mono">{lastImport.fileName}</span> received {lastImport.createdAt.slice(0, 16).replace("T", " ")}:{" "}
+              {lastImport.rowsRead.toLocaleString()} rows read, {lastImport.claimsAdded.toLocaleString()} paid claims added
+              {lastImport.duplicates ? `, ${lastImport.duplicates} already held` : ""}
+              {lastImport.skipped ? `, ${lastImport.skipped} set aside (${Object.entries(JSON.parse(lastImport.skipReasons || "{}") as Record<string, number>).map(([k, v]) => `${v} ${k}`).join(", ")})` : ""}
+              {lastImport.periodFrom ? ` — claims transmitted ${lastImport.periodFrom}` : ""}.
+            </>
+          ) : (
+            <><span className="badge badge-muted">waiting</span> No daily report has arrived yet. The first is due at 6:30 this evening.</>
+          )}
+        </div>
+      </section>
+
+      <section className="my-4 rounded-lg border border-line bg-surface p-4">
+        <h2 className="text-sm font-semibold">Load a file by hand</h2>
+        <p className="mt-1 text-xs text-ink-3">
+          The daily transaction report (.txt) or the Completed Prescriptions export (.xlsx or .csv). Loading the same
+          file again is safe — every row is identified, so anything already held is counted rather than added twice.
         </p>
         <form action={upload} className="mt-3 flex flex-wrap items-center gap-2">
-          <input type="file" name="file" accept=".xlsx,.csv" className="text-sm" />
+          <input type="file" name="file" accept=".xlsx,.csv,.txt" className="text-sm" />
           <button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Load</button>
         </form>
       </section>

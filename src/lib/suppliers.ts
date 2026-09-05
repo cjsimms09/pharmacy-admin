@@ -349,6 +349,7 @@ export type Opportunity = {
  */
 export async function purchasingOpportunities(): Promise<{ ready: boolean; reason?: string; rows: Opportunity[] }> {
   const claims = await db.query.claims.findMany({
+    where: eq(schema.claims.status, "paid"),
     columns: { ndc11: true, itemName: true, acquisitionCents: true, quantityThousandths: true },
   });
   if (claims.length === 0) return { ready: false, reason: "No claims loaded yet.", rows: [] };

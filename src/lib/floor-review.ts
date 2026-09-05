@@ -310,8 +310,9 @@ export function reviewClaims(
   blockers.sort((a, b) => b.onlyThisCents - a.onlyThisCents || b.onlyThis - a.onlyThis);
 
   const caveats = [
-    "The claims export carries no reversal indicator, so this review assumes no claim on it was reversed. " +
-      "A reversed claim would show as a shortfall that is not one.",
+    "Claims from the daily transaction report have their reversals applied, and reversed claims are left out. " +
+      "Claims from the one-row-per-fill export carry no reversal indicator and are assumed not reversed; a reversed " +
+      "one would show as a shortfall that is not one.",
     "It carries no compound or 340B indicator either, and neither is priced against NADAC. Ask for both columns.",
     "Amounts are what the plan adjudicated, taken from the dispensing system, rather than what a remittance " +
       "confirms arrived. That is the payer's own figure, which is fair evidence — but a matched remittance is " +
@@ -337,10 +338,13 @@ export function reviewClaims(
 
 /** Loads what the review needs and hands it to the pure reviewer above. */
 export async function floorReview(): Promise<FloorReview> {
-  const { db } = await import("@/db");
+  const { db, schema } = await import("@/db");
+  const { eq } = await import("drizzle-orm");
   const { getSettings } = await import("./settings");
   const [claims, plans, prices, s] = await Promise.all([
-    db.query.claims.findMany({ orderBy: (c, { asc }) => [asc(c.dateFilled)] }),
+    // Paid claims only. A reversed claim is money the plan took back; pricing it against the
+    // floor would report a shortfall on a claim the pharmacy was never paid for.
+    db.query.claims.findMany({ where: eq(schema.claims.status, "paid"), orderBy: (c, { asc }) => [asc(c.dateFilled)] }),
     db.query.planGroups.findMany(),
     db.query.nadacPrices.findMany(),
     getSettings(),

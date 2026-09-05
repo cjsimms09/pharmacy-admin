@@ -308,6 +308,7 @@ async function loadOneFile(full: string, file: string, size: number, onProgress?
  */
 export async function nadacClaimCoverage() {
   const claims = await db.query.claims.findMany({
+    where: eq(schema.claims.status, "paid"),
     columns: { id: true, ndc11: true, dateFilled: true, itemName: true, planType: true },
   });
   const withNdc = claims.filter((c) => c.ndc11);
@@ -372,6 +373,7 @@ export async function nadacWeekGaps(): Promise<
   { weekStart: string; claims: number; distinctNdcs: number; examples: string[] }[]
 > {
   const claims = await db.query.claims.findMany({
+    where: eq(schema.claims.status, "paid"),
     columns: { ndc11: true, dateFilled: true, itemName: true },
   });
   const withNdc = claims.filter((c) => c.ndc11);

@@ -10,6 +10,13 @@ import { excelSerialToIso, columnIndex } from "../src/lib/xlsx";
  * produce a table that looks right and is wrong.
  */
 
+describe("dates as the transaction report writes them", () => {
+  test("a two-digit year is this century", () => {
+    assert.equal(parseClaimDate("09/05/26"), "2026-09-05");
+    assert.equal(parseClaimDate("9/5/2026"), "2026-09-05");
+  });
+});
+
 describe("mapColumns against the real PioneerRx headers", () => {
   const headers = [
     "Rx Number", "Prescribed Item", "Dispensed Item Name", "Date Filled", "Written Quantity", "Pay Method",
