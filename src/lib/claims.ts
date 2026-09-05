@@ -23,7 +23,14 @@ import { CLASS_INFO, planKey } from "./plans";
  * What each field can be called. First match wins, so the exact PioneerRx name leads.
  * Comparison is on a normalised key: lowercase, alphanumeric only.
  */
-const COLUMNS = {
+/**
+ * Every header this recognises, per field, first match winning.
+ *
+ * Exported because the question "what do I ask the report writer for" has to be answerable before
+ * anybody has a file to check. The names leading each list are PioneerRx's own, so a report built
+ * from them imports without anybody renaming a column.
+ */
+export const COLUMNS = {
   rxNumber: ["rx number", "rxnumber", "prescription number", "rx"],
   fillNumber: ["fill number", "refill number", "refill", "fill"],
   dateFilled: ["date filled", "datefilled", "date of service", "fill date"],

@@ -4,6 +4,8 @@ import { requireUser } from "@/lib/auth";
 import { checkReport, type ReportCheck, type FieldResult } from "@/lib/report-check";
 import { requireReimbursement } from "@/lib/features";
 import { PageHeader, Notice, Empty } from "@/components/ui";
+import { CLAIM_NEEDS } from "@/lib/report-check";
+import { COLUMNS } from "@/lib/claims";
 
 export const metadata = { title: "Report check" };
 export const dynamic = "force-dynamic";
@@ -72,7 +74,72 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       </section>
 
       {!check ? (
-        <Empty>No report checked yet.</Empty>
+        <>
+          <Empty>No report checked yet.</Empty>
+
+          {/*
+            What to ask for, before there is a file to check.
+            
+            The checker answers "is this report good enough" and cannot answer "what report should
+            I build" — which is the question that comes first and the one somebody has to take to
+            whoever writes the report. The names below lead with PioneerRx's own, so a report built
+            from this list imports without anybody renaming a column afterwards.
+          */}
+          <section className="mt-6 rounded-lg border border-line bg-surface p-4">
+            <h2 className="text-sm font-semibold">What to ask for</h2>
+            <p className="mt-1 text-sm text-ink-2">
+              Ask for the <b>Completed Prescriptions</b> report, one row per fill, with the primary third-party
+              columns added — that report is one row per dispensing, which is the unit the statutory floor is
+              calculated on. A transaction-level claims report carries a submission, a reversal and a resubmission as
+              three rows for the same fill, which has to be unpicked before anything can be priced.
+            </p>
+            <div className="mt-3 overflow-x-auto rounded-lg border border-line">
+              <table className="w-full text-sm">
+                <thead className="bg-ground text-left text-xs uppercase tracking-wide text-ink-3">
+                  <tr>
+                    <th className="px-3 py-2">Column</th>
+                    <th className="px-3 py-2">Ask for it as</th>
+                    <th className="px-3 py-2">Needed</th>
+                    <th className="px-3 py-2">Without it</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {CLAIM_NEEDS.map((n) => {
+                    const names = (COLUMNS as Record<string, readonly string[]>)[n.field] ?? [];
+                    return (
+                      <tr key={n.field} className="border-t border-line align-top">
+                        <td className="px-3 py-2 font-medium">
+                          {n.name}
+                          {n.ncpdp && <div className="text-xs text-ink-3">NCPDP {n.ncpdp}</div>}
+                        </td>
+                        <td className="px-3 py-2 text-xs text-ink-2">
+                          {names[0] ?? "—"}
+                          {names.length > 1 && (
+                            <div className="text-ink-3">or: {names.slice(1).join(", ")}</div>
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          {n.critical ? (
+                            <span className="badge badge-crit">required</span>
+                          ) : (
+                            <span className="badge badge-muted">helpful</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-xs text-ink-2">{n.blocks}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-3 text-xs text-ink-3">
+              Three more columns are worth asking for even though nothing here needs them yet, because each closes an
+              assumption the floor review currently has to make in the pharmacy&rsquo;s favour: whether the claim was
+              <b> reversed</b>, whether it was a <b>compound</b>, and whether it was dispensed under <b>340B</b>.
+              None of the three is priced against NADAC.
+            </p>
+          </section>
+        </>
       ) : (
         <>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
