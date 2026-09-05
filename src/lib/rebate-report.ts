@@ -266,6 +266,44 @@ export function monthDayYear(s: string): string | null {
  * rather than dropped: they change the money, and a person reading the terms later needs to know
  * they exist even though nothing computes with them yet.
  */
+/**
+ * The generic purchase ratio ladder, as terms of its own.
+ *
+ * A second programme rather than a footnote, because it is a second way of being paid and this
+ * pharmacy is earning nothing from it: the ratio reads 0.00% and the first band that pays anything
+ * starts at 75%. Recorded as its own ladder, the site can say how far away that is, which is a
+ * question worth asking every month. Left out, the report would look as though the GCR ladder were
+ * the only one there is.
+ */
+export function gprTermsFromReport(r: RebateReport): {
+  kind: "tiered_ratio";
+  period: "month";
+  eligibility: "all_generics";
+  ratioDefinition: string;
+  tiers: { thresholdPercent: number; rebatePercent: number }[];
+  paidAs: string;
+  notes: string;
+} | null {
+  if (r.ladder.gpr.length === 0) return null;
+  const pays = r.ladder.gpr.filter((b) => b.rebatePercent > 0).sort((a, b) => a.fromPercent - b.fromPercent)[0] ?? null;
+  return {
+    kind: "tiered_ratio",
+    period: "month",
+    eligibility: "all_generics",
+    ratioDefinition:
+      "The generic purchase ratio McKesson prints on the monthly rebate breakdown — the share of purchases that " +
+      "are generic. Measured separately from the compliance rate that pays the OneStop rebate.",
+    tiers: r.ladder.gpr.map((b) => ({ thresholdPercent: b.fromPercent, rebatePercent: b.rebatePercent })),
+    paidAs: "Settled monthly, alongside the compliance rebate.",
+    notes: pays
+      ? `Nothing is paid below ${pays.fromPercent}%. ` +
+        (r.statement.gprPercent === null
+          ? ""
+          : `The ${r.statement.periodFrom ?? "reported"} ratio was ${r.statement.gprPercent}%, which earns nothing.`)
+      : "No band on this ladder pays anything.",
+  };
+}
+
 export function termsFromReport(r: RebateReport): {
   kind: "tiered_ratio";
   period: "month";

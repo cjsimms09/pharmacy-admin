@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { getSettings, setSetting } from "./settings";
 import { allSuppliers } from "./suppliers-registry";
 import { saveRebateProgram } from "./supplier-terms-store";
-import { parseRebateReport, termsFromReport, looksLikeRebateReport, type RebateReport } from "./rebate-report";
+import { parseRebateReport, termsFromReport, gprTermsFromReport, bandFor, looksLikeRebateReport, type RebateReport } from "./rebate-report";
 
 /**
  * Filing a rebate breakdown: the ladder as terms, and the month's rate as the one the comparison uses.
@@ -29,8 +29,60 @@ export type FiledRebateReport = {
   ratePercent: number | null;
   periodFrom: string | null;
   report: RebateReport;
+  /** Where the pharmacy sits on each ladder, and what the next band up is worth. */
+  standing?: Standing;
   message: string;
 };
+
+export type Standing = {
+  lines: string[];
+  /** What one more band on the compliance ladder would have been worth on this month's purchases. */
+  nextBandWorthCents: number | null;
+};
+
+/**
+ * Where this pharmacy sits on each ladder, in money rather than percentages.
+ *
+ * "You are at 20.64%" means nothing on its own. "Three and a half points more would have paid
+ * another twenty-nine dollars this month" is a decision. And the ladder that pays nothing matters
+ * most of all: a pharmacy earning zero from the purchase-ratio programme cannot see the gap unless
+ * something names it.
+ */
+export function whereYouStand(r: RebateReport): Standing {
+  const s = r.statement;
+  const lines: string[] = [];
+  let nextBandWorthCents: number | null = null;
+
+  const here = s.scrubbedGcrPercent === null ? null : bandFor(r.ladder.gcr, s.scrubbedGcrPercent);
+  if (here && s.scrubbedGcrPercent !== null) {
+    lines.push(
+      `Compliance rate ${s.scrubbedGcrPercent}%, which is the ${here.fromPercent}%${here.toPercent === null ? "+" : `–${here.toPercent}%`} band: ${here.genericPercent}% on contract generics and ${here.brandPercent}% on brand.`,
+    );
+    const next = r.ladder.gcr.filter((b) => b.fromPercent > s.scrubbedGcrPercent!).sort((a, b) => a.fromPercent - b.fromPercent)[0];
+    if (next && s.oneStopPurchasedCents !== null) {
+      const gain = Math.round((s.oneStopPurchasedCents * (next.genericPercent - here.genericPercent)) / 100);
+      nextBandWorthCents = gain;
+      lines.push(
+        next.genericPercent > here.genericPercent
+          ? `The next band starts at ${next.fromPercent}% and pays ${next.genericPercent}% — ${round2(next.fromPercent - s.scrubbedGcrPercent)} points away, worth ${money(gain)} more on this month's contract purchases.`
+          : `The next band starts at ${next.fromPercent}% and pays the same ${next.genericPercent}% on generics, but ${next.brandPercent}% on brand rather than ${here.brandPercent}%.`,
+      );
+    }
+  }
+
+  const paysAt = r.ladder.gpr.filter((b) => b.rebatePercent > 0).sort((a, b) => a.fromPercent - b.fromPercent)[0];
+  if (paysAt && s.gprPercent !== null) {
+    lines.push(
+      s.gprPercent >= paysAt.fromPercent
+        ? `Purchase ratio ${s.gprPercent}%, which is earning on the second ladder.`
+        : `Purchase ratio ${s.gprPercent}%. Nothing is paid on that ladder below ${paysAt.fromPercent}%, so it is contributing nothing — ${round2(paysAt.fromPercent - s.gprPercent)} points short of the first band that pays.`,
+    );
+  }
+  return { lines, nextBandWorthCents };
+}
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 /** Which register row this report belongs to. McKesson prints no supplier name on it. */
 async function mckesson(): Promise<{ id: string; name: string } | null> {
@@ -80,7 +132,31 @@ export async function fileRebateReport(
       termsFromReport(report),
       user,
     );
-    parts.push(`${report.ladder.gcr.length} tiers filed against ${supplier.name}`);
+    parts.push(`${report.ladder.gcr.length} compliance tiers filed against ${supplier.name}`);
+
+    /*
+     * The second ladder, filed as a programme of its own.
+     *
+     * The purchase-ratio ladder pays nothing at this pharmacy — the ratio reads 0.00% and nothing
+     * pays below 75% — which is exactly why it is worth recording rather than mentioning in a
+     * footnote. Money not being earned is invisible unless something holds the shape of what would
+     * earn it.
+     */
+    const gprTerms = gprTermsFromReport(report);
+    if (gprTerms) {
+      await saveRebateProgram(
+        supplier.id,
+        {
+          name: "McKesson generic purchase ratio (GPR)",
+          effectiveFrom: s.periodFrom ?? new Date().toISOString().slice(0, 10),
+          notes: `Read from the same rebate breakdown for ${s.periodFrom ?? "an unnamed period"}.`,
+          documentId: meta.documentId ?? null,
+        },
+        gprTerms,
+        user,
+      );
+      parts.push(`${report.ladder.gpr.length} purchase-ratio tiers as well`);
+    }
   } else {
     parts.push(
       "No McKesson row exists on the Suppliers page yet, so the tier ladder has nowhere to be filed — " +
@@ -113,6 +189,7 @@ export async function fileRebateReport(
     ratePercent: rate,
     periodFrom: s.periodFrom,
     report,
+    standing: whereYouStand(report),
     message:
       `Rebate breakdown for ${s.periodFrom ?? "an unnamed period"} read and checked: ` +
       `a scrubbed GCR of ${s.scrubbedGcrPercent}% earned ${rate}% on ${dollarsOf(s.oneStopPurchasedCents)} of contract generics. ` +

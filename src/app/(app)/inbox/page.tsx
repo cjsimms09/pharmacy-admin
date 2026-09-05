@@ -4,6 +4,7 @@ import { db, schema } from "@/db";
 import { requireManager } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
 import { hasMailPassword } from "@/lib/mailbox";
+import { allSuppliers, addressesOf, type Supplier } from "@/lib/suppliers-registry";
 import { PageHeader, Notice, Empty } from "@/components/ui";
 import { fileInboxItem, deleteInboxItem, sweepNow, rereadItem } from "./actions";
 
@@ -13,11 +14,12 @@ export const dynamic = "force-dynamic";
 export default async function InboxPage({ searchParams }: { searchParams: Promise<{ saved?: string; error?: string; detail?: string; ok?: string }> }) {
   await requireManager();
   const { saved, error, detail, ok } = await searchParams;
-  const [s, configured, items, people] = await Promise.all([
+  const [s, configured, items, people, suppliers] = await Promise.all([
     getSettings(),
     hasMailPassword(),
     db.select().from(schema.inboxItems).orderBy(desc(schema.inboxItems.receivedAt)).limit(200),
     db.query.people.findMany({ where: eq(schema.people.active, true), orderBy: (p, { asc }) => [asc(p.lastName)] }),
+    allSuppliers(true),
   ]);
 
   return (
@@ -83,7 +85,13 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
                       <div className="mt-1 max-w-md text-xs text-ink-3">Filed only — {i.routeResult}</div>
                     )}
                     {!i.routedAs && i.routeResult && <div className="mt-1 max-w-md text-xs text-ink-3">{i.routeResult}</div>}
-                    {whatToDo(i) && <div className="mt-1 max-w-md rounded-md border border-warn bg-warn-soft px-2 py-1 text-xs text-warn">{whatToDo(i)}</div>}
+                    {(() => {
+                      const from = supplierByAddress(suppliers, i.fromAddress);
+                      const advice = whatToDo({ ...i, senderIsSupplier: Boolean(from), supplierName: from?.name ?? null });
+                      return advice ? (
+                        <div className="mt-1 max-w-md rounded-md border border-warn bg-warn-soft px-2 py-1 text-xs text-warn">{advice}</div>
+                      ) : null;
+                    })()}
                   </td>
                   <td>
                     {/* An emailed CPR card is useless sitting here. This is where it becomes a
@@ -164,13 +172,40 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
  * Sunday. Derived from the recorded reason rather than stored, so a wording change here reaches
  * old lines too.
  */
-function whatToDo(i: { status: string; reason: string | null; routedAs: string | null; routeResult: string | null; fileName: string | null }): string | null {
+function whatToDo(i: {
+  status: string;
+  reason: string | null;
+  routedAs: string | null;
+  routeResult: string | null;
+  fileName: string | null;
+  subject: string | null;
+  /** Whether the address it came from is already against a supplier on the register. */
+  senderIsSupplier: boolean;
+  supplierName: string | null;
+}): string | null {
   const text = `${i.reason ?? ""} ${i.routeResult ?? ""}`;
   if (/not on the allowed list/i.test(text)) return "Add this sender's address under Settings → Email → accepted senders, then press “Check for new mail now”.";
   if (/type this reads|no file extension/i.test(text)) return "Have the report emailed as a plain text or CSV attachment (not zipped, not in the body of the email).";
   if (/larger than 20 MB/i.test(text)) return "Schedule the report per supplier rather than all suppliers in one file, so each stays under the size limit.";
   if (/automatic loading is switched off/i.test(text)) return "Turn on “Load recognised reports automatically” under Settings → Email, then press “Read again with today's rules” on this line.";
-  if (i.routedAs === "unrecognised" && /\.pdf$/i.test(i.fileName ?? "")) return "If this is a supplier invoice, add the sender's address to that supplier under Suppliers, then press “Read again with today's rules” on this line.";
+  /*
+   * A PDF from somewhere the site does not know what to do with.
+   *
+   * The advice used to be "add the sender's address under Suppliers" whatever the case, which was
+   * wrong and infuriating for the commonest case of all: the address *is* already there, and the
+   * document simply is not an invoice. A monthly statement is the example — it summarises invoices
+   * rather than being one, and filing it under the controlled-substance invoice rules would be
+   * wrong anyway. So the advice now depends on whether the sender is known.
+   */
+  if (i.routedAs === "unrecognised" && /\.pdf$/i.test(i.fileName ?? "")) {
+    if (!i.senderIsSupplier) {
+      return "If this is a supplier invoice, add the sender's address to that supplier under Suppliers, then press “Read again with today's rules” on this line.";
+    }
+    if (/statement/i.test(`${i.subject ?? ""} ${i.fileName ?? ""}`)) {
+      return `Filed as a document from ${i.supplierName ?? "that supplier"}. A statement summarises invoices rather than being one, so it is not filed with them — the invoices it covers are already here on their own.`;
+    }
+    return `${i.supplierName ?? "That supplier"} is on the register, so this was filed as a document from them. It is not an invoice, a catalogue, a claims report or a rebate breakdown — nothing more is needed unless you expected it to load.`;
+  }
   if (/named for .* but names/i.test(text)) return "The schedule that produces this file exports a different supplier's catalogue than its name says. Fix either the name or the supplier in the PioneerRx schedule.";
   if (/columns have changed/i.test(text)) return "The Daily report's columns were changed in PioneerRx. Put them back to the list shown on Reports, or send the file to be looked at; nothing from it was loaded.";
   if (/split across lines but .* price lines/i.test(text)) return "The report's layout changed. Send the file to be looked at; nothing from that supplier was replaced.";
@@ -178,3 +213,18 @@ function whatToDo(i: { status: string; reason: string | null; routedAs: string |
   if (i.routedAs === "unrecognised" && /catalog/i.test(text)) return "The file was not recognised as the PioneerRx catalogue export. It must begin with its own title line, “Supplier Catalog Item Search Results”.";
   return null;
 }
+
+/** The supplier a message came from, where its address is on the register. */
+function supplierByAddress(suppliers: Supplier[], from: string): Supplier | null {
+  const f = (from ?? "").toLowerCase();
+  if (!f) return null;
+  let best: { s: Supplier; len: number } | null = null;
+  for (const s of suppliers) {
+    for (const a of addressesOf(s)) {
+      // Longest match wins, so a full address beats a domain several suppliers share.
+      if (f.includes(a) && (!best || a.length > best.len)) best = { s, len: a.length };
+    }
+  }
+  return best?.s ?? null;
+}
+

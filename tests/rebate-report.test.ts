@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { parseRebateReport, termsFromReport, bandFor, monthDayYear, looksLikeRebateReport } from "../src/lib/rebate-report";
+import { parseRebateReport, termsFromReport, gprTermsFromReport, bandFor, monthDayYear, looksLikeRebateReport } from "../src/lib/rebate-report";
 import { RebateTerms } from "../src/lib/supplier-terms";
 
 /**
@@ -166,3 +166,36 @@ describe("dates", () => {
     assert.equal(monthDayYear("sometime"), null);
   });
 });
+
+/**
+ * The second ladder, which pays this pharmacy nothing.
+ *
+ * That is exactly why it is stored. A purchase ratio of 0.00% against a first paying band of 75%
+ * is money not being earned, and money not being earned is invisible unless something holds the
+ * shape of what would earn it.
+ */
+describe("the purchase-ratio ladder", () => {
+  const r = parseRebateReport(REPORT);
+
+  test("it is filed as a programme of its own, not folded into the one that pays", () => {
+    const gpr = gprTermsFromReport(r)!;
+    assert.equal(gpr.tiers.length, 11);
+    assert.deepEqual(gpr.tiers[0], { thresholdPercent: 0, rebatePercent: 0 });
+    assert.deepEqual(gpr.tiers[1], { thresholdPercent: 75, rebatePercent: 1 });
+    assert.deepEqual(gpr.tiers[10], { thresholdPercent: 95, rebatePercent: 10 });
+    assert.equal(gpr.eligibility, "all_generics", "a different measure from the OneStop contract flag");
+    assert.equal(RebateTerms.safeParse(gpr).success, true);
+  });
+
+  test("the notes say where the first money is", () => {
+    assert.match(gprTermsFromReport(r)!.notes, /Nothing is paid below 75%/);
+  });
+
+  test("the two ladders are never confused for one another", () => {
+    // The compliance ladder starts paying at 0%; the purchase-ratio ladder pays nothing until 75%.
+    // Reading one for the other would put this pharmacy four bands from where it actually is.
+    assert.equal(termsFromReport(r).tiers[0].rebatePercent, 15);
+    assert.equal(gprTermsFromReport(r)!.tiers[0].rebatePercent, 0);
+  });
+});
+
