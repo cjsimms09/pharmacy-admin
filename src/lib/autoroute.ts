@@ -5,6 +5,8 @@ import { mapColumns } from "./claims";
 import { mapSupplierColumns } from "./suppliers";
 import { looksLikePioneerCatalog } from "./pioneer-catalog";
 import { looksLikeRxTransactions } from "./rx-transactions";
+import { pdfText } from "./pdf-text";
+import { looksLikeRebateReport } from "./rebate-report";
 import { ALLOWED_MIME } from "./files";
 
 /**
@@ -22,7 +24,7 @@ import { ALLOWED_MIME } from "./files";
  * behaviour we already had and is never wrong, only unhelpful.
  */
 
-export type RouteKind = "claims" | "rx_transactions" | "supplier_catalog" | "pioneer_catalog" | "nadac" | "unrecognised";
+export type RouteKind = "claims" | "rx_transactions" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "nadac" | "unrecognised";
 
 export type Classification = {
   kind: RouteKind;
@@ -64,6 +66,29 @@ export function headersOf(fileName: string, buf: Buffer): string[] {
  * would otherwise match the looser catalogue rule.
  */
 export function classify(fileName: string, buf: Buffer): Classification {
+  /*
+   * A PDF, which is the one shape here that is not text at all.
+   *
+   * McKesson's monthly rebate breakdown is the document that carries the tier ladder and the rate
+   * actually earned. It arrives as a generated PDF, so its words have to be pulled out before
+   * anything can be told about it — and it is worth the trouble, because the alternative is
+   * somebody typing eleven bands of a contract into a form and one of them being wrong.
+   */
+  if (/^%PDF/.test(buf.subarray(0, 8).toString("latin1"))) {
+    try {
+      const text = pdfText(buf);
+      if (looksLikeRebateReport(text)) {
+        return {
+          kind: "rebate_report",
+          why: "A McKesson rebate breakdown: it carries the tier table and the compliance rate the month was paid at.",
+          headers: [],
+        };
+      }
+    } catch {
+      // Not readable as text — a scan. It is filed as a document like anything else.
+    }
+    return { kind: "unrecognised", why: "A PDF this does not recognise. Filed as a document.", headers: [] };
+  }
   /*
    * The daily "Rx Transaction Details By Submission Type" report — the claims feed — is, like the
    * catalogue, a printed report whose first line is its title, so it is known by that title.

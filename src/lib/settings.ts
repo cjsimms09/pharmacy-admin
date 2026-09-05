@@ -111,6 +111,8 @@ export const SETTING_KEYS = [
    * discount it may not earn.
    */
   "mck_generic_rebate_rate",
+  /* The last rebate breakdown read, so the page can say where the rate came from and when. */
+  "mck_rebate_last_statement",
   // ── iMonnit temperature monitoring ──
   "imonnit_key_id_enc",
   "imonnit_secret_enc",

@@ -591,6 +591,13 @@ async function importRecognised(
         routeResult = `${supplier}: ${r.itemsAdded} new, ${r.itemsUpdated} updated, ${r.skipped} skipped`;
         imported = true;
       }
+    } else if (cls.kind === "rebate_report") {
+      // The tier ladder and the month's achieved rate, filed without anybody typing either.
+      const { fileRebateReport } = await import("./rebate-report-store");
+      const { pdfText } = await import("./pdf-text");
+      const r = await fileRebateReport(pdfText(buf), {}, { name: ctx.userName ?? "Automatic check" });
+      routeResult = r.message;
+      imported = r.stored;
     } else if (cls.kind === "nadac") {
       const dir = nadacDir();
       await fs.mkdir(dir, { recursive: true });
