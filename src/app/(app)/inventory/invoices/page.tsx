@@ -448,6 +448,42 @@ export default async function InvoicesPage({
     }
   }
 
+  /**
+   * Says of a document in the vault that it is not an invoice, and means it.
+   *
+   * The adoption list is built from titles and file names, so a rebate breakdown and a returned
+   * goods policy both landed on it under a heading saying they had not been filed — with a button
+   * offering to file them as invoices and no way to say otherwise. A list of outstanding work that
+   * contains finished work cannot be emptied, so it stops being read.
+   */
+  async function notAnInvoiceDocument(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const documentId = String(fd.get("documentId") ?? "");
+    try {
+      const { db, schema } = await import("@/db");
+      const { eq } = await import("drizzle-orm");
+      const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, documentId) });
+      if (!doc) redirect("/inventory/invoices?error=" + encodeURIComponent("That document no longer exists."));
+      // Filed as a supplier document rather than deleted: the paper still exists, it is just not an
+      // invoice, and the category is what keeps this list from offering it again.
+      await db
+        .update(schema.documents)
+        .set({ category: "supplier_statement", notes: [doc!.notes, `Marked as not an invoice by ${u.name}.`].filter(Boolean).join(" ") })
+        .where(eq(schema.documents.id, documentId));
+      await audit({ action: "invoice.not_an_invoice", userId: u.id, userName: u.name, entity: "document", entityId: documentId, details: doc!.title });
+      revalidatePath("/inventory/invoices");
+      revalidatePath("/documents");
+      redirect(
+        "/inventory/invoices?ok=" +
+          encodeURIComponent(`“${doc!.title}” is filed under supplier statements and will not be offered as an invoice again.`),
+      );
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/inventory/invoices?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not do that."));
+    }
+  }
+
   async function saveExpected(fd: FormData) {
     "use server";
     const u = await requireManager();
@@ -652,6 +688,19 @@ export default async function InvoicesPage({
                     {[d.fileName, d.receivedFrom, d.effectiveOn ? fmt(d.effectiveOn) : ""].filter(Boolean).join(" · ")}
                   </span>
                 </span>
+                {/*
+                  A way off this list for something that is not an invoice.
+
+                  The list is built from a document's title and file name, so anything with a
+                  supplier's name on it lands here — and without this, a document that is not an
+                  invoice can never leave, and the list can never be emptied.
+                */}
+                <form action={notAnInvoiceDocument} className="shrink-0">
+                  <input type="hidden" name="documentId" value={d.id} />
+                  <button className="btn btn-sm" formNoValidate title="Leaves the document where it is and stops offering it here.">
+                    Not an invoice
+                  </button>
+                </form>
               </li>
             ))}
           </ul>

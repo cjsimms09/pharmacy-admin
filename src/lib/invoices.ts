@@ -1254,23 +1254,50 @@ export async function adoptableDocuments(): Promise<
   ]);
   const claimed = new Set(already.map((i) => i.documentId));
 
-  return docs
+  const candidates = docs
     .filter((d) => !claimed.has(d.id))
     .filter((d) => d.category !== "invoice_schedule_2" && d.category !== "invoice_schedule_3_5" && d.category !== "invoice")
+    /*
+     * A document already filed as what it is, is not waiting to be filed as something else.
+     *
+     * The rebate breakdown and the returned goods policy were both sitting on this list under
+     * "already received, but not filed as invoices", with a button offering to file them as
+     * invoices — because the rule that built the list matched the word "McKesson" in a title. They
+     * are not invoices, nothing is wrong with them, and there was no way to say so. A list of
+     * outstanding work that contains finished work is worse than no list: it cannot be emptied.
+     */
+    .filter((d) => d.category !== "supplier_statement" && d.category !== "supplier_agreement")
     .filter((d) => /\.pdf$/i.test(d.fileName) || d.mimeType === "application/pdf")
     .filter((d) =>
       /invoice|inv\b|statement of account|packing (list|slip)|mckesson|independent pharmacy|cardinal|cencora|amerisource/i.test(
         `${d.title} ${d.fileName} ${d.notes ?? ""}`,
       ),
-    )
-    .map((d) => ({
+    );
+
+  /*
+   * And what the document itself says beats what its title contains.
+   *
+   * Matching a supplier's name in a title is how a rebate breakdown gets offered as an invoice. The
+   * words settle it, at the cost of reading each candidate once — and this list is short by
+   * construction, being only what has not been filed.
+   */
+  const out: { id: string; title: string; fileName: string; receivedFrom: string | null; effectiveOn: string | null }[] = [];
+  for (const d of candidates) {
+    try {
+      const kind = classifySupplierDocument(pdfText(await readStoredFile(d.storageKey)), d.fileName, d.title).kind;
+      if (kind !== "invoice" && kind !== "unknown") continue;
+    } catch {
+      // Unreadable as text — a scan. Those are exactly what this list is for.
+    }
+    out.push({
       id: d.id,
       title: d.title || d.fileName,
       fileName: d.fileName,
       receivedFrom: d.notes?.match(/from ([^\s.]+@[^\s.]+\.\S+)/i)?.[1] ?? null,
       effectiveOn: d.effectiveOn,
-    }))
-    .sort((a, b) => (b.effectiveOn ?? "").localeCompare(a.effectiveOn ?? ""));
+    });
+  }
+  return out.sort((a, b) => (b.effectiveOn ?? "").localeCompare(a.effectiveOn ?? ""));
 }
 
 /**
@@ -1294,6 +1321,27 @@ export async function adoptDocument(documentId: string, ctx: { userId: string; u
   const buf = await readFile(doc.storageKey);
 
   const text = textOf(buf);
+
+  /*
+   * Refuse outright to file something that is not an invoice.
+   *
+   * Reached by URL rather than from the list, or from a list built before this check existed. A
+   * rebate breakdown filed as an invoice ends up held with the Schedule II records — a document
+   * recording no receipt of anything, in the file an inspector reads first.
+   */
+  if (text) {
+    const kind = classifySupplierDocument(text, doc.fileName, doc.title);
+    if (kind.kind !== "invoice" && kind.kind !== "unknown") {
+      const word = kind.kind === "rebate_report" ? "rebate breakdown" : kind.kind === "credit_memo" ? "credit memo" : "statement of account";
+      throw new Error(
+        `That is a ${word}, not an invoice — ${kind.why} It is already filed where it belongs and nothing needs doing to it. ` +
+          (kind.kind === "rebate_report"
+            ? "To read the tier ladder off it, open the supplier's rebate and return terms page."
+            : "It records no receipt of goods, so it is deliberately kept out of the invoice files."),
+      );
+    }
+  }
+
   const fromText = text ? classifyInvoiceText(text) : null;
 
   let schedule: InvoiceSchedule = fromText?.confident ? fromText.schedule : "unknown";
@@ -1567,7 +1615,17 @@ export async function unfileInvoice(
   user: { id?: string | null; name: string },
 ): Promise<{ message: string; documentId: string | null }> {
   const inv = await db.query.supplierInvoices.findFirst({ where: eq(schema.supplierInvoices.id, invoiceId) });
-  if (!inv) throw new Error("That invoice is no longer on file.");
+  /*
+   * Already done is not an error.
+   *
+   * Pressing this twice — which is what anybody does when the first press looks as though it did
+   * nothing — produced "That invoice is no longer on file", which reads as a failure and is in
+   * fact a report of success. The first press had worked; the document had simply moved into the
+   * list below, where it was then offered for filing as an invoice all over again.
+   */
+  if (!inv) {
+    return { message: "That was already taken out of the invoice file — nothing further to do.", documentId: null };
+  }
   const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, inv.documentId) });
 
   await db.delete(schema.invoiceLines).where(eq(schema.invoiceLines.invoiceId, invoiceId));
