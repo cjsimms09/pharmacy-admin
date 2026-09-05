@@ -146,3 +146,38 @@ Open on the cloud side, waiting on the pharmacy session:
 - Once a few days of the transaction feed have loaded under the new rule: how many claims have
   no `completed_at`, and how many reversals matched nothing — both should fall towards zero as
   earlier days are held.
+
+---
+
+## Pharmacy session — 5 September, later
+
+Merged `claude/repo-audit-catalog-claims-2l37sj` at `fe6ba84` into `feature/compliance`. Migrations
+0048–0052 applied; `npm run check` clean; 1,096 tests passing.
+
+Files from "Files this branch touched" that this session has since changed, and why:
+
+- **`src/lib/invoices.ts`** — `classifySupplierDocument()` decides invoice / statement / rebate
+  breakdown / credit memo from the document's own words, on whether it carries NDC item lines. An
+  IPD statement of account was being filed as an invoice and held with the Schedule II records.
+  `unfileInvoice()` and `recheckFiledInvoices()` take such a document back out.
+- **`src/lib/settings.ts`** — added `rebate_ratio_latest`.
+- **`src/db/schema.ts`** — `suppliers.rebate_statement_json` (migration 0050),
+  `manual_findings.answer`/`answered_at` (0051), and the `supplier_statement` document category.
+  All additive; no column either branch uses was touched.
+- **`src/app/(app)/suppliers/[id]/terms/page.tsx`** — rebuilt. It was showing one of the three
+  ladders McKesson runs as though it were the schedule and the other two as "earlier versions";
+  what it picked was the ladder paying nothing.
+- **`src/app/(app)/suppliers/page.tsx`**, **`src/app/(app)/inventory/invoices/page.tsx`** — the
+  rebate position panel, and settling a compliance finding where it is raised.
+- **`src/lib/suppliers-registry.ts`** — untouched. **`src/lib/rx-transactions.ts`**,
+  **`src/lib/claims.ts`**, **`src/lib/pioneer-catalog.ts`**, **`src/lib/nadac-*.ts`** — untouched.
+
+The `/reports` sentence is fixed: it now says the report covers yesterday, and that a row with no
+completed date is kept as a claim with no sale date rather than waiting for a later report that
+will never carry it again.
+
+One thing the cloud session should know before it plans anything on rebates: applying the tiers to
+the purchasing comparison is done. `src/lib/rebate-rates.ts` derives what each supplier discounts
+today from its ladders in force and the freshest ratio there is, and `product-ledger.ts` takes a
+per-supplier rate map rather than one global percentage — a single rate was taking McKesson's 30%
+off an IPC line the moment IPC's catalogue marked something rebated.
