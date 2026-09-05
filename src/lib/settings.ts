@@ -106,6 +106,16 @@ export const SETTING_KEYS = [
   "imonnit_last_result",
   "mail_allowed_senders", // one per line
   "mail_auto_import", // "yes" | "no" — load recognised reports rather than only filing them
+  /*
+   * Where the record of receipt for controlled substances is kept, when it is not kept here.
+   *
+   * 21 CFR 1304.22(c) wants a record of what arrived and when. Most pharmacies confirm receipt in
+   * the wholesaler's own ordering system as the tote is checked in — this pharmacy does — and
+   * asking them to do it a second time here is duplicate work that would go undone within a week,
+   * leaving a panel permanently red about a record that does exist. Naming the system settles it:
+   * the panel says where the record is rather than that there is none, and stops asking.
+   */
+  "receipt_record_kept_in",
   "mail_supplier_rules", // one per line: a sender or subject fragment, then "=", then a supplier name
   // Off by default. The reimbursement side is built and tested but waiting on data that has to
   // come from outside, and half-working pages in the daily path are a daily irritation.

@@ -5,7 +5,7 @@ import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { loadNadacFiles, nadacCoverage, nadacClaimCoverage, nadacWeekGaps, nadacDir } from "@/lib/nadac";
+import { loadNadacFiles, nadacCoverage, nadacClaimCoverage, nadacWeekGaps, nadacDir, nadacHealth } from "@/lib/nadac";
 import { yearArchiveUrl, archiveYears, nadacAuto } from "@/lib/nadac-fetch";
 import { nadacJob, startNadacFetch, runNadacFetch, nadacJobRunning } from "@/lib/nadac-job";
 import { JobPanel } from "@/components/job-panel";
@@ -48,6 +48,7 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
   const { ok, error } = await searchParams;
   const s = await getSettings();
   const cov = await nadacCoverage();
+  const health = await nadacHealth();
   const claimCov = cov.prices > 0 ? await nadacClaimCoverage() : null;
   const gaps = claimCov && claimCov.priced < claimCov.withNdc ? await nadacWeekGaps() : [];
   const job = await nadacJob();
@@ -132,12 +133,24 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
 
-      {cov.prices === 0 && (
-        <Notice kind="warn">
-          No NADAC loaded. Until it is, no claim can be checked against the statutory floor — the engine will decline
-          to price rather than estimate.
-        </Notice>
-      )}
+      {/*
+        The verdict, before any detail.
+
+        This page used to open with a settings form and a row of counts, and a pharmacist looking at
+        it could not answer the only question that matters. A fetch reporting "720,000 rows read, 0
+        new" is a complete success — every price CMS has published was already held — and read like
+        a failure. So the page now says, in a sentence, whether today's claims can be priced.
+      */}
+      <div
+        className={`my-4 rounded-lg border p-4 ${
+          health.state === "current" ? "border-accent bg-accent-soft" : health.state === "behind" ? "border-warn bg-warn-soft" : "border-crit bg-crit-soft"
+        }`}
+      >
+        <p className={`text-sm font-semibold ${health.state === "current" ? "text-accent" : health.state === "behind" ? "text-warn" : "text-crit"}`}>
+          {health.headline}
+        </p>
+        <p className="mt-1 text-sm text-ink-2">{health.detail}</p>
+      </div>
 
       {/* ── Automatic ── */}
       <section className="my-4 rounded-lg border border-line bg-surface p-4">

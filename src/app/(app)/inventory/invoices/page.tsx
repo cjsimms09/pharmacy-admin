@@ -31,6 +31,7 @@ import {
 import { invoiceCompliance, RETENTION_YEARS } from "@/lib/invoice-compliance";
 import { setSetting } from "@/lib/settings";
 import { getSettings } from "@/lib/settings";
+import { allSuppliers, addressesOf } from "@/lib/suppliers-registry";
 import { PageHeader, Card, Figure, Notice, Empty } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import { INVOICE_SCHEDULES, type InvoiceSchedule } from "@/db/schema";
@@ -135,7 +136,20 @@ export default async function InvoicesPage({
   const unmet = compliance.filter((c) => c.state === "attention");
 
   const shown = onlyUndated ? rows.filter((r) => !r.invoiceDate) : rows;
-  const rules = (s.mail_supplier_rules ?? "").trim();
+  /*
+   * Whether any sender is recognised at all — read from the register, which is where the pharmacy
+   * puts them.
+   *
+   * This asked the old free-text setting under Settings → Email instead, so a pharmacist who had
+   * entered IPC's and IPD's addresses on the Suppliers page — the page this banner tells them to
+   * use — was still told no sender was named. Two places to record one fact, and the banner
+   * watching the one nobody uses.
+   */
+  const receiptElsewhere = (s.receipt_record_kept_in ?? "").trim();
+  const registered = await allSuppliers();
+  const withSenders = registered.filter((x) => addressesOf(x).length > 0);
+  const noSenders = withSenders.length === 0;
+  const missingSenders = registered.filter((x) => addressesOf(x).length === 0);
   const filtered = Boolean(
     sp.q || sp.month || sp.supplier || sp.from || sp.to || sp.on || sp.min || sp.max || onlyUnconfirmed || onlyUndated || onlyNoAmount,
   );
@@ -248,6 +262,31 @@ export default async function InvoicesPage({
     }
   }
 
+  /**
+   * Says where receipt is actually recorded, when it is not recorded here.
+   *
+   * The pharmacy checks totes in against the wholesaler's own ordering system. Recording it here as
+   * well is the same fact twice, and the second one would stop being done within a week — leaving a
+   * compliance panel permanently red about a record that exists. Naming the system settles the
+   * line honestly and stops the asking.
+   */
+  async function receiptKeptIn(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const where = String(fd.get("where") ?? "").trim();
+    await setSetting("receipt_record_kept_in", where);
+    await audit({ action: "invoice.receipt.location", userId: u.id, userName: u.name, details: where || "recorded here" });
+    revalidatePath("/inventory/invoices");
+    redirect(
+      "/inventory/invoices?unreceipted=1&ok=" +
+        encodeURIComponent(
+          where
+            ? `Recorded: receipt is confirmed in ${where}. The compliance panel says so and will stop asking for it here.`
+            : "Receipt will be recorded here again, against each invoice.",
+        ),
+    );
+  }
+
   async function send(fd: FormData) {
     "use server";
     const u = await requireManager();
@@ -345,14 +384,24 @@ export default async function InvoicesPage({
       {sp.ok && <Notice kind="ok">{sp.ok}</Notice>}
       {sp.error && <Notice kind="crit">{sp.error}</Notice>}
 
-      {!rules && (
+      {noSenders ? (
         <Notice kind="warn">
           <b>No sender is named as a supplier yet, so nothing will be filed as an invoice.</b> Add your wholesalers
           on the <Link href="/suppliers" className="underline">Suppliers</Link> page, with the addresses they send
           from, then ask them to email invoices to this mailbox. From then on it happens with nobody doing
           anything.
         </Notice>
-      )}
+      ) : missingSenders.length > 0 ? (
+        <Notice kind="warn">
+          <b>
+            {missingSenders.map((x) => x.name).join(", ")} {missingSenders.length === 1 ? "has" : "have"} no sending
+            address recorded, so {missingSenders.length === 1 ? "their" : "their"} invoices will not be recognised.
+          </b>{" "}
+          Add the address {missingSenders.length === 1 ? "it arrives" : "they arrive"} from on the{" "}
+          <Link href="/suppliers" className="underline">Suppliers</Link> page. Everything already in the mailbox from
+          that address is read again the moment you save it.
+        </Notice>
+      ) : null}
 
       {/*
         What is wrong, before what is here.
@@ -470,11 +519,11 @@ export default async function InvoicesPage({
         <Figure value={counts.schedule_3_5} label="Schedule III-V" sub="Also kept apart" href="/inventory/invoices?tab=schedule_3_5" tone="muted" />
         <Figure value={counts.none} label="No controlled lines" sub="Ordinary business records" href="/inventory/invoices?tab=none" tone="muted" />
         <Figure
-          value={unreceipted.length}
-          label="Not confirmed received"
-          sub={unreceipted.length ? "The paper slip is still the record" : "All confirmed"}
+          value={receiptElsewhere ? counts.schedule_2 + counts.schedule_3_5 : unreceipted.length}
+          label={receiptElsewhere ? "Controlled invoices" : "Not confirmed received"}
+          sub={receiptElsewhere ? `Receipt confirmed in ${receiptElsewhere}` : unreceipted.length ? "The paper slip is still the record" : "All confirmed"}
           href="/inventory/invoices?unreceipted=1"
-          tone={unreceipted.length ? "warn" : "ok"}
+          tone={receiptElsewhere ? "muted" : unreceipted.length ? "warn" : "ok"}
         />
         <Figure
           value={counts.review}
@@ -768,7 +817,42 @@ export default async function InvoicesPage({
         the quantity, and a short count is exactly the thing somebody writes on the paper slip and
         then cannot throw away. The name comes from whoever is signed in.
       */}
-      {onlyUnreceipted && canManage && unreceipted.length > 0 && (
+      {/*
+        Where the receipt record is kept — asked once, not per invoice.
+
+        This sits above the per-invoice list deliberately: for a pharmacy that checks its totes in
+        against the wholesaler's own system, the whole list below is the wrong question, and being
+        told so first saves the scrolling.
+      */}
+      {onlyUnreceipted && canManage && (
+        <Card
+          title="Where receipt is recorded"
+          className="mt-4"
+          subtitle="21 CFR 1304.22(c) wants a record of what arrived and when. Most pharmacies confirm receipt in the wholesaler's own ordering system as the tote is checked in. If that is what you do, name it here and this stops asking — the compliance panel will say where the record is kept rather than that there is none."
+        >
+          <form action={receiptKeptIn} className="flex flex-wrap items-end gap-2">
+            <label className="text-xs text-ink-3">
+              Confirmed in
+              <input
+                name="where"
+                defaultValue={s.receipt_record_kept_in ?? ""}
+                placeholder="McKesson Connect, IPD portal"
+                className="field w-72 text-sm"
+              />
+            </label>
+            <button className="btn btn-primary">Save</button>
+            <span className="text-xs text-ink-3">Leave it empty to go back to recording receipt against each invoice here.</span>
+          </form>
+          {(s.receipt_record_kept_in ?? "").trim() && (
+            <p className="mt-2 text-xs text-ink-3">
+              Be able to produce that system&rsquo;s receipt history at the pharmacy during an inspection, printed or on
+              screen &mdash; that is what 21 CFR 1304.04(a) asks of a record kept electronically, wherever it is kept.
+            </p>
+          )}
+        </Card>
+      )}
+
+      {onlyUnreceipted && canManage && !(s.receipt_record_kept_in ?? "").trim() && unreceipted.length > 0 && (
         <Card
           title="Confirm what actually arrived"
           count={unreceipted.length}

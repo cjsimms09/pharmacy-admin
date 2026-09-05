@@ -437,6 +437,81 @@ export async function nadacCoverage() {
   return { ...agg, weeks };
 }
 
+/** The effective dates already held, so a weekly file for one of them need never be downloaded. */
+export async function heldWeeks(): Promise<Set<string>> {
+  const rows = await db
+    .selectDistinct({ effectiveOn: schema.nadacPrices.effectiveOn })
+    .from(schema.nadacPrices);
+  return new Set(rows.map((r) => r.effectiveOn));
+}
+
+/**
+ * The one question the NADAC page has to answer before any other: are we holding prices current
+ * enough to check today's claims against the floor?
+ *
+ * Everything else on that page — rows held, distinct NDCs, weeks loaded, the address it downloads
+ * from — is detail that only means something once this is answered, and the pharmacist reading it
+ * had no way to tell. A fetch that reported "720,000 rows read, 0 new" is in fact the best possible
+ * outcome (every price CMS has published since 2021 was already held) and read like a failure.
+ *
+ * CMS publishes on a Wednesday. Ten days of grace covers a publication that slipped and a machine
+ * switched off over a long weekend; beyond that something has stopped and the claims filled since
+ * are being priced against last month's NADAC.
+ */
+export type NadacHealth = {
+  prices: number;
+  ndcs: number;
+  earliest: string | null;
+  latest: string | null;
+  ageDays: number | null;
+  state: "none" | "current" | "behind";
+  headline: string;
+  detail: string;
+};
+
+export async function nadacHealth(today = new Date()): Promise<NadacHealth> {
+  const [agg] = await db
+    .select({
+      prices: sql<number>`count(*)`,
+      ndcs: sql<number>`count(distinct ${schema.nadacPrices.ndc11})`,
+      earliest: sql<string | null>`min(${schema.nadacPrices.effectiveOn})`,
+      latest: sql<string | null>`max(${schema.nadacPrices.effectiveOn})`,
+    })
+    .from(schema.nadacPrices);
+
+  const prices = Number(agg?.prices ?? 0);
+  const ndcs = Number(agg?.ndcs ?? 0);
+  const latest = agg?.latest ?? null;
+  const earliest = agg?.earliest ?? null;
+  if (prices === 0 || !latest) {
+    return {
+      prices: 0, ndcs: 0, earliest: null, latest: null, ageDays: null, state: "none",
+      headline: "No NADAC prices are held",
+      detail: "Until some are, no claim can be checked against the Kansas floor — the engine declines to price rather than estimate. Press “Fetch now” below.",
+    };
+  }
+
+  const ms = Date.parse(`${latest}T00:00:00Z`);
+  const now = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  const ageDays = Math.max(0, Math.round((now - ms) / 86_400_000));
+  const held = `${prices.toLocaleString()} prices covering ${ndcs.toLocaleString()} products${earliest ? `, from ${earliest}` : ""}.`;
+
+  if (ageDays <= 10) {
+    return {
+      prices, ndcs, earliest, latest, ageDays, state: "current",
+      headline: `Up to date — prices in force ${latest}`,
+      detail: `Every claim filled on or before that date can be priced against the floor. ${held}`,
+    };
+  }
+  return {
+    prices, ndcs, earliest, latest, ageDays, state: "behind",
+    headline: `Behind by ${ageDays} days — the newest prices held are from ${latest}`,
+    detail:
+      `CMS publishes every Wednesday, so a claim filled since ${latest} is being priced against prices that old. ` +
+      `Press “Fetch now”, and if that fails the message will say which addresses it tried. ${held}`,
+  };
+}
+
 /** The price the statute pointed at on a given fill date, or null with nothing invented. */
 export async function priceInForce(ndc11: string, dateFilled: string): Promise<NadacRecord | null> {
   const rows = await db.query.nadacPrices.findMany({

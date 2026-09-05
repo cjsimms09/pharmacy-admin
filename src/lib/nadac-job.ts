@@ -1,6 +1,6 @@
 import "server-only";
 import { getSettings, setSetting } from "./settings";
-import { fetchNadacFrom, type FetchResult } from "./nadac-fetch";
+import { fetchNadac, fetchNadacFrom, type FetchResult } from "./nadac-fetch";
 import { audit } from "./audit";
 
 /**
@@ -120,7 +120,9 @@ export async function runNadacFetch(
   };
   try {
     await step(`Fetching ${what}`);
-    const r = await fetchNadacFrom(sources, step);
+    // No addresses given means the ordinary weekly check, which works out for itself which weeks
+    // are missing and asks for nothing else. A list means somebody named exactly what to fetch.
+    const r = sources.length === 0 ? await fetchNadac(step) : await fetchNadacFrom(sources, step);
     if (!(await ours())) return;
     const j = await nadacJob();
     await write({ ...j!, state: r.ok ? "done" : "failed", finishedAt: new Date().toISOString(), step: r.message, result: r, error: r.ok ? undefined : r.message });

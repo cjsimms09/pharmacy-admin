@@ -143,12 +143,59 @@ export type FetchResult = {
  */
 export async function fetchNadac(onProgress?: (text: string) => void | Promise<void>): Promise<FetchResult> {
   const s = await getSettings();
-  return fetchNadacFrom(weeklySources(s.nadac_source_url), onProgress);
+  const { heldWeeks } = await import("./nadac");
+  const held = await heldWeeks();
+  const sources = weeklySourcesNeeded(held, s.nadac_source_url);
+  if (sources.length === 0) {
+    // Every week this knows how to ask for is already in the database. Saying so plainly is the
+    // whole point: it is the ordinary outcome of a daily check, and it costs no download at all.
+    const latest = [...held].sort().pop() ?? null;
+    const message = `Nothing new — the newest weekly file CMS has published is already held${latest ? ` (prices in force ${latest})` : ""}.`;
+    await setSetting("nadac_last_fetch", new Date().toISOString());
+    await setSetting("nadac_last_result", message);
+    await setSetting("nadac_last_ok", new Date().toISOString());
+    return { ok: true, source: null, message, added: 0, rowsParsed: 0, fileAsOf: latest };
+  }
+  return fetchNadacFrom(sources, onProgress);
 }
 
-/** Where "Fetch now" looks, in order: the pharmacy's own address, this week's file, then the rest. */
+/**
+ * Where "Fetch now" looks, in order: the pharmacy's own address, then the dated weekly files.
+ *
+ * The datastore addresses in KNOWN_SOURCES are deliberately *not* here any more. That endpoint
+ * does not serve the current week — it serves the entire NADAC history, every weekly file CMS has
+ * published since 2021, which is seven hundred thousand rows and a download measured in minutes.
+ * It is why "fetch the latest NADAC" took a quarter of an hour and reported a file dated 2021.
+ * A weekly pull wants this week: one dated file, about thirty thousand rows, a few megabytes.
+ * The history remains available deliberately, from the back-fill button, where somebody has asked
+ * for it and is told what it costs.
+ */
 export function weeklySources(override?: string | null): string[] {
-  return [override?.trim(), ...weeklyFileUrls(), ...KNOWN_SOURCES].filter(Boolean) as string[];
+  return [override?.trim(), ...weeklyFileUrls()].filter(Boolean) as string[];
+}
+
+/** The Wednesday a weekly file's address is for, as ISO, or null for any other address. */
+export function weekOfUrl(url: string): string | null {
+  const m = /nadac-national-average-drug-acquisition-cost-(\d{2})-(\d{2})-(\d{4})\.csv/i.exec(url);
+  return m ? `${m[3]}-${m[1]}-${m[2]}` : null;
+}
+
+/**
+ * The weekly addresses worth trying, given what is already held.
+ *
+ * This is what makes a daily check free. Each weekly file carries one effective date — the
+ * Wednesday in its own address — so if prices for that Wednesday are already in the database there
+ * is nothing in the file to learn, and no reason to spend several megabytes finding out. What is
+ * left is exactly the pharmacy's own question: pick up what is new and nothing else.
+ *
+ * The pharmacy's own override address is never filtered out. It exists for the day CMS moves the
+ * file, and its contents cannot be guessed from its name.
+ */
+export function weeklySourcesNeeded(held: Set<string>, override?: string | null): string[] {
+  return weeklySources(override).filter((u) => {
+    const week = weekOfUrl(u);
+    return week === null || !held.has(week);
+  });
 }
 
 /**
@@ -307,15 +354,17 @@ const short = (u: string) => {
 /**
  * Whether a pull is due.
  *
- * CMS publishes weekly, so checking twice a week catches a new file within days without asking
- * for the same download over and over. There is no benefit to daily and no cost to being a day
- * late — a price effective this week is still the price when it is fetched on Friday.
+ * Daily, because a check now costs nothing. Each weekly file carries the Wednesday in its own
+ * address, so a week already in the database is never asked for again — the ordinary daily check
+ * finds every week held and stops without a single byte downloaded. Only the week CMS has just
+ * published is fetched, once. Checking twice a week was the old compromise, made when every check
+ * meant downloading a file to find out it held nothing new.
  */
 export function fetchDue(lastIso: string | null, now = Date.now()): boolean {
   if (!lastIso) return true;
   const last = Date.parse(lastIso);
   if (!Number.isFinite(last)) return true;
-  return now - last >= 3.5 * 24 * 60 * 60 * 1000;
+  return now - last >= 20 * 60 * 60 * 1000;
 }
 
 /**
