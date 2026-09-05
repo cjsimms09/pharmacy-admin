@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { buildLedger, effectiveMicros, opportunities, packQtyOf, type LedgerInput } from "../src/lib/product-ledger";
+import { buildLedger, effectiveMicros, opportunities, packQtyOf, margins, losers, type LedgerInput } from "../src/lib/product-ledger";
 
 /**
  * Whether the four records add up to a recommendation worth acting on.
@@ -309,5 +309,64 @@ describe("a rebate belongs to the supplier that pays it", () => {
       rows[0].buys.map((b) => [b.supplier, b.effectiveUnitMicros]).sort(),
       [["IPC", 95_000], ["McKesson", 100_000]],
     );
+  });
+});
+
+describe("what each drug actually earns", () => {
+  const row = (over: Partial<import("../src/lib/product-ledger").LedgerRow> = {}) => ({
+    ndc11: "00093721698",
+    name: "AMLODIPINE 5MG",
+    buys: [],
+    paid: { supplier: "McKesson", unitCostMicros: 100_000, effectiveUnitMicros: 70_000, rebated: true, source: "invoice" as const, on: "2026-08-20", shortDated: null },
+    best: null,
+    nadacMicros: 90_000,
+    nadacOn: "2026-09-01",
+    unitsDispensed: 90,
+    receivedCents: 1_500,
+    claims: 1,
+    vsNadacMicros: -20_000,
+    switchSavingCents: null,
+    flags: [] as import("../src/lib/product-ledger").Flag[],
+    ...over,
+  });
+
+  test("cost is what the supplier really charges, after the rebate that supplier pays", () => {
+    /*
+     * The whole point. 90 units at 7 cents effective is $6.30, not the $9.00 the invoice printed —
+     * and $15.00 came in. A margin worked out on gross prices understates every contract generic
+     * by the tier rate, which here would turn $8.70 of margin into $6.00 and could get a
+     * profitable drug dropped.
+     */
+    const [m] = margins([row()]);
+    assert.equal(m.costCents, 630);
+    assert.equal(m.marginCents, 870);
+    assert.equal(m.marginPercent, 58);
+  });
+
+  test("a drug dispensed at a loss is separated out, worst first", () => {
+    const rows = margins([
+      row({ ndc11: "1", receivedCents: 1_500 }),
+      row({ ndc11: "2", receivedCents: 400 }),
+      row({ ndc11: "3", receivedCents: 100 }),
+    ]);
+    const bad = losers(rows);
+    assert.deepEqual(bad.map((m) => m.ndc11), ["3", "2"]);
+    assert.equal(bad[0].marginCents, -530);
+  });
+
+  test("nothing dispensed, or no price we actually paid, and no margin is claimed", () => {
+    assert.deepEqual(margins([row({ unitsDispensed: 0, claims: 0 })]), []);
+    assert.deepEqual(margins([row({ paid: null })]), []);
+  });
+
+  test("an unknown pack size means no margin rather than a wrong one", () => {
+    // The same rule the comparison uses: a per-package price read as a per-unit one is out by the
+    // pack size, and a margin built on it is confidently wrong rather than absent.
+    assert.deepEqual(margins([row({ flags: ["pack_size_unknown"] })]), []);
+  });
+
+  test("per unit as well as in total, so a rare drug can be compared with a common one", () => {
+    const [m] = margins([row()]);
+    assert.equal(m.marginPerUnitMicros, Math.round((870 * 10_000) / 90));
   });
 });

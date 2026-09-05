@@ -341,3 +341,78 @@ export async function productLedger(): Promise<{ rows: LedgerRow[]; rate: number
 }
 
 export { MICROS };
+
+/**
+ * What each drug actually earns: what came in against what it truly cost.
+ *
+ * The comparison table answers "am I paying too much"; this answers the question the pharmacist
+ * asked next, which is "which of these is worth dispensing". They are not the same question and
+ * one does not imply the other — a drug bought well below NADAC can still be dispensed at a loss
+ * if the plan reimburses below acquisition, and a drug bought above NADAC can be the best margin
+ * on the shelf.
+ *
+ * The cost side is the *effective* cost: what the invoice charged, less the rebate that supplier
+ * actually pays on that line. A margin worked out on gross invoice prices understates every
+ * contract generic by the tier rate, which for this pharmacy is thirty percent — enough to turn a
+ * profitable drug into an apparent loss and get it dropped.
+ *
+ * Where the true cost is not known, no margin is produced. Not zero, not a guess from NADAC: NADAC
+ * is what pharmacies on average paid, not what this one paid, and a margin computed from it is a
+ * statement about somebody else's business.
+ */
+export type Margin = {
+  ndc11: string;
+  name: string | null;
+  claims: number;
+  unitsDispensed: number;
+  /** What plans and patients paid, across the claims held. */
+  receivedCents: number;
+  /** Units dispensed times the effective cost per unit. */
+  costCents: number;
+  marginCents: number;
+  /** Margin as a percentage of what came in. Null where nothing came in. */
+  marginPercent: number | null;
+  /** Per unit, so a drug dispensed once can be compared with one dispensed a hundred times. */
+  marginPerUnitMicros: number;
+  /** What this pharmacy pays against the benchmark, per unit. Negative is buying below it. */
+  vsNadacMicros: number | null;
+  supplier: string | null;
+  rebated: boolean | null;
+};
+
+export function margins(rows: LedgerRow[]): Margin[] {
+  const out: Margin[] = [];
+  for (const r of rows) {
+    // No dispensing, or no price this pharmacy actually paid, and there is no margin to state.
+    if (r.unitsDispensed <= 0 || r.claims === 0 || !r.paid) continue;
+    if (r.flags.includes("pack_size_unknown")) continue;
+    const costCents = Math.round((r.paid.effectiveUnitMicros * r.unitsDispensed) / 10_000);
+    const marginCents = r.receivedCents - costCents;
+    out.push({
+      ndc11: r.ndc11,
+      name: r.name,
+      claims: r.claims,
+      unitsDispensed: r.unitsDispensed,
+      receivedCents: r.receivedCents,
+      costCents,
+      marginCents,
+      marginPercent: r.receivedCents > 0 ? Math.round((marginCents / r.receivedCents) * 1000) / 10 : null,
+      marginPerUnitMicros: Math.round((marginCents * 10_000) / r.unitsDispensed),
+      vsNadacMicros: r.vsNadacMicros,
+      supplier: r.paid.supplier,
+      rebated: r.paid.rebated,
+    });
+  }
+  return out.sort((a, b) => b.marginCents - a.marginCents);
+}
+
+/**
+ * The ones dispensed at a loss, worst first.
+ *
+ * Separated out rather than left at the bottom of a long list, because they are a different kind
+ * of fact: everything above the line is a question of degree, and everything below it is money
+ * going the wrong way every time the drug is dispensed.
+ */
+export function losers(rows: Margin[]): Margin[] {
+  return rows.filter((m) => m.marginCents < 0).sort((a, b) => a.marginCents - b.marginCents);
+}
