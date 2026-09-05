@@ -82,6 +82,9 @@ export const SETTING_KEYS = [
   "nadac_last_result",
   // When it last actually succeeded, which is a different question from when it last ran.
   "nadac_last_ok",
+  // What data.medicaid.gov currently calls its NADAC datasets, as JSON, read from the listing at
+  // most once a week. The yearly dataset's id changes every January; this is how it is followed.
+  "nadac_datasets_json",
   /*
    * The Kansas Medicaid professional dispensing fee, in cents.
    *

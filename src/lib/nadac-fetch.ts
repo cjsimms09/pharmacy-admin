@@ -5,6 +5,7 @@ import { getSettings, setSetting } from "./settings";
 import { loadNadacFiles, loadedFiles, looksLikeNadacHeader, nadacDir } from "./nadac";
 import { createWriteStream } from "node:fs";
 import { createHash } from "node:crypto";
+import { discoverNadacDatasets, datasetDownloadUrl, weekDownloadUrl, wednesdaysFor, type NadacDatasets } from "./nadac-sources";
 
 /**
  * Pulling NADAC from CMS automatically.
@@ -105,6 +106,100 @@ export function archiveYears(): string[] {
   return Object.keys(YEAR_DATASETS).sort().reverse();
 }
 
+/*
+ * ── The ids, looked up rather than written down ──
+ *
+ * Everything above carries an id somebody typed in. It is right today and wrong next January,
+ * when CMS mints a new id for the new year's dataset, and the failure is silent: the archive
+ * button offers a year that no longer exists, or worse, an old one. So the site also reads the
+ * dataset listing on data.medicaid.gov — one small request, once a week — and remembers what it
+ * found. The typed-in ids stay as the fallback for a machine that cannot reach the listing.
+ */
+const DATASETS_SETTING = "nadac_datasets_json" as const;
+const DATASETS_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * The NADAC datasets as the site last saw them, refreshed from the listing when a week old.
+ *
+ * A listing that cannot be read leaves the last good copy in place; a site that has never read
+ * one returns null and the typed-in ids carry on alone. Never throws.
+ */
+export async function nadacDatasets(opts: { refresh?: boolean; fetchImpl?: typeof fetch } = {}): Promise<NadacDatasets | null> {
+  const s = await getSettings();
+  const cached = parseDatasets(s[DATASETS_SETTING]);
+  const age = cached ? Date.now() - Date.parse(cached.readAt) : Infinity;
+  if (cached && !opts.refresh && Number.isFinite(age) && age < DATASETS_MAX_AGE_MS) return cached;
+  try {
+    const fresh = await discoverNadacDatasets(opts.fetchImpl);
+    if (fresh.weekly || Object.keys(fresh.years).length > 0) {
+      await setSetting(DATASETS_SETTING, JSON.stringify(fresh));
+      return fresh;
+    }
+  } catch {
+    // The listing was unreachable or unreadable. The last good copy, if any, is still right.
+  }
+  return cached;
+}
+
+function parseDatasets(raw: string | undefined): NadacDatasets | null {
+  if (!raw) return null;
+  try {
+    const d = JSON.parse(raw) as NadacDatasets;
+    return d && typeof d.readAt === "string" && d.years && typeof d.years === "object" ? d : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The archive address for a year: the typed-in id where there is one, else the one the listing gave. */
+export async function yearArchiveUrlAsync(year: string | number): Promise<string | null> {
+  const typed = yearArchiveUrl(year);
+  if (typed) return typed;
+  const d = await nadacDatasets();
+  const found = d?.years[String(year)];
+  return found ? datasetDownloadUrl(found.id) : null;
+}
+
+/** Every year an archive can be fetched for, typed-in and discovered together, newest first. */
+export async function archiveYearsAsync(): Promise<string[]> {
+  const d = await nadacDatasets();
+  return [...new Set([...archiveYears(), ...Object.keys(d?.years ?? {})])].sort().reverse();
+}
+
+/**
+ * The weekly sources, with the current-file dataset the listing names added after the typed-in
+ * ones — so a moved id is picked up without anybody editing this file.
+ */
+export async function weeklySourcesAsync(override?: string | null): Promise<string[]> {
+  const base = weeklySources(override);
+  const d = await nadacDatasets();
+  const extra = d?.weekly ? datasetDownloadUrl(d.weekly.id) : null;
+  return extra && !base.includes(extra) ? [...base, extra] : base;
+}
+
+/**
+ * Where to get the file for one particular week, for filling a gap.
+ *
+ * The plain weekly file for the Wednesday on or before the date, then the one after, then the
+ * same two weeks cut out of the yearly dataset by as_of_date — a few megabytes each, against a
+ * hundred for the whole year. The fetch takes the first that exists.
+ */
+export async function weekSources(dateIso: string): Promise<string[]> {
+  const { onOrBefore, after } = wednesdaysFor(dateIso);
+  const plain = (iso: string) => {
+    const [y, m, d] = iso.split("-");
+    return `https://download.medicaid.gov/data/nadac-national-average-drug-acquisition-cost-${m}-${d}-${y}.csv`;
+  };
+  const out = [plain(onOrBefore), plain(after)];
+  const d = await nadacDatasets();
+  for (const iso of [onOrBefore, after]) {
+    const year = iso.slice(0, 4);
+    const id = d?.years[year]?.id ?? YEAR_DATASETS[year];
+    if (id) out.push(weekDownloadUrl(id, iso));
+  }
+  return out;
+}
+
 /**
  * Whether the automatic pull is on.
  *
@@ -143,7 +238,7 @@ export type FetchResult = {
  */
 export async function fetchNadac(onProgress?: (text: string) => void | Promise<void>): Promise<FetchResult> {
   const s = await getSettings();
-  return fetchNadacFrom(weeklySources(s.nadac_source_url), onProgress);
+  return fetchNadacFrom(await weeklySourcesAsync(s.nadac_source_url), onProgress);
 }
 
 /** Where "Fetch now" looks, in order: the pharmacy's own address, this week's file, then the rest. */
