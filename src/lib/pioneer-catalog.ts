@@ -1,4 +1,5 @@
 import { productKey } from "./product-key";
+import { normalizeNdc } from "./ndc";
 
 /**
  * Reading PioneerRx's "Supplier Catalog Item Search Results" export.
@@ -207,9 +208,9 @@ const BARE_NUMBER = /^\d+(\.\d+)?$/;
 
 /** A hyphenated NDC to the eleven-digit billing form. Unambiguous, because the hyphens are present. */
 export function ndc11FromHyphenated(s: string): string | null {
-  const m = NDC.exec(s.trim());
-  if (!m) return null;
-  return m[1].padStart(5, "0") + m[2].padStart(4, "0") + m[3].padStart(2, "0");
+  if (!NDC.test(s.trim())) return null;
+  const r = normalizeNdc(s);
+  return r.ok ? r.ndc11 : null;
 }
 
 /**

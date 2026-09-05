@@ -5,7 +5,9 @@ import { newId } from "./crypto";
 import { parseCents, parseUnitMicros, parseQuantityThousandths, formatCents } from "./money";
 import { readSheetAsObjects } from "./xlsx";
 import { parseCsv } from "./reference";
-import { normalizeClaimNdc, parseClaimDate } from "./claims";
+import { parseClaimDate } from "./claims";
+import { readNdc } from "./ndc";
+import { heldNdcs } from "./ndc-held";
 import { productKey } from "./product-key";
 import { parsePioneerCatalog, supplierFromFileName, dateFromFileName, type CatalogSection } from "./pioneer-catalog";
 
@@ -267,11 +269,14 @@ export async function importSupplierCatalog(
   const before = new Set(
     (await db.query.supplierItems.findMany({ where: eq(schema.supplierItems.supplier, supplier), columns: { ndc11: true } })).map((e) => e.ndc11),
   );
+  const held = await heldNdcs();
 
   for (const r of rows) {
     const g = (f: FieldName) => (map[f] ? r[map[f]!] : undefined);
-    const ndc11 = normalizeClaimNdc(g("ndc"));
-    if (!ndc11) { skip("no readable 11-digit NDC"); continue; }
+    // A bare ten-digit code is settled against the products already held, never padded (ndc.ts).
+    const ndc = readNdc(g("ndc"), (n) => held.has(n));
+    const ndc11 = ndc.ndc11;
+    if (!ndc11) { skip(ndc.reason ?? "no readable NDC"); continue; }
 
     const { unitCostMicros, packCostCents } = unitCostFrom(g("unitCost"), g("packCost"), g("units"));
     if (unitCostMicros === null && packCostCents === null) { skip("no readable price"); continue; }

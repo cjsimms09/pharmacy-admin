@@ -7,6 +7,8 @@ import { readSheetAsObjects, excelSerialToIso } from "./xlsx";
 import { parseCsv, buildPbmResolver } from "./reference";
 import { SB20_MIN_DISPENSING_FEE_CENTS } from "./reimbursement-rules";
 import { CLASS_INFO, planKey } from "./plans";
+import { readNdc } from "./ndc";
+import { heldNdcs } from "./ndc-held";
 import type { Transaction } from "./rx-transactions";
 
 /**
@@ -98,12 +100,16 @@ export function parseClaimDate(raw: string | undefined): string | null {
   return null;
 }
 
-/** NDCs arrive with or without hyphens, and sometimes short of a leading zero. */
-export function normalizeClaimNdc(raw: string | undefined): string | null {
-  const d = (raw ?? "").replace(/\D/g, "");
-  if (d.length === 11) return d;
-  if (d.length === 10) return `0${d}`; // a leading zero lost to a numeric cell
-  return null;
+/**
+ * NDCs arrive with or without hyphens, and sometimes as ten bare digits.
+ *
+ * The hyphenated forms convert exactly. A bare ten-digit code is settled only against the NDCs
+ * the site already holds (pass `isKnown`), because "0" in front is right for one of the three
+ * FDA layouts and wrong for the other two — see ndc.ts. Unresolved comes back null, and the
+ * import counts it, rather than filing the claim under a product it may not be.
+ */
+export function normalizeClaimNdc(raw: string | undefined, isKnown?: (ndc11: string) => boolean): string | null {
+  return readNdc(raw, isKnown).ndc11;
 }
 
 export type ImportReport = {
@@ -159,6 +165,9 @@ export async function importClaims(file: Buffer, fileName: string, userId: strin
     (await db.query.claims.findMany({ columns: { rxNumber: true, fillNumber: true, dateFilled: true } }))
       .map((c) => `${c.rxNumber}|${c.fillNumber ?? ""}|${c.dateFilled}`),
   );
+  // For settling a bare ten-digit NDC against a product we already know (see ndc.ts).
+  const held = await heldNdcs();
+  const isKnown = (n: string) => held.has(n);
 
   await db.insert(schema.claimImports).values({
     id: importId, fileName, rowsRead: rows.length, createdBy: userId,
@@ -189,13 +198,18 @@ export async function importClaims(file: Buffer, fileName: string, userId: strin
 
     const unitRaw = (g("quantityUnit") ?? "").trim().toUpperCase();
 
+    // The claim is kept whether or not its NDC can be read — the money is real either way — but
+    // an NDC that cannot be settled is counted so the gap is visible on the import line.
+    const ndc = readNdc(g("ndc11"), isKnown);
+    if (ndc.ndc11 === null && (g("ndc11") ?? "").trim()) skip(`kept without an NDC: ${ndc.reason}`);
+
     pending.push({
       id: newId(),
       importId,
       rxNumber,
       fillNumber,
       dateFilled,
-      ndc11: normalizeClaimNdc(g("ndc11")),
+      ndc11: ndc.ndc11,
       itemName: (g("itemName") ?? "").trim() || null,
       bin,
       pcn: (g("pcn") ?? "").trim() || null,
@@ -278,6 +292,26 @@ export async function importRxTransactions(file: Buffer, fileName: string, userI
   const parsed = parseRxTransactions(file.toString("utf8"));
   const importId = newId();
   const rowsRead = parsed.rows.length;
+
+  /*
+   * A ten-digit NDC with no hyphens is settled here, not in the reader.
+   *
+   * The reader is pure and cannot know which products the site holds; this can. A bare code that
+   * matches exactly one NDC already in the catalogues, NADAC or the claims is that product. One
+   * that matches none or several stays without an NDC — the claim is still stored with its money,
+   * it simply cannot be priced until somebody looks — and the count says how many.
+   */
+  const bare = parsed.rows.filter((t) => t.ndc11 === null && t.ndcBare10);
+  if (bare.length > 0) {
+    const held = await heldNdcs();
+    let unresolved = 0;
+    for (const t of bare) {
+      const r = readNdc(t.ndcBare10, (n) => held.has(n));
+      if (r.ndc11) t.ndc11 = r.ndc11;
+      else unresolved++;
+    }
+    if (unresolved > 0) parsed.reasons["kept without an NDC: 10-digit NDC with no hyphens matched no product we hold, or more than one"] = unresolved;
+  }
 
   await db.insert(schema.claimImports).values({ id: importId, fileName, rowsRead, createdBy: userId });
 
