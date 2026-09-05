@@ -51,10 +51,21 @@ export async function apiKeyHint(): Promise<string | null> {
 
 /** Thrown when the month's ceiling has been reached. Its own class, so it reads as a choice. */
 export class AiCapReachedError extends Error {
-  constructor(spent: string, cap: string) {
+  /*
+   * The message has to say whose ceiling it is.
+   *
+   * It read "the ceiling you set" whether or not anybody had set one — and the built-in fifty
+   * dollars is the one most pharmacies will meet first, having never chosen it. Being stopped by a
+   * limit you did not know existed, and told you set it, is the kind of message that sends
+   * somebody looking for a fault that is not there.
+   */
+  constructor(spent: string, cap: string, isDefault = false) {
     super(
-      `Claude has cost ${spent} in the last month, which is the ceiling you set (${cap}). Nothing further will be ` +
-        "sent until the month rolls on or you raise it under Settings → Claude. Everything already done is saved.",
+      `Claude has cost ${spent} in the last month, against a ceiling of ${cap}` +
+        (isDefault
+          ? " — which nothing here chose deliberately; it is the built-in limit, there so that software spending your money on a computer you are not sitting at cannot run away. Raise it or turn it off under Settings → Claude."
+          : ", which is the ceiling you set. Raise it under Settings → Claude, or wait for the month to roll on.") +
+        " Everything already done is saved, and nothing further is sent until then.",
     );
     this.name = "AiCapReachedError";
   }
@@ -72,7 +83,7 @@ async function client(): Promise<{ client: Anthropic; model: string }> {
   if (!s.anthropic_api_key_enc) throw new AiNotConfiguredError();
   const { monthlyCap, dollars } = await import("./ai-spend");
   const limit = await monthlyCap();
-  if (limit.over) throw new AiCapReachedError(dollars(limit.spent), dollars(limit.cap!));
+  if (limit.over) throw new AiCapReachedError(dollars(limit.spent), dollars(limit.cap!), limit.isDefault);
   return { client: new Anthropic({ apiKey: decryptText(s.anthropic_api_key_enc), maxRetries: 2, timeout: 10 * 60 * 1000 }), model: s.ai_model || DEFAULT_MODEL };
 }
 
@@ -1043,5 +1054,76 @@ export async function readPurchaseDrillDown(pdf: Buffer, ctx: { userId: string; 
   await logUsage("ai.read_drill_down", ctx.userId, ctx.userName, res.usage, "Purchase Drill Down");
   if (res.stop_reason === "refusal") throw new Error("Claude declined to read that document.");
   if (!res.parsed_output) throw new Error("That report could not be read. It may be a scan of poor quality.");
+  return res.parsed_output;
+}
+
+/**
+ * Turning one finding into the text that answers it.
+ *
+ * The reviewer already knows what should be written. Read its findings back: "This pharmacy has
+ * decided that staff are not given advance notice of a controlled substance inventory; the manual
+ * should say that, and should say that the date and time are recorded on the inventory record."
+ * That is an instruction, complete and specific — and nothing turned instructions into text, so
+ * they came back on every pass with a note saying the section needed a decision, and the findings
+ * list stopped being read.
+ *
+ * The step that was missing. One finding, the section as it stands, and where the pharmacy has
+ * supplied a fact the reviewer was waiting on, that fact. Out comes the section rewritten so that
+ * this finding no longer applies — and nothing else changed, because a rewrite that quietly
+ * improves three other paragraphs is one nobody can check.
+ */
+const FindingFix = z.object({
+  body: z
+    .string()
+    .describe(
+      "The whole section, rewritten so this one finding no longer applies. Everything the finding does not touch " +
+        "must survive word for word. Empty string only where the finding still turns on a fact you were not given.",
+    ),
+  changed: z.string().describe("What you changed, in one sentence, so a person can check it without reading the whole section."),
+  stillNeeded: z
+    .string()
+    .nullable()
+    .describe("Where you could not write it, the question the pharmacy has to answer, asked plainly and in one sentence. Null where the text is complete."),
+});
+export type FindingFixT = z.infer<typeof FindingFix>;
+
+export async function writeFindingFix(
+  input: { title: string; body: string; what: string; why: string; answer?: string | null; context: string; siteDoes: string },
+  ctx: { userId: string; userName: string },
+): Promise<FindingFixT> {
+  if (MOCK) return { body: "", changed: "", stillNeeded: "Mock mode writes nothing." };
+  const { client: c, model } = await client();
+  const res = await c.messages.parse({
+    model,
+    max_tokens: 32_000,
+    thinking: { type: "adaptive" },
+    system:
+      "You rewrite one section of a community pharmacy's policy and procedure manual so that a single named finding " +
+      "no longer applies, and change nothing else. Everything the finding does not touch survives word for word — a " +
+      "rewrite that quietly improves three other paragraphs is one nobody can check, in a document an inspector holds " +
+      "the pharmacy to.\n\n" +
+      "Where the finding itself states what the pharmacy has decided, that is your instruction: write it. Where the " +
+      "pharmacy has supplied an answer below, use it and write the text. Only where the finding still turns on a fact " +
+      "nobody has given you do you return an empty body and ask for that fact in one plain sentence — never invent a " +
+      "fact about this pharmacy to produce text, because the invented sentence becomes the standard it is held to.\n\n" +
+      "Write in the manual's own register: plain, direct, present tense, no hedging, no 'as appropriate' or 'per " +
+      "policy'. Cite a regulation only where the finding cites one, and cite it exactly as the finding does.",
+    messages: [
+      {
+        role: "user",
+        content:
+          `Section: ${input.title}\n\n` +
+          `--- The section as it stands ---\n${input.body}\n\n` +
+          `--- The finding ---\nWhat is wrong: ${input.what}\nWhy: ${input.why}\n\n` +
+          (input.answer ? `--- What the pharmacy says about this ---\n${input.answer}\n\n` : "") +
+          `--- About this pharmacy ---\n${input.context}\n\n` +
+          `--- What the compliance system already does ---\n${input.siteDoes}\n`,
+      },
+    ],
+    output_config: { effort: "high", format: zodOutputFormat(FindingFix) },
+  });
+  await logUsage("ai.finding_fix", ctx.userId, ctx.userName, res.usage, input.title);
+  if (res.stop_reason === "refusal") throw new Error("Claude declined to rewrite that section.");
+  if (!res.parsed_output) throw new Error("The rewrite could not be read back. Try again, or open the section and write it.");
   return res.parsed_output;
 }

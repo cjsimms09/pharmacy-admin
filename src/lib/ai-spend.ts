@@ -34,8 +34,18 @@ export type Rates = { in: number; out: number; model: string };
 
 export async function rates(): Promise<Rates> {
   const s = await getSettings();
+  /*
+   * Blank means "nobody has set this", not "zero".
+   *
+   * Number("") is 0, and 0 passed the range test — so a rate nobody had typed read as free, and
+   * the spend page reported $0.00 across a million and a half tokens at "$0 and $0 per million".
+   * A cost page that always says nothing is the same as no cost page, and worse, because it is
+   * believed. Only a figure somebody actually typed can set a rate to zero.
+   */
   const n = (v: string | undefined, fallback: number) => {
-    const x = Number((v ?? "").trim());
+    const raw = (v ?? "").trim();
+    if (raw === "") return fallback;
+    const x = Number(raw);
     return Number.isFinite(x) && x >= 0 ? x : fallback;
   };
   return {

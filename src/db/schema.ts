@@ -663,6 +663,19 @@ export const manualFindings = sqliteTable(
     why: text("why").notNull(),
     /** The replacement text, where the audit could write one. Empty where it could not. */
     suggestedBody: text("suggested_body").notNull().default(""),
+    /**
+     * What the pharmacy says about this, where the finding was waiting on a fact.
+     *
+     * Most findings that carry no suggested text are not asking for judgement — they are asking a
+     * question. "The manual sets a standard for release that delivery cannot meet; the pharmacy
+     * must decide who the driver may release to." Nothing could answer that but the pharmacist,
+     * and there was nowhere for him to answer it, so twenty-three findings came back unchanged on
+     * every pass until the list stopped being read. This is the answer, kept against the finding
+     * that asked, and it is what the rewrite is then written from.
+     */
+    answer: text("answer"),
+    /** When the answer was given, so a stale rewrite can be told from a current one. */
+    answeredAt: text("answered_at"),
     appliedAt: text("applied_at"),
     dismissedAt: text("dismissed_at"),
     /** Why it was dismissed. A finding waved away with no reason is not closed, it is hidden. */
