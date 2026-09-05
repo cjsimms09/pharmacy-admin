@@ -594,6 +594,26 @@ const PolicyReview = z.object({
 export type PolicyReviewT = z.infer<typeof PolicyReview>;
 
 /**
+ * The same review, asked small, for a section whose full answer will not fit.
+ *
+ * Four findings at most and no rewrite. A structured answer that runs out of room does not come
+ * back short — it comes back as an unparseable fragment — so when the full question fails twice
+ * this is asked instead. Four real findings on a long section beat an error on it for ever.
+ */
+const PolicyReviewBrief = z.object({
+  findings: z
+    .array(
+      z.object({
+        what: z.string().describe("What is wrong with this section as it stands, in two sentences at most."),
+        why: z.string().describe("The requirement it falls short of, cited exactly."),
+        severity: z.enum(["blocking", "should", "note"]),
+      }),
+    )
+    .max(4)
+    .describe("Empty when the section is adequate. Do not manufacture work."),
+});
+
+/**
  * Reads one section of the manual against the requirements and against what this site does.
  *
  * Separate from drafting, and deliberately so. Drafting is asked for by somebody who has already
@@ -627,7 +647,7 @@ export async function reviewPolicy(
    * something anybody reviews as a wholesale replacement anyway; the findings are what is wanted,
    * and they always fit.
    */
-  const TOO_LONG_TO_REWRITE = 9_000;
+  const TOO_LONG_TO_REWRITE = 4_000;
   const longSection = input.body.length > TOO_LONG_TO_REWRITE;
 
   /*
@@ -640,9 +660,9 @@ export async function reviewPolicy(
   const ask = async () =>
     c.messages.parse({
       model,
-      // Generous enough to carry findings and a full rewrite of an ordinary section. The old
-      // limit of 4,000 truncated the long ones, which is a separate failure of the same shape.
-      max_tokens: 12_000,
+      // Headroom, because the answer that does not fit does not come back short — it comes back
+      // as an unparseable fragment, which is a far worse failure than a long reply.
+      max_tokens: 32_000,
     system:
       "You audit sections of an independent Kansas community pharmacy's policy and procedure manual against Kansas " +
       "Board of Pharmacy regulations (K.S.A. 65-16xx, K.A.R. 68-x), DEA requirements (21 CFR 1300-1317), HIPAA " +
@@ -699,10 +719,54 @@ export async function reviewPolicy(
   if (!res?.parsed_output && res?.stop_reason !== "max_tokens" && res?.stop_reason !== "refusal") {
     ({ res, parseError } = await attempt());
   }
+  /*
+   * The last resort: ask for less.
+   *
+   * Three sections of this pharmacy's manual failed every pass with an unterminated string — the
+   * answer running out part-way through, which is what a structured reply does when it does not
+   * fit. Retrying the same question produced the same answer. So the question gets smaller: the
+   * findings alone, at most four, each a couple of sentences, and no replacement text at all.
+   * Findings without a rewrite are most of the value and a fraction of the length, and a section
+   * that yields four real findings is far better than one that yields an error for ever.
+   */
+  if (!res?.parsed_output) {
+    try {
+      const small = await c.messages.parse({
+        model,
+        max_tokens: 8_000,
+        system:
+          "You audit one section of a Kansas community pharmacy's policy manual against Kansas Board of Pharmacy " +
+          "regulations, DEA requirements (21 CFR 1300-1317), HIPAA and OSHA. Report at most the four most important " +
+          "problems, each in two sentences at most. Do not rewrite the section. A section that is adequate gets no " +
+          "findings at all — do not manufacture work. Never invent a fact about this pharmacy.",
+        messages: [
+          {
+            role: "user",
+            content: `The pharmacy: ${input.context}\n\nSection title: ${input.title}\n\nCurrent text:\n${input.body.slice(0, 30_000)}`,
+          },
+        ],
+        output_config: { format: zodOutputFormat(PolicyReviewBrief) },
+      });
+      if (small.parsed_output) {
+        await logUsage("ai.policy.review.brief", ctx.userId, ctx.userName, small.usage, input.title.slice(0, 120));
+        return {
+          verdict: small.parsed_output.findings.length === 0 ? "ok" : "gap",
+          // No replacement text, which is exactly what an empty suggestedBody means everywhere
+          // else: the reviewer had a finding and could not write the fix.
+          findings: small.parsed_output.findings.map((f) => ({ ...f, severity: f.severity, suggestedBody: "" })),
+          suggestedBody: "",
+        } as PolicyReviewT;
+      }
+    } catch {
+      // Fall through to the error below, which now names both attempts.
+    }
+  }
+
   if (!res) {
     throw new Error(
-      `The review of “${input.title}” came back twice in a form this site could not read (${(parseError ?? "").split("\n")[0].slice(0, 160)}). ` +
-        "The rest of the manual is unaffected; try this section again later, or split it if it is long.",
+      `The review of “${input.title}” came back twice in a form this site could not read (${(parseError ?? "").split("\n")[0].slice(0, 160)}), ` +
+        "and a shorter question failed too. The rest of the manual is unaffected. This section is long enough that " +
+        "splitting it into smaller ones is worth doing anyway — nobody reads a four-thousand-word policy either.",
     );
   }
 

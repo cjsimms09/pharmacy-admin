@@ -18,6 +18,7 @@ import { importSupplierCatalog } from "./suppliers";
 import { allSuppliers, supplierForSender } from "./suppliers-registry";
 import { loadNadacFiles, nadacDir } from "./nadac";
 import { gateFile } from "./phi-gate";
+import { pdfText } from "./pdf-text";
 import { audit } from "./audit";
 import { matchTrainingReplies, completeByEmailReply } from "./training-replies";
 import { matchCertificateReply, fileCertificateReply } from "./credential-requests";
@@ -407,12 +408,27 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
             const matched = supplierForSender(register, from);
             const supplierName =
               matched?.name ?? supplierFor(parseSupplierRules(s.mail_supplier_rules ?? ""), from, subject);
+            /*
+             * The document's own words, where it is a PDF and they can be read.
+             *
+             * Read once, here, because two decisions below need them: whether this is really an
+             * invoice, and if not, what else it is.
+             */
+            const pdfWords = (() => {
+              if (!/\.pdf$/i.test(fileName) && att.contentType !== "application/pdf") return null;
+              try {
+                return pdfText(buf);
+              } catch {
+                return null;
+              }
+            })();
             if (
               looksLikeInvoice({
                 fileName,
                 mimeType: att.contentType ?? "",
                 subject,
                 supplier: supplierName,
+                text: pdfWords,
               })
             ) {
               try {

@@ -7,6 +7,7 @@ import { storeFile, readFile as readStoredFile } from "./files";
 import { readInvoice } from "./ai";
 import { getSettings } from "./settings";
 import { pdfText } from "./pdf-text";
+import { looksLikeRebateReport } from "./rebate-report";
 import { allSuppliers, supplierForSender } from "./suppliers-registry";
 import { scheduleFromNames, linesMatching } from "./controlled-names";
 import type { InvoiceSchedule, DocumentCategory } from "@/db/schema";
@@ -60,10 +61,21 @@ export function looksLikeInvoice(opts: {
   mimeType: string;
   subject: string;
   supplier: string | null;
+  /** The document's own words, where they could be read. A rebate report is never an invoice. */
+  text?: string | null;
 }): boolean {
   const isPdf = /\.pdf$/i.test(opts.fileName) || opts.mimeType === "application/pdf";
   if (!isPdf) return false;
   if (!opts.supplier) return false;
+  /*
+   * What the document says beats what the subject line calls it.
+   *
+   * McKesson's monthly rebate breakdown is a PDF from a known supplier, and a subject line reading
+   * "statement of account" matched the words below — so it was filed as an invoice with an
+   * unreadable schedule and held with the Schedule II records, and the tier ladder inside it was
+   * never read. The subject is written by whoever sent the email; the document is the document.
+   */
+  if (opts.text && looksLikeRebateReport(opts.text)) return false;
   return /invoice|inv\b|statement of account|packing (list|slip)/i.test(`${opts.subject} ${opts.fileName}`);
 }
 
