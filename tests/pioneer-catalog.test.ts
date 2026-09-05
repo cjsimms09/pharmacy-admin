@@ -50,6 +50,117 @@ const withRebate = () =>
     "Printed On: 9/8/2026 6:02 AM,Page 1 of 1",
   ].join("\r\n");
 
+/**
+ * The scheduled Monday file as it really arrives: tab-separated, the header's sixth column on its
+ * own line, most items split across two lines with the pack and cost on a line that may come before
+ * or after the item, and the rebate figure rendered wherever the report engine found room — on a
+ * line of its own next to a single-line item, or in the empty pack column of a split one.
+ */
+const scheduled = (sep = "\t") =>
+  [
+    "\ufeffSupplier Catalog Item Search Results",
+    "McKesson",
+    "Supplier: McKessonStatus: Available",
+    ["Supplier Item Number", "Name", "NDC", "Package Size", "Cost Per Unit"].join(sep),
+    "Rebate Pck Cost",
+    // split item, price after, not rebated
+    ["3925302", ".15ML MD MINI PMP BL MED 100DS", "38779-6254-02", ""].join(sep),
+    [" (1) 100.00 EA", "3.7706"].join(sep),
+    // split item, price BEFORE it, not rebated
+    [" (1) 1.00 EA", "8.0900"].join(sep),
+    ["1768217", "A M TAPE LABEL RX  2X72YD", "", ""].join(sep),
+    // single-line rebated item whose rebate figure follows on its own line
+    ["3637774", "ABACAV LAM TB 600 300MG CIP30@", "69097-0362-02", " (1) 30.00 EA", "2.3330"].join(sep),
+    "41.9900",
+    // rebate figure BEFORE its single-line item
+    "301.3300",
+    ["3085883", "ABACAVIR TB 300MG SAF UD 50@", "51079-0204-06", " (1) 50.00 EA", "10.0442"].join(sep),
+    // split rebated item: the figure sits in the pack column, the price arrives later
+    ["1903673", "ABACAVIR TAB 300MG  UD AHP 30@", "68084-0021-21", "153.6400"].join(sep),
+    [" (1) 30.00 EA", "8.5357"].join(sep),
+    // split item with a zero-cost price line: must hold its place in the order
+    ["1299908", "ABACAVIR TAB 300MG UD MYLN 50", "51079-0204-06", ""].join(sep),
+    [" (1) 50.00 EA", "0.0000"].join(sep),
+    ["3996006", "ABACAVIR TB 300MG MMP UD3X10@", "00904-6874-04", ""].join(sep),
+    [" (1) 30.00 EA", "8.3870"].join(sep),
+    ["Printed On: 9/5/2026 12:14 PM", "Page 1 of 1"].join(sep),
+  ].join("\r\n");
+
+describe("the scheduled Monday file", () => {
+  const by = (item: string) => parsePioneerCatalog(scheduled()).sections[0].rows.find((x) => x.itemNumber === item);
+
+  test("split items are paired with their price lines by order, whichever side the price fell on", () => {
+    const r = parsePioneerCatalog(scheduled());
+    assert.deepEqual(r.problems, []);
+    assert.deepEqual(r.sections.map((s) => s.supplier), ["McKesson"]);
+    assert.equal(by("3925302")!.unitCostMicros, 3_770_600);
+    assert.equal(by("3996006")!.unitCostMicros, 8_387_000);
+    assert.equal(by("1903673")!.unitCostMicros, 8_535_700, "the split item after the zero-cost one must not shift");
+  });
+
+  test("a rebate figure standing on its own line marks the single-line item beside it — before or after", () => {
+    assert.equal(by("3637774")!.rebated, true, "figure after");
+    assert.equal(by("3085883")!.rebated, true, "figure before");
+    assert.equal(by("3925302")!.rebated, false);
+  });
+
+  test("a lone figure is never taken for a supplier's name", () => {
+    const r = parsePioneerCatalog(scheduled());
+    assert.ok(!r.sections.some((s) => /^[\d.]+$/.test(s.supplier)));
+  });
+
+  test("a rebate figure in the pack column marks a split item rebated", () => {
+    assert.equal(by("1903673")!.rebated, true);
+    assert.equal(by("3996006")!.rebated, false);
+  });
+
+  test("a zero-cost price line holds its place in the order and is counted, not loaded", () => {
+    const r = parsePioneerCatalog(scheduled());
+    assert.equal(by("1299908"), undefined);
+    assert.equal(r.reasons["zero or negative cost"], 1);
+  });
+
+  test("a non-drug item with no NDC is counted under a reason that says so", () => {
+    const r = parsePioneerCatalog(scheduled());
+    assert.equal(r.reasons["no NDC (supplies and other non-drug items)"], 1);
+  });
+
+  test("a mismatch between split items and price lines refuses the block with the counts named", () => {
+    const text = scheduled().replace(" (1) 30.00 EA\t8.3870\r\n", "");
+    const r = parsePioneerCatalog(text);
+    assert.ok(r.problems.some((p) => /McKesson: 5 items were split across lines but 4 price lines/.test(p)), r.problems.join(" | "));
+    // the single-line items are still loaded
+    assert.ok(r.sections[0].rows.some((x) => x.itemNumber === "3637774"));
+  });
+
+  test("the same file with commas reads identically", () => {
+    const a = parsePioneerCatalog(scheduled("\t")).sections[0].rows.map((x) => [x.itemNumber, x.unitCostMicros, x.rebated]);
+    const b = parsePioneerCatalog(scheduled(",")).sections[0].rows.map((x) => [x.itemNumber, x.unitCostMicros, x.rebated]);
+    assert.deepEqual(a, b);
+  });
+
+  test("a rebate figure with no single-line item either side is reported, not guessed", () => {
+    const text = scheduled().replace("41.9900\r\n301.3300", "41.9900\r\n99.0000\r\n301.3300");
+    const r = parsePioneerCatalog(text);
+    assert.ok(r.problems.some((p) => /1 rebate figure stood on a line of its own/.test(p)), r.problems.join(" | "));
+  });
+});
+
+describe("the hand export's blanks", () => {
+  test("a blank item number with an NDC and a price is kept — the NDC is the key", () => {
+    const text = semi().replace("721021;METFORMIN", ";METFORMIN");
+    const r = parsePioneerCatalog(text);
+    assert.ok(r.sections[0].rows.some((x) => x.itemNumber === "" && x.ndc11 === "23155084205"));
+  });
+
+  test("an item listed without a price is counted as such, not as a split-row mismatch", () => {
+    const text = semi().replace(" (1) 112.00 GM;0.4654", " (1) 112.00 GM;");
+    const r = parsePioneerCatalog(text);
+    assert.deepEqual(r.problems, []);
+    assert.equal(r.reasons["item listed without a price"], 1);
+  });
+});
+
 describe("the rebate column the pharmacy added", () => {
   test("a six-column file reads every row — the five-column version would have skipped them all", () => {
     const r = parsePioneerCatalog(withRebate());
@@ -155,7 +266,7 @@ describe("reading it", () => {
 
   test("a row with no NDC is skipped with the reason counted, not stored under a blank", () => {
     const r = parsePioneerCatalog(semi());
-    assert.ok((r.reasons["NDC not in 5-4-2 hyphenated form"] ?? 0) >= 1);
+    assert.ok((r.reasons["no NDC (supplies and other non-drug items)"] ?? 0) >= 1);
     assert.ok(!r.sections.flatMap((s) => s.rows).some((x) => x.ndc11 === ""));
   });
 
