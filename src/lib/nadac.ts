@@ -68,7 +68,24 @@ export type ParsedNadacRow = {
   fileAsOf: string;
 };
 
-export type ParseReport = { rows: ParsedNadacRow[]; skipped: number; reasons: Record<string, number>; fileAsOf: string | null };
+export type ParseReport = {
+  rows: ParsedNadacRow[];
+  skipped: number;
+  reasons: Record<string, number>;
+  /** The earliest as-of date in the file. For a weekly file this is the file's own date. */
+  fileAsOf: string | null;
+  /**
+   * The latest as-of date in the file, which is a different question once year archives exist.
+   *
+   * A weekly file has one as-of date, so reporting the first row's was fine. A year archive holds
+   * fifty-odd of them, and reporting the first made a full year of 2022 announce itself as "the
+   * file published 2022-01-05" — technically true, completely misleading, and it hid the fact
+   * that the wrong dataset had been fetched at all.
+   */
+  fileAsOfLatest: string | null;
+  /** Distinct as-of dates present. More than one means this is an archive, not a weekly file. */
+  weeks: number;
+};
 
 /** Reads one CMS NADAC CSV. Never throws on a bad row — it counts it and moves on. */
 export function parseNadacCsv(text: string): ParseReport {
@@ -77,6 +94,8 @@ export function parseNadacCsv(text: string): ParseReport {
   const reasons: Record<string, number> = {};
   let skipped = 0;
   let fileAsOf: string | null = null;
+  let fileAsOfLatest: string | null = null;
+  const asOfSeen = new Set<string>();
   const skip = (why: string) => {
     skipped++;
     reasons[why] = (reasons[why] ?? 0) + 1;
@@ -94,7 +113,11 @@ export function parseNadacCsv(text: string): ParseReport {
     if (!isPricingUnit(unit)) { skip(`unrecognised pricing unit (${unit || "blank"})`); continue; }
     if (!effectiveOn) { skip("no readable effective date"); continue; }
 
-    if (asOf && !fileAsOf) fileAsOf = asOf;
+    if (asOf) {
+      asOfSeen.add(asOf);
+      if (!fileAsOf || asOf < fileAsOf) fileAsOf = asOf;
+      if (!fileAsOfLatest || asOf > fileAsOfLatest) fileAsOfLatest = asOf;
+    }
     rows.push({
       ndc11,
       description: (pick(r, "ndc description") ?? "").trim() || null,
@@ -107,7 +130,7 @@ export function parseNadacCsv(text: string): ParseReport {
       fileAsOf: asOf ?? effectiveOn,
     });
   }
-  return { rows, skipped, reasons, fileAsOf };
+  return { rows, skipped, reasons, fileAsOf, fileAsOfLatest, weeks: asOfSeen.size };
 }
 
 export type LoadReport = { file: string; added: number; alreadyHad: number; skipped: number; reasons: Record<string, number>; fileAsOf: string | null };

@@ -145,6 +145,21 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
           Worth leaving on even while the reimbursement pages are switched off: each weekly file carries only the
           prices in force that week, so a month with this off is a month of history to reconstruct later.
         </p>
+        {/*
+          A stale override is the failure that hid the 2022 problem.
+
+          The pharmacy's own address is tried before every built-in one — which is right, since it
+          exists for the day CMS moves the file. But it then wins for ever, silently, including
+          over corrections to the built-in list. Somebody who pasted an address a year ago has no
+          reason to remember it, and nothing on the page said it was in force.
+        */}
+        {s.nadac_source_url?.trim() && (
+          <p className="mt-3 rounded-md border border-warn bg-warn-soft px-3 py-2 text-sm text-warn">
+            <b>An address of your own is set, and it is tried before every built-in one.</b> Everything downloads from{" "}
+            <span className="font-mono text-xs">{s.nadac_source_url}</span> unless it fails. If prices are coming in
+            from the wrong year, empty this box and save — the built-in list is kept current.
+          </p>
+        )}
         <form action={saveAuto} className="mt-3 space-y-3">
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" name="auto" defaultChecked={s.nadac_auto !== "no"} />

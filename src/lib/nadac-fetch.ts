@@ -182,10 +182,27 @@ export async function fetchNadacFrom(sources: string[]): Promise<FetchResult> {
       const reports = await loadNadacFiles();
       const added = reports.reduce((n, r) => n + r.added, 0);
 
+      /*
+       * What was fetched, and from where.
+       *
+       * The old message said "the file published 2022-01-05" and stopped there. Both halves of
+       * what somebody needs were missing: it never named the address, so a source list quietly
+       * falling through to the wrong dataset was invisible; and it reported the first as-of date
+       * in the file, so a whole year of 2022 announced itself as a single January file. Somebody
+       * reading it had no way to tell they were looking at four-year-old prices.
+       *
+       * So the message now says the span it covers, how many weeks are in it, and which address
+       * it came from. A wrong source becomes obvious on the first read instead of never.
+       */
+      const covers =
+        parsed.weeks > 1 && parsed.fileAsOfLatest && parsed.fileAsOfLatest !== stamp
+          ? `${parsed.weeks} weekly files, ${stamp} to ${parsed.fileAsOfLatest}`
+          : `the file published ${stamp}`;
+
       const message =
-        added > 0
-          ? `${added.toLocaleString()} new prices from the file published ${stamp}.`
-          : `Up to date — the file published ${stamp} holds nothing we did not already have.`;
+        (added > 0
+          ? `${added.toLocaleString()} new prices from ${covers}.`
+          : `Nothing new — ${covers} holds only prices already held.`) + ` Source: ${short(url)}.`;
       await setSetting("nadac_last_fetch", new Date().toISOString());
       await setSetting("nadac_last_result", message);
       await setSetting("nadac_last_ok", new Date().toISOString());
@@ -203,9 +220,29 @@ export async function fetchNadacFrom(sources: string[]): Promise<FetchResult> {
   return { ok: false, source: null, message, added: 0, rowsParsed: 0, fileAsOf: null };
 }
 
+/**
+ * An address, shortened to the part that identifies which dataset it is.
+ *
+ * Taking the last path segment was fine for download.medicaid.gov, where the filename says what
+ * the file is. It is useless for a DKAN address, where every one ends in "download" — so three
+ * different datasets all reported as the same word. The dataset id is the identifying part, and
+ * the known ones are named outright, because "2022 archive" tells somebody something that a UUID
+ * never will.
+ */
+const KNOWN_IDS: Record<string, string> = {
+  "d5eaf378-dcef-5779-83de-acdd8347d68e": "current weekly file",
+  "fbb83258-11c7-47f5-8b18-5f8e79f7e704": "2026 archive",
+  "99315a95-37ac-4eee-946a-3c523b4c481e": "2024 archive",
+  "4a00010a-132b-4e4d-a611-543c9521280f": "2023 archive",
+  "dfa2ab14-06c2-457a-9e36-5cb6d80f8d93": "2022 archive",
+};
+
 const short = (u: string) => {
   try {
-    return new URL(u).pathname.split("/").pop() || u;
+    const url = new URL(u);
+    const id = url.pathname.split("/").find((p) => /^[0-9a-f-]{36}$/i.test(p));
+    if (id) return `${url.host} ${KNOWN_IDS[id.toLowerCase()] ?? id}`;
+    return `${url.host} ${url.pathname.split("/").pop() || ""}`.trim();
   } catch {
     return u;
   }
