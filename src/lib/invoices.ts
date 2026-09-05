@@ -10,6 +10,7 @@ import { pdfText } from "./pdf-text";
 import { looksLikeRebateReport } from "./rebate-report";
 import { allSuppliers, supplierForSender } from "./suppliers-registry";
 import { scheduleFromNames, linesMatching } from "./controlled-names";
+import { audit } from "./audit";
 import type { InvoiceSchedule, DocumentCategory } from "@/db/schema";
 
 /**
@@ -56,12 +57,81 @@ export type SupplierInvoice = typeof schema.supplierInvoices.$inferSelect;
  * subject or file name says invoice. Everything else stays on the path it was on. A rule that
  * swept up too much would file the wrong things under a heading an inspector reads first.
  */
+export type SupplierDocumentKind = "invoice" | "statement" | "rebate_report" | "credit_memo" | "unknown";
+
+/**
+ * What a supplier actually sent, read off the document rather than off the subject line.
+ *
+ * A wholesaler sends four kinds of paper and they are not interchangeable. An **invoice** is a
+ * record of goods received, and its Schedule II copy has to be held apart from every other record
+ * the registrant keeps (21 CFR 1304.04(h)(1)). A **statement** is a summary of an account: it
+ * records no receipt of anything, and filing one under the invoice headings puts a document that
+ * proves nothing into the file an inspector reads first. A **rebate breakdown** carries the tier
+ * ladder. A **credit memo** is money coming back, usually for a return.
+ *
+ * The distinction that does the work is the item table. Every invoice lists what was shipped, with
+ * an NDC against each line; a statement lists invoice numbers and balances and carries no NDC at
+ * all. So a document that talks like a statement and has no item lines is a statement, whatever
+ * the subject line says — and a document with item lines is not demoted to a statement merely for
+ * printing the word "statement" in a footer.
+ */
+export function classifySupplierDocument(text: string | null | undefined, fileName = "", subject = ""): { kind: SupplierDocumentKind; why: string } {
+  const words = text ?? "";
+  if (words && looksLikeRebateReport(words)) {
+    return { kind: "rebate_report", why: "It is a rebate breakdown: it carries the tier table and the month's settlement, not goods." };
+  }
+
+  // How many lines look like an item shipped: an NDC and a price on the same line.
+  const itemLines = words
+    .split(/\r?\n/)
+    .filter((l) => /(?:\d{11}|\d{4,5}-\d{3,4}-\d{1,2})/.test(l) && /\$?\d[\d,]*\.\d{2}/.test(l)).length;
+
+  const said = `${subject} ${fileName}`;
+  const creditWords = /\bcredit (?:memo|memorandum|note|invoice)\b|\bRGA\b|\breturn(?:ed)? goods authorisation\b|\breturn(?:ed)? goods authorization\b/i;
+  if (creditWords.test(words.slice(0, 4000)) || creditWords.test(said)) {
+    return { kind: "credit_memo", why: "It is a credit memo — money coming back, not goods going out." };
+  }
+
+  /*
+   * Statement wording. Aging buckets are the giveaway that nothing else prints: a statement of
+   * account sets out what is current, 30, 60 and 90 days old, and no invoice has any reason to.
+   */
+  const statementWords =
+    /statement of account|\bremittance advice\b|balance forward|previous balance|amount enclosed|\baging\b|past due summary/i.test(words) ||
+    /\b(?:31|30)[\s-]*(?:to|-)?\s*60\s*days?\b/i.test(words) ||
+    (/\bstatement\b/i.test(words.slice(0, 1500)) && /\bbalance\b/i.test(words));
+
+  if (statementWords && itemLines < 2) {
+    return {
+      kind: "statement",
+      why:
+        "It reads as a statement of account — balances and invoice numbers — and carries no item lines with NDCs on them, " +
+        "so it is a summary of the account rather than a record that goods were received.",
+    };
+  }
+  if (itemLines >= 2) {
+    return { kind: "invoice", why: `It lists ${itemLines} item lines with NDCs and prices, which is what an invoice is.` };
+  }
+  if (statementWords) {
+    return { kind: "statement", why: "It reads as a statement of account." };
+  }
+  return { kind: "unknown", why: "Nothing in it settles what kind of document it is." };
+}
+
+/**
+ * Whether an attachment should be filed as a supplier invoice.
+ *
+ * Deliberately narrow: a PDF, from a sender the pharmacy has already named as a supplier, whose
+ * subject or file name says invoice — and which, where its words can be read, is not something
+ * else. Everything else stays on the path it was on. A rule that swept up too much would file the
+ * wrong things under a heading an inspector reads first.
+ */
 export function looksLikeInvoice(opts: {
   fileName: string;
   mimeType: string;
   subject: string;
   supplier: string | null;
-  /** The document's own words, where they could be read. A rebate report is never an invoice. */
+  /** The document's own words, where they could be read. A statement is never an invoice. */
   text?: string | null;
 }): boolean {
   const isPdf = /\.pdf$/i.test(opts.fileName) || opts.mimeType === "application/pdf";
@@ -73,9 +143,13 @@ export function looksLikeInvoice(opts: {
    * McKesson's monthly rebate breakdown is a PDF from a known supplier, and a subject line reading
    * "statement of account" matched the words below — so it was filed as an invoice with an
    * unreadable schedule and held with the Schedule II records, and the tier ladder inside it was
-   * never read. The subject is written by whoever sent the email; the document is the document.
+   * never read. Then an IPD statement of account did the same thing for the same reason. The
+   * subject is written by whoever sent the email; the document is the document.
    */
-  if (opts.text && looksLikeRebateReport(opts.text)) return false;
+  if (opts.text) {
+    const kind = classifySupplierDocument(opts.text, opts.fileName, opts.subject).kind;
+    if (kind !== "invoice" && kind !== "unknown") return false;
+  }
   return /invoice|inv\b|statement of account|packing (list|slip)/i.test(`${opts.subject} ${opts.fileName}`);
 }
 
@@ -1366,3 +1440,83 @@ export async function storeInvoiceLines(
 }
 
 
+
+/**
+ * Taking a document back out of the invoice file, because it was never an invoice.
+ *
+ * A statement of account arrived from IPD, matched the words on the front of it, and was filed as
+ * an invoice — and then there was nothing anybody could do about it. No way to correct it, no way
+ * to remove it. That is the worse half of the mistake: every automatic filing rule will be wrong
+ * about something eventually, and a rule with no undo turns a five-second correction into a
+ * permanent wrong record.
+ *
+ * Two outcomes, and they are different. **Re-filing** keeps the document and moves it to the
+ * category it belongs in — the paper still exists, it is just not an invoice. **Discarding**
+ * removes it altogether, for the duplicate or the thing that should never have been kept, and it
+ * takes the bytes with it only when no other record points at them.
+ *
+ * The invoice row and its item lines go either way. Leaving the lines behind would leave a
+ * statement's figures sitting in the purchasing comparison as though they were prices paid.
+ */
+export type Unfiling = { kind: "statement" | "rebate_report" | "credit_memo" | "other" } | { kind: "discard" };
+
+export async function unfileInvoice(
+  invoiceId: string,
+  outcome: Unfiling,
+  user: { id?: string | null; name: string },
+): Promise<{ message: string; documentId: string | null }> {
+  const inv = await db.query.supplierInvoices.findFirst({ where: eq(schema.supplierInvoices.id, invoiceId) });
+  if (!inv) throw new Error("That invoice is no longer on file.");
+  const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, inv.documentId) });
+
+  await db.delete(schema.invoiceLines).where(eq(schema.invoiceLines.invoiceId, invoiceId));
+  await db.delete(schema.supplierInvoices).where(eq(schema.supplierInvoices.id, invoiceId));
+
+  const named = inv.supplier ?? "the supplier";
+  if (outcome.kind === "discard") {
+    if (doc) {
+      const { deleteFile } = await import("./files");
+      const others = await db.query.documents.findMany({ where: eq(schema.documents.storageKey, doc.storageKey), columns: { id: true } });
+      await db.delete(schema.documents).where(eq(schema.documents.id, doc.id));
+      if (others.every((o) => o.id === doc.id)) await deleteFile(doc.storageKey).catch(() => {});
+    }
+    await audit({
+      action: "invoice.discarded",
+      userId: user.id ?? null,
+      userName: user.name,
+      entity: "document",
+      entityId: inv.documentId,
+      details: `${named} · ${inv.invoiceNumber ?? "no number"} · removed from the invoice file and deleted`,
+    });
+    return { message: `Removed. The document and everything read off it are gone.`, documentId: null };
+  }
+
+  const word =
+    outcome.kind === "rebate_report" ? "rebate breakdown" : outcome.kind === "credit_memo" ? "credit memo" : outcome.kind === "statement" ? "statement of account" : "document";
+  if (doc) {
+    await db
+      .update(schema.documents)
+      .set({
+        category: outcome.kind === "other" ? "other" : "supplier_statement",
+        title: outcome.kind === "other" ? doc.title : `${named} ${word}${inv.invoiceDate ? ` — ${inv.invoiceDate}` : ""}`,
+        notes: [doc.notes, `Taken out of the invoice file by ${user.name}: it is a ${word}, not an invoice.`].filter(Boolean).join(" "),
+      })
+      .where(eq(schema.documents.id, doc.id));
+  }
+  await audit({
+    action: "invoice.unfiled",
+    userId: user.id ?? null,
+    userName: user.name,
+    entity: "document",
+    entityId: inv.documentId,
+    details: `${named} · ${inv.invoiceNumber ?? "no number"} · re-filed as ${word}`,
+  });
+  return {
+    message:
+      `Taken out of the invoice file and kept as a ${word} from ${named}. ` +
+      (outcome.kind === "rebate_report"
+        ? "It carries a tier ladder — read it from the supplier's terms page and the ladder is filed with it."
+        : "Nothing read off it is counted as a purchase any more."),
+    documentId: inv.documentId,
+  };
+}

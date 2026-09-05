@@ -23,7 +23,7 @@ import { audit } from "./audit";
 import { matchTrainingReplies, completeByEmailReply } from "./training-replies";
 import { matchCertificateReply, fileCertificateReply } from "./credential-requests";
 import { isBounce, parseBounce, describeBounce } from "./bounces";
-import { looksLikeInvoice, fileInvoice, filingFor } from "./invoices";
+import { looksLikeInvoice, classifySupplierDocument, fileInvoice, filingFor } from "./invoices";
 
 /**
  * Sweeps the pharmacy's admin mailbox for scheduled reports.
@@ -482,13 +482,27 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
               }
             }
 
+            /*
+             * What a supplier sent that is not an invoice, filed as what it is.
+             *
+             * A statement of account and a rebate breakdown were both landing under "report", the
+             * heading for everything the site has no better word for — which is how a statement
+             * came to be filed as an invoice in the first place and then had nowhere to go when it
+             * was taken back out. Naming it costs nothing and means the Documents list can be
+             * asked for the account statements without anybody remembering the file name.
+             */
+            const supplierKind = supplierName ? classifySupplierDocument(pdfWords, fileName, subject).kind : "unknown";
+            const asStatement = supplierKind === "statement" || supplierKind === "rebate_report" || supplierKind === "credit_memo";
+            const kindWord =
+              supplierKind === "rebate_report" ? "rebate breakdown" : supplierKind === "credit_memo" ? "credit memo" : "statement of account";
+
             const file = new File([new Uint8Array(buf)], fileName, { type: att.contentType || "application/octet-stream" });
             const stored = await storeFile(file, { allowReportTypes: true });
             const docId = newId();
             await db.insert(schema.documents).values({
               id: docId,
-              category: "report",
-              title: subject || fileName,
+              category: asStatement ? "supplier_statement" : "report",
+              title: asStatement ? `${supplierName} ${kindWord}${subject ? ` — ${subject}` : ""}` : subject || fileName,
               fileName,
               mimeType: stored.mimeType,
               sizeBytes: stored.sizeBytes,
@@ -526,7 +540,11 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
               documentId: docId,
               status: "stored",
               scanned: gate.scanned,
-              reason: gate.note ?? null,
+              reason:
+                gate.note ??
+                (asStatement
+                  ? `Not an invoice: a ${kindWord} from ${supplierName}, filed under supplier statements. It records no goods received, so it is kept out of the invoice files.`
+                  : null),
               routedAs,
               routeResult,
             });
@@ -662,7 +680,35 @@ export async function rereadInboxItem(itemId: string, ctx: { userId: string; use
 
   const matched = supplierForSender(register, from);
   const supplierName = matched?.name ?? supplierFor(parseSupplierRules(s.mail_supplier_rules ?? ""), from, subject);
-  if (looksLikeInvoice({ fileName, mimeType: doc.mimeType, subject, supplier: supplierName })) {
+  /*
+   * The document's own words, on this path too.
+   *
+   * Reading again used to ask only the file name and the subject, so every guard that depends on
+   * what the document actually says was skipped here — and this is the path a pharmacist presses
+   * after adding a supplier's address, which is exactly when a statement of account gets filed as
+   * an invoice.
+   */
+  const words = (() => {
+    if (!/\.pdf$/i.test(fileName) && doc.mimeType !== "application/pdf") return null;
+    try {
+      return pdfText(buf);
+    } catch {
+      return null;
+    }
+  })();
+  const kind = supplierName ? classifySupplierDocument(words, fileName, subject) : { kind: "unknown" as const, why: "" };
+  if (kind.kind === "statement" || kind.kind === "rebate_report" || kind.kind === "credit_memo") {
+    const word = kind.kind === "rebate_report" ? "rebate breakdown" : kind.kind === "credit_memo" ? "credit memo" : "statement of account";
+    await db
+      .update(schema.documents)
+      .set({ category: "supplier_statement", title: `${supplierName} ${word}${subject ? ` — ${subject}` : ""}` })
+      .where(eq(schema.documents.id, doc.id));
+    const text = `Read again ${stamp}: this is a ${word} from ${supplierName}, not an invoice. ${kind.why} Filed under supplier statements.`;
+    await db.update(schema.inboxItems).set({ routedAs: "supplier_statement", routeResult: text, reason: null }).where(eq(schema.inboxItems.id, itemId));
+    await audit({ action: "inbox.reread", userId: ctx.userId, userName: ctx.userName, entity: "document", entityId: doc.id, details: text.slice(0, 200) });
+    return text;
+  }
+  if (looksLikeInvoice({ fileName, mimeType: doc.mimeType, subject, supplier: supplierName, text: words })) {
     const filed = await fileInvoice(
       buf,
       { fileName, mimeType: doc.mimeType || "application/pdf", supplier: supplierName, supplierId: matched?.id ?? null, from, subject },

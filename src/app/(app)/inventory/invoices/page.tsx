@@ -27,6 +27,7 @@ import {
   invoicesWithoutLines,
   recordReceipt,
   awaitingReceipt,
+  unfileInvoice,
   sumOf,
   money,
 } from "@/lib/invoices";
@@ -324,6 +325,39 @@ export default async function InvoicesPage({
     } catch (e) {
       if (e && typeof e === "object" && "digest" in e) throw e;
       redirect(`${back}${back.includes("?") ? "&" : "?"}error=` + encodeURIComponent(e instanceof Error ? e.message : "Could not send that."));
+    }
+  }
+
+  /**
+   * Taking a document back out of the invoice file.
+   *
+   * Every automatic filing rule is going to be wrong about something. A statement of account from
+   * IPD matched the words on the front of it and was filed as an invoice, and there was then
+   * nothing anybody could do — no correction, no removal, a wrong record with no undo. This is the
+   * undo, and it says where the document went rather than only that it left.
+   *
+   * It shares the surrounding form, so the button carries the invoice's id and the choice is read
+   * from the select belonging to that row. Nesting a form inside a form is not something a browser
+   * will do.
+   */
+  async function notAnInvoice(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const id = String(fd.get("unfileId") ?? "");
+    const back = String(fd.get("back") ?? "/inventory/invoices");
+    const choice = String(fd.get(`as_${id}`) ?? "statement");
+    try {
+      const r = await unfileInvoice(
+        id,
+        choice === "discard" ? { kind: "discard" } : { kind: choice as "statement" | "rebate_report" | "credit_memo" | "other" },
+        u,
+      );
+      revalidatePath("/inventory/invoices");
+      revalidatePath("/documents");
+      redirect(`${back}${back.includes("?") ? "&" : "?"}ok=` + encodeURIComponent(r.message));
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect(`${back}${back.includes("?") ? "&" : "?"}error=` + encodeURIComponent(e instanceof Error ? e.message : "Could not take that out of the invoice file."));
     }
   }
 
@@ -820,6 +854,29 @@ export default async function InvoicesPage({
                         </td>
                         <td className="whitespace-nowrap align-top">
                           <a href={`/files/${i.documentId}`} target="_blank" rel="noreferrer" className="btn btn-sm">Open</a>
+                          {canManage && (
+                            <details className="mt-1">
+                              <summary className="cursor-pointer text-[11px] text-ink-3 hover:text-accent">Not an invoice?</summary>
+                              <div className="mt-1 flex flex-col gap-1">
+                                <select name={`as_${i.id}`} className="field field-sm text-[11px]" defaultValue="statement">
+                                  <option value="statement">It is a statement of account</option>
+                                  <option value="rebate_report">It is a rebate breakdown</option>
+                                  <option value="credit_memo">It is a credit memo</option>
+                                  <option value="other">Something else — just file it away</option>
+                                  <option value="discard">Delete it entirely</option>
+                                </select>
+                                <button
+                                  formAction={notAnInvoice}
+                                  name="unfileId"
+                                  value={i.id}
+                                  className="btn btn-sm text-[11px]"
+                                  title="Removes it from the invoice file along with everything read off it, and files the document where it belongs."
+                                >
+                                  Take it out of the invoice file
+                                </button>
+                              </div>
+                            </details>
+                          )}
                         </td>
                       </tr>
                     ))}

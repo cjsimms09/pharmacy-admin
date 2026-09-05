@@ -278,7 +278,8 @@ export function monthDayYear(s: string): string | null {
 export function gprTermsFromReport(r: RebateReport): {
   kind: "tiered_ratio";
   period: "month";
-  eligibility: "all_generics";
+  eligibility: "catalog_rebate_flag";
+  ratioMeasure: "generic_purchase_ratio";
   ratioDefinition: string;
   tiers: { thresholdPercent: number; rebatePercent: number }[];
   paidAs: string;
@@ -289,12 +290,23 @@ export function gprTermsFromReport(r: RebateReport): {
   return {
     kind: "tiered_ratio",
     period: "month",
-    eligibility: "all_generics",
+    /*
+     * Paid on the contract items, not on generics generally.
+     *
+     * The report settles it: the statement's "Generic Rebate" is the GCR rebate plus the GPR
+     * rebate, and the GCR rebate is OneStop purchases times the GCR rate. Two rebates added
+     * together are two rebates on the same purchases. Recorded as "all generics" this ladder would
+     * have promised a discount on every generic on the shelf, contract or not, and a purchasing
+     * comparison would have preferred a McKesson generic that earns nothing.
+     */
+    eligibility: "catalog_rebate_flag",
+    ratioMeasure: "generic_purchase_ratio",
     ratioDefinition:
       "The generic purchase ratio McKesson prints on the monthly rebate breakdown — the share of purchases that " +
-      "are generic. Measured separately from the compliance rate that pays the OneStop rebate.",
+      "are generic. A different measurement from the compliance rate, selecting a band on a different ladder, but " +
+      "paid on the same OneStop contract items and on top of the compliance rebate.",
     tiers: r.ladder.gpr.map((b) => ({ thresholdPercent: b.fromPercent, rebatePercent: b.rebatePercent })),
-    paidAs: "Settled monthly, alongside the compliance rebate.",
+    paidAs: "Settled monthly, added to the compliance rebate on the same contract purchases.",
     notes: pays
       ? `Nothing is paid below ${pays.fromPercent}%. ` +
         (r.statement.gprPercent === null
@@ -316,6 +328,7 @@ export function brandTermsFromReport(r: RebateReport): {
   kind: "tiered_ratio";
   period: "month";
   eligibility: "brand_purchases";
+  ratioMeasure: "generic_compliance";
   ratioDefinition: string;
   tiers: { thresholdPercent: number; rebatePercent: number }[];
   paidAs: string;
@@ -327,6 +340,7 @@ export function brandTermsFromReport(r: RebateReport): {
     kind: "tiered_ratio",
     period: "month",
     eligibility: "brand_purchases",
+    ratioMeasure: "generic_compliance",
     ratioDefinition:
       "The same scrubbed generic compliance rate that sets the generic rebate — the brand factor is a second column " +
       "on the same ladder, not a separate measurement.",
@@ -343,6 +357,7 @@ export function termsFromReport(r: RebateReport): {
   kind: "tiered_ratio";
   period: "month";
   eligibility: "catalog_rebate_flag";
+  ratioMeasure: "generic_compliance";
   ratioDefinition: string;
   tiers: { thresholdPercent: number; rebatePercent: number }[];
   paidAs: string;
@@ -352,6 +367,7 @@ export function termsFromReport(r: RebateReport): {
     kind: "tiered_ratio",
     period: "month",
     eligibility: "catalog_rebate_flag",
+    ratioMeasure: "generic_compliance",
     ratioDefinition:
       "The scrubbed generic compliance rate McKesson prints on the monthly rebate breakdown. Certain products — " +
       "GLP-1s among them — are excluded from both sides of the ratio before it is worked out, and which products " +

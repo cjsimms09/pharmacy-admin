@@ -261,6 +261,17 @@ export const DOCUMENT_CATEGORIES = [
    * together makes the BAA register — which is reviewed annually and must be complete — wrong.
    */
   "supplier_agreement",
+  /**
+   * A statement of account, rebate breakdown or credit memo from a supplier.
+   *
+   * Not an invoice, and the distinction is not cosmetic. An invoice is a receipt record under
+   * 21 CFR 1304.22(c) and its Schedule II copy has to be held apart from everything else; a
+   * statement is a summary of an account and is a record of nothing that was received. Filed
+   * together, the controlled-substance filing fills up with documents that record no receipt, and
+   * the one question the category exists to answer — show me every invoice for these goods —
+   * stops having a clean answer.
+   */
+  "supplier_statement",
   "cqi_summary",
   "cqi_incident",
   "ce_certificate",
