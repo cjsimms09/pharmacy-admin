@@ -15,6 +15,26 @@ import { PageHeader, Notice, Empty } from "@/components/ui";
 export const metadata = { title: "NADAC" };
 export const dynamic = "force-dynamic";
 
+/*
+ * Every fetch is a background job.
+ *
+ * The button used to do the download, parse and load inside its own request, and it froze the
+ * site: the browser's router waits on a pending action, so nothing else answered until a
+ * multi-megabyte download had finished. Now the press claims the job and returns at once; the
+ * work runs after the response and the panel on the page shows where it has got to.
+ *
+ * At module level, not inside the page. An inline server action's closed-over variables are
+ * serialised into the form, and a function cannot be — a version that defined this next to the
+ * actions rendered as "Functions cannot be passed directly to Client Components" in production.
+ */
+async function begin(what: string, sources: string[]): Promise<never> {
+  const u = await requireManager();
+  const r = await startNadacFetch(u, what);
+  if (r.started) after(() => runNadacFetch(u, r.runId!, what, sources));
+  revalidatePath("/nadac");
+  redirect(`/nadac?${r.started ? "ok" : "error"}=` + encodeURIComponent(r.message));
+}
+
 export default async function NadacPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
   /*
    * Reachable whether or not the reimbursement pages are switched on.
@@ -45,22 +65,6 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
   }
 
 
-
-  /*
-   * Every fetch is a background job.
-   *
-   * The button used to do the download, parse and load inside its own request, and it froze the
-   * site: the browser's router waits on a pending action, so nothing else answered until a
-   * multi-megabyte download had finished. Now the press claims the job and returns at once; the
-   * work runs after the response and the panel below shows where it has got to.
-   */
-  async function begin(what: string, sources: string[]) {
-    const u = await requireManager();
-    const r = await startNadacFetch(u, what);
-    if (r.started) after(() => runNadacFetch(u, r.runId!, what, sources));
-    revalidatePath("/nadac");
-    redirect(`/nadac?${r.started ? "ok" : "error"}=` + encodeURIComponent(r.message));
-  }
 
   async function pullNow() {
     "use server";
