@@ -5,7 +5,7 @@ import { getSettings } from "./settings";
 import { TRAINING_LABEL, CREDENTIAL_LABEL } from "./labels";
 import { courseFor } from "./courses";
 import { courseVersion } from "./course-packet";
-import { todayIso } from "./dates";
+import { todayIso, daysBetween } from "./dates";
 import type { TrainingType } from "@/db/schema";
 
 /**
@@ -74,6 +74,18 @@ export type PersonFile = {
   present: string;
   lines: RecordLine[];
   missing: string[];
+  /**
+   * Where the first bloodborne pathogens training sits against the day they started.
+   *
+   * The standard is not satisfied by being current. 29 CFR 1910.1030(g)(2)(i) requires training at
+   * the time of initial assignment to tasks where occupational exposure may take place — before
+   * the exposure, not merely within the same year as it. So a technician hired in March and
+   * trained in August has a five-month gap, and the record proves it rather than hiding it.
+   *
+   * Null where the person has no hire date recorded or has never had the training, both of which
+   * are their own problem and are already reported elsewhere.
+   */
+  initialTrainingGapDays: number | null;
 };
 
 export type TrainingFile = {
@@ -155,6 +167,23 @@ export async function trainingFile(opts: { includeFormer?: boolean } = {}): Prom
           : `Left${p.endedOn ? ` ${p.endedOn}` : ""}`,
         lines,
         missing: REQUIRED.filter((t) => !mine.some((x) => x.type === t)).map((t) => TRAINING_LABEL[t]),
+        /*
+         * The gap between starting and being trained, which "current" hides.
+         *
+         * 29 CFR 1910.1030(g)(2)(i) asks for training at the time of initial assignment to tasks
+         * with occupational exposure — before it, not within the same year as it. A record showing
+         * somebody hired in March and trained in August is evidence of five months of untrained
+         * exposure, and it is better to know that from this page than from an inspector reading it.
+         */
+        initialTrainingGapDays: (() => {
+          if (!p.hiredOn) return null;
+          const first = mine
+            .filter((x) => x.type === "osha_bloodborne")
+            .map((x) => x.completedOn)
+            .sort()[0];
+          if (!first) return null;
+          return Math.max(0, daysBetween(p.hiredOn, first));
+        })(),
       };
     });
 

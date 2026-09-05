@@ -172,6 +172,23 @@ export default async function TrainingRecordsPage({
               </tbody>
             </table>
           )}
+          {/*
+            The gap "current" hides.
+
+            29 CFR 1910.1030(g)(2)(i) asks for bloodborne training at the time of initial
+            assignment — before the exposure, not merely within the same year as it. Being current
+            today says nothing about the months between starting and being trained, and that gap is
+            exactly what an inspector reads off a training file. Better it is stated here, with the
+            number, than found there.
+          */}
+          {p.initialTrainingGapDays !== null && p.initialTrainingGapDays > 30 && (
+            <p className="mt-2 text-[11px]">
+              <b>Note:</b> bloodborne pathogens training was first recorded {p.initialTrainingGapDays} days after this
+              person started. 29 CFR 1910.1030(g)(2)(i) asks for it at the time of initial assignment to tasks with
+              occupational exposure. Nothing can change a past date; what can be recorded is what was actually done at
+              the time, if it was.
+            </p>
+          )}
           {p.missing.length > 0 && (
             <p className="border-t border-black px-2 py-1 text-[10px]">
               <b>Not yet recorded:</b> {p.missing.join(", ")}.
