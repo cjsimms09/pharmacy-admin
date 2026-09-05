@@ -21,6 +21,8 @@ import {
 import { rebateProgramsFor, returnPoliciesFor, saveRebateProgram, saveReturnPolicy } from "@/lib/supplier-terms-store";
 import { lastRebateStatement } from "@/lib/rebate-report-store";
 import { PageHeader, Card, Notice, Field } from "@/components/ui";
+import { SubmitButton } from "@/components/submit-button";
+import { getSettings, setSetting } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Supplier terms" };
@@ -52,9 +54,22 @@ export default async function SupplierTermsPage({
   if (!supplier) notFound();
   const canManage = user.role !== "staff";
 
-  const [rebates, returns] = await Promise.all([rebateProgramsFor(id), returnPoliciesFor(id)]);
+  const [rebates, returns, settings] = await Promise.all([rebateProgramsFor(id), returnPoliciesFor(id), getSettings()]);
   // The proof, where this supplier's ladder was read from a report rather than typed.
   const filed = await lastRebateStatement();
+  // A policy read but not yet confirmed. It fills the form; it is not stored terms.
+  const draft = (() => {
+    const raw = settings.returns_policy_draft;
+    if (!raw) return null;
+    try {
+      const d = JSON.parse(raw) as import("@/lib/ai").ReadReturnPolicyT & { supplierId: string; fileName: string; readAt: string };
+      // A draft belongs to the supplier it was read for. Showing another's would fill this form
+      // with somebody else's terms.
+      return d.supplierId === id ? d : null;
+    } catch {
+      return null;
+    }
+  })();
   const statement = filed && /mckesson/i.test(supplier.name) ? filed : null;
   const today = todayIso();
   const currentRebate = rebates.find((r) => r.effectiveFrom <= today && (r.effectiveTo === null || r.effectiveTo >= today)) ?? rebates[0] ?? null;
@@ -94,6 +109,45 @@ export default async function SupplierTermsPage({
     }
   }
 
+  /**
+   * Reads a returned-goods policy PDF and fills the form below from it.
+   *
+   * A rebate breakdown is a grid of figures that checks itself, so it is read by rule. A returns
+   * policy is paragraphs of conditions, and two real ones — McKesson's and IPC's — yield almost no
+   * readable text at all: twenty-seven characters of fragments from one of them. So the document
+   * goes to the model as a document.
+   *
+   * What comes back is a proposal, never a saved fact. Every figure is quoted back to the sentence
+   * it came from, so it can be checked against the page rather than believed; nothing is stored
+   * until the form below is submitted. A returns policy decides whether a bottle is worth sending
+   * back or throwing away, and a figure nobody checked is not worth having.
+   */
+  async function readPolicy(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const file = fd.get("policy");
+    if (!(file instanceof File) || file.size === 0) {
+      redirect(`/suppliers/${id}/terms?error=` + encodeURIComponent("Choose the policy PDF first."));
+    }
+    try {
+      const { readReturnPolicy } = await import("@/lib/ai");
+      const read = await readReturnPolicy(Buffer.from(await file.arrayBuffer()), supplier!.name, { userId: u.id, userName: u.name });
+      await audit({ action: "supplier.returns.read", userId: u.id, userName: u.name, entity: "supplier", entityId: id, details: file.name });
+      await setSetting("returns_policy_draft", JSON.stringify({ ...read, supplierId: id, fileName: file.name, readAt: new Date().toISOString() }));
+      revalidatePath(`/suppliers/${id}/terms`);
+      redirect(
+        `/suppliers/${id}/terms?ok=` +
+          encodeURIComponent(
+            `Read ${file.name}. Check each figure against the quote beside it, then save — nothing is stored until you do.` +
+              (read.unclear.length ? ` ${read.unclear.length} thing${read.unclear.length === 1 ? " was" : "s were"} left unsettled.` : ""),
+          ),
+      );
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect(`/suppliers/${id}/terms?error=` + encodeURIComponent(e instanceof Error ? e.message : "Could not read that policy."));
+    }
+  }
+
   async function saveReturns(fd: FormData) {
     "use server";
     const u = await requireManager();
@@ -125,6 +179,7 @@ export default async function SupplierTermsPage({
       await audit({ action: "supplier.returns.save", userId: u.id, userName: u.name, entity: "supplier", entityId: supplierId });
       revalidatePath(`/suppliers/${supplierId}/terms`);
       revalidatePath("/suppliers");
+      await setSetting("returns_policy_draft", "");
       redirect(`/suppliers/${supplierId}/terms?ok=` + encodeURIComponent("Return policy saved."));
     } catch (e) {
       if (e && typeof e === "object" && "digest" in e) throw e;
@@ -267,6 +322,33 @@ export default async function SupplierTermsPage({
         </Card>
 
         <Card title="Return policy" subtitle={returnTerms ? `${currentReturn!.name}, in force from ${fmt(currentReturn!.effectiveFrom)}.` : "Nothing recorded yet, so nothing can say what a return to this supplier is worth."}>
+          {/*
+            The policy as a document, read for you.
+
+            These arrive as prose, and often as PDFs whose text cannot be pulled out at all, so
+            this is the one place here where a model reads a supplier document. It proposes; the
+            form below is what stores anything.
+          */}
+          <form action={readPolicy} className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-line bg-ground p-3">
+            <span className="text-xs text-ink-2">Have the policy as a PDF? Read it and fill the form in.</span>
+            <input type="file" name="policy" accept=".pdf" className="text-xs" />
+            <SubmitButton className="btn btn-sm" pendingLabel="Reading…">Read the policy</SubmitButton>
+          </form>
+          {draft && (
+            <div className="mb-3 rounded-md border border-accent bg-accent-soft p-3 text-xs">
+              <p className="font-semibold text-accent">Read from {draft.fileName} — check each figure against its quote, then save below.</p>
+              <ul className="mt-1 space-y-1 text-ink-2">
+                {draft.quotes.map((q) => (
+                  <li key={q.field + q.sentence}><b>{q.field}:</b> &ldquo;{q.sentence}&rdquo;</li>
+                ))}
+              </ul>
+              {draft.unclear.length > 0 && (
+                <p className="mt-2 text-warn">
+                  Not settled by the policy: {draft.unclear.join("; ")}. Those are left empty rather than guessed.
+                </p>
+              )}
+            </div>
+          )}
           {returnTerms && <p className="text-sm">{describeReturns(returnTerms)}</p>}
           {returnTerms?.reverseDistributor && <p className="mt-1 text-xs text-ink-3">Outside the window: {returnTerms.reverseDistributor}.</p>}
           {returns.length > 1 && (

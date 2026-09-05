@@ -881,3 +881,68 @@ export async function draftPolicy(
   await logUsage("ai.policy.draft", ctx.userId, ctx.userName, res.usage, input.title.slice(0, 120));
   return res.parsed_output;
 }
+
+/**
+ * Reading a supplier's returned-goods policy, which is prose rather than a table.
+ *
+ * The rebate breakdown is read by rule because it is a grid of figures that checks itself. A
+ * returns policy is neither: it is paragraphs of conditions, and two of them — McKesson's and
+ * IPC's — do not even yield readable text to the extractor, coming back as twenty-seven characters
+ * of fragments. So the document goes to the model as a document, which is what the model is for.
+ *
+ * What comes back is a proposal, not a fact. Every field is quoted back to the sentence it came
+ * from so the pharmacist can check it against the page in front of him, and nothing is stored until
+ * he says so. A returns policy decides whether a bottle is worth sending back or throwing away;
+ * a figure nobody checked is not worth having.
+ */
+const ReadReturnPolicy = z.object({
+  windowMonthsBeforeExpiry: z.number().nullable().describe("Earliest a product can go back, in months before its expiry date. Null where the policy does not say."),
+  windowMonthsAfterExpiry: z.number().nullable().describe("Latest, in months after expiry. 0 where nothing goes back after expiry. Null where not stated."),
+  creditSteps: z
+    .array(z.object({ monthsToExpiryMin: z.number(), creditPercent: z.number() }))
+    .describe("Credit as a percentage of what was paid, by how many months remain to expiry. Empty where the policy states one flat rate or none."),
+  restockingFeePercent: z.number().nullable(),
+  nonReturnable: z.array(z.string()).describe("Categories the supplier will not take back, in the policy's own words."),
+  reverseDistributor: z.string().nullable(),
+  notes: z.string().nullable().describe("Anything else that changes what a return is worth: deadlines for a return authorisation, who pays freight, minimum values."),
+  quotes: z
+    .array(z.object({ field: z.string(), sentence: z.string() }))
+    .describe("For every field you filled in, the sentence from the policy it came from, quoted exactly. This is how the pharmacist checks you."),
+  unclear: z.array(z.string()).describe("Anything the policy does not settle. Leave the field null and say so here rather than guessing."),
+});
+export type ReadReturnPolicyT = z.infer<typeof ReadReturnPolicy>;
+
+export async function readReturnPolicy(
+  pdf: Buffer,
+  supplier: string,
+  ctx: { userId: string; userName: string },
+): Promise<ReadReturnPolicyT> {
+  if (MOCK) return { windowMonthsBeforeExpiry: null, windowMonthsAfterExpiry: null, creditSteps: [], restockingFeePercent: null, nonReturnable: [], reverseDistributor: null, notes: null, quotes: [], unclear: [] };
+  const { client: c, model } = await client();
+  const res = await c.messages.parse({
+    model,
+    max_tokens: 8_000,
+    thinking: { type: "adaptive" },
+    system:
+      "You read a pharmaceutical wholesaler's returned-goods policy and set out its terms. Quote the sentence behind " +
+      "every figure you give, exactly as written. Where the policy does not settle something, leave the field null " +
+      "and say so in 'unclear' — never infer a number that is not there. Dating windows are often written as " +
+      "'current month plus six months', which means a product is returnable while at least six months of shelf life " +
+      "remain; convert such phrasing to months and quote the sentence.",
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "document", source: { type: "base64", media_type: "application/pdf", data: pdf.toString("base64") } },
+          { type: "text", text: `This is ${supplier}'s returned goods policy. Set out its terms.` },
+        ],
+      },
+    ],
+    output_config: { effort: "high", format: zodOutputFormat(ReadReturnPolicy) },
+  });
+  await logUsage("ai.read_return_policy", ctx.userId, ctx.userName, res.usage, supplier);
+  if (res.stop_reason === "refusal") throw new Error("Claude declined to read that document.");
+  if (!res.parsed_output) throw new Error("That policy could not be read into terms. It may be a scan of poor quality.");
+  return res.parsed_output;
+}
+

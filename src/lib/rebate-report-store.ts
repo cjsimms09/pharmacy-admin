@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { getSettings, setSetting } from "./settings";
 import { allSuppliers } from "./suppliers-registry";
 import { saveRebateProgram } from "./supplier-terms-store";
-import { parseRebateReport, termsFromReport, gprTermsFromReport, bandFor, looksLikeRebateReport, type RebateReport } from "./rebate-report";
+import { parseRebateReport, termsFromReport, gprTermsFromReport, brandTermsFromReport, bandFor, looksLikeRebateReport, type RebateReport } from "./rebate-report";
 
 /**
  * Filing a rebate breakdown: the ladder as terms, and the month's rate as the one the comparison uses.
@@ -156,6 +156,22 @@ export async function fileRebateReport(
         user,
       );
       parts.push(`${report.ladder.gpr.length} purchase-ratio tiers as well`);
+    }
+
+    const brandTerms = brandTermsFromReport(report);
+    if (brandTerms) {
+      await saveRebateProgram(
+        supplier.id,
+        {
+          name: "McKesson brand factor",
+          effectiveFrom: s.periodFrom ?? new Date().toISOString().slice(0, 10),
+          notes: `Read from the same rebate breakdown for ${s.periodFrom ?? "an unnamed period"}.`,
+          documentId: meta.documentId ?? null,
+        },
+        brandTerms,
+        user,
+      );
+      parts.push(`${brandTerms.tiers.length} brand-factor tiers`);
     }
   } else {
     parts.push(

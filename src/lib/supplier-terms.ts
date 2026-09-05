@@ -46,7 +46,15 @@ export const RebateTerms = z.object({
    * What counts. "catalog_rebate_flag": the items the catalogue marks rebated (McKesson OneStop).
    * "all_generics": every generic. "all_purchases": everything on the invoice.
    */
-  eligibility: z.enum(["catalog_rebate_flag", "all_generics", "all_purchases"]),
+  /*
+   * What the ladder pays on.
+   *
+   * "brand_purchases" is a fourth because McKesson pays a separate factor on brand, off the same
+   * compliance bands but a different column: nil at the bottom, one percent at the top. Folded in
+   * with generics it would either inflate a generic's discount or vanish; kept apart it can price
+   * the brand line it actually applies to.
+   */
+  eligibility: z.enum(["catalog_rebate_flag", "all_generics", "all_purchases", "brand_purchases"]),
   /** The supplier's own definition of the ratio, in its words, where it has one. */
   ratioDefinition: z.string().nullable(),
   /** Ascending by threshold. At least one tier. */
@@ -188,7 +196,12 @@ export function returnCreditPercent(terms: ReturnTermsT, monthsToExpiry: number)
 /** One sentence for a supplier card. */
 export function describeRebate(terms: RebateTermsT): string {
   const period = { month: "monthly", quarter: "quarterly", year: "annual" }[terms.period];
-  const on = { catalog_rebate_flag: "the items the catalogue marks rebated", all_generics: "all generics", all_purchases: "all purchases" }[terms.eligibility];
+  const on = {
+    catalog_rebate_flag: "the items the catalogue marks rebated",
+    all_generics: "all generics",
+    all_purchases: "all purchases",
+    brand_purchases: "brand purchases",
+  }[terms.eligibility];
   if (terms.kind === "flat_percent" || terms.tiers.length === 1) {
     return `${terms.tiers[0].rebatePercent}% on ${on}, ${period}.`;
   }

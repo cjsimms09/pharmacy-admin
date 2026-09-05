@@ -304,6 +304,41 @@ export function gprTermsFromReport(r: RebateReport): {
   };
 }
 
+/**
+ * The brand factor ladder, which runs off the same compliance bands as the generic one.
+ *
+ * A separate programme rather than a note, because it is money on a different kind of purchase:
+ * the same 20.64% compliance rate that pays 29% on contract generics pays 0.75% on every brand
+ * item. Written into the notes it was a sentence nobody could compute with; as a ladder of its own
+ * the brand side of an invoice can be priced too.
+ */
+export function brandTermsFromReport(r: RebateReport): {
+  kind: "tiered_ratio";
+  period: "month";
+  eligibility: "brand_purchases";
+  ratioDefinition: string;
+  tiers: { thresholdPercent: number; rebatePercent: number }[];
+  paidAs: string;
+  notes: string;
+} | null {
+  if (r.ladder.gcr.length === 0) return null;
+  if (r.ladder.gcr.every((b) => b.brandPercent === 0)) return null;
+  return {
+    kind: "tiered_ratio",
+    period: "month",
+    eligibility: "brand_purchases",
+    ratioDefinition:
+      "The same scrubbed generic compliance rate that sets the generic rebate — the brand factor is a second column " +
+      "on the same ladder, not a separate measurement.",
+    tiers: r.ladder.gcr.map((b) => ({ thresholdPercent: b.fromPercent, rebatePercent: b.brandPercent })),
+    paidAs: "Settled monthly, on brand purchases, alongside the generic rebate.",
+    notes:
+      r.statement.brandFactorPercent === null
+        ? "Paid on brand purchases only."
+        : `Paid on brand purchases only. The ${r.statement.periodFrom ?? "reported"} factor was ${r.statement.brandFactorPercent}%.`,
+  };
+}
+
 export function termsFromReport(r: RebateReport): {
   kind: "tiered_ratio";
   period: "month";
@@ -313,7 +348,6 @@ export function termsFromReport(r: RebateReport): {
   paidAs: string;
   notes: string;
 } {
-  const brandLadder = r.ladder.gcr.map((b) => `${describeBand(b)} → ${b.brandPercent}%`).join(", ");
   return {
     kind: "tiered_ratio",
     period: "month",
@@ -326,6 +360,8 @@ export function termsFromReport(r: RebateReport): {
     paidAs: r.statement.paidOn
       ? `Settled monthly; the ${r.statement.periodFrom ?? "period"} statement was paid ${r.statement.paidOn}.`
       : "Settled monthly.",
-    notes: `Brand purchases earn a separate factor on the same ladder: ${brandLadder}.`,
+    notes:
+      "Brand purchases earn a separate factor off the same compliance bands; it is recorded as its own " +
+      "programme rather than folded in here, so a brand line can be priced with it.",
   };
 }

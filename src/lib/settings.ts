@@ -113,6 +113,14 @@ export const SETTING_KEYS = [
   "mck_generic_rebate_rate",
   /* The last rebate breakdown read, so the page can say where the rate came from and when. */
   "mck_rebate_last_statement",
+  /*
+   * A returns policy read from a PDF but not yet confirmed.
+   *
+   * One at a time, holding the supplier it belongs to, because it is a step in a conversation
+   * rather than a record: read the policy, check each figure against its quote, save. A draft left
+   * behind is replaced by the next read, and saving clears it.
+   */
+  "returns_policy_draft",
   // ── iMonnit temperature monitoring ──
   "imonnit_key_id_enc",
   "imonnit_secret_enc",
