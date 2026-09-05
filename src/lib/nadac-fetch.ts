@@ -285,10 +285,13 @@ export async function fetchNadacFrom(sources: string[], onProgress?: (text: stri
         mine.weeks > 1 && mine.fileAsOfLatest && mine.fileAsOfLatest !== stamp
           ? `${mine.weeks} weekly files, ${stamp} to ${mine.fileAsOfLatest}`
           : `the file published ${stamp}`;
+      // Corrections are named separately from additions, because they mean something different:
+      // a figure the pharmacy was already holding has been withdrawn by CMS and replaced.
+      const corrected = mine.revised ? ` ${mine.revised.toLocaleString()} price${mine.revised === 1 ? " was" : "s were"} corrected by CMS for a date already held.` : "";
       const message =
         (added > 0
           ? `${added.toLocaleString()} new prices from ${covers}.`
-          : `Nothing new — ${covers} holds only prices already held.`) + ` Source: ${short(url)}.`;
+          : `Nothing new — ${covers} holds only prices already held.`) + corrected + ` Source: ${short(url)}.`;
       await setSetting("nadac_last_fetch", new Date().toISOString());
       await setSetting("nadac_last_result", message);
       await setSetting("nadac_last_ok", new Date().toISOString());

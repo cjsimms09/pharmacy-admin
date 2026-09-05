@@ -27,6 +27,8 @@ import {
   awaitingReceipt,
   sumOf,
   money,
+  backfillInvoiceLines,
+  invoiceLineStats,
 } from "@/lib/invoices";
 import { invoiceCompliance, RETENTION_YEARS } from "@/lib/invoice-compliance";
 import { setSetting } from "@/lib/settings";
@@ -145,6 +147,7 @@ export default async function InvoicesPage({
    * use — was still told no sender was named. Two places to record one fact, and the banner
    * watching the one nobody uses.
    */
+  const lineStats = await invoiceLineStats();
   const receiptElsewhere = (s.receipt_record_kept_in ?? "").trim();
   const registered = await allSuppliers();
   const withSenders = registered.filter((x) => addressesOf(x).length > 0);
@@ -287,6 +290,26 @@ export default async function InvoicesPage({
     );
   }
 
+  /**
+   * Reads the figures off every invoice already filed.
+   *
+   * The invoices were kept long before their line items were read as data, so without this the
+   * purchasing ledger would start empty and fill up over months. The documents are on disk; nothing
+   * has to be asked of a supplier.
+   */
+  async function readLines() {
+    "use server";
+    const u = await requireManager();
+    const r = await backfillInvoiceLines();
+    await audit({ action: "invoice.lines.backfill", userId: u.id, userName: u.name, details: `${r.lines} lines from ${r.invoices} invoices` });
+    revalidatePath("/inventory/invoices");
+    revalidatePath("/purchasing");
+    const bits = [`${r.lines.toLocaleString()} item line${r.lines === 1 ? "" : "s"} read from ${r.invoices.toLocaleString()} invoice${r.invoices === 1 ? "" : "s"}`];
+    if (r.unreconciled) bits.push(`${r.unreconciled} did not add up to their printed total and were left out rather than counted short`);
+    if (r.unreadable) bits.push(`${r.unreadable} could not be read as text`);
+    redirect("/inventory/invoices?ok=" + encodeURIComponent(bits.join(". ") + "."));
+  }
+
   async function send(fd: FormData) {
     "use server";
     const u = await requireManager();
@@ -419,6 +442,27 @@ export default async function InvoicesPage({
         </Card>
       )}
 
+
+      {/*
+        The figures, as against the filing.
+
+        An invoice filed is a record kept; an invoice read is a price the purchasing ledger can use.
+        This is the one-off catch-up for everything filed before the lines were being read — from
+        now on it happens as each invoice arrives.
+      */}
+      {canManage && rows.length > 0 && lineStats.invoicesWithLines < rows.length && (
+        <Notice kind="warn">
+          <b>
+            {(rows.length - lineStats.invoicesWithLines).toLocaleString()} invoice
+            {rows.length - lineStats.invoicesWithLines === 1 ? " has" : "s have"} not had their item lines read.
+          </b>{" "}
+          Until they are, the purchasing comparison does not know what this pharmacy actually paid for those drugs — only
+          what the catalogues list. The documents are already here; this reads them.
+          <form action={readLines} className="mt-2">
+            <button className="btn btn-sm btn-primary">Read the item lines off them</button>
+          </form>
+        </Notice>
+      )}
 
       {noSenders ? (
         <Notice kind="warn">

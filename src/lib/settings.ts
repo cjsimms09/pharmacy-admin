@@ -98,6 +98,16 @@ export const SETTING_KEYS = [
    * lines invites an argument about rounding instead of an argument about the statute.
    */
   "floor_materiality_cents",
+  /*
+   * The generic rebate tier rate from the McKesson rebate report, as a percentage.
+   *
+   * Read off the report rather than modelled: the rate depends on a scrubbed generic compliance
+   * rate with drugs carved out of it, and a figure this site worked out for itself would be a
+   * guess sitting inside a purchasing recommendation. Left empty, every comparison uses gross
+   * invoice prices and says so, which understates the pharmacy's position rather than inventing a
+   * discount it may not earn.
+   */
+  "mck_generic_rebate_rate",
   // ── iMonnit temperature monitoring ──
   "imonnit_key_id_enc",
   "imonnit_secret_enc",

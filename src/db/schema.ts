@@ -726,6 +726,58 @@ export const suppliers = sqliteTable(
 );
 
 
+/**
+ * What was actually bought, line by line, off the invoices the pharmacy is already keeping.
+ *
+ * The invoices were being filed and searched as text, which answers "when did we last buy
+ * oxycodone" and nothing else. This is the same document read as figures: the NDC, what was paid
+ * for it, how many, and — on a McKesson invoice, from the K it prints — whether that line earned
+ * the generics contract rebate. It is the only record of what this pharmacy *actually* paid, as
+ * against what a catalogue lists, and every question about margin, returns and where to buy runs
+ * through it.
+ *
+ * Lines are only stored where the invoice reconciles: the extended amounts must add to the total
+ * printed on its face. A partial read is the dangerous outcome, because the figures that were read
+ * look perfectly good on their own and the product whose line was dropped simply appears cheaper
+ * than it was.
+ */
+export const invoiceLines = sqliteTable(
+  "invoice_lines",
+  {
+    id: text("id").primaryKey(),
+    invoiceId: text("invoice_id").notNull().references(() => supplierInvoices.id, { onDelete: "cascade" }),
+    supplier: text("supplier"),
+    /** The date on the invoice, copied here so a price can be placed in time without a join. */
+    invoiceDate: text("invoice_date"),
+    ndc11: text("ndc11").notNull(),
+    description: text("description"),
+    itemNumber: text("item_number"),
+    quantity: integer("quantity").notNull(),
+    unitOfMeasure: text("unit_of_measure"),
+    /** What was paid for one unit of the pack, in cents, as printed. Before any rebate. */
+    unitCostCents: integer("unit_cost_cents").notNull(),
+    extendedCents: integer("extended_cents").notNull(),
+    awpCents: integer("awp_cents"),
+    /** The supplier's own class letter: R legend, X Schedule II, B/D/E Schedule III-V. */
+    itemClass: text("item_class"),
+    /**
+     * Whether the line was marked as earning the supplier's contract rebate.
+     *
+     * True where the invoice printed the mark, false where the invoice prints marks and this line
+     * had none, and null where the invoice prints no such mark at all — which is not the same as
+     * "not rebated", and treating it as such would strip a discount off a price in every
+     * comparison that followed.
+     */
+    rebated: integer("rebated", { mode: "boolean" }),
+    createdAt: text("created_at").notNull().default(now()),
+  },
+  (t) => [
+    index("invoice_lines_invoice_idx").on(t.invoiceId),
+    index("invoice_lines_ndc_idx").on(t.ndc11),
+    index("invoice_lines_supplier_idx").on(t.supplier),
+  ],
+);
+
 export const supplierInvoices = sqliteTable(
   "supplier_invoices",
   {

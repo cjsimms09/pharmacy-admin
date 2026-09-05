@@ -7,6 +7,7 @@ import { importSupplierCatalog, importPioneerCatalog, purchasingOpportunities, s
 import { getSettings } from "@/lib/settings";
 import { hasMailPassword } from "@/lib/mailbox";
 import { FILE_NAME_CODES } from "@/lib/pioneer-catalog";
+import { productLedger, opportunities, type Flag } from "@/lib/product-ledger";
 import Link from "next/link";
 import { looksLikePioneerCatalog } from "@/lib/pioneer-catalog";
 import { formatCents } from "@/lib/money";
@@ -17,13 +18,17 @@ export const metadata = { title: "Purchasing" };
 export const dynamic = "force-dynamic";
 
 /** Micros to a displayable per-unit price, at the five decimals these prices are quoted in. */
-const perUnit = (micros: number | null) => (micros === null ? "—" : `$${(micros / 1_000_000).toFixed(5)}`);
+const perUnit = (micros: number | null) =>
+  micros === null ? "—" : `${micros < 0 ? "-" : ""}$${(Math.abs(micros) / 1_000_000).toFixed(5)}`;
 
 export default async function PurchasingPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
   await requireReimbursement();
   await requireUser();
   const { ok, error } = await searchParams;
-  const [opps, summary, schedule, s, mailReady] = await Promise.all([purchasingOpportunities(), supplierSummary(), catalogSchedule(), getSettings(), hasMailPassword()]);
+  const [opps, summary, schedule, s, mailReady, ledger] = await Promise.all([
+    purchasingOpportunities(), supplierSummary(), catalogSchedule(), getSettings(), hasMailPassword(), productLedger(),
+  ]);
+  const ledgerRows = opportunities(ledger.rows);
   const autoImport = (s.mail_auto_import ?? "").toLowerCase() === "yes";
   const mailOn = s.mail_enabled === "yes";
 
@@ -167,6 +172,100 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
         </div>
       </section>
 
+      {/*
+        Everything known about a drug, in one row.
+
+        The four records that answer this question were held apart: the invoices say what was
+        actually paid and whether the line earned the rebate, the catalogues say what everyone else
+        charges, NADAC says what the government reckons it costs, and the claims say what went out
+        of the door. Each on its own is a page somebody has to reconcile in their head. Together
+        they say which drugs to move, where to, and what it is worth.
+      */}
+      <section className="my-4 rounded-lg border border-line bg-surface p-4">
+        <h2 className="text-sm font-semibold">What to do about it</h2>
+        <p className="mt-1 text-sm text-ink-2">
+          Every drug this pharmacy has bought or dispensed, with what was paid, what it earns back, what else it costs
+          elsewhere and what the benchmark says. Sorted by what the move is actually worth on the quantities dispensed,
+          because a large percentage off something bought twice a year is not worth an afternoon.
+        </p>
+        {ledger.rate === null ? (
+          <p className="mt-2 rounded-md border border-warn bg-warn-soft px-3 py-2 text-xs text-warn">
+            <b>No generic rebate rate is on file, so every McKesson contract line is being compared at its gross invoice
+            price.</b> That understates this pharmacy&rsquo;s position rather than overstating it — a rebated line looks
+            dearer than it is, so a competitor may look better than it really is. Put the tier rate from the rebate
+            report in Settings and every figure below sharpens. It is deliberately not estimated.
+          </p>
+        ) : (
+          <p className="mt-2 text-xs text-ink-3">
+            Contract lines are compared after taking off the {(ledger.rate * 100).toFixed(2)}% generic tier rate from
+            the rebate report. A line the invoice did not mark as rebated is never given that discount.
+          </p>
+        )}
+        {ledgerRows.length === 0 ? (
+          <Empty>
+            Nothing to compare yet. This fills in as invoices arrive and are read, the Monday catalogues land, and NADAC
+            is fetched — it needs at least the invoices, which is where what you actually paid comes from.
+          </Empty>
+        ) : (
+          <div className="mt-3 overflow-x-auto">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Drug</th>
+                  <th className="text-right">We pay</th>
+                  <th className="text-right">NADAC</th>
+                  <th className="text-right">Against it</th>
+                  <th>Cheapest known</th>
+                  <th className="text-right">Worth</th>
+                  <th>What it means</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ledgerRows.slice(0, 40).map((r) => (
+                  <tr key={r.ndc11}>
+                    <td>
+                      <span className="block text-sm font-medium">{r.name ?? "—"}</span>
+                      <span className="font-mono text-xs text-ink-3">{r.ndc11}</span>
+                    </td>
+                    <td className="whitespace-nowrap text-right tabular-nums text-sm">
+                      {r.paid ? perUnit(r.paid.effectiveUnitMicros) : "—"}
+                      {r.paid?.rebated === true && <span className="badge badge-ok ml-1">rebated</span>}
+                      {r.paid && <span className="block text-xs text-ink-3">{r.paid.supplier}</span>}
+                    </td>
+                    <td className="whitespace-nowrap text-right tabular-nums text-sm">
+                      {r.nadacMicros === null ? <span className="text-ink-3">none</span> : perUnit(r.nadacMicros)}
+                    </td>
+                    <td className={`whitespace-nowrap text-right tabular-nums text-sm ${r.vsNadacMicros === null ? "" : r.vsNadacMicros > 0 ? "text-crit" : "text-accent"}`}>
+                      {r.vsNadacMicros === null ? "—" : `${r.vsNadacMicros > 0 ? "+" : ""}${perUnit(r.vsNadacMicros)}`}
+                    </td>
+                    <td className="text-sm">
+                      {r.best ? (
+                        <>
+                          {r.best.supplier}
+                          <span className="block text-xs text-ink-3">{perUnit(r.best.effectiveUnitMicros)} · {r.best.source === "invoice" ? "what we paid" : "listed"}</span>
+                        </>
+                      ) : (
+                        <span className="text-ink-3">—</span>
+                      )}
+                    </td>
+                    <td className="whitespace-nowrap text-right tabular-nums text-sm font-medium">
+                      {r.switchSavingCents ? `$${(r.switchSavingCents / 100).toFixed(2)}` : "—"}
+                    </td>
+                    <td className="text-xs">
+                      {r.flags.map((f) => (
+                        <span key={f} className={`badge mr-1 ${f === "buying_above_nadac" || f === "not_dispensed" ? "badge-warn" : f === "cheaper_elsewhere" ? "badge-ok" : "badge-muted"}`}>
+                          {MEANS[f]}
+                        </span>
+                      ))}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
       {!opps.ready ? (
         <Notice kind="warn">{opps.reason}</Notice>
       ) : (
@@ -252,3 +351,15 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
     </>
   );
 }
+
+/** What each flag means, in the words somebody acting on it would use. */
+const MEANS: Record<Flag, string> = {
+  buying_above_nadac: "paying over NADAC",
+  cheaper_elsewhere: "cheaper elsewhere",
+  no_nadac: "no NADAC",
+  not_dispensed: "bought, never dispensed",
+  short_dated_only: "only short-dated",
+  rebate_unknown: "rebate rate not on file",
+  pack_size_unknown: "pack size unknown — not compared",
+};
+

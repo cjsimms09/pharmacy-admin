@@ -1,0 +1,304 @@
+import "server-only";
+
+/**
+ * One row per drug, with everything the pharmacy knows about it in the same place.
+ *
+ * Four separate records answer four separate halves of the same question, and none of them answers
+ * it alone. The invoices say what was actually paid, and whether the line earned the rebate. The
+ * supplier catalogues say what every other wholesaler would have charged for the same NDC, and
+ * which of them rebate it. NADAC says what the government thinks the drug costs, which is both the
+ * reimbursement floor and the only external benchmark on the buying side. The claims say what was
+ * dispensed and what came back for it.
+ *
+ * Held apart, each is a page somebody has to read and reconcile in their head. Together they
+ * answer the questions the pharmacy actually has: which drugs am I buying above the benchmark
+ * everyone else is paid against, where should I be buying them instead, and what am I holding that
+ * I should send back.
+ *
+ * ── The rebate, and why it is the whole difficulty ──
+ *
+ * A McKesson generic bought on the OneStop contract earns the tier rate — twenty-nine percent at
+ * this pharmacy's current tier — and that rebate is paid months later on a report, not taken off
+ * the invoice. So the invoice price of a rebated line is not what the drug cost, and comparing it
+ * with a competitor's price is comparing the wrong two numbers. Every comparison here therefore
+ * works on an effective cost: the invoice price less the tier rate where, and only where, the line
+ * was marked as rebated.
+ *
+ * The direction of the error matters. Treating an unmarked line as rebated invents a discount and
+ * recommends staying put; treating a rebated line as unmarked invents a saving and recommends
+ * moving spend off the contract, which can cost more in a lost tier than it saves on the invoice.
+ * So a rebate is applied only where a document says so, never inferred, and a comparison that
+ * cannot tell says it cannot tell rather than picking a side.
+ *
+ * ── Everything is per unit, and that is not a detail ──
+ *
+ * An invoice prices a package: one Ozempic pen, $996.68. A catalogue prices a unit inside it:
+ * $332.2267 per millilitre, three millilitres to the pen. Those are the same price. Compared
+ * without converting, the catalogue looks two thirds cheaper and the pharmacy is told to switch
+ * supplier to save ninety-nine thousand dollars on a drug whose price has not moved — which is
+ * what the first version of this said, on real invoices, until the figures were checked against
+ * the source documents.
+ *
+ * So every price here is per unit, converted using the pack size the catalogue prints, and where
+ * no pack size is known for an NDC the comparison is not made at all. A recommendation nobody can
+ * check is worse than no recommendation, because it is acted on once and trusted afterwards.
+ */
+
+export type Buy = {
+  supplier: string;
+  /** As printed on the invoice or catalogue, before any rebate. */
+  unitCostMicros: number;
+  /** After the tier rate, where the line is marked rebated. Equal to the gross where it is not. */
+  effectiveUnitMicros: number;
+  rebated: boolean | null;
+  /** "invoice" is what was actually paid; "catalogue" is what the supplier lists. */
+  source: "invoice" | "catalogue";
+  on: string | null;
+  shortDated: string | null;
+};
+
+export type LedgerRow = {
+  ndc11: string;
+  name: string | null;
+  /** Every price known for this NDC, cheapest effective first. */
+  buys: Buy[];
+  /** What this pharmacy last actually paid, from an invoice. */
+  paid: Buy | null;
+  /** The cheapest source known, whatever it is. */
+  best: Buy | null;
+  /** NADAC per unit at the latest effective date held. */
+  nadacMicros: number | null;
+  nadacOn: string | null;
+  /** Units dispensed across the claims held, which is what scales every figure to this pharmacy. */
+  unitsDispensed: number;
+  /** What the plans and patients paid, across those claims. */
+  receivedCents: number;
+  claims: number;
+  /** paid − NADAC, per unit. Negative is buying below the benchmark, which is the good side. */
+  vsNadacMicros: number | null;
+  /** What moving to the cheapest source would have saved on what was actually dispensed. */
+  switchSavingCents: number | null;
+  flags: Flag[];
+};
+
+export type Flag =
+  | "buying_above_nadac"
+  | "cheaper_elsewhere"
+  | "no_nadac"
+  | "not_dispensed"
+  | "short_dated_only"
+  | "rebate_unknown"
+  | "pack_size_unknown";
+
+/** The tier rate, as a fraction, from the rebate report — never guessed. */
+export type Contract = { genericRebateRate: number | null };
+
+const MICROS = 1_000_000;
+
+/**
+ * The effective cost of a line: the printed price less the tier rate, where the line earns it.
+ *
+ * Where the rebate applies but the rate is not on file, the gross price is used unchanged and the
+ * row is flagged — an estimated rate would put a made-up number into a purchasing recommendation.
+ */
+export function effectiveMicros(grossMicros: number, rebated: boolean | null, rate: number | null): number {
+  if (rebated !== true || rate === null) return grossMicros;
+  return Math.round(grossMicros * (1 - rate));
+}
+
+export type LedgerInput = {
+  invoiceLines: { ndc11: string; supplier: string | null; description: string | null; unitCostCents: number; rebated: boolean | null; invoiceDate: string | null }[];
+  /** `packQty` is how many units are in the package the invoice prices. Without it nothing compares. */
+  catalogue: { ndc11: string; supplier: string; description: string | null; unitCostMicros: number | null; packQty: number | null; contractFlag: string | null; pricedOn: string | null; availability: string | null }[];
+  nadac: { ndc11: string; unitMicros: number; effectiveOn: string; description: string | null }[];
+  claims: { ndc11: string | null; itemName: string | null; quantityThousandths: number | null; remitCents: number | null; copayCents: number | null; status?: string }[];
+  contract: Contract;
+  /** Below this, a saving is noise rather than a reason to change where you buy. */
+  materialityCents: number;
+};
+
+/**
+ * Builds the ledger. Pure: everything it needs is passed in, so it can be tested against figures
+ * taken off real invoices rather than only against whatever is in the database today.
+ */
+export function buildLedger(input: LedgerInput): LedgerRow[] {
+  const rate = input.contract.genericRebateRate;
+  const rows = new Map<string, LedgerRow>();
+
+  const row = (ndc11: string): LedgerRow => {
+    let r = rows.get(ndc11);
+    if (!r) {
+      r = {
+        ndc11, name: null, buys: [], paid: null, best: null, nadacMicros: null, nadacOn: null,
+        unitsDispensed: 0, receivedCents: 0, claims: 0, vsNadacMicros: null, switchSavingCents: null, flags: [],
+      };
+      rows.set(ndc11, r);
+    }
+    return r;
+  };
+
+  /*
+   * How many units are in the package an invoice prices, per NDC.
+   *
+   * Taken from the catalogues, which print it, and used to put the invoice on the same footing as
+   * everything else. Where two suppliers disagree about the pack for one NDC the larger is not
+   * safer than the smaller — either could be right — so the first is taken and the disagreement is
+   * not something this pretends to settle.
+   */
+  const packOf = new Map<string, number>();
+  for (const c of input.catalogue) {
+    if (c.packQty && c.packQty > 0 && !packOf.has(c.ndc11)) packOf.set(c.ndc11, c.packQty);
+  }
+
+  // ── What was actually paid ──
+  // The most recent invoice line for an NDC is what the pharmacy pays today; earlier ones are
+  // history. Sorted by date so "most recent" means it rather than whichever the database returned.
+  const byNdcInvoice = new Map<string, LedgerInput["invoiceLines"][number]>();
+  for (const l of [...input.invoiceLines].sort((a, b) => (a.invoiceDate ?? "").localeCompare(b.invoiceDate ?? ""))) {
+    byNdcInvoice.set(l.ndc11, l);
+  }
+  for (const [ndc, l] of byNdcInvoice) {
+    const r = row(ndc);
+    if (!r.name && l.description) r.name = l.description;
+    // The invoice prices a package; everything else here prices a unit inside it.
+    const pack = packOf.get(ndc) ?? null;
+    if (pack === null) r.flags.push("pack_size_unknown");
+    const gross = Math.round((l.unitCostCents * 10_000) / (pack ?? 1));
+    const buy: Buy = {
+      supplier: l.supplier ?? "our supplier",
+      unitCostMicros: gross,
+      effectiveUnitMicros: effectiveMicros(gross, l.rebated, rate),
+      rebated: l.rebated,
+      source: "invoice",
+      on: l.invoiceDate,
+      shortDated: null,
+    };
+    r.paid = buy;
+    r.buys.push(buy);
+  }
+
+  // ── What every supplier lists ──
+  for (const c of input.catalogue) {
+    if (c.unitCostMicros === null) continue;
+    const r = row(c.ndc11);
+    if (!r.name && c.description) r.name = c.description;
+    const rebated = c.contractFlag === "rebated" ? true : c.contractFlag === "not rebated" ? false : null;
+    r.buys.push({
+      supplier: c.supplier,
+      unitCostMicros: c.unitCostMicros,
+      effectiveUnitMicros: effectiveMicros(c.unitCostMicros, rebated, rate),
+      rebated,
+      source: "catalogue",
+      on: c.pricedOn,
+      shortDated: /short-dated only/i.test(c.availability ?? "") ? (c.availability ?? "").trim() : null,
+    });
+  }
+
+  // ── The benchmark ──
+  for (const n of input.nadac) {
+    const r = rows.get(n.ndc11);
+    if (!r) continue; // A benchmark for a drug we neither buy nor dispense is not a row.
+    if (!r.nadacOn || n.effectiveOn > r.nadacOn) {
+      r.nadacOn = n.effectiveOn;
+      r.nadacMicros = n.unitMicros;
+    }
+    if (!r.name && n.description) r.name = n.description;
+  }
+
+  // ── What we dispensed, which scales everything to this pharmacy ──
+  for (const c of input.claims) {
+    if (!c.ndc11 || c.status === "reversed") continue;
+    const r = rows.get(c.ndc11);
+    if (!r) continue;
+    r.claims++;
+    r.unitsDispensed += (c.quantityThousandths ?? 0) / 1000;
+    r.receivedCents += (c.remitCents ?? 0) + (c.copayCents ?? 0);
+    if (!r.name && c.itemName) r.name = c.itemName;
+  }
+
+  // ── The conclusions ──
+  for (const r of rows.values()) {
+    // Nothing at all is concluded where the invoice price could not be put on a per-unit footing:
+    // a package compared with a unit is the error that produced a hundred-thousand-dollar saving
+    // on a drug whose price had not moved.
+    const comparable = !r.flags.includes("pack_size_unknown");
+    r.buys.sort((a, b) => a.effectiveUnitMicros - b.effectiveUnitMicros);
+    // A short-dated lot is never the recommendation. It is a real price and stays in the list, but
+    // it is stock expiring inside the return window, and a comparison that does not know the
+    // difference recommends it every time.
+    r.best = r.buys.find((b) => !b.shortDated) ?? null;
+
+    if (comparable && r.paid && r.nadacMicros !== null) r.vsNadacMicros = r.paid.effectiveUnitMicros - r.nadacMicros;
+
+    if (comparable && r.paid && r.best && r.best.effectiveUnitMicros < r.paid.effectiveUnitMicros && r.unitsDispensed > 0) {
+      const perUnit = r.paid.effectiveUnitMicros - r.best.effectiveUnitMicros;
+      r.switchSavingCents = Math.round((perUnit * r.unitsDispensed) / 10_000);
+    }
+
+    if (comparable && r.nadacMicros === null) r.flags.push("no_nadac");
+    else if (r.vsNadacMicros !== null && r.vsNadacMicros > 0) r.flags.push("buying_above_nadac");
+    if ((r.switchSavingCents ?? 0) >= input.materialityCents) r.flags.push("cheaper_elsewhere");
+    if (r.claims === 0 && r.paid) r.flags.push("not_dispensed");
+    if (r.buys.length > 0 && r.buys.every((b) => b.shortDated)) r.flags.push("short_dated_only");
+    // Named where it matters: a rebated line whose rate is unknown is being compared at its gross
+    // price, which understates the pharmacy's position rather than overstating it.
+    if (rate === null && r.buys.some((b) => b.rebated === true)) r.flags.push("rebate_unknown");
+  }
+
+  return [...rows.values()];
+}
+
+/**
+ * How many units a stored pack size describes: "30 EA" is thirty, "(10) 100 EA" is a hundred.
+ *
+ * The leading bracket is the order multiple — how many packs one order line buys — and is not part
+ * of the pack. Reading it as the pack size would divide every price by ten.
+ */
+export function packQtyOf(packSize: string | null): number | null {
+  if (!packSize) return null;
+  const m = /(?:\(\d+\)\s*)?([\d.]+)\s*(EA|ML|GM)\b/i.exec(packSize);
+  const n = m ? Number(m[1]) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** The rows worth acting on, most valuable first. */
+export function opportunities(rows: LedgerRow[]): LedgerRow[] {
+  return rows
+    .filter((r) => r.flags.includes("cheaper_elsewhere") || r.flags.includes("buying_above_nadac") || r.flags.includes("not_dispensed"))
+    .sort((a, b) => (b.switchSavingCents ?? 0) - (a.switchSavingCents ?? 0));
+}
+
+/** Loads everything the ledger needs and builds it. */
+export async function productLedger(): Promise<{ rows: LedgerRow[]; rate: number | null; materialityCents: number }> {
+  const { db, schema } = await import("@/db");
+  const { getSettings } = await import("./settings");
+  const { eq } = await import("drizzle-orm");
+
+  const [lines, catalogue, nadac, claims, s] = await Promise.all([
+    db.query.invoiceLines.findMany(),
+    db.query.supplierItems.findMany(),
+    db.query.nadacPrices.findMany({ columns: { ndc11: true, unitMicros: true, effectiveOn: true, description: true } }),
+    db.query.claims.findMany({ columns: { ndc11: true, itemName: true, quantityThousandths: true, remitCents: true, copayCents: true, status: true } }),
+    getSettings(),
+  ]);
+
+  const pct = Number((s.mck_generic_rebate_rate ?? "").replace("%", "").trim());
+  const rate = Number.isFinite(pct) && pct > 0 && pct < 100 ? pct / 100 : null;
+  const materialityCents = Number(s.floor_materiality_cents ?? "") || 500;
+
+  const rows = buildLedger({
+    invoiceLines: lines,
+    catalogue: catalogue.map((c) => ({
+      ndc11: c.ndc11, supplier: c.supplier, description: c.description,
+      unitCostMicros: c.unitCostMicros, packQty: packQtyOf(c.packSize), contractFlag: c.contractFlag, pricedOn: c.pricedOn, availability: c.availability,
+    })),
+    nadac,
+    claims,
+    contract: { genericRebateRate: rate },
+    materialityCents,
+  });
+  void eq;
+  return { rows, rate, materialityCents };
+}
+
+export { MICROS };

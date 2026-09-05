@@ -1,9 +1,9 @@
 import "server-only";
-import { and, eq, gte, lte, isNull } from "drizzle-orm";
+import { and, eq, gte, lte, isNull, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "./crypto";
 import { todayIso, daysBetween } from "./dates";
-import { storeFile } from "./files";
+import { storeFile, readFile as readStoredFile } from "./files";
 import { readInvoice } from "./ai";
 import { getSettings } from "./settings";
 import { pdfText } from "./pdf-text";
@@ -401,10 +401,11 @@ export async function fileInvoice(
    * true of inferring a schedule from drug names. The model is the fallback for the cases the
    * rule cannot settle: a scan, an unfamiliar layout, a supplier who prints no class at all.
    */
+  let invoiceText = "";
   const fromText = (() => {
     try {
-      const text = pdfText(buf);
-      return text.length > 200 ? classifyInvoiceText(text) : null;
+      invoiceText = pdfText(buf);
+      return invoiceText.length > 200 ? classifyInvoiceText(invoiceText) : null;
     } catch {
       return null;
     }
@@ -483,6 +484,8 @@ export async function fileInvoice(
     needsReview: !confident,
     receivedFrom: meta.from,
   });
+
+  await storeInvoiceLines(id, { supplier, invoiceDate, text: invoiceText, printedTotalCents: totalCents });
 
   return { id, documentId, schedule, needsReview: !confident };
 }
@@ -1022,10 +1025,11 @@ export async function adoptDocument(documentId: string, ctx: { userId: string; u
   const { readFile } = await import("./files");
   const buf = await readFile(doc.storageKey);
 
+  let invoiceText = "";
   const fromText = (() => {
     try {
-      const text = pdfText(buf);
-      return text.length > 200 ? classifyInvoiceText(text) : null;
+      invoiceText = pdfText(buf);
+      return invoiceText.length > 200 ? classifyInvoiceText(invoiceText) : null;
     } catch {
       return null;
     }
@@ -1088,6 +1092,8 @@ export async function adoptDocument(documentId: string, ctx: { userId: string; u
     needsReview: !(fromText?.confident ?? false) && schedule === "unknown",
     receivedFrom: doc.notes ?? null,
   });
+
+  await storeInvoiceLines(id, { supplier, invoiceDate, text: invoiceText, printedTotalCents: totalCents });
 
   return { id, documentId, schedule, needsReview: schedule === "unknown" };
 }
@@ -1230,3 +1236,92 @@ export async function awaitingReceipt(): Promise<SupplierInvoice[]> {
     .filter((r) => r.schedule !== "none")
     .sort((a, b) => (b.invoiceDate ?? "").localeCompare(a.invoiceDate ?? ""));
 }
+
+/**
+ * Stores the item lines of an invoice, where they can be read and where they add up.
+ *
+ * Only when they reconcile against the total printed on the invoice's face. A partial read is the
+ * outcome that does damage: every figure that was read looks perfectly sound, and the product
+ * whose line was dropped simply appears cheaper than the pharmacy actually paid. Where the sum does
+ * not match, nothing is stored and the count of unread lines is left for the invoice page to say,
+ * because a purchasing recommendation built on three quarters of an invoice is worse than one built
+ * on none of it.
+ */
+export async function storeInvoiceLines(
+  invoiceId: string,
+  meta: { supplier: string | null; invoiceDate: string | null; text: string; printedTotalCents: number | null },
+): Promise<{ stored: number; reconciles: boolean | null; readCents: number }> {
+  const { parseInvoiceLines } = await import("./invoice-lines");
+  if (!meta.text || meta.text.length < 200) return { stored: 0, reconciles: null, readCents: 0 };
+  const parsed = parseInvoiceLines(meta.text, meta.printedTotalCents);
+  if (parsed.lines.length === 0) return { stored: 0, reconciles: parsed.reconciles, readCents: 0 };
+  if (parsed.reconciles === false) return { stored: 0, reconciles: false, readCents: parsed.totalCents };
+
+  await db.delete(schema.invoiceLines).where(eq(schema.invoiceLines.invoiceId, invoiceId));
+  const rows = parsed.lines.map((l) => ({
+    id: newId(),
+    invoiceId,
+    supplier: meta.supplier,
+    invoiceDate: meta.invoiceDate,
+    ndc11: l.ndc11,
+    description: l.description,
+    itemNumber: l.itemNumber,
+    quantity: l.quantity,
+    unitOfMeasure: l.unitOfMeasure,
+    unitCostCents: l.unitCostCents,
+    extendedCents: l.extendedCents,
+    awpCents: l.awpCents,
+    itemClass: l.itemClass,
+    rebated: l.rebated,
+  }));
+  for (let i = 0; i < rows.length; i += 200) await db.insert(schema.invoiceLines).values(rows.slice(i, i + 200));
+  return { stored: rows.length, reconciles: parsed.reconciles, readCents: parsed.totalCents };
+}
+
+/**
+ * Reads the lines of every invoice already filed, for the day this arrives.
+ *
+ * The invoices were being kept long before their figures were being read, so without this the
+ * ledger would start empty and fill up over months. The documents are on disk; nothing needs to be
+ * asked of a supplier.
+ */
+export async function backfillInvoiceLines(): Promise<{ invoices: number; lines: number; unreconciled: number; unreadable: number }> {
+  const invoices = await db.query.supplierInvoices.findMany();
+  const done = new Set(
+    (await db.selectDistinct({ invoiceId: schema.invoiceLines.invoiceId }).from(schema.invoiceLines)).map((r) => r.invoiceId),
+  );
+  let lines = 0;
+  let unreconciled = 0;
+  let unreadable = 0;
+  for (const inv of invoices) {
+    if (done.has(inv.id)) continue;
+    const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, inv.documentId) });
+    if (!doc) continue;
+    try {
+      const buf = await readStoredFile(doc.storageKey);
+      const text = pdfText(buf);
+      const r = await storeInvoiceLines(inv.id, {
+        supplier: inv.supplier,
+        invoiceDate: inv.invoiceDate,
+        text,
+        printedTotalCents: inv.totalCents,
+      });
+      lines += r.stored;
+      if (r.reconciles === false) unreconciled++;
+      else if (r.stored === 0) unreadable++;
+    } catch {
+      unreadable++;
+    }
+  }
+  return { invoices: invoices.length, lines, unreconciled, unreadable };
+}
+
+/** How many invoices have had their item lines read, for the page that offers to read the rest. */
+export async function invoiceLineStats(): Promise<{ invoicesWithLines: number; lines: number }> {
+  const [withLines, all] = await Promise.all([
+    db.selectDistinct({ invoiceId: schema.invoiceLines.invoiceId }).from(schema.invoiceLines),
+    db.select({ n: sql<number>`count(*)` }).from(schema.invoiceLines),
+  ]);
+  return { invoicesWithLines: withLines.length, lines: Number(all[0]?.n ?? 0) };
+}
+
