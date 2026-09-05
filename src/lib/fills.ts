@@ -42,6 +42,8 @@ export type ClaimRow = {
   ndc11: string | null;
   itemName: string | null;
   bin: string | null;
+  /** The plan's group number, which with the BIN is what identifies the actual plan. */
+  groupNumber?: string | null;
   pbmName: string | null;
   payerLabel: string | null;
   quantityThousandths: number | null;
@@ -55,6 +57,8 @@ export type ClaimRow = {
 
 export type FillPayer = {
   bin: string | null;
+  /** BIN and group together identify the plan; the BIN alone often identifies only the processor. */
+  groupNumber: string | null;
   name: string | null;
   remitCents: number;
   copayCents: number;
@@ -113,6 +117,7 @@ export function groupIntoFills(claims: ClaimRow[]): Fill[] {
   for (const [key, rows] of by) {
     const payers: FillPayer[] = rows.map((r) => ({
       bin: r.bin,
+      groupNumber: r.groupNumber ?? null,
       name: r.pbmName ?? r.payerLabel,
       remitCents: r.remitCents ?? 0,
       copayCents: r.copayCents ?? 0,

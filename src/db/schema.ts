@@ -1694,6 +1694,43 @@ export const PLAN_CLASSES = [
 ] as const;
 export type PlanClass = (typeof PLAN_CLASSES)[number];
 
+/**
+ * A key seen on a claim, tied once to the payer and the contract behind it.
+ *
+ * The alternative is searching the contracts every time, which is what the site did first: it found
+ * the answer, showed it, and forgot it, so the same twenty PDFs were read again on the next page
+ * load and nobody's decision was ever recorded. A search finds a candidate; a person confirms it;
+ * this is where that confirmation lives.
+ *
+ * Keyed on whatever the claim actually carried. A BIN alone identifies a processor, not a plan —
+ * one BIN can front a dozen employers — so the group number and the network or contract id printed
+ * on the claim are part of the key where they exist. A row with a null group matches any group,
+ * which is the right answer for a processor that runs one contract.
+ */
+export const payerLinks = sqliteTable(
+  "payer_links",
+  {
+    id: text("id").primaryKey(),
+    bin: text("bin"),
+    /** The processor control number, where the claim carried one. */
+    pcn: text("pcn"),
+    groupNumber: text("group_number"),
+    /** The network reimbursement or contract id PioneerRx prints on the claim. */
+    contractId: text("contract_id"),
+    /** Who this is, settled. */
+    pbmName: text("pbm_name").notNull(),
+    /** The contract document this plan is priced under, where one is on file. */
+    contractDocId: text("contract_doc_id"),
+    /** The contract PDF's own file name, so the link survives a checklist rebuild. */
+    contractFileName: text("contract_file_name"),
+    /** Why this is the answer: the sentence from the contract, or who said so. */
+    basis: text("basis"),
+    confirmedBy: text("confirmed_by").notNull(),
+    confirmedOn: text("confirmed_on").notNull().default(now()),
+  },
+  (t) => [index("payer_links_bin_idx").on(t.bin), index("payer_links_pbm_idx").on(t.pbmName)],
+);
+
 export const planGroups = sqliteTable(
   "plan_groups",
   {

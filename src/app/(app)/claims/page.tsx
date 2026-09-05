@@ -63,7 +63,13 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
       <PageHeader
         title="Claims"
         subtitle="Dispensing and adjudication detail from PioneerRx, matched to the payer that priced it."
-        actions={<Link href="/claims/floor" className="btn btn-primary">Paid under the floor</Link>}
+        actions={
+          <>
+            <Link href="/payers/performance" className="btn btn-primary">Who pays best</Link>
+            <Link href="/claims/floor" className="btn">Paid under the floor</Link>
+            <Link href="/plans" className="btn">Classify plans</Link>
+          </>
+        }
       />
 
       {ok && <Notice kind="ok">{ok}</Notice>}
