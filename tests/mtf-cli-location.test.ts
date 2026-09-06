@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { splitCommand, spawnPlan } from "../src/lib/mtf";
+import { splitCommand, spawnPlan, cliDownloadArg } from "../src/lib/mtf";
 
 /**
  * What "where the tool is" is allowed to be.
@@ -60,5 +60,26 @@ describe("starting it on Windows", () => {
     const p = spawnPlan(String.raw`C:\mtf\bin\mtf-cli.exe`, ["--version"]);
     assert.equal(p.command, String.raw`C:\mtf\bin\mtf-cli.exe`);
     assert.deepEqual(p.args, ["--version"]);
+  });
+});
+
+describe("telling the tool where to put its downloads", () => {
+  test("a folder inside the site's own is given relatively, because the tool joins rather than resolves", () => {
+    /*
+     * Version 2.2.0 joins --downloadDir onto its working directory instead of resolving it, so an
+     * absolute path comes back doubled and it fails trying to create
+     * "C:\Users\wwfprx\pharmacy-admin\C:\Users\wwfprx\pharmacy-admin\data\remits\mtf".
+     */
+    const arg = cliDownloadArg("/home/user/pharmacy-admin/data/remits/mtf", "/home/user/pharmacy-admin");
+    assert.equal(arg, "data/remits/mtf");
+  });
+
+  test("a folder outside it still gets a relative form, because joining handles the way back up", () => {
+    const arg = cliDownloadArg("/home/user/remits", "/home/user/pharmacy-admin");
+    assert.equal(arg, "../remits");
+  });
+
+  test("the folder it is already in needs no path at all", () => {
+    assert.equal(cliDownloadArg("/home/user/pharmacy-admin", "/home/user/pharmacy-admin"), "/home/user/pharmacy-admin");
   });
 });

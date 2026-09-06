@@ -200,6 +200,12 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
               It is run once to prove it is really there, and the stored API key is written into it so a scheduled
               download uses the same key and the same folder.
             </span>
+            <p className="mt-2 text-xs text-ink-2">
+              If you set up a scheduled download in Task Scheduler, set its <b>Start in</b> box to{" "}
+              <code>{process.cwd()}</code>. Version 2.2.0 of the tool works out its download folder by joining what it
+              was given onto whatever folder it was started in, so a task started somewhere else puts the files
+              somewhere else and this page finds nothing.
+            </p>
           </div>
         </form>
       </section>

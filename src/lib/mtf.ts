@@ -85,6 +85,29 @@ export function spawnPlan(bin: string, args: string[]): { command: string; args:
   return { command: bin, args };
 }
 
+/**
+ * The download folder as the CLI will understand it, which is not the same as where it is.
+ *
+ * Version 2.2.0 joins whatever it is given onto its own working directory instead of resolving it,
+ * so an absolute path comes back doubled:
+ *
+ *   ENOENT: no such file or directory, mkdir
+ *   'C:\Users\wwfprx\pharmacy-admin\C:\Users\wwfprx\pharmacy-admin\data\remits\mtf'
+ *
+ * A path relative to the working directory joins correctly, and joining handles the ".." in one
+ * that points outside. This site always runs the tool from its own folder, so the relative form is
+ * computed from there — which also means a scheduled task started in that folder behaves the same
+ * way, and the stored configuration is right for both.
+ *
+ * If their CLI is fixed to resolve absolute paths, this keeps working: a relative path was always
+ * valid. It is the absolute one that was not.
+ */
+export function cliDownloadArg(absolute: string, from = process.cwd()): string {
+  const rel = path.relative(from, absolute);
+  // A path on another drive has no relative form on Windows; there is nothing to do but pass it.
+  return rel && !path.isAbsolute(rel) ? rel : absolute;
+}
+
 async function downloadDir(): Promise<string> {
   const s = await getSettings();
   const configured = s.mtf_download_dir?.trim();
@@ -126,6 +149,16 @@ async function cli(args: string[], timeoutMs = 120_000): Promise<{ ok: boolean; 
      * "downloaded from the internet" flag and every file extracted from it inherited it. The fix is
      * a checkbox, and nobody finds it by guessing.
      */
+    if (/ENOENT[^]*mkdir/i.test(err.stderr ?? err.message ?? "")) {
+      return {
+        ok: false,
+        out: err.stdout ?? "",
+        err:
+          "The MTF tool could not create its download folder. It builds that path by joining what it was given onto " +
+          "its own working folder, so an absolute path comes back doubled — press “Save and check it runs” again and " +
+          "the folder is configured in the form it accepts.",
+      };
+    }
     if (err.code === "EINVAL") {
       return {
         ok: false,
@@ -162,7 +195,7 @@ async function applyKey(): Promise<MtfResult | null> {
     };
   }
   const dir = await downloadDir();
-  const r = await cli(["config", "set", `--apiKey=${key}`, `--downloadDir=${dir}`], 30_000);
+  const r = await cli(["config", "set", `--apiKey=${key}`, `--downloadDir=${cliDownloadArg(dir)}`], 30_000);
   if (!r.ok) return { ok: false, message: r.err || "Could not configure the MTF tool.", output: r.out };
   return null;
 }
