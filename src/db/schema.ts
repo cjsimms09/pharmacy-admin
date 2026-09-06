@@ -2408,3 +2408,110 @@ export const onHand = sqliteTable(
     uniqueIndex("on_hand_counted_ndc_idx").on(t.countedOn, t.ndc11),
   ],
 );
+
+
+// ── Supplies ─────────────────────────────────────────────────────────
+// Vials, bags, labels and receipt tape: the things the pharmacy cannot dispense without and which
+// nothing in the building counts. There is no claims feed for a box of 30 dram vials — it is
+// opened, used and thrown away without a record — so the only evidence of how fast they go is the
+// difference between two counts, and the only way to get ahead of a stockout is to log those
+// counts and let the site work out the rate.
+
+export const supplyItems = sqliteTable(
+  "supply_items",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    /**
+     * What one of it is, and it is what the pharmacy counts rather than what it uses.
+     *
+     * Vials are kept and ordered by the box. Counting them as vials means counting to two thousand
+     * on a shelf and reordering in units nobody buys in, so the unit of issue is the box and the
+     * count of vials inside it is information, not arithmetic.
+     */
+    unit: text("unit").notNull().default("box"),
+    /** Vials per box, labels per roll. Shown, never used to convert a count. */
+    perUnit: integer("per_unit"),
+    /** Who it is ordered from. */
+    vendorId: text("vendor_id").references(() => vendors.id, { onDelete: "set null" }),
+    /** Their code for it, so an order email says something the rep can act on without translating. */
+    supplierCode: text("supplier_code"),
+    /** Days from sending the order to it being on the shelf. */
+    leadTimeDays: integer("lead_time_days").notNull().default(5),
+    /** Cover held beyond the lead time, so a busy week is not a stockout. */
+    safetyDays: integer("safety_days").notNull().default(7),
+    /** How many days of stock an order should bring the shelf up to. */
+    targetDays: integer("target_days").notNull().default(45),
+    /** Ordered in whole cases where the supplier sells that way. */
+    orderMultiple: integer("order_multiple"),
+    notes: text("notes"),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: text("created_at").notNull().default(now()),
+  },
+  (t) => [index("supply_items_active_idx").on(t.active)],
+);
+
+export const supplyCounts = sqliteTable(
+  "supply_counts",
+  {
+    id: text("id").primaryKey(),
+    itemId: text("item_id").notNull().references(() => supplyItems.id, { onDelete: "cascade" }),
+    /** The day the shelf was counted, which is not always the day it was typed in. */
+    countedOn: text("counted_on").notNull(),
+    quantity: real("quantity").notNull(),
+    countedBy: text("counted_by"),
+    note: text("note"),
+    createdAt: text("created_at").notNull().default(now()),
+  },
+  (t) => [uniqueIndex("supply_counts_item_day_idx").on(t.itemId, t.countedOn)],
+);
+
+/**
+ * An order placed with a rep, and what came of it.
+ *
+ * Kept because a delivery is half of the usage arithmetic. Two counts either side of an unlogged
+ * delivery report a week where nothing was used, and every reorder date built on that is late by
+ * exactly as much as the pharmacy orders — so the busiest items fail worst.
+ */
+export const supplyOrders = sqliteTable(
+  "supply_orders",
+  {
+    id: text("id").primaryKey(),
+    vendorId: text("vendor_id").references(() => vendors.id, { onDelete: "set null" }),
+    vendorName: text("vendor_name").notNull(),
+    /** Where the order was sent, kept as sent rather than looked up again later. */
+    sentTo: text("sent_to"),
+    placedOn: text("placed_on").notNull(),
+    status: text("status", { enum: ["draft", "sent", "received", "cancelled"] }).notNull().default("draft"),
+    /** The body of the email, exactly as it went, so there is no doubt what was asked for. */
+    body: text("body"),
+    sentAt: text("sent_at"),
+    sendError: text("send_error"),
+    receivedOn: text("received_on"),
+    placedBy: text("placed_by").notNull(),
+    note: text("note"),
+    createdAt: text("created_at").notNull().default(now()),
+  },
+  (t) => [index("supply_orders_status_idx").on(t.status)],
+);
+
+export const supplyOrderLines = sqliteTable(
+  "supply_order_lines",
+  {
+    id: text("id").primaryKey(),
+    orderId: text("order_id").notNull().references(() => supplyOrders.id, { onDelete: "cascade" }),
+    itemId: text("item_id").notNull().references(() => supplyItems.id, { onDelete: "cascade" }),
+    /** What was asked for. */
+    quantity: real("quantity").notNull(),
+    /**
+     * What actually turned up, which is not always what was asked for.
+     *
+     * The rate is worked out from what arrived, never from what was ordered — a short shipment
+     * counted as a full one reports usage that never happened and brings the next order forward.
+     * Null until the delivery is confirmed.
+     */
+    receivedQuantity: real("received_quantity"),
+  },
+  (t) => [index("supply_order_lines_order_idx").on(t.orderId), index("supply_order_lines_item_idx").on(t.itemId)],
+);

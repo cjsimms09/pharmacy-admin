@@ -139,9 +139,14 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
       <section className="my-4 rounded-lg border border-line bg-surface p-4">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-sm font-semibold">Today&rsquo;s order</h2>
-          <Link href="/purchasing/shelf" className="text-xs underline">
-            The shelf: days of stock, surplus and what to send back →
-          </Link>
+          <div className="flex flex-wrap gap-3">
+            <Link href="/purchasing/shelf" className="text-xs underline">
+              The shelf: days of stock, surplus and what to send back →
+            </Link>
+            <Link href="/purchasing/supplies" className="text-xs underline">
+              Supplies: vials, bags, labels and tape →
+            </Link>
+          </div>
         </div>
 
         {buyList.missing.length > 0 && (
