@@ -428,6 +428,13 @@
       "when": 1788664198811,
       "tag": "0060_keen_blonde_phantom",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "6",
+      "when": 1788665999010,
+      "tag": "0061_lyrical_photon",
+      "breakpoints": true
     }
   ]
 }
