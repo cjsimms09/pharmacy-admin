@@ -24,6 +24,7 @@ const claim = (over: Partial<ClaimRow> = {}): ClaimRow => ({
   copayCents: 0,
   patientTotalCents: null,
   acquisitionCents: 57_676,
+  grossProfitCents: null,
   status: "paid",
   ...over,
 });
@@ -85,6 +86,38 @@ describe("one fill, however many payers priced it", () => {
     assert.equal(e.coordinatedFills, 1);
     assert.equal(e.falseLosses, 1);
     assert.equal(e.falseLossCents, 57_676 - 800, "$568.76 of loss that was never real");
+  });
+
+  test("the report's own gross profit is used to check ours, and a mismatch is named", () => {
+    /*
+     * The check that can catch a mis-read column from the inside.
+     *
+     * Column positions in the daily report are worked out by counting. A report whose columns shift
+     * by one gives figures that are each individually plausible and collectively wrong, and nothing
+     * inside our own arithmetic can notice. PioneerRx computes its own gross profit from the same
+     * row, so when ours and theirs disagree, a column is not where this reader thinks it is.
+     */
+    const [wrong] = groupIntoFills([
+      claim({ remitCents: 4_626, copayCents: 0, patientTotalCents: 0, acquisitionCents: 12_868, grossProfitCents: 3_315 }),
+    ]);
+    assert.equal(wrong.marginCents, 4_626 - 12_868);
+    assert.equal(wrong.reportedMarginCents, 3_315);
+    assert.equal(wrong.agreesWithReport, false, "the site and the report cannot both be right");
+
+    const [right] = groupIntoFills([
+      claim({ remitCents: 4_626, copayCents: 0, patientTotalCents: 11_557, acquisitionCents: 12_868, grossProfitCents: 3_315 }),
+    ]);
+    assert.equal(right.marginCents, 3_315);
+    assert.equal(right.agreesWithReport, true);
+  });
+
+  test("a fill carrying money that arrived later is not checked against a figure printed on the day", () => {
+    // The report could not have known about it, so a disagreement there is evidence of nothing.
+    const [f] = groupIntoFills(
+      [claim({ remitCents: 20_457, copayCents: 0, patientTotalCents: 0, acquisitionCents: 32_823, grossProfitCents: -12_366 })],
+      [{ rxNumber: "400010", fillNumber: 1, dateFilled: "2026-09-04", ndc11: "81968004560", source: "mtf", payer: "MTF", amountCents: 14_618 }],
+    );
+    assert.equal(f.agreesWithReport, null);
   });
 
   test("a copay card takes money off the copay; the rest does not disappear", () => {

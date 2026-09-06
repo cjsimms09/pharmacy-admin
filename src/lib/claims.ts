@@ -528,6 +528,7 @@ export async function claimFlags() {
       copayCents: c.copayCents,
       patientTotalCents: c.patientTotalCents,
       acquisitionCents: c.acquisitionCents,
+      grossProfitCents: c.grossProfitCents,
       status: c.status,
       // A reversal kept because it matched nothing: negative money against a fill never counted.
       unmatchedReversal: (c.remitCents ?? 0) < 0 && !c.reversalKey,
@@ -609,6 +610,15 @@ export async function claimFlags() {
       return by;
     })(),
     lossFills,
+    /*
+     * Fills where our arithmetic and the report's own gross profit disagree.
+     *
+     * Not a rounding quibble: it means a column is not where this reader thinks it is, and every
+     * figure derived from that row is wrong in the same direction. It is the one check that can
+     * catch a mis-read column from the inside, because the report computed its own answer from the
+     * same row.
+     */
+    disagreeing: fills.filter((f) => f.agreesWithReport === false),
     lossFillsTotalCents: lossFills.reduce((n, f) => n + (f.marginCents ?? 0), 0),
     coordination,
     inScope: inScope.length,

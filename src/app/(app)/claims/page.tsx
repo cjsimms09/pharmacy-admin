@@ -133,6 +133,28 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
         </Notice>
       )}
 
+      {/*
+        The report checking us, which is the only check that can catch a mis-read column.
+
+        Column positions here are worked out by counting. A report whose columns shift by one gives
+        figures that are each plausible and collectively wrong, and nothing inside our own
+        arithmetic can notice. PioneerRx prints its own gross profit for each row, computed from the
+        same row — so when ours and theirs disagree, a column is not where this reader thinks it is.
+      */}
+      {flags.disagreeing.length > 0 && (
+        <Notice kind="crit">
+          <b>
+            {flags.disagreeing.length} fill{flags.disagreeing.length === 1 ? "" : "s"} where this site&rsquo;s arithmetic
+            disagrees with the report&rsquo;s own gross profit.
+          </b>{" "}
+          That means a column is not where this reader thinks it is, and every figure taken from those rows is wrong the
+          same way. First one: Rx {flags.disagreeing[0].rxNumber}
+          {flags.disagreeing[0].fillNumber !== null ? `-${flags.disagreeing[0].fillNumber}` : ""} — this site makes it{" "}
+          {formatCents(flags.disagreeing[0].marginCents ?? 0)}, the report says{" "}
+          {formatCents(flags.disagreeing[0].reportedMarginCents ?? 0)}. Open it below and send me the row.
+        </Notice>
+      )}
+
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
 
@@ -395,6 +417,14 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
                               <p className="text-[11px] text-ink-3">
                                 This claim came from an older load that did not keep the original row, so there is
                                 nothing to show. Load that day&rsquo;s report again and it will be here.
+                              </p>
+                            )}
+                            {f.agreesWithReport === false && (
+                              <p className="rounded-md border border-crit bg-crit-soft p-2 text-[11px] text-crit">
+                                The report says this fill made {formatCents(f.reportedMarginCents ?? 0)} and this site
+                                makes it {formatCents(f.marginCents ?? 0)}. They are computed from the same row, so one
+                                of the columns above is not what this reader thinks it is — that is the bug, not the
+                                claim.
                               </p>
                             )}
                             <p className="text-[11px] text-ink-2">

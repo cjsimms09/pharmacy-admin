@@ -59,6 +59,8 @@ export type ClaimRow = {
    */
   patientTotalCents?: number | null;
   acquisitionCents: number | null;
+  /** The gross profit the report itself printed for this row. The check on our own arithmetic. */
+  grossProfitCents?: number | null;
   status: string;
   /** True where this is a reversal that matched no claim held. */
   unmatchedReversal?: boolean;
@@ -112,6 +114,19 @@ export type Fill = {
   acquisitionCents: number | null;
   /** Revenue less acquisition, where acquisition is known. */
   marginCents: number | null;
+  /**
+   * What the report itself said this fill made, added across its rows.
+   *
+   * The check that makes the rest of this trustworthy. Column positions in the daily report are
+   * worked out by counting, and a report whose columns shift by one produces figures that are each
+   * individually plausible and collectively wrong — a dispensing fee read as a patient total, a tax
+   * read as a quantity. Nothing inside our own arithmetic can notice that. The report's own gross
+   * profit can: it is computed by PioneerRx from the same row, so if our margin and theirs disagree
+   * then one of the columns is not what this reader thinks it is.
+   */
+  reportedMarginCents: number | null;
+  /** False where our arithmetic and the report's disagree by more than a rounding cent. */
+  agreesWithReport: boolean | null;
 };
 
 /** The same dispensing, whichever plan was billed. */
@@ -184,6 +199,17 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
     const laterPaymentsCents = mine.reduce((n, p) => n + p.amountCents, 0);
 
     const revenueCents = remitCents + patientPaidCents + laterPaymentsCents;
+
+    /*
+     * The report's own answer, for comparison — but only where it is comparable.
+     *
+     * A payment that arrived weeks later cannot be in a figure printed on the day, so a fill
+     * carrying one is not evidence of anything and is left unchecked rather than reported as a
+     * disagreement.
+     */
+    const reported = rows.map((r) => r.grossProfitCents).filter((x): x is number => x !== null && x !== undefined);
+    const reportedMarginCents = reported.length === rows.length && rows.length > 0 ? reported.reduce((n, x) => n + x, 0) : null;
+
     const first = rows[0];
     out.push({
       key,
@@ -203,6 +229,11 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
       patientShareUncertain,
       acquisitionCents,
       marginCents: acquisitionCents === null ? null : revenueCents - acquisitionCents,
+      reportedMarginCents,
+      agreesWithReport:
+        reportedMarginCents === null || acquisitionCents === null || laterPaymentsCents !== 0
+          ? null
+          : Math.abs(revenueCents - acquisitionCents - reportedMarginCents) <= 2,
     });
   }
   return out.sort((a, b) => b.dateFilled.localeCompare(a.dateFilled) || a.rxNumber.localeCompare(b.rxNumber));
