@@ -65,6 +65,20 @@ describe("one fill, however many payers priced it", () => {
     assert.equal(f.marginCents, 1_000);
   });
 
+  test("payers remitting more than any row said the drug cost is flagged, not asserted", () => {
+    /*
+     * Two rows each paying $90 on a $100 drug. Whatever these are — two primaries, a rebill read as
+     * a coordination — they are not one chain, and the patient's share cannot be worked out from
+     * them. It is floored at nothing and said to be uncertain rather than invented.
+     */
+    const [f] = groupIntoFills([
+      claim({ bin: "610011", remitCents: 9_000, copayCents: 1_000 }),
+      claim({ bin: "610502", remitCents: 9_000, copayCents: 1_000 }),
+    ]);
+    assert.equal(f.patientShareUncertain, true);
+    assert.equal(f.patientPaidCents, 0);
+  });
+
   test("a single-payer fill is unchanged by any of this", () => {
     const [f] = groupIntoFills([claim({ remitCents: 1_283, copayCents: 0, acquisitionCents: 1_080 })]);
     assert.equal(f.coordinated, false);
@@ -72,52 +86,76 @@ describe("one fill, however many payers priced it", () => {
     assert.equal(f.marginCents, 203);
   });
 
-  test("the primary alone would have looked like a loss, and that is counted and named", () => {
-    // A $576.76 pen: the primary pays $8 and passes the rest on, the secondary pays $590 and
-    // leaves the patient $10. Read as two claims, the primary row is a $568.76 loss.
+  test("a row on its own would have looked like a loss, and that is counted and named", () => {
+    /*
+     * The real Synthroid again, from the other end. The plan's row carries the whole bottle against
+     * nothing at all — $0.00 paid, $0.00 assessed, $128.68 of drug — and read on its own it is a
+     * $128.68 loss. The money came in on the card's row, which carries no cost. One bottle, and the
+     * loss is invented by reading the two rows as two claims.
+     */
     const fills = groupIntoFills([
-      claim({ bin: "610011", remitCents: 800, copayCents: 0, acquisitionCents: 57_676 }),
-      claim({ bin: "610502", remitCents: 59_000, copayCents: 1_000, acquisitionCents: 57_676 }),
+      claim({ bin: "610455", payerLabel: "Blue Cross Blue Shield", remitCents: 0, patientTotalCents: 0, acquisitionCents: 12_868 }),
+      claim({ bin: "601341", payerLabel: "Change Healthcare", remitCents: 4_625, patientTotalCents: 11_557, acquisitionCents: 0 }),
     ]);
-    assert.equal(fills[0].revenueCents, 59_800);
-    assert.equal(fills[0].marginCents, 59_800 - 57_676);
-    assert.ok(fills[0].marginCents! > 0, "the fill made money once both plans are counted");
+    assert.equal(fills[0].revenueCents, 16_182);
+    assert.equal(fills[0].marginCents, 16_182 - 12_868);
+    assert.ok(fills[0].marginCents! > 0, "the fill made money once both rows are one bottle");
     const e = coordinationEffect(fills);
     assert.equal(e.coordinatedFills, 1);
     assert.equal(e.falseLosses, 1);
-    assert.equal(e.falseLossCents, 57_676 - 800, "$568.76 of loss that was never real");
+    assert.equal(e.falseLossCents, 12_868, "$128.68 of loss that was never real");
   });
 
-  test("the report's own gross profit is used to check ours, and a mismatch is named", () => {
+  test("counting money the report did not is a reading error, and is named as one", () => {
     /*
      * The check that can catch a mis-read column from the inside.
      *
      * Column positions in the daily report are worked out by counting. A report whose columns shift
      * by one gives figures that are each individually plausible and collectively wrong, and nothing
      * inside our own arithmetic can notice. PioneerRx computes its own gross profit from the same
-     * row, so when ours and theirs disagree, a column is not where this reader thinks it is.
+     * row, so where this site holds *more* than the report did and nothing arrived later to explain
+     * it, that cannot be a timing difference: a column is not where this reader thinks it is.
      */
     const [wrong] = groupIntoFills([
-      claim({ remitCents: 4_626, copayCents: 0, patientTotalCents: 0, acquisitionCents: 12_868, grossProfitCents: 3_315 }),
+      claim({ remitCents: 20_000, copayCents: 0, patientTotalCents: 0, acquisitionCents: 12_868, grossProfitCents: 3_315 }),
     ]);
-    assert.equal(wrong.marginCents, 4_626 - 12_868);
+    assert.equal(wrong.marginCents, 20_000 - 12_868);
     assert.equal(wrong.reportedMarginCents, 3_315);
     assert.equal(wrong.agreesWithReport, false, "the site and the report cannot both be right");
+    assert.equal(wrong.awaitedCents, null, "and nothing here is owed to the pharmacy");
 
     const [right] = groupIntoFills([
       claim({ remitCents: 4_626, copayCents: 0, patientTotalCents: 11_557, acquisitionCents: 12_868, grossProfitCents: 3_315 }),
     ]);
     assert.equal(right.marginCents, 3_315);
     assert.equal(right.agreesWithReport, true);
+    assert.equal(right.awaitedCents, null);
   });
 
-  test("a fill carrying money that arrived later is not checked against a figure printed on the day", () => {
-    // The report could not have known about it, so a disagreement there is evidence of nothing.
-    const [f] = groupIntoFills(
-      [claim({ remitCents: 20_457, copayCents: 0, patientTotalCents: 0, acquisitionCents: 32_823, grossProfitCents: -12_366 })],
-      [{ rxNumber: "400010", fillNumber: 1, dateFilled: "2026-09-04", ndc11: "81968004560", source: "mtf", payer: "MTF", amountCents: 14_618 }],
+  test("the report ahead of the bank is a receivable, not a bug, and it closes when the money lands", () => {
+    /*
+     * Rx 332359, a real fill. PioneerRx books the facilitator's share at adjudication, because the
+     * plan's response says what it will be; the money itself arrives weeks later from the Medicare
+     * Transaction Facilitator. So the report reads $22.52 made and this site reads a $123.66 loss,
+     * and the whole of the difference is the $146.18 still to come.
+     *
+     * Calling that a reading error put a red banner across the claims screen for thirty-two fills
+     * that were simply waiting to be paid. It is the opposite of a bug: it is a list of money owed.
+     */
+    const [waiting] = groupIntoFills([
+      claim({ rxNumber: "332359", fillNumber: 1, dateFilled: "2026-09-05", remitCents: 20_457, copayCents: 0, patientTotalCents: 0, acquisitionCents: 32_823, grossProfitCents: 2_252 }),
+    ]);
+    assert.equal(waiting.marginCents, -12_366);
+    assert.equal(waiting.awaitedCents, 14_618, "$146.18 the report counted and the pharmacy has not got");
+    assert.equal(waiting.agreesWithReport, true, "nothing here says a column was mis-read");
+
+    const [paid] = groupIntoFills(
+      [claim({ rxNumber: "332359", fillNumber: 1, dateFilled: "2026-09-05", ndc11: "81968004560", remitCents: 20_457, copayCents: 0, patientTotalCents: 0, acquisitionCents: 32_823, grossProfitCents: 2_252 })],
+      [{ rxNumber: "332359", fillNumber: 1, dateFilled: "2026-09-05", ndc11: "81968004560", source: "mtf", payer: "Medicare Transaction Facilitator", amountCents: 14_618 }],
     );
-    assert.equal(f.agreesWithReport, null);
+    assert.equal(paid.marginCents, 2_252, "which is exactly what the report said all along");
+    assert.equal(paid.awaitedCents, null, "nothing outstanding once it is matched to the fill");
+    assert.equal(paid.agreesWithReport, true);
   });
 
   test("a copay card takes money off the copay; the rest does not disappear", () => {
@@ -135,14 +173,43 @@ describe("one fill, however many payers priced it", () => {
      * the copay, it does not make the remainder vanish.
      */
     const [f] = groupIntoFills([
-      claim({ rxNumber: "305766", fillNumber: 2, dateFilled: "2026-08-31", ndc11: "00074433902", itemName: "SYNTHROID", bin: "610455", payerLabel: "Blue Cross Blue Shield", remitCents: 0, copayCents: 0, patientTotalCents: 16_057, acquisitionCents: 12_868 }),
-      claim({ rxNumber: "305766", fillNumber: 2, dateFilled: "2026-08-31", ndc11: "00074433902", itemName: "SYNTHROID", bin: "610020", payerLabel: "Change Healthcare", remitCents: 4_626, copayCents: 0, patientTotalCents: 11_557, acquisitionCents: 12_868 }),
+      claim({ rxNumber: "305766", fillNumber: 2, dateFilled: "2026-08-31", ndc11: "00074662490", itemName: "SYNTHROID 100 MCG TABLET", bin: "610455", groupNumber: "MT207", payerLabel: "Blue Cross Blue Shield", quantityThousandths: 90_000, remitCents: 0, copayCents: 0, patientTotalCents: 0, acquisitionCents: 12_868, grossProfitCents: -12_868 }),
+      claim({ rxNumber: "305766", fillNumber: 2, dateFilled: "2026-08-31", ndc11: "00074662490", itemName: "SYNTHROID 100 MCG TABLET", bin: "601341", groupNumber: "OH9010121", payerLabel: "Change Healthcare", quantityThousandths: 0, remitCents: 4_625, copayCents: 11_557, patientTotalCents: 11_557, acquisitionCents: 0, grossProfitCents: 16_182 }),
     ]);
-    assert.equal(f.remitCents, 4_626, "the plan paid nothing; the card paid $46.26");
-    assert.equal(f.patientPaidCents, 11_557, "the patient paid what the card left, not nothing and not both copays");
-    assert.equal(f.revenueCents, 16_183);
-    assert.equal(f.acquisitionCents, 12_868);
-    assert.equal(f.marginCents, 3_315, "$33.15 made, against the $82.43 loss the site was showing");
+    assert.equal(f.remitCents, 4_625, "the plan paid nothing; the card paid $46.25");
+    assert.equal(f.patientPaidCents, 11_557, "the $161.82 price, less the $46.25 the card paid down");
+    assert.equal(f.revenueCents, 16_182);
+    assert.equal(f.acquisitionCents, 12_868, "the bottle, from the row that carried it — counted once");
+    assert.equal(f.quantityThousandths, 90_000, "ninety tablets, not the card row's zero");
+    assert.equal(f.marginCents, 3_314, "$33.14 made, against the $82.43 loss the site was showing");
+    assert.equal(f.reportedMarginCents, 3_314, "which is what the report itself printed");
+    assert.equal(f.agreesWithReport, true);
+    assert.equal(f.awaitedCents, null, "nothing outstanding: this money is already in hand");
+  });
+
+  test("the same answer when the plan that paid nothing was never stored", () => {
+    /*
+     * A plan paying nothing is a rejection to the importer, so the only row held for a fill like
+     * this can be the card's. The arithmetic has to survive that, and it does: the card's own copay
+     * already has the plan's contribution taken out of it, so remit plus that copay is still the
+     * whole of what the pharmacy took.
+     */
+    const [f] = groupIntoFills([
+      claim({ rxNumber: "305766", fillNumber: 2, dateFilled: "2026-08-31", ndc11: "00074662490", bin: "601341", payerLabel: "Change Healthcare", remitCents: 4_625, copayCents: 11_557, patientTotalCents: 11_557, acquisitionCents: 12_868 }),
+    ]);
+    assert.equal(f.revenueCents, 16_182);
+    assert.equal(f.marginCents, 3_314);
+  });
+
+  test("an ordinary coordination: each plan pays, and the patient pays what is left", () => {
+    // Primary pays $10 and leaves $20; the secondary is billed that $20, pays $15, leaves $5.
+    const [f] = groupIntoFills([
+      claim({ remitCents: 1_000, copayCents: 2_000, acquisitionCents: 2_000 }),
+      claim({ remitCents: 1_500, copayCents: 500, acquisitionCents: 2_000 }),
+    ]);
+    assert.equal(f.remitCents, 2_500);
+    assert.equal(f.patientPaidCents, 500);
+    assert.equal(f.revenueCents, 3_000);
   });
 
   test("money that arrives later is added to the fill it belongs to", () => {
@@ -162,13 +229,19 @@ describe("one fill, however many payers priced it", () => {
     assert.deepEqual(f.laterPayments.map((p) => p.source), ["mtf"]);
   });
 
-  test("where the plans disagree about the patient's share, the figure is flagged not asserted", () => {
+  test("a chain that closes is not flagged: the residuals are consistent with one price", () => {
+    /*
+     * The primary establishes $30 and pays $10; the secondary is billed the remaining $20, pays $15
+     * and leaves $5. The payers took $25 of a $30 drug, the patient the last $5. Nothing is in
+     * doubt here and nothing is flagged — the flag is for rows that cannot be one chain.
+     */
     const [f] = groupIntoFills([
       claim({ bin: "610011", remitCents: 1_000, copayCents: 2_000 }),
       claim({ bin: "610502", remitCents: 1_500, copayCents: 500 }),
     ]);
-    assert.equal(f.patientShareUncertain, true);
-    assert.equal(f.patientPaidCents, 500, "the smallest, which is right whenever each plan reduces what is left");
+    assert.equal(f.patientShareUncertain, false);
+    assert.equal(f.patientPaidCents, 500, "what the last plan left, not both copays added");
+    assert.equal(f.revenueCents, 3_000);
   });
 
   test("a reversal that matches nothing held is not a loss", () => {

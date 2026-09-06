@@ -16,10 +16,12 @@
  *
  * ── The arithmetic that fixes it ──
  *
- * Revenue is the sum of what every payer remitted, plus what the patient actually paid — and the
- * patient pays once. In a coordinated chain each payer reduces what is left owing, so the residual
- * the patient hands over is the *smallest* copay in the chain, not the sum of them. The primary's
- * copay is not money; it is the amount handed on to the secondary.
+ * Every row says what that payer paid and what the patient still owed afterwards. Added, those two
+ * are the price that adjudication established — on the real Synthroid, the card's $46.25 plus the
+ * $115.57 it left is the $161.82 the report derived for that row. Down a chain each payer is billed
+ * only what is left, so the largest of those sums is the whole price of the fill and the rest are
+ * residuals of it. Revenue is that price; the patient's share is what remains of it once every
+ * payer's remittance is taken out. The primary's copay is not money — it is the amount handed on.
  *
  * Cost is the acquisition price, taken once. Quantity is taken once. Neither is doubled by a claim
  * being transmitted twice.
@@ -125,7 +127,23 @@ export type Fill = {
    * then one of the columns is not what this reader thinks it is.
    */
   reportedMarginCents: number | null;
-  /** False where our arithmetic and the report's disagree by more than a rounding cent. */
+  /**
+   * Money the report counted on the day that has not reached the pharmacy.
+   *
+   * PioneerRx books the facilitator's share at adjudication, because the plan's response says what
+   * it will be. The money itself turns up weeks later, from the Medicare Transaction Facilitator.
+   * Until it does, the report's gross profit is ahead of the bank by exactly that amount — on one
+   * real Jardiance fill, $146.18, which is the whole difference between the report's $22.52 and
+   * this site's $123.66 loss.
+   *
+   * That is not a reading error, it is a receivable: the amount to expect, and the amount to chase
+   * if it never comes. It closes itself when the payment lands and is matched to the fill.
+   */
+  awaitedCents: number | null;
+  /**
+   * False only where this site holds *more* than the report did and nothing arrived later to
+   * explain it — which cannot be a timing difference, so a column is not where this reader thinks.
+   */
   agreesWithReport: boolean | null;
 };
 
@@ -172,15 +190,39 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
     }));
     const remitCents = payers.reduce((n, p) => n + p.remitCents, 0);
     /*
-     * The patient pays once.
+     * What the pharmacy actually took, worked out the way the report itself works it out.
      *
-     * Each plan in a coordinated chain reduces what is left owing, so the residual actually handed
-     * over is the smallest copay on the chain. Summing them counts the primary's copay — which is
-     * simply the amount passed to the secondary — as money the pharmacy received.
+     * Every row carries what that payer paid and what the patient was left owing after it. Those
+     * two added are the price that adjudication established:
+     *
+     *   the price = what this payer paid + what the patient still owed afterwards
+     *
+     * On the real Synthroid fill the card's row reads $46.25 paid and $115.57 still owing — $161.82,
+     * which is exactly the ingredient cost the report derived for that row. The plan's row reads
+     * zero and zero: it paid nothing and assessed nothing, and establishes no price at all.
+     *
+     * Down a coordinated chain each payer is billed only what is left, so the *largest* of those
+     * sums is the whole price of the fill and the later ones are residuals of it. Take the largest
+     * and nothing is counted twice — not the primary's copay, which is only the amount handed on,
+     * and not a rebill transmitted a second time.
+     *
+     *   revenue    = the largest price any row established
+     *   the patient = that price, less everything the payers between them remitted
+     *
+     * $161.82 taken on a bottle that cost $128.68: thirty-three dollars made, which this site was
+     * reporting as an eighty-two dollar loss. It is also how PioneerRx computes its own gross
+     * profit per row, which is why our figure and the report's now agree instead of arguing.
      */
-    const copays = payers.map((p) => p.copayCents);
-    const patientPaidCents = payers.length === 1 ? copays[0] : Math.min(...copays);
-    const patientShareUncertain = payers.length > 1 && new Set(copays).size > 1 && copays.every((c) => c > 0);
+    const priceEstablishedCents = Math.max(...payers.map((p) => p.remitCents + p.copayCents), 0);
+    const patientPaidCents = Math.max(0, priceEstablishedCents - remitCents);
+    /*
+     * Flagged where the arithmetic cannot close.
+     *
+     * If the payers between them remitted more than any row said the drug cost, these rows are not
+     * one chain — two primaries, or a rebill read as a coordination — and the patient's share above
+     * is a floor rather than a fact.
+     */
+    const patientShareUncertain = payers.length > 1 && remitCents > priceEstablishedCents;
 
     // The same bottle, priced once, whatever it was transmitted against.
     const costs = rows.map((r) => r.acquisitionCents).filter((x): x is number => x !== null && x !== undefined);
@@ -210,6 +252,15 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
     const reported = rows.map((r) => r.grossProfitCents).filter((x): x is number => x !== null && x !== undefined);
     const reportedMarginCents = reported.length === rows.length && rows.length > 0 ? reported.reduce((n, x) => n + x, 0) : null;
 
+    /*
+     * Where the report and this site differ, and by how much. Positive means the report counted
+     * money the pharmacy has not got.
+     */
+    const gapCents =
+      reportedMarginCents === null || acquisitionCents === null
+        ? null
+        : reportedMarginCents - (revenueCents - acquisitionCents);
+
     const first = rows[0];
     out.push({
       key,
@@ -230,10 +281,15 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
       acquisitionCents,
       marginCents: acquisitionCents === null ? null : revenueCents - acquisitionCents,
       reportedMarginCents,
-      agreesWithReport:
-        reportedMarginCents === null || acquisitionCents === null || laterPaymentsCents !== 0
-          ? null
-          : Math.abs(revenueCents - acquisitionCents - reportedMarginCents) <= 2,
+      /*
+       * The report ahead of us is a receivable; us ahead of the report is a bug.
+       *
+       * Both directions used to read as "the site is broken", which put a red banner on the claims
+       * screen for thirty-two fills that were simply waiting on facilitator money. They are not the
+       * same thing and are no longer said the same way.
+       */
+      awaitedCents: gapCents !== null && gapCents > 2 ? gapCents : null,
+      agreesWithReport: gapCents === null ? null : gapCents >= -2 || laterPaymentsCents !== 0,
     });
   }
   return out.sort((a, b) => b.dateFilled.localeCompare(a.dateFilled) || a.rxNumber.localeCompare(b.rxNumber));
@@ -263,9 +319,15 @@ export function coordinationEffect(fills: Fill[]): {
     if (!f.coordinated) continue;
     coordinatedFills++;
     if (f.marginCents === null || f.acquisitionCents === null) continue;
-    // What the primary alone would have looked like: its remit and copay against the whole bottle.
-    const primary = f.payers[0];
-    const alone = primary.remitCents + primary.copayCents - f.acquisitionCents;
+    /*
+     * What the worst single row would have looked like on its own.
+     *
+     * On a coordinated fill one row carries the bottle's whole cost while the money came in on
+     * another: the real Synthroid has a plan row reading $0.00 paid against $128.68 of drug, a
+     * $128.68 loss on a fill that in fact made $33.14. That row, not the first one, is the invented
+     * loss this grouping removes.
+     */
+    const alone = Math.min(...f.payers.map((p) => p.remitCents + p.copayCents - f.acquisitionCents!));
     if (alone < 0 && f.marginCents >= 0) {
       falseLosses++;
       falseLossCents += -alone;

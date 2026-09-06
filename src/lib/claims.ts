@@ -619,7 +619,27 @@ export async function claimFlags() {
      * same row.
      */
     disagreeing: fills.filter((f) => f.agreesWithReport === false),
+    /*
+     * Fills the report counted money on that the pharmacy has not received — worst first.
+     *
+     * PioneerRx books the facilitator's share at adjudication because the plan's response says what
+     * it will be; the money arrives weeks later from the Medicare Transaction Facilitator. Until it
+     * does, the report is ahead of the bank by exactly that amount. This is a list of receivables,
+     * and it closes itself as the payments land and are matched.
+     */
+    awaiting: fills.filter((f) => f.awaitedCents !== null).sort((a, b) => b.awaitedCents! - a.awaitedCents!),
+    awaitingCents: fills.reduce((n, f) => n + (f.awaitedCents ?? 0), 0),
     lossFillsTotalCents: lossFills.reduce((n, f) => n + (f.marginCents ?? 0), 0),
+    /*
+     * What these dispensings actually made, which is the only reason any of this is being counted.
+     *
+     * One row per bottle, cost taken once, the patient counted once, and anything that arrived
+     * afterwards added. Fills whose acquisition cost never came through are left out of both sides
+     * rather than counted as pure profit, and named, so the figure is of a knowable population.
+     */
+    pricedFills: fills.filter((f) => f.marginCents !== null).length,
+    revenueCents: fills.filter((f) => f.marginCents !== null).reduce((n, f) => n + f.revenueCents, 0),
+    marginCents: fills.reduce((n, f) => n + (f.marginCents ?? 0), 0),
     coordination,
     inScope: inScope.length,
     undetermined: undetermined.length,
@@ -638,26 +658,110 @@ export async function claimFlags() {
 }
 
 /** Claims grouped by the payer that priced them — the view a contract review works from. */
+/**
+ * What each payer is actually worth to this pharmacy.
+ *
+ * Per dispensing, not per transmission — the same correction the rest of this file makes, because
+ * otherwise this table answers the same question as the loss list and gives a different number.
+ * Summing the report's per-row gross profit counted one bottle's cost against every plan that
+ * priced it, which is how a copay card that paid $46.25 into a profitable fill came to be shown as
+ * a $62.99 loss, and how CVS Caremark read $95.13 in the red on a day it was not.
+ *
+ * A fill with one payer is that payer's, whole. A fill that two plans coordinated on belongs to
+ * neither of them alone, and there is no honest way to split one bottle between them — so it is
+ * held out of the profit column entirely and shown separately, with each plan credited only with
+ * the money it actually sent. Two figures that are true beat one that is tidy.
+ */
 export async function claimsByPayer() {
   const rows = await db.query.claims.findMany();
-  type Row = { pbmName: string; claims: number; receivedCents: number; profitCents: number; belowCost: number; bins: Set<string>; networks: Set<string> };
+  const { groupIntoFills } = await import("./fills");
+  const { laterPayments } = await import("./claim-payments");
+  const fills = groupIntoFills(
+    rows.map((c) => ({
+      id: c.id,
+      rxNumber: c.rxNumber,
+      fillNumber: c.fillNumber,
+      dateFilled: c.dateFilled,
+      ndc11: c.ndc11,
+      itemName: c.itemName,
+      bin: c.bin,
+      pbmName: c.pbmName,
+      payerLabel: c.payerLabel,
+      quantityThousandths: c.quantityThousandths,
+      remitCents: c.remitCents,
+      copayCents: c.copayCents,
+      patientTotalCents: c.patientTotalCents,
+      acquisitionCents: c.acquisitionCents,
+      grossProfitCents: c.grossProfitCents,
+      status: c.status,
+      unmatchedReversal: (c.remitCents ?? 0) < 0 && !c.reversalKey,
+    })),
+    await laterPayments(),
+  );
+
+  type Row = {
+    pbmName: string;
+    /** Fills this payer priced on its own, which are the ones its profit figure is drawn from. */
+    fills: number;
+    receivedCents: number;
+    profitCents: number;
+    belowCost: number;
+    /** Fills it shared with another plan: real business, but not separable into one plan's margin. */
+    coordinatedFills: number;
+    coordinatedRemitCents: number;
+    bins: Set<string>;
+    networks: Set<string>;
+  };
   const map = new Map<string, Row>();
-  for (const c of rows) {
-    const name = c.pbmName ?? (c.payerLabel ? `${c.payerLabel} (unmatched)` : "Unidentified payer");
+  const named = (p: { name: string | null; bin: string | null }) =>
+    p.name ?? (p.bin ? `BIN ${p.bin} (unmatched)` : "Unidentified payer");
+  const at = (name: string) => {
     let e = map.get(name);
     if (!e) {
-      e = { pbmName: name, claims: 0, receivedCents: 0, profitCents: 0, belowCost: 0, bins: new Set(), networks: new Set() };
+      e = { pbmName: name, fills: 0, receivedCents: 0, profitCents: 0, belowCost: 0, coordinatedFills: 0, coordinatedRemitCents: 0, bins: new Set(), networks: new Set() };
       map.set(name, e);
     }
-    e.claims++;
-    e.receivedCents += receivedCents(c.remitCents, c.copayCents) ?? 0;
-    e.profitCents += c.grossProfitCents ?? 0;
-    if ((c.grossProfitCents ?? 0) < 0) e.belowCost++;
-    if (c.bin) e.bins.add(c.bin);
-    if (c.networkId) e.networks.add(c.networkId);
+    return e;
+  };
+
+  for (const f of fills) {
+    if (f.coordinated) {
+      for (const p of f.payers) {
+        const e = at(named(p));
+        e.coordinatedFills++;
+        e.coordinatedRemitCents += p.remitCents;
+        if (p.bin) e.bins.add(p.bin);
+      }
+      continue;
+    }
+    const p = f.payers[0];
+    if (!p) continue;
+    const e = at(named(p));
+    e.fills++;
+    e.receivedCents += f.revenueCents;
+    e.profitCents += f.marginCents ?? 0;
+    if ((f.marginCents ?? 0) < 0) e.belowCost++;
+    if (p.bin) e.bins.add(p.bin);
   }
+
+  /*
+   * Networks belong to the claim row rather than the fill, and are joined back on the BIN — which
+   * is the one identifier both sides certainly agree on. Joining on the payer's display name would
+   * quietly drop every network for a payer the listing does not name.
+   */
+  const networksByBin = new Map<string, Set<string>>();
+  for (const c of rows) {
+    if (!c.networkId || !c.bin) continue;
+    const set = networksByBin.get(c.bin) ?? new Set<string>();
+    set.add(c.networkId);
+    networksByBin.set(c.bin, set);
+  }
+  for (const e of map.values()) {
+    for (const bin of e.bins) for (const n of networksByBin.get(bin) ?? []) e.networks.add(n);
+  }
+
   return [...map.values()]
-    .map((e) => ({ ...e, bins: [...e.bins].sort(), networks: [...e.networks].sort() }))
+    .map((e) => ({ ...e, claims: e.fills + e.coordinatedFills, bins: [...e.bins].sort(), networks: [...e.networks].sort() }))
     .sort((a, b) => b.claims - a.claims);
 }
 

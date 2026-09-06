@@ -34,6 +34,87 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
    */
   const { againstNadac, STANDING_MEANS } = await import("@/lib/against-nadac");
   const nadacStanding = await againstNadac(flags.fills);
+  /*
+   * Three lists, because they need three different things done to them.
+   *
+   * Measuring every dispensing against the benchmark is right; printing every dispensing is not.
+   * A row that came in above NADAC needs nothing, and a row on an unclassified plan cannot be
+   * judged at all until somebody says what kind of plan it is — so neither belongs in the list of
+   * work. What is left is the money: a shortfall the Kansas floor lets us file, and a rate that is
+   * bad but lawful and has to be argued commercially.
+   */
+  const short = nadacStanding.rows.filter((r) => r.againstBenchmarkCents < 0);
+  const actionable = short.filter((r) => r.standing === "owed" || r.standing === "argue");
+  const unsettled = short.filter((r) => r.standing === "unclassified");
+  const settled = nadacStanding.rows.filter((r) => r.againstBenchmarkCents >= 0 || r.standing === "the price");
+
+  /* One table, rendered against whichever of those lists is being shown. */
+  function NadacTable({ rows }: { rows: typeof nadacStanding.rows }) {
+    return (
+      <div className="mt-2 overflow-x-auto rounded-lg border border-line">
+        <table className="w-full text-sm">
+          <thead className="bg-ground text-left text-xs uppercase tracking-wide text-ink-3">
+            <tr>
+              <th className="px-3 py-2">Filled</th>
+              <th className="px-3 py-2">Drug</th>
+              <th className="px-3 py-2">Payer</th>
+              <th className="px-3 py-2 text-right">Came in</th>
+              <th className="px-3 py-2 text-right">NADAC + fee</th>
+              <th className="px-3 py-2 text-right">Against it</th>
+              <th className="px-3 py-2">What it means</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.slice(0, 60).map((r) => (
+              <tr key={r.key} className="border-t border-line">
+                <td className="px-3 py-2 whitespace-nowrap text-xs">{r.dateFilled}</td>
+                <td className="px-3 py-2">
+                  {r.itemName ?? r.ndc11}
+                  <span className="block font-mono text-[11px] text-ink-3">
+                    Rx {r.rxNumber}{r.fillNumber !== null ? `-${r.fillNumber}` : ""} · NADAC of {r.nadacOn}
+                  </span>
+                </td>
+                <td className="px-3 py-2 text-xs">{r.payer}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{formatCents(r.receivedCents)}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-ink-2">
+                  {formatCents(r.benchmarkCents)}
+                  <span className="block text-[11px] text-ink-3">
+                    {formatCents(r.nadacCents)} + {formatCents(r.dispensingFeeCents)}
+                  </span>
+                </td>
+                <td className={`px-3 py-2 text-right tabular-nums font-medium ${r.againstBenchmarkCents < 0 ? "text-red-700" : "text-accent"}`}>
+                  {r.againstBenchmarkCents > 0 ? "+" : ""}{formatCents(r.againstBenchmarkCents)}
+                </td>
+                <td className="px-3 py-2 text-xs">
+                  {r.againstBenchmarkCents >= 0 ? (
+                    <span className="text-ink-3">at or above it</span>
+                  ) : (
+                    <span
+                      className={`badge ${r.standing === "owed" ? "badge-crit" : r.standing === "argue" ? "badge-warn" : "badge-muted"}`}
+                      title={STANDING_MEANS[r.standing]}
+                    >
+                      {r.standing === "owed"
+                        ? "owed — file it"
+                        : r.standing === "argue"
+                          ? "argue it, cannot file"
+                          : r.standing === "the price"
+                            ? "the price, not a shortfall"
+                            : "classify the plan first"}
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {rows.length > 60 && (
+          <p className="border-t border-line px-3 py-2 text-xs text-ink-3">
+            The worst 60 of {rows.length} are shown.
+          </p>
+        )}
+      </div>
+    );
+  }
 
   const autoImport = (s.mail_auto_import ?? "").toLowerCase() === "yes";
   const mailOn = s.mail_enabled === "yes";
@@ -146,21 +227,46 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
       )}
 
       {/*
-        The report checking us, which is the only check that can catch a mis-read column.
+        The report ahead of the bank: money counted at adjudication that has not arrived.
 
-        Column positions here are worked out by counting. A report whose columns shift by one gives
-        figures that are each plausible and collectively wrong, and nothing inside our own
-        arithmetic can notice. PioneerRx prints its own gross profit for each row, computed from the
-        same row — so when ours and theirs disagree, a column is not where this reader thinks it is.
+        PioneerRx books the facilitator's share on the day, because the plan's response says what it
+        will be. The money itself comes weeks later from the Medicare Transaction Facilitator. So
+        the report reads a profit where this site reads a loss, and the whole of the difference is
+        cash the pharmacy is owed and has not got.
+
+        This used to be a red "the arithmetic is broken" banner over thirty-two fills that were
+        simply waiting to be paid. It is the opposite of a bug — it is a bill to collect.
+      */}
+      {flags.awaiting.length > 0 && (
+        <Notice kind="warn">
+          <b>{formatCents(flags.awaitingCents)} the report counted that has not reached the pharmacy.</b>{" "}
+          {flags.awaiting.length} fill{flags.awaiting.length === 1 ? " was" : "s were"} priced with a facilitator or
+          manufacturer share the plan promised at adjudication and pays weeks later — biggest is Rx{" "}
+          {flags.awaiting[0].rxNumber}
+          {flags.awaiting[0].fillNumber !== null ? `-${flags.awaiting[0].fillNumber}` : ""}
+          {flags.awaiting[0].itemName ? ` (${flags.awaiting[0].itemName})` : ""} at{" "}
+          {formatCents(flags.awaiting[0].awaitedCents ?? 0)}. Each is carried as a loss here until the payment lands and
+          is matched, which happens on its own once{" "}
+          <Link href="/remits/mtf" className="underline">the facilitator feed</Link> is running.
+        </Notice>
+      )}
+
+      {/*
+        The one direction that really is a reading error.
+
+        Column positions here are worked out by counting, and a report whose columns shift by one
+        gives figures that are each plausible and collectively wrong. Where this site holds *more*
+        than the report did and nothing arrived later to explain it, that cannot be a timing
+        difference — a column is not where this reader thinks it is.
       */}
       {flags.disagreeing.length > 0 && (
         <Notice kind="crit">
           <b>
-            {flags.disagreeing.length} fill{flags.disagreeing.length === 1 ? "" : "s"} where this site&rsquo;s arithmetic
-            disagrees with the report&rsquo;s own gross profit.
+            {flags.disagreeing.length} fill{flags.disagreeing.length === 1 ? "" : "s"} where this site counts more than
+            the report did, and nothing arrived later to explain it.
           </b>{" "}
-          That means a column is not where this reader thinks it is, and every figure taken from those rows is wrong the
-          same way. First one: Rx {flags.disagreeing[0].rxNumber}
+          That can only mean a column is not where this reader thinks it is. First one: Rx{" "}
+          {flags.disagreeing[0].rxNumber}
           {flags.disagreeing[0].fillNumber !== null ? `-${flags.disagreeing[0].fillNumber}` : ""} — this site makes it{" "}
           {formatCents(flags.disagreeing[0].marginCents ?? 0)}, the report says{" "}
           {formatCents(flags.disagreeing[0].reportedMarginCents ?? 0)}. Open it below and send me the row.
@@ -170,90 +276,50 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
 
-      {/*
-        The daily feed, and whether the door is open for it.
-
-        PioneerRx emails the "Rx Transaction Details By Submission Type" report at 6:30 every evening
-        as "Daily (date)". Everything that has to be true for it to load on its own is listed here
-        with its state, and the last file that came is named with what was made of it — so the
-        morning after, "did it come in right" is one glance here, and "what went wrong" is the Inbox
-        line this points to.
-      */}
-      <section className="my-4 rounded-lg border border-line bg-surface p-4">
-        <h2 className="text-sm font-semibold">Daily claims feed</h2>
-        <p className="mt-1 text-xs text-ink-3">
-          PioneerRx emails the <b>Rx Transaction Details By Submission Type</b> report at 6:30 each evening, named{" "}
-          <span className="font-mono">Daily (date)</span>. The site recognises it by its title line, not its name. A paid
-          row becomes a claim and a reversal cancels the claim it names. A paid row with no completed date had not been
-          picked up when the report ran; it is kept, because the report is drawn by the day a claim was transmitted and
-          that row will not come round again — if the patient never comes, the return to stock arrives as a reversal.
-          If it does not load, the <Link href="/inbox" className="text-accent underline">Inbox</Link> line
-          says how it came and what to change.
-        </p>
-        <ul className="mt-3 grid gap-1 text-xs sm:grid-cols-3">
-          <li className="flex items-center gap-2">
-            <span className={`badge ${mailReady ? "badge-ok" : "badge-crit"}`}>{mailReady ? "ready" : "not set up"}</span>
-            Mailbox connected {!mailReady && <Link href="/settings/email" className="text-accent underline">(set up)</Link>}
-          </li>
-          <li className="flex items-center gap-2">
-            <span className={`badge ${mailOn ? "badge-ok" : "badge-crit"}`}>{mailOn ? "on" : "off"}</span>
-            Checked automatically {!mailOn && <Link href="/settings/email" className="text-accent underline">(turn on)</Link>}
-          </li>
-          <li className="flex items-center gap-2">
-            <span className={`badge ${autoImport ? "badge-ok" : "badge-crit"}`}>{autoImport ? "on" : "off"}</span>
-            Loaded on arrival {!autoImport && <Link href="/settings/email" className="text-accent underline">(turn on)</Link>}
-          </li>
-        </ul>
-        <div className="mt-3 text-xs">
-          {lastImport ? (
-            <>
-              <span className={`badge ${lastAgeDays !== null && lastAgeDays > 2.3 ? "badge-warn" : "badge-ok"}`}>
-                {lastAgeDays !== null && lastAgeDays < 1 ? "today" : `${Math.floor(lastAgeDays ?? 0)}d ago`}
-              </span>{" "}
-              Last file <span className="font-mono">{lastImport.fileName}</span> received {lastImport.createdAt.slice(0, 16).replace("T", " ")}:{" "}
-              {lastImport.rowsRead.toLocaleString()} rows read, {lastImport.claimsAdded.toLocaleString()} paid claims added
-              {lastImport.duplicates ? `, ${lastImport.duplicates} already held` : ""}
-              {lastImport.skipped ? `, ${lastImport.skipped} set aside (${Object.entries(JSON.parse(lastImport.skipReasons || "{}") as Record<string, number>).map(([k, v]) => `${v} ${k}`).join(", ")})` : ""}
-              {lastImport.periodFrom ? ` — claims transmitted ${lastImport.periodFrom}` : ""}.
-            </>
-          ) : (
-            <><span className="badge badge-muted">waiting</span> No daily report has arrived yet. The first is due at 6:30 this evening.</>
-          )}
-        </div>
-      </section>
-
-      <section className="my-4 rounded-lg border border-line bg-surface p-4">
-        <h2 className="text-sm font-semibold">Load a file by hand</h2>
-        <p className="mt-1 text-xs text-ink-3">
-          The daily transaction report (.txt) or the Completed Prescriptions export (.xlsx or .csv). Loading the same
-          file again is safe — every row is identified, so anything already held is counted rather than added twice.
-        </p>
-        <form action={upload} className="mt-3 flex flex-wrap items-center gap-2">
-          <input type="file" name="file" accept=".xlsx,.csv,.txt" className="text-sm" />
-          <button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Load</button>
-        </form>
-      </section>
-
       {flags.total === 0 ? (
         <Empty>No claims loaded yet.</Empty>
       ) : (
         <>
+          {/*
+            What the pharmacy made, first, and then what it is still owed.
+
+            The four figures here used to be "claims held" and three kinds of problem, which is a
+            screen that can only ever deliver bad news. The reason any of this is counted is to find
+            money, so the money leads: what these dispensings made, what has been counted but not
+            received, what can be filed, and what actually lost.
+          */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Stat label="Claims held" value={flags.total.toLocaleString()} />
             <Stat
-              label="Dispensed at a loss"
-              value={String(flags.lossFills.length)}
-              tone={flags.lossFills.length ? "warn" : undefined}
-              sub={`${formatCents(flags.lossFillsTotalCents)} · per dispensing`}
+              label="What these fills made"
+              value={formatCents(flags.marginCents)}
+              tone={flags.marginCents < 0 ? "warn" : undefined}
+              sub={`${formatCents(flags.revenueCents)} taken in on ${flags.pricedFills.toLocaleString()} of ${flags.fills.length.toLocaleString()} dispensings`}
+            />
+            <Stat
+              label="Counted, not yet received"
+              value={formatCents(flags.awaitingCents)}
+              tone={flags.awaitingCents ? "warn" : undefined}
+              sub={flags.awaiting.length ? `${flags.awaiting.length} fills awaiting a facilitator payment` : "nothing outstanding"}
             />
             <Stat
               label="In-scope under $10.50"
-              value={String(flags.underFee.length)}
+              value={formatCents(flags.underFeeShortfallCents)}
               tone={flags.underFee.length ? "warn" : undefined}
-              sub={`${formatCents(flags.underFeeShortfallCents)} short`}
+              sub={`${flags.underFee.length} claims — a shortfall to file`}
             />
-            <Stat label="Cannot be priced" value={String(flags.unpriceable)} tone={flags.unpriceable ? "warn" : undefined} sub="no quantity" />
+            <Stat
+              label="Dispensed at a loss"
+              value={formatCents(flags.lossFillsTotalCents)}
+              tone={flags.lossFills.length ? "warn" : undefined}
+              sub={`${flags.lossFills.length} dispensings, after every payer is counted`}
+            />
           </div>
+          <p className="mt-1 text-xs text-ink-3">
+            {flags.total.toLocaleString()} claim rows became {flags.fills.length.toLocaleString()} dispensings — a
+            prescription billed to a plan and then to a card is one bottle, and counting it twice doubles its cost and
+            invents a loss.
+            {flags.unpriceable > 0 && ` ${flags.unpriceable} carry no dispensed quantity and cannot be priced at all.`}
+          </p>
 
           {flags.undetermined > 0 && (
             <Notice kind="warn">
@@ -292,16 +358,22 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
           )}
 
           <h2 className="mt-8 text-sm font-semibold">By payer</h2>
-          <p className="mb-2 text-xs text-ink-3">Open a payer to see its contracted rates and appeal route next to its claims.</p>
+          <p className="mb-2 text-xs text-ink-3">
+            Per dispensing, on the same arithmetic as everything else on this page — one bottle counted once, the
+            patient counted once. A fill two plans coordinated on cannot be split between them honestly, so it is held
+            out of the profit column and shown on its own, with each plan credited only with the money it sent.{" "}
+            Open a payer to see its contracted rates and appeal route next to its claims.
+          </p>
           <div className="overflow-x-auto rounded-lg border border-line">
             <table className="w-full text-sm">
               <thead className="bg-ground text-left text-xs uppercase tracking-wide text-ink-3">
                 <tr>
                   <th className="px-3 py-2">Payer</th>
-                  <th className="px-3 py-2 text-right">Claims</th>
+                  <th className="px-3 py-2 text-right">Fills</th>
                   <th className="px-3 py-2 text-right">Received</th>
                   <th className="px-3 py-2 text-right">Gross profit</th>
                   <th className="px-3 py-2 text-right">At a loss</th>
+                  <th className="px-3 py-2 text-right">Shared</th>
                   <th className="px-3 py-2">Networks</th>
                 </tr>
               </thead>
@@ -316,10 +388,21 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
                       )}
                       <div className="text-xs text-ink-3">{p.bins.join(", ") || "—"}</div>
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums">{p.claims}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{formatCents(p.receivedCents)}</td>
-                    <td className={`px-3 py-2 text-right tabular-nums ${p.profitCents < 0 ? "text-red-700" : ""}`}>{formatCents(p.profitCents)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{p.fills || <span className="text-ink-3">—</span>}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{p.fills ? formatCents(p.receivedCents) : <span className="text-ink-3">—</span>}</td>
+                    <td className={`px-3 py-2 text-right tabular-nums ${p.profitCents < 0 ? "text-red-700" : ""}`}>
+                      {p.fills ? formatCents(p.profitCents) : <span className="text-ink-3">—</span>}
+                    </td>
                     <td className="px-3 py-2 text-right tabular-nums">{p.belowCost || <span className="text-ink-3">—</span>}</td>
+                    <td className="px-3 py-2 text-right text-xs tabular-nums text-ink-3">
+                      {p.coordinatedFills ? (
+                        <span title="Fills this plan priced alongside another. One bottle cannot be split between two plans honestly, so only the money this plan sent is shown.">
+                          {p.coordinatedFills} · {formatCents(p.coordinatedRemitCents)}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
                     <td className="px-3 py-2 text-xs text-ink-3">{p.networks.join(", ") || "—"}</td>
                   </tr>
                 ))}
@@ -364,73 +447,58 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
                 <Stat label="At or above the benchmark" value={String(nadacStanding.atOrAbove)} sub="Paid what the drug cost, and the fee" />
               </div>
 
-              <div className="mt-2 overflow-x-auto rounded-lg border border-line">
-                <table className="w-full text-sm">
-                  <thead className="bg-ground text-left text-xs uppercase tracking-wide text-ink-3">
-                    <tr>
-                      <th className="px-3 py-2">Filled</th>
-                      <th className="px-3 py-2">Drug</th>
-                      <th className="px-3 py-2">Payer</th>
-                      <th className="px-3 py-2 text-right">Came in</th>
-                      <th className="px-3 py-2 text-right">NADAC + fee</th>
-                      <th className="px-3 py-2 text-right">Against it</th>
-                      <th className="px-3 py-2">What it means</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {nadacStanding.rows.slice(0, 60).map((r) => (
-                      <tr key={r.key} className="border-t border-line">
-                        <td className="px-3 py-2 whitespace-nowrap text-xs">{r.dateFilled}</td>
-                        <td className="px-3 py-2">
-                          {r.itemName ?? r.ndc11}
-                          <span className="block font-mono text-[11px] text-ink-3">
-                            Rx {r.rxNumber}{r.fillNumber !== null ? `-${r.fillNumber}` : ""} · NADAC of {r.nadacOn}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-xs">{r.payer}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{formatCents(r.receivedCents)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums text-ink-2">
-                          {formatCents(r.benchmarkCents)}
-                          <span className="block text-[11px] text-ink-3">
-                            {formatCents(r.nadacCents)} + {formatCents(r.dispensingFeeCents)}
-                          </span>
-                        </td>
-                        <td className={`px-3 py-2 text-right tabular-nums font-medium ${r.againstBenchmarkCents < 0 ? "text-red-700" : "text-accent"}`}>
-                          {r.againstBenchmarkCents > 0 ? "+" : ""}{formatCents(r.againstBenchmarkCents)}
-                        </td>
-                        <td className="px-3 py-2 text-xs">
-                          {r.againstBenchmarkCents >= 0 ? (
-                            <span className="text-ink-3">at or above it</span>
-                          ) : (
-                            <span
-                              className={`badge ${r.standing === "owed" ? "badge-crit" : r.standing === "argue" ? "badge-warn" : "badge-muted"}`}
-                              title={STANDING_MEANS[r.standing]}
-                            >
-                              {r.standing === "owed"
-                                ? "owed — file it"
-                                : r.standing === "argue"
-                                  ? "argue it, cannot file"
-                                  : r.standing === "the price"
-                                    ? "the price, not a shortfall"
-                                    : "classify the plan first"}
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              {/*
+                Only the rows somebody can do something about.
+
+                Every dispensing is measured, but printing all of them put fifty-nine rows and seven
+                pages of red numbers on this screen whose every actionable total was $0.00 — and a
+                list that long, that alarming and that inert is worse than no list, because it
+                teaches the reader to scroll past the section that holds the money. What is settled
+                stays one keystroke away below; what needs a decision is here.
+              */}
+              {actionable.length > 0 ? (
+                <NadacTable rows={actionable} />
+              ) : (
+                <p className="mt-2 rounded-lg border border-line bg-surface p-3 text-xs text-ink-2">
+                  Nothing here is a shortfall to file or a rate to argue{unsettled.length > 0 ? " yet" : ""}. Every
+                  dispensing with a classified plan came in at or above NADAC plus the fee, or is a discount programme
+                  where the low number is simply the price.
+                </p>
+              )}
+
+              {unsettled.length > 0 && (
+                <div className="mt-3 rounded-lg border border-warn/40 bg-warn/5 p-3 text-xs">
+                  <b>
+                    {unsettled.length} dispensing{unsettled.length === 1 ? "" : "s"} came in under NADAC + the fee on a
+                    plan nobody has classified — {formatCents(unsettled.reduce((n, r) => n + r.againstBenchmarkCents, 0))}{" "}
+                    between them.
+                  </b>{" "}
+                  Whether that is money owed or simply the price depends entirely on what kind of plan it is: the Kansas
+                  floor reaches a commercial or governmental plan and does not reach a discount card. Nothing can be
+                  claimed until they are told apart.{" "}
+                  <Link href="/plans" className="font-medium underline">Classify these plans</Link> and every one of
+                  these rows answers itself.
+                  <details className="mt-2">
+                    <summary className="cursor-pointer text-ink-3">Show the {unsettled.length} dispensings</summary>
+                    <div className="mt-2"><NadacTable rows={unsettled} /></div>
+                  </details>
+                </div>
+              )}
+
+              {settled.length > 0 && (
+                <details className="mt-3">
+                  <summary className="cursor-pointer text-xs text-ink-3">
+                    {settled.length} dispensing{settled.length === 1 ? "" : "s"} that need nothing — paid at or above the
+                    benchmark, or a discount programme where the low number is the price
+                  </summary>
+                  <div className="mt-2"><NadacTable rows={settled} /></div>
+                </details>
+              )}
+
               {nadacStanding.notCompared.length > 0 && (
                 <p className="mt-1 text-xs text-ink-3">
                   Not compared: {nadacStanding.notCompared.map((x) => `${x.fills} with ${x.reason}`).join(", ")}. Named
                   rather than dropped — a shorter list reads as good news.
-                </p>
-              )}
-              {nadacStanding.rows.some((r) => r.standing === "unclassified") && (
-                <p className="mt-1 text-xs text-warn">
-                  Some of these are on plans nobody has classified, so nothing can say whether the Kansas floor reaches
-                  them. <Link href="/plans" className="underline">Classify them</Link> and each answers itself.
                 </p>
               )}
             </>
@@ -496,14 +564,36 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
                         {f.payers.map((p) => p.name ?? p.bin ?? "—").join(" then ")}
                         {f.coordinated && <span className="badge badge-muted ml-1">two plans</span>}
                         {f.patientShareUncertain && (
-                          <span className="badge badge-warn ml-1" title="The plans disagree about what the patient owed and the report does not say which came last. The smaller figure is used.">
+                          <span className="badge badge-warn ml-1" title="These rows remit more between them than any of them said the drug cost, so they cannot be one chain. The patient's share is floored at nothing rather than invented.">
                             patient share unclear
+                          </span>
+                        )}
+                        {/*
+                          A loss that is only waiting to be paid is not the same as a loss.
+
+                          The report booked the facilitator's share on the day; the money comes weeks
+                          later. Sending somebody to argue with a plan over a fill that is simply
+                          unpaid wastes the one thing this screen is for.
+                        */}
+                        {f.awaitedCents !== null && (
+                          <span
+                            className="badge badge-warn ml-1"
+                            title="The report counted this at adjudication and the money has not arrived. It posts itself against this fill when the facilitator pays."
+                          >
+                            waiting on {formatCents(f.awaitedCents)}
                           </span>
                         )}
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums">{formatCents(f.revenueCents)}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{formatCents(f.acquisitionCents ?? 0)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-red-700">{formatCents(f.marginCents ?? 0)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-red-700">
+                        {formatCents(f.marginCents ?? 0)}
+                        {f.awaitedCents !== null && (
+                          <span className="block text-[11px] font-normal text-ink-3">
+                            {formatCents((f.marginCents ?? 0) + f.awaitedCents)} once it is paid
+                          </span>
+                        )}
+                      </td>
                     </tr>
                     {/*
                       What actually arrived, field by field.
@@ -540,12 +630,28 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
                                 nothing to show. Load that day&rsquo;s report again and it will be here.
                               </p>
                             )}
+                            {/*
+                              The two things a gap against the report can mean, said as two different
+                              things — because one is a bill to collect and the other is our bug.
+                            */}
+                            {f.awaitedCents !== null && (
+                              <p className="rounded-md border border-warn/50 bg-warn/10 p-2 text-[11px] text-ink-2">
+                                The report says this fill made {formatCents(f.reportedMarginCents ?? 0)} and this site
+                                makes it {formatCents(f.marginCents ?? 0)}. The difference is{" "}
+                                <b>{formatCents(f.awaitedCents)} the report counted at adjudication that has not reached
+                                the pharmacy</b> — the facilitator or manufacturer share the plan promised and pays
+                                weeks later. Nothing is wrong with the claim and nothing needs arguing: it posts itself
+                                against this fill when the money arrives through{" "}
+                                <Link href="/remits/mtf" className="underline">the facilitator feed</Link>, and this row
+                                becomes {formatCents((f.marginCents ?? 0) + f.awaitedCents)}.
+                              </p>
+                            )}
                             {f.agreesWithReport === false && (
                               <p className="rounded-md border border-crit bg-crit-soft p-2 text-[11px] text-crit">
-                                The report says this fill made {formatCents(f.reportedMarginCents ?? 0)} and this site
-                                makes it {formatCents(f.marginCents ?? 0)}. They are computed from the same row, so one
-                                of the columns above is not what this reader thinks it is — that is the bug, not the
-                                claim.
+                                This site makes this fill {formatCents(f.marginCents ?? 0)} and the report only{" "}
+                                {formatCents(f.reportedMarginCents ?? 0)}. We cannot be holding money the report never
+                                counted, so one of the columns above is not what this reader thinks it is — that is the
+                                bug, not the claim.
                               </p>
                             )}
                             <p className="text-[11px] text-ink-2">
@@ -586,6 +692,69 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
           )}
         </>
       )}
+      {/*
+        Where these claims come from, and how to feed it by hand.
+
+        It belongs on this page — the morning after, "did last night's file come in" is one glance
+        here. It does not belong above the money. Anyone opening this screen is asking what the
+        pharmacy made and what it is owed, and four paragraphs of plumbing before the first figure
+        is how a working screen turns into a wall.
+      */}
+      <section className="my-4 rounded-lg border border-line bg-surface p-4">
+        <h2 className="text-sm font-semibold">Daily claims feed</h2>
+        <p className="mt-1 text-xs text-ink-3">
+          PioneerRx emails the <b>Rx Transaction Details By Submission Type</b> report at 6:30 each evening, named{" "}
+          <span className="font-mono">Daily (date)</span>. The site recognises it by its title line, not its name. A paid
+          row becomes a claim and a reversal cancels the claim it names. A paid row with no completed date had not been
+          picked up when the report ran; it is kept, because the report is drawn by the day a claim was transmitted and
+          that row will not come round again — if the patient never comes, the return to stock arrives as a reversal.
+          If it does not load, the <Link href="/inbox" className="text-accent underline">Inbox</Link> line
+          says how it came and what to change.
+        </p>
+        <ul className="mt-3 grid gap-1 text-xs sm:grid-cols-3">
+          <li className="flex items-center gap-2">
+            <span className={`badge ${mailReady ? "badge-ok" : "badge-crit"}`}>{mailReady ? "ready" : "not set up"}</span>
+            Mailbox connected {!mailReady && <Link href="/settings/email" className="text-accent underline">(set up)</Link>}
+          </li>
+          <li className="flex items-center gap-2">
+            <span className={`badge ${mailOn ? "badge-ok" : "badge-crit"}`}>{mailOn ? "on" : "off"}</span>
+            Checked automatically {!mailOn && <Link href="/settings/email" className="text-accent underline">(turn on)</Link>}
+          </li>
+          <li className="flex items-center gap-2">
+            <span className={`badge ${autoImport ? "badge-ok" : "badge-crit"}`}>{autoImport ? "on" : "off"}</span>
+            Loaded on arrival {!autoImport && <Link href="/settings/email" className="text-accent underline">(turn on)</Link>}
+          </li>
+        </ul>
+        <div className="mt-3 text-xs">
+          {lastImport ? (
+            <>
+              <span className={`badge ${lastAgeDays !== null && lastAgeDays > 2.3 ? "badge-warn" : "badge-ok"}`}>
+                {lastAgeDays !== null && lastAgeDays < 1 ? "today" : `${Math.floor(lastAgeDays ?? 0)}d ago`}
+              </span>{" "}
+              Last file <span className="font-mono">{lastImport.fileName}</span> received {lastImport.createdAt.slice(0, 16).replace("T", " ")}:{" "}
+              {lastImport.rowsRead.toLocaleString()} rows read, {lastImport.claimsAdded.toLocaleString()} paid claims added
+              {lastImport.duplicates ? `, ${lastImport.duplicates} already held` : ""}
+              {lastImport.skipped ? `, ${lastImport.skipped} set aside (${Object.entries(JSON.parse(lastImport.skipReasons || "{}") as Record<string, number>).map(([k, v]) => `${v} ${k}`).join(", ")})` : ""}
+              {lastImport.periodFrom ? ` — claims transmitted ${lastImport.periodFrom}` : ""}.
+            </>
+          ) : (
+            <><span className="badge badge-muted">waiting</span> No daily report has arrived yet. The first is due at 6:30 this evening.</>
+          )}
+        </div>
+      </section>
+
+      <section className="my-4 rounded-lg border border-line bg-surface p-4">
+        <h2 className="text-sm font-semibold">Load a file by hand</h2>
+        <p className="mt-1 text-xs text-ink-3">
+          The daily transaction report (.txt) or the Completed Prescriptions export (.xlsx or .csv). Loading the same
+          file again is safe — every row is identified, so anything already held is counted rather than added twice.
+        </p>
+        <form action={upload} className="mt-3 flex flex-wrap items-center gap-2">
+          <input type="file" name="file" accept=".xlsx,.csv,.txt" className="text-sm" />
+          <button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Load</button>
+        </form>
+      </section>
+
     </>
   );
 }
