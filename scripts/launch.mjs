@@ -230,15 +230,33 @@ function sourceStamp() {
 function build(logged = false) {
   const r = logged ? runLogged : run;
   r(npmCmd, ["install", "--no-audit", "--no-fund"], logged ? 20 * 60_000 : undefined);
-  const buildEnv = { NODE_OPTIONS: "--max-old-space-size=4096", NEXT_TELEMETRY_DISABLED: "1" };
+  const once = (env, timeout) => {
+    if (logged) runLogged(npmCmd, ["run", "build"], timeout, env);
+    else run(npmCmd, ["run", "build"], { env: { ...process.env, ...env } });
+    // A build that exits nought without writing a BUILD_ID has not produced a site. Next has done
+    // this when a worker died late, and the app then starts against a directory that looks built.
+    if (!fs.existsSync(path.join(root, ".next", "BUILD_ID"))) {
+      throw new Error("the build finished without producing a site (no BUILD_ID)");
+    }
+  };
   try {
-    if (logged) runLogged(npmCmd, ["run", "build"], 30 * 60_000, buildEnv);
-    else run(npmCmd, ["run", "build"], { env: { ...process.env, ...buildEnv } });
+    once({ NODE_OPTIONS: "--max-old-space-size=4096", NEXT_TELEMETRY_DISABLED: "1" }, 30 * 60_000);
   } catch (e) {
-    step(`The build ran out of room (${e.message.split("\n")[0]}). Trying again with less of it at once…`);
-    const lean = { NODE_OPTIONS: "--max-old-space-size=2048", NEXT_TELEMETRY_DISABLED: "1", UV_THREADPOOL_SIZE: "2" };
-    if (logged) runLogged(npmCmd, ["run", "build"], 40 * 60_000, lean);
-    else run(npmCmd, ["run", "build"], { env: { ...process.env, ...lean } });
+    /*
+     * Start again from nothing rather than on top of the wreckage.
+     *
+     * A build killed part way leaves .next half written, and the next attempt reads that cache and
+     * fails in stranger ways — while the app cannot start at all, because the working build it
+     * replaced is gone. Clearing it costs a few minutes and is the difference between a pharmacy
+     * that is slow to update and one that has no site.
+     */
+    step(`The build did not finish (${String(e.message).split("\n")[0]}). Clearing the half-built copy and trying again with less at once…`);
+    try {
+      fs.rmSync(path.join(root, ".next"), { recursive: true, force: true });
+    } catch {
+      /* Locked by something still running; the retry will overwrite what it can. */
+    }
+    once({ NODE_OPTIONS: "--max-old-space-size=2048", NEXT_TELEMETRY_DISABLED: "1", UV_THREADPOOL_SIZE: "2" }, 40 * 60_000);
   }
   fs.writeFileSync(path.join(root, ".next", "source-stamp"), sourceStamp());
 }
