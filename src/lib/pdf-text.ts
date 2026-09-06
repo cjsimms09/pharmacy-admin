@@ -181,6 +181,84 @@ function unescape(s: string): string {
  * generated invoice places each cell separately and the schedule code is only meaningful next to
  * the item it belongs to. Reading the operators in file order would scatter the columns.
  */
+/**
+ * One run of text, and where on the page it was drawn.
+ *
+ * A report laid out in tiles puts several unrelated figures on the same baseline, so joining a
+ * page by line alone interleaves them beyond recovery — which is what made McKesson's drill-down
+ * look unreadable even after the positions were being computed correctly. A parser that has the
+ * x as well can read a column.
+ */
+export type PdfItem = { page: number; x: number; y: number; text: string };
+
+/** Every run of text on every page, with its position. `pdfText` is this, joined by line. */
+export function pdfItems(buf: Buffer): PdfItem[] {
+  const items: PdfItem[] = [];
+  const fonts = (() => {
+    try {
+      return fontMaps(buf);
+    } catch {
+      return new Map() as FontMaps;
+    }
+  })();
+  let i = 0;
+  let page = 0;
+
+  while (true) {
+    const s = buf.indexOf("stream", i);
+    if (s < 0) break;
+    let start = s + 6;
+    if (buf[start] === 13) start++;
+    if (buf[start] === 10) start++;
+    const end = buf.indexOf("endstream", start);
+    if (end < 0) break;
+
+    const raw = buf.subarray(start, end);
+    const text = inflate(raw) ?? raw.toString("latin1");
+    i = end + 9;
+    if (!text.includes("Td") && !text.includes("Tm")) continue;
+    page++;
+
+    let m: RegExpExecArray | null;
+    let font: FontMap | undefined;
+    let x = 0;
+    let y = 0;
+    TOKENS.lastIndex = 0;
+
+    while ((m = TOKENS.exec(text))) {
+      if (m[1] !== undefined) {
+        x = 0;
+        y = 0;
+        continue;
+      }
+      if (m[2] !== undefined) {
+        font = fonts.get(m[2]);
+        continue;
+      }
+      if (m[3] !== undefined && m[4] !== undefined) {
+        x += Number.parseFloat(m[3]);
+        y += Number.parseFloat(m[4]);
+        continue;
+      }
+      if (m[5] !== undefined && m[6] !== undefined) {
+        x = Number.parseFloat(m[5]);
+        y = Number.parseFloat(m[6]);
+        continue;
+      }
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+
+      const bytes = m[7]
+        ? Buffer.from(m[7].replace(/\s+/g, ""), "hex")
+        : Buffer.from(unescape(m[8] ?? ""), "latin1");
+      if (bytes.length === 0) continue;
+      const piece = font ? decode(bytes, font) : plain(bytes);
+      if (!piece.trim()) continue;
+      items.push({ page, x, y, text: piece });
+    }
+  }
+  return items;
+}
+
 export function pdfText(buf: Buffer): string {
   const out: string[] = [];
   const fonts = (() => {

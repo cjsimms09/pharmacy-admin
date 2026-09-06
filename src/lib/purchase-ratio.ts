@@ -20,9 +20,22 @@ import { allSuppliers } from "./suppliers-registry";
 export type LatestRatio = {
   supplierId: string | null;
   supplierName: string | null;
-  /** The scrubbed generic compliance ratio, as printed. */
+  /** The generic compliance ratio, as printed. */
   gcrPercent: number | null;
   osRxPercent: number | null;
+  /**
+   * Whether the report's exclusions are McKesson's own, and the ratio may therefore pick a band.
+   *
+   * Read off the line the report prints about itself. "Flu or Dropship" alone is a position on a
+   * wider denominator than McKesson settles on — on one real month the two read 10.13% and 20.64%.
+   * The full list, Flu and Dropship and Specialty and GLP1, is the scrub, and a GCR measured on it
+   * is the settled figure. Null where the report does not say, which is neither answer.
+   */
+  scrubbed?: boolean | null;
+  /** The exclusions as printed, so a screen can show what the answer rests on. */
+  exclusions?: string | null;
+  /** OneStop over generic: the figure the purchase-ratio ladder is measured by. */
+  osGxPercent?: number | null;
   /** The month it belongs to, as YYYY-MM. */
   month: string | null;
   /** When the report itself was generated. */
@@ -56,6 +69,9 @@ export async function filePurchaseDrillDown(
     currentMonth: string | null;
     currentGcrPercent: number | null;
     currentOsRxPercent: number | null;
+    currentOsGxPercent?: number | null;
+    scrubbed?: boolean | null;
+    exclusions?: string | null;
     months: { month: string; gcrPercent: number | null; osRxPercent: number | null; netPurchasesCents: number | null }[];
   },
   meta: { documentId?: string | null; supplierId?: string | null },
@@ -80,6 +96,9 @@ export async function filePurchaseDrillDown(
     supplierName: supplier?.name ?? null,
     gcrPercent: read.currentGcrPercent,
     osRxPercent: read.currentOsRxPercent,
+    osGxPercent: read.currentOsGxPercent ?? null,
+    scrubbed: read.scrubbed ?? null,
+    exclusions: read.exclusions ?? null,
     month: read.currentMonth,
     generatedOn: read.generatedOn,
     readAt: new Date().toISOString(),

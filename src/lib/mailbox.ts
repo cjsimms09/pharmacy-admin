@@ -803,12 +803,54 @@ async function importRecognised(
        * sets the discount on every contract generic. Read on arrival so the answer is already
        * right the first time anybody asks it, rather than a month behind.
        */
-      const { readPurchaseDrillDown } = await import("./ai");
       const { filePurchaseDrillDown } = await import("./purchase-ratio");
-      const read = await readPurchaseDrillDown(buf, { userId: ctx.userId ?? "mailbox-sweep", userName: ctx.userName ?? "Automatic check" });
-      const r = await filePurchaseDrillDown(read, { documentId: filed?.documentId ?? null, supplierId: filed?.supplierId ?? null });
-      routeResult = r.message + (read.unclear.length ? ` Left unsettled: ${read.unclear.join("; ")}` : "");
-      imported = r.stored;
+      /*
+       * Read from the document's own text first, and only ask for judgement if that fails.
+       *
+       * This report decides what a generic costs, and it arrives every morning. Sending it to a
+       * model made it cost money, need a key, and — the morning this was written — stop being read
+       * at all, because the month's spending ceiling had been reached. The layout is regular and
+       * the report checks its own arithmetic, so none of that is necessary.
+       */
+      const { readDrillDown } = await import("./drill-down-read");
+      const direct = readDrillDown(buf);
+      if (direct.months.length > 0 && direct.problems.length === 0) {
+        const current = direct.months[0];
+        const r = await filePurchaseDrillDown(
+          {
+            generatedOn: direct.generatedOn,
+            currentMonth: current.month,
+            currentGcrPercent: current.gcrPercent,
+            currentOsRxPercent: current.osRxPercent,
+            currentOsGxPercent: current.osGxPercent,
+            scrubbed: direct.scrubbed,
+            exclusions: direct.exclusions,
+            months: direct.months.map((m) => ({
+              month: m.month,
+              gcrPercent: m.gcrPercent,
+              osRxPercent: m.osRxPercent,
+              netPurchasesCents: m.netPurchasesCents,
+            })),
+          },
+          { documentId: filed?.documentId ?? null, supplierId: filed?.supplierId ?? null },
+        );
+        routeResult =
+          `${r.message} Read from the report itself — no judgement needed, so this cannot be stopped by the cost ceiling.` +
+          (direct.scrubbed === true
+            ? ` Its exclusions are ${direct.exclusions}, which is McKesson's own scrub, so this ratio picks the rebate band.`
+            : direct.scrubbed === false
+              ? ` Its exclusions are ${direct.exclusions} — narrower than McKesson settles on, so this is a position and the statement still picks the band.`
+              : " It does not print its exclusions, so it is held as a position only.");
+        imported = r.stored;
+      } else {
+        const { readPurchaseDrillDown } = await import("./ai");
+        const read = await readPurchaseDrillDown(buf, { userId: ctx.userId ?? "mailbox-sweep", userName: ctx.userName ?? "Automatic check" });
+        const r = await filePurchaseDrillDown(read, { documentId: filed?.documentId ?? null, supplierId: filed?.supplierId ?? null });
+        routeResult =
+          `${r.message} The layout could not be read directly (${direct.problems.join(" ") || "no month rows found"}), so it was read by Claude.` +
+          (read.unclear.length ? ` Left unsettled: ${read.unclear.join("; ")}` : "");
+        imported = r.stored;
+      }
     } else if (cls.kind === "return_policy") {
       /*
        * A returned goods policy, read against the supplier who sent it.
