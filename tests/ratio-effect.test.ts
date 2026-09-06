@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { projectRatio, tierEffect, lineEffect, bandAt, counts, type Position, type OrderLine, type Band } from "../src/lib/ratio-effect";
+import { projectRatio, tierEffect, lineEffect, bandAt, counts, type Position, type OrderLine, type Band, breakEvenPremiumPercent, nextTierAdvice} from "../src/lib/ratio-effect";
 
 /**
  * The second price on every McKesson line: what it does to the compliance ratio, and what the
@@ -109,5 +109,91 @@ describe("what the band is worth", () => {
   test("below the lowest threshold there is no band", () => {
     assert.equal(bandAt([{ thresholdPercent: 10, rebatePercent: 5 }], 9.99), null);
     assert.equal(bandAt(LADDER, 24)?.rebatePercent, 29);
+  });
+});
+
+describe("what the next band is worth, against what it costs to reach", () => {
+  test("the break-even premium is what the band pays over what it takes", () => {
+    // $512 of band on $4,120 of buying moved: worth doing while the primary is under 12.43% dearer.
+    assert.equal(breakEvenPremiumPercent(51_200, 412_000), 12.43);
+  });
+
+  test("a band already reached asks no question, and a band worth nothing answers none", () => {
+    assert.equal(breakEvenPremiumPercent(51_200, 0), null);
+    assert.equal(breakEvenPremiumPercent(0, 412_000), null);
+    assert.equal(breakEvenPremiumPercent(-100, 412_000), null);
+  });
+
+  test("a band worth more than the spend it needs is worth any premium", () => {
+    assert.equal(breakEvenPremiumPercent(200_000, 100_000), 200);
+  });
+});
+
+describe("the next band as an instruction", () => {
+  /*
+   * McKesson's compliance ladder, roughly as this pharmacy's stands: the ratio in the low
+   * eighties, bands every two points, and a month's buying of about $90,000 of which $52,000 is
+   * contract generics.
+   */
+  const bands: Band[] = [
+    { thresholdPercent: 78, rebatePercent: 20 },
+    { thresholdPercent: 82, rebatePercent: 24 },
+    { thresholdPercent: 86, rebatePercent: 27 },
+  ];
+  const position: Position = {
+    ratioPercent: 83.5,
+    denominatorCents: 9_000_000,
+    definition: "generics_over_rx",
+    scrub: "statement",
+  };
+  const effect = tierEffect(position, bands, [], 5_200_000);
+
+  test("the spend needed carries the ratio over the threshold, and no further", () => {
+    const a = nextTierAdvice({ effect, supplier: "McKesson", daysLeft: 9 })!;
+    assert.equal(a.nextThresholdPercent, 86);
+    assert.equal(a.nextRatePercent, 27);
+    assert.equal(a.currentRatePercent, 24);
+    // (0.86 × 9,000,000 − 0.835 × 9,000,000) / (1 − 0.86) = 225,000 / 0.14
+    assert.equal(a.neededCents, 1_607_143);
+    // Adding that spend to both sides lands exactly on the threshold, which is the point of it.
+    const after = (position.ratioPercent / 100 * position.denominatorCents + a.neededCents) / (position.denominatorCents + a.neededCents);
+    assert.ok(Math.abs(after * 100 - 86) < 0.001, `lands on the threshold, not near it: ${after * 100}`);
+  });
+
+  test("what the band pays is the rate step on the contract base, not on everything bought", () => {
+    const a = nextTierAdvice({ effect, supplier: "McKesson", daysLeft: 9 })!;
+    // (27% − 24%) × $52,000 = $1,560. The denominator is $90,000 and is not what the rebate pays on.
+    assert.equal(a.worthCents, 156_000);
+  });
+
+  test("the break-even premium is the whole decision, and it is in the sentence", () => {
+    const a = nextTierAdvice({ effect, supplier: "McKesson", daysLeft: 9 })!;
+    // $1,560 of band on $16,071.43 of buying moved: worth it while McKesson is under 9.71% dearer.
+    assert.equal(a.breakEvenPremiumPercent, 9.71);
+    assert.match(a.says, /\$16,071\.43 more of contract generics at McKesson/);
+    assert.match(a.says, /into the 27% band, worth \$1,560\.00/);
+    assert.match(a.says, /less than 9\.71% dearer on those items, and there are 9 days left to do it/);
+  });
+
+  test("a closed month says so rather than asking for buying that can no longer happen", () => {
+    const a = nextTierAdvice({ effect, supplier: "McKesson", daysLeft: 0 })!;
+    assert.match(a.says, /and the month is closed\.$/);
+    assert.doesNotMatch(a.says, /days left/);
+  });
+
+  test("the top band asks nothing, because there is nothing above it", () => {
+    const top = tierEffect({ ...position, ratioPercent: 90 }, bands, [], 5_200_000);
+    assert.equal(nextTierAdvice({ effect: top, supplier: "McKesson", daysLeft: 9 }), null);
+  });
+
+  test("a band that pays no more is named as worth nothing rather than recommended", () => {
+    const flat: Band[] = [
+      { thresholdPercent: 78, rebatePercent: 24 },
+      { thresholdPercent: 86, rebatePercent: 24 },
+    ];
+    const e = tierEffect(position, flat, [], 5_200_000);
+    const a = nextTierAdvice({ effect: e, supplier: "McKesson", daysLeft: 9 })!;
+    assert.equal(a.worthCents, 0);
+    assert.match(a.says, /worth nothing/);
   });
 });

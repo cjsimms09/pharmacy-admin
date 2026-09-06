@@ -199,3 +199,77 @@ export function lineEffect(p: Position, bands: Band[], line: OrderLine, baseCent
     bandDeltaCents: withIt.rebateAfterCents - without.rebateAfterCents,
   };
 }
+
+/**
+ * The most a dearer supplier may cost before reaching the next band stops paying.
+ *
+ * The owner's question, in his words: "if I am close to a higher tier and it's worth $500, I might
+ * want to order generics from McKesson even if more expensive." Both halves of that are already
+ * here — `next.numeratorNeededCents` is how much more contract-generic spend the band needs, and
+ * `next.worthCents` is what the band pays once reached — and the decision is the ratio between
+ * them.
+ *
+ * Buying that spend at the primary instead of the cheaper supplier costs the premium on it. So the
+ * band pays as long as
+ *
+ *     premium × spend needed  <  what the band is worth
+ *
+ * and the break-even premium is simply worth ÷ needed. Above it, moving the buying loses money
+ * even though the ratio improves; below it, a dearer invoice is the cheaper month.
+ *
+ * Returned as a percentage. Null where nothing is needed (the band is already reached, and the
+ * question does not arise) or where the band is worth nothing.
+ */
+export function breakEvenPremiumPercent(worthCents: number, neededCents: number): number | null {
+  if (neededCents <= 0 || worthCents <= 0) return null;
+  return Math.round((worthCents / neededCents) * 10_000) / 100;
+}
+
+/**
+ * The next band as an instruction: what it takes, what it pays, and when it stops paying.
+ *
+ * Pure, because it is the sentence the owner acts on and the arithmetic behind it should be
+ * provable without a database. `nextTierNow` in shelf.ts loads the position and hands it here.
+ */
+export type NextTierAdvice = {
+  nextThresholdPercent: number;
+  nextRatePercent: number;
+  currentRatePercent: number | null;
+  ratioPercent: number;
+  neededCents: number;
+  worthCents: number;
+  breakEvenPremiumPercent: number | null;
+  says: string;
+};
+
+export function nextTierAdvice(a: {
+  effect: TierEffect;
+  supplier: string;
+  /** Days left in the month, counting today. Nought once the month has closed. */
+  daysLeft: number;
+}): NextTierAdvice | null {
+  const { effect, supplier, daysLeft } = a;
+  if (!effect.next) return null;
+  const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const breakEven = breakEvenPremiumPercent(effect.next.worthCents, effect.next.numeratorNeededCents);
+  const says =
+    effect.next.worthCents <= 0
+      ? `The ${effect.next.band.rebatePercent}% band pays no more than the one ${supplier} is in on this month's contract generics, so reaching it is worth nothing.`
+      : `${money(effect.next.numeratorNeededCents)} more of contract generics at ${supplier} carries the ratio from ` +
+        `${effect.projection.afterPercent.toFixed(2)}% past ${effect.next.band.thresholdPercent}% and into the ` +
+        `${effect.next.band.rebatePercent}% band, worth ${money(effect.next.worthCents)} on the month's contract generics` +
+        (breakEven === null
+          ? "."
+          : `. That pays as long as ${supplier} is less than ${breakEven.toFixed(2)}% dearer on those items` +
+            (daysLeft === 0 ? ", and the month is closed." : `, and there ${daysLeft === 1 ? "is 1 day" : `are ${daysLeft} days`} left to do it.`));
+  return {
+    nextThresholdPercent: effect.next.band.thresholdPercent,
+    nextRatePercent: effect.next.band.rebatePercent,
+    currentRatePercent: effect.after?.rebatePercent ?? null,
+    ratioPercent: effect.projection.afterPercent,
+    neededCents: effect.next.numeratorNeededCents,
+    worthCents: effect.next.worthCents,
+    breakEvenPremiumPercent: breakEven,
+    says,
+  };
+}
