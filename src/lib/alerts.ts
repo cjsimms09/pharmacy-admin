@@ -444,6 +444,41 @@ export async function alerts(): Promise<Alert[]> {
     });
   }
 
+  /*
+   * Supplies, because running out of 16 dram vials stops the pharmacy as surely as anything else
+   * on this list and is the one thing here nobody is reminded of by a regulator.
+   *
+   * "Order now" means the stock left is down to the lead time plus the cushion — so it is not a
+   * warning that it is getting low, it is the last day the order can go and still arrive in time.
+   */
+  try {
+    const { suppliesAlert } = await import("./supplies-store");
+    const sup = await suppliesAlert();
+    if (sup && sup.toOrder > 0) {
+      out.push({
+        key: "supplies-order",
+        level: "now",
+        title: `${sup.toOrder} ${sup.toOrder === 1 ? "supply needs" : "supplies need"} ordering: ${sup.names.join(", ")}`,
+        why: "What is left is down to the delivery time plus the cushion. Ordering later than today spends the cushion.",
+        href: "/purchasing/supplies",
+        action: "Order",
+      });
+    }
+    if (sup && sup.neverCounted > 0) {
+      out.push({
+        key: "supplies-count",
+        level: "soon",
+        title: `${sup.neverCounted} ${sup.neverCounted === 1 ? "supply has" : "supplies have"} never been counted`,
+        why: "Nothing can be predicted about an item nobody has counted. One count is a position; a second gives the rate.",
+        href: "/purchasing/supplies",
+        action: "Count",
+      });
+    }
+  } catch (e) {
+    // Never let the supplies board take the whole dashboard down with it.
+    void e;
+  }
+
   // Worst first, and within a level the oldest problem first — which is the order somebody would
   // work them in anyway.
   const rank: Record<AlertLevel, number> = { now: 0, soon: 1 };

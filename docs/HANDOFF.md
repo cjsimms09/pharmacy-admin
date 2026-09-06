@@ -16,7 +16,7 @@ it and said so on the pull request. The owner reads this too.
 Done by the pharmacy session at `3c2c18c`: the statement selects the band (the daily figure is
 shown as a position, with the gap to the scrubbed figure carried live); invoices de-duplicate on
 the supplier's number and date; the database-backed tests use a migrated scratch file; gitleaks
-has `pull-requests: read`. Migrations `0062` and `0063` are theirs; the recommendation log is `0065` (their `0064` adds `on_account` to claims). Both sessions built
+has `pull-requests: read`. Migrations `0062` and `0063` are theirs; the recommendation log is `0066` (their `0064` and `0065` are `on_account` and supplies). Both sessions built
 the shelf and order-minimum pieces on the same night; the cloud session's `lean-stock.ts` and
 `order-basket.ts` were withdrawn for the pharmacy session's `usage.ts`, `on-hand.ts`,
 `order-plan.ts` and `lean-shelf.ts`, which are wired and have a real on-hand reader.
@@ -31,7 +31,7 @@ the shelf and order-minimum pieces on the same night; the cloud session's `lean-
       flag off three sidebar links silently land on Today; and Today's "needs you" is still
       compliance only. The profit side must be the first thing seen
       (`docs/reference/profit-engine.md` §4; `design-audit.md` §3.3).
-- [ ] **Remember and score the advice.** Migration `0065` adds `recommendation_log`. Call
+- [ ] **Remember and score the advice.** Migration `0066` adds `recommendation_log`. Call
       `rememberRecommendations(rows)` from `recommendation-store.ts` where `moneyFound()` is
       built; show each row's age from `ages`; add "acted" / "not doing this" buttons calling
       `markRecommendation`; `measureSwitch` scores a switch-NDC entry on the claims since. The
@@ -44,7 +44,7 @@ the shelf and order-minimum pieces on the same night; the cloud session's `lean-
       with minimums; it returns the band to aim at, every line's NDC and supplier, the moves, and
       the total, with the next best band beside it. This supersedes wiring the band strategy on
       its own. Demand and shelf come from your `usage.ts` and `on-hand.ts`; minimums from the supplier
-      fields you added at `0e14cb4`. The recommendation log is now migration `0065`.
+      fields you added at `0e14cb4`. The recommendation log is now migration `0066`.
 - [ ] **The McKesson question, monthly.** `bandStrategy()` in `band-strategy.ts` needs: the
       position (drill-down, restated to the statement's scrub), the ladder, the month's OneStop
       base, and two levers from the catalogues: unscrubbed brand spend that could move and its
@@ -300,7 +300,7 @@ id only), and twelve further uses of the data ranked by value against readiness.
 now delegates to `product-key.ts`, which it had duplicated.
 
 ### Files this branch touched
-`src/db/schema.ts`, `drizzle/0048_*`, `drizzle/0049_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down,recommendations,recommendation-log,recommendation-store,reimbursement-fit,band-strategy,month-plan}.ts` (new), `drizzle/0065_*`,
+`src/db/schema.ts`, `drizzle/0048_*`, `drizzle/0049_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down,recommendations,recommendation-log,recommendation-store,reimbursement-fit,band-strategy,month-plan}.ts` (new), `drizzle/0066_*`,
 `src/lib/{claims,rx-transactions,suppliers,suppliers-registry,pioneer-catalog,invoices,nadac-fetch,settings}.ts`,
 `src/app/(app)/suppliers/page.tsx`, `src/app/(app)/suppliers/[id]/terms/page.tsx` (new),
 `src/app/(app)/inventory/invoices/page.tsx`, `src/app/(app)/nadac/page.tsx`, `src/app/(app)/claims/page.tsx`,

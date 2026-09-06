@@ -273,6 +273,10 @@ export const SETTING_KEYS = [
   "mtf_auto",
   "mtf_last_pull",
   "mtf_last_result",
+
+  // Where a supply order from the Supplies page is sent. The pharmacy orders bags, labels and
+  // vials by emailing a rep, so the address is the whole of the integration.
+  "supplies_rep_email",
 ] as const;
 export type SettingKey = (typeof SETTING_KEYS)[number];
 export type Settings = Record<SettingKey, string>;
