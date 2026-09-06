@@ -128,6 +128,15 @@ export type Fill = {
   expectedFacilitatorCents: number | null;
   /** The promise less what has actually arrived, floored at nothing. What is still to come. */
   facilitatorOutstandingCents: number | null;
+  /**
+   * True where this fill is on a programme that pays a top-off later and none has arrived.
+   *
+   * The RxRescue plan (BIN 024284) adjudicates for whatever the primary will pay and sends the rest
+   * weeks afterwards on a credit memo. Unlike a facilitator payment the claim does not say what the
+   * amount will be — so the amount cannot be shown, but the fact that one is coming can, and that
+   * alone is the difference between a rate to argue about and a bill not yet paid.
+   */
+  topOffExpected: boolean;
   /** Remit, plus what the patient paid, plus anything that arrived afterwards. */
   revenueCents: number;
   /**
@@ -175,6 +184,15 @@ export type Fill = {
    */
   agreesWithReport: boolean | null;
 };
+
+/**
+ * Plans that pay part of the claim later, by credit memo rather than at adjudication.
+ *
+ * BIN 024284 is the Aytu / IPD RxRescue programme. A fill on it is priced at whatever the primary
+ * plan pays and topped up afterwards, so on the day it is dispensed it can look like a heavy loss
+ * and be nothing of the kind.
+ */
+export const TOP_OFF_BINS = new Set(["024284"]);
 
 /** The same dispensing, whichever plan was billed. */
 export function fillKey(c: { rxNumber: string; fillNumber: number | null; dateFilled: string; ndc11: string | null }): string {
@@ -337,6 +355,8 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
       laterPayments: mine.map((p) => ({ source: p.source, payer: p.payer, amountCents: p.amountCents })),
       expectedFacilitatorCents,
       facilitatorOutstandingCents,
+      topOffExpected:
+        payers.some((p) => p.bin !== null && TOP_OFF_BINS.has(p.bin)) && !mine.some((p) => p.source === "rxrescue"),
       revenueCents,
       patientShareUncertain,
       acquisitionCents,

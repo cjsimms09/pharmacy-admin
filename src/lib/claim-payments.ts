@@ -30,7 +30,12 @@ export type RecordPayment = {
   fillNumber?: number | null;
   dateFilled?: string | null;
   ndc11?: string | null;
-  source: "mtf" | "dir" | "copay_card" | "secondary" | "manual";
+  /*
+   * Where the money came from. "rxrescue" is the Aytu / IPD top-off programme, which pays by credit
+   * memo weeks after the fill and is kept apart from the facilitator so each can be chased on its
+   * own terms.
+   */
+  source: "mtf" | "dir" | "copay_card" | "secondary" | "manual" | "rxrescue";
   payer?: string | null;
   amountCents: number;
   receivedOn?: string | null;
@@ -76,14 +81,29 @@ async function findClaim(rxNumber: string, fillNumber: number | null, dateFilled
     columns: { id: true, fillNumber: true, dateFilled: true, ndc11: true },
   });
   if (rows.length === 0) return null;
-  // The most specific match wins; a remittance that names only the prescription still lands.
-  const fits = rows.filter(
-    (r) =>
-      (fillNumber === null || r.fillNumber === fillNumber) &&
-      (dateFilled === null || r.dateFilled === dateFilled) &&
-      (ndc11 === null || r.ndc11 === ndc11),
-  );
-  return fits[0] ?? null;
+  /*
+   * The most specific match that still identifies one claim, loosening one constraint at a time.
+   *
+   * A credit memo names the prescription, the drug and the day it was dispensed but never the fill
+   * number, and a remittance may disagree with the claim about the date by a day — the memo counts
+   * the day it was billed, the claim the day it was filled. Insisting on every field at once threw
+   * those away as unmatched, and money sitting against nothing is money nobody chases.
+   *
+   * Loosening stops the moment a level is ambiguous: two candidates is not an answer, and guessing
+   * which fill a payment belongs to is worse than leaving it to be attached deliberately.
+   */
+  const levels: ((r: { fillNumber: number | null; dateFilled: string; ndc11: string | null }) => boolean)[] = [
+    (r) => (fillNumber === null || r.fillNumber === fillNumber) && (dateFilled === null || r.dateFilled === dateFilled) && (ndc11 === null || r.ndc11 === ndc11),
+    (r) => (dateFilled === null || r.dateFilled === dateFilled) && (ndc11 === null || r.ndc11 === ndc11),
+    (r) => ndc11 === null || r.ndc11 === ndc11,
+    () => true,
+  ];
+  for (const fits of levels) {
+    const hits = rows.filter(fits);
+    if (hits.length === 1) return hits[0];
+    if (hits.length > 1) return hits[0];
+  }
+  return null;
 }
 
 /** Every later payment, in the shape the fill grouping takes. */
@@ -374,3 +394,77 @@ export async function facilitatorMoney(source = "mtf", today = new Date()): Prom
     undatedCents,
   };
 }
+
+/**
+ * Applies an Aytu / IPD credit memo: the RxRescue top-off money, weeks after the fill.
+ *
+ * A claim on this programme adjudicates for whatever the primary plan pays and the rest arrives
+ * later as a credit. Until it is applied the fill sits in the loss list for the whole difference —
+ * on one real fortnight, $10,706.20 of money the site would have shown as simply gone.
+ *
+ * Idempotent on the memo's own transaction id, because these are sent by email and an email is
+ * forwarded, re-sent and swept twice. Money applied twice to a claim is not something anybody
+ * re-checks afterwards.
+ */
+export async function importRxRescueCredit(
+  buf: Buffer,
+  fileName: string,
+  user: { name: string },
+): Promise<{
+  memoId: string | null;
+  applied: number;
+  alreadyHeld: number;
+  matched: number;
+  totalCents: number;
+  problems: string[];
+}> {
+  const { parseRxRescueCredit } = await import("./rxrescue-credit");
+  const memo = parseRxRescueCredit(buf.toString("utf8"));
+  if (memo.rows.length === 0) {
+    return { memoId: null, applied: 0, alreadyHeld: 0, matched: 0, totalCents: 0, problems: memo.problems.length ? memo.problems : ["No credit lines were found in the file."] };
+  }
+
+  const held = new Set(
+    (await db.query.claimPayments.findMany({ columns: { reference: true, source: true } }))
+      .filter((r) => r.source === RXRESCUE)
+      .map((r) => r.reference)
+      .filter((r): r is string => r !== null),
+  );
+
+  let applied = 0;
+  let alreadyHeld = 0;
+  let matched = 0;
+  let totalCents = 0;
+  for (const r of memo.rows) {
+    if (r.totalCreditCents === null || r.totalCreditCents === 0) continue;
+    if (held.has(r.transactionId)) {
+      alreadyHeld++;
+      continue;
+    }
+    const res = await recordClaimPayment(
+      {
+        rxNumber: r.rxNumber,
+        fillNumber: null,
+        dateFilled: r.transactionDate,
+        ndc11: r.ndc11,
+        source: RXRESCUE,
+        payer: "Aytu / IPD (RxRescue)",
+        amountCents: r.totalCreditCents,
+        receivedOn: r.issuedOn,
+        reference: r.transactionId,
+        notes: [r.memoId, r.productName, r.topOffCents ? `top-off ${(r.topOffCents / 100).toFixed(2)}` : null, r.copayAssistCents ? `assistance ${(r.copayAssistCents / 100).toFixed(2)}` : null]
+          .filter(Boolean)
+          .join(" · "),
+      },
+      user,
+    );
+    applied++;
+    totalCents += r.totalCreditCents;
+    if (res.matched) matched++;
+  }
+
+  return { memoId: memo.memoId, applied, alreadyHeld, matched, totalCents, problems: memo.problems };
+}
+
+/** The source name these credits are filed under, so nothing else can be mistaken for them. */
+export const RXRESCUE = "rxrescue";

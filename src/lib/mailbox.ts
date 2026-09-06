@@ -609,6 +609,24 @@ async function importRecognised(
       const r = await importRxTransactions(buf, fileName, ctx.userId ?? "mailbox-sweep");
       routeResult = describeTransactionImport(r);
       if (r.claimsAdded || r.reversed) imported = true;
+    } else if (cls.kind === "rxrescue_credit") {
+      /*
+       * Top-off money applied to the fills it names. Idempotent on the memo's own transaction ids,
+       * because an emailed memo gets forwarded and swept more than once, and money applied twice to
+       * a claim is not something anybody re-checks.
+       */
+      const { importRxRescueCredit } = await import("./claim-payments");
+      const r = await importRxRescueCredit(buf, fileName, { name: ctx.userName ?? "mailbox-sweep" });
+      const bits = [
+        r.applied
+          ? `${money(r.totalCents)} of RxRescue credit applied across ${r.applied} line${r.applied === 1 ? "" : "s"}${r.memoId ? ` (memo ${r.memoId})` : ""}`
+          : "No new credit lines on this memo.",
+        r.matched < r.applied ? `${r.applied - r.matched} name a prescription this site has not loaded yet; they attach themselves when it arrives.` : null,
+        r.alreadyHeld ? `${r.alreadyHeld} were already applied from an earlier copy of this memo.` : null,
+        ...r.problems,
+      ].filter(Boolean);
+      routeResult = bits.join(" ");
+      if (r.applied) imported = true;
     } else if (cls.kind === "accrual_sales") {
       /*
        * Recognised, kept, and honestly described as not yet counted.

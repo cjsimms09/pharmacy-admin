@@ -632,6 +632,19 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
                             MTF promised {formatCents(f.facilitatorOutstandingCents ?? 0)}
                           </span>
                         )}
+                        {/*
+                          A programme that tops the claim up later. The amount is not knowable from
+                          the claim — only the memo says it — but the fact that money is coming is,
+                          and that is the whole difference between a bad rate and an unpaid bill.
+                        */}
+                        {f.topOffExpected && (
+                          <span
+                            className="badge badge-warn ml-1"
+                            title="This plan pays part of the claim later, on a credit memo. Nothing has been credited against this fill yet. The amount is not on the claim — it arrives with the memo."
+                          >
+                            top-off expected
+                          </span>
+                        )}
                         {f.unreconciledCents !== null && (
                           <span
                             className="badge badge-warn ml-1"
