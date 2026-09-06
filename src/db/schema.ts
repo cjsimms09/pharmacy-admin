@@ -905,6 +905,15 @@ export const supplierInvoices = sqliteTable(
      * the same three facts, against the same invoice, signed by the same person.
      */
     receivedOn: text("received_on"),
+    /**
+     * The day the wholesaler was actually paid, which is a different question from the invoice date.
+     *
+     * A cash account records goods when the money leaves, and an accrual account records them when
+     * they are dispensed. Without this the site had only the invoice date and was showing the same
+     * cost of goods on both bases — which cannot be right on either, and is the flattering answer
+     * on whichever one is wrong that month.
+     */
+    paidOn: text("paid_on"),
     receivedBy: text("received_by"),
     /** Anything that did not match — short counts, damage, a substitution. */
     receiptNote: text("receipt_note"),
