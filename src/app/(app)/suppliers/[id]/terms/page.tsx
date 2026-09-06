@@ -32,6 +32,7 @@ import { ratioForSupplier } from "@/lib/purchase-ratio";
 import { PageHeader, Card, Notice, Field } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import { getSettings, setSetting } from "@/lib/settings";
+import { parseCents, formatCents } from "@/lib/money";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Supplier terms" };
@@ -206,6 +207,60 @@ export default async function SupplierTermsPage({
       if (e && typeof e === "object" && "digest" in e) throw e;
       redirect(`/suppliers/${id}/terms?error=` + encodeURIComponent(e instanceof Error ? e.message : "Could not remove that."));
     }
+  }
+
+  /**
+   * How this supplier will and will not take an order.
+   *
+   * Not a rebate and not a return policy, but it decides both of those in practice: a saving on a
+   * secondary's price is only a saving if the order reaches their minimum, and an order that does
+   * not is either abandoned or padded with stock nobody wanted. Recorded here so the buy list can
+   * say "short by $320" before the buying is done rather than after.
+   *
+   * Blank means "not known", which is a different thing from zero. Zero is a supplier who will
+   * ship a single bottle; blank is a supplier whose terms nobody has entered, and the buy list
+   * treats those two very differently.
+   */
+  async function saveOrdering(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const cents = (name: string): number | null => {
+      const raw = String(fd.get(name) ?? "").trim();
+      if (!raw) return null;
+      const n = parseCents(raw);
+      return n === null || n < 0 ? null : n;
+    };
+    const whole = (name: string): number | null => {
+      const raw = String(fd.get(name) ?? "").trim();
+      if (!raw) return null;
+      const n = Number(raw);
+      return Number.isFinite(n) && n >= 0 ? Math.round(n) : null;
+    };
+    const primary = fd.get("primarySupplier") === "yes";
+
+    /*
+     * Exactly one supplier is the primary. Setting a new one clears the old, rather than leaving
+     * two: the rebate-band arithmetic asks "which relationship carries the ladder" and two answers
+     * is worse than none — it would price the same order against whichever row came back first.
+     */
+    if (primary) await db.update(schema.suppliers).set({ primarySupplier: false });
+    await db
+      .update(schema.suppliers)
+      .set({
+        minimumOrderCents: cents("minimumOrderCents"),
+        freeFreightCents: cents("freeFreightCents"),
+        freightCents: cents("freightCents"),
+        leadTimeDays: whole("leadTimeDays"),
+        primarySupplier: primary,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(schema.suppliers.id, id));
+
+    await audit({ action: "supplier.ordering.save", userId: u.id, userName: u.name, entity: "supplier", entityId: id, details: "order minimum, freight and lead time" });
+    revalidatePath(`/suppliers/${id}/terms`);
+    revalidatePath("/suppliers");
+    revalidatePath("/purchasing");
+    redirect(`/suppliers/${id}/terms?ok=` + encodeURIComponent("Ordering terms saved. The buy list will hold an order to this supplier until the minimum is met."));
   }
 
   /** Clears every duplicate at once, keeping the first copy of each. */
@@ -420,6 +475,50 @@ export default async function SupplierTermsPage({
           </form>
         </Notice>
       )}
+
+      {/* ── 0. How they will take an order ────────────────────────────── */}
+      <Card
+        className="mt-4"
+        tone={supplier.minimumOrderCents === null ? "warn" : undefined}
+        title="How they will take an order"
+        subtitle="The minimum, the freight, and how long it takes to arrive. Without these the buy list will recommend a basket this supplier refuses."
+      >
+        <form action={saveOrdering} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Field label="Order minimum" hint="They will not ship under this. Leave blank if they have none; 0 means they will ship anything.">
+            <input name="minimumOrderCents" defaultValue={supplier.minimumOrderCents === null ? "" : formatCents(supplier.minimumOrderCents)} placeholder="500.00" inputMode="decimal" />
+          </Field>
+          <Field label="Free freight above" hint="Where different from the minimum. Below it, the charge below is added to every comparison.">
+            <input name="freeFreightCents" defaultValue={supplier.freeFreightCents === null ? "" : formatCents(supplier.freeFreightCents)} placeholder="250.00" inputMode="decimal" />
+          </Field>
+          <Field label="Freight charged below that">
+            <input name="freightCents" defaultValue={supplier.freightCents === null ? "" : formatCents(supplier.freightCents)} placeholder="15.00" inputMode="decimal" />
+          </Field>
+          <Field label="Days from order to shelf" hint="Part of how much cover an order has to buy, not a footnote.">
+            <input name="leadTimeDays" type="number" min={0} step={1} defaultValue={supplier.leadTimeDays ?? ""} placeholder="1" />
+          </Field>
+          <div className="sm:col-span-2 lg:col-span-4">
+            <label className="flex items-start gap-2 text-sm">
+              <input type="checkbox" name="primarySupplier" value="yes" defaultChecked={supplier.primarySupplier === true} className="mt-1" />
+              <span>
+                <b>This is the primary wholesaler.</b> Exactly one supplier is, and it is the one whose compliance ratio
+                moving spend away from costs a rebate band. It is taken from the contract rather than from whoever
+                happened to be the largest this month — the buy list prices every switch against this supplier&rsquo;s
+                ladder, and pointing it at the wrong one gets the arithmetic exactly backwards.
+              </span>
+            </label>
+          </div>
+          <div className="sm:col-span-2 lg:col-span-4">
+            <SubmitButton pendingLabel="Saving…">Save ordering terms</SubmitButton>
+          </div>
+        </form>
+        {supplier.minimumOrderCents !== null && (
+          <p className="mt-3 text-sm text-ink-3">
+            The buy list will hold an order to {supplier.name} until it reaches {formatCents(supplier.minimumOrderCents)},
+            and will offer to fill the gap with the drugs this supplier is cheapest on that move fast enough to be worth
+            buying deep. <Link href="/purchasing" className="underline">See what it would order today</Link>.
+          </p>
+        )}
+      </Card>
 
       {/* ── 1. The answer ─────────────────────────────────────────────── */}
       <Card

@@ -698,6 +698,27 @@ async function importRecognised(
       ].filter(Boolean);
       routeResult = bits.join(" ");
       if (r.applied) imported = true;
+    } else if (cls.kind === "on_hand") {
+      /*
+       * The day's shelf, filed against the date it counts rather than the date it arrived.
+       *
+       * A snapshot, not a ledger: the same day sent twice is the same shelf, so it replaces. The
+       * date is read off the file where it prints one; where it does not, nothing is filed, because
+       * a count dated a day out misplaces a whole day of dispensing and would then recommend
+       * sending back stock that has already gone.
+       */
+      const { fileOnHand } = await import("./shelf");
+      const r = await fileOnHand(buf, fileName, { userId: ctx.userId ?? "mailbox-sweep" }, { documentId: filed?.documentId ?? null });
+      if (r.ok) {
+        routeResult =
+          `${r.items.toLocaleString()} items counted on ${r.countedOn}` +
+          (r.replaced ? ", replacing the earlier upload for that day" : "") +
+          (r.unmappedColumns.length ? `. Columns not used: ${r.unmappedColumns.join(", ")}` : "") +
+          ".";
+        imported = true;
+      } else {
+        routeResult = `Recognised as an inventory count but nothing was filed: ${r.why}`;
+      }
     } else if (cls.kind === "accrual_sales") {
       /*
        * Recognised, kept, and honestly described as not yet counted.

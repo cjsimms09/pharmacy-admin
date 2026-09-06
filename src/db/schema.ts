@@ -761,6 +761,29 @@ export const suppliers = sqliteTable(
      * supplier sending a rebate report would have overwritten the first one's figures.
      */
     rebateStatementJson: text("rebate_statement_json"),
+    /**
+     * The order value they will not ship under, in cents.
+     *
+     * A secondary wholesaler is often cheaper on a handful of items and will not take the order
+     * unless it reaches a number — five hundred dollars at this pharmacy's secondaries. Without it
+     * on file the site recommends a basket the supplier refuses, which is worse than no
+     * recommendation: the buying is done, the saving is not, and the pharmacist finds out at their
+     * website. Null means they have no minimum, which is a different thing from not knowing.
+     */
+    minimumOrderCents: integer("minimum_order_cents"),
+    /** Above this they ship free; below it `freightCents` is added to the comparison. */
+    freeFreightCents: integer("free_freight_cents"),
+    freightCents: integer("freight_cents"),
+    /** Days from order to shelf. Part of how much cover an order has to buy, not a footnote. */
+    leadTimeDays: integer("lead_time_days"),
+    /**
+     * The wholesaler whose compliance ratio moving spend away from costs a rebate band.
+     *
+     * Exactly one supplier is the primary. It is not inferred from spend: the pharmacy's contract
+     * says which relationship carries the ladder, and a month where a secondary happened to be
+     * larger would otherwise silently move the ratio arithmetic to the wrong supplier.
+     */
+    primarySupplier: integer("primary_supplier", { mode: "boolean" }).notNull().default(false),
     notes: text("notes"),
     active: integer("active", { mode: "boolean" }).notNull().default(true),
     createdAt: text("created_at").notNull().default(now()),
@@ -2319,4 +2342,56 @@ export const tempNotes = sqliteTable(
     createdAt: text("created_at").notNull().default(now()),
   },
   (t) => [index("temp_notes_sensor_period_idx").on(t.sensorId, t.periodKey)],
+);
+
+
+// ── The shelf ────────────────────────────────────────────────────────
+// What is physically here, counted rather than computed. Claims say what left and invoices say
+// what arrived, and the difference between them is not what is on the shelf — short fills, partial
+// bottles, returns, breakage and every count ever done sit in that gap. So it is read from a daily
+// export and stored as a snapshot per day, never accumulated.
+
+export const onHandImports = sqliteTable(
+  "on_hand_imports",
+  {
+    id: text("id").primaryKey(),
+    /** The date the count represents, not the date it was uploaded. One snapshot per date. */
+    countedOn: text("counted_on").notNull(),
+    fileName: text("file_name").notNull(),
+    rowsRead: integer("rows_read").notNull().default(0),
+    itemsKept: integer("items_kept").notNull().default(0),
+    /** Reasons rows were dropped, as JSON, so a short read is visible rather than silent. */
+    skipReasons: text("skip_reasons").notNull().default("{}"),
+    /** Columns in the file this site had no meaning for. */
+    unmappedColumns: text("unmapped_columns").notNull().default("[]"),
+    unitsThousandths: integer("units_thousandths").notNull().default(0),
+    /** The shelf's total value, where the file carried one. Null where it did not. */
+    valueCents: integer("value_cents"),
+    documentId: text("document_id"),
+    createdBy: text("created_by").notNull(),
+    createdAt: text("created_at").notNull().default(now()),
+  },
+  (t) => [uniqueIndex("on_hand_imports_counted_idx").on(t.countedOn)],
+);
+
+export const onHand = sqliteTable(
+  "on_hand",
+  {
+    id: text("id").primaryKey(),
+    importId: text("import_id").notNull().references(() => onHandImports.id, { onDelete: "cascade" }),
+    /** Copied from the import so a day's shelf is one query without a join. */
+    countedOn: text("counted_on").notNull(),
+    ndc11: text("ndc11").notNull(),
+    description: text("description"),
+    itemNumber: text("item_number"),
+    /** Units on the shelf, in thousandths, so a part bottle is exact. */
+    quantityThousandths: integer("quantity_thousandths").notNull(),
+    unit: text("unit"),
+    unitCostMicros: integer("unit_cost_micros"),
+    valueCents: integer("value_cents"),
+  },
+  (t) => [
+    index("on_hand_counted_idx").on(t.countedOn),
+    uniqueIndex("on_hand_counted_ndc_idx").on(t.countedOn, t.ndc11),
+  ],
 );
