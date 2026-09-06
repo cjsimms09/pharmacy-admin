@@ -99,6 +99,14 @@ export default async function AppealsPage({ searchParams }: { searchParams: Prom
       <PageHeader
         title="Appeals"
         subtitle="What the contracts say is owed on the claims, packet by packet, with the deadline on each; sent by the PBM's own route and scored by the next remittance."
+        help={
+          <>
+            <p><b>What is appealed.</b> A paid third-party claim of the last 120 days whose PBM has a rate row on file, priced under that row&rsquo;s formula by more than $3.00, with NADAC in force on the fill date and the claim&rsquo;s own AWP as the benchmarks. Where the claim names a network id, that row; where the PBM has one row, that; where it has several and the claim names none, no guess.</p>
+            <p><b>What the packet carries.</b> The claim, what it paid, what the contract yields, the shortfall, the invoice line nearest the fill priced per unit from the catalogue&rsquo;s pack size, the deadline from the contract&rsquo;s own window, and the route.</p>
+            <p><b>Sending.</b> Email goes through the pharmacy&rsquo;s mailbox with the PDF attached. A portal or a fax is handed over with the packet to download; mark it sent here. The outcome is recorded when the reprocessed claim comes in.</p>
+            <p><b>Floor complaints.</b> One packet per plan from the Kansas floor review, for the Insurance Department&rsquo;s portal.</p>
+          </>
+        }
         actions={canManage && queue.ready.length > 0 ? <form action={prepareAll}><SubmitButton pendingLabel="Preparing…" className="btn btn-primary">Prepare all {queue.ready.length} ready</SubmitButton></form> : undefined}
       />
 

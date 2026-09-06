@@ -109,6 +109,14 @@ export default async function SortPage({ searchParams }: { searchParams: Promise
         title="Sort the folder"
         subtitle="Which PDFs are contracts and which are not, decided before anything is paid to read them."
         back={{ href: "/payers/contracts", label: "The contracts" }}
+        help={
+          <>
+            <p><b>Two sorters, cheapest first.</b> A PDF with its own text is sorted here by its words for nothing: agreement, reimbursement, MAC, AWP, BIN, network and effective date mark a contract; a W-9, a statement, a newsletter mark something else. Anything naming a price or a term is never ruled out.</p>
+            <p><b>A scan</b> goes to the small model with one question and a one-sentence answer, in a batch, for a few cents. Only a confident &ldquo;not relevant&rdquo; is acted on.</p>
+            <p><b>Your word beats both.</b> Change any verdict and the full read follows you. The read skips only what was ruled out.</p>
+            <p><b>Proving the reader.</b> &ldquo;Read now&rdquo; sends the smallest unread document synchronously with the exact batch request and prints its terms or the API&rsquo;s exact refusal. A refused request costs nothing.</p>
+          </>
+        }
         actions={
           canManage ? (
             <>

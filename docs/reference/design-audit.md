@@ -112,9 +112,13 @@ substance record) is a retire with a reason, never a removal.
   bench should get a collapsible sidebar and cards that stack.
 - **Accessibility.** Contrast on the grey helper text (#6b7280 on white fails AA at 12 px);
   focus rings; table headers as `th` with scope; buttons that are buttons.
-- **A design system.** `src/components/ui` has PageHeader, Card, Notice, Empty, Figure, badges.
-  Add: DataTable (sort, filter, page), Drawer, RowMenu, Stat with trend, Tabs, HelpPanel.
-  Pages then stop hand-rolling tables and buttons (see §7).
+- **A design system.** `src/components/ui` has PageHeader (now with `help`), Card, Notice, Empty,
+  Figure (now with `size`), badges. Added 6 September: `data-table.tsx` (sort, filter, page),
+  `kit.tsx` (LinkTabs, Stat with delta and sparkline, `deltaOf`), `kit-client.tsx` (Drawer,
+  RowMenu, HelpPanel), `bars.tsx` (grouped bars each a link, Sparkline) and the pharmacy
+  session's `charts.tsx` (BarChart, LineChart, Movement, for the printed report). Used so far on
+  the books, appeals, sort, minimums and replay pages; the rest of the site still hand-rolls (see
+  §7.3), and moving each page onto these is the page-by-page pass still to do.
 
 ## 7. Inventory of pages, sections and actions
 

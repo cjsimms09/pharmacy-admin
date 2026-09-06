@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { HelpPanel } from "./kit-client";
 
 /**
  * The shared pieces every screen is built from.
@@ -15,11 +16,14 @@ export function PageHeader({
   subtitle,
   actions,
   back,
+  help,
 }: {
   title: string;
   subtitle?: string;
   actions?: React.ReactNode;
   back?: { href: string; label: string };
+  /** The explanation, behind a "?" beside the title: paragraphs the page used to carry above its figures. */
+  help?: React.ReactNode;
 }) {
   return (
     <div className="mb-6">
@@ -30,7 +34,10 @@ export function PageHeader({
       )}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
-          <h1>{title}</h1>
+          <h1 className="flex items-center gap-2">
+            {title}
+            {help && <HelpPanel title={title}>{help}</HelpPanel>}
+          </h1>
           {subtitle && <p className="mt-1 text-sm text-ink-2">{subtitle}</p>}
         </div>
         {actions && <div className="flex flex-wrap gap-2">{actions}</div>}

@@ -37,6 +37,14 @@ export default async function ReplayPage({ searchParams }: { searchParams: Promi
         title="Which contract"
         subtitle="A year of dispensing replayed through each wholesaler's catalogue and rebate ladder, so the renewal is decided on this pharmacy's own claims."
         back={{ href: "/purchasing", label: "What to buy" }}
+        help={
+          <>
+            <p><b>Every fill of the last twelve months</b> is priced at each supplier&rsquo;s cheapest product in the same group: drug, strength, form, brand-or-generic and pricing unit from NADAC&rsquo;s descriptions. A brand is never replayed as its generic.</p>
+            <p><b>Each supplier&rsquo;s ladder</b> is measured on the replayed month, unscrubbed, so every ladder is understated the same way, and applied to the spend the programme calls eligible. No ladder on file earns nothing, and says so.</p>
+            <p><b>Coverage</b> is shown apart: a supplier cheapest on ninety per cent of the dispensing and unable to supply the rest is a different proposition. The ranking is among suppliers covering 90%; the head-to-head compares two on the products both supply.</p>
+            <p><b>To test a new wholesaler:</b> add it under Suppliers, load its price file, type its ladder on its terms page, and open this page again. Rule 8 in <code>buying-logic.md</code>.</p>
+          </>
+        }
         actions={<Link href="/suppliers" className="btn">Suppliers and terms</Link>}
       />
 

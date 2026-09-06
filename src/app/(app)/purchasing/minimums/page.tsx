@@ -31,6 +31,13 @@ export default async function MinimumsPage() {
         title="Order minimums"
         subtitle="What to add at each supplier to reach its minimum: generics it is the best place to buy, in quantities the next two months will use."
         back={{ href: "/purchasing", label: "What to buy" }}
+        help={
+          <>
+            <p><b>A pick has to pass every test:</b> CMS says generic (never the name); no invoice class letter or name list says controlled; the claims show a steady rate, not one big fill; this supplier&rsquo;s price after the rebate is the lowest of everyone who prices it; whole packs fit inside sixty days of use with the shelf and the on-order counted.</p>
+            <p><b>Ranking</b> is saving per dollar committed, then velocity, until the shortfall is met. The last pack may overshoot the minimum; the page says by how much. Where nothing qualifies it says so and prices the alternative.</p>
+            <p><b>Recomputed on every open</b> from the latest count, claims and catalogues, starting from today&rsquo;s planned basket at each supplier. Rule 7a in <code>buying-logic.md</code>.</p>
+          </>
+        }
         actions={<Link href="/suppliers" className="btn">Suppliers and minimums</Link>}
       />
 

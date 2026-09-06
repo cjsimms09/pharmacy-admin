@@ -5,8 +5,9 @@ import { todayIso } from "@/lib/dates";
 import { parsePeriod, periodOf, neighbours, type PeriodKind } from "@/lib/ledger";
 import { booksFor, recentMonths } from "@/lib/ledger-store";
 import { moneyFound } from "@/lib/money-found";
-import { PageHeader, Card, Notice, Figure } from "@/components/ui";
+import { PageHeader, Card, Notice } from "@/components/ui";
 import { Bars } from "@/components/bars";
+import { Stat, deltaOf } from "@/components/kit";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Money" };
@@ -34,12 +35,30 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
 
   const tone = (c: number) => (c < 0 ? "crit" : "ok");
   const pct = (c: number) => (accrual.netRevenueCents > 0 ? `${Math.round((c / accrual.netRevenueCents) * 1000) / 10}% of net revenue` : undefined);
+  /*
+   * The change against the period before, and the six-month line under each figure.
+   *
+   * For a month the comparison is the month before; for a quarter or a year the figures are the
+   * period's and the line is still the months, because the months are what moved.
+   */
+  const previous = period.kind === "month" ? recent[recent.findIndex((r) => r.month === period.key) - 1] ?? null : null;
+  const hist = (pick: (r: (typeof recent)[number]) => number | null) => recent.map((r) => (r.pl.revenue.length ? pick(r) : null));
+  const d = (now: number, before: number | null | undefined) => deltaOf(now, before, formatCents);
 
   return (
     <>
       <PageHeader
         title="Money"
         subtitle="The books: what the period earned and what reached the bank, both kept, neither mixed."
+        help={
+          <>
+            <p><b>Cost of goods comes from what was dispensed, not what was bought.</b> PioneerRx prints the acquisition cost of every fill, so the cost of what actually sold is known per bottle and no stocktake is needed. Purchases less dispensed cost is stock moving on or off the shelf, reported as cash, never as profit.</p>
+            <p><b>Rebates reduce cost; they are never revenue.</b> Earned against the month that earned them on the accrual basis, received against the month they were banked on the cash basis.</p>
+            <p><b>DIR fees come out of revenue, not overheads,</b> so the dispensing margin is not flattered.</p>
+            <p><b>Cash and accrual are both true.</b> A prescription dispensed on the 30th is this month&rsquo;s earnings and next month&rsquo;s money. The gap is the receivable, and it is named rather than hidden.</p>
+            <p><b>Every figure links to its rows.</b> A wrong figure is corrected on the linked page, never here. The specification is <code>docs/reference/money-ledger.md</code>.</p>
+          </>
+        }
         actions={
           <>
             <Link href={`/money/monthly?period=${period.key}`} className="btn btn-primary">Statement</Link>
@@ -82,11 +101,11 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
 
       {/* The five figures the period comes down to, on the accrual basis, each a link to its rows. */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <Figure size="sm" value={formatCents(accrual.netRevenueCents)} label="Net revenue" sub={pace?.netRevenueCents ? `${formatCents(pace.netRevenueCents)} at this pace` : "after DIR and chargebacks"} tone="muted" href={sources.revenue} />
-        <Figure size="sm" value={formatCents(accrual.grossProfitCents)} label="Gross profit" sub={accrual.grossMarginPercent !== null ? `${accrual.grossMarginPercent}% of net revenue` : "cost of goods not known"} tone={tone(accrual.grossProfitCents)} href={sources.costOfGoods} />
-        <Figure size="sm" value={formatCents(accrual.operatingCents)} label="Keeping the doors open" sub={pct(accrual.operatingCents) ?? "operating costs entered"} tone="muted" href={sources.expenses} />
-        <Figure size="sm" value={formatCents(accrual.netProfitCents)} label={accrual.netProfitCents < 0 ? "Net loss" : "Net profit"} sub={accrual.usable ? "every line in" : "lines missing, see above"} tone={accrual.usable ? tone(accrual.netProfitCents) : "warn"} href={`/money/monthly?period=${period.key}`} />
-        <Figure size="sm" value={scripts.scripts.toLocaleString()} label="Scripts" sub={scripts.perDay !== null ? `${scripts.perDay} a day · ${scripts.cash} cash` : "none in the period"} tone="muted" href={sources.scripts} />
+        <Stat size="sm" value={formatCents(accrual.netRevenueCents)} label="Net revenue" sub={pace?.netRevenueCents ? `${formatCents(pace.netRevenueCents)} at this pace` : "after DIR and chargebacks"} tone="muted" href={sources.revenue} delta={d(accrual.netRevenueCents, previous?.pl.netRevenueCents)} history={hist((r) => r.pl.netRevenueCents)} />
+        <Stat size="sm" value={formatCents(accrual.grossProfitCents)} label="Gross profit" sub={accrual.grossMarginPercent !== null ? `${accrual.grossMarginPercent}% of net revenue` : "cost of goods not known"} tone={tone(accrual.grossProfitCents)} href={sources.costOfGoods} delta={d(accrual.grossProfitCents, previous?.pl.grossProfitCents)} history={hist((r) => r.pl.grossProfitCents)} />
+        <Stat size="sm" value={formatCents(accrual.operatingCents)} label="Keeping the doors open" sub={pct(accrual.operatingCents) ?? "operating costs entered"} tone="muted" href={sources.expenses} delta={d(accrual.operatingCents, previous?.pl.operatingCents)} upIsGood={false} history={hist((r) => r.pl.operatingCents)} />
+        <Stat size="sm" value={formatCents(accrual.netProfitCents)} label={accrual.netProfitCents < 0 ? "Net loss" : "Net profit"} sub={accrual.usable ? "every line in" : "lines missing, see above"} tone={accrual.usable ? tone(accrual.netProfitCents) : "warn"} href={`/money/monthly?period=${period.key}`} delta={d(accrual.netProfitCents, previous?.pl.netProfitCents)} history={hist((r) => r.pl.netProfitCents)} />
+        <Stat size="sm" value={scripts.scripts.toLocaleString()} label="Scripts" sub={scripts.perDay !== null ? `${scripts.perDay} a day · ${scripts.cash} cash` : "none in the period"} tone="muted" href={sources.scripts} delta={previous ? deltaOf(scripts.scripts, previous.scripts, (n) => String(n)) : null} history={recent.map((r) => (r.pl.revenue.length ? r.scripts : null))} />
       </div>
 
       {/* Both bases, side by side, and the gap said for what it is. */}
