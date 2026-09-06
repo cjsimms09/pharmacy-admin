@@ -10,7 +10,7 @@ import { storeFile } from "@/lib/files";
 import { newId } from "@/lib/crypto";
 import { parseQuantityThousandths } from "@/lib/money";
 import { normalizeClaimNdc } from "@/lib/claims";
-import { PageHeader, Notice, BackLink, Empty, Field } from "@/components/ui";
+import { PageHeader, Notice, BackLink, Empty, Field, Card } from "@/components/ui";
 
 export const metadata = { title: "Inventory discrepancies" };
 export const dynamic = "force-dynamic";
@@ -101,9 +101,7 @@ export default async function DiscrepanciesPage({ searchParams }: { searchParams
         matter and still needs a DEA Form 106.
       </Notice>
 
-      <section className="my-4 rounded-lg border border-line bg-surface p-4">
-        <h2 className="text-sm font-semibold">Log one</h2>
-        <form action={log} className="mt-3 grid gap-3 sm:grid-cols-3">
+      <Card title="Log one" className="my-4">        <form action={log} className="mt-3 grid gap-3 sm:grid-cols-3">
           <Field label="Date discovered">
             <input type="date" name="discoveredOn" defaultValue={todayIso()} className="field" />
           </Field>
@@ -149,7 +147,7 @@ export default async function DiscrepanciesPage({ searchParams }: { searchParams
             <button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Save</button>
           </div>
         </form>
-      </section>
+      </Card>
 
       <h2 className="mt-8 text-sm font-semibold">
         Logged {open.length > 0 && <span className="font-normal text-ink-3">· {open.length} still open</span>}

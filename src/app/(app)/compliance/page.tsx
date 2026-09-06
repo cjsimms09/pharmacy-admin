@@ -15,7 +15,7 @@ import type { TrainingType } from "@/db/schema";
 import { fmt, todayIso } from "@/lib/dates";
 import { storeFile } from "@/lib/files";
 import { newId } from "@/lib/crypto";
-import { PageHeader, Notice } from "@/components/ui";
+import { PageHeader, Notice, Card } from "@/components/ui";
 import { AttestForm } from "@/components/attest-form";
 
 export const metadata = { title: "Compliance" };
@@ -211,9 +211,7 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
       )}
 
       {summary.unanswered.length > 0 && (
-        <section className="mt-8 rounded-lg border border-line bg-surface p-4">
-          <h2 className="text-sm font-semibold">Does this apply here?</h2>
-          <p className="mt-1 text-xs text-ink-3">
+        <Card title="Does this apply here?" className="mt-8">          <p className="mt-1 text-xs text-ink-3">
             {summary.unanswered.length} duty{summary.unanswered.length === 1 ? "" : " duties"} shipped switched on because
             leaving out a rule that does apply is the expensive mistake. Answer once and it is settled — a &ldquo;no&rdquo;
             is recorded with today&rsquo;s date and your name, so the register shows it was considered rather than missed.
@@ -224,7 +222,7 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
               <Question key={q.obligationId} q={q} action={answerAction} />
             ))}
           </div>
-        </section>
+        </Card>
       )}
 
       {notYetDue.length > 0 && (

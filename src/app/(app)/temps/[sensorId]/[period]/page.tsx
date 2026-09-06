@@ -8,7 +8,7 @@ import { audit } from "@/lib/audit";
 import { monthSummary, availableMonths, syncReadings, hasCredentials, f } from "@/lib/imonnit";
 import { periodLabel } from "@/lib/periods";
 import { newId } from "@/lib/crypto";
-import { PageHeader, Notice, BackLink, Empty } from "@/components/ui";
+import { PageHeader, Notice, BackLink, Empty, Figure } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Temperature log" };
@@ -170,13 +170,13 @@ export default async function TempLogPage({
           <h2 className="mt-6 text-sm font-semibold">
             Readings {all !== "1" && listed.length < readings.length && <span className="font-normal text-ink-3">· showing what went out of range</span>}
           </h2>
-          <div className="mt-2 overflow-x-auto rounded-lg border border-line">
-            <table className="w-full text-sm">
-              <thead className="bg-ground text-left text-xs uppercase tracking-wide text-ink-3">
+          <div className="mt-2 overflow-x-auto">
+            <table className="table">
+              <thead>
                 <tr>
-                  <th className="px-3 py-2">When</th>
-                  <th className="px-3 py-2 text-right">Reading</th>
-                  <th className="px-3 py-2">Note</th>
+                  <th>When</th>
+                  <th className="text-right">Reading</th>
+                  <th>Note</th>
                 </tr>
               </thead>
               <tbody>
@@ -184,11 +184,11 @@ export default async function TempLogPage({
                   const n = byReading.get(r.id);
                   return (
                     <tr key={r.id} className={`border-t border-line ${r.excursion ? "bg-red-50" : ""}`}>
-                      <td className="px-3 py-2 whitespace-nowrap text-xs">{when(r.takenAt)}</td>
+                      <td className="whitespace-nowrap text-xs">{when(r.takenAt)}</td>
                       <td className={`px-3 py-2 text-right tabular-nums ${r.excursion ? "font-semibold text-red-700" : ""}`}>
                         {f(r.valueTenthsF)}
                       </td>
-                      <td className="px-3 py-2">
+                      <td>
                         {n ? (
                           <span className="text-xs">{n.note} <span className="text-ink-3">— {n.writtenBy}</span></span>
                         ) : r.excursion ? (
@@ -255,12 +255,13 @@ export default async function TempLogPage({
   );
 }
 
+/*
+ * The page's own tile, which is now the shared one wearing this page's prop names.
+ *
+ * It drew its own amber and emerald straight from Tailwind's palette rather than the theme's
+ * tokens, so a change to what "needs attention" looks like reached every screen except the five
+ * that had quietly forked it. The signature is kept so nothing at the call sites has to move.
+ */
 function Stat({ label, value, tone }: { label: string; value: string; tone?: "warn" | "ok" | "crit" }) {
-  const c = tone === "crit" ? "border-red-300 bg-red-50" : tone === "warn" ? "border-amber-300 bg-amber-50" : tone === "ok" ? "border-emerald-300 bg-emerald-50" : "border-line bg-surface";
-  return (
-    <div className={`rounded-lg border p-3 ${c}`}>
-      <div className="text-lg font-semibold tabular-nums">{value}</div>
-      <div className="text-xs text-ink-3">{label}</div>
-    </div>
-  );
+  return <Figure value={value} label={label} tone={tone ?? "muted"} />;
 }

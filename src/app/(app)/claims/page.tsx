@@ -10,7 +10,7 @@ import { getSettings } from "@/lib/settings";
 import { hasMailPassword } from "@/lib/mailbox";
 import { formatCents } from "@/lib/money";
 import { requireReimbursement } from "@/lib/features";
-import { PageHeader, Notice, Empty } from "@/components/ui";
+import { PageHeader, Notice, Empty, Figure } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 
 export const metadata = { title: "Claims" };
@@ -76,32 +76,32 @@ export default async function ClaimsPage({
   /* One table, rendered against whichever of those lists is being shown. */
   function NadacTable({ rows }: { rows: typeof nadacStanding.rows }) {
     return (
-      <div className="mt-2 overflow-x-auto rounded-lg border border-line">
-        <table className="w-full text-sm">
-          <thead className="bg-ground text-left text-xs uppercase tracking-wide text-ink-3">
+      <div className="mt-2 overflow-x-auto">
+        <table className="table">
+          <thead>
             <tr>
-              <th className="px-3 py-2">Filled</th>
-              <th className="px-3 py-2">Drug</th>
-              <th className="px-3 py-2">Payer</th>
-              <th className="px-3 py-2 text-right">Came in</th>
-              <th className="px-3 py-2 text-right">NADAC + fee</th>
-              <th className="px-3 py-2 text-right">Against it</th>
-              <th className="px-3 py-2">What it means</th>
+              <th>Filled</th>
+              <th>Drug</th>
+              <th>Payer</th>
+              <th className="text-right">Came in</th>
+              <th className="text-right">NADAC + fee</th>
+              <th className="text-right">Against it</th>
+              <th>What it means</th>
             </tr>
           </thead>
           <tbody>
             {rows.slice(0, 60).map((r) => (
-              <tr key={r.key} className="border-t border-line">
-                <td className="px-3 py-2 whitespace-nowrap text-xs">{r.dateFilled}</td>
-                <td className="px-3 py-2">
+              <tr key={r.key}>
+                <td className="whitespace-nowrap text-xs">{r.dateFilled}</td>
+                <td>
                   {r.itemName ?? r.ndc11}
                   <span className="block font-mono text-[11px] text-ink-3">
                     Rx {r.rxNumber}{r.fillNumber !== null ? `-${r.fillNumber}` : ""} · NADAC of {r.nadacOn}
                   </span>
                 </td>
-                <td className="px-3 py-2 text-xs">{r.payer}</td>
-                <td className="px-3 py-2 text-right tabular-nums">{formatCents(r.receivedCents)}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-ink-2">
+                <td className="text-xs">{r.payer}</td>
+                <td className="text-right tabular-nums">{formatCents(r.receivedCents)}</td>
+                <td className="text-right tabular-nums text-ink-2">
                   {formatCents(r.benchmarkCents)}
                   <span className="block text-[11px] text-ink-3">
                     {formatCents(r.nadacCents)} + {formatCents(r.dispensingFeeCents)}
@@ -110,7 +110,7 @@ export default async function ClaimsPage({
                 <td className={`px-3 py-2 text-right tabular-nums font-medium ${r.againstBenchmarkCents < 0 ? "text-red-700" : "text-accent"}`}>
                   {r.againstBenchmarkCents > 0 ? "+" : ""}{formatCents(r.againstBenchmarkCents)}
                 </td>
-                <td className="px-3 py-2 text-xs">
+                <td className="text-xs">
                   {r.againstBenchmarkCents >= 0 ? (
                     <span className="text-ink-3">at or above it</span>
                   ) : (
@@ -452,35 +452,35 @@ export default async function ClaimsPage({
             money, so the money leads: what these dispensings made, what has been counted but not
             received, what can be filed, and what actually lost.
           */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Stat
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Figure
               label="What these fills made"
               value={formatCents(flags.marginCents)}
-              tone={flags.marginCents < 0 ? "warn" : undefined}
+              tone={flags.marginCents < 0 ? "crit" : "ok"}
               sub={`${formatCents(flags.revenueCents)} taken in on ${flags.pricedFills.toLocaleString()} of ${flags.fills.length.toLocaleString()} dispensings`}
             />
-            <Stat
+            <Figure
               label="Counted, not found in the row"
               value={formatCents(flags.unreconciledCents)}
-              tone={flags.unreconciledCents ? "warn" : undefined}
-              sub={flags.unreconciled.length ? `${flags.unreconciled.length} fills the report values higher than we can` : "the report and this site agree"}
+              tone={flags.unreconciledCents ? "warn" : "ok"}
+              sub={flags.unreconciled.length ? `${flags.unreconciled.length} fills the report values higher than we can` : "The report and this site agree"}
             />
-            <Stat
+            <Figure
               label="Promised, not yet paid"
               value={formatCents(flags.awaitingFacilitatorCents)}
-              tone={flags.awaitingFacilitatorCents ? "warn" : undefined}
+              tone={flags.awaitingFacilitatorCents ? "warn" : "ok"}
               sub={
                 flags.awaitingFacilitator.length
                   ? `${flags.awaitingFacilitator.length} fills awaiting the facilitator`
                   : flags.underFee.length
                     ? `${formatCents(flags.underFeeShortfallCents)} under $10.50 on ${flags.underFee.length} in-scope claims`
-                    : "nothing outstanding"
+                    : "Nothing outstanding"
               }
             />
-            <Stat
+            <Figure
               label="Dispensed at a loss"
               value={formatCents(flags.lossFillsTotalCents)}
-              tone={flags.lossFills.length ? "warn" : undefined}
+              tone={flags.lossFills.length ? "crit" : "ok"}
               sub={`${flags.lossFills.length} dispensings, after every payer is counted`}
             />
           </div>
@@ -539,23 +539,23 @@ export default async function ClaimsPage({
             out of the profit column and shown on its own, with each plan credited only with the money it sent.{" "}
             Open a payer to see its contracted rates and appeal route next to its claims.
           </p>
-          <div className="overflow-x-auto rounded-lg border border-line">
-            <table className="w-full text-sm">
-              <thead className="bg-ground text-left text-xs uppercase tracking-wide text-ink-3">
+          <div className="overflow-x-auto">
+            <table className="table">
+              <thead>
                 <tr>
-                  <th className="px-3 py-2">Payer</th>
-                  <th className="px-3 py-2 text-right">Fills</th>
-                  <th className="px-3 py-2 text-right">Received</th>
-                  <th className="px-3 py-2 text-right">Gross profit</th>
-                  <th className="px-3 py-2 text-right">At a loss</th>
-                  <th className="px-3 py-2 text-right">Shared</th>
-                  <th className="px-3 py-2">Networks</th>
+                  <th>Payer</th>
+                  <th className="text-right">Fills</th>
+                  <th className="text-right">Received</th>
+                  <th className="text-right">Gross profit</th>
+                  <th className="text-right">At a loss</th>
+                  <th className="text-right">Shared</th>
+                  <th>Networks</th>
                 </tr>
               </thead>
               <tbody>
                 {byPayer.map((p) => (
                   <tr key={p.pbmName} className="border-t border-line align-top">
-                    <td className="px-3 py-2">
+                    <td>
                       {p.pbmName.includes("unmatched") || p.pbmName === "Unidentified payer" ? (
                         <span>{p.pbmName}</span>
                       ) : (
@@ -563,13 +563,13 @@ export default async function ClaimsPage({
                       )}
                       <div className="text-xs text-ink-3">{p.bins.join(", ") || "—"}</div>
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums">{p.fills || <span className="text-ink-3">—</span>}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{p.fills ? formatCents(p.receivedCents) : <span className="text-ink-3">—</span>}</td>
+                    <td className="text-right tabular-nums">{p.fills || <span className="text-ink-3">—</span>}</td>
+                    <td className="text-right tabular-nums">{p.fills ? formatCents(p.receivedCents) : <span className="text-ink-3">—</span>}</td>
                     <td className={`px-3 py-2 text-right tabular-nums ${p.profitCents < 0 ? "text-red-700" : ""}`}>
                       {p.fills ? formatCents(p.profitCents) : <span className="text-ink-3">—</span>}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums">{p.belowCost || <span className="text-ink-3">—</span>}</td>
-                    <td className="px-3 py-2 text-right text-xs tabular-nums text-ink-3">
+                    <td className="text-right tabular-nums">{p.belowCost || <span className="text-ink-3">—</span>}</td>
+                    <td className="text-right text-xs tabular-nums text-ink-3">
                       {p.coordinatedFills ? (
                         <span title="Fills this plan priced alongside another. One bottle cannot be split between two plans honestly, so only the money this plan sent is shown.">
                           {p.coordinatedFills} · {formatCents(p.coordinatedRemitCents)}
@@ -578,7 +578,7 @@ export default async function ClaimsPage({
                         "—"
                       )}
                     </td>
-                    <td className="px-3 py-2 text-xs text-ink-3">{p.networks.join(", ") || "—"}</td>
+                    <td className="text-xs text-ink-3">{p.networks.join(", ") || "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -611,20 +611,21 @@ export default async function ClaimsPage({
             </Empty>
           ) : (
             <>
-              <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <Stat label="Compared" value={String(nadacStanding.rows.length)} sub="dispensings with a NADAC for that date" />
-                <Stat
+              <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <Figure label="Compared" value={nadacStanding.rows.length} tone="muted" sub="Dispensings with a NADAC for that date" />
+                <Figure
                   label="Owed — the floor reaches them"
                   value={formatCents(nadacStanding.owedCents)}
-                  tone={nadacStanding.owedCents ? "warn" : undefined}
+                  tone={nadacStanding.owedCents ? "warn" : "ok"}
                   sub="A shortfall to claim"
                 />
-                <Stat
+                <Figure
                   label="Under, but out of reach"
                   value={formatCents(nadacStanding.argueCents)}
+                  tone="muted"
                   sub="Not a claim — a rate to argue"
                 />
-                <Stat label="At or above the benchmark" value={String(nadacStanding.atOrAbove)} sub="Paid what the drug cost, and the fee" />
+                <Figure label="At or above the benchmark" value={nadacStanding.atOrAbove} tone="ok" sub="Paid what the drug cost, and the fee" />
               </div>
 
               {/*
@@ -815,28 +816,28 @@ export default async function ClaimsPage({
           {flags.lossFills.length === 0 ? (
             <Empty>None — every dispensing brought in at least what the drug cost.</Empty>
           ) : (
-            <div className="mt-2 overflow-x-auto rounded-lg border border-line">
-              <table className="w-full text-sm">
-                <thead className="bg-ground text-left text-xs uppercase tracking-wide text-ink-3">
+            <div className="mt-2 overflow-x-auto">
+              <table className="table">
+                <thead>
                   <tr>
-                    <th className="px-3 py-2">Filled</th>
-                    <th className="px-3 py-2">Drug</th>
-                    <th className="px-3 py-2">Paid by</th>
-                    <th className="px-3 py-2 text-right">Came in</th>
-                    <th className="px-3 py-2 text-right">Cost</th>
-                    <th className="px-3 py-2 text-right">Loss</th>
+                    <th>Filled</th>
+                    <th>Drug</th>
+                    <th>Paid by</th>
+                    <th className="text-right">Came in</th>
+                    <th className="text-right">Cost</th>
+                    <th className="text-right">Loss</th>
                   </tr>
                 </thead>
                 <tbody>
                   {flags.lossFills.slice(0, 50).map((f) => (
                     <React.Fragment key={f.key}>
-                    <tr className="border-t border-line">
-                      <td className="px-3 py-2 whitespace-nowrap text-xs">{f.dateFilled}</td>
-                      <td className="px-3 py-2">
+                    <tr>
+                      <td className="whitespace-nowrap text-xs">{f.dateFilled}</td>
+                      <td>
                         {f.itemName ?? f.ndc11 ?? "—"}
                         <span className="block font-mono text-[11px] text-ink-3">Rx {f.rxNumber}{f.fillNumber !== null ? `-${f.fillNumber}` : ""}</span>
                       </td>
-                      <td className="px-3 py-2 text-xs">
+                      <td className="text-xs">
                         {f.payers.map((p) => p.name ?? p.bin ?? "—").join(" then ")}
                         {f.coordinated && <span className="badge badge-muted ml-1">two plans</span>}
                         {f.patientShareUncertain && (
@@ -882,9 +883,9 @@ export default async function ClaimsPage({
                           </span>
                         )}
                       </td>
-                      <td className="px-3 py-2 text-right tabular-nums">{formatCents(f.revenueCents)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{formatCents(f.acquisitionCents ?? 0)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-red-700">
+                      <td className="text-right tabular-nums">{formatCents(f.revenueCents)}</td>
+                      <td className="text-right tabular-nums">{formatCents(f.acquisitionCents ?? 0)}</td>
+                      <td className="text-right tabular-nums text-red-700">
                         {formatCents(f.marginCents ?? 0)}
                         {(f.facilitatorOutstandingCents ?? 0) > 0 && (
                           <span className="block text-[11px] font-normal text-ink-3">
@@ -1110,12 +1111,3 @@ function Todo({
   );
 }
 
-function Stat({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: "warn" }) {
-  return (
-    <div className={`rounded-lg border p-3 ${tone === "warn" ? "border-amber-300 bg-amber-50" : "border-line bg-surface"}`}>
-      <div className="text-xl font-semibold tabular-nums">{value}</div>
-      <div className="text-xs text-ink-3">{label}</div>
-      {sub && <div className="mt-0.5 text-xs text-ink-3">{sub}</div>}
-    </div>
-  );
-}

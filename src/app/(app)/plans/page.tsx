@@ -6,7 +6,7 @@ import { planRegister, registerProgress, syncPlanGroups, classifyPlan, CLASS_INF
 import { PLAN_CLASSES, type PlanClass } from "@/db/schema";
 import { formatCents } from "@/lib/money";
 import { requireReimbursement } from "@/lib/features";
-import { PageHeader, Notice, Empty } from "@/components/ui";
+import { PageHeader, Notice, Empty, Card, Figure, Field } from "@/components/ui";
 
 export const metadata = { title: "Plans" };
 export const dynamic = "force-dynamic";
@@ -70,11 +70,26 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
         </>
       ) : (
         <>
-          <div className="my-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Stat label="Plans" value={String(progress.plans)} />
-            <Stat label="Determined" value={`${progress.decided} of ${progress.plans}`} tone={progress.unknown ? "warn" : "ok"} />
-            <Stat label="In scope for the floor" value={String(progress.inScopePlans)} sub={`${progress.inScopeClaims} claims`} tone="ok" />
-            <Stat label="Claims still unclassified" value={String(progress.claimsUnknown)} tone={progress.claimsUnknown ? "warn" : undefined} />
+          <div className="my-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Figure value={progress.plans} label="Plans" sub="Seen on the claims held" tone="muted" />
+            <Figure
+              value={`${progress.decided} of ${progress.plans}`}
+              label="Determined"
+              sub={progress.unknown ? `${progress.unknown} still to establish` : "Every one settled"}
+              tone={progress.unknown ? "warn" : "ok"}
+            />
+            <Figure
+              value={progress.inScopePlans}
+              label="In scope for the floor"
+              sub={`${progress.inScopeClaims} claims on them`}
+              tone="ok"
+            />
+            <Figure
+              value={progress.claimsUnknown}
+              label="Claims still unclassified"
+              sub={progress.claimsUnknown ? "Neither owed nor dismissed until the plan is known" : "Nothing left waiting"}
+              tone={progress.claimsUnknown ? "warn" : "ok"}
+            />
           </div>
 
           {progress.inScopeUnderFee > 0 && (
@@ -84,109 +99,103 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
             </Notice>
           )}
 
-          <section className="my-4 rounded-lg border border-line bg-surface p-4 text-sm">
-            <h2 className="text-sm font-semibold">How to establish one</h2>
-            <ul className="mt-2 list-disc space-y-1 pl-5 text-ink-2">
+          <Card
+            className="mt-4"
+            title="How to establish one"
+            subtitle="Four rules settle almost every plan. The first one settles most of them."
+          >
+            <ul className="list-disc space-y-2 pl-5 text-sm text-ink-2">
               <li>
-                <b>Self-funded or fully insured</b> is answered by the sponsor&rsquo;s <b>Form 5500</b>, filed annually
-                with the Department of Labor and public at <code>efast.dol.gov</code>. Search the employer name. A
-                Schedule A means an insurance contract — fully insured, and in scope. No Schedule A on a health benefit
-                means self-funded, and out.
+                <b className="text-ink">Self-funded or fully insured</b> is answered by the sponsor&rsquo;s{" "}
+                <b className="text-ink">Form 5500</b>, filed annually with the Department of Labor and public at{" "}
+                <code>efast.dol.gov</code>. Search the employer name. A Schedule A means an insurance contract — fully
+                insured, and in scope. No Schedule A on a health benefit means self-funded, and out.
               </li>
               <li>
-                <b>City, county, school district and state plans are not ERISA plans at all</b>, so they stay in scope
-                even when self-funded. The sponsor name usually gives this away.
+                <b className="text-ink">City, county, school district and state plans are not ERISA plans at all</b>, so
+                they stay in scope even when self-funded. The sponsor name usually gives this away.
               </li>
               <li>
-                <b>Plans with fewer than 100 participants</b> may not file a full 5500. Ask the plan, or read the
-                summary plan description.
+                <b className="text-ink">Plans with fewer than 100 participants</b> may not file a full 5500. Ask the
+                plan, or read the summary plan description.
               </li>
               <li>
-                <b>A discount card is not insurance.</b> There is no plan to regulate and no payer to owe a floor.
+                <b className="text-ink">A discount card is not insurance.</b> There is no plan to regulate and no payer
+                to owe a floor.
               </li>
             </ul>
-          </section>
+          </Card>
 
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-sm font-semibold">{show === "all" ? "Every plan" : "Not yet determined"}</h2>
-            <a href={show === "all" ? "/plans" : "/plans?show=all"} className="text-xs underline">
-              {show === "all" ? "Show only undetermined" : "Show all"}
-            </a>
-          </div>
-
-          {shown.length === 0 ? (
-            <Empty>Every plan has been determined.</Empty>
-          ) : (
-            <div className="space-y-3">
-              {shown.map((r) => (
-                <form key={r.id} action={classify} className="rounded-lg border border-line bg-surface p-4">
-                  <input type="hidden" name="id" value={r.id} />
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <div>
-                      <span className="font-mono text-sm font-semibold">{r.groupNumber || "(no group number)"}</span>
-                      <span className="ml-2 text-sm text-ink-2">{r.payerLabel ?? r.pbmName ?? "—"}</span>
-                      <div className="mt-0.5 text-xs text-ink-3">
-                        BIN {r.bin ?? "—"}
-                        {r.planTypes.length > 0 && ` · PioneerRx calls it ${r.planTypes.join(", ")}`}
-                        {r.decidedOn && ` · determined ${r.decidedOn}`}
+          <Card
+            className="mt-4"
+            title={show === "all" ? "Every plan" : "Not yet determined"}
+            count={shown.length}
+            subtitle="Each is one form. Record what established it as well as what it is — a classification nobody can check is one nobody can file on."
+            actions={
+              <a href={show === "all" ? "/plans" : "/plans?show=all"} className="btn btn-sm">
+                {show === "all" ? "Show only undetermined" : "Show all"}
+              </a>
+            }
+          >
+            {shown.length === 0 ? (
+              <Empty>Every plan has been determined.</Empty>
+            ) : (
+              <div className="space-y-3">
+                {shown.map((r) => (
+                  <form key={r.id} action={classify} className="rounded-lg border border-line p-4">
+                    <input type="hidden" name="id" value={r.id} />
+                    <div className="flex flex-wrap items-baseline justify-between gap-3">
+                      <div className="min-w-0">
+                        <span className="font-mono text-sm font-semibold">{r.groupNumber || "(no group number)"}</span>
+                        <span className="ml-2 text-sm text-ink-2">{r.payerLabel ?? r.pbmName ?? "—"}</span>
+                        <div className="mt-0.5 text-xs text-ink-3">
+                          BIN {r.bin ?? "—"}
+                          {r.planTypes.length > 0 && ` · PioneerRx calls it ${r.planTypes.join(", ")}`}
+                          {r.decidedOn && ` · determined ${r.decidedOn}`}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-lg font-semibold tabular-nums">{r.claims}</div>
+                        <div className="text-xs text-ink-3">claims · {formatCents(r.receivedCents)}</div>
+                        {r.underFeeClaims > 0 && (
+                          <div className="mt-1"><span className="badge badge-warn">{r.underFeeClaims} under $10.50</span></div>
+                        )}
                       </div>
                     </div>
-                    <div className="text-right text-xs">
-                      <div className="text-base font-semibold tabular-nums">{r.claims}</div>
-                      <div className="text-ink-3">claims · {formatCents(r.receivedCents)}</div>
-                      {r.underFeeClaims > 0 && <div className="text-amber-800">{r.underFeeClaims} under $10.50</div>}
+
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <Field label="Classification">
+                        <select name="classification" defaultValue={r.classification} className="w-full">
+                          {PLAN_CLASSES.map((c) => (
+                            <option key={c} value={c}>
+                              {CLASS_INFO[c].label}{CLASS_INFO[c].inScope ? " — floor applies" : ""}
+                            </option>
+                          ))}
+                        </select>
+                      </Field>
+                      <Field label="Plan sponsor / employer">
+                        <input name="sponsorName" defaultValue={r.sponsorName ?? ""} placeholder="What you would search on efast.dol.gov" className="w-full" />
+                      </Field>
+                      <Field label="How this was established" className="sm:col-span-2">
+                        <input name="basis" defaultValue={r.basis ?? ""} placeholder="Form 5500 for plan year 2025 shows a Schedule A for the health benefit — fully insured" className="w-full" />
+                      </Field>
+                      <Field label="Source link" className="sm:col-span-2">
+                        <input name="sourceUrl" defaultValue={r.sourceUrl ?? ""} placeholder="Link to the filing or document" className="w-full" />
+                      </Field>
                     </div>
-                  </div>
 
-                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                    <label className="text-xs text-ink-3">
-                      Classification
-                      <select name="classification" defaultValue={r.classification} className="mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm text-ink">
-                        {PLAN_CLASSES.map((c) => (
-                          <option key={c} value={c}>
-                            {CLASS_INFO[c].label}{CLASS_INFO[c].inScope ? " — floor applies" : ""}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="text-xs text-ink-3">
-                      Plan sponsor / employer
-                      <input name="sponsorName" defaultValue={r.sponsorName ?? ""} placeholder="What you would search on efast.dol.gov" className="mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm text-ink" />
-                    </label>
-                    <label className="text-xs text-ink-3 sm:col-span-2">
-                      How this was established
-                      <input name="basis" defaultValue={r.basis ?? ""} placeholder="e.g. Form 5500 for plan year 2025 shows a Schedule A for the health benefit — fully insured" className="mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm text-ink" />
-                    </label>
-                    <label className="text-xs text-ink-3 sm:col-span-2">
-                      Source link
-                      <input name="sourceUrl" defaultValue={r.sourceUrl ?? ""} placeholder="Link to the filing or document" className="mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm text-ink" />
-                    </label>
-                  </div>
+                    <button className="btn btn-sm mt-3">Record</button>
+                  </form>
+                ))}
+              </div>
+            )}
+          </Card>
 
-                  <button className="mt-3 rounded-md border border-line px-3 py-1.5 text-sm hover:bg-ground">Record</button>
-                </form>
-              ))}
-            </div>
-          )}
-
-          <form action={sync} className="mt-6">
-            <button className="rounded-md border border-line px-3 py-2 text-sm hover:bg-ground">
-              Pick up plans from newly loaded claims
-            </button>
+          <form action={sync} className="mt-4">
+            <button className="btn">Pick up plans from newly loaded claims</button>
           </form>
         </>
       )}
     </>
-  );
-}
-
-function Stat({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: "warn" | "ok" }) {
-  const border = tone === "warn" ? "border-amber-300 bg-amber-50" : tone === "ok" ? "border-emerald-300 bg-emerald-50" : "border-line bg-surface";
-  return (
-    <div className={`rounded-lg border p-3 ${border}`}>
-      <div className="text-lg font-semibold tabular-nums">{value}</div>
-      <div className="text-xs text-ink-3">{label}</div>
-      {sub && <div className="mt-0.5 text-xs text-ink-3">{sub}</div>}
-    </div>
   );
 }

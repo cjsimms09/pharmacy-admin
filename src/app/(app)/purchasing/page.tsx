@@ -12,7 +12,7 @@ import Link from "next/link";
 import { looksLikePioneerCatalog } from "@/lib/pioneer-catalog";
 import { formatCents } from "@/lib/money";
 import { requireReimbursement } from "@/lib/features";
-import { PageHeader, Notice, Empty, Field } from "@/components/ui";
+import { PageHeader, Notice, Empty, Field, Card } from "@/components/ui";
 
 export const metadata = { title: "Purchasing" };
 export const dynamic = "force-dynamic";
@@ -136,18 +136,17 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
         find the items this supplier is *also* cheapest on that move fast enough to buy deep. Only
         the third is a decision, and it needs numbers nobody has in their head at the order screen.
       */}
-      <section className="my-4 rounded-lg border border-line bg-surface p-4">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="text-sm font-semibold">Today&rsquo;s order</h2>
-          <div className="flex flex-wrap gap-3">
-            <Link href="/purchasing/shelf" className="text-xs underline">
-              The shelf: days of stock, surplus and what to send back →
-            </Link>
-            <Link href="/purchasing/supplies" className="text-xs underline">
-              Supplies: vials, bags, labels and tape →
-            </Link>
-          </div>
-        </div>
+      <Card
+        className="my-4"
+        title="Today&rsquo;s order"
+        tone={buyList.plan.baskets.some((b) => b.verdict === "hold") ? "warn" : undefined}
+        actions={
+          <>
+            <Link href="/purchasing/shelf" className="btn btn-sm">The shelf</Link>
+            <Link href="/purchasing/supplies" className="btn btn-sm">Supplies</Link>
+          </>
+        }
+      >
 
         {buyList.missing.length > 0 && (
           <ul className="mt-2 space-y-1 text-xs text-ink-3">
@@ -225,7 +224,7 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
                       </thead>
                       <tbody>
                         {b.lines.map((l) => (
-                          <tr key={l.ndc11} className="border-t border-line">
+                          <tr key={l.ndc11}>
                             <td className="py-1">
                               {l.name ?? l.ndc11}
                               <div className="text-ink-3">{l.ndc11}</div>
@@ -275,21 +274,21 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
             )}
           </>
         )}
-      </section>
+      </Card>
 
-      <section className="my-4 rounded-lg border border-line bg-surface p-4">
-        <h2 className="text-sm font-semibold">Load a supplier price file</h2>
-        <p className="mt-1 text-xs text-ink-3">
+      <Card title="Load a supplier price file" className="my-4">        <p className="mt-1 text-xs text-ink-3">
           An order guide or price list from any wholesaler, as .xlsx or .csv. Column names differ between suppliers
           and are matched loosely — anything not recognised is reported back rather than ignored. Loading a file again
           replaces that supplier&rsquo;s prices for the NDCs it covers and leaves every other supplier alone.
         </p>
-        <form action={upload} className="mt-3 flex flex-wrap items-end gap-3">
-          <Field label="Supplier">
-            <input name="supplier" placeholder="McKesson" className="w-48 rounded-md border border-line px-3 py-2 text-sm" />
+        <form action={upload} className="flex flex-wrap items-end gap-3">
+          <Field label="Supplier" hint="Leave blank for a PioneerRx export, which names its own.">
+            <input name="supplier" placeholder="McKesson" className="w-48" />
           </Field>
-          <input type="file" name="file" accept=".xlsx,.csv,.txt" className="text-sm" />
-          <button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Load</button>
+          <Field label="The file">
+            <input type="file" name="file" accept=".xlsx,.csv,.txt" className="text-sm" />
+          </Field>
+          <button className="btn btn-primary">Load</button>
         </form>
 
         {summary.counts.length > 0 && (
@@ -302,7 +301,7 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
             ))}
           </ul>
         )}
-      </section>
+      </Card>
 
       {/*
         The Sunday files, and whether the door is open for them.
@@ -313,9 +312,7 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
         Monday after the first Sunday, "did it work" is answered by one glance at this panel, and
         "what went wrong" by the Inbox line it points to.
       */}
-      <section className="my-4 rounded-lg border border-line bg-surface p-4">
-        <h2 className="text-sm font-semibold">Scheduled catalogues</h2>
-        <p className="mt-1 text-xs text-ink-3">
+      <Card title="Scheduled catalogues" className="my-4">        <p className="mt-1 text-xs text-ink-3">
           PioneerRx emails one file per supplier, named <span className="font-mono">Supplier</span> + run date
           &mdash; {FILE_NAME_CODES.map((c) => <span key={c} className="font-mono">{c}9_6_2026</span>).reduce<React.ReactNode[]>((acc, x, i) => (i ? [...acc, ", ", x] : [x]), [])}.
           The site reads the supplier from inside the file and checks it against the name; a file named for one supplier
@@ -366,7 +363,7 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
             </tbody>
           </table>
         </div>
-      </section>
+      </Card>
 
       {/*
         Everything known about a drug, in one row.
@@ -385,38 +382,36 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
         percentage off something bought twice a year is not worth an afternoon.
       */}
       {(switches.length > 0 || unstocked.length > 0) && (
-        <section className="my-4 rounded-lg border border-line bg-surface p-4">
-          <h2 className="text-sm font-semibold">Buy these instead</h2>
-          <p className="mt-1 text-xs text-ink-2">
+        <Card title="Buy these instead" className="my-4">          <p className="mt-1 text-xs text-ink-2">
             Every NDC offered under what the federal benchmark says the drug costs, after the rebate this pharmacy
             actually earns. Grouped into products on NADAC&rsquo;s own description, so a switch is between genuine
             equivalents rather than between things that merely sound alike.
           </p>
 
           {switches.length > 0 && (
-            <div className="mt-3 overflow-x-auto rounded-lg border border-line">
-              <table className="w-full text-sm">
-                <thead className="bg-ground text-left text-xs uppercase tracking-wide text-ink-3">
+            <div className="mt-3 overflow-x-auto">
+              <table className="table">
+                <thead>
                   <tr>
-                    <th className="px-3 py-2">Product</th>
-                    <th className="px-3 py-2">Buying now</th>
-                    <th className="px-3 py-2">Better</th>
-                    <th className="px-3 py-2 text-right">Worth</th>
+                    <th>Product</th>
+                    <th>Buying now</th>
+                    <th>Better</th>
+                    <th className="text-right">Worth</th>
                   </tr>
                 </thead>
                 <tbody>
                   {switches.slice(0, 25).map((p) => (
                     <tr key={p.groupKey} className="border-t border-line align-top">
-                      <td className="px-3 py-2">
+                      <td>
                         {p.name ?? p.pick.ndc11}
                         <span className="block text-[11px] text-ink-3">{p.units.toLocaleString()} units dispensed</span>
                       </td>
-                      <td className="px-3 py-2 font-mono text-[11px]">{p.current?.ndc11 ?? "—"}</td>
-                      <td className="px-3 py-2">
+                      <td className="font-mono text-[11px]">{p.current?.ndc11 ?? "—"}</td>
+                      <td>
                         <span className="font-mono text-[11px]">{p.pick.ndc11}</span>
                         <span className="block text-[11px] text-ink-3">{p.pick.buy.supplier}</span>
                       </td>
-                      <td className="px-3 py-2 text-right font-medium tabular-nums text-accent">{formatCents(p.gainCents)}</td>
+                      <td className="text-right font-medium tabular-nums text-accent">{formatCents(p.gainCents)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -458,12 +453,10 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
               as good news.
             </p>
           )}
-        </section>
+        </Card>
       )}
 
-      <section className="my-4 rounded-lg border border-line bg-surface p-4">
-        <h2 className="text-sm font-semibold">What to do about it</h2>
-        <p className="mt-1 text-sm text-ink-2">
+      <Card title="What to do about it" className="my-4">        <p className="mt-1 text-sm text-ink-2">
           Every drug this pharmacy has bought or dispensed, with what was paid, what it earns back, what else it costs
           elsewhere and what the benchmark says. Sorted by what the move is actually worth on the quantities dispensed,
           because a large percentage off something bought twice a year is not worth an afternoon.
@@ -544,7 +537,7 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
             </table>
           </div>
         )}
-      </section>
+      </Card>
 
       {/*
         Margin, which is the question the comparison does not answer.
@@ -557,9 +550,7 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
         profitable drug into an apparent loss and get it dropped.
       */}
       {earned.length > 0 && (
-        <section className="my-4 rounded-lg border border-line bg-surface p-4">
-          <h2 className="text-sm font-semibold">What each drug earns</h2>
-          <p className="mt-1 text-sm text-ink-2">
+        <Card title="What each drug earns" className="my-4">          <p className="mt-1 text-sm text-ink-2">
             What the plans and patients paid, against what the drug actually cost this pharmacy — the invoice price less
             the rebate that supplier really pays on the line. Across everything held, {money(totalMarginCents)} on{" "}
             {earned.length.toLocaleString()} product{earned.length === 1 ? "" : "s"}.
@@ -634,7 +625,7 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
             what pharmacies on average paid, not what this one paid, so it is never used as the cost side — a margin
             worked out from it would be a statement about somebody else&rsquo;s business.
           </p>
-        </section>
+        </Card>
       )}
 
       {!opps.ready ? (
@@ -648,28 +639,28 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
             </Notice>
           )}
 
-          <div className="overflow-x-auto rounded-lg border border-line">
-            <table className="w-full text-sm">
-              <thead className="bg-ground text-left text-xs uppercase tracking-wide text-ink-3">
+          <div className="overflow-x-auto">
+            <table className="table">
+              <thead>
                 <tr>
-                  <th className="px-3 py-2">Product</th>
-                  <th className="px-3 py-2 text-right">Fills</th>
-                  <th className="px-3 py-2 text-right">We paid / unit</th>
-                  <th className="px-3 py-2">Cheapest source</th>
-                  <th className="px-3 py-2 text-right">Their price</th>
-                  <th className="px-3 py-2 text-right">Difference</th>
+                  <th>Product</th>
+                  <th className="text-right">Fills</th>
+                  <th className="text-right">We paid / unit</th>
+                  <th>Cheapest source</th>
+                  <th className="text-right">Their price</th>
+                  <th className="text-right">Difference</th>
                 </tr>
               </thead>
               <tbody>
                 {opps.rows.map((r) => (
                   <tr key={r.productKey} className="border-t border-line align-top">
-                    <td className="px-3 py-2">
+                    <td>
                       {r.description}
                       <div className="font-mono text-xs text-ink-3">{r.currentNdc ?? "—"}</div>
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums">{r.claims}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{perUnit(r.paidUnitMicros)}</td>
-                    <td className="px-3 py-2">
+                    <td className="text-right tabular-nums">{r.claims}</td>
+                    <td className="text-right tabular-nums">{perUnit(r.paidUnitMicros)}</td>
+                    <td>
                       {r.best ? (
                         <>
                           <b>{r.best.supplier}</b>
@@ -683,7 +674,7 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
                         <span className="text-ink-3">no catalogue match</span>
                       )}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums">{perUnit(r.best?.unitCostMicros ?? null)}</td>
+                    <td className="text-right tabular-nums">{perUnit(r.best?.unitCostMicros ?? null)}</td>
                     <td className={`px-3 py-2 text-right tabular-nums ${(r.savingCents ?? 0) > 0 ? "font-medium text-emerald-700" : "text-ink-3"}`}>
                       {r.savingCents ? formatCents(r.savingCents) : "—"}
                     </td>
@@ -695,9 +686,7 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
         </>
       )}
 
-      <section className="mt-8 rounded-lg border border-line bg-surface p-4 text-sm">
-        <h2 className="text-sm font-semibold">How this compares things, and what it will not do</h2>
-        <ul className="mt-2 list-disc space-y-1 pl-5 text-ink-2">
+      <Card title="How this compares things, and what it will not do" className="mt-8  text-sm">        <ul className="mt-2 list-disc space-y-1 pl-5 text-ink-2">
           <li>
             Only NDCs that match on <b>ingredient, salt, strength, release profile and dosage form</b> are compared.
             Metoprolol succinate is never offered in place of metoprolol tartrate, and an ER tablet is never offered
@@ -718,7 +707,7 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
             something this can do for you.
           </li>
         </ul>
-      </section>
+      </Card>
     </>
   );
 }

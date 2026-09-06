@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { requireUser } from "@/lib/auth";
 import { checkReport, type ReportCheck, type FieldResult } from "@/lib/report-check";
 import { requireReimbursement } from "@/lib/features";
-import { PageHeader, Notice, Empty } from "@/components/ui";
+import { PageHeader, Notice, Empty, Card, Figure } from "@/components/ui";
 import { CLAIM_NEEDS } from "@/lib/report-check";
 import { COLUMNS } from "@/lib/claims";
 
@@ -57,7 +57,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
 
       {error && <Notice kind="crit">{error}</Notice>}
 
-      <section className="my-4 rounded-lg border border-line bg-surface p-4">
+      <Card className="my-4">
         <p className="text-sm text-ink-2">
           A written specification tells you a column is missing. It cannot tell you a column is present and{" "}
           <b>empty</b> — which is what actually happened with Dispensed Quantity and Acquisition Cost. This reads the
@@ -71,7 +71,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           Nothing is saved. This reads the file, reports on it, and forgets it — use Claims or Purchasing to actually
           load one.
         </p>
-      </section>
+      </Card>
 
       {!check ? (
         <>
@@ -85,9 +85,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
             whoever writes the report. The names below lead with PioneerRx's own, so a report built
             from this list imports without anybody renaming a column afterwards.
           */}
-          <section className="mt-6 rounded-lg border border-line bg-surface p-4">
-            <h2 className="text-sm font-semibold">What to ask for</h2>
-            <p className="mt-1 text-sm text-ink-2">
+          <Card title="What to ask for" className="mt-6">            <p className="mt-1 text-sm text-ink-2">
               The daily feed is PioneerRx&rsquo;s <b>Rx Transaction Details By Submission Type</b> report, scheduled
               to email each evening as <span className="font-mono">Daily (date)</span>, covering <b>yesterday</b> — a
               report printed mid-day cannot contain that afternoon&rsquo;s transactions, and the report is drawn by the
@@ -103,14 +101,14 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
               transaction report lacks plan type, basis of reimbursement and days supply, which the floor check does
               not need and an appeal would like.
             </p>
-            <div className="mt-3 overflow-x-auto rounded-lg border border-line">
-              <table className="w-full text-sm">
-                <thead className="bg-ground text-left text-xs uppercase tracking-wide text-ink-3">
+            <div className="mt-3 overflow-x-auto">
+              <table className="table">
+                <thead>
                   <tr>
-                    <th className="px-3 py-2">Column</th>
-                    <th className="px-3 py-2">Ask for it as</th>
-                    <th className="px-3 py-2">Needed</th>
-                    <th className="px-3 py-2">Without it</th>
+                    <th>Column</th>
+                    <th>Ask for it as</th>
+                    <th>Needed</th>
+                    <th>Without it</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -118,24 +116,24 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
                     const names = (COLUMNS as Record<string, readonly string[]>)[n.field] ?? [];
                     return (
                       <tr key={n.field} className="border-t border-line align-top">
-                        <td className="px-3 py-2 font-medium">
+                        <td className="font-medium">
                           {n.name}
                           {n.ncpdp && <div className="text-xs text-ink-3">NCPDP {n.ncpdp}</div>}
                         </td>
-                        <td className="px-3 py-2 text-xs text-ink-2">
+                        <td className="text-xs text-ink-2">
                           {names[0] ?? "—"}
                           {names.length > 1 && (
                             <div className="text-ink-3">or: {names.slice(1).join(", ")}</div>
                           )}
                         </td>
-                        <td className="px-3 py-2">
+                        <td>
                           {n.critical ? (
                             <span className="badge badge-crit">required</span>
                           ) : (
                             <span className="badge badge-muted">helpful</span>
                           )}
                         </td>
-                        <td className="px-3 py-2 text-xs text-ink-2">{n.blocks}</td>
+                        <td className="text-xs text-ink-2">{n.blocks}</td>
                       </tr>
                     );
                   })}
@@ -148,7 +146,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
               <b> reversed</b>, whether it was a <b>compound</b>, and whether it was dispensed under <b>340B</b>.
               None of the three is priced against NADAC.
             </p>
-          </section>
+          </Card>
         </>
       ) : (
         <>
@@ -167,26 +165,26 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           )}
 
           <h2 className="mt-8 text-sm font-semibold">Field by field</h2>
-          <div className="mt-2 overflow-x-auto rounded-lg border border-line">
-            <table className="w-full text-sm">
-              <thead className="bg-ground text-left text-xs uppercase tracking-wide text-ink-3">
+          <div className="mt-2 overflow-x-auto">
+            <table className="table">
+              <thead>
                 <tr>
-                  <th className="px-3 py-2">Field</th>
-                  <th className="px-3 py-2">Column found</th>
-                  <th className="px-3 py-2">State</th>
-                  <th className="px-3 py-2">What it blocks</th>
+                  <th>Field</th>
+                  <th>Column found</th>
+                  <th>State</th>
+                  <th>What it blocks</th>
                 </tr>
               </thead>
               <tbody>
                 {check.results.map((r) => (
                   <tr key={r.name} className="border-t border-line align-top">
-                    <td className="px-3 py-2">
+                    <td>
                       {r.name}
                       {r.ncpdp && <div className="font-mono text-xs text-ink-3">{r.ncpdp}</div>}
                     </td>
-                    <td className="px-3 py-2 text-xs">{r.column ?? <span className="text-ink-3">—</span>}</td>
-                    <td className="px-3 py-2"><State r={r} /></td>
-                    <td className="px-3 py-2 text-xs text-ink-3">{r.state === "populated" ? "" : r.blocks}</td>
+                    <td className="text-xs">{r.column ?? <span className="text-ink-3">—</span>}</td>
+                    <td><State r={r} /></td>
+                    <td className="text-xs text-ink-3">{r.state === "populated" ? "" : r.blocks}</td>
                   </tr>
                 ))}
               </tbody>
@@ -228,12 +226,15 @@ function State({ r }: { r: FieldResult }) {
   );
 }
 
+/*
+ * The page's own tile, which is now the shared one wearing this page's prop names.
+ *
+ * It drew its own amber and emerald straight from Tailwind's palette rather than the theme's
+ * tokens, so a change to what "needs attention" looks like reached every screen except the five
+ * that had quietly forked it. The signature is kept so nothing at the call sites has to move.
+ */
 function Stat({ label, value, tone }: { label: string; value: string; tone?: "warn" | "ok" | "crit" }) {
-  const c = tone === "crit" ? "border-red-300 bg-red-50" : tone === "warn" ? "border-amber-300 bg-amber-50" : tone === "ok" ? "border-emerald-300 bg-emerald-50" : "border-line bg-surface";
-  return (
-    <div className={`rounded-lg border p-3 ${c}`}>
-      <div className="text-lg font-semibold capitalize tabular-nums">{value}</div>
-      <div className="text-xs text-ink-3">{label}</div>
-    </div>
-  );
+  // These values are status words; the old tile capitalised them in CSS.
+  const shown = value.charAt(0).toUpperCase() + value.slice(1);
+  return <Figure value={shown} label={label} tone={tone ?? "muted"} />;
 }

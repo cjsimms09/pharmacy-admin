@@ -3,7 +3,7 @@ import { revalidatePath } from "next/cache";
 import { requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { getSettings, setSetting } from "@/lib/settings";
-import { PageHeader, Notice, BackLink } from "@/components/ui";
+import { PageHeader, Notice, BackLink, Card } from "@/components/ui";
 
 export const metadata = { title: "Extra sections" };
 export const dynamic = "force-dynamic";
@@ -31,7 +31,7 @@ export default async function FeaturesPage({ searchParams }: { searchParams: Pro
       <PageHeader title="Extra sections" subtitle="Parts of the site that are built but not in daily use yet." />
       {ok && <Notice kind="ok">{ok}</Notice>}
 
-      <section className="mt-4 max-w-2xl rounded-lg border border-line bg-surface p-4">
+      <Card className="mt-4 max-w-2xl">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="font-semibold">Reimbursement and purchasing</h2>
           <span className={`rounded px-2 py-0.5 text-xs ${on ? "bg-emerald-100 text-emerald-800" : "bg-ground text-ink-3"}`}>
@@ -52,7 +52,7 @@ export default async function FeaturesPage({ searchParams }: { searchParams: Pro
             {on ? "Switch it off" : "Switch it on"}
           </button>
         </form>
-      </section>
+      </Card>
     </>
   );
 }
