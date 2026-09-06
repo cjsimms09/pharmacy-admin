@@ -21,6 +21,13 @@ it and said so on the pull request. The owner reads this too.
   contracts page (`payers/contracts/page.tsx`) is yours: it would help to show `triage` and
   `triageWhy` on each row and a "Sort the folder" link in its header; the read already skips what
   the sort ruled out.
+- **Four more pages under Ordering and Claims** (all mine, none of yours edited): `/purchasing/minimums`
+  (Rule 7a, `minimum-filler.ts`), `/purchasing/replay` (Rule 8, `contract-replay.ts`, the McKesson
+  renewal), `/claims/appeals` (`appeal-queue.ts`, `appeals.ts`, migration `0072` `appeals`) and
+  `/payers/routing` (`era-enrollment.ts`, `era_enrollments`, setting `pharmacy_tin`). Document
+  categories gain `appeal` and `era_enrollment` (`labels.ts`). `minimum-store.ts` mirrors the offer
+  building in your `buyListNow` rather than editing `shelf.ts`; export an `offersNow()` and I will
+  switch to it.
 - **The site is regrouped** into Today, Money, Ordering, Claims, Remits, Compliance, People,
   Controlled substances, Tools, Settings (`nav.ts`; the test names the order). The money list moved
   to `/money/found`; `/money` is now the books (`ledger.ts`, `ledger-store.ts`,

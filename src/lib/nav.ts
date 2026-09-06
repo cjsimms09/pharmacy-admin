@@ -96,6 +96,8 @@ export const NAV: NavGroup[] = [
       { href: "/payers", label: "Payers", blurb: "Every BIN we bill, its contract, appeal route and payment routing", gated: true },
       { href: "/payers/contracts", label: "Contracts", blurb: "Every agreement, read once, with the contract's own words beside each figure", gated: true },
       { href: "/plans", label: "Plans", blurb: "Which plans the Kansas floor can reach, one row per BIN, PCN and group", gated: true },
+      { href: "/claims/appeals", label: "Appeals", blurb: "MAC appeals and floor complaints: prepared from the claims, sent, and scored", gated: true },
+      { href: "/payers/routing", label: "835 routing", blurb: "Getting each PBM's remittance delivered here: the request, per payer, and where it stands", gated: true },
     ],
   },
   {

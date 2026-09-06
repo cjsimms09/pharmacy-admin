@@ -223,3 +223,18 @@ either sorter. A refused read now records the API's own reason in plain words (t
 read: split it; not a PDF: re-save it; key refused; busy, try again), and a refused request costs
 nothing. The per-request page limit is 50, not 100: a scanned page is sent as an image and costs
 up to 3,000 tokens, so a hundred of them overflow a 200,000-token window.
+
+**Steps 7 and 8 are now pages.** `/claims/appeals` (`appeal-queue.ts`, pure, tested; `appeals.ts`)
+prices every paid third-party claim of the last 120 days against the rate row on file for its
+PBM — the row for its network id where the claim names one, the PBM's single row otherwise, and no
+guess between several — with NADAC in force and the claim's own AWP, builds the packet
+(`appeal-packet.ts`) with the invoice line nearest the fill priced per unit from the catalogue's
+pack size, and shows what is ready to send, deadline first, and what holds the rest back, counted
+by reason. Prepare keeps the packet and files its PDF (`appeals` table, migration `0072`); Send
+goes through the pharmacy's mailbox where the contract names an email, and hands over the fields
+where it names a portal or fax; the outcome is recorded against the appeal. Kansas floor
+complaints are one packet per plan from the floor review, for the Insurance Department's portal.
+`/payers/routing` (`era-enrollment.ts`, `era_enrollments` table) writes the ERA request from
+Settings (NCPDP, NPI, the new `pharmacy_tin`) and the site's mailbox as the delivery point, sends
+it to the payment or EFT contact the contract named, and keeps the per-payer state: requested,
+confirmed, receiving.
