@@ -581,7 +581,15 @@ export async function repairReversals(): Promise<{ paired: number; strays: numbe
    * A reversal already recorded as one: negative money, held as reversed, pointing at itself
    * because nothing was found to pair it with when it arrived.
    */
-  const strays = rows.filter((c) => isStrandedReversal(c));
+  /*
+   * A reversal is only stranded if nothing has since been cancelled by it.
+   *
+   * Once a later file brings in the run it cancels, the pairing marks that claim reversed and points
+   * it at this row — but this row stays on file, still shaped like an orphan. Reporting it as
+   * stranded afterwards is a complaint about work already done, and it is exactly the sort of
+   * false alarm that teaches somebody to stop reading the list.
+   */
+  const strays = rows.filter((c) => isStrandedReversal(c) && !rows.some((o) => o.id !== c.id && o.reversalKey === c.transactionKey));
   if (strays.length === 0) return { paired: 0, strays: 0, stillStranded: [] };
 
   const live = new Map<string, typeof rows>();

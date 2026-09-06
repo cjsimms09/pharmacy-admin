@@ -148,11 +148,36 @@ export async function searchContracts(term: string, limit = 20): Promise<Contrac
  * nothing had ever put the two in the same room.
  */
 export async function contractsForUnknownBins(bins: string[]): Promise<Map<string, ContractHit[]>> {
+  /*
+   * Every contract read once, and every BIN looked for inside it.
+   *
+   * This called the search once per BIN, and the search reads the full text of every contract on
+   * file. With thirty-three unrecognised BINs — which is what this pharmacy actually has — that was
+   * thirty-three passes over every contract the practice holds, tens of megabytes each time, on
+   * every load of the payers screen. The work belongs the other way round: the contracts are the
+   * expensive thing, so read them once and ask all the questions of each.
+   */
   const out = new Map<string, ContractHit[]>();
-  for (const bin of bins) {
-    const hits = await searchContracts(bin, 3);
-    if (hits.length) out.set(bin, hits);
+  const wanted = bins.filter((b) => b.trim().length >= 3);
+  if (wanted.length === 0) return out;
+
+  const rows = await db.query.contractText.findMany();
+  for (const r of rows) {
+    if (!r.body) continue;
+    const flatBody = r.body.replace(/[^0-9A-Za-z]/g, "");
+    for (const bin of wanted) {
+      if ((out.get(bin)?.length ?? 0) >= 3) continue;
+      const direct = countAndSnip(r.body, bin);
+      const loose = direct.matches === 0 && bin.length >= 5 ? countAndSnip(flatBody, bin, true) : { matches: 0, snippets: [] as string[] };
+      const matches = direct.matches + loose.matches;
+      if (matches === 0) continue;
+      out.set(bin, [
+        ...(out.get(bin) ?? []),
+        { fileName: r.fileName, contractDocId: r.contractDocId, matches, snippets: [...direct.snippets, ...loose.snippets].slice(0, 3) },
+      ]);
+    }
   }
+  for (const [bin, hits] of out) out.set(bin, hits.sort((a, b) => b.matches - a.matches).slice(0, 3));
   return out;
 }
 
