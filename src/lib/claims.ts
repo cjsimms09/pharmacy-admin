@@ -117,7 +117,15 @@ export type ImportReport = {
   rowsRead: number;
   claimsAdded: number;
   duplicates: number;
-  /** Rows already held whose figures this file corrected. A re-sent report is how a fix arrives. */
+  /**
+   * Rows already held that this file re-stated.
+   *
+   * Written whether or not the figures actually moved — the site does not know what the previous
+   * file said, only what this one says, and the last word is the right one. Compared against
+   * `duplicates` it is also the check that a re-sent report landed: the two should match, and a
+   * restated count well below the duplicate count means rows did not line up and somebody should
+   * look before trusting the totals.
+   */
   restated?: number;
   skipped: number;
   skipReasons: Record<string, number>;
@@ -480,7 +488,7 @@ export function describeTransactionImport(r: TransactionImportReport): string {
   if (r.notYetSold) bits.push(`${r.notYetSold} of them not yet picked up when the report ran (kept; a return to stock comes in as a reversal)`);
   if (r.nowSold) bits.push(`${r.nowSold} held earlier now shown sold`);
   if (r.duplicates) bits.push(`${r.duplicates} already held`);
-  if (r.restated) bits.push(`${r.restated} of those restated from this file, because the report's own figures had changed`);
+  if (r.restated) bits.push(`${r.restated} of those re-read from this file, so a figure the report has since corrected replaces the one held`);
   const other = Object.entries(r.skipReasons).filter(([k]) => !/not yet sold/.test(k));
   if (other.length) bits.push(other.map(([k, v]) => `${v} ${k}`).join(", "));
   if (r.period) bits.push(`claims transmitted ${r.period.from}${r.period.to !== r.period.from ? ` to ${r.period.to}` : ""}`);

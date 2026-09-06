@@ -372,3 +372,77 @@ describe("a column added to the report", () => {
     assert.ok(bad.problems.length > 0, "and it explains itself rather than loading a plausible lie");
   });
 });
+
+/**
+ * Sending a corrected report to the mailbox, and having it replace what is already held.
+ *
+ * The report is not immutable. Its gross profit column was quietly carrying an estimated rebate,
+ * so every figure drawn from it disagreed with the pharmacy's own arithmetic; when that was fixed
+ * at source, the corrected numbers arrived in a file whose rows this site already held. Treating
+ * those rows as duplicates and skipping them would have kept the wrong figures for ever — the only
+ * way to get the truth in would have been to delete every claim and start again.
+ */
+describe("re-sending a corrected report", () => {
+  const key = (t: Transaction) => t.transactionKey;
+
+  // The same fill, as the old report printed it and as the rebuilt one does.
+  const asItWas = parseRxTransactions(
+    file(
+      "Third Party:,610097(A4) - 610097",
+      // Gross profit $22.52: the acquisition arithmetic plus an estimated rebate nobody asked for.
+      "332359-1,P,$204.57,KS20B2,IRX9TP,$0.00,$10.50,$0.00,9/5/2026 9:23:51 AM,09/05/26,610097,30.0000,$328.23,A4,00597015290,$22.52",
+    ),
+  );
+
+  const asItIs = parseRxTransactions(
+    [
+      "Rx Transaction Details By Submission Type (BETA)",
+      "West Wichita Family Pharmacy",
+      "9/1/2026 12:00:00 AM, to ,9/6/2026 12:00:00 AM",
+      "Third Party,Script",
+      "Dispensing Fee,Completed Date",
+      "Rx Number,Status,Amount,Group,Ntw Reim. Id,Copay,Total,Date Filled,BIN,Est,QTY,Acq. Inv. Cost,PCN,NDC,GrossProfit",
+      "Transmitted",
+      "Third Party:,610097(A4) - 610097",
+      // The same row, restated: the rebate taken back out, the promised facilitator payment named.
+      "332359-1,P,$204.57,KS20B2,IRX9TP,$0.00,$10.50,$0.00,9/5/2026 9:23:51 AM,09/05/26,610097,$146.18,30.0000,$328.23,A4,00597015290,($123.66)",
+      // And a day the pharmacy had never sent before.
+      "331220-1,P,$0.00,,,$27.47,$10.00,$27.47,9/1/2026 5:04:04 PM,09/01/26,610097,$0.00,30.0000,$1.26,A4,72603066402,$26.21",
+      "9/5/2026 1:51 PM,Page 1 of 1",
+    ].join("\r\n"),
+  );
+
+  test("both files read, and the row that appears in both keeps one identity", () => {
+    assert.deepEqual(asItWas.problems, []);
+    assert.deepEqual(asItIs.problems, []);
+    assert.equal(asItWas.rows[0].grossProfitCents, 2_252, "what the old report claimed");
+    assert.equal(asItIs.rows[0].grossProfitCents, -12_366, "what it says now the rebate is out of it");
+    assert.equal(key(asItWas.rows[0]), key(asItIs.rows[0]), "the same transaction, so the same key");
+  });
+
+  test("the corrected row is restated rather than stored twice or skipped", () => {
+    const held = new Map([[key(asItWas.rows[0]), "claim-1"]]);
+    const plan = planTransactions(
+      asItIs.rows,
+      { keys: new Set(held.keys()), paid: [], byKey: held },
+      { ignoreBins: ["028249"] },
+    );
+
+    assert.equal(plan.duplicates, 1, "counted once, not added again");
+    assert.equal(plan.insertPaid.length, 1, "and only the genuinely new day is inserted");
+    assert.equal(plan.insertPaid[0].rxNumber, "331220");
+
+    assert.equal(plan.refresh.length, 1, "the row already held is re-read");
+    assert.equal(plan.refresh[0].claimId, "claim-1", "against the claim it belongs to");
+    assert.equal(plan.refresh[0].txn.grossProfitCents, -12_366, "with the report's corrected figure");
+    assert.equal(plan.refresh[0].txn.expectedFacilitatorCents, 14_618, "and the column that did not exist before");
+  });
+
+  test("nothing is restated where the site has no such claim to restate", () => {
+    // A first load has nothing held, so every row is an insert and none of them is a correction.
+    const plan = planTransactions(asItIs.rows, { keys: new Set(), paid: [] }, { ignoreBins: ["028249"] });
+    assert.equal(plan.refresh.length, 0);
+    assert.equal(plan.duplicates, 0);
+    assert.equal(plan.insertPaid.length, 2);
+  });
+});
