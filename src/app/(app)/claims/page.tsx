@@ -227,6 +227,27 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
       )}
 
       {/*
+        Money a plan has already promised and not yet sent.
+
+        This is not inferred from a gap — the report now carries the figure in its own column,
+        because the plan's adjudication response says what the manufacturer share will be. Until the
+        facilitator pays it the fill reads as a loss for the whole amount, and the loss list gives
+        no way to tell a rate worth arguing about from a bill nobody has paid yet.
+      */}
+      {flags.awaitingFacilitator.length > 0 && (
+        <Notice kind="warn">
+          <b>{formatCents(flags.awaitingFacilitatorCents)} is promised on these claims and has not been paid.</b>{" "}
+          {flags.awaitingFacilitator.length} fill{flags.awaitingFacilitator.length === 1 ? "" : "s"} where the plan named
+          a facilitator payment at adjudication — biggest is Rx {flags.awaitingFacilitator[0].rxNumber}
+          {flags.awaitingFacilitator[0].fillNumber !== null ? `-${flags.awaitingFacilitator[0].fillNumber}` : ""}
+          {flags.awaitingFacilitator[0].itemName ? ` (${flags.awaitingFacilitator[0].itemName})` : ""} at{" "}
+          {formatCents(flags.awaitingFacilitator[0].facilitatorOutstandingCents ?? 0)}. Every one of them shows as a loss
+          below until the money lands, and none of them is a rate to argue about. They post themselves against the fill
+          when <Link href="/remits/mtf" className="underline">the facilitator feed</Link> brings the payment in.
+        </Notice>
+      )}
+
+      {/*
         Revenue the report booked that this site did not find in the row.
 
         PioneerRx computes its gross profit from the same row we read, so a gap means it counted
@@ -304,10 +325,16 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
               sub={flags.unreconciled.length ? `${flags.unreconciled.length} fills the report values higher than we can` : "the report and this site agree"}
             />
             <Stat
-              label="In-scope under $10.50"
-              value={formatCents(flags.underFeeShortfallCents)}
-              tone={flags.underFee.length ? "warn" : undefined}
-              sub={`${flags.underFee.length} claims — a shortfall to file`}
+              label="Promised, not yet paid"
+              value={formatCents(flags.awaitingFacilitatorCents)}
+              tone={flags.awaitingFacilitatorCents ? "warn" : undefined}
+              sub={
+                flags.awaitingFacilitator.length
+                  ? `${flags.awaitingFacilitator.length} fills awaiting the facilitator`
+                  : flags.underFee.length
+                    ? `${formatCents(flags.underFeeShortfallCents)} under $10.50 on ${flags.underFee.length} in-scope claims`
+                    : "nothing outstanding"
+              }
             />
             <Stat
               label="Dispensed at a loss"
@@ -538,6 +565,25 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
             A reversal matching no claim held is left out entirely: it reverses a dispensing from before this feed
             began, whose revenue was never counted here.
           </p>
+          {/*
+            The part of the red number that is not a loss at all.
+
+            Somebody reading a four-thousand-dollar loss needs to know before anything else how much
+            of it is money already promised. Chasing a plan over a fill that is merely unpaid is the
+            most expensive way there is to spend an afternoon.
+          */}
+          {flags.awaitingFacilitator.length > 0 && (
+            <p className="mt-2 rounded-lg border border-warn/40 bg-warn/5 p-3 text-xs">
+              <b>
+                {flags.awaitingFacilitator.filter((f) => (f.marginCents ?? 0) < 0).length} of these are waiting on a
+                facilitator payment the plan already promised — {formatCents(flags.awaitingFacilitatorCents)} between
+                them.
+              </b>{" "}
+              They are marked <span className="badge badge-warn">MTF promised</span> below, with what each becomes once
+              it is paid. Nothing about them is a rate to argue over, and nothing needs doing to them: the payment posts
+              itself against the fill when it arrives.
+            </p>
+          )}
           {flags.lossFills.length === 0 ? (
             <Empty>None — every dispensing brought in at least what the drug cost.</Empty>
           ) : (
@@ -574,6 +620,18 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
                           A loss the report does not agree is a loss is worth saying before somebody
                           goes and argues with the plan about it.
                         */}
+                        {/*
+                          The plan's own promise, from the report's column rather than from a gap.
+                          A fill that is merely unpaid must not read like a rate worth arguing over.
+                        */}
+                        {(f.facilitatorOutstandingCents ?? 0) > 0 && (
+                          <span
+                            className="badge badge-warn ml-1"
+                            title="The plan named this facilitator payment when it adjudicated the claim. It has not arrived yet, and it posts itself against this fill when it does."
+                          >
+                            MTF promised {formatCents(f.facilitatorOutstandingCents ?? 0)}
+                          </span>
+                        )}
                         {f.unreconciledCents !== null && (
                           <span
                             className="badge badge-warn ml-1"
@@ -587,6 +645,12 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
                       <td className="px-3 py-2 text-right tabular-nums">{formatCents(f.acquisitionCents ?? 0)}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-red-700">
                         {formatCents(f.marginCents ?? 0)}
+                        {(f.facilitatorOutstandingCents ?? 0) > 0 && (
+                          <span className="block text-[11px] font-normal text-ink-3">
+                            {formatCents((f.marginCents ?? 0) + (f.facilitatorOutstandingCents ?? 0))} once the
+                            facilitator pays
+                          </span>
+                        )}
                         {f.unreconciledCents !== null && (
                           <span className="block text-[11px] font-normal text-ink-3">
                             the report says {formatCents((f.marginCents ?? 0) + f.unreconciledCents)}

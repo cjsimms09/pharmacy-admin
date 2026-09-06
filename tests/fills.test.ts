@@ -65,6 +65,27 @@ describe("one fill, however many payers priced it", () => {
     assert.equal(f.marginCents, 1_000);
   });
 
+  test("a fill the plans covered outright is not a puzzle: the patient paid nothing", () => {
+    /*
+     * Rx 333968, a real fill. CVS paid $279.77 and a copay card $69.94 towards a $472.01 drug, and
+     * every row reads $0.00 still owing. That is not ambiguity — it is a patient who paid nothing.
+     *
+     * With no residual reported anywhere, "the largest price any row established" collapses to the
+     * largest single remittance, and the two payers have between them sent more than that. Read as
+     * a contradiction it is indistinguishable from two primaries, and the site put "patient share
+     * unclear" on ordinary coordinated claims all day. A residual is only worked out where one was
+     * actually reported.
+     */
+    const [f] = groupIntoFills([
+      claim({ rxNumber: "333968", bin: "004336", payerLabel: "CVS Caremark", remitCents: 27_977, copayCents: 0, patientTotalCents: 0, acquisitionCents: 47_201 }),
+      claim({ rxNumber: "333968", bin: "024284", payerLabel: "ACR", remitCents: 6_994, copayCents: 0, patientTotalCents: 0, acquisitionCents: 0 }),
+    ]);
+    assert.equal(f.patientShareUncertain, false, "nothing about this is unclear");
+    assert.equal(f.patientPaidCents, 0);
+    assert.equal(f.revenueCents, 34_971, "what the two payers actually sent");
+    assert.equal(f.marginCents, 34_971 - 47_201, "a real loss, and the report agrees it is one");
+  });
+
   test("payers remitting more than any row said the drug cost is flagged, not asserted", () => {
     /*
      * Two rows each paying $90 on a $100 drug. Whatever these are — two primaries, a rebill read as
@@ -298,5 +319,65 @@ describe("one fill, however many payers priced it", () => {
   test("the same prescription on a different day is a different fill", () => {
     const f = groupIntoFills([claim({ dateFilled: "2026-09-04" }), claim({ dateFilled: "2026-09-05" })]);
     assert.equal(f.length, 2);
+  });
+});
+
+describe("money a plan promised and has not sent", () => {
+  test("the promise is carried on the fill, and what is still owed falls as payments land", () => {
+    /*
+     * Rx 332359, a real fill. The report's own column says $146.18 of facilitator money — the plan
+     * named it when it adjudicated the claim — and the pharmacy took $204.57 on a $328.23 drug.
+     *
+     * Read without the promise that is a $123.66 loss and looks exactly like a rate worth arguing
+     * over. It is neither: it is a bill nobody has paid yet.
+     */
+    const row = {
+      rxNumber: "332359",
+      fillNumber: 1,
+      dateFilled: "2026-09-05",
+      ndc11: "00597015290",
+      remitCents: 20_457,
+      copayCents: 0,
+      patientTotalCents: 0,
+      acquisitionCents: 32_823,
+      expectedFacilitatorCents: 14_618,
+    };
+
+    const [waiting] = groupIntoFills([claim(row)]);
+    assert.equal(waiting.expectedFacilitatorCents, 14_618);
+    assert.equal(waiting.facilitatorOutstandingCents, 14_618, "none of it has arrived");
+    assert.equal(waiting.marginCents, -12_366, "and until it does, the fill is genuinely in the red");
+
+    const [paid] = groupIntoFills(
+      [claim(row)],
+      [{ rxNumber: "332359", fillNumber: 1, dateFilled: "2026-09-05", ndc11: "00597015290", source: "mtf", payer: "MTF", amountCents: 14_618 }],
+    );
+    assert.equal(paid.facilitatorOutstandingCents, 0, "nothing outstanding once it is matched");
+    assert.equal(paid.marginCents, 2_252, "and the fill made $22.52 all along");
+  });
+
+  test("one promise on one bottle, however many rows carry it", () => {
+    /*
+     * A coordinated fill can print the same promised payment on both of its transmissions. It is
+     * one manufacturer share on one dispensing — adding them would invent money, in the direction
+     * that flatters the pharmacy, on a figure somebody is going to chase a payer over.
+     */
+    const [f] = groupIntoFills([
+      claim({ bin: "610097", remitCents: 10_000, copayCents: 0, patientTotalCents: 0, acquisitionCents: 30_000, expectedFacilitatorCents: 14_618 }),
+      claim({ bin: "610455", remitCents: 5_000, copayCents: 0, patientTotalCents: 0, acquisitionCents: 0, expectedFacilitatorCents: 14_618 }),
+    ]);
+    assert.equal(f.expectedFacilitatorCents, 14_618);
+  });
+
+  test("a report that promised nothing leaves nothing outstanding", () => {
+    const [f] = groupIntoFills([claim({ remitCents: 785, copayCents: 0, patientTotalCents: 0, acquisitionCents: 1_390 })]);
+    assert.equal(f.expectedFacilitatorCents, null, "no column, so no claim either way");
+    assert.equal(f.facilitatorOutstandingCents, null);
+  });
+
+  test("a promise of zero is a fact, and it is not money owed", () => {
+    const [f] = groupIntoFills([claim({ remitCents: 785, copayCents: 0, patientTotalCents: 0, acquisitionCents: 1_390, expectedFacilitatorCents: 0 })]);
+    assert.equal(f.expectedFacilitatorCents, 0);
+    assert.equal(f.facilitatorOutstandingCents, 0);
   });
 });

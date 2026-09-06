@@ -242,16 +242,32 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
      * reporting as an eighty-two dollar loss. It is also how PioneerRx computes its own gross
      * profit per row, which is why our figure and the report's now agree instead of arguing.
      */
-    const priceEstablishedCents = Math.max(...payers.map((p) => p.remitCents + p.copayCents), 0);
-    const patientPaidCents = Math.max(0, priceEstablishedCents - remitCents);
     /*
-     * Flagged where the arithmetic cannot close.
+     * Where no row leaves the patient owing anything, the patient paid nothing. That is not a
+     * puzzle, and it must not be treated as one.
      *
-     * If the payers between them remitted more than any row said the drug cost, these rows are not
-     * one chain — two primaries, or a rebill read as a coordination — and the patient's share above
-     * is a floor rather than a fact.
+     * On a fill the plans covered outright every row reads $0.00 owing, so "the largest price any
+     * row established" collapses to the largest single remittance — and on a coordinated fill the
+     * payers between them have then remitted more than that, which looked exactly like the
+     * two-primaries case and got flagged "patient share unclear" on perfectly ordinary claims. On
+     * one real fill a plan paid $279.77 and a copay card $69.94 towards a $472.01 drug, with
+     * nothing owing anywhere, and the site called the patient's share doubtful when it was plainly
+     * zero.
+     *
+     * So the residual is only worked out where a residual was actually reported. Otherwise revenue
+     * is what the payers sent, which is all there was.
      */
-    const patientShareUncertain = payers.length > 1 && remitCents > priceEstablishedCents;
+    const owed = payers.filter((p) => p.copayCents > 0);
+    const priceEstablishedCents = owed.length ? Math.max(...owed.map((p) => p.remitCents + p.copayCents)) : 0;
+    const patientPaidCents = owed.length ? Math.max(0, priceEstablishedCents - remitCents) : 0;
+    /*
+     * Flagged only where a reported residual and the remittances genuinely contradict each other.
+     *
+     * If a row says the patient was left owing something, and the payers between them have already
+     * remitted more than the price that row implies, these are not one chain — two primaries, or a
+     * rebill read as a coordination — and the share above is a floor rather than a fact.
+     */
+    const patientShareUncertain = payers.length > 1 && owed.length > 0 && remitCents > priceEstablishedCents;
 
     // The same bottle, priced once, whatever it was transmitted against.
     const costs = rows.map((r) => r.acquisitionCents).filter((x): x is number => x !== null && x !== undefined);

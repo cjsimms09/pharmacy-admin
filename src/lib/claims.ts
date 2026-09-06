@@ -736,6 +736,18 @@ export async function claimFlags() {
      * one real gap was $146.18 of facilitator money, another $5.56 that no facilitator would ever
      * pay. What is knowable is the amount and the row it is on, and both are shown.
      */
+    /*
+     * Fills the plan promised a facilitator payment on that has not arrived — biggest first.
+     *
+     * These are not losses, they are unpaid. The report says at adjudication what the manufacturer
+     * share will be; the money follows weeks later through the Medicare Transaction Facilitator.
+     * Until it lands the fill sits in the red for the whole amount, and somebody looking at the
+     * loss list has no way to tell a rate worth arguing about from a bill nobody has paid yet.
+     */
+    awaitingFacilitator: fills
+      .filter((f) => (f.facilitatorOutstandingCents ?? 0) > 0)
+      .sort((a, b) => (b.facilitatorOutstandingCents ?? 0) - (a.facilitatorOutstandingCents ?? 0)),
+    awaitingFacilitatorCents: fills.reduce((n, f) => n + (f.facilitatorOutstandingCents ?? 0), 0),
     unreconciled: fills.filter((f) => f.unreconciledCents !== null).sort((a, b) => b.unreconciledCents! - a.unreconciledCents!),
     unreconciledCents: fills.reduce((n, f) => n + (f.unreconciledCents ?? 0), 0),
     lossFillsTotalCents: lossFills.reduce((n, f) => n + (f.marginCents ?? 0), 0),
