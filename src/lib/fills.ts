@@ -49,6 +49,15 @@ export type ClaimRow = {
   quantityThousandths: number | null;
   remitCents: number | null;
   copayCents: number | null;
+  /**
+   * What the patient was left owing after this adjudication — the report's "Total", not its "Copay".
+   *
+   * The two differ exactly where it costs money. Where a plan pays nothing and applies the fill to
+   * a deductible, the copay column reads zero while the patient is left owing the whole price; take
+   * the copay as the patient's payment and the entire sum vanishes. On one real fill that was
+   * $115.57 of a $161.83 prescription, and it turned $33.14 of margin into an $82.43 loss.
+   */
+  patientTotalCents?: number | null;
   acquisitionCents: number | null;
   status: string;
   /** True where this is a reversal that matched no claim held. */
@@ -61,6 +70,7 @@ export type FillPayer = {
   groupNumber: string | null;
   name: string | null;
   remitCents: number;
+  /** What the patient was left owing after this payer adjudicated. */
   copayCents: number;
 };
 
@@ -80,7 +90,13 @@ export type Fill = {
   remitCents: number;
   /** What the patient actually handed over: the residual after the last plan. */
   patientPaidCents: number;
-  /** Remit plus patient. What the fill brought in. */
+  /**
+   * Money that reached this fill after it was adjudicated: an MTF payment, a DIR reconciliation, a
+   * copay card posted late. Real revenue, and not the plan's — so it is added and kept nameable.
+   */
+  laterPaymentsCents: number;
+  laterPayments: { source: string; payer: string | null; amountCents: number }[];
+  /** Remit, plus what the patient paid, plus anything that arrived afterwards. */
   revenueCents: number;
   /**
    * True where the payers disagree about what the patient owes and the order cannot be settled.
@@ -103,7 +119,17 @@ export function fillKey(c: { rxNumber: string; fillNumber: number | null; dateFi
   return [c.rxNumber.trim(), c.fillNumber ?? "", c.dateFilled, c.ndc11 ?? ""].join("|");
 }
 
-export function groupIntoFills(claims: ClaimRow[]): Fill[] {
+export type LaterPayment = {
+  rxNumber: string;
+  fillNumber: number | null;
+  dateFilled: string | null;
+  ndc11: string | null;
+  source: string;
+  payer: string | null;
+  amountCents: number;
+};
+
+export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): Fill[] {
   const by = new Map<string, ClaimRow[]>();
   for (const c of claims) {
     // A reversed row is not revenue, and a reversal matching nothing held is not a loss either.
@@ -120,7 +146,14 @@ export function groupIntoFills(claims: ClaimRow[]): Fill[] {
       groupNumber: r.groupNumber ?? null,
       name: r.pbmName ?? r.payerLabel,
       remitCents: r.remitCents ?? 0,
-      copayCents: r.copayCents ?? 0,
+      /*
+       * The patient's residual, from the column that actually carries it.
+       *
+       * "Total" is what the patient was left owing after this adjudication; "Copay" is the copay the
+       * plan assessed, which is zero on a deductible fill where the patient in fact owes everything.
+       * Falling back to the copay only where no total was read keeps older rows working.
+       */
+      copayCents: r.patientTotalCents ?? r.copayCents ?? 0,
     }));
     const remitCents = payers.reduce((n, p) => n + p.remitCents, 0);
     /*
@@ -140,7 +173,17 @@ export function groupIntoFills(claims: ClaimRow[]): Fill[] {
     const quantities = rows.map((r) => r.quantityThousandths).filter((x): x is number => x !== null && x !== undefined);
     const quantityThousandths = quantities.length ? Math.max(...quantities) : null;
 
-    const revenueCents = remitCents + patientPaidCents;
+    /*
+     * What arrived after the day, matched on the fill rather than on the claim row.
+     *
+     * A facilitator payment names a prescription and a date, not the claim id this system happens
+     * to have given it, and it may arrive for a fill that went to two payers. Matching on the fill
+     * is the only join that holds.
+     */
+    const mine = later.filter((p) => fillKey({ rxNumber: p.rxNumber, fillNumber: p.fillNumber, dateFilled: p.dateFilled ?? "", ndc11: p.ndc11 }) === key);
+    const laterPaymentsCents = mine.reduce((n, p) => n + p.amountCents, 0);
+
+    const revenueCents = remitCents + patientPaidCents + laterPaymentsCents;
     const first = rows[0];
     out.push({
       key,
@@ -154,6 +197,8 @@ export function groupIntoFills(claims: ClaimRow[]): Fill[] {
       quantityThousandths,
       remitCents,
       patientPaidCents,
+      laterPaymentsCents,
+      laterPayments: mine.map((p) => ({ source: p.source, payer: p.payer, amountCents: p.amountCents })),
       revenueCents,
       patientShareUncertain,
       acquisitionCents,

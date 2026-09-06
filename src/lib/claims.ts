@@ -374,7 +374,8 @@ export async function importRxTransactions(file: Buffer, fileName: string, userI
       bin: t.bin, pcn: t.pcn, groupNumber: t.groupNumber, networkId: t.networkId,
       payerLabel: t.payerLabel, pbmName: resolved.pbmName, matchMethod: resolved.method, payerAmbiguous: resolved.ambiguous,
       quantityThousandths: t.quantityThousandths, quantityUnit: null,
-      remitCents: t.remitCents, copayCents: t.copayCents, acquisitionCents: t.acquisitionCents, grossProfitCents: t.grossProfitCents,
+      remitCents: t.remitCents, copayCents: t.copayCents, patientTotalCents: t.patientTotalCents,
+      acquisitionCents: t.acquisitionCents, grossProfitCents: t.grossProfitCents,
       ingredientPaidCents: t.ingredientPaidCents, dispensingFeePaidCents: t.dispensingFeeCents,
       status, reversedOn: status === "reversed" ? reversedOn : null,
       completedAt: t.completedAt ? mdyToIso(t.completedAt) : null,
@@ -508,6 +509,8 @@ export async function claimFlags() {
    * Both together put a real day $459 in the red on this pharmacy's first live file.
    */
   const { groupIntoFills, fillsAtALoss, coordinationEffect } = await import("./fills");
+  const { laterPayments } = await import("./claim-payments");
+  const later = await laterPayments();
   const heldKeys = new Set(rows.filter((c) => c.status === "paid").map((c) => c.transactionKey ?? c.id));
   const fills = groupIntoFills(
     rows.map((c) => ({
@@ -523,11 +526,13 @@ export async function claimFlags() {
       quantityThousandths: c.quantityThousandths,
       remitCents: c.remitCents,
       copayCents: c.copayCents,
+      patientTotalCents: c.patientTotalCents,
       acquisitionCents: c.acquisitionCents,
       status: c.status,
       // A reversal kept because it matched nothing: negative money against a fill never counted.
       unmatchedReversal: (c.remitCents ?? 0) < 0 && !c.reversalKey,
     })),
+    later,
   );
   void heldKeys;
   const lossFills = fillsAtALoss(fills);

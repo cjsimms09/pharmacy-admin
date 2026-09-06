@@ -1,6 +1,7 @@
 import "server-only";
 import { db } from "@/db";
 import { groupIntoFills, type Fill, type ClaimRow } from "./fills";
+import { laterPayments } from "./claim-payments";
 import { allPayerLinks, linkFor, type PayerLinkRow } from "./payer-links";
 
 /**
@@ -142,6 +143,8 @@ export async function payerMap(): Promise<{
     db.query.networkRates.findMany(),
     allPayerLinks(),
   ]);
+  // Money that reached these fills after the day they were transmitted.
+  const later = await laterPayments();
   // What somebody has already settled, keyed by the claim it came from, so it can be read here
   // rather than searched for again.
   const keyOfClaim = new Map<string, { pcn: string | null; contractId: string | null }>();
@@ -163,11 +166,13 @@ export async function payerMap(): Promise<{
         quantityThousandths: c.quantityThousandths,
         remitCents: c.remitCents,
         copayCents: c.copayCents,
+        patientTotalCents: c.patientTotalCents,
         acquisitionCents: c.acquisitionCents,
         status: c.status,
         unmatchedReversal: (c.remitCents ?? 0) < 0 && !c.reversalKey,
       }),
     ),
+    later,
   );
 
   // ── The chain, per BIN and group actually billed ──
@@ -452,6 +457,7 @@ export async function payerTree(): Promise<{ companies: CompanyNode[]; unnamedRe
     db.query.planGroups.findMany(),
     allPayerLinks(),
   ]);
+  const later = await laterPayments();
 
   const fills = groupIntoFills(
     claims.map(
@@ -469,11 +475,13 @@ export async function payerTree(): Promise<{ companies: CompanyNode[]; unnamedRe
         quantityThousandths: c.quantityThousandths,
         remitCents: c.remitCents,
         copayCents: c.copayCents,
+        patientTotalCents: c.patientTotalCents,
         acquisitionCents: c.acquisitionCents,
         status: c.status,
         unmatchedReversal: (c.remitCents ?? 0) < 0 && !c.reversalKey,
       }),
     ),
+    later,
   );
 
   // The claim carries the contract id and PCN; the fill carries the payers. Join on the claim.

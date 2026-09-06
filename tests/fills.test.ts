@@ -22,6 +22,7 @@ const claim = (over: Partial<ClaimRow> = {}): ClaimRow => ({
   quantityThousandths: 30_000,
   remitCents: 60_738,
   copayCents: 0,
+  patientTotalCents: null,
   acquisitionCents: 57_676,
   status: "paid",
   ...over,
@@ -84,6 +85,48 @@ describe("one fill, however many payers priced it", () => {
     assert.equal(e.coordinatedFills, 1);
     assert.equal(e.falseLosses, 1);
     assert.equal(e.falseLossCents, 57_676 - 800, "$568.76 of loss that was never real");
+  });
+
+  test("a copay card takes money off the copay; the rest does not disappear", () => {
+    /*
+     * Rx 305766, a real fill, and the one that proved this wrong.
+     *
+     * Blue Cross paid nothing and left the patient owing $160.57. The copay card then paid $46.26
+     * and left the patient owing $115.57. The patient paid that. The pharmacy took $161.83 on a
+     * drug that cost $128.68 — $33.14 of margin — and the site called it an $82.43 loss, because it
+     * counted the card's $46.26 and nothing else.
+     *
+     * Two mistakes in one. The patient's residual was read from the "Copay" column, which is zero
+     * on a deductible fill, instead of "Total", which is what they were actually left owing. And
+     * the residual after the *last* adjudication is what the patient hands over — a card reduces
+     * the copay, it does not make the remainder vanish.
+     */
+    const [f] = groupIntoFills([
+      claim({ rxNumber: "305766", fillNumber: 2, dateFilled: "2026-08-31", ndc11: "00074433902", itemName: "SYNTHROID", bin: "610455", payerLabel: "Blue Cross Blue Shield", remitCents: 0, copayCents: 0, patientTotalCents: 16_057, acquisitionCents: 12_868 }),
+      claim({ rxNumber: "305766", fillNumber: 2, dateFilled: "2026-08-31", ndc11: "00074433902", itemName: "SYNTHROID", bin: "610020", payerLabel: "Change Healthcare", remitCents: 4_626, copayCents: 0, patientTotalCents: 11_557, acquisitionCents: 12_868 }),
+    ]);
+    assert.equal(f.remitCents, 4_626, "the plan paid nothing; the card paid $46.26");
+    assert.equal(f.patientPaidCents, 11_557, "the patient paid what the card left, not nothing and not both copays");
+    assert.equal(f.revenueCents, 16_183);
+    assert.equal(f.acquisitionCents, 12_868);
+    assert.equal(f.marginCents, 3_315, "$33.15 made, against the $82.43 loss the site was showing");
+  });
+
+  test("money that arrives later is added to the fill it belongs to", () => {
+    /*
+     * A Medicare Transaction Facilitator payment reaches the pharmacy weeks after the claim, names
+     * a prescription rather than a claim id, and is real revenue. Held only as what the daily report
+     * said on the day, a fill sits on the "dispensed at a loss" list because of a payment that has
+     * since arrived.
+     */
+    const [f] = groupIntoFills(
+      [claim({ rxNumber: "332359", fillNumber: 1, dateFilled: "2026-09-05", remitCents: 20_457, copayCents: 0, patientTotalCents: 0, acquisitionCents: 32_823 })],
+      [{ rxNumber: "332359", fillNumber: 1, dateFilled: "2026-09-05", ndc11: "81968004560", source: "mtf", payer: "Medicare Transaction Facilitator", amountCents: 14_618 }],
+    );
+    assert.equal(f.laterPaymentsCents, 14_618);
+    assert.equal(f.revenueCents, 20_457 + 14_618);
+    assert.equal(f.marginCents, 35_075 - 32_823, "a $123.66 loss becomes $22.52 made once the facilitator payment lands");
+    assert.deepEqual(f.laterPayments.map((p) => p.source), ["mtf"]);
   });
 
   test("where the plans disagree about the patient's share, the figure is flagged not asserted", () => {

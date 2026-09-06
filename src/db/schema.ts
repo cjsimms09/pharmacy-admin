@@ -1619,6 +1619,19 @@ export const claims = sqliteTable(
     daysSupply: integer("days_supply"),
     remitCents: integer("remit_cents"),
     copayCents: integer("copay_cents"),
+    /**
+     * What the patient was left owing after this adjudication — the report's "Total" column.
+     *
+     * Not the same as the copay, and the difference is money. On a fill where the plan pays nothing
+     * and applies it to a deductible, the copay column reads $0.00 while the patient is left owing
+     * the lot; taking the copay as the patient's payment then loses the whole of it. On one real
+     * fill that was $115.57 on a $161.83 prescription, which turned $33.14 of margin into an
+     * $82.43 loss on the screen.
+     *
+     * In a coordinated chain each adjudication leaves a smaller figure here, and the last one is
+     * what the patient actually hands over.
+     */
+    patientTotalCents: integer("patient_total_cents"),
     awpCents: integer("awp_cents"),
     acquisitionCents: integer("acquisition_cents"),
     grossProfitCents: integer("gross_profit_cents"),
@@ -1743,6 +1756,47 @@ export const payerLinks = sqliteTable(
     confirmedOn: text("confirmed_on").notNull().default(now()),
   },
   (t) => [index("payer_links_bin_idx").on(t.bin), index("payer_links_pbm_idx").on(t.pbmName)],
+);
+
+/**
+ * Money that reaches a claim after it was adjudicated.
+ *
+ * A claim's revenue is not settled on the day it is transmitted. A Medicare Transaction Facilitator
+ * payment arrives later and has to be matched back to the fill it belongs to. So does a DIR
+ * reconciliation, a copay card posted after the fact, or a secondary that adjudicated a week on.
+ * Held only as what the daily report said on the day, every one of those is money the pharmacy
+ * received and this system never counted — and a fill sits on the "dispensed at a loss" list
+ * because of a payment that has since arrived.
+ *
+ * Kept as its own rows rather than added into the claim, so what was paid on the day stays
+ * distinguishable from what arrived afterwards. That distinction is the whole point when a payer
+ * is being judged: the plan paid what the plan paid, and a facilitator payment on top of it is not
+ * the plan's money.
+ */
+export const claimPayments = sqliteTable(
+  "claim_payments",
+  {
+    id: text("id").primaryKey(),
+    claimId: text("claim_id").references(() => claims.id, { onDelete: "cascade" }),
+    /** Where the fill can be found again when the claim row is not known: the natural key. */
+    rxNumber: text("rx_number").notNull(),
+    fillNumber: integer("fill_number"),
+    dateFilled: text("date_filled"),
+    ndc11: text("ndc11"),
+    /** "mtf", "dir", "copay_card", "secondary", "manual". */
+    source: text("source").notNull(),
+    /** Who paid it, as the remittance names them. */
+    payer: text("payer"),
+    amountCents: integer("amount_cents").notNull(),
+    /** When the money was received, not when the claim was filled. */
+    receivedOn: text("received_on"),
+    /** The remittance or file this came from, so it can be traced back. */
+    reference: text("reference"),
+    notes: text("notes"),
+    recordedBy: text("recorded_by").notNull(),
+    createdAt: text("created_at").notNull().default(now()),
+  },
+  (t) => [index("claim_payments_claim_idx").on(t.claimId), index("claim_payments_rx_idx").on(t.rxNumber)],
 );
 
 export const planGroups = sqliteTable(

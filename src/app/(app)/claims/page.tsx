@@ -10,11 +10,14 @@ import { hasMailPassword } from "@/lib/mailbox";
 import { formatCents } from "@/lib/money";
 import { requireReimbursement } from "@/lib/features";
 import { PageHeader, Notice, Empty } from "@/components/ui";
+import { SubmitButton } from "@/components/submit-button";
 
 export const metadata = { title: "Claims" };
 export const dynamic = "force-dynamic";
 
 export default async function ClaimsPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
+  const { laterPaymentSummary } = await import("@/lib/claim-payments");
+  const laterMoney = await laterPaymentSummary();
   await requireReimbursement();
   await requireUser();
   const { ok, error } = await searchParams;
@@ -33,7 +36,10 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
       const buf = Buffer.from(await file.arrayBuffer());
       if (looksLikeRxTransactions(buf.subarray(0, 8192).toString("utf8"))) {
         const t = await importRxTransactions(buf, file.name, u.id);
-        const text = describeTransactionImport(t);
+        // A remittance can beat the daily report. Anything waiting for this prescription attaches now.
+        const { matchOrphanPayments } = await import("@/lib/claim-payments");
+        const attached = await matchOrphanPayments();
+        const text = describeTransactionImport(t) + (attached.matched ? ` ${attached.matched} payment${attached.matched === 1 ? "" : "s"} that arrived before the claim ${attached.matched === 1 ? "was" : "were"} attached.` : "");
         await audit({ action: "claims.import", userId: u.id, userName: u.name, details: `${file.name}: ${text.slice(0, 200)}` });
         revalidatePath("/claims");
         redirect(`/claims?${t.problems.length && !t.claimsAdded ? "error" : "ok"}=` + encodeURIComponent(text));
@@ -58,6 +64,32 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
     }
   }
 
+  /**
+   * Recovers the patient's residual on claims loaded before it was being kept.
+   *
+   * The report's "Total" column was read and thrown away, so every claim already held records the
+   * patient as having paid nothing — which on a fill applied to a deductible is the whole of the
+   * money. The raw row is stored against each claim, so nothing has to be sent again.
+   */
+  async function repairPatientTotals() {
+    "use server";
+    const u = await requireManager();
+    const { backfillPatientTotals } = await import("@/lib/claim-payments");
+    const r = await backfillPatientTotals();
+    await audit({ action: "claims.backfill_patient", userId: u.id, userName: u.name, details: `${r.filled} of ${r.read}` });
+    revalidatePath("/claims");
+    revalidatePath("/purchasing");
+    revalidatePath("/payers/performance");
+    redirect(
+      "/claims?ok=" +
+        encodeURIComponent(
+          r.filled === 0
+            ? "Nothing to recover — every claim already carries what the patient was left owing."
+            : `${r.filled} claim${r.filled === 1 ? "" : "s"} now carry what the patient was actually left owing, read back out of the row as it arrived. Every margin on the site follows.`,
+        ),
+    );
+  }
+
   return (
     <>
       <PageHeader
@@ -68,9 +100,37 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
             <Link href="/payers/performance" className="btn btn-primary">Who pays best</Link>
             <Link href="/claims/floor" className="btn">Paid under the floor</Link>
             <Link href="/plans" className="btn">Classify plans</Link>
+            <form action={repairPatientTotals}>
+              <SubmitButton className="btn" pendingLabel="Recovering…">Recover patient payments</SubmitButton>
+            </form>
           </>
         }
       />
+
+      {/*
+        Money that reached a fill after the day it was transmitted.
+
+        A facilitator payment arrives weeks later and is real revenue. Counted only as what the
+        daily report said on the day, a fill sits on the loss list because of a payment that has
+        since arrived — and the plan that underpaid is judged on money it never sent.
+      */}
+      {laterMoney.length > 0 && (
+        <Notice kind="ok">
+          <b>
+            {formatCents(laterMoney.reduce((n, x) => n + x.amountCents, 0))} has reached these claims since they were
+            transmitted
+          </b>{" "}
+          — {laterMoney.map((x) => `${x.payments} from ${x.source.toUpperCase()}`).join(", ")}. It is added to the fill it
+          belongs to and kept apart from what the plan itself paid.
+          {laterMoney.some((x) => x.unmatched > 0) && (
+            <>
+              {" "}
+              {laterMoney.reduce((n, x) => n + x.unmatched, 0)} of them name a prescription this site has not loaded yet;
+              they attach themselves when it arrives.
+            </>
+          )}
+        </Notice>
+      )}
 
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}

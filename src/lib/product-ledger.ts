@@ -322,6 +322,8 @@ export async function productLedger(): Promise<{ rows: LedgerRow[]; rate: number
    * depending on which screen it was asked from, which is worse than either answer being wrong.
    */
   const { groupIntoFills } = await import("./fills");
+  const { laterPayments } = await import("./claim-payments");
+  const later = await laterPayments();
   const fills = groupIntoFills(
     rawClaims.map((c) => ({
       id: c.id,
@@ -337,10 +339,12 @@ export async function productLedger(): Promise<{ rows: LedgerRow[]; rate: number
       quantityThousandths: c.quantityThousandths,
       remitCents: c.remitCents,
       copayCents: c.copayCents,
+      patientTotalCents: c.patientTotalCents,
       acquisitionCents: c.acquisitionCents,
       status: c.status,
       unmatchedReversal: (c.remitCents ?? 0) < 0 && !c.reversalKey,
     })),
+    later,
   );
   const claims = fills.map((f) => ({
     ndc11: f.ndc11,
