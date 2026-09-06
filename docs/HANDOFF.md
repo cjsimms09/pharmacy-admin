@@ -163,6 +163,21 @@ was everything after the draft. Pure and tested now:
       AWP settles the contract formula. Until then they are null, and nothing should read them as
       zero. `other_coverage_code` is on the report and blank on every row.
 
+**From the review of `ea77544` (the drill down read from the document, 6 September evening).**
+The reader is right to let the document decide, and the two identities it checks are the ones in
+`drill-down.ts`. One thing to add before the daily figure is trusted to pick the band on its own:
+
+- [ ] **Prove the four exclusions are McKesson's whole scrub, on the same month.** `FULL_SCRUB`
+      (flu, dropship, specialty, GLP1) is asserted, not yet shown: the only proof is a daily
+      reading for month M agreeing with the statement for month M. `driftPercent` today compares
+      the statement (last period) with the daily figure (this month), which is two months and not
+      a check. Keep the last daily reading per month (`purchase_positions`, already on the list)
+      and, when the statement for M lands, compare it to the last scrubbed daily reading for M:
+      within rounding, the list is proved and the daily figure may keep selecting the band; wider,
+      the list is incomplete, the daily figure goes back to a position, and the gap is shown with
+      the two months named. Until the first statement arrives on a scrubbed month, say on the
+      supplier card that the band is selected on a figure not yet reconciled to a statement.
+
 **From the design audit** (`docs/reference/design-audit.md`; the page inventory is §7). Ordered
 by what changes the owner's morning most. Each is small on its own; none needs a migration.
 
@@ -217,8 +232,6 @@ by what changes the owner's morning most. Each is small on its own; none needs a
 ### For the owner, on the pharmacy computer
 
 - [ ] Schedule the PioneerRx transaction report to cover **yesterday**.
-- [ ] Set the Purchase Drill Down's exclusion filter to McKesson's rebate scrub, if the filter
-      offers it; otherwise say so on the pull request and the site estimates the scrub.
 - [ ] NADAC page: "Read the listing now", then "Fetch this week" on a gap. Neither session can
       reach data.medicaid.gov.
 - [ ] Suppliers page: set the catalogue name on McKesson, IPD, IPC, ParMed.
