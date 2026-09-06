@@ -65,7 +65,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         </p>
         <form action={run} className="mt-3 flex flex-wrap items-center gap-2">
           <input type="file" name="file" accept=".xlsx,.csv" className="text-sm" />
-          <button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Check it</button>
+          <button className="btn btn-primary">Check it</button>
         </form>
         <p className="mt-2 text-xs text-ink-3">
           Nothing is saved. This reads the file, reports on it, and forgets it — use Claims or Purchasing to actually

@@ -95,7 +95,7 @@ export default async function MonthlyPLPage({
             <option value="cash">Cash — what reached the bank</option>
           </select>
         </label>
-        <button className="rounded-md bg-ink px-3 py-1.5 text-sm text-white">Show</button>
+        <button className="btn btn-sm btn-primary">Show</button>
         <p className="ml-auto max-w-md text-xs text-ink-3">
           {basis === "accrual"
             ? "A prescription dispensed on the 30th is this month's, whatever month the plan pays in."

@@ -302,7 +302,7 @@ export default async function PayersPage({ searchParams }: { searchParams: Promi
             inputMode="numeric"
             className="w-40 rounded-md border border-line px-3 py-2 text-sm"
           />
-          <button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Look up</button>
+          <button className="btn btn-primary">Look up</button>
         </form>
 
         {hit && (

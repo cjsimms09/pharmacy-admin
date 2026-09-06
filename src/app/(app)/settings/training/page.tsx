@@ -58,7 +58,7 @@ export default async function TrainingMaterialPage({ searchParams }: { searchPar
             />
           </Field>
         ))}
-        <button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Save</button>
+        <button className="btn btn-primary">Save</button>
       </form>
 
       <Card className="mt-8 max-w-3xl  text-sm">

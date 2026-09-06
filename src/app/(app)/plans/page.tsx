@@ -65,7 +65,7 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
         <>
           <Empty>No plans in the register yet.</Empty>
           <form action={sync} className="mt-3">
-            <button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Build it from the claims</button>
+            <button className="btn btn-primary">Build it from the claims</button>
           </form>
         </>
       ) : (

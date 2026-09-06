@@ -129,7 +129,7 @@ export default async function ConnectionsPage({ searchParams }: { searchParams: 
               ))}
 
               <div className="flex gap-2">
-                <button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Save</button>
+                <button className="btn btn-primary">Save</button>
               </div>
             </form>
 
