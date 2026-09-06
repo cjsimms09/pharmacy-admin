@@ -64,7 +64,7 @@ export { STANDING_MEANS, SB20_MIN_DISPENSING_FEE_CENTS, SB20_EFFECTIVE_FROM };
 export type AgainstNadac = {
   rows: NadacStanding[];
   /** Fills that could not be compared, and why — never silently dropped. */
-  notCompared: { reason: "no NADAC held for that date" | "no quantity on the claim" | "no NDC on the claim"; fills: number }[];
+  notCompared: { reason: "no NADAC held for that date" | "no quantity on the claim" | "no NDC on the claim" | "the pharmacy's own cash price, which no benchmark applies to"; fills: number }[];
   owedCents: number;
   argueCents: number;
   /** How many of the compared fills are paid at or above the benchmark. */
@@ -116,9 +116,26 @@ export async function againstNadac(fills: Fill[]): Promise<AgainstNadac> {
   const ksFee = Number.isFinite(feeRaw) && feeRaw > 0 ? feeRaw : null;
 
   const rows: NadacStanding[] = [];
-  const missing = { "no NADAC held for that date": 0, "no quantity on the claim": 0, "no NDC on the claim": 0 };
+  const missing = {
+    "no NADAC held for that date": 0,
+    "no quantity on the claim": 0,
+    "no NDC on the claim": 0,
+    "the pharmacy's own cash price, which no benchmark applies to": 0,
+  };
 
   for (const f of fills) {
+    /*
+     * The pharmacy's own cash programme is not measured against the benchmark.
+     *
+     * NADAC plus the dispensing fee is a test of whether a *payer* paid enough. On a fill the
+     * pharmacy priced itself there is no payer, no floor for the state to enforce and nobody to
+     * argue with — the number is what it chose to charge. Measuring it produces a list of
+     * "shortfalls" against itself, which is noise on the one screen that has to stay actionable.
+     */
+    if (f.cashPlan) {
+      missing["the pharmacy's own cash price, which no benchmark applies to"]++;
+      continue;
+    }
     if (!f.ndc11) {
       missing["no NDC on the claim"]++;
       continue;

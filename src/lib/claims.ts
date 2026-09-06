@@ -761,11 +761,21 @@ export function describeTransactionImport(r: TransactionImportReport): string {
       r.reportGrossProfitCents !== null && r.reportGrossProfitCents !== undefined && r.readGrossProfitCents !== undefined
         ? r.reportGrossProfitCents - r.readGrossProfitCents
         : 0;
+    /*
+     * The bridge from what this reader made of the file to what the report says the file came to.
+     *
+     * Every row is either read or set aside for a named reason, and the gross profit of the ones set
+     * aside is exactly the difference between the two totals. Stated in full, because "our figure
+     * and theirs differ" is only alarming until you can point at the rows, and on the live file the
+     * whole of the difference is five rows carrying a status this reader does not know.
+     */
     bits.push(
       `the report's own total for this file is ${money(r.reportSalesCents)} taken and ${money(r.reportGrossProfitCents ?? 0)} made` +
-        (Math.abs(short) > 2
-          ? `, and this reader accounted for ${money(r.readGrossProfitCents ?? 0)} of that — ${money(Math.abs(short))} sits on rows it set aside`
-          : ", every penny of which this reader accounted for"),
+        (Math.abs(short) <= 2
+          ? ", every penny of which this reader accounted for"
+          : short < 0
+            ? `, and this reader read ${money(r.readGrossProfitCents ?? 0)} of gross profit across the rows it could read — ${money(-short)} more, which is what sits on the rows it set aside and did not count`
+            : `, and this reader accounted for ${money(r.readGrossProfitCents ?? 0)} of that — ${money(short)} sits on rows it could not read`),
     );
   }
   if (r.unresolvedBins.length) bits.push(`BINs not on the listing: ${r.unresolvedBins.join(", ")}`);

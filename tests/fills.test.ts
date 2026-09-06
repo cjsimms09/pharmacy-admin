@@ -49,20 +49,27 @@ describe("one fill, however many payers priced it", () => {
     assert.equal(f.quantityThousandths, 30_000, "not sixty thousand");
   });
 
-  test("the patient pays once — the primary's copay is what the secondary is billed", () => {
+  test("the patient's residual sits on one row, and is taken from that row", () => {
     /*
-     * Primary pays $10 and leaves $20 owing; the secondary is billed that $20, pays $15 and leaves
-     * $5. The pharmacy receives $10 + $15 + $5 = $30. Summing the copays would count the $20 the
-     * secondary was billed as money the pharmacy was handed, and report $50.
+     * Rx 336765, a real coordinated fill and the one that disproved this module's founding
+     * assumption. OptumRx paid $461.89 on the dispensing row; a second plan paid $100 and left the
+     * patient owing $733.52. The pharmacy took $1,295.41 on a pen costing $1,302.73 — a $7.32 loss,
+     * which is what PioneerRx says too.
+     *
+     * The old arithmetic worked the patient's share out backwards, subtracting every remittance from
+     * a price no row states. That gave $271.63 and a $469.21 loss. It was invented from one example
+     * and nothing could contradict it until this fill arrived.
      */
     const [f] = groupIntoFills([
-      claim({ bin: "610011", remitCents: 1_000, copayCents: 2_000, acquisitionCents: 2_000 }),
-      claim({ bin: "610502", remitCents: 1_500, copayCents: 500, acquisitionCents: 2_000 }),
+      claim({ rxNumber: "336765", bin: "019158", payerLabel: "CNRX", remitCents: 10_000, copayCents: 73_352, patientTotalCents: 73_352, acquisitionCents: 0, quantityThousandths: 0, grossProfitCents: 83_352 }),
+      claim({ rxNumber: "336765", bin: "610011", payerLabel: "OptumRx", remitCents: 46_189, copayCents: 0, patientTotalCents: 0, acquisitionCents: 130_273, quantityThousandths: 2_000, grossProfitCents: -84_084 }),
     ]);
-    assert.equal(f.remitCents, 2_500);
-    assert.equal(f.patientPaidCents, 500);
-    assert.equal(f.revenueCents, 3_000);
-    assert.equal(f.marginCents, 1_000);
+    assert.equal(f.remitCents, 56_189, "both plans' money");
+    assert.equal(f.patientPaidCents, 73_352, "what the one row leaving a residual actually left");
+    assert.equal(f.revenueCents, 129_541);
+    assert.equal(f.acquisitionCents, 130_273, "the pen, from the row that dispensed it");
+    assert.equal(f.marginCents, -732);
+    assert.equal(f.agreesWithReport, true, "and the report says the same");
   });
 
   test("a fill the plans covered outright is not a puzzle: the patient paid nothing", () => {
@@ -86,18 +93,20 @@ describe("one fill, however many payers priced it", () => {
     assert.equal(f.marginCents, 34_971 - 47_201, "a real loss, and the report agrees it is one");
   });
 
-  test("payers remitting more than any row said the drug cost is flagged, not asserted", () => {
+  test("two rows both leaving the patient owing is flagged, because it may be one residual twice", () => {
     /*
-     * Two rows each paying $90 on a $100 drug. Whatever these are — two primaries, a rebill read as
-     * a coordination — they are not one chain, and the patient's share cannot be worked out from
-     * them. It is floored at nothing and said to be uncertain rather than invented.
+     * The one assumption the plain arithmetic rests on: the report puts the patient's residual on
+     * the single row where it actually stays with them. That holds on every one of 1,199 real fills.
+     *
+     * If it ever stops holding, adding the rows would invent revenue — so the case is named rather
+     * than assumed away. The figure is still given, because it is the best available; it is the
+     * certainty that is withheld.
      */
     const [f] = groupIntoFills([
-      claim({ bin: "610011", remitCents: 9_000, copayCents: 1_000 }),
-      claim({ bin: "610502", remitCents: 9_000, copayCents: 1_000 }),
+      claim({ bin: "610011", remitCents: 9_000, copayCents: 1_000, patientTotalCents: 1_000 }),
+      claim({ bin: "610502", remitCents: 9_000, copayCents: 1_000, patientTotalCents: 1_000 }),
     ]);
     assert.equal(f.patientShareUncertain, true);
-    assert.equal(f.patientPaidCents, 0);
   });
 
   test("a single-payer fill is unchanged by any of this", () => {
@@ -256,15 +265,31 @@ describe("one fill, however many payers priced it", () => {
     assert.equal(f.marginCents, 3_314);
   });
 
-  test("an ordinary coordination: each plan pays, and the patient pays what is left", () => {
-    // Primary pays $10 and leaves $20; the secondary is billed that $20, pays $15, leaves $5.
+  test("the bottle is counted from the row that dispensed it, and the others carry zero", () => {
+    /*
+     * This module was built believing every row of a coordinated fill repeats the acquisition cost,
+     * so it took the largest. It does not: across 1,199 real fills, not one has two live rows
+     * carrying a cost. The coordination row carries zero, and adding is both simpler and right.
+     */
     const [f] = groupIntoFills([
-      claim({ remitCents: 1_000, copayCents: 2_000, acquisitionCents: 2_000 }),
-      claim({ remitCents: 1_500, copayCents: 500, acquisitionCents: 2_000 }),
+      claim({ bin: "004336", remitCents: 27_977, copayCents: 0, patientTotalCents: 0, acquisitionCents: 47_201, quantityThousandths: 30_000 }),
+      claim({ bin: "024284", remitCents: 6_994, copayCents: 0, patientTotalCents: 0, acquisitionCents: 0, quantityThousandths: 0 }),
     ]);
-    assert.equal(f.remitCents, 2_500);
-    assert.equal(f.patientPaidCents, 500);
-    assert.equal(f.revenueCents, 3_000);
+    assert.equal(f.acquisitionCents, 47_201, "once, from the dispensing row");
+    assert.equal(f.quantityThousandths, 30_000, "and the quantity likewise, not the card row's zero");
+  });
+
+  test("a cost repeated on both rows is still counted once", () => {
+    /*
+     * The guard for the belief this was built on. It never fires on the real file — but if the
+     * report ever does start repeating the cost of the bottle, the answer has to degrade to right
+     * rather than to double, which was the original bug and cost a real day $459.
+     */
+    const [f] = groupIntoFills([
+      claim({ bin: "610455", remitCents: 800, copayCents: 0, patientTotalCents: 0, acquisitionCents: 57_676 }),
+      claim({ bin: "610502", remitCents: 59_000, copayCents: 1_000, patientTotalCents: 1_000, acquisitionCents: 57_676 }),
+    ]);
+    assert.equal(f.acquisitionCents, 57_676, "one bottle, not two");
   });
 
   test("money that arrives later is added to the fill it belongs to", () => {
@@ -284,19 +309,14 @@ describe("one fill, however many payers priced it", () => {
     assert.deepEqual(f.laterPayments.map((p) => p.source), ["mtf"]);
   });
 
-  test("a chain that closes is not flagged: the residuals are consistent with one price", () => {
-    /*
-     * The primary establishes $30 and pays $10; the secondary is billed the remaining $20, pays $15
-     * and leaves $5. The payers took $25 of a $30 drug, the patient the last $5. Nothing is in
-     * doubt here and nothing is flagged — the flag is for rows that cannot be one chain.
-     */
+  test("an ordinary coordination is not flagged: only one row leaves a residual", () => {
+    // Rx 336765 again, which is the shape every real coordinated fill has.
     const [f] = groupIntoFills([
-      claim({ bin: "610011", remitCents: 1_000, copayCents: 2_000 }),
-      claim({ bin: "610502", remitCents: 1_500, copayCents: 500 }),
+      claim({ bin: "019158", remitCents: 10_000, copayCents: 73_352, patientTotalCents: 73_352, acquisitionCents: 0 }),
+      claim({ bin: "610011", remitCents: 46_189, copayCents: 0, patientTotalCents: 0, acquisitionCents: 130_273 }),
     ]);
-    assert.equal(f.patientShareUncertain, false);
-    assert.equal(f.patientPaidCents, 500, "what the last plan left, not both copays added");
-    assert.equal(f.revenueCents, 3_000);
+    assert.equal(f.patientShareUncertain, false, "nothing here is in doubt");
+    assert.equal(f.patientPaidCents, 73_352);
   });
 
   test("a reversal that matches nothing held is not a loss", () => {

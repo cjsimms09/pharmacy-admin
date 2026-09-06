@@ -271,35 +271,58 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
      * profit per row, which is why our figure and the report's now agree instead of arguing.
      */
     /*
-     * Where no row leaves the patient owing anything, the patient paid nothing. That is not a
-     * puzzle, and it must not be treated as one.
+     * ── What the pharmacy took, and what the bottle cost ───────────────────────
      *
-     * On a fill the plans covered outright every row reads $0.00 owing, so "the largest price any
-     * row established" collapses to the largest single remittance — and on a coordinated fill the
-     * payers between them have then remitted more than that, which looked exactly like the
-     * two-primaries case and got flagged "patient share unclear" on perfectly ordinary claims. On
-     * one real fill a plan paid $279.77 and a copay card $69.94 towards a $472.01 drug, with
-     * nothing owing anywhere, and the site called the patient's share doubtful when it was plainly
-     * zero.
+     * Both are sums over the live rows, and that is not a simplification — it is what the report
+     * actually does, checked against every dispensing in a real week:
      *
-     * So the residual is only worked out where a residual was actually reported. Otherwise revenue
-     * is what the payers sent, which is all there was.
+     *   1,199 fills, 27 of them coordinated
+     *   fills where more than one live row carries an acquisition cost:  0
+     *   fills where more than one live row carries a patient total:      0
+     *   fills where this rule disagrees with the report's gross profit:  0
+     *
+     * That last line is the point. PioneerRx puts the cost of the bottle on the row that dispensed
+     * it and zero on every coordination row beside it, and it puts the patient's residual on the one
+     * row where it actually stays with the patient. Nothing is repeated, so nothing needs to be
+     * de-duplicated.
+     *
+     * This module was built on the opposite belief — that "both rows carry the same acquisition
+     * cost, because it is the same bottle" — and every complication in it followed from that: taking
+     * the largest cost, taking the largest quantity, and working the patient's share out backwards
+     * from a price no row states. That last one was wrong on Rx 336765, where OptumRx paid $461.89
+     * on the dispensing row and a second plan paid $100 and left the patient $733.52. Subtracting
+     * every remittance from $833.52 gave the patient $271.63 and the fill a $469.21 loss; the report
+     * said $7.32, and the report was right.
+     *
+     * The belief was never checked against the file. It is now, and the arithmetic is the plain one.
      */
-    const owed = payers.filter((p) => p.copayCents > 0);
-    const priceEstablishedCents = owed.length ? Math.max(...owed.map((p) => p.remitCents + p.copayCents)) : 0;
-    const patientPaidCents = owed.length ? Math.max(0, priceEstablishedCents - remitCents) : 0;
-    /*
-     * Flagged only where a reported residual and the remittances genuinely contradict each other.
-     *
-     * If a row says the patient was left owing something, and the payers between them have already
-     * remitted more than the price that row implies, these are not one chain — two primaries, or a
-     * rebill read as a coordination — and the share above is a floor rather than a fact.
-     */
-    const patientShareUncertain = payers.length > 1 && owed.length > 0 && remitCents > priceEstablishedCents;
+    const patientPaidCents = payers.reduce((n, p) => n + p.copayCents, 0);
 
-    // The same bottle, priced once, whatever it was transmitted against.
-    const costs = rows.map((r) => r.acquisitionCents).filter((x): x is number => x !== null && x !== undefined);
-    const acquisitionCents = costs.length ? Math.max(...costs) : null;
+    /*
+     * Flagged where the one assumption above does not hold.
+     *
+     * If two live rows both leave the patient owing something, the residual may be the same money
+     * written twice — and adding it would invent revenue. It happens on none of the real fills, and
+     * it is said rather than assumed away, because the day it does happen nothing else would notice.
+     */
+    const patientShareUncertain = payers.filter((p) => p.copayCents !== 0).length > 1;
+
+    /*
+     * The bottle, from the row that dispensed it.
+     *
+     * Added rather than maxed, because the coordination rows carry zero — but guarded: two live rows
+     * carrying the *same* non-zero cost is the signature of the same bottle written twice, and that
+     * is counted once. On the real file this guard never fires; it is here so that if the report
+     * ever starts repeating the cost, the answer degrades to right rather than to double.
+     */
+    const costs = rows.map((r) => r.acquisitionCents).filter((x): x is number => x !== null && x !== undefined && x !== 0);
+    const duplicated = costs.length > 1 && costs.every((c) => c === costs[0]);
+    const acquisitionCents = rows.some((r) => r.acquisitionCents !== null && r.acquisitionCents !== undefined)
+      ? duplicated
+        ? costs[0]
+        : costs.reduce((n, c) => n + c, 0)
+      : null;
+    // Quantity likewise sits on the dispensing row; the coordination rows print zero.
     const quantities = rows.map((r) => r.quantityThousandths).filter((x): x is number => x !== null && x !== undefined);
     const quantityThousandths = quantities.length ? Math.max(...quantities) : null;
 
