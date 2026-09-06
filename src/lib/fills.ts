@@ -128,18 +128,19 @@ export type Fill = {
    */
   reportedMarginCents: number | null;
   /**
-   * Money the report counted on the day that has not reached the pharmacy.
+   * Money the report booked on this fill that this site has not found in the row.
    *
-   * PioneerRx books the facilitator's share at adjudication, because the plan's response says what
-   * it will be. The money itself turns up weeks later, from the Medicare Transaction Facilitator.
-   * Until it does, the report's gross profit is ahead of the bank by exactly that amount — on one
-   * real Jardiance fill, $146.18, which is the whole difference between the report's $22.52 and
-   * this site's $123.66 loss.
+   * PioneerRx computes its gross profit from the same row we read, so a gap means it counted
+   * revenue we did not. What that revenue *is* varies and the fill cannot tell us: on one Jardiance
+   * fill it was $146.18 of facilitator money the plan promised at adjudication; on a Losartan fill
+   * it was $5.56, which no facilitator was ever going to pay and is far likelier to be a patient
+   * total sitting in a column this reader is not picking up.
    *
-   * That is not a reading error, it is a receivable: the amount to expect, and the amount to chase
-   * if it never comes. It closes itself when the payment lands and is matched to the fill.
+   * So the amount is stated and the cause is not. Naming every gap a facilitator payment turned a
+   * reading problem into a queue of receivables that were never coming — the same mistake as the
+   * red banner it replaced, in the opposite direction. The gap is the fact; the row is the evidence.
    */
-  awaitedCents: number | null;
+  unreconciledCents: number | null;
   /**
    * False only where this site holds *more* than the report did and nothing arrived later to
    * explain it — which cannot be a timing difference, so a column is not where this reader thinks.
@@ -282,13 +283,14 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
       marginCents: acquisitionCents === null ? null : revenueCents - acquisitionCents,
       reportedMarginCents,
       /*
-       * The report ahead of us is a receivable; us ahead of the report is a bug.
+       * Which way the gap runs still matters, even though its cause is not knowable from here.
        *
-       * Both directions used to read as "the site is broken", which put a red banner on the claims
-       * screen for thirty-two fills that were simply waiting on facilitator money. They are not the
-       * same thing and are no longer said the same way.
+       * The report ahead of us means revenue we did not pick up — recoverable, once the column is
+       * found. Us ahead of the report cannot be a timing difference at all and can only be a
+       * mis-read column. Neither deserves the red "the arithmetic is broken" banner that used to
+       * cover both.
        */
-      awaitedCents: gapCents !== null && gapCents > 2 ? gapCents : null,
+      unreconciledCents: gapCents !== null && gapCents > 2 ? gapCents : null,
       agreesWithReport: gapCents === null ? null : gapCents >= -2 || laterPaymentsCents !== 0,
     });
   }

@@ -227,27 +227,29 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
       )}
 
       {/*
-        The report ahead of the bank: money counted at adjudication that has not arrived.
+        Revenue the report booked that this site did not find in the row.
 
-        PioneerRx books the facilitator's share on the day, because the plan's response says what it
-        will be. The money itself comes weeks later from the Medicare Transaction Facilitator. So
-        the report reads a profit where this site reads a loss, and the whole of the difference is
-        cash the pharmacy is owed and has not got.
+        PioneerRx computes its gross profit from the same row we read, so a gap means it counted
+        money we did not — and the amount is the only part of that this site actually knows. On one
+        Jardiance fill the gap was $146.18 of facilitator money the plan promised at adjudication.
+        On a Losartan fill it was $5.56, which no facilitator was ever going to pay and is far more
+        likely to be a patient total sitting in a column this reader is not picking up.
 
-        This used to be a red "the arithmetic is broken" banner over thirty-two fills that were
-        simply waiting to be paid. It is the opposite of a bug — it is a bill to collect.
+        So the gap is stated and the cause is not. Calling every one of them a facilitator payment
+        built a queue of receivables that were never coming, which is the same mistake as the red
+        "the arithmetic is broken" banner it replaced, made in the opposite direction.
       */}
-      {flags.awaiting.length > 0 && (
+      {flags.unreconciled.length > 0 && (
         <Notice kind="warn">
-          <b>{formatCents(flags.awaitingCents)} the report counted that has not reached the pharmacy.</b>{" "}
-          {flags.awaiting.length} fill{flags.awaiting.length === 1 ? " was" : "s were"} priced with a facilitator or
-          manufacturer share the plan promised at adjudication and pays weeks later — biggest is Rx{" "}
-          {flags.awaiting[0].rxNumber}
-          {flags.awaiting[0].fillNumber !== null ? `-${flags.awaiting[0].fillNumber}` : ""}
-          {flags.awaiting[0].itemName ? ` (${flags.awaiting[0].itemName})` : ""} at{" "}
-          {formatCents(flags.awaiting[0].awaitedCents ?? 0)}. Each is carried as a loss here until the payment lands and
-          is matched, which happens on its own once{" "}
-          <Link href="/remits/mtf" className="underline">the facilitator feed</Link> is running.
+          <b>{formatCents(flags.unreconciledCents)} the report counted that this site has not found in the row.</b>{" "}
+          Across {flags.unreconciled.length} fill{flags.unreconciled.length === 1 ? "" : "s"} — biggest is Rx{" "}
+          {flags.unreconciled[0].rxNumber}
+          {flags.unreconciled[0].fillNumber !== null ? `-${flags.unreconciled[0].fillNumber}` : ""}
+          {flags.unreconciled[0].itemName ? ` (${flags.unreconciled[0].itemName})` : ""} at{" "}
+          {formatCents(flags.unreconciled[0].unreconciledCents ?? 0)}. PioneerRx computes its gross profit from the same
+          row, so it is revenue we did not pick up: a patient total in a column this reader is missing, or money the
+          plan promised at adjudication and pays later. Open <b>Why is this a loss?</b> on one below — the row is
+          printed there exactly as it arrived, and it says which.
         </Notice>
       )}
 
@@ -296,10 +298,10 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
               sub={`${formatCents(flags.revenueCents)} taken in on ${flags.pricedFills.toLocaleString()} of ${flags.fills.length.toLocaleString()} dispensings`}
             />
             <Stat
-              label="Counted, not yet received"
-              value={formatCents(flags.awaitingCents)}
-              tone={flags.awaitingCents ? "warn" : undefined}
-              sub={flags.awaiting.length ? `${flags.awaiting.length} fills awaiting a facilitator payment` : "nothing outstanding"}
+              label="Counted, not found in the row"
+              value={formatCents(flags.unreconciledCents)}
+              tone={flags.unreconciledCents ? "warn" : undefined}
+              sub={flags.unreconciled.length ? `${flags.unreconciled.length} fills the report values higher than we can` : "the report and this site agree"}
             />
             <Stat
               label="In-scope under $10.50"
@@ -569,18 +571,15 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
                           </span>
                         )}
                         {/*
-                          A loss that is only waiting to be paid is not the same as a loss.
-
-                          The report booked the facilitator's share on the day; the money comes weeks
-                          later. Sending somebody to argue with a plan over a fill that is simply
-                          unpaid wastes the one thing this screen is for.
+                          A loss the report does not agree is a loss is worth saying before somebody
+                          goes and argues with the plan about it.
                         */}
-                        {f.awaitedCents !== null && (
+                        {f.unreconciledCents !== null && (
                           <span
                             className="badge badge-warn ml-1"
-                            title="The report counted this at adjudication and the money has not arrived. It posts itself against this fill when the facilitator pays."
+                            title="The report booked this much revenue on this fill that the site did not find in the row. Open the row below to see which column it is in."
                           >
-                            waiting on {formatCents(f.awaitedCents)}
+                            {formatCents(f.unreconciledCents)} unaccounted
                           </span>
                         )}
                       </td>
@@ -588,9 +587,9 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
                       <td className="px-3 py-2 text-right tabular-nums">{formatCents(f.acquisitionCents ?? 0)}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-red-700">
                         {formatCents(f.marginCents ?? 0)}
-                        {f.awaitedCents !== null && (
+                        {f.unreconciledCents !== null && (
                           <span className="block text-[11px] font-normal text-ink-3">
-                            {formatCents((f.marginCents ?? 0) + f.awaitedCents)} once it is paid
+                            the report says {formatCents((f.marginCents ?? 0) + f.unreconciledCents)}
                           </span>
                         )}
                       </td>
@@ -631,19 +630,23 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
                               </p>
                             )}
                             {/*
-                              The two things a gap against the report can mean, said as two different
-                              things — because one is a bill to collect and the other is our bug.
+                              What the gap is, without pretending to know what caused it.
+
+                              The two candidates want opposite responses — a missing column is fixed
+                              here, a promised payment is waited for — and the fill cannot tell them
+                              apart. The row above can, which is why it is printed.
                             */}
-                            {f.awaitedCents !== null && (
+                            {f.unreconciledCents !== null && (
                               <p className="rounded-md border border-warn/50 bg-warn/10 p-2 text-[11px] text-ink-2">
                                 The report says this fill made {formatCents(f.reportedMarginCents ?? 0)} and this site
-                                makes it {formatCents(f.marginCents ?? 0)}. The difference is{" "}
-                                <b>{formatCents(f.awaitedCents)} the report counted at adjudication that has not reached
-                                the pharmacy</b> — the facilitator or manufacturer share the plan promised and pays
-                                weeks later. Nothing is wrong with the claim and nothing needs arguing: it posts itself
-                                against this fill when the money arrives through{" "}
-                                <Link href="/remits/mtf" className="underline">the facilitator feed</Link>, and this row
-                                becomes {formatCents((f.marginCents ?? 0) + f.awaitedCents)}.
+                                makes it {formatCents(f.marginCents ?? 0)}. PioneerRx computes its figure from the row
+                                above, so <b>{formatCents(f.unreconciledCents)} of revenue is on that row and this site
+                                did not pick it up</b>. Two things it can be: a patient total in a column this reader is
+                                not reading — the usual cause on a small generic, and fixable here — or money the plan
+                                promised at adjudication and pays weeks later through{" "}
+                                <Link href="/remits/mtf" className="underline">the facilitator</Link>, which is the
+                                usual cause on a Part D brand. Compare the figures above against what this site made of
+                                them, below, and send me this box: the column it is hiding in will be one of them.
                               </p>
                             )}
                             {f.agreesWithReport === false && (

@@ -620,15 +620,15 @@ export async function claimFlags() {
      */
     disagreeing: fills.filter((f) => f.agreesWithReport === false),
     /*
-     * Fills the report counted money on that the pharmacy has not received — worst first.
+     * Fills where the report booked revenue this site has not found in the row — biggest first.
      *
-     * PioneerRx books the facilitator's share at adjudication because the plan's response says what
-     * it will be; the money arrives weeks later from the Medicare Transaction Facilitator. Until it
-     * does, the report is ahead of the bank by exactly that amount. This is a list of receivables,
-     * and it closes itself as the payments land and are matched.
+     * PioneerRx computes its gross profit from the same row we read, so a gap means it counted
+     * money we did not. The cause is not knowable from the fill and is deliberately not asserted:
+     * one real gap was $146.18 of facilitator money, another $5.56 that no facilitator would ever
+     * pay. What is knowable is the amount and the row it is on, and both are shown.
      */
-    awaiting: fills.filter((f) => f.awaitedCents !== null).sort((a, b) => b.awaitedCents! - a.awaitedCents!),
-    awaitingCents: fills.reduce((n, f) => n + (f.awaitedCents ?? 0), 0),
+    unreconciled: fills.filter((f) => f.unreconciledCents !== null).sort((a, b) => b.unreconciledCents! - a.unreconciledCents!),
+    unreconciledCents: fills.reduce((n, f) => n + (f.unreconciledCents ?? 0), 0),
     lossFillsTotalCents: lossFills.reduce((n, f) => n + (f.marginCents ?? 0), 0),
     /*
      * What these dispensings actually made, which is the only reason any of this is being counted.
@@ -659,24 +659,17 @@ export async function claimFlags() {
 
 /** Claims grouped by the payer that priced them — the view a contract review works from. */
 /**
- * What each payer is actually worth to this pharmacy.
+ * Every dispensing this site holds, grouped from the claim rows.
  *
- * Per dispensing, not per transmission — the same correction the rest of this file makes, because
- * otherwise this table answers the same question as the loss list and gives a different number.
- * Summing the report's per-row gross profit counted one bottle's cost against every plan that
- * priced it, which is how a copay card that paid $46.25 into a profitable fill came to be shown as
- * a $62.99 loss, and how CVS Caremark read $95.13 in the red on a day it was not.
- *
- * A fill with one payer is that payer's, whole. A fill that two plans coordinated on belongs to
- * neither of them alone, and there is no honest way to split one bottle between them — so it is
- * held out of the profit column entirely and shown separately, with each plan credited only with
- * the money it actually sent. Two figures that are true beat one that is tidy.
+ * One place, because three screens were each building this the same way and a fourth would have
+ * made it four — and the whole point of the grouping is that the claims screen, the payer table
+ * and the dashboard cannot be allowed to give different answers to the same question.
  */
-export async function claimsByPayer() {
+export async function allFills() {
   const rows = await db.query.claims.findMany();
   const { groupIntoFills } = await import("./fills");
   const { laterPayments } = await import("./claim-payments");
-  const fills = groupIntoFills(
+  return groupIntoFills(
     rows.map((c) => ({
       id: c.id,
       rxNumber: c.rxNumber,
@@ -694,10 +687,29 @@ export async function claimsByPayer() {
       acquisitionCents: c.acquisitionCents,
       grossProfitCents: c.grossProfitCents,
       status: c.status,
+      // A reversal kept because it matched nothing: negative money against a fill never counted.
       unmatchedReversal: (c.remitCents ?? 0) < 0 && !c.reversalKey,
     })),
     await laterPayments(),
   );
+}
+
+/**
+ * What each payer is actually worth to this pharmacy.
+ *
+ * Per dispensing, not per transmission — the same correction the rest of this file makes, because
+ * otherwise this table answers the same question as the loss list and gives a different number.
+ * Summing the report's per-row gross profit counted one bottle's cost against every plan that
+ * priced it, which is how a copay card that paid $46.25 into a profitable fill came to be shown as
+ * a $62.99 loss, and how CVS Caremark read $95.13 in the red on a day it was not.
+ *
+ * A fill with one payer is that payer's, whole. A fill that two plans coordinated on belongs to
+ * neither of them alone, and there is no honest way to split one bottle between them — so it is
+ * held out of the profit column entirely and shown separately, with each plan credited only with
+ * the money it actually sent. Two figures that are true beat one that is tidy.
+ */
+export async function claimsByPayer() {
+  const [rows, fills] = await Promise.all([db.query.claims.findMany(), allFills()]);
 
   type Row = {
     pbmName: string;
