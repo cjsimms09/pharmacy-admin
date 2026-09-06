@@ -26,7 +26,7 @@ import zlib from "node:zlib";
  * marking next to the wrong item, which is the one mistake that matters here.
  */
 const TOKENS =
-  /\/([A-Za-z0-9_.+-]+)\s+[\d.]+\s+Tf|([\d.-]+)\s+([\d.-]+)\s+Td|(?:[\d.-]+\s+){4}([\d.-]+)\s+([\d.-]+)\s+Tm|(?:<([0-9A-Fa-f\s]+)>|\(((?:[^()\\]|\\.)*)\))\s*Tj/g;
+  /(BT)\b|\/([A-Za-z0-9_.+-]+)\s+[\d.]+\s+Tf|([\d.-]+)\s+([\d.-]+)\s+T[dD]\b|(?:[\d.-]+\s+){4}([\d.-]+)\s+([\d.-]+)\s+Tm|(?:<([0-9A-Fa-f\s]+)>|\(((?:[^()\\]|\\.)*)\))\s*Tj/g;
 
 function inflate(chunk: Buffer): string | null {
   try {
@@ -218,27 +218,40 @@ export function pdfText(buf: Buffer): string {
 
     while ((m = TOKENS.exec(text))) {
       if (m[1] !== undefined) {
-        font = fonts.get(m[1]);
+        // BT starts a text object and resets the line to the origin.
+        x = 0;
+        y = 0;
         continue;
       }
-      // Td offsets and a Tm text matrix are two ways of saying the same thing, and generators
-      // pick one or the other with no pattern. A reader that knows only Td silently returns an
-      // empty page for half the PDFs it is given — including the ones this system writes itself.
-      if (m[2] !== undefined && m[3] !== undefined) {
-        x = Number.parseFloat(m[2]);
-        y = Number.parseFloat(m[3]);
+      if (m[2] !== undefined) {
+        font = fonts.get(m[2]);
         continue;
       }
-      if (m[4] !== undefined && m[5] !== undefined) {
-        x = Number.parseFloat(m[4]);
-        y = Number.parseFloat(m[5]);
+      /*
+       * Td moves the line RELATIVE to the one before it. Tm sets it absolutely.
+       *
+       * They are not two spellings of the same thing, and reading Td as absolute is why a report
+       * laid out in tiles came back with its headings shuffled and its figures interleaved — every
+       * run after the first was placed at an offset as though it were a coordinate. McKesson's
+       * Purchase Drill Down uses 626 Td against 254 Tm, so almost the whole page was landing in
+       * the wrong place, and the damage was invisible: the words were all there, in an order
+       * nobody could read, which looks like a bad PDF rather than a bad reader.
+       */
+      if (m[3] !== undefined && m[4] !== undefined) {
+        x += Number.parseFloat(m[3]);
+        y += Number.parseFloat(m[4]);
+        continue;
+      }
+      if (m[5] !== undefined && m[6] !== undefined) {
+        x = Number.parseFloat(m[5]);
+        y = Number.parseFloat(m[6]);
         continue;
       }
       if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
 
-      const bytes = m[6]
-        ? Buffer.from(m[6].replace(/\s+/g, ""), "hex")
-        : Buffer.from(unescape(m[7] ?? ""), "latin1");
+      const bytes = m[7]
+        ? Buffer.from(m[7].replace(/\s+/g, ""), "hex")
+        : Buffer.from(unescape(m[8] ?? ""), "latin1");
       if (bytes.length === 0) continue;
 
       /*
