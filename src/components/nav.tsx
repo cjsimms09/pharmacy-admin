@@ -17,9 +17,17 @@ import { NAV, groupFor } from "@/lib/nav";
 export function Nav({ tools }: { tools: boolean }) {
   const pathname = usePathname() || "/";
   const active = groupFor(pathname);
+  /*
+   * A link that lands on Today is worse than no link.
+
+   * The reimbursement pages redirect home while the flag is off, so their entries are dropped from
+   * the groups rather than left to fail silently; the group itself stays, because Money is more
+   * than the pages behind the flag.
+   */
+  const visible = tools ? NAV : NAV.map((g) => ({ ...g, items: g.items.filter((i) => !i.gated) }));
   const groups = tools
-    ? [...NAV.slice(0, -1), { href: "/tools", label: "Tools", blurb: "Work in progress", items: [] }, NAV[NAV.length - 1]]
-    : NAV;
+    ? [...visible.slice(0, -1), { href: "/tools", label: "Tools", blurb: "Work in progress", items: [] }, visible[visible.length - 1]]
+    : visible;
 
   return (
     <nav className="px-2 pb-4">

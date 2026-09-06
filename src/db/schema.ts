@@ -2003,6 +2003,40 @@ export type PlanClass = (typeof PLAN_CLASSES)[number];
  * on the claim are part of the key where they exist. A row with a null group matches any group,
  * which is the right answer for a processor that runs one contract.
  */
+// ── What the site has told the owner to do, and what came of it ─────────
+// A recommendation that is shown once and forgotten teaches nobody anything. Each row of the money
+// list is remembered from the day it first appeared: how much it said, whether it was acted on,
+// and what actually happened afterwards — so the site can say "the last twelve times it said
+// switch NDC, the margin moved by this much", and stop repeating advice that was tried and did
+// nothing. Appended by the site, judged by the claims; only `status` and `note` are typed by a
+// person.
+export const recommendationLog = sqliteTable(
+  "recommendation_log",
+  {
+    id: text("id").primaryKey(),
+    /** The money-list row key, e.g. "switch-ndc", plus the thing it was about where there is one. */
+    key: text("key").notNull(),
+    subject: text("subject"),
+    says: text("says").notNull(),
+    todo: text("todo").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    cadence: text("cadence").notNull(),
+    confidence: text("confidence").notNull(),
+    firstSeenOn: text("first_seen_on").notNull(),
+    lastSeenOn: text("last_seen_on").notNull(),
+    /** The day it stopped appearing, because it was done or because the facts moved. */
+    resolvedOn: text("resolved_on"),
+    /** open | acted | dismissed | resolved. A person marks acted or dismissed; the site marks resolved. */
+    status: text("status").notNull().default("open"),
+    /** What the claims showed afterwards, in cents, where the site could measure it. Null until it can. */
+    outcomeCents: integer("outcome_cents"),
+    outcomeBasis: text("outcome_basis"),
+    measuredOn: text("measured_on"),
+    note: text("note"),
+  },
+  (t) => [index("recommendation_log_key_idx").on(t.key), index("recommendation_log_status_idx").on(t.status)],
+);
+
 export const payerLinks = sqliteTable(
   "payer_links",
   {
@@ -2086,6 +2120,13 @@ export const planGroups = sqliteTable(
     id: text("id").primaryKey(),
     /** The natural key of a plan on a claim: who processes it and under which group. */
     bin: text("bin"),
+    /**
+     * The processor control number, which with the BIN says which processor and usually which line
+     * of business. One BIN carries a commercial PCN and a Part D PCN side by side; a register keyed
+     * on BIN and group alone classified them as one plan. Null on rows made before the PCN was kept:
+     * those stand as a fallback for any PCN until a row for the PCN is decided.
+     */
+    pcn: text("pcn"),
     groupNumber: text("group_number"),
     /** The payer name as the claims wrote it, for recognising the row. */
     payerLabel: text("payer_label"),

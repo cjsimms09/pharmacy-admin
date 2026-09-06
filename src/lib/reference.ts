@@ -125,6 +125,11 @@ export type ImportSummary = {
   /** Source labels that did not resolve to a canonical PBM name. These need a crosswalk row. */
   unresolvedPbms: string[];
   skipped: string[];
+  /** From the pharmacy's own payer list, where one is in the folder: BINs added, and BINs the two records disagree on. */
+  listingBins: number;
+  listingConflicts: string[];
+  /** Claims already held that gained a payer from the list. */
+  listingClaims: number;
 };
 
 /** "null" and "N/A" are literal strings in these exports; they mean absent, not a value. */
@@ -345,9 +350,14 @@ export function buildPbmResolver(
 }
 
 /** Reads every reference file present and replaces what it covers. Safe to re-run. */
+/** The resolver as it stands, from what is loaded: for naming a counterparty the way the payer pages name it. */
+export async function pbmResolver(): Promise<PbmResolver> {
+  return buildPbmResolver(await db.query.payerBins.findMany({ columns: { pbmName: true, aliases: true } }), await readReference(["pbm_name_crosswalk"]));
+}
+
 export async function importReference(): Promise<ImportSummary> {
   const dir = referenceDir();
-  const out: ImportSummary = { bins: 0, docs: 0, rates: 0, appeals: 0, routing: 0, contacts: 0, communications: 0, unresolvedPbms: [], skipped: [] };
+  const out: ImportSummary = { bins: 0, docs: 0, rates: 0, appeals: 0, routing: 0, contacts: 0, communications: 0, unresolvedPbms: [], skipped: [], listingBins: 0, listingConflicts: [], listingClaims: 0 };
 
   // ── BIN crosswalk ────────────────────────────────────────────────
   const binCsv = await readReference(["bin_crosswalk"]);
@@ -394,6 +404,50 @@ export async function importReference(): Promise<ImportSummary> {
     await readReference(["pbm_name_crosswalk"]),
   );
   const canonical = (label: string): string => resolver.resolve(label).name;
+
+  // ── The pharmacy's own payer list ────────────────────────────────
+  // The reconciliation service's export: this pharmacy's payers, one row per BIN, with the PSAO
+  // marked on the name. Fills the BINs the published crosswalk does not carry and never overwrites
+  // one it does; a disagreement is named for a person.
+  const listingCsv = await readReference(["payer_listing", "openclaims"]);
+  if (listingCsv) {
+    const { parsePayerListing, reconcileListing } = await import("./payer-listing");
+    const held = await db.query.payerBins.findMany({ columns: { id: true, bin: true, pbmName: true, aliases: true } });
+    const r = reconcileListing(parsePayerListing(listingCsv), held, (l) => { const x = resolver.resolve(l); return x.via === "unresolved" ? l : x.name; });
+    for (const a of r.add) {
+      await db.insert(schema.payerBins).values({
+        id: newId(), bin: a.bin, pbmName: a.canonical, aliases: a.rawName, subNetwork: a.viaPsao,
+        notes: `From the pharmacy's own payer list${a.viaPsao ? `; contracted through ${a.viaPsao}` : "; pays direct"}.`, collides: false,
+      });
+      out.bins++;
+      out.listingBins++;
+    }
+    for (const x of r.same) {
+      const row = held.find((h) => h.bin === x.bin);
+      if (!row) continue;
+      const aliases = new Set((row.aliases ?? "").split(";").map((v) => v.trim()).filter(Boolean));
+      if (!aliases.has(x.rawName)) {
+        aliases.add(x.rawName);
+        await db.update(schema.payerBins).set({ aliases: [...aliases].join(";"), subNetwork: x.viaPsao ?? undefined }).where(eq(schema.payerBins.id, row.id));
+      }
+    }
+    out.listingConflicts = r.conflict.map((c) => `${c.bin}: the list says ${c.rawName}, the crosswalk says ${c.listedAs}`);
+    /*
+     * What was learned is applied to the claims already held, the way naming a BIN by hand does:
+     * every claim on a newly named BIN that has no payer yet gets one. A BIN the crosswalk already
+     * named was attributed when its claims were imported.
+     */
+    if (r.add.length > 0) {
+      const named = new Map(r.add.map((a) => [a.bin, a.canonical]));
+      const held = await db.query.claims.findMany({ columns: { id: true, bin: true, pbmName: true } });
+      for (const c of held) {
+        const name = c.bin ? named.get(c.bin.trim()) : undefined;
+        if (!name || c.pbmName) continue;
+        await db.update(schema.claims).set({ pbmName: name, matchMethod: "payer_list", payerAmbiguous: false }).where(eq(schema.claims.id, c.id));
+        out.listingClaims++;
+      }
+    }
+  } else out.skipped.push("payer_listing.csv");
 
   // ── Contract index ───────────────────────────────────────────────
   const idxCsv = await readReference(["contract_index"]);

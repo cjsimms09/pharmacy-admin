@@ -36,7 +36,13 @@
  *   5. If a page is only ever reached from another page — a person's record, one month's
  *      temperatures, one incident — it is not in the menu at all. The menu lists starting points.
  */
-export type NavItem = { href: string; label: string; blurb?: string };
+export type NavItem = {
+  href: string;
+  label: string;
+  blurb?: string;
+  /** Behind the "extra sections" flag: the page redirects to Today while it is off, so the link is not shown. */
+  gated?: boolean;
+};
 export type NavGroup = { href: string; label: string; blurb: string; items: NavItem[] };
 
 export const NAV: NavGroup[] = [
@@ -100,13 +106,13 @@ export const NAV: NavGroup[] = [
     blurb: "What the pharmacy earns, what it spends, and what the month came to.",
     items: [
       { href: "/money/monthly", label: "Monthly profit and loss", blurb: "What the month took, what the goods cost, and what is left" },
-      { href: "/claims", label: "Claims", blurb: "Every dispensing, what it made, and what is still owed on it" },
-      { href: "/payers/performance", label: "Who pays best", blurb: "Every plan ranked by what it actually pays" },
-      { href: "/purchasing", label: "What to buy", blurb: "Which NDC of a product pays most against what it costs" },
+      { href: "/claims", label: "Claims", blurb: "Every dispensing, what it made, and what is still owed on it", gated: true },
+      { href: "/payers/performance", label: "Who pays best", blurb: "Every plan ranked by what it actually pays", gated: true },
+      { href: "/purchasing", label: "What to buy", blurb: "Which NDC of a product pays most against what it costs", gated: true },
       { href: "/suppliers", label: "Suppliers and rebates", blurb: "The ladders, the ratio, and what this month's buying is earning" },
       { href: "/expenses", label: "Spending", blurb: "Bills, the vendors who send them, and the rules that file them" },
       { href: "/money", label: "Money found", blurb: "Everything worth chasing, ranked" },
-      { href: "/remits/mtf", label: "Facilitator payments", blurb: "What the Medicare Transaction Facilitator has brought in" },
+      { href: "/remits/mtf", label: "Facilitator payments", blurb: "What the Medicare Transaction Facilitator has brought in", gated: true },
     ],
   },
   {

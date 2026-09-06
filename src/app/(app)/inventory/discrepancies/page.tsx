@@ -18,11 +18,13 @@ export const dynamic = "force-dynamic";
 /** Thousandths back to a readable count: 90000 -> "90", 2500 -> "2.5". */
 const qty = (n: number | null) => (n === null ? "—" : String(n / 1000));
 
-export default async function DiscrepanciesPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
+export default async function DiscrepanciesPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string; edit?: string }> }) {
   await requireUser();
-  const { ok, error } = await searchParams;
+  const { ok, error, edit } = await searchParams;
   const rows = await db.query.csDiscrepancies.findMany({ orderBy: [desc(schema.csDiscrepancies.discoveredOn)] });
   const open = rows.filter((r) => !r.resolvedOn);
+  // An entry can be corrected after the fact; the audit log says it was, and by whom.
+  const editing = edit ? rows.find((r) => r.id === edit) ?? null : null;
 
   async function log(fd: FormData) {
     "use server";
@@ -32,7 +34,11 @@ export default async function DiscrepanciesPage({ searchParams }: { searchParams
     if (!drugName) redirect("/inventory/discrepancies?error=" + encodeURIComponent("Name the drug."));
     if (narrative.length < 10) redirect("/inventory/discrepancies?error=" + encodeURIComponent("Write down what happened — that account is the whole point of the log."));
 
-    const id = newId();
+    const existingId = String(fd.get("id") ?? "") || null;
+    if (existingId && !(await db.query.csDiscrepancies.findFirst({ where: eq(schema.csDiscrepancies.id, existingId), columns: { id: true } }))) {
+      redirect("/inventory/discrepancies?error=" + encodeURIComponent("That entry is no longer on file."));
+    }
+    const id = existingId ?? newId();
     const file = fd.get("file");
     if (file instanceof File && file.size > 0) {
       const stored = await storeFile(file, { allowReportTypes: true });
@@ -51,8 +57,7 @@ export default async function DiscrepanciesPage({ searchParams }: { searchParams
       });
     }
 
-    await db.insert(schema.csDiscrepancies).values({
-      id,
+    const facts = {
       discoveredOn: String(fd.get("discoveredOn") ?? "") || todayIso(),
       drugName,
       ndc11: normalizeClaimNdc(String(fd.get("ndc") ?? "")),
@@ -62,8 +67,14 @@ export default async function DiscrepanciesPage({ searchParams }: { searchParams
       countedThousandths: parseQuantityThousandths(String(fd.get("counted") ?? "")),
       unit: String(fd.get("unit") ?? "EA").trim() || "EA",
       narrative,
-      createdBy: u.name,
-    });
+    };
+    if (existingId) {
+      await db.update(schema.csDiscrepancies).set({ ...facts, updatedAt: new Date().toISOString() }).where(eq(schema.csDiscrepancies.id, existingId));
+      await audit({ action: "discrepancy.edit", userId: u.id, userName: u.name, details: `${existingId} ${drugName} on ${facts.discoveredOn}` });
+      revalidatePath("/inventory/discrepancies");
+      redirect("/inventory/discrepancies?ok=" + encodeURIComponent("Corrected. The original entry and this change are both in the audit log."));
+    }
+    await db.insert(schema.csDiscrepancies).values({ id, ...facts, createdBy: u.name });
     await audit({ action: "discrepancy.log", userId: u.id, userName: u.name, details: `${drugName} on ${fd.get("discoveredOn")}` });
     revalidatePath("/inventory/discrepancies");
     redirect("/inventory/discrepancies?ok=" + encodeURIComponent("Logged."));
@@ -101,21 +112,23 @@ export default async function DiscrepanciesPage({ searchParams }: { searchParams
         matter and still needs a DEA Form 106.
       </Notice>
 
-      <Card title="Log one" className="my-4">        <form action={log} className="mt-3 grid gap-3 sm:grid-cols-3">
+<Card id="log" title={editing ? `Correct the entry for ${editing.drugName}` : "Log one"} className="my-4">
+        <form key={editing?.id ?? "new"} action={log} className="mt-3 grid gap-3 sm:grid-cols-3">
+          {editing && <input type="hidden" name="id" value={editing.id} />}
           <Field label="Date discovered">
-            <input type="date" name="discoveredOn" defaultValue={todayIso()} className="field" />
+            <input type="date" name="discoveredOn" defaultValue={editing?.discoveredOn ?? todayIso()} className="field" />
           </Field>
           <Field label="Drug" className="sm:col-span-2">
-            <input name="drugName" placeholder="Oxycodone 5 mg tablet" className="field" />
+            <input name="drugName" placeholder="Oxycodone 5 mg tablet" defaultValue={editing?.drugName ?? ""} className="field" />
           </Field>
           <Field label="NDC" hint="Optional.">
-            <input name="ndc" placeholder="11 digits" className="field font-mono" />
+            <input name="ndc" placeholder="11 digits" defaultValue={editing?.ndc11 ?? ""} className="field font-mono" />
           </Field>
           <Field label="Strength" hint="If it is not in the name.">
-            <input name="strength" className="field" />
+            <input name="strength" defaultValue={editing?.strength ?? ""} className="field" />
           </Field>
           <Field label="Schedule">
-            <select name="schedule" className="field" defaultValue="CII">
+            <select name="schedule" className="field" defaultValue={editing?.schedule ?? "CII"}>
               <option value="CII">CII</option>
               <option value="CIII">CIII</option>
               <option value="CIV">CIV</option>
@@ -125,26 +138,27 @@ export default async function DiscrepanciesPage({ searchParams }: { searchParams
             </select>
           </Field>
           <Field label="Should have had" hint="What the system said.">
-            <input name="expected" inputMode="decimal" className="field" />
+            <input name="expected" inputMode="decimal" defaultValue={editing?.expectedThousandths != null ? String(editing.expectedThousandths / 1000) : ""} className="field" />
           </Field>
           <Field label="Actually counted">
-            <input name="counted" inputMode="decimal" className="field" />
+            <input name="counted" inputMode="decimal" defaultValue={editing?.countedThousandths != null ? String(editing.countedThousandths / 1000) : ""} className="field" />
           </Field>
           <Field label="Unit">
-            <input name="unit" defaultValue="EA" className="field" />
+            <input name="unit" defaultValue={editing?.unit ?? "EA"} className="field" />
           </Field>
           <Field
             label="What happened"
             hint="In your own words. What you found, when, who was involved, what you checked. This is the part that matters later."
             className="sm:col-span-3"
           >
-            <textarea name="narrative" rows={4} className="field" />
+            <textarea name="narrative" rows={4} defaultValue={editing?.narrative ?? ""} className="field" />
           </Field>
           <Field label="Back-of-house audit form or count sheet" className="sm:col-span-3">
             <input type="file" name="file" className="field" />
           </Field>
-          <div className="sm:col-span-3">
-            <button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Save</button>
+          <div className="flex gap-2 sm:col-span-3">
+            <button className="btn btn-primary">{editing ? "Save the correction" : "Save"}</button>
+            {editing && <Link href="/inventory/discrepancies" className="btn">Cancel</Link>}
           </div>
         </form>
       </Card>
@@ -170,6 +184,7 @@ export default async function DiscrepanciesPage({ searchParams }: { searchParams
                       {fmt(r.discoveredOn)} · {r.schedule === "non_controlled" ? "not controlled" : r.schedule}
                       {r.ndc11 && <> · <span className="font-mono">{r.ndc11}</span></>}
                       {" · logged by "}{r.createdBy}
+                      {" · "}<Link href={`/inventory/discrepancies?edit=${r.id}#log`} className="text-accent underline">correct it</Link>
                     </div>
                   </div>
                   <div className="text-right text-sm">
@@ -198,7 +213,7 @@ export default async function DiscrepanciesPage({ searchParams }: { searchParams
                     <form action={resolve} className="mt-2 flex flex-wrap gap-2">
                       <input type="hidden" name="id" value={r.id} />
                       <input name="resolution" placeholder="What it turned out to be" className="field flex-1 min-w-64" />
-                      <button className="rounded-md border border-line px-3 py-2 text-sm hover:bg-ground">Close</button>
+                      <button className="btn">Close</button>
                     </form>
                   </details>
                 )}

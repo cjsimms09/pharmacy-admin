@@ -13,6 +13,7 @@ import { looksLikePioneerCatalog } from "@/lib/pioneer-catalog";
 import { formatCents } from "@/lib/money";
 import { requireReimbursement } from "@/lib/features";
 import { PageHeader, Notice, Empty, Field, Card } from "@/components/ui";
+import { DataTable } from "@/components/data-table";
 import { ExportData } from "@/components/export-data";
 
 export const metadata = { title: "Purchasing" };
@@ -481,61 +482,71 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
             is fetched — it needs at least the invoices, which is where what you actually paid comes from.
           </Empty>
         ) : (
-          <div className="mt-3 overflow-x-auto">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Drug</th>
-                  <th className="text-right">We pay</th>
-                  <th className="text-right">NADAC</th>
-                  <th className="text-right">Against it</th>
-                  <th>Cheapest known</th>
-                  <th className="text-right">Worth</th>
-                  <th>What it means</th>
-                </tr>
-              </thead>
-              <tbody>
-                {ledgerRows.slice(0, 40).map((r) => (
-                  <tr key={r.ndc11}>
-                    <td>
+          <div className="mt-3">
+            <DataTable
+              initialSort={{ key: "worth", dir: "desc" }}
+              caption={`${ledgerRows.length.toLocaleString()} drugs · sort by any column, filter by name, NDC or supplier`}
+              columns={[
+                { key: "drug", label: "Drug" },
+                { key: "pay", label: "We pay", align: "right" },
+                { key: "nadac", label: "NADAC", align: "right" },
+                { key: "vs", label: "Against it", align: "right", firstSort: "desc" },
+                { key: "best", label: "Cheapest known" },
+                { key: "worth", label: "Worth", align: "right" },
+                { key: "means", label: "What it means", sortable: false },
+              ]}
+              rows={ledgerRows.map((r) => ({
+                key: r.ndc11,
+                sort: {
+                  drug: `${r.name ?? ""} ${r.ndc11}`,
+                  pay: r.paid ? r.paid.effectiveUnitMicros : null,
+                  nadac: r.nadacMicros,
+                  vs: r.vsNadacMicros,
+                  best: r.best ? `${r.best.supplier} ${r.best.effectiveUnitMicros}` : null,
+                  worth: r.switchSavingCents ?? 0,
+                  means: r.flags.map((f) => MEANS[f]).join(" "),
+                },
+                cells: {
+                  drug: (
+                    <>
                       <span className="block text-sm font-medium">{r.name ?? "—"}</span>
                       <span className="font-mono text-xs text-ink-3">{r.ndc11}</span>
-                    </td>
-                    <td className="whitespace-nowrap text-right tabular-nums text-sm">
+                    </>
+                  ),
+                  pay: (
+                    <span className="whitespace-nowrap text-sm">
                       {r.paid ? perUnit(r.paid.effectiveUnitMicros) : "—"}
                       {r.paid?.rebated === true && <span className="badge badge-ok ml-1">rebated</span>}
                       {r.paid && <span className="block text-xs text-ink-3">{r.paid.supplier}</span>}
-                    </td>
-                    <td className="whitespace-nowrap text-right tabular-nums text-sm">
-                      {r.nadacMicros === null ? <span className="text-ink-3">none</span> : perUnit(r.nadacMicros)}
-                    </td>
-                    <td className={`whitespace-nowrap text-right tabular-nums text-sm ${r.vsNadacMicros === null ? "" : r.vsNadacMicros > 0 ? "text-crit" : "text-accent"}`}>
+                    </span>
+                  ),
+                  nadac: <span className="whitespace-nowrap text-sm">{r.nadacMicros === null ? <span className="text-ink-3">none</span> : perUnit(r.nadacMicros)}</span>,
+                  vs: (
+                    <span className={`whitespace-nowrap text-sm ${r.vsNadacMicros === null ? "" : r.vsNadacMicros > 0 ? "text-crit" : "text-accent"}`}>
                       {r.vsNadacMicros === null ? "—" : `${r.vsNadacMicros > 0 ? "+" : ""}${perUnit(r.vsNadacMicros)}`}
-                    </td>
-                    <td className="text-sm">
-                      {r.best ? (
-                        <>
-                          {r.best.supplier}
-                          <span className="block text-xs text-ink-3">{perUnit(r.best.effectiveUnitMicros)} · {r.best.source === "invoice" ? "what we paid" : "listed"}</span>
-                        </>
-                      ) : (
-                        <span className="text-ink-3">—</span>
-                      )}
-                    </td>
-                    <td className="whitespace-nowrap text-right tabular-nums text-sm font-medium">
-                      {r.switchSavingCents ? `$${(r.switchSavingCents / 100).toFixed(2)}` : "—"}
-                    </td>
-                    <td className="text-xs">
+                    </span>
+                  ),
+                  best: r.best ? (
+                    <span className="text-sm">
+                      {r.best.supplier}
+                      <span className="block text-xs text-ink-3">{perUnit(r.best.effectiveUnitMicros)} · {r.best.source === "invoice" ? "what we paid" : "listed"}</span>
+                    </span>
+                  ) : (
+                    <span className="text-sm text-ink-3">—</span>
+                  ),
+                  worth: <span className="whitespace-nowrap text-sm font-medium">{r.switchSavingCents ? `$${(r.switchSavingCents / 100).toFixed(2)}` : "—"}</span>,
+                  means: (
+                    <span className="text-xs">
                       {r.flags.map((f) => (
                         <span key={f} className={`badge mr-1 ${f === "buying_above_nadac" || f === "not_dispensed" ? "badge-warn" : f === "cheaper_elsewhere" ? "badge-ok" : "badge-muted"}`}>
                           {MEANS[f]}
                         </span>
                       ))}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </span>
+                  ),
+                },
+              }))}
+            />
           </div>
         )}
       </Card>
@@ -640,50 +651,55 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
             </Notice>
           )}
 
-          <div className="overflow-x-auto">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Product</th>
-                  <th className="text-right">Fills</th>
-                  <th className="text-right">We paid / unit</th>
-                  <th>Cheapest source</th>
-                  <th className="text-right">Their price</th>
-                  <th className="text-right">Difference</th>
-                </tr>
-              </thead>
-              <tbody>
-                {opps.rows.map((r) => (
-                  <tr key={r.productKey} className="border-t border-line align-top">
-                    <td>
-                      {r.description}
-                      <div className="font-mono text-xs text-ink-3">{r.currentNdc ?? "—"}</div>
-                    </td>
-                    <td className="text-right tabular-nums">{r.claims}</td>
-                    <td className="text-right tabular-nums">{perUnit(r.paidUnitMicros)}</td>
-                    <td>
-                      {r.best ? (
-                        <>
-                          <b>{r.best.supplier}</b>
-                          <div className="font-mono text-xs text-ink-3">{r.best.ndc11}</div>
-                          <div className="text-xs text-ink-3">
-                            {r.best.manufacturer ?? "—"}
-                            {r.best.contractFlag && ` · ${r.best.contractFlag}`}
-                          </div>
-                        </>
-                      ) : (
-                        <span className="text-ink-3">no catalogue match</span>
-                      )}
-                    </td>
-                    <td className="text-right tabular-nums">{perUnit(r.best?.unitCostMicros ?? null)}</td>
-                    <td className={`px-3 py-2 text-right tabular-nums ${(r.savingCents ?? 0) > 0 ? "font-medium text-emerald-700" : "text-ink-3"}`}>
-                      {r.savingCents ? formatCents(r.savingCents) : "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            initialSort={{ key: "diff", dir: "desc" }}
+            pageSize={25}
+            caption={`${opps.rows.length.toLocaleString()} products · sort by any column, filter by name, NDC or supplier`}
+            columns={[
+              { key: "product", label: "Product" },
+              { key: "fills", label: "Fills", align: "right" },
+              { key: "paid", label: "We paid / unit", align: "right" },
+              { key: "source", label: "Cheapest source" },
+              { key: "their", label: "Their price", align: "right" },
+              { key: "diff", label: "Difference", align: "right" },
+            ]}
+            rows={opps.rows.map((r) => ({
+              key: r.productKey,
+              className: "align-top",
+              sort: {
+                product: `${r.description} ${r.currentNdc ?? ""}`,
+                fills: r.claims,
+                paid: r.paidUnitMicros,
+                source: r.best ? `${r.best.supplier} ${r.best.ndc11} ${r.best.manufacturer ?? ""}` : null,
+                their: r.best?.unitCostMicros ?? null,
+                diff: r.savingCents ?? 0,
+              },
+              cells: {
+                product: (
+                  <>
+                    {r.description}
+                    <div className="font-mono text-xs text-ink-3">{r.currentNdc ?? "—"}</div>
+                  </>
+                ),
+                fills: r.claims,
+                paid: perUnit(r.paidUnitMicros),
+                source: r.best ? (
+                  <>
+                    <b>{r.best.supplier}</b>
+                    <div className="font-mono text-xs text-ink-3">{r.best.ndc11}</div>
+                    <div className="text-xs text-ink-3">
+                      {r.best.manufacturer ?? "—"}
+                      {r.best.contractFlag && ` · ${r.best.contractFlag}`}
+                    </div>
+                  </>
+                ) : (
+                  <span className="text-ink-3">no catalogue match</span>
+                ),
+                their: perUnit(r.best?.unitCostMicros ?? null),
+                diff: <span className={(r.savingCents ?? 0) > 0 ? "font-medium text-accent" : "text-ink-3"}>{r.savingCents ? formatCents(r.savingCents) : "—"}</span>,
+              },
+            }))}
+          />
         </>
       )}
 

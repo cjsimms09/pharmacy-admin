@@ -12,6 +12,7 @@ import { CLASS_INFO, needsBasis } from "@/lib/plans";
 import { PLAN_CLASSES, type PlanClass } from "@/db/schema";
 import { searchContracts } from "@/lib/contract-search";
 import { PageHeader, Card, Notice, Empty, Figure } from "@/components/ui";
+import { DataTable } from "@/components/data-table";
 import { ExportData } from "@/components/export-data";
 
 export const dynamic = "force-dynamic";
@@ -55,10 +56,11 @@ export default async function PayerPerformancePage({ searchParams }: { searchPar
     "use server";
     const u = await requireManager();
     const bin = String(fd.get("bin") ?? "") || null;
+    const pcn = String(fd.get("pcn") ?? "") || null;
     const groupNumber = String(fd.get("groupNumber") ?? "") || null;
     try {
       const r = await savePayerLink(
-        { bin, pcn: null, groupNumber, contractId: null },
+        { bin, pcn, groupNumber, contractId: null },
         {
           pbmName: String(fd.get("pbmName") ?? ""),
           contractFileName: String(fd.get("contractFileName") ?? "") || null,
@@ -93,7 +95,7 @@ export default async function PayerPerformancePage({ searchParams }: { searchPar
     if (cls === "unknown") redirect("/payers/performance?error=" + encodeURIComponent("Choose what kind of plan it is."));
     try {
       const { classifyPlanByKey } = await import("@/lib/plans");
-      const r = await classifyPlanByKey(bin, groupNumber, cls, u, String(fd.get("basis") ?? ""));
+      const r = await classifyPlanByKey(bin, String(fd.get("pcn") ?? "") || null, groupNumber, cls, u, String(fd.get("basis") ?? ""));
       await audit({ action: "plans.classify", userId: u.id, userName: u.name, details: `${bin ?? ""}/${groupNumber ?? ""} → ${cls}` });
       revalidatePath("/payers/performance");
       revalidatePath("/plans");
@@ -222,51 +224,51 @@ export default async function PayerPerformancePage({ searchParams }: { searchPar
             {ndcs.length === 0 ? (
               <Empty>Nothing yet — this needs claims carrying an NDC and an acquisition cost.</Empty>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Drug</th><th className="text-right">Fills</th>
-                      <th className="text-right">Came in</th><th className="text-right">Cost</th><th className="text-right">Margin</th>
-                      <th>Best payer</th><th>Worst payer</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ndcs.slice(0, 40).map((n) => (
-                      <tr key={n.ndc11}>
-                        <td>
-                          <span className="block text-sm">{n.name ?? "—"}</span>
-                          <span className="font-mono text-[11px] text-ink-3">{n.ndc11}</span>
-                        </td>
-                        <td className="num text-sm">{n.fills}</td>
-                        <td className="num text-sm">{formatCents(n.revenueCents)}</td>
-                        <td className="num text-sm">{formatCents(n.costCents)}</td>
-                        <td className={`num text-sm font-medium ${n.marginCents < 0 ? "text-crit" : "text-accent"}`}>{formatCents(n.marginCents)}</td>
-                        <td className="text-xs">
-                          {n.bestPayer ? (
-                            <>
-                              {n.bestPayer.name}
-                              <span className="block text-ink-3">{formatCents(n.bestPayer.marginCents)} over {n.bestPayer.fills} fill{n.bestPayer.fills === 1 ? "" : "s"}</span>
-                            </>
-                          ) : (
-                            <span className="text-ink-3">—</span>
-                          )}
-                        </td>
-                        <td className="text-xs">
-                          {n.worstPayer ? (
-                            <>
-                              {n.worstPayer.name}
-                              <span className="block text-ink-3">{formatCents(n.worstPayer.marginCents)} over {n.worstPayer.fills} fill{n.worstPayer.fills === 1 ? "" : "s"}</span>
-                            </>
-                          ) : (
-                            <span className="text-ink-3">only one plan so far</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                initialSort={{ key: "margin", dir: "desc" }}
+                caption={`${ndcs.length.toLocaleString()} drugs · sort by any column, filter by name or NDC`}
+                columns={[
+                  { key: "drug", label: "Drug" },
+                  { key: "fills", label: "Fills", align: "right" },
+                  { key: "in", label: "Came in", align: "right" },
+                  { key: "cost", label: "Cost", align: "right" },
+                  { key: "margin", label: "Margin", align: "right" },
+                  { key: "best", label: "Best payer" },
+                  { key: "worst", label: "Worst payer" },
+                ]}
+                rows={ndcs.map((n) => ({
+                  key: n.ndc11,
+                  sort: { drug: `${n.name ?? ""} ${n.ndc11}`, fills: n.fills, in: n.revenueCents, cost: n.costCents, margin: n.marginCents, best: n.bestPayer?.name ?? null, worst: n.worstPayer?.name ?? null },
+                  cells: {
+                    drug: (
+                      <>
+                        <span className="block text-sm">{n.name ?? "—"}</span>
+                        <span className="font-mono text-[11px] text-ink-3">{n.ndc11}</span>
+                      </>
+                    ),
+                    fills: <span className="text-sm">{n.fills}</span>,
+                    in: <span className="text-sm">{formatCents(n.revenueCents)}</span>,
+                    cost: <span className="text-sm">{formatCents(n.costCents)}</span>,
+                    margin: <span className={`text-sm font-medium ${n.marginCents < 0 ? "text-crit" : "text-accent"}`}>{formatCents(n.marginCents)}</span>,
+                    best: n.bestPayer ? (
+                      <span className="text-xs">
+                        {n.bestPayer.name}
+                        <span className="block text-ink-3">{formatCents(n.bestPayer.marginCents)} over {n.bestPayer.fills} fill{n.bestPayer.fills === 1 ? "" : "s"}</span>
+                      </span>
+                    ) : (
+                      <span className="text-xs text-ink-3">—</span>
+                    ),
+                    worst: n.worstPayer ? (
+                      <span className="text-xs">
+                        {n.worstPayer.name}
+                        <span className="block text-ink-3">{formatCents(n.worstPayer.marginCents)} over {n.worstPayer.fills} fill{n.worstPayer.fills === 1 ? "" : "s"}</span>
+                      </span>
+                    ) : (
+                      <span className="text-xs text-ink-3">only one plan so far</span>
+                    ),
+                  },
+                }))}
+              />
             )}
             {spread.length > 0 && (
               <div className="mt-3 rounded-md border border-line bg-ground p-3">
@@ -328,8 +330,10 @@ export default async function PayerPerformancePage({ searchParams }: { searchPar
                           </p>
                           <ul className="ml-4 mt-1 space-y-1">
                             {b.groups.map((g) => (
-                              <li key={g.groupNumber ?? "none"} className="text-xs">
-                                <span className="font-mono">group {g.groupNumber ?? "—"}</span>
+                              <li key={`${g.pcn ?? ""}|${g.groupNumber ?? ""}`} className="text-xs">
+                                <span className="font-mono">
+                                  {g.pcn ? `PCN ${g.pcn} · ` : ""}group {g.groupNumber ?? "—"}
+                                </span>
                                 {g.sponsorName && <span className="ml-1 text-ink-2">{g.sponsorName}</span>}
                                 {g.classification && g.classification !== "unknown" ? (
                                   <span className="badge badge-muted ml-1">{CLASS_INFO[g.classification as PlanClass]?.label ?? g.classification.replace(/_/g, " ")}</span>
@@ -344,6 +348,7 @@ export default async function PayerPerformancePage({ searchParams }: { searchPar
                                   */
                                   <form action={classify} className="ml-1 inline-flex items-center gap-1">
                                     <input type="hidden" name="bin" value={b.bin ?? ""} />
+                                    <input type="hidden" name="pcn" value={g.pcn ?? ""} />
                                     <input type="hidden" name="groupNumber" value={g.groupNumber ?? ""} />
                                     <select name="classification" className="field w-auto px-1 py-0.5 text-[11px]" defaultValue="unknown">
                                       <option value="unknown">what kind of plan?</option>
@@ -399,8 +404,9 @@ export default async function PayerPerformancePage({ searchParams }: { searchPar
             </ul>
             <p className="mt-2 text-xs text-ink-3">
               A BIN is a processing route, not a plan: the same BIN carries a fully-insured commercial plan the Kansas
-              floor applies to and a self-funded ERISA plan it cannot touch. The group number separates them, and the
-              contract id printed on the claim names the agreement that priced it.
+              floor applies to and a self-funded ERISA plan it cannot touch. The PCN separates the lines of business
+              and the group number the plans under them, and the network id printed on the claim names the agreement
+              that priced it.
             </p>
           </Card>
 
@@ -418,13 +424,14 @@ export default async function PayerPerformancePage({ searchParams }: { searchPar
               <div className="overflow-x-auto">
                 <table className="table">
                   <thead>
-                    <tr><th>BIN / group</th><th>Who</th><th className="text-right">Fills</th><th className="text-right">Came in</th><th>What is missing</th></tr>
+                    <tr><th>BIN / PCN / group</th><th>Who</th><th className="text-right">Fills</th><th className="text-right">Came in</th><th>What is missing</th></tr>
                   </thead>
                   <tbody>
                     {unmapped.slice(0, 40).map((l) => (
-                      <tr key={`${l.bin}|${l.groupNumber}`}>
+                      <tr key={`${l.bin}|${l.pcn}|${l.groupNumber}`}>
                         <td className="font-mono text-xs">
                           {l.bin ?? "—"}
+                          {l.pcn && <span className="block text-ink-3">PCN {l.pcn}</span>}
                           {l.groupNumber && <span className="block text-ink-3">{l.groupNumber}</span>}
                         </td>
                         <td className="text-sm">
@@ -447,6 +454,7 @@ export default async function PayerPerformancePage({ searchParams }: { searchPar
                           {canManage && (
                             <form action={confirm} className="mt-1.5 flex flex-wrap items-center gap-1.5">
                               <input type="hidden" name="bin" value={l.bin ?? ""} />
+                              <input type="hidden" name="pcn" value={l.pcn ?? ""} />
                               <input type="hidden" name="groupNumber" value={l.groupNumber ?? ""} />
                               <input
                                 name="pbmName"
@@ -494,37 +502,38 @@ export default async function PayerPerformancePage({ searchParams }: { searchPar
 function Table({ rows }: { rows: import("@/lib/payer-map").PayerScore[] }) {
   if (rows.length === 0) return <Empty>Nothing to rank yet.</Empty>;
   return (
-    <div className="overflow-x-auto">
-      <table className="table">
-        <thead>
-          <tr>
-            <th>Payer</th><th className="text-right">Fills</th><th className="text-right">Per fill</th>
-            <th className="text-right">Margin</th><th className="text-right">%</th><th className="text-right">Card support</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((s) => (
-            <tr key={s.pbmName}>
-              <td>
-                <span className="block text-sm">{s.pbmName}</span>
-                <span className="font-mono text-[11px] text-ink-3">
-                  {s.bins.join(", ") || "no BIN"}
-                  {s.fillsAtALoss > 0 && <span className="text-warn"> · {s.fillsAtALoss} at a loss</span>}
-                  {!s.fullyMapped && <span className="text-ink-3"> · chain incomplete</span>}
-                </span>
-              </td>
-              <td className="num text-sm">{s.fills}</td>
-              <td className={`num text-sm font-medium ${s.marginPerFillCents < 0 ? "text-crit" : "text-accent"}`}>{formatCents(s.marginPerFillCents)}</td>
-              <td className="num text-sm">{formatCents(s.marginCents)}</td>
-              <td className="num text-sm">{s.marginPercent === null ? "—" : `${s.marginPercent}%`}</td>
-              {/* Not this payer's money, and it can be withdrawn. */}
-              <td className="num text-xs text-ink-3">
-                {s.cardSupportBesideThisCents > 0 ? formatCents(s.cardSupportBesideThisCents) : "—"}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <DataTable
+      filter={rows.length > 8}
+      columns={[
+        { key: "payer", label: "Payer" },
+        { key: "fills", label: "Fills", align: "right" },
+        { key: "perFill", label: "Per fill", align: "right" },
+        { key: "margin", label: "Margin", align: "right" },
+        { key: "pct", label: "%", align: "right" },
+        { key: "card", label: "Card support", align: "right" },
+      ]}
+      rows={rows.map((s) => ({
+        key: s.pbmName,
+        sort: { payer: s.pbmName, fills: s.fills, perFill: s.marginPerFillCents, margin: s.marginCents, pct: s.marginPercent, card: s.cardSupportBesideThisCents },
+        cells: {
+          payer: (
+            <>
+              <span className="block text-sm">{s.pbmName}</span>
+              <span className="font-mono text-[11px] text-ink-3">
+                {s.bins.join(", ") || "no BIN"}
+                {s.fillsAtALoss > 0 && <span className="text-warn"> · {s.fillsAtALoss} at a loss</span>}
+                {!s.fullyMapped && <span className="text-ink-3"> · chain incomplete</span>}
+              </span>
+            </>
+          ),
+          fills: <span className="text-sm">{s.fills}</span>,
+          perFill: <span className={`text-sm font-medium ${s.marginPerFillCents < 0 ? "text-crit" : "text-accent"}`}>{formatCents(s.marginPerFillCents)}</span>,
+          margin: <span className="text-sm">{formatCents(s.marginCents)}</span>,
+          pct: <span className="text-sm">{s.marginPercent === null ? "—" : `${s.marginPercent}%`}</span>,
+          // Not this payer's money, and it can be withdrawn.
+          card: <span className="text-xs text-ink-3">{s.cardSupportBesideThisCents > 0 ? formatCents(s.cardSupportBesideThisCents) : "—"}</span>,
+        },
+      }))}
+    />
   );
 }

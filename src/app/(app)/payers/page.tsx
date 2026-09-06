@@ -63,6 +63,8 @@ export default async function PayersPage({ searchParams }: { searchParams: Promi
       revalidatePath("/payers");
       const note = [
         `${r.bins} BINs, ${r.rates} network rates, ${r.appeals} appeal routes, ${r.communications} notices.`,
+        r.listingBins ? `${r.listingBins} BIN${r.listingBins === 1 ? "" : "s"} named from the pharmacy's own payer list${r.listingClaims ? `, and ${r.listingClaims} claim${r.listingClaims === 1 ? "" : "s"} already held now carry a payer` : ""}.` : "",
+        r.listingConflicts.length ? `The payer list and the crosswalk disagree on ${r.listingConflicts.length}: ${r.listingConflicts.join("; ")}.` : "",
         r.unresolvedPbms.length ? `Not on the BIN listing: ${r.unresolvedPbms.join(", ")}.` : "",
         r.skipped.length ? `No file for: ${r.skipped.join(", ")}.` : "",
       ].filter(Boolean).join(" ");
@@ -123,6 +125,7 @@ export default async function PayersPage({ searchParams }: { searchParams: Promi
         actions={
           <>
             <Link href="/payers/performance" className="btn btn-primary">Who pays best</Link>
+            <Link href="/payers/contracts" className="btn">The contracts</Link>
             <Link href="/claims/floor" className="btn">Kansas floor (SB 20)</Link>
             <Link href="/plans" className="btn">Classify plans</Link>
           </>

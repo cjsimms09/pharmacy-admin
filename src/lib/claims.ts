@@ -6,7 +6,7 @@ import { parseCents, parseQuantityThousandths, isPricingUnit, receivedCents } fr
 import { readSheetAsObjects, excelSerialToIso } from "./xlsx";
 import { parseCsv, buildPbmResolver } from "./reference";
 import { SB20_MIN_DISPENSING_FEE_CENTS } from "./reimbursement-rules";
-import { CLASS_INFO, planKey } from "./plans";
+import { CLASS_INFO, planLookup } from "./plans";
 import { readNdc } from "./ndc";
 import { heldNdcs } from "./ndc-held";
 import type { Transaction } from "./rx-transactions";
@@ -931,6 +931,8 @@ export async function claimFlags(scope: ClaimScope = {}) {
       ndc11: c.ndc11,
       itemName: c.itemName,
       bin: c.bin,
+      pcn: c.pcn,
+      groupNumber: c.groupNumber,
       pbmName: c.pbmName,
       payerLabel: c.payerLabel,
       quantityThousandths: c.quantityThousandths,
@@ -960,8 +962,8 @@ export async function claimFlags(scope: ClaimScope = {}) {
   // "Standard" and a low payment on one is correct, not a shortfall. So the register decides,
   // and a plan nobody has classified is held back rather than counted either way.
   const groups = await db.query.planGroups.findMany();
-  const byKey = new Map(groups.map((g) => [planKey(g.bin, g.groupNumber), g.classification]));
-  const classOf = (c: { bin: string | null; groupNumber: string | null }) => byKey.get(planKey(c.bin, c.groupNumber));
+  const lookup = planLookup(groups);
+  const classOf = (c: { bin: string | null; pcn?: string | null; groupNumber: string | null }) => lookup(c)?.classification;
 
   /*
    * The cash programme is not a plan, and no question about plans applies to it.
@@ -1193,6 +1195,8 @@ export async function allFills() {
       ndc11: c.ndc11,
       itemName: c.itemName,
       bin: c.bin,
+      pcn: c.pcn,
+      groupNumber: c.groupNumber,
       pbmName: c.pbmName,
       payerLabel: c.payerLabel,
       quantityThousandths: c.quantityThousandths,

@@ -1,0 +1,2 @@
+# Fingerprints of findings that are made-up values in tests, never a real identifier.
+a4453b6a4d04646b01ef5566f418bbb96d80c23d:tests/appeal-packet.test.ts:ncpdp-or-npi-literal:10

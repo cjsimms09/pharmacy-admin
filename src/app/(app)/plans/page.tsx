@@ -149,7 +149,7 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
                         <span className="font-mono text-sm font-semibold">{r.groupNumber || "(no group number)"}</span>
                         <span className="ml-2 text-sm text-ink-2">{r.payerLabel ?? r.pbmName ?? "—"}</span>
                         <div className="mt-0.5 text-xs text-ink-3">
-                          BIN {r.bin ?? "—"}
+                          BIN {r.bin ?? "—"}{r.pcn ? ` · PCN ${r.pcn}` : " · any PCN"}
                           {r.planTypes.length > 0 && ` · PioneerRx calls it ${r.planTypes.join(", ")}`}
                           {r.decidedOn && ` · determined ${r.decidedOn}`}
                         </div>

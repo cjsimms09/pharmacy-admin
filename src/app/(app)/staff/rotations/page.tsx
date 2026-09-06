@@ -103,6 +103,7 @@ function Group({ title, rows, muted }: { title: string; rows: RotationRow[]; mut
               <tr key={r.id}>
                 <td className="whitespace-nowrap">
                   <Link href={`/staff/${r.id}`} className="font-medium text-accent hover:underline">{r.name}</Link>
+                  <Link href={`/staff/${r.id}?edit=1`} className="ml-2 text-xs text-ink-3 underline hover:text-accent">edit</Link>
                 </td>
                 <td className="text-xs text-ink-2">{r.affiliation ?? "—"}</td>
                 <td className="whitespace-nowrap text-xs">

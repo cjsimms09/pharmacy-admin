@@ -274,6 +274,7 @@ export async function movement(
       ndc11: c.ndc11,
       itemName: c.itemName,
       bin: c.bin,
+      pcn: c.pcn,
       groupNumber: c.groupNumber,
       pbmName: c.pbmName,
       payerLabel: c.payerLabel,

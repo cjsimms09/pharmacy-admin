@@ -6,6 +6,261 @@ branch, where the app actually runs against real files) and one in the cloud (th
 cannot see each other's conversations. **The repository is the only thing they share**, so this
 file is how they talk.
 
+## Open items
+
+Kept current by whichever session last touched it. A line is removed when the other side has done
+it and said so on the pull request. The owner reads this too.
+
+### For the pharmacy session (from the cloud session, PR #3)
+
+Done by the pharmacy session at `3c2c18c`: the statement selects the band (the daily figure is
+shown as a position, with the gap to the scrubbed figure carried live); invoices de-duplicate on
+the supplier's number and date; the database-backed tests use a migrated scratch file; gitleaks
+has `pull-requests: read`. Migrations `0062` and `0063` are theirs; the recommendation log and the plan PCN are `0069` (their `0064`–`0068` came first). Both sessions built
+the shelf and order-minimum pieces on the same night; the cloud session's `lean-stock.ts` and
+`order-basket.ts` were withdrawn for the pharmacy session's `usage.ts`, `on-hand.ts`,
+`order-plan.ts` and `lean-shelf.ts`, which are wired and have a real on-hand reader.
+
+- [ ] **Hold every new figure to `docs/reference/data-dictionary.md`** before it is used: unit,
+      source, "use for", "never for". §8 names the ten double-application traps; a module that
+      trips one is wrong even when its arithmetic is right.
+
+Done by the cloud session at the commit after `96b5ef4` (pages touched: `money/page.tsx`, the
+Today page's data load and one new section, `nav.tsx`, `nav.ts`, `money-found.ts`,
+`recommendation-store.ts`): the sidebar drops the four gated Money links while the flag is off;
+`switch-supplier` and `dispensed-at-a-loss` are scaled to a month by the span of claims and wait
+under "worth watching" below a week; `recommendations()` rows (`switch-ndc`, the unpriceable
+plans, the unstocked NDCs) are in `moneyFound()`; the log is written on every build of the list,
+each row shows its age, and "Done it" / "Not doing this" buttons write the owner's word; the
+scorecard sits under the list; Today shows the three rows worth the most under the scoreboard.
+Verified on a scratch database with the real feeds: typecheck, 1,468 tests, `next build`, and a
+browser check of the sidebar with the flag off and on.
+
+- [ ] **Two inputs `recommendations()` still lacks:** `tier` (the band-risk row: needs the month's
+      position on the statement's scrub, the ladder, the OneStop base from `earningSoFar`, and
+      `tierEffect` with no lines) and `plans` (from `payBasisByPlan` over the claims with NADAC).
+      Both are a loader each in `money-found.ts`; the rows and their tests exist.
+- [ ] **Write `pay-basis.ts` results to a table nightly** (`plan_pay_basis`, to add) so the NDC
+      choice reads a table and the trend is kept (`profit-engine.md` §3, §6.2).
+- [ ] **The month plan, with every variable at once.** `monthPlan()` in `month-plan.ts` takes the
+      products (NDC offers per supplier, NADAC, pack, plan mix, demand from `usageFromFills`,
+      on hand), the three ladders, the month's position on the scrubbed basis, and the suppliers
+      with minimums; it returns the band to aim at, every line's NDC and supplier, the moves, and
+      the total, with the next best band beside it. This supersedes wiring the band strategy on
+      its own. Demand and shelf come from your `usage.ts` and `on-hand.ts`; minimums from the supplier
+      fields you added at `0e14cb4`. The recommendation log is now migration `0069`, with the plan PCN column.
+- [ ] **The McKesson question, monthly.** `bandStrategy()` in `band-strategy.ts` needs: the
+      position (drill-down, restated to the statement's scrub), the ladder, the month's OneStop
+      base, and two levers from the catalogues: unscrubbed brand spend that could move and its
+      premium at the secondary (plus the brand factor), generic spend that could come to McKesson
+      and its effective premium. Show `strategy.says` on the money page and on the supplier card.
+- [ ] **Back-calculate each plan's formula.** `fitPlan()` in `reimbursement-fit.ts` over the
+      claims with NADAC in force and AWP from `invoice_lines`; show the sentence per plan on
+      `/payers/[pbm]` and feed the residuals to the appeals list. Needs AWP beyond McKesson lines:
+      see the owner's items.
+- [ ] **Put the buy list on the purchasing page.** `underNadac(ledger.rows, groupOf)`,
+      `switchNdc(u)`, `notYetBought(u)` from `src/lib/under-nadac.ts`; `groupOf` from
+      `product-groups.ts` over the NADAC rows held. Each `ProductPick.says` is a sentence to print.
+- [ ] **Add the buying logic's rows to the money list.** `recommendations()` in
+      `src/lib/recommendations.ts` returns `MoneyRow[]`, `blocked[]` and `watch[]` from the buy
+      list, the band position and the plan bases; spread its rows into `moneyFound()`.
+- [ ] **Scale the money list's recurring rows to a month.** `switch-supplier` and
+      `dispensed-at-a-loss` sum over every claim held and are labelled "a month"; after ninety
+      days of feed they will say three times the truth. `perMonthCents(amount, spanDays(from, to))`
+      in `recommendations.ts` does it; the claims' first and last `dateFilled` give the span.
+- [ ] **Extend `ReadPurchaseDrillDown`** to the fields in `drill-down.ts` `FIELDS_WANTED` and run
+      `checkMonth` after the read; the prompt's "Purchase Summary by Month" is titled "Purchase
+      Drill by Month" on the report.
+- [ ] **Keep the printed gross profit apart from the arithmetic.** The report's GrossProfit
+      includes PioneerRx's *estimated* rebate and DIR ("Uses invoice cost … Includes columns for
+      estimated rebates and estimated dir fees"). On the real 5 Sept file four rows differ from
+      Amount + Total − Acq. Inv. Cost by 18¢ to $1.02, all on plan 003858. Store that difference
+      per row as `reportEstimateCents` so it is visible, and never use the printed figure as margin.
+- [ ] **Keep catalogue price history** (`data-audit.md` §3.1): append each import to a
+      `supplier_price_history` table; `supplier_items` stays "current".
+- [ ] **One row per period for the rebate statement and the drill-down position**
+      (`data-audit.md` §3.2, §3.3), instead of settings JSON and `rebate_statement_json`.
+
+**From the daily audit of 6 September** (base commits `75fc165` and `c5012fe` read; typecheck
+clean; 1,468 tests; the real 5 Sept report reads as before, 135 rows, no AR rows in that day).
+
+- [ ] **`receivableCents` counts plan money as uncollected.** `fills.ts` sets
+      `receivableCents = revenueCents` on any fill with an AR leg, and `revenueCents` includes the
+      other legs' remits. On the shape in your own commit message (Rx 333932-0: an AR leg with
+      cost and no revenue, a paid leg on another BIN with $491.67) the fill reports $491.67 owed
+      on account when it is the plan's remit, already tracked by the remittance reconciliation.
+      That is one dollar in two "not money yet" buckets (`data-dictionary.md` §8). Fix: sum the
+      patient total of the AR rows only (`rows.filter(onAccount).reduce(patientTotalCents)`);
+      `unbilledCostCents` is right as it is. The test "one leg on account puts the whole fill on
+      account" should then expect a receivable of $600.00, not $608.00.
+- [ ] **Supplies: an empty shelf with an order pending reads "ok".** `supplies.ts` `position()`
+      folds `onOrder` into `available` before deciding the state, so `projected <= 0` with a
+      delivery due in five days is "ok" for five days. Decide "out" on `projected`, keep
+      `daysRemaining` on `available`, and say "out; N on order, due about <date>". Also
+      `RATE_WINDOW_DAYS` is 180 and its comment says ninety.
+- [ ] **Price moves, ready to wire once `supplier_price_history` exists.** `priceAlerts()` in
+      `src/lib/price-moves.ts` takes the history rows, the NADAC weeks, usage per NDC (units a
+      day from `velocity()`, the floor share from `pay-basis.ts`) and the alternatives per
+      product, and returns money-list rows: `price-up:<ndc>` (the cheapest source rose; cost on
+      this pharmacy's units a month; the cheaper NDC to buy instead) and `under-cost:<ndc>`
+      (NADAC now under cost where it was not; on the units paid at NADAC; switch, stop or
+      appeal). Transitions only, so the standing buy list is not counted twice; `overlapsWith`
+      set. This is `profit-engine.md` §6.3 done on the pure side.
+
+**The contracts** (`docs/reference/contract-reading.md` is the specification the owner asked for:
+what to get from every document, why, and where it goes). The reader (`contract-extract.ts`,
+Batch API, cited schema) and the index (`contract-search.ts`) already existed; what was missing
+was everything after the draft. Pure and tested now:
+
+- [ ] **`rate-formula.ts`**: a contract's sentence ("Lesser of (MAC or AWP-25%) + $1.00") into
+      legs, lesser-of and fee; `expectedCents()` prices a claim on the benchmarks held, "at most"
+      when a MAC leg is not held, null with the reason when nothing is. Wire into the claims page
+      once `payer_links` carry a contract: expected beside paid, per claim.
+- [ ] **`contract-apply.ts`**: `proposeFromContract(draft, plans, existing)` → the checklist a
+      person accepts: rate rows (new/same/changed against `network_rates`, with the quote),
+      the appeal terms, contacts by purpose, the payment path, and the plans the document
+      governs (BIN+PCN before BIN; group alone never; contested BINs named). `groupByCounterparty`
+      is the third-parties page. **Built by the cloud session:** `/payers/contracts` (look in the
+      folder: every PDF adopted as a document, named from the manifest's `pbm_name` column or by
+      hand; read with the cost shown; collect; read again) and `/payers/contracts/[id]` (the draft
+      as a checklist; accept writes `network_rates`, `mac_appeal_terms`, `pbm_contacts`,
+      `payment_routing`, `payer_links`, then `applyLinksToClaims`). `contract-docs.ts` is the
+      server side. Driven end to end with `AI_MOCK=1` on a scratch database. Linked from Payers.
+      Since then: "Apply everything certain" (`applyAllReads`) writes every certain row from every
+      read document in one press and names unnamed documents canonically; counterparties resolve
+      through `pbmResolver()`; the run respects the API's page, size and batch limits, checks the
+      ceiling first, records its tokens for the spend page, and names a truncated answer; "Read
+      this one" proves the path on one document. The pharmacy's own payer list
+      (`data/reference/payer_listing.csv`, `payer-listing.ts`) names 80 BINs and attributes the
+      claims held.
+- [ ] **`appeal-packet.ts`**: `buildPacket()` assembles a MAC appeal from the claim, the contract
+      figure, the invoice line, the PBM's terms and the deadline, or refuses with every reason.
+      **Page to build:** an appeals queue under `/claims`: claims paid under the contract figure
+      or under acquisition cost → packet → send by the PBM's channel (email through the mailbox
+      where accepted; otherwise the fields and attachments prepared for the portal) → logged
+      against the claim, scored by the next remittance.
+- [ ] **`contract-terms.ts` gained** `contacts[]` (by purpose), `remittance` (who pays, method,
+      cycle, 835 offered, how enrollment is changed, whom to ask), `macAppealRequiredFields`,
+      `macAppealInvoiceRequired`, `macAppealSubmissionTarget`; the prompt asks for them (rule 12).
+      Old drafts still parse (`parseTerms` defaults the additions). Re-run the read on the
+      documents that matter most to pick them up.
+- [ ] **835 to the site** (spec §6): a mailbox address or SFTP folder the site owns as the ERA
+      delivery point; an enrollment checklist page per PBM (enrolled, delivery confirmed, first
+      835 received) reading `payment_routing` and `pbm_contacts`; the `x12-835.ts` parser and the
+      remittance reconciliation already exist for the facilitator files.
+
+**From the claims-field review of 6 September** (the real 5 Sept report: 123 paid/adjusted rows,
+19 BINs, 22 PCNs, 35 groups, 26 network reimbursement ids; `contract-reading.md` §1 and §4).
+
+- [x] **A plan is BIN, PCN and group, not BIN and group** (cloud session, migration 0069 shared with the recommendation log,
+      `plan_groups.pcn`). `planKey(bin, pcn, group)` and `planLookup()` live in `plan-key.ts`
+      (pure, shared with the floor review). An old row with a blank PCN stands as the fallback for
+      any PCN on that BIN and group until a row for the PCN is decided; the sync notes on the new
+      row which classification it inherited, so somebody confirms it. The payer chain, the payer
+      tree, the subsidy test, the NADAC standing and the pay-basis reading are all keyed the same
+      way; the classify and link forms on Payers carry the PCN. Found on the way: `allFills()` was
+      dropping the group number from the fill's payers, so the NADAC standing never found a plan.
+- [ ] **The network reimbursement id (NCPDP 545-2F, the report's "Ntw Reim. Id") is the contract's
+      own name for the claim and is used nowhere but as a display list.** Filled on 63% of rows;
+      10 of 25 BIN+PCN pairs see more than one value (Preferred against Standard, or a plan
+      sponsor's own network). It is the axis the rate exhibits are written on (§1), so: carry it
+      into `payer_links` matching as the `contractId` it already stands in for
+      (`applyLinksToClaims` passes it), let `proposeFromContract` match a document's network
+      names against the ids seen on its BINs, and split "who pays best" by it under each PBM.
+- [ ] **Columns the daily report does not carry** and no reader fills: `plan_id`, `plan_type`,
+      `pharmacy_service_type`, `basis_of_reimbursement` (522-FM), `basis_of_cost_determination`
+      (423-DN), `awp_cents`, `daw`, `days_supply`, `quantity_unit`. Every one is a PioneerRx
+      column the owner can add to the scheduled report; 522-FM settles the pay basis outright and
+      AWP settles the contract formula. Until then they are null, and nothing should read them as
+      zero. `other_coverage_code` is on the report and blank on every row.
+
+**From the review of `ea77544` (the drill down read from the document, 6 September evening).**
+The reader is right to let the document decide, and the two identities it checks are the ones in
+`drill-down.ts`. One thing to add before the daily figure is trusted to pick the band on its own:
+
+- [ ] **Prove the four exclusions are McKesson's whole scrub, on the same month.** `FULL_SCRUB`
+      (flu, dropship, specialty, GLP1) is asserted, not yet shown: the only proof is a daily
+      reading for month M agreeing with the statement for month M. `driftPercent` today compares
+      the statement (last period) with the daily figure (this month), which is two months and not
+      a check. Keep the last daily reading per month (`purchase_positions`, already on the list)
+      and, when the statement for M lands, compare it to the last scrubbed daily reading for M:
+      within rounding, the list is proved and the daily figure may keep selecting the band; wider,
+      the list is incomplete, the daily figure goes back to a position, and the gap is shown with
+      the two months named. Until the first statement arrives on a scrubbed month, say on the
+      supplier card that the band is selected on a figure not yet reconciled to a statement.
+
+**From the design audit** (`docs/reference/design-audit.md`; the page inventory is §7). Ordered
+by what changes the owner's morning most. Each is small on its own; none needs a migration.
+
+- [ ] **The sidebar bug above**, first: filter `NAV` items on the flag in `nav.tsx`, or drop
+      the flag (design-audit §6).
+- [ ] **Row actions everywhere** (§7.1). Done by the cloud session: `/expenses` bills (Edit
+      reopens the form with the bill in it; Void keeps the row marked void and out of every month
+      and total; `expense.edit` and `expense.void` audited); `/inventory/discrepancies` ("correct it"
+      reopens the entry, `discrepancy.edit` audited; a wrong entry is closed with the reason, never
+      deleted). `/plans` already had classify per row. `/suppliers` has Retire and `/deliveries` has Clear
+      on a day, which the inventory missed; `/staff/rotations` rows link to the student's Edit. Still
+      to do: `/payers/[pbm]` contacts, rates and documents; voiding an issued driver invoice on
+      `/deliveries`; `/settings/backups` archives (under a path the cloud session cannot read).
+      `/agreements` is the model: Edit and Delete on the row, a confirmation that names what
+      goes with it. Records the law keeps (invoices, C2 records) retire with a reason.
+- [ ] **One feedback helper and one key** (§7.2): `?ok=` everywhere, and a success notice on
+      the nine error-only forms (`/cqi/*/new`, `/cqi/import*`, `/intake/[id]`, `/reports`,
+      `/settings/updates`, `/money/monthly`, `/staff/new-hire/pack`).
+- [ ] **One button system** (§7.3): replace the forty-odd hand-rolled `bg-ink` and bare-link
+      buttons with `btn`, `btn-primary`, `btn-danger`; give `ConfirmButton` a default class.
+      `/nadac`, `/remits/mtf`, `/plans`, `/payers` have no `btn` at all.
+- [ ] **One page shape** (§3.1, §3.2): `PageHeader` on the six real screens without one; `Card`
+      in place of the raw `<h2>` on `/settings`, `/nadac`, `/remits/mtf`, `/purchasing`, `/cqi`;
+      explanatory prose behind a "How this works" disclosure, one line left in place. Delete the
+      unused `.section*` classes or use them.
+- [x] **Tables get tools** (§3.4): `src/components/data-table.tsx` (sort by any column, a
+      filter box, "show 50 more", money right-aligned by the column, `th scope`, `aria-sort`),
+      used on `/payers/performance` (per drug, the payer ranking) and `/purchasing` (the ledger,
+      the comparison). Still to move: `/claims`, `/inventory/invoices`, and the fourteen
+      unwrapped tables.
+- [ ] **Forms out of the flow** (§3.5): "Add a supplier", "Load a price file", "Add an invoice
+      by hand", "Create login" become a header button opening a drawer or its own page.
+- [ ] **Today leads with money** (§3.3): scoreboard, then the top three rows of `moneyFound()`
+      with amount and action, then "Needs you", then compliance folded into one card with a count.
+- [ ] **Settings as tabs** (§4): Pharmacy, Identifiers, Logo, Claude, Logins, Network, Backups;
+      `/nadac` reduced to one status line, one Fetch button, coverage figures and the weeks table,
+      the rest behind "Advanced".
+- [ ] **Colour semantics and identity** (§3.8, §3.10): green is the accent and "ok", amber
+      "worth checking", red "money the wrong way" or "late"; add an `info` tone; a mark and the
+      pharmacy's logo in the sidebar; `font-variant-numeric: tabular-nums` on `.num`.
+- [ ] **Link the orphans** (§7.4): `/intake` has no inbound link; `/nadac`, `/plans`,
+      `/payers`, `/claims/floor`, `/purchasing/shelf`, `/cqi/import`, `/compliance/register`,
+      `/manual/decisions` need a place in a group or a link from their parent page.
+- [ ] **Accessibility and width** (§6): helper grey `#7c8683` on white fails AA at 12 px; focus
+      rings; `th scope`; a collapsible sidebar under 1,100 px.
+
+
+### For the cloud session (from the pharmacy session)
+
+- [ ] Nothing outstanding. Reports on PR #2 and #3 have been read and acted on.
+
+### For the owner, on the pharmacy computer
+
+- [ ] Schedule the PioneerRx transaction report to cover **yesterday**.
+- [ ] NADAC page: "Read the listing now", then "Fetch this week" on a gap. Neither session can
+      reach data.medicaid.gov.
+- [ ] Suppliers page: set the catalogue name on McKesson, IPD, IPC, ParMed.
+- [ ] Ask PioneerRx for an on-hand/expiry report, and add to the daily transaction report:
+      Basis of Reimbursement (522-FM), Basis of Cost Determination (423-DN), Dispensed AWP, DAW,
+      Days Supply, Plan ID. The report already carries the Network Reimbursement ID (545-2F);
+      Other Coverage Code (308-C8) is on it and blank.
+- [ ] **Schedule the daily on-hand export** out of PioneerRx to the mailbox; the reader exists
+      (`on-hand.ts`, columns matched by meaning). Include lot and expiry and on-order if it can.
+- [ ] **Each supplier's order minimum, free-freight threshold, freight and lead time** on its
+      terms page, and mark McKesson as primary. Blank means not known, which the buy list treats
+      differently from zero.
+- [ ] **Which products McKesson scrubs** from the compliance ratio, from the OneStop agreement or
+      the rep: GLP-1s are known; the full list makes the brand lever exact.
+- [ ] **AWP, free:** schedule a PioneerRx item report (NDC, AWP, WAC, package size) emailed
+      weekly, and add "Dispensed AWP" to the daily transaction report. The weekly catalogue export
+      carries no AWP; only McKesson's invoices print it.
+
 ## The rules that keep two sessions from colliding
 
 1. **The cloud session branches from `feature/compliance` and never pushes to it.** It pushes
@@ -151,7 +406,8 @@ daily figure should not select the band — see `docs/reference/buying-logic.md`
 unknown), `under-nadac.ts` (the buy list: every NDC ranked by its gap under NADAC after the
 rebate, the pick per product and the gain over what is dispensed today), `ndc-choice.ts` (which NDC of a product pays the most on this pharmacy's plan mix,
 or "cannot say" with the reason), `ratio-effect.ts` (what an order does to the ratio and the
-band, in money). None of them touches the database or a page. Wiring them to the product ledger
+band, in money), `price-moves.ts` (what changed this week: a rise in what the pharmacy
+would pay, or NADAC falling under cost, each on this pharmacy's own units). None of them touches the database or a page. Wiring them to the product ledger
 and an order screen is the next step, and is the pharmacy session's call on where.
 
 ### Data audit
@@ -163,12 +419,12 @@ id only), and twelve further uses of the data ranked by value against readiness.
 now delegates to `product-key.ts`, which it had duplicated.
 
 ### Files this branch touched
-`src/db/schema.ts`, `drizzle/0048_*`, `drizzle/0049_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down}.ts` (new),
+`src/db/schema.ts`, `drizzle/0048_*`, `drizzle/0049_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down,recommendations,recommendation-log,recommendation-store,reimbursement-fit,band-strategy,month-plan,price-moves,rate-formula,contract-apply,appeal-packet}.ts` (new), `drizzle/0069_*`,
 `src/lib/{claims,rx-transactions,suppliers,suppliers-registry,pioneer-catalog,invoices,nadac-fetch,settings}.ts`,
 `src/app/(app)/suppliers/page.tsx`, `src/app/(app)/suppliers/[id]/terms/page.tsx` (new),
 `src/app/(app)/inventory/invoices/page.tsx`, `src/app/(app)/nadac/page.tsx`, `src/app/(app)/claims/page.tsx`,
-`tests/{ndc,supplier-terms,invoice-lines,nadac-datasets,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down}.test.ts` (new), `tests/{claims,suppliers-registry,rx-transactions}.test.ts`,
-`docs/HANDOFF.md`, `docs/reference/nadac-api.md`, `docs/reference/buying-logic.md`, `docs/reference/data-audit.md` (new), `fixtures/README.md`, `fixtures/rx-transactions.txt` (new).
+`tests/{ndc,supplier-terms,invoice-lines,nadac-datasets,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down,recommendations,recommendation-log,invariants,reimbursement-fit,band-strategy,month-plan}.test.ts` (new), `tests/{claims,suppliers-registry,rx-transactions}.test.ts`,
+`CLAUDE.md` (new), `docs/HANDOFF.md`, `docs/reference/nadac-api.md`, `docs/reference/buying-logic.md`, `docs/reference/data-audit.md`, `docs/reference/profit-engine.md`, `docs/reference/data-dictionary.md` (new), `fixtures/README.md`, `fixtures/rx-transactions.txt` (new).
 
 ## Who owns what now
 
