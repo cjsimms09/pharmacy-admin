@@ -37,6 +37,17 @@ export default async function ShelfPage({ searchParams }: { searchParams: Promis
   await requireUser();
   const { ok, error } = await searchParams;
   const [view, snapshot, move] = await Promise.all([leanShelfNow(), latestShelf(), movement()]);
+  /*
+   * The front shop, told apart rather than mixed in.
+   *
+   * Every rate on this page divides by claims, and a barcode has none. Adding vitamins to the
+   * shelf value would flatter the surplus share; leaving them out of the page entirely would lose
+   * eleven thousand dollars of stock the pharmacy owns. So it is one sentence, on its own.
+   */
+  const frontShopCents =
+    snapshot && snapshot.valueCents !== null && snapshot.rxValueCents !== null
+      ? snapshot.valueCents - snapshot.rxValueCents
+      : null;
   const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const days = (n: number) => (Number.isFinite(n) ? `${Math.round(n)} days` : "never");
 
@@ -92,8 +103,8 @@ export default async function ShelfPage({ searchParams }: { searchParams: Promis
           tone={snapshot ? "ok" : "warn"}
         />
         <Figure
-          value={snapshot?.valueCents !== null && snapshot?.valueCents !== undefined ? money(snapshot.valueCents) : "—"}
-          label="on the shelf"
+          value={snapshot?.rxValueCents !== null && snapshot?.rxValueCents !== undefined ? money(snapshot.rxValueCents) : "—"}
+          label="on the dispensing shelf"
           sub={t.surplusShare !== null ? `${Math.round(t.surplusShare * 100)}% of it surplus` : "The file carried no values"}
           tone="muted"
         />
@@ -105,6 +116,13 @@ export default async function ShelfPage({ searchParams }: { searchParams: Promis
           tone={t.atRiskCents > 0 ? "crit" : "ok"}
         />
       </div>
+
+      {frontShopCents !== null && frontShopCents > 0 && (
+        <p className="mt-3 text-sm text-slate-500">
+          A further {money(frontShopCents)} of front-shop stock was counted. Nothing in the claims dispenses it, so it is
+          left out of every rate above and counted only in the stock the accounts close on.
+        </p>
+      )}
 
       {t.deadLines > 0 && (
         <div className="mt-4">
@@ -118,10 +136,10 @@ export default async function ShelfPage({ searchParams }: { searchParams: Promis
 
       <Card
         title="Upload today's count"
-        subtitle="The on-hand export from PioneerRx, in text or CSV. One snapshot per day — uploading the same day twice replaces it rather than doubling the shelf."
+        subtitle="PioneerRx's Inventory Search Results, or any on-hand export in text or CSV. One snapshot per day — uploading the same day twice replaces it rather than doubling the shelf."
       >
         <form action={upload} className="grid gap-3 sm:grid-cols-[1fr_auto_auto] sm:items-end">
-          <Field label="The file" hint="Any separator. It needs at least an NDC column and a quantity-on-hand column.">
+          <Field label="The file" hint="The Inventory Search Results report as it comes, or any export with an NDC column beside a quantity-on-hand column.">
             <input type="file" name="file" accept=".txt,.csv,.tsv" required />
           </Field>
           <Field label="Count date" hint="Only needed where the file prints none.">

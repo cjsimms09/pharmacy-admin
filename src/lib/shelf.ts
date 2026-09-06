@@ -2,10 +2,17 @@ import "server-only";
 import { db, schema } from "@/db";
 import { desc, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
-import { parseOnHand, onHandTotals } from "./on-hand";
+import { readOnHand, onHandTotals } from "./on-hand";
 import { velocity, toOrderThousandths, type Velocity } from "./usage";
 import { leanShelf, shelfTotals, type ShelfRow } from "./lean-shelf";
-import { planOrder, type Offer, type Need, type Movement, type SupplierTerms, type Plan } from "./order-plan";
+import {
+  planOrder,
+  type Offer,
+  type Need,
+  type Movement,
+  type SupplierTerms,
+  type Plan,
+} from "./order-plan";
 
 /**
  * The shelf, joined to everything that has an opinion about it.
@@ -34,16 +41,46 @@ export const SHELF_POLICY = {
   lookbackDays: 90,
 };
 
+export type ShelfLine = {
+  code: string;
+  /** Null for a front-shop barcode, which is why every join below is on this and not on `code`. */
+  ndc11: string | null;
+  description: string | null;
+  inventoryGroup: string | null;
+  quantityThousandths: number;
+  onOrderThousandths: number | null;
+  packQty: number | null;
+  valueCents: number | null;
+};
+
 export type ShelfSnapshot = {
   countedOn: string;
   fileName: string;
-  rows: { ndc11: string; description: string | null; quantityThousandths: number; valueCents: number | null }[];
+  /** Everything counted, front shop included, because the balance sheet takes the lot. */
+  rows: ShelfLine[];
+  /**
+   * The dispensing shelf alone. The buy list, the return list and days-of-stock all work from this:
+   * a bottle of shampoo has no claims behind it, and a tool that ranks by "nothing dispensed this"
+   * would put the whole front shop at the top of the return list.
+   */
+  rxRows: RxShelfLine[];
   valueCents: number | null;
+  /** The dispensing shelf's share of that value, which is the figure the Rx account turns on. */
+  rxValueCents: number | null;
   unitsThousandths: number;
   items: number;
   unmappedColumns: string[];
   skipReasons: Record<string, number>;
 };
+
+/** A dispensing line: in the Rx group, and carrying a real NDC to join claims on. */
+export type RxShelfLine = ShelfLine & { ndc11: string };
+
+/** The front shop is anything the report filed outside the Rx group, or that has no NDC at all. */
+function isRx(r: ShelfLine): r is RxShelfLine {
+  if (r.ndc11 === null) return false;
+  return r.inventoryGroup === null || /^rx$/i.test(r.inventoryGroup);
+}
 
 /**
  * Files a day's count, replacing that day wholesale.
@@ -58,18 +95,50 @@ export async function fileOnHand(
   fileName: string,
   by: { userId: string },
   opts: { countedOn?: string; documentId?: string | null } = {},
-): Promise<{ ok: true; countedOn: string; items: number; replaced: boolean; unmappedColumns: string[]; skipped: Record<string, number> } | { ok: false; why: string }> {
-  const parsed = parseOnHand(buf.toString("utf8"));
-  if (parsed.problems.length > 0 && parsed.rows.length === 0) return { ok: false, why: parsed.problems[0] };
+): Promise<
+  | {
+      ok: true;
+      countedOn: string;
+      items: number;
+      replaced: boolean;
+      unmappedColumns: string[];
+      skipped: Record<string, number>;
+    }
+  | { ok: false; why: string }
+> {
+  const parsed = readOnHand(buf.toString("utf8"));
+  if (parsed.problems.length > 0 && parsed.rows.length === 0)
+    return { ok: false, why: parsed.problems[0] };
   const countedOn = opts.countedOn ?? parsed.countedOn;
   if (!countedOn) {
-    return { ok: false, why: "The file carries no count date. Say which day it is for and upload it again." };
+    return {
+      ok: false,
+      why: "The file carries no count date. Say which day it is for and upload it again.",
+    };
   }
-  if (parsed.rows.length === 0) return { ok: false, why: "No usable rows: every line was missing an NDC or a quantity." };
+  if (parsed.rows.length === 0)
+    return {
+      ok: false,
+      why: "No usable rows: every line was missing an NDC or a quantity.",
+    };
 
   const totals = onHandTotals(parsed.rows);
-  const existing = await db.query.onHandImports.findFirst({ where: eq(schema.onHandImports.countedOn, countedOn) });
-  if (existing) await db.delete(schema.onHandImports).where(eq(schema.onHandImports.id, existing.id));
+  // The dispensing shelf's share, so the accounts can check drug cost against a drug shelf.
+  const rxTotals = onHandTotals(
+    parsed.rows.filter((r) =>
+      isRx({
+        inventoryGroup: r.inventoryGroup ?? null,
+        ndc11: r.ndc11,
+      } as ShelfLine),
+    ),
+  );
+  const existing = await db.query.onHandImports.findFirst({
+    where: eq(schema.onHandImports.countedOn, countedOn),
+  });
+  if (existing)
+    await db
+      .delete(schema.onHandImports)
+      .where(eq(schema.onHandImports.id, existing.id));
 
   const importId = randomUUID();
   await db.insert(schema.onHandImports).values({
@@ -82,39 +151,78 @@ export async function fileOnHand(
     unmappedColumns: JSON.stringify(parsed.unmappedColumns),
     unitsThousandths: totals.unitsThousandths,
     valueCents: totals.valueCents,
+    rxValueCents: rxTotals.valueCents,
     documentId: opts.documentId ?? null,
     createdBy: by.userId,
   });
-  await db.insert(schema.onHand).values(
-    parsed.rows.map((r) => ({
-      id: randomUUID(),
-      importId,
-      countedOn,
-      ndc11: r.ndc11,
-      description: r.description,
-      itemNumber: r.itemNumber,
-      quantityThousandths: r.quantityThousandths,
-      unit: r.unit,
-      unitCostMicros: r.unitCostMicros,
-      valueCents: r.valueCents,
-    })),
-  );
+  /*
+   * Inserted in batches, because SQLite binds a limited number of parameters per statement and a
+   * real count is over two thousand items across sixteen columns. One statement for the lot parses
+   * fine and fails at run time — which is exactly how this was found.
+   */
+  const values = parsed.rows.map((r) => ({
+    id: randomUUID(),
+    importId,
+    countedOn,
+    code: r.code,
+    codeKind: r.codeKind,
+    ndc11: r.ndc11,
+    description: r.description,
+    itemNumber: r.itemNumber,
+    inventoryGroup: r.inventoryGroup ?? null,
+    quantityThousandths: r.quantityThousandths,
+    onOrderThousandths: r.onOrderThousandths ?? null,
+    packQty: r.packQty ?? null,
+    countedInPackages: r.countedInPackages ?? false,
+    unit: r.unit,
+    unitCostMicros: r.unitCostMicros,
+    valueCents: r.valueCents,
+  }));
+  for (let i = 0; i < values.length; i += 300)
+    await db.insert(schema.onHand).values(values.slice(i, i + 300));
 
   return {
-    ok: true, countedOn, items: parsed.rows.length, replaced: Boolean(existing),
-    unmappedColumns: parsed.unmappedColumns, skipped: parsed.skipped,
+    ok: true,
+    countedOn,
+    items: parsed.rows.length,
+    replaced: Boolean(existing),
+    unmappedColumns: parsed.unmappedColumns,
+    skipped: parsed.skipped,
   };
 }
 
 /** The most recent count held, or null where none has been uploaded. */
 export async function latestShelf(): Promise<ShelfSnapshot | null> {
-  const imp = await db.query.onHandImports.findFirst({ orderBy: [desc(schema.onHandImports.countedOn)] });
+  const imp = await db.query.onHandImports.findFirst({
+    orderBy: [desc(schema.onHandImports.countedOn)],
+  });
   if (!imp) return null;
-  const rows = await db.query.onHand.findMany({ where: eq(schema.onHand.countedOn, imp.countedOn) });
+  const rows = await db.query.onHand.findMany({
+    where: eq(schema.onHand.countedOn, imp.countedOn),
+  });
+  const lines: ShelfLine[] = rows.map((r) => ({
+    code: r.code,
+    ndc11: r.ndc11,
+    description: r.description,
+    inventoryGroup: r.inventoryGroup,
+    quantityThousandths: r.quantityThousandths,
+    onOrderThousandths: r.onOrderThousandths,
+    packQty: r.packQty,
+    valueCents: r.valueCents,
+  }));
+  const rxRows = lines.filter(isRx);
+  const rxValue = rxRows.reduce<number | null>(
+    (a, r) => (r.valueCents === null ? a : (a ?? 0) + r.valueCents),
+    null,
+  );
   return {
     countedOn: imp.countedOn,
     fileName: imp.fileName,
-    rows: rows.map((r) => ({ ndc11: r.ndc11, description: r.description, quantityThousandths: r.quantityThousandths, valueCents: r.valueCents })),
+    rows: lines,
+    rxRows,
+    // Preferring what the import stored, and falling back to the rows for a count filed before
+    // the front shop was told apart from the shelf.
+    rxValueCents: imp.rxValueCents ?? rxValue,
     valueCents: imp.valueCents,
     unitsThousandths: imp.unitsThousandths,
     items: imp.itemsKept,
@@ -139,7 +247,9 @@ function safeJson<T>(raw: string, fallback: T): T {
  * fortnight's dispensing by ninety days would report every drug as barely moving and recommend
  * returning the lot.
  */
-export async function movement(lookbackDays = SHELF_POLICY.lookbackDays): Promise<{ rows: Velocity[]; from: string; to: string } | null> {
+export async function movement(
+  lookbackDays = SHELF_POLICY.lookbackDays,
+): Promise<{ rows: Velocity[]; from: string; to: string } | null> {
   const claims = await db.query.claims.findMany();
   if (claims.length === 0) return null;
 
@@ -157,11 +267,23 @@ export async function movement(lookbackDays = SHELF_POLICY.lookbackDays): Promis
   const later = await laterPayments();
   const fills = groupIntoFills(
     claims.map((c) => ({
-      id: c.id, rxNumber: c.rxNumber, fillNumber: c.fillNumber, dateFilled: c.dateFilled,
-      ndc11: c.ndc11, itemName: c.itemName, bin: c.bin, groupNumber: c.groupNumber,
-      pbmName: c.pbmName, payerLabel: c.payerLabel, quantityThousandths: c.quantityThousandths,
-      remitCents: c.remitCents, copayCents: c.copayCents, patientTotalCents: c.patientTotalCents,
-      acquisitionCents: c.acquisitionCents, status: c.status, onAccount: c.onAccount,
+      id: c.id,
+      rxNumber: c.rxNumber,
+      fillNumber: c.fillNumber,
+      dateFilled: c.dateFilled,
+      ndc11: c.ndc11,
+      itemName: c.itemName,
+      bin: c.bin,
+      groupNumber: c.groupNumber,
+      pbmName: c.pbmName,
+      payerLabel: c.payerLabel,
+      quantityThousandths: c.quantityThousandths,
+      remitCents: c.remitCents,
+      copayCents: c.copayCents,
+      patientTotalCents: c.patientTotalCents,
+      acquisitionCents: c.acquisitionCents,
+      status: c.status,
+      onAccount: c.onAccount,
       unmatchedReversal: (c.remitCents ?? 0) < 0 && !c.reversalKey,
     })),
     later,
@@ -178,7 +300,8 @@ export async function movement(lookbackDays = SHELF_POLICY.lookbackDays): Promis
     if (c.daysSupply === null) continue;
     const key = `${c.rxNumber}|${c.dateFilled}`;
     const held = daysSupplyBy.get(key);
-    if (held === undefined || c.daysSupply > held) daysSupplyBy.set(key, c.daysSupply);
+    if (held === undefined || c.daysSupply > held)
+      daysSupplyBy.set(key, c.daysSupply);
   }
 
   const events = fills.map((f) => ({
@@ -192,19 +315,41 @@ export async function movement(lookbackDays = SHELF_POLICY.lookbackDays): Promis
     status: "paid" as const,
   }));
 
-  const days = events.map((e) => e.dateFilled).filter(Boolean).sort();
+  const days = events
+    .map((e) => e.dateFilled)
+    .filter(Boolean)
+    .sort();
   if (days.length === 0) return null;
   const to = days[days.length - 1];
   const earliest = days[0];
-  const cutoff = new Date(Date.parse(`${to}T00:00:00Z`) - lookbackDays * 86_400_000).toISOString().slice(0, 10);
+  const cutoff = new Date(
+    Date.parse(`${to}T00:00:00Z`) - lookbackDays * 86_400_000,
+  )
+    .toISOString()
+    .slice(0, 10);
   const from = cutoff > earliest ? cutoff : earliest;
-  return { rows: velocity(events.filter((e) => e.dateFilled >= from), { from, to }), from, to };
+  return {
+    rows: velocity(
+      events.filter((e) => e.dateFilled >= from),
+      { from, to },
+    ),
+    from,
+    to,
+  };
 }
 
 /** Movement joined to the shelf, which is what both the buy list and the return list run on. */
-export async function shelfMovement(): Promise<{ movement: Movement[]; velocity: Velocity[]; snapshot: ShelfSnapshot | null; from: string | null; to: string | null }> {
+export async function shelfMovement(): Promise<{
+  movement: Movement[];
+  velocity: Velocity[];
+  snapshot: ShelfSnapshot | null;
+  from: string | null;
+  to: string | null;
+}> {
   const [m, snapshot] = await Promise.all([movement(), latestShelf()]);
-  const onHandBy = new Map((snapshot?.rows ?? []).map((r) => [r.ndc11, r.quantityThousandths]));
+  const onHandBy = new Map(
+    (snapshot?.rxRows ?? []).map((r) => [r.ndc11, r.quantityThousandths]),
+  );
   const rows = m?.rows ?? [];
   return {
     velocity: rows,
@@ -232,9 +377,16 @@ export type LeanShelfView = {
 export async function leanShelfNow(): Promise<LeanShelfView> {
   const { movement: move, velocity: vel, snapshot } = await shelfMovement();
   const missing: string[] = [];
-  if (!snapshot) missing.push("No inventory count has been uploaded, so nothing can be sized against what is here.");
-  if (vel.length === 0) missing.push("No claims are held, so nothing has a rate to be measured against.");
-  if (!snapshot || vel.length === 0) return { rows: [], totals: shelfTotals([], null), snapshot, missing };
+  if (!snapshot)
+    missing.push(
+      "No inventory count has been uploaded, so nothing can be sized against what is here.",
+    );
+  if (vel.length === 0)
+    missing.push(
+      "No claims are held, so nothing has a rate to be measured against.",
+    );
+  if (!snapshot || vel.length === 0)
+    return { rows: [], totals: shelfTotals([], null), snapshot, missing };
 
   const velBy = new Map(vel.map((v) => [v.ndc11, v]));
   const moveBy = new Map(move.map((m) => [m.ndc11, m]));
@@ -247,11 +399,26 @@ export async function leanShelfNow(): Promise<LeanShelfView> {
    */
   const { returnsDueNow } = await import("./returns-due");
   const due = await returnsDueNow();
-  const returns = new Map<string, { supplier: string; creditPercentNow: number; dropsInDays: number | null; dropsToPercent: number | null; closesInDays: number | null }>();
+  const returns = new Map<
+    string,
+    {
+      supplier: string;
+      creditPercentNow: number;
+      dropsInDays: number | null;
+      dropsToPercent: number | null;
+      closesInDays: number | null;
+    }
+  >();
   for (const r of due.rows) {
     const held = returns.get(r.ndc11);
-    const soonest = (x: { dropsInDays: number | null; closesInDays: number | null }) =>
-      Math.min(x.dropsInDays ?? Number.MAX_SAFE_INTEGER, x.closesInDays ?? Number.MAX_SAFE_INTEGER);
+    const soonest = (x: {
+      dropsInDays: number | null;
+      closesInDays: number | null;
+    }) =>
+      Math.min(
+        x.dropsInDays ?? Number.MAX_SAFE_INTEGER,
+        x.closesInDays ?? Number.MAX_SAFE_INTEGER,
+      );
     if (held && soonest(held) <= soonest(r)) continue;
     returns.set(r.ndc11, {
       supplier: r.supplier,
@@ -262,19 +429,34 @@ export async function leanShelfNow(): Promise<LeanShelfView> {
     });
   }
   if (due.suppliersWithoutPolicy.length > 0) {
-    missing.push(`No return policy on file for ${due.suppliersWithoutPolicy.join(", ")}, so nothing bought from them is given a window.`);
+    missing.push(
+      `No return policy on file for ${due.suppliersWithoutPolicy.join(", ")}, so nothing bought from them is given a window.`,
+    );
   }
 
   const rows = leanShelf({
-    onHand: snapshot.rows,
-    movement: vel.map((v) => ({ ndc11: v.ndc11, name: v.name, perDayThousandths: v.perDayThousandths, steady: v.steady, lastOn: v.lastOn })),
+    onHand: snapshot.rxRows,
+    movement: vel.map((v) => ({
+      ndc11: v.ndc11,
+      name: v.name,
+      perDayThousandths: v.perDayThousandths,
+      steady: v.steady,
+      lastOn: v.lastOn,
+    })),
     returns,
     targetDays: SHELF_POLICY.targetDays,
     materialityCents: SHELF_POLICY.materialityCents,
   });
   void velBy;
   void moveBy;
-  return { rows, totals: shelfTotals(rows, snapshot.valueCents), snapshot, missing };
+  // Measured against the dispensing shelf, not the whole building: the front shop is not what
+  // these rows were drawn from, and dividing by it would flatter every share.
+  return {
+    rows,
+    totals: shelfTotals(rows, snapshot.rxValueCents),
+    snapshot,
+    missing,
+  };
 }
 
 export type BuyListView = {
@@ -296,8 +478,12 @@ export type BuyListView = {
 export async function buyListNow(): Promise<BuyListView> {
   const { movement: move, velocity: vel, snapshot } = await shelfMovement();
   const missing: string[] = [];
-  if (!snapshot) missing.push("No inventory count has been uploaded. Without one, a shortfall cannot be told from a full shelf.");
-  if (vel.length === 0) missing.push("No claims are held, so nothing has a rate to buy against.");
+  if (!snapshot)
+    missing.push(
+      "No inventory count has been uploaded. Without one, a shortfall cannot be told from a full shelf.",
+    );
+  if (vel.length === 0)
+    missing.push("No claims are held, so nothing has a rate to buy against.");
 
   const { allSuppliers } = await import("./suppliers-registry");
   const registry = await allSuppliers(true);
@@ -310,13 +496,26 @@ export async function buyListNow(): Promise<BuyListView> {
     leadTimeDays: s.leadTimeDays ?? null,
     primary: s.primarySupplier === true,
   }));
-  const leadBy = new Map(suppliers.map((s) => [s.supplier, s.leadTimeDays ?? 1]));
+  const leadBy = new Map(
+    suppliers.map((s) => [s.supplier, s.leadTimeDays ?? 1]),
+  );
   const shortestLead = Math.min(...[...leadBy.values()], 1);
 
   const items = await db.query.supplierItems.findMany({
-    columns: { supplier: true, ndc11: true, description: true, unitCostMicros: true, packSize: true, contractFlag: true, availability: true },
+    columns: {
+      supplier: true,
+      ndc11: true,
+      description: true,
+      unitCostMicros: true,
+      packSize: true,
+      contractFlag: true,
+      availability: true,
+    },
   });
-  if (items.length === 0) missing.push("No supplier catalogue has been imported, so there is nothing to price an order against.");
+  if (items.length === 0)
+    missing.push(
+      "No supplier catalogue has been imported, so there is nothing to price an order against.",
+    );
 
   /*
    * The rebate rate per supplier, so a contract line is compared at what it actually costs.
@@ -335,7 +534,10 @@ export async function buyListNow(): Promise<BuyListView> {
     const packQty = packQtyOf(it.packSize);
     const rebated = it.contractFlag ? true : null;
     const rate = rates[it.supplier.trim().toLowerCase()] ?? null;
-    const effective = rebated === true && rate !== null ? Math.round(it.unitCostMicros * (1 - rate)) : it.unitCostMicros;
+    const effective =
+      rebated === true && rate !== null
+        ? Math.round(it.unitCostMicros * (1 - rate))
+        : it.unitCostMicros;
     offers.push({
       ndc11: it.ndc11,
       supplier: it.supplier,
@@ -344,21 +546,40 @@ export async function buyListNow(): Promise<BuyListView> {
       effectiveUnitMicros: effective,
       rebated,
       packQty: packQty !== null && packQty > 0 ? packQty : null,
-      shortDated: /short|dated/i.test(it.availability ?? "") ? (it.availability ?? "").trim() : null,
+      shortDated: /short|dated/i.test(it.availability ?? "")
+        ? (it.availability ?? "").trim()
+        : null,
     });
   }
 
-  const onHandBy = new Map((snapshot?.rows ?? []).map((r) => [r.ndc11, r.quantityThousandths]));
+  const onHandBy = new Map(
+    (snapshot?.rxRows ?? []).map((r) => [r.ndc11, r.quantityThousandths]),
+  );
+  /*
+   * What is already on a truck.
+   *
+   * The pharmacy's own report carries On Order, and without it the site cannot tell a shelf that is
+   * genuinely short from one whose replacement was ordered yesterday — it would order the same
+   * bottle again every day until the first one landed. It is counted as cover because that is what
+   * it is: stock that will be here before the target days run out.
+   */
+  const onOrderBy = new Map(
+    (snapshot?.rxRows ?? [])
+      .filter((r) => (r.onOrderThousandths ?? 0) > 0)
+      .map((r) => [r.ndc11, r.onOrderThousandths as number]),
+  );
   const needs: Need[] = [];
   for (const v of vel) {
     if (!v.steady) continue; // A lumpy item is ordered when it is prescribed, not on a rate.
     const need = toOrderThousandths({
       onHandThousandths: onHandBy.get(v.ndc11) ?? 0,
+      onOrderThousandths: onOrderBy.get(v.ndc11) ?? 0,
       perDayThousandths: v.perDayThousandths,
       targetDays: SHELF_POLICY.targetDays,
       leadTimeDays: shortestLead,
     });
-    if (need > 0) needs.push({ ndc11: v.ndc11, name: v.name, needThousandths: need });
+    if (need > 0)
+      needs.push({ ndc11: v.ndc11, name: v.name, needThousandths: need });
   }
 
   const plan = planOrder({
@@ -397,7 +618,10 @@ export async function buyListNow(): Promise<BuyListView> {
       }),
     );
   }
-  plan.totalSavingCents = plan.baskets.reduce((n, b) => n + b.savingCents + (b.bandDeltaCents ?? 0), 0);
+  plan.totalSavingCents = plan.baskets.reduce(
+    (n, b) => n + b.savingCents + (b.bandDeltaCents ?? 0),
+    0,
+  );
   return { plan, needs, suppliers, snapshot, missing };
 }
 
@@ -429,7 +653,10 @@ export type BandCost = {
   says: string;
 };
 
-export async function bandCostOfMoving(basketCents: number, contractShareCents?: number): Promise<BandCost | null> {
+export async function bandCostOfMoving(
+  basketCents: number,
+  contractShareCents?: number,
+): Promise<BandCost | null> {
   if (basketCents <= 0) return null;
   const { allSuppliers } = await import("./suppliers-registry");
   const registry = await allSuppliers(true);
@@ -437,15 +664,27 @@ export async function bandCostOfMoving(basketCents: number, contractShareCents?:
   if (!primary) return null;
 
   const { ratesFor, earningSoFar } = await import("./rebate-rates");
-  const [rates, earning] = await Promise.all([ratesFor(primary.id), earningSoFar(primary.id)]);
+  const [rates, earning] = await Promise.all([
+    ratesFor(primary.id),
+    earningSoFar(primary.id),
+  ]);
   if (!rates || !earning) return null;
 
   /*
    * The ladder that is measured by the compliance ratio. A programme measured by something else —
    * the purchase ratio, OS/Gx — is not moved by where a generic is bought, so it is not in this.
    */
-  const ladder = rates.view.programmes.find((p) => p.terms.kind === "tiered_ratio" && /compliance|gcr/i.test(p.measuredBy ?? p.name));
-  if (!ladder || ladder.achievedPercent === null || ladder.terms.tiers.length === 0) return null;
+  const ladder = rates.view.programmes.find(
+    (p) =>
+      p.terms.kind === "tiered_ratio" &&
+      /compliance|gcr/i.test(p.measuredBy ?? p.name),
+  );
+  if (
+    !ladder ||
+    ladder.achievedPercent === null ||
+    ladder.terms.tiers.length === 0
+  )
+    return null;
 
   /*
    * The position: the ratio as settled, and the denominator it implies from the period's purchases.
@@ -464,7 +703,10 @@ export async function bandCostOfMoving(basketCents: number, contractShareCents?:
     definition: "generics_over_rx" as const,
     scrub: "statement" as const,
   };
-  const bands = ladder.terms.tiers.map((t) => ({ thresholdPercent: t.thresholdPercent, rebatePercent: t.rebatePercent }));
+  const bands = ladder.terms.tiers.map((t) => ({
+    thresholdPercent: t.thresholdPercent,
+    rebatePercent: t.rebatePercent,
+  }));
 
   /*
    * The contract share: how much of the basket would have been a contract generic at the primary.
@@ -476,8 +718,18 @@ export async function bandCostOfMoving(basketCents: number, contractShareCents?:
    */
   const contract = contractShareCents ?? basketCents;
 
-  const here = tierEffect(position, bands, [{ cents: contract, atPrimary: true, kind: "onestop_generic" }], earning.contractPurchasedCents + contract);
-  const away = tierEffect(position, bands, [{ cents: contract, atPrimary: false, kind: "onestop_generic" }], earning.contractPurchasedCents);
+  const here = tierEffect(
+    position,
+    bands,
+    [{ cents: contract, atPrimary: true, kind: "onestop_generic" }],
+    earning.contractPurchasedCents + contract,
+  );
+  const away = tierEffect(
+    position,
+    bands,
+    [{ cents: contract, atPrimary: false, kind: "onestop_generic" }],
+    earning.contractPurchasedCents,
+  );
   const deltaCents = away.rebateAfterCents - here.rebateAfterCents;
 
   const pct = (n: number) => `${n.toFixed(2)}%`;

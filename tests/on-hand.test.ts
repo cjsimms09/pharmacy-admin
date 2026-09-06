@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { parseOnHand, looksLikeOnHand, countDate, mapHeader, onHandTotals } from "../src/lib/on-hand";
+import { parseOnHand, looksLikeOnHand, countDate, mapHeader, onHandTotals, looksLikePioneerOnHand, readOnHand, packFrom } from "../src/lib/on-hand";
 
 const tabbed = [
   "West Wichita Family Pharmacy — Inventory On Hand",
@@ -156,5 +156,141 @@ describe("routing an emailed count", () => {
       "123456\tLisinopril 10mg\t0093-1056-01\t(1) 100.00 EA\t0.02410",
     ].join("\n");
     assert.notEqual(classify("MCKCatalog_9_5_2026.txt", Buffer.from(catalog, "utf8")).kind, "on_hand");
+  });
+});
+
+// ── PioneerRx's Inventory Search Results, which is the file this pharmacy actually sends ────────
+//
+// Copied from a real export, with the real page furniture and both inventory groups. The test
+// cares most about the thing that is invisible when it is wrong: the Retail group counts packages
+// where the Rx group counts dispensing units, so the same test strip is 100 on one shelf and
+// "2 of a 100 EA package" on the other.
+
+const pioneer = [
+  "﻿Inventory Search Results with Lot Information",
+  "West Wichita Family Pharmacy",
+  '"8200 W Central Ave, Ste 5"',
+  '"Wichita, KS 67212-3661"',
+  "Inventory Group:,Rx",
+  "Acamprosate Calc Dr 333 Mg Tab",
+  "NDC/UPC:,68462-0435-18,On Hand:,180.00,Inventory Group Status:,Active",
+  "Package Info:,180 EA,On Order:,0.00",
+  "Item Status:,Active,Cost:,$0.62",
+  "ACETAMINOPHEN 500 MG CAPLET",
+  "NDC/UPC:,00904-6720-51,On Hand:,8.00,Inventory Group Status:,Active",
+  "Package Info:,50 EA,On Order:,50.00",
+  "Item Status:,Active,Cost:,$0.08",
+  "Printed On: 9/6/2026,Page 1 of 225",
+  "Inventory Search Results with Lot Information",
+  "West Wichita Family Pharmacy",
+  '"8200 W Central Ave, Ste 5"',
+  '"Wichita, KS 67212-3661"',
+  "ACCU-CHEK GUIDE TEST STRIP",
+  "NDC/UPC:,65702-0712-10,On Hand:,100.00,Inventory Group Status:,Active",
+  "Package Info:,100 EA,On Order:,0.00",
+  "Item Status:,Active,Cost:,$0.41",
+  "Inventory Group:,Retail",
+  "ACCU-CHEK GUIDE TEST STRIP",
+  "NDC/UPC:,365702712102,On Hand:,2.00,Inventory Group Status:,Active",
+  "Package Info:,Package (100 EA),On Order:,0.00",
+  "Item Status:,Active,Cost:,$0.41",
+  "ABREVA 10% CREAM",
+  "NDC/UPC:,307660801559,On Hand:,2.00,Inventory Group Status:,Active",
+  "Package Info:,Package (2 GM),On Order:,0.00",
+  "Item Status:,Active,Cost:,$8.85",
+  "Item With No Code At All",
+  "NDC/UPC:,,On Hand:,6.00,Inventory Group Status:,Active",
+  "Package Info:,Package (1 EA),On Order:,0.00",
+  "Item Status:,Active,Cost:,$1.00",
+  "Printed On: 9/6/2026,Page 225 of 225",
+].join("\n");
+
+describe("reading PioneerRx's Inventory Search Results", () => {
+  test("recognises it, and the generic reader does not have to", () => {
+    assert.equal(looksLikePioneerOnHand(pioneer), true);
+    assert.equal(looksLikeOnHand(pioneer), true, "autoroute files it as a count");
+    assert.equal(looksLikePioneerOnHand(tabbed), false);
+  });
+
+  test("reads name, code, quantity, pack, cost and on order", () => {
+    const p = readOnHand(pioneer);
+    assert.equal(p.countedOn, "2026-09-06");
+    const acam = p.rows.find((r) => r.code === "68462043518");
+    assert.ok(acam);
+    assert.equal(acam.description, "Acamprosate Calc Dr 333 Mg Tab");
+    assert.equal(acam.inventoryGroup, "Rx");
+    assert.equal(acam.quantityThousandths, 180_000);
+    assert.equal(acam.packQty, 180);
+    assert.equal(acam.unit, "EA");
+    assert.equal(acam.unitCostMicros, 620_000);
+    assert.equal(acam.valueCents, 11_160);
+  });
+
+  test("carries On Order, which is the whole reason a shelf can be short without being bought again", () => {
+    const p = readOnHand(pioneer);
+    const apap = p.rows.find((r) => r.code === "00904672051");
+    assert.equal(apap?.quantityThousandths, 8_000);
+    assert.equal(apap?.onOrderThousandths, 50_000);
+  });
+
+  test("the Retail group counts packages, and is multiplied out to dispensing units", () => {
+    const p = readOnHand(pioneer);
+    const retailStrip = p.rows.find((r) => r.code === "365702712102");
+    assert.ok(retailStrip);
+    assert.equal(retailStrip.countedInPackages, true);
+    assert.equal(retailStrip.quantityThousandths, 200_000, "two boxes of a hundred, not two strips");
+    assert.equal(retailStrip.valueCents, 8_200, "2 × 100 × $0.41");
+
+    const abreva = p.rows.find((r) => r.code === "307660801559");
+    assert.equal(abreva?.quantityThousandths, 4_000, "two 2 g tubes");
+    assert.equal(abreva?.valueCents, 3_540, "$17.70 a tube, not 35 cents for both");
+  });
+
+  test("the Rx line for the same product is left in units, and the two do not collide", () => {
+    const p = readOnHand(pioneer);
+    const rxStrip = p.rows.find((r) => r.code === "65702071210");
+    assert.equal(rxStrip?.quantityThousandths, 100_000);
+    assert.equal(rxStrip?.countedInPackages, false);
+    assert.equal(rxStrip?.inventoryGroup, "Rx");
+  });
+
+  test("a barcode is kept as a barcode and never presented as an NDC", () => {
+    const p = readOnHand(pioneer);
+    const retail = p.rows.filter((r) => r.inventoryGroup === "Retail");
+    assert.ok(retail.length >= 2);
+    for (const r of retail.filter((x) => x.codeKind === "upc")) {
+      assert.equal(r.ndc11, null, "nothing may join a shampoo's barcode to a drug");
+    }
+    const rx = p.rows.find((r) => r.code === "68462043518");
+    assert.equal(rx?.codeKind, "ndc11");
+    assert.equal(rx?.ndc11, "68462043518");
+  });
+
+  test("an item with no code at all is refused and named, not counted as nothing", () => {
+    const p = readOnHand(pioneer);
+    assert.equal(p.rows.some((r) => r.description === "Item With No Code At All"), false);
+    assert.equal(p.skipped["no NDC or barcode on the item"], 1);
+    assert.equal(p.rowsRead, 6);
+  });
+
+  test("page furniture is not read as an item name", () => {
+    const p = readOnHand(pioneer);
+    for (const r of p.rows) {
+      assert.doesNotMatch(r.description ?? "", /Printed On|Inventory Search|West Wichita|Wichita, KS|Central Ave/i);
+    }
+  });
+
+  test("packFrom tells the two package forms apart", () => {
+    assert.deepEqual(packFrom("180 EA"), { packQty: 180, unit: "EA", countsPackages: false });
+    assert.deepEqual(packFrom("Package (100 EA)"), { packQty: 100, unit: "EA", countsPackages: true });
+    assert.deepEqual(packFrom("Package (473 ML)"), { packQty: 473, unit: "ML", countsPackages: true });
+    assert.deepEqual(packFrom(""), { packQty: null, unit: null, countsPackages: false });
+  });
+
+  test("a package count with no readable pack size is refused, because 2 of an unknown is not a number", () => {
+    const broken = pioneer.replace("Package Info:,Package (2 GM),On Order:,0.00", "Package Info:,Package (),On Order:,0.00");
+    const p = readOnHand(broken);
+    assert.equal(p.rows.some((r) => r.code === "307660801559"), false);
+    assert.equal(p.skipped["counted in packages with no readable pack size"], 1);
   });
 });

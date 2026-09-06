@@ -35,10 +35,28 @@ import { splitRow } from "./pioneer-catalog";
  */
 
 export type OnHandRow = {
-  ndc11: string;
+  /**
+   * The item's code exactly as the pharmacy's system carries it: an eleven-digit NDC for anything
+   * dispensed, a twelve-digit UPC for a front-shop item that was never assigned one.
+   */
+  code: string;
+  codeKind: "ndc11" | "upc";
+  /**
+   * The eleven-digit NDC where the code is one, and null where it is a barcode. Kept separate from
+   * `code` so nothing joins a shampoo's UPC to a drug that happens to share its digits.
+   */
+  ndc11: string | null;
   description: string | null;
   itemNumber: string | null;
-  /** Units on the shelf, in thousandths, so a part bottle is exact. */
+  /** Which shelf the item sits on — "Rx" or "Retail" — where the report says. */
+  inventoryGroup?: string | null;
+  /** Ordered and not yet on the shelf, where the report carries it. Dispensing units. */
+  onOrderThousandths?: number | null;
+  /** Units in the package the item is bought in — "180 EA". */
+  packQty?: number | null;
+  /** True where the report counted whole packages and this reader multiplied them out. */
+  countedInPackages?: boolean;
+  /** Units on the shelf, in thousandths, so a part bottle is exact. Always dispensing units. */
   quantityThousandths: number;
   unit: string | null;
   /** What the pharmacy's own system values a unit at, in micros. Null where the file omits it. */
@@ -146,8 +164,10 @@ function findHeader(lines: string[]): { index: number; sep: string; mapping: Map
   return null;
 }
 
+/** True for either shape of count: the four-line PioneerRx report, or a column export. */
 export function looksLikeOnHand(text: string): boolean {
   const head = text.slice(0, 20_000);
+  if (looksLikePioneerOnHand(head)) return true;
   if (!/on ?hand|qoh|inventory/i.test(head)) return false;
   return findHeader(head.split(/\r?\n/)) !== null;
 }
@@ -220,6 +240,8 @@ export function parseOnHand(text: string): OnHandParse {
           : null;
 
     const row: OnHandRow = {
+      code: ndc.ndc11,
+      codeKind: "ndc11",
       ndc11: ndc.ndc11,
       description: at(cells, "description") || null,
       itemNumber: at(cells, "itemNumber") || null,
@@ -233,7 +255,7 @@ export function parseOnHand(text: string): OnHandParse {
      * One NDC can appear on several lines — separate lots, or a bottle counted per shelf. They add
      * up; the shelf holds the total. Overwriting would report the last lot as the whole stock.
      */
-    const already = seen.get(row.ndc11);
+    const already = seen.get(row.code);
     if (already !== undefined) {
       const prev = rows[already];
       prev.quantityThousandths += row.quantityThousandths;
@@ -242,7 +264,7 @@ export function parseOnHand(text: string): OnHandParse {
       if (!prev.description && row.description) prev.description = row.description;
       continue;
     }
-    seen.set(row.ndc11, rows.length);
+    seen.set(row.code, rows.length);
     rows.push(row);
   }
 
@@ -264,4 +286,212 @@ export function onHandTotals(rows: OnHandRow[]): { items: number; unitsThousandt
     }
   }
   return { items: rows.length, unitsThousandths, valueCents: anyValue ? valueCents : null };
+}
+
+
+
+/**
+ * PioneerRx's "Inventory Search Results with Lot Information", which is the file this pharmacy
+ * actually sends — and is not a table at all.
+ *
+ * Each item is four lines: its name, then three lines of "label:,value" pairs, with the report's
+ * masthead and a "Printed On" footer every forty-odd lines. The reader above expects a header row
+ * and columns and would make nothing of this, so this is a second reader rather than a looser
+ * version of the first.
+ *
+ *     Acamprosate Calc Dr 333 Mg Tab
+ *     NDC/UPC:,68462-0435-18,On Hand:,180.00,Inventory Group Status:,Active
+ *     Package Info:,180 EA,On Order:,0.00
+ *     Item Status:,Active,Cost:,$0.62
+ *
+ * It carries three things worth more than the count itself. **On Order** is what the order planner
+ * needed and had no source for — without it the site cannot tell a shelf that is genuinely short
+ * from one whose stock is already on a truck, and would order it twice. **Cost** is per dispensing
+ * unit, so a value can be put on the shelf without a catalogue. And **Package Info** gives the pack
+ * size, which is what turns "order 140 units" into "order two bottles".
+ *
+ * ── Two shelves in one file, counted in two different units ──
+ *
+ * The report is sectioned by inventory group — "Rx" then "Retail" — and the two count differently.
+ * The same test strip appears in both:
+ *
+ *     Rx      65702-0712-10   On Hand 100.00   Package Info: 100 EA            Cost $0.41
+ *     Retail  365702712102    On Hand   2.00   Package Info: Package (100 EA)  Cost $0.41
+ *
+ * The Rx line is a hundred strips. The Retail line is two boxes of a hundred, not two strips: the
+ * parenthesised "Package (...)" form is PioneerRx saying the count is in packages. Cost stays per
+ * dispensing unit in both, so a retail line is worth quantity × pack × cost — reading it as
+ * quantity × cost values two boxes of Abreva at seventeen dollars a tube as thirty-five cents.
+ *
+ * So a package-counted line is multiplied out to dispensing units here, and everything downstream
+ * gets one unit of measure. A package-counted line whose pack size cannot be read is refused
+ * rather than guessed: there is no safe reading of "2" without knowing 2 of what.
+ *
+ * ── Why the front shop is kept ──
+ *
+ * Retail items are barcodes, not NDCs, and nothing in the claims will ever match them. They are
+ * still money on a shelf and belong in the stock figure the accounts close on, so they are stored
+ * with their group and their UPC kept out of the NDC field — the shelf tools filter to Rx, and the
+ * balance takes the lot.
+ */
+const FURNITURE =
+  /^(inventory search results|west wichita family|printed on:|inventory group:,|"?\d[\w ]* (?:w|e|n|s) [a-z]|"?wichita,)/i;
+
+/** A label:,value pair reader for one of the three keyed lines. */
+function pairs(cells: string[]): Map<string, string> {
+  const out = new Map<string, string>();
+  for (let i = 0; i + 1 < cells.length; i += 2) {
+    const k = cells[i].trim().replace(/:$/, "").toLowerCase();
+    if (k) out.set(k, cells[i + 1].trim());
+  }
+  return out;
+}
+
+export type PackageInfo = {
+  /** Units in one package — 180 of "180 EA" and of "Package (180 EA)". Null where unreadable. */
+  packQty: number | null;
+  /** The dispensing unit: EA, ML, GM. */
+  unit: string | null;
+  /** True for the "Package (...)" form, which means the On Hand figure counts packages. */
+  countsPackages: boolean;
+};
+
+/** Reads "180 EA" and "Package (100 EA)", and says which of the two it was. */
+export function packFrom(text: string): PackageInfo {
+  const t = text.trim();
+  const paren = /^Package\s*\((.*)\)\s*$/i.exec(t);
+  const inner = paren ? paren[1] : t;
+  const m = /^\s*([\d,]+(?:\.\d+)?)\s*([A-Za-z]+)?/.exec(inner);
+  const n = m ? Number(m[1].replace(/,/g, "")) : NaN;
+  return {
+    packQty: Number.isFinite(n) && n > 0 ? n : null,
+    unit: m && m[2] ? m[2].toUpperCase() : null,
+    countsPackages: Boolean(paren),
+  };
+}
+
+export function looksLikePioneerOnHand(text: string): boolean {
+  const head = text.replace(/^﻿/, "").slice(0, 4000);
+  return /Inventory Search Results/i.test(head) && /NDC\/UPC:/.test(head) && /On Hand:/.test(head);
+}
+
+/**
+ * Eleven digits is an NDC; twelve to fourteen is a retail barcode — UPC-A, EAN-13 or a GTIN-14 —
+ * and the front shop carries all three. Anything else this reader will not name.
+ */
+function codeOf(raw: string): { code: string; codeKind: "ndc11" | "upc"; ndc11: string | null } | null {
+  const digits = raw.replace(/[^\d]/g, "");
+  const ndc = normalizeNdc(raw);
+  if (ndc.ok) return { code: ndc.ndc11, codeKind: "ndc11", ndc11: ndc.ndc11 };
+  if (digits.length >= 12 && digits.length <= 14) return { code: digits, codeKind: "upc", ndc11: null };
+  return null;
+}
+
+export function parsePioneerOnHand(text: string): OnHandParse {
+  const lines = text.replace(/^﻿/, "").split(/\r?\n/);
+  const rows: OnHandRow[] = [];
+  const seen = new Map<string, number>();
+  const skipped: Record<string, number> = {};
+  const problems: string[] = [];
+  const skip = (why: string) => {
+    skipped[why] = (skipped[why] ?? 0) + 1;
+  };
+
+  let rowsRead = 0;
+  let name: string | null = null;
+  let group: string | null = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i].trim();
+    if (!raw) continue;
+
+    const groupLine = /^Inventory Group:,(.*)$/i.exec(raw);
+    if (groupLine) {
+      group = groupLine[1].trim() || null;
+      continue;
+    }
+    if (FURNITURE.test(raw)) continue;
+
+    if (!/^NDC\/UPC:/i.test(raw)) {
+      // Anything that is not one of the three keyed lines is the item's name.
+      if (!/^(Package Info:|Item Status:)/i.test(raw)) name = splitRow(raw, ",")[0].trim() || raw;
+      continue;
+    }
+
+    rowsRead++;
+    const cells = splitRow(raw, ",");
+    const a = pairs(cells);
+    const b = i + 1 < lines.length ? pairs(splitRow(lines[i + 1].trim(), ",")) : new Map<string, string>();
+    const c = i + 2 < lines.length ? pairs(splitRow(lines[i + 2].trim(), ",")) : new Map<string, string>();
+
+    const rawCode = (a.get("ndc/upc") ?? "").trim();
+    const id = codeOf(rawCode);
+    if (!id) {
+      // Split, because the two are different jobs: a blank field is an item to fix in PioneerRx,
+      // an unrecognised one is a code shape this reader has not been taught.
+      skip(rawCode ? "code was neither an NDC nor a barcode" : "no NDC or barcode on the item");
+      continue;
+    }
+    const counted = parseQuantityThousandths(a.get("on hand"));
+    if (counted === null) {
+      // Refused rather than defaulted: an unreadable quantity is not an empty shelf.
+      skip("quantity unreadable");
+      continue;
+    }
+
+    const pack = packFrom(b.get("package info") ?? "");
+    if (pack.countsPackages && pack.packQty === null) {
+      // "2" of an unknown package is not a number of anything.
+      skip("counted in packages with no readable pack size");
+      continue;
+    }
+    // Package counts become dispensing units, so one unit of measure leaves this reader.
+    const factor = pack.countsPackages ? (pack.packQty as number) : 1;
+    const qty = counted * factor;
+    const onOrder = parseQuantityThousandths(b.get("on order"));
+
+    const unitCostMicros = parseUnitMicros((c.get("cost") ?? "").replace(/\$/g, ""));
+
+    const row: OnHandRow = {
+      code: id.code,
+      codeKind: id.codeKind,
+      ndc11: id.ndc11,
+      description: name,
+      itemNumber: null,
+      inventoryGroup: group,
+      quantityThousandths: qty,
+      unit: pack.unit,
+      unitCostMicros,
+      valueCents: unitCostMicros === null ? null : extendedCents(unitCostMicros, qty),
+      onOrderThousandths: onOrder === null ? null : onOrder * factor,
+      packQty: pack.packQty,
+      countedInPackages: pack.countsPackages,
+    };
+
+    /*
+     * One code listed twice is one shelf. The report groups by item, and the same code can appear
+     * under two item names where the pharmacy has renamed something; overwriting would report the
+     * second listing as the whole stock.
+     */
+    const already = seen.get(row.code);
+    if (already !== undefined) {
+      const prev = rows[already];
+      prev.quantityThousandths += row.quantityThousandths;
+      if (prev.valueCents !== null && row.valueCents !== null) prev.valueCents += row.valueCents;
+      if (prev.onOrderThousandths != null && row.onOrderThousandths != null) {
+        prev.onOrderThousandths += row.onOrderThousandths;
+      }
+      continue;
+    }
+    seen.set(row.code, rows.length);
+    rows.push(row);
+  }
+
+  if (rows.length === 0 && rowsRead > 0) problems.push("Items were found but none carried a usable code and quantity.");
+  return { rows, countedOn: countDate(text), unmappedColumns: [], rowsRead, skipped, problems };
+}
+
+/** Reads whichever shape the file is. */
+export function readOnHand(text: string): OnHandParse {
+  return looksLikePioneerOnHand(text) ? parsePioneerOnHand(text) : parseOnHand(text);
 }

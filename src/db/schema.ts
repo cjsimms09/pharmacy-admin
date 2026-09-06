@@ -2387,8 +2387,17 @@ export const onHandImports = sqliteTable(
     /** Columns in the file this site had no meaning for. */
     unmappedColumns: text("unmapped_columns").notNull().default("[]"),
     unitsThousandths: integer("units_thousandths").notNull().default(0),
-    /** The shelf's total value, where the file carried one. Null where it did not. */
+    /** The whole building's stock value, front shop included, where the file carried one. */
     valueCents: integer("value_cents"),
+    /**
+     * The dispensing shelf's share of it.
+     *
+     * The accounts check cost of goods as opening + purchases − closing against what the claims say
+     * was dispensed, and that identity only holds if both sides count the same shelf. A month where
+     * the front shop sold a hundred bottles of vitamins would otherwise show up as a hundred
+     * bottles of unexplained drug cost.
+     */
+    rxValueCents: integer("rx_value_cents"),
     documentId: text("document_id"),
     createdBy: text("created_by").notNull(),
     createdAt: text("created_at").notNull().default(now()),
@@ -2403,18 +2412,34 @@ export const onHand = sqliteTable(
     importId: text("import_id").notNull().references(() => onHandImports.id, { onDelete: "cascade" }),
     /** Copied from the import so a day's shelf is one query without a join. */
     countedOn: text("counted_on").notNull(),
-    ndc11: text("ndc11").notNull(),
+    /**
+     * The item's code as the pharmacy's own system carries it — an NDC for anything dispensed, a
+     * UPC for a front-shop item. It is the key, because the front shop has no NDCs.
+     */
+    code: text("code").notNull(),
+    codeKind: text("code_kind").notNull().default("ndc11"),
+    /** The NDC where the code is one, and null for a barcode, so nothing joins a UPC to a drug. */
+    ndc11: text("ndc11"),
     description: text("description"),
     itemNumber: text("item_number"),
-    /** Units on the shelf, in thousandths, so a part bottle is exact. */
+    /** "Rx" or "Retail": which shelf, and so which tools should be looking at it. */
+    inventoryGroup: text("inventory_group"),
+    /** Units on the shelf, in thousandths, always dispensing units even where the file counted packs. */
     quantityThousandths: integer("quantity_thousandths").notNull(),
+    /** Ordered and not yet arrived, dispensing units, so the buy list does not order it twice. */
+    onOrderThousandths: integer("on_order_thousandths"),
+    /** Units in one package, which is what turns "order 140" into "order two bottles". */
+    packQty: integer("pack_qty"),
+    /** True where the file counted packages and the reader multiplied them out. */
+    countedInPackages: integer("counted_in_packages", { mode: "boolean" }).notNull().default(false),
     unit: text("unit"),
     unitCostMicros: integer("unit_cost_micros"),
     valueCents: integer("value_cents"),
   },
   (t) => [
     index("on_hand_counted_idx").on(t.countedOn),
-    uniqueIndex("on_hand_counted_ndc_idx").on(t.countedOn, t.ndc11),
+    uniqueIndex("on_hand_counted_code_idx").on(t.countedOn, t.code),
+    index("on_hand_ndc_idx").on(t.ndc11),
   ],
 );
 
