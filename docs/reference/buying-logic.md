@@ -209,6 +209,53 @@ For each line the buyer is about to order:
 Nothing is submitted anywhere. The output is a sheet with a sentence per line and every figure
 traceable to a document.
 
+## Rule 6: the month, decided with every variable at once
+
+`month-plan.ts`. Rules 1 to 3a each hold something still. The buy list ranks NDCs at a fixed
+rate; the rate depends on the band; the band depends on where every generic and brand is
+bought; a secondary's minimum pulls generics off McKesson, which lowers the ratio and shrinks the
+OneStop base; which NDC pays most depends on the plan mix. Solved separately these are each right
+and together wrong. The band is the only thing that couples the lines, and there are few bands,
+so the month is solved by enumeration:
+
+    for every band pair the month could land in (GCR band × GPR band):
+      fix the rates that band pays (OneStop rate + GPR rate; the brand factor);
+      per product: effective cost of every NDC at every supplier at those rates, expected
+        reimbursement of every NDC on the plan mix, best margin on the units to buy
+        (lean target less on hand);
+      add the purchases to the month's position; if the ratio lands below the band, repair
+        upward with the cheapest real line moves; landing above is fine;
+      for each secondary under its minimum: pull fast movers forward inside the days cap, or
+        send its lines back to McKesson, whichever costs less;
+      total: reimbursement − gross cost + the rebates the landed band pays on the actual bases,
+        once, at the end;
+    take the band with the largest total, and say what the next best would have made.
+
+Every line in the result says which band it assumed. The test in `tests/month-plan.test.ts`
+is the case where the separate answers disagree: IPC is 20 cents a unit cheaper on two generics,
+and the joint plan still buys them at McKesson, because the band they lift pays $1,120 more on
+the whole OneStop base than the $800 the lines save. Where McKesson's effective price beats IPC
+outright, the plan buys there for that reason alone; where IPC is cheaper even at the top band,
+the plan buys at IPC and meets IPC's minimum with the fastest movers, or sends the lines back to
+McKesson when the minimum would mean holding more than the days cap.
+
+What it needs that the site does not yet hold: **on-hand quantities** (without them every line
+is sized as if the shelf were empty, and the plan says so), **each secondary's order minimum and
+lead time** on the supplier register, **which brands McKesson scrubs** (a scrubbed brand moved
+off McKesson changes nothing), and the plan bases from Rule 1 with enough claims behind them.
+
+## Rule 7: lean stock, and the last good day to send it back
+
+`lean-stock.ts`. Units a day per product from the claims, reversals out, one bottle per fill.
+Target = usage × (lead time + review + safety days); a must-stock product keeps a pack; a product
+with fewer than three fills in the window is ordered when prescribed, not shelved. The order is
+what brings the shelf to target in whole packs less what is on order. The excess is what is over
+target; the return goes on the last day of the highest credit step on which the excess still
+exists after usage until then, with the credit in dollars and what waiting would cost. No policy
+on file, no return proposed. `order-basket.ts` meets a secondary's minimum with what is needed
+today plus the fastest movers pulled forward inside the days cap, returnable lines only, and
+otherwise says to buy from the primary this time.
+
 ## What is missing, in order of value
 
 1. **On-hand quantity** (a scheduled PioneerRx inventory report). Without it, days of supply and
@@ -227,7 +274,7 @@ traceable to a document.
 Each module's tests use round figures that can be checked by hand: `tests/pay-basis.test.ts`,
 `tests/ndc-choice.test.ts`, `tests/ratio-effect.test.ts`, `tests/product-groups.test.ts`,
 `tests/drill-down.test.ts`, `tests/under-nadac.test.ts`, `tests/reimbursement-fit.test.ts`,
-`tests/band-strategy.test.ts`. When a
+`tests/band-strategy.test.ts`, `tests/month-plan.test.ts`, `tests/lean-stock.test.ts`. When a
 real statement, a real month of claims, or a real order is available on the pharmacy machine, the
 right test to add is the one that takes those figures (redacted) and pins the answer the module
 gives, so that the answer cannot drift.

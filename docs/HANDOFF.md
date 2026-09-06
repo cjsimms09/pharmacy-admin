@@ -33,6 +33,15 @@ has `pull-requests: read`. Migration `0062` is theirs; the recommendation log is
       scorecard (`recommendationScorecard`) belongs on `/money` under the list.
 - [ ] **Write `pay-basis.ts` results to a table nightly** (`plan_pay_basis`, to add) so the NDC
       choice reads a table and the trend is kept (`profit-engine.md` §3, §6.2).
+- [ ] **The month plan, with every variable at once.** `monthPlan()` in `month-plan.ts` takes the
+      products (NDC offers per supplier, NADAC, pack, plan mix, demand from `usageFromFills`,
+      on hand), the three ladders, the month's position on the scrubbed basis, and the suppliers
+      with minimums; it returns the band to aim at, every line's NDC and supplier, the moves, and
+      the total, with the next best band beside it. This supersedes wiring the band strategy on
+      its own. Needs `suppliers.order_minimum_cents` and `suppliers.lead_time_days` (to add,
+      additive) and the on-hand feed below.
+- [ ] **Lean stock and returns timing.** `adviseStock()` and `returnTiming()` in `lean-stock.ts`
+      once the on-hand feed lands; `/inventory/returns` gains the best day and the credit then.
 - [ ] **The McKesson question, monthly.** `bandStrategy()` in `band-strategy.ts` needs: the
       position (drill-down, restated to the statement's scrub), the ladder, the month's OneStop
       base, and two levers from the catalogues: unscrubbed brand spend that could move and its
@@ -80,6 +89,13 @@ has `pull-requests: read`. Migration `0062` is theirs; the recommendation log is
 - [ ] Suppliers page: set the catalogue name on McKesson, IPD, IPC, ParMed.
 - [ ] Ask PioneerRx for an on-hand/expiry report, and for Basis of Reimbursement (522-FM) and
       Other Coverage Code (308-C8) on the daily report.
+- [ ] **Upload the daily on-hand report** (you offered). Columns wanted: NDC, quantity on hand,
+      unit, and if PioneerRx has them, lot and expiry, on-order quantity. Send one file and the
+      reader is written against it; then schedule it daily like the transaction report.
+- [ ] **Each secondary's order minimum, free-freight threshold and lead time** (days from order
+      to shelf), and McKesson's, on the supplier card once the fields exist.
+- [ ] **Which products McKesson scrubs** from the compliance ratio, from the OneStop agreement or
+      the rep: GLP-1s are known; the full list makes the brand lever exact.
 - [ ] **AWP, free:** schedule a PioneerRx item report (NDC, AWP, WAC, package size) emailed
       weekly, and add "Dispensed AWP" to the daily transaction report. The weekly catalogue export
       carries no AWP; only McKesson's invoices print it.
@@ -241,11 +257,11 @@ id only), and twelve further uses of the data ranked by value against readiness.
 now delegates to `product-key.ts`, which it had duplicated.
 
 ### Files this branch touched
-`src/db/schema.ts`, `drizzle/0048_*`, `drizzle/0049_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down,recommendations,recommendation-log,recommendation-store,reimbursement-fit,band-strategy}.ts` (new), `drizzle/0063_*`,
+`src/db/schema.ts`, `drizzle/0048_*`, `drizzle/0049_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down,recommendations,recommendation-log,recommendation-store,reimbursement-fit,band-strategy,month-plan,lean-stock,order-basket}.ts` (new), `drizzle/0063_*`,
 `src/lib/{claims,rx-transactions,suppliers,suppliers-registry,pioneer-catalog,invoices,nadac-fetch,settings}.ts`,
 `src/app/(app)/suppliers/page.tsx`, `src/app/(app)/suppliers/[id]/terms/page.tsx` (new),
 `src/app/(app)/inventory/invoices/page.tsx`, `src/app/(app)/nadac/page.tsx`, `src/app/(app)/claims/page.tsx`,
-`tests/{ndc,supplier-terms,invoice-lines,nadac-datasets,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down,recommendations,recommendation-log,invariants,reimbursement-fit,band-strategy}.test.ts` (new), `tests/{claims,suppliers-registry,rx-transactions}.test.ts`,
+`tests/{ndc,supplier-terms,invoice-lines,nadac-datasets,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down,recommendations,recommendation-log,invariants,reimbursement-fit,band-strategy,month-plan,lean-stock}.test.ts` (new), `tests/{claims,suppliers-registry,rx-transactions}.test.ts`,
 `CLAUDE.md` (new), `docs/HANDOFF.md`, `docs/reference/nadac-api.md`, `docs/reference/buying-logic.md`, `docs/reference/data-audit.md`, `docs/reference/profit-engine.md`, `docs/reference/data-dictionary.md` (new), `fixtures/README.md`, `fixtures/rx-transactions.txt` (new).
 
 ## Who owns what now
