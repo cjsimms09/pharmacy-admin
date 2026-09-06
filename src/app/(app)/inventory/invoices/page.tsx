@@ -361,13 +361,20 @@ export default async function InvoicesPage({
     const id = String(fd.get("unfileId") ?? "");
     const back = String(fd.get("back") ?? "/inventory/invoices");
     const choice = String(fd.get(`as_${id}`) ?? "statement");
-    const documentId = String(fd.get("documentId") ?? "") || null;
+    /*
+     * No document id is passed, and none is wanted.
+     *
+     * It used to come from a hidden field in this table's one shared form, which meant it was
+     * always the first row's — so the fallback that was supposed to finish the job when an invoice
+     * record had gone would have finished it on somebody else's document. `unfileInvoice` finds
+     * the document from the invoice, and the case where the record has already gone is what the
+     * Delete button handles outright.
+     */
     try {
       const r = await unfileInvoice(
         id,
         choice === "discard" ? { kind: "discard" } : { kind: choice as "statement" | "rebate_report" | "credit_memo" | "other" },
         u,
-        documentId,
       );
       revalidatePath("/inventory/invoices");
       revalidatePath("/documents");
@@ -960,7 +967,6 @@ export default async function InvoicesPage({
                     */}
                     <form className="mt-1.5 flex flex-wrap items-center gap-1.5">
                       <input type="hidden" name="unfileId" value={i.id} />
-                      <input type="hidden" name="documentId" value={i.documentId} />
                       <input type="hidden" name="back" value="/inventory/invoices" />
                       <input type="hidden" name={`as_${i.id}`} value="statement" />
                       <button
@@ -1178,7 +1184,17 @@ export default async function InvoicesPage({
                                 behind a select was how somebody ended up going round in circles
                                 with a statement that would not leave.
                               */}
-                              <input type="hidden" name="documentId" value={i.documentId} />
+                              {/*
+                                No hidden field for the document, deliberately.
+
+                                This whole table is one form — the one that emails invoices on — so a
+                                hidden input on every row means the form carries one per row and
+                                `fd.get("documentId")` returns the FIRST row's, whichever row was
+                                pressed. Deleting the third invoice would take the first one's
+                                document with it. A submit button's own name and value are the only
+                                thing a form sends per-button, so the id travels there and nowhere
+                                else; the delete finds the document from the invoice itself.
+                              */}
                               <button
                                 formAction={destroy}
                                 formNoValidate
