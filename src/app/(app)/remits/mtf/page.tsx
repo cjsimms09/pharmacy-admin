@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { testMtf, downloadMtf, mtfStatus, saveCliLocation } from "@/lib/mtf";
+import { testMtf, downloadMtf, mtfStatus, saveCliLocation, findCli } from "@/lib/mtf";
 import { getSettings } from "@/lib/settings";
 import { requireReimbursement } from "@/lib/features";
 import { PageHeader, Notice, Field, Empty, BackLink } from "@/components/ui";
@@ -12,10 +12,11 @@ export const dynamic = "force-dynamic";
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 
-export default async function MtfPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string; out?: string }> }) {
+export default async function MtfPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string; out?: string; found?: string }> }) {
   await requireReimbursement();
   await requireManager();
-  const { ok, error, out } = await searchParams;
+  const { ok, error, out, found } = await searchParams;
+  const candidates = (found ?? "").split("|").filter(Boolean);
   const s = await mtfStatus();
   const settings = await getSettings();
 
@@ -44,6 +45,28 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
     const q = new URLSearchParams(r.ok ? { ok: r.message } : { error: r.message });
     if (r.output) q.set("out", r.output.slice(0, 4000));
     redirect("/remits/mtf?" + q.toString());
+  }
+
+  /**
+   * Looks for the tool rather than telling somebody where it "usually" is.
+   *
+   * A guess dressed as instruction, when wrong, produces an error repeating the same wrong path
+   * back at the person. The computer knows where the file is; it can look.
+   */
+  async function locate() {
+    "use server";
+    await requireManager();
+    const r = await findCli();
+    revalidatePath("/remits/mtf");
+    if (r.found.length === 0) {
+      redirect(
+        "/remits/mtf?error=" +
+          encodeURIComponent(
+            `Nothing named mtf-cli was found under your user folder, Downloads, Desktop or Documents. If you extracted it somewhere else — another drive, or a shared folder — open that folder, find the file, and paste its full path in below. Looked in ${r.searched.length} folders.`,
+          ),
+      );
+    }
+    redirect("/remits/mtf?found=" + encodeURIComponent(r.found.join("|")));
   }
 
   /** Records where the tool is, checks it runs, and points its downloads at the folder this reads. */
@@ -134,6 +157,26 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
           user folder puts it at <code>C:\Users\&lt;your user&gt;\mtf-cli\bin\mtf-cli.exe</code>. You do not need to
           touch the system PATH.
         </p>
+        <form action={locate} className="mt-2">
+          <button className="rounded-md border border-line px-3 py-2 text-sm hover:bg-ground">Find it for me</button>
+          <span className="ml-2 text-xs text-ink-3">
+            Looks under your user folder, Downloads, Desktop and Documents. Nothing is changed — it only reports what it
+            finds.
+          </span>
+        </form>
+
+        {candidates.length > 0 && (
+          <div className="mt-3 rounded-md border border-accent bg-accent-soft p-3 text-xs">
+            <p className="font-semibold text-accent">
+              Found {candidates.length === 1 ? "it" : `${candidates.length} of them`}. Use the one below, or copy the path
+              you want into the box.
+            </p>
+            <ul className="mt-1 space-y-1 font-mono">
+              {candidates.map((c) => <li key={c}>{c}</li>)}
+            </ul>
+          </div>
+        )}
+
         <form action={saveWhere} className="mt-3 grid gap-3 sm:grid-cols-2">
           <Field label="Program">
             <input

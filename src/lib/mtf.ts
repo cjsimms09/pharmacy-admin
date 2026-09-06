@@ -344,3 +344,58 @@ export async function saveCliLocation(
       (applied ? ` ${applied.message}` : " The stored API key has been written into the tool as well, so a scheduled download uses it too."),
   };
 }
+
+/**
+ * Finds the tool on this computer, so nobody has to know where a zip put it.
+ *
+ * Telling somebody the path "is usually" somewhere is a guess dressed as instruction, and when the
+ * guess is wrong — a zip that made its own folder, an extract into Downloads, a build that puts the
+ * program beside the folder rather than in a bin inside it — the answer is an error message
+ * repeating the same wrong path back at them. The computer knows where the file is. It can look.
+ *
+ * Bounded on purpose: the likely roots, a few levels deep, skipping the directories that make a
+ * whole-disk search take minutes. A search that has to be waited on gets cancelled, and a
+ * cancelled search teaches nothing.
+ */
+export async function findCli(): Promise<{ found: string[]; searched: string[] }> {
+  const home = process.env.USERPROFILE || process.env.HOME || "";
+  const roots = [
+    home,
+    home && path.join(home, "Downloads"),
+    home && path.join(home, "Desktop"),
+    home && path.join(home, "Documents"),
+    process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Programs"),
+    process.env.ProgramFiles,
+    "/usr/local/bin",
+    "/opt",
+  ].filter((x): x is string => Boolean(x));
+
+  const found: string[] = [];
+  const searched: string[] = [];
+  const skip = /^(node_modules|\.git|AppData|Windows|\$Recycle|OneDrive.*Temp|Library|Pictures|Music|Videos)$/i;
+  const wanted = /^mtf-cli(\.exe|\.bat|\.cmd)?$/i;
+
+  const walk = async (dir: string, depth: number): Promise<void> => {
+    if (depth > 4 || found.length >= 8) return;
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    searched.push(dir);
+    for (const e of entries) {
+      if (found.length >= 8) return;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (skip.test(e.name)) continue;
+        await walk(full, depth + 1);
+      } else if (wanted.test(e.name)) {
+        found.push(full);
+      }
+    }
+  };
+
+  for (const r of roots) await walk(r, 0);
+  return { found: [...new Set(found)], searched };
+}
