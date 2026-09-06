@@ -13,6 +13,17 @@ it and said so on the pull request. The owner reads this too.
 
 ### For the pharmacy session (from the cloud session, PR #3)
 
+- [ ] **A Money group in the navigation, and the top three money lines on Today.** `/money`,
+      `/purchasing`, `/claims`, `/payers` are behind the "extra sections" flag and absent from
+      `nav.ts`; Today's "needs you" is compliance only. The profit side must be one page and the
+      first thing seen (`docs/reference/profit-engine.md` §4).
+- [ ] **Remember and score the advice.** Migration `0062` adds `recommendation_log`. Call
+      `rememberRecommendations(rows)` from `recommendation-store.ts` where `moneyFound()` is
+      built; show each row's age from `ages`; add "acted" / "not doing this" buttons calling
+      `markRecommendation`; `measureSwitch` scores a switch-NDC entry on the claims since. The
+      scorecard (`recommendationScorecard`) belongs on `/money` under the list.
+- [ ] **Write `pay-basis.ts` results to a table nightly** (`plan_pay_basis`, to add) so the NDC
+      choice reads a table and the trend is kept (`profit-engine.md` §3, §6.2).
 - [ ] **Put the buy list on the purchasing page.** `underNadac(ledger.rows, groupOf)`,
       `switchNdc(u)`, `notYetBought(u)` from `src/lib/under-nadac.ts`; `groupOf` from
       `product-groups.ts` over the NADAC rows held. Each `ProductPick.says` is a sentence to print.
@@ -214,12 +225,12 @@ id only), and twelve further uses of the data ranked by value against readiness.
 now delegates to `product-key.ts`, which it had duplicated.
 
 ### Files this branch touched
-`src/db/schema.ts`, `drizzle/0048_*`, `drizzle/0049_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down,recommendations}.ts` (new),
+`src/db/schema.ts`, `drizzle/0048_*`, `drizzle/0049_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down,recommendations,recommendation-log,recommendation-store}.ts` (new), `drizzle/0062_*`,
 `src/lib/{claims,rx-transactions,suppliers,suppliers-registry,pioneer-catalog,invoices,nadac-fetch,settings}.ts`,
 `src/app/(app)/suppliers/page.tsx`, `src/app/(app)/suppliers/[id]/terms/page.tsx` (new),
 `src/app/(app)/inventory/invoices/page.tsx`, `src/app/(app)/nadac/page.tsx`, `src/app/(app)/claims/page.tsx`,
-`tests/{ndc,supplier-terms,invoice-lines,nadac-datasets,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down,recommendations}.test.ts` (new), `tests/{claims,suppliers-registry,rx-transactions}.test.ts`,
-`CLAUDE.md` (new), `docs/HANDOFF.md`, `docs/reference/nadac-api.md`, `docs/reference/buying-logic.md`, `docs/reference/data-audit.md` (new), `fixtures/README.md`, `fixtures/rx-transactions.txt` (new).
+`tests/{ndc,supplier-terms,invoice-lines,nadac-datasets,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down,recommendations,recommendation-log}.test.ts` (new), `tests/{claims,suppliers-registry,rx-transactions}.test.ts`,
+`CLAUDE.md` (new), `docs/HANDOFF.md`, `docs/reference/nadac-api.md`, `docs/reference/buying-logic.md`, `docs/reference/data-audit.md`, `docs/reference/profit-engine.md` (new), `fixtures/README.md`, `fixtures/rx-transactions.txt` (new).
 
 ## Who owns what now
 

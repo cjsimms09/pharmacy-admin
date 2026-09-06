@@ -435,6 +435,13 @@
       "when": 1788665999010,
       "tag": "0061_lyrical_photon",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "6",
+      "when": 1788671000344,
+      "tag": "0062_perpetual_black_tom",
+      "breakpoints": true
     }
   ]
 }
