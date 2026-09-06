@@ -117,6 +117,11 @@ export type ImportReport = {
   rowsRead: number;
   claimsAdded: number;
   duplicates: number;
+  /** What the report itself said this file came to: total sales, and total gross profit. */
+  reportSalesCents?: number | null;
+  reportGrossProfitCents?: number | null;
+  /** The same gross profit added from the rows this reader got out of the file. */
+  readGrossProfitCents?: number;
   /**
    * Rows already held that this file re-stated.
    *
@@ -328,7 +333,24 @@ export async function importRxTransactions(file: Buffer, fileName: string, userI
     if (unresolved > 0) parsed.reasons["kept without an NDC: 10-digit NDC with no hyphens matched no product we hold, or more than one"] = unresolved;
   }
 
-  await db.insert(schema.claimImports).values({ id: importId, fileName, rowsRead, createdBy: userId });
+  /*
+   * The report's own bottom line, and ours over the rows we actually read.
+   *
+   * Kept side by side because together they answer "did we read all of it" — a question nothing
+   * inside our own arithmetic can ask. A row set aside for a status this reader does not recognise
+   * makes the file quietly short by exactly its gross profit, and the load otherwise looks perfect.
+   */
+  const readGrossProfitCents = parsed.rows.reduce((n, t) => n + (t.grossProfitCents ?? 0), 0);
+  await db.insert(schema.claimImports).values({
+    id: importId,
+    fileName,
+    rowsRead,
+    createdBy: userId,
+    reportSalesCents: parsed.grandTotal?.salesCents ?? null,
+    reportAcquisitionCents: parsed.grandTotal?.acquisitionCents ?? null,
+    reportGrossProfitCents: parsed.grandTotal?.grossProfitCents ?? null,
+    readGrossProfitCents,
+  });
 
   const base: TransactionImportReport = {
     importId, rowsRead, claimsAdded: 0, duplicates: 0, skipped: parsed.skipped, skipReasons: { ...parsed.reasons },
@@ -460,6 +482,9 @@ export async function importRxTransactions(file: Buffer, fileName: string, userI
     notYetSold: plan.insertPaid.filter((t) => !t.completedAt).length,
     nowSold: plan.markSold.length,
     restated,
+    reportSalesCents: parsed.grandTotal?.salesCents ?? null,
+    reportGrossProfitCents: parsed.grandTotal?.grossProfitCents ?? null,
+    readGrossProfitCents,
   });
 }
 
@@ -482,6 +507,7 @@ async function drugNamesByNdc(ndcs: string[]): Promise<Map<string, string>> {
 
 /** A one-line account of a transaction-report import, for the inbox and the claims page. */
 export function describeTransactionImport(r: TransactionImportReport): string {
+  const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const bits = [`${r.claimsAdded.toLocaleString()} paid claim${r.claimsAdded === 1 ? "" : "s"} added`];
   if (r.reversed) bits.push(`${r.reversed} reversed`);
   if (r.unmatchedReversals) bits.push(`${r.unmatchedReversals} reversal${r.unmatchedReversals === 1 ? "" : "s"} matched no claim we hold (kept, marked reversed)`);
@@ -492,6 +518,24 @@ export function describeTransactionImport(r: TransactionImportReport): string {
   const other = Object.entries(r.skipReasons).filter(([k]) => !/not yet sold/.test(k));
   if (other.length) bits.push(other.map(([k, v]) => `${v} ${k}`).join(", "));
   if (r.period) bits.push(`claims transmitted ${r.period.from}${r.period.to !== r.period.from ? ` to ${r.period.to}` : ""}`);
+  /*
+   * The report's own answer, said out loud, and whether we got all of it.
+   *
+   * This is the only total in the building that nothing here computed, so it is worth printing even
+   * when it agrees — and when it does not, the difference is exactly the rows that were set aside.
+   */
+  if (r.reportSalesCents !== null && r.reportSalesCents !== undefined) {
+    const short =
+      r.reportGrossProfitCents !== null && r.reportGrossProfitCents !== undefined && r.readGrossProfitCents !== undefined
+        ? r.reportGrossProfitCents - r.readGrossProfitCents
+        : 0;
+    bits.push(
+      `the report's own total for this file is ${money(r.reportSalesCents)} taken and ${money(r.reportGrossProfitCents ?? 0)} made` +
+        (Math.abs(short) > 2
+          ? `, and this reader accounted for ${money(r.readGrossProfitCents ?? 0)} of that — ${money(Math.abs(short))} sits on rows it set aside`
+          : ", every penny of which this reader accounted for"),
+    );
+  }
   if (r.unresolvedBins.length) bits.push(`BINs not on the listing: ${r.unresolvedBins.join(", ")}`);
   return bits.join(". ") + "." + (r.problems.length ? " " + r.problems.join(" ") : "");
 }

@@ -376,6 +376,30 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
             }
           />
         </div>
+        {/*
+          The report's own bottom line, which nothing on this site computed.
+
+          It is the only authoritative total sales figure the pharmacy has — the transaction report
+          prints a grand total, and that total is the thing to reconcile against the bank. Said as
+          the report's figure for the report's period, never quietly reinterpreted as the month's:
+          those are the same only when the file sent is the monthly one.
+        */}
+        {money.dispensing.reported && (
+          <p className="mt-2 text-xs text-ink-2">
+            <b>{formatCents(money.dispensing.reported.salesCents)} taken and{" "}
+            {formatCents(money.dispensing.reported.grossProfitCents)} made</b>{" "}
+            — the report&rsquo;s own grand total for the last file loaded
+            {money.dispensing.reported.from
+              ? `, covering ${money.dispensing.reported.from}${
+                  money.dispensing.reported.to && money.dispensing.reported.to !== money.dispensing.reported.from
+                    ? ` to ${money.dispensing.reported.to}`
+                    : ""
+                }`
+              : ""}
+            . This is the one figure here nobody worked out — PioneerRx printed it — so it is what to
+            reconcile against the bank.
+          </p>
+        )}
         {money.unreconciled.fills > 0 && (
           <p className="mt-2 text-xs text-ink-3">
             Separately, {formatCents(money.unreconciled.cents)} across {money.unreconciled.fills} fills is revenue the

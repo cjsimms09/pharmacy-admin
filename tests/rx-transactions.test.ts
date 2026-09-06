@@ -8,6 +8,7 @@ import {
   parseSectionLabel,
   mdyToIso,
   looksLikeRxTransactions,
+  readTotalsLine,
   type Transaction,
 } from "../src/lib/rx-transactions";
 
@@ -444,5 +445,43 @@ describe("re-sending a corrected report", () => {
     assert.equal(plan.refresh.length, 0);
     assert.equal(plan.duplicates, 0);
     assert.equal(plan.insertPaid.length, 2);
+  });
+});
+
+/**
+ * The report's own grand total — the only figures in the building that nothing here computed.
+ *
+ * Which makes it the only real check on our arithmetic, and the only authoritative answer to "what
+ * did the pharmacy take". Its columns are not labelled and there are fewer of them than the header
+ * has names, so nothing about it is guessed at: gross profit is the last cell because GrossProfit
+ * is the last column, and sales and acquisition are derived from the identity every row obeys.
+ */
+describe("the report's own bottom line", () => {
+  test("sales and cost are derived from the identity, not read off a guessed position", () => {
+    // The live file's last line, to the cent.
+    const line = [8_417_997, 0, 8_417_997, 2_479_643, 0, 2_479_643, 0, 10_897_640, 0, 324_979, 9_608_963, 1_288_677];
+    const t = readTotalsLine(line);
+    assert.equal(t?.grossProfitCents, 1_288_677, "the last cell, because GrossProfit is the last column");
+    assert.equal(t?.salesCents, 10_897_640, "$108,976.40 — and $84,179.97 from plans plus $24,796.43 from patients agrees");
+    assert.equal(t?.acquisitionCents, 9_608_963);
+  });
+
+  test("a zero on either side proves nothing and is never taken as the answer", () => {
+    /*
+     * Every totals line is full of zeros, and "gross profit minus nothing is gross profit" is true
+     * of all of them. Treating that as a match would make the sales figure whatever happened to sit
+     * beside a zero — a confident number, reconciled against a bank, and wrong.
+     */
+    const t = readTotalsLine([0, 0, 0, 5_000, 0, 5_000]);
+    assert.equal(t, null);
+  });
+
+  test("where more than one pair fits, nothing is claimed", () => {
+    // Ambiguity is not resolved by picking first. A total somebody reconciles has to be certain.
+    assert.equal(readTotalsLine([300, 100, 500, 300, 200]), null);
+  });
+
+  test("too short a line is not a total", () => {
+    assert.equal(readTotalsLine([100, 50]), null);
   });
 });

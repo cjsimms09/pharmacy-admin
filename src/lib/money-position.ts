@@ -43,6 +43,15 @@ export type MoneyPosition = {
     /** Promised at adjudication by a plan and not yet paid. Real, sourced, and chaseable. */
     promisedCents: number;
     promisedFills: number;
+    /**
+     * The report's own bottom line for the last file loaded, which nothing here computed.
+     *
+     * PioneerRx prints a grand total — what the pharmacy took, what the drugs cost, what it made —
+     * and it is the only authoritative total sales figure in the building. Shown beside our own so
+     * a disagreement is visible rather than discovered later; the period it covers is the file's,
+     * which is the whole month once the monthly report is the one being sent.
+     */
+    reported: { salesCents: number; grossProfitCents: number; from: string | null; to: string | null; fileName: string } | null;
   };
   /** Where the compliance ratio stands, and what it is buying. */
   ratio: {
@@ -201,6 +210,25 @@ export async function moneyPosition(today = new Date()): Promise<MoneyPosition> 
   const mine = fills.filter((f) => f.dateFilled.startsWith(month));
   const cash = mine.filter((f) => f.cashPlan);
   const promised = mine.filter((f) => (f.facilitatorOutstandingCents ?? 0) > 0);
+  /*
+   * The most recent file's own grand total. Reported as the report's figure for the report's
+   * period, never silently reinterpreted as the month's — they are the same thing only when the
+   * file sent is the monthly one.
+   */
+  const { db, schema } = await import("@/db");
+  void schema;
+  const lastImport = await db.query.claimImports.findFirst({ orderBy: (i, { desc }) => [desc(i.createdAt)] });
+  const reported =
+    lastImport?.reportSalesCents !== null && lastImport?.reportSalesCents !== undefined
+      ? {
+          salesCents: lastImport.reportSalesCents,
+          grossProfitCents: lastImport.reportGrossProfitCents ?? 0,
+          from: lastImport.periodFrom,
+          to: lastImport.periodTo,
+          fileName: lastImport.fileName,
+        }
+      : null;
+
   const dispensing: MoneyPosition["dispensing"] = {
     month,
     fills: mine.length,
@@ -211,6 +239,7 @@ export async function moneyPosition(today = new Date()): Promise<MoneyPosition> 
     cashMarginCents: cash.reduce((n, f) => n + (f.marginCents ?? 0), 0),
     promisedCents: promised.reduce((n, f) => n + (f.facilitatorOutstandingCents ?? 0), 0),
     promisedFills: promised.length,
+    reported,
   };
 
   return {

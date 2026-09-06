@@ -106,6 +106,15 @@ export type TransactionParse = {
   skipped: number;
   reasons: Record<string, number>;
   problems: string[];
+  /** Every totals line the report printed, by the label above it. */
+  totals: { label: string; amounts: (number | null)[] }[];
+  /**
+   * What the report itself says the whole file came to.
+   *
+   * The only figures here that this site did not compute, and therefore the only real check on the
+   * ones it did. Null where the totals line could not be read without guessing.
+   */
+  grandTotal: { salesCents: number; acquisitionCents: number; grossProfitCents: number } | null;
 };
 
 export const TITLE = "Rx Transaction Details By Submission Type";
@@ -279,6 +288,42 @@ const FOOTER = /Page \d+ of \d+\s*$/i;
 const SECTION = /^Third Party:,(.*)$/;
 const MONEY_AS_ID = /^\$([\d,]+)\.00$/;
 
+/**
+ * The report's own bottom line, taken from the totals it prints rather than from our arithmetic.
+ *
+ * The last two lines of the file are the whole month in one row — what the pharmacy took, what the
+ * drugs cost it, and what it made. It is the only figure in the building that nothing here computed,
+ * which makes it the one check worth having: if our totals and these disagree, ours are wrong.
+ *
+ * The columns cannot be read by name — the totals row has fewer cells than the header has names,
+ * and none of them is labelled. So nothing is guessed at. Gross profit is the last cell, because
+ * GrossProfit is the last column of the report; and sales and acquisition are then *derived* by
+ * finding the one pair on the line that satisfies the same identity every row satisfies:
+ *
+ *   sales − acquisition = gross profit
+ *
+ * On the live file exactly one pair does — $108,976.40 and $96,089.63 — and it is confirmed a
+ * second way, independently: $84,179.97 from the plans plus $24,796.43 from patients is that same
+ * $108,976.40. Where no single pair fits, nothing is claimed at all, which is the right answer for
+ * a total somebody is going to reconcile against their bank.
+ */
+export function readTotalsLine(amounts: (number | null)[]): { salesCents: number; acquisitionCents: number; grossProfitCents: number } | null {
+  const v = amounts.filter((x): x is number => x !== null);
+  if (v.length < 4) return null;
+  const grossProfitCents = v[v.length - 1];
+  const hits: { salesCents: number; acquisitionCents: number }[] = [];
+  for (const a of v) {
+    for (const b of v) {
+      // A zero on either side makes the identity trivially true and says nothing.
+      if (a <= 0 || b <= 0 || a === b) continue;
+      if (Math.abs(a - b - grossProfitCents) <= 2) hits.push({ salesCents: a, acquisitionCents: b });
+    }
+  }
+  const unique = hits.filter((h, i) => hits.findIndex((x) => x.salesCents === h.salesCents && x.acquisitionCents === h.acquisitionCents) === i);
+  if (unique.length !== 1) return null;
+  return { ...unique[0], grossProfitCents };
+}
+
 export function looksLikeRxTransactions(text: string): boolean {
   return text.replace(/^﻿/, "").slice(0, 4000).includes(TITLE);
 }
@@ -326,6 +371,8 @@ export function parseRxTransactions(text: string): TransactionParse {
   let ordinal = 0;
   const keysSeen = new Map<string, number>();
   const pending: { parts: string[]; section: ReturnType<typeof parseSectionLabel>; submissionType: string | null }[] = [];
+  const totals: { label: string; amounts: (number | null)[] }[] = [];
+  let pendingTotalLabel: string | null = null;
 
   for (const raw of lines) {
     const line = raw.trim();
@@ -350,7 +397,26 @@ export function parseRxTransactions(text: string): TransactionParse {
       section = parseSectionLabel(sec[1]);
       continue;
     }
-    if (/Totals?:/.test(line)) continue;
+    /*
+     * A totals line, kept rather than stepped over.
+     *
+     * "Grand Total:" carries its figures on the same line; a section total and "Transmitted Totals:"
+     * are a label followed by a row of money underneath. Both shapes are held, because the last one
+     * in the file is the report's own answer for the whole period and is the only check on ours
+     * that did not come from us.
+     */
+    if (/Totals?:/.test(line)) {
+      const cells = splitRow(raw, ",").map((x) => x.trim());
+      const label = cells[0].replace(/,$/, "");
+      const money = cells.slice(1).filter((c) => c !== "");
+      if (money.length >= 4 && money.every((c) => /^\(?-?\$/.test(c))) {
+        totals.push({ label, amounts: money.map((c) => parseCents(c)) });
+        pendingTotalLabel = null;
+      } else {
+        pendingTotalLabel = label;
+      }
+      continue;
+    }
 
     const parts = splitRow(raw, ",").map((x) => x.trim());
 
@@ -387,6 +453,10 @@ export function parseRxTransactions(text: string): TransactionParse {
       // reason rather than lumped in with anything unrecognised, so that a transaction row this
       // reader genuinely could not read stands out instead of hiding among thirty totals.
       const allMoney = parts.every((c) => c.trim() === "" || /^\(?\$[\d,]+\.\d{2}\)?$/.test(c.trim()));
+      if (allMoney && pendingTotalLabel !== null) {
+        totals.push({ label: pendingTotalLabel, amounts: parts.filter((c) => c !== "").map((c) => parseCents(c)) });
+        pendingTotalLabel = null;
+      }
       skip(allMoney ? "a payer's totals line" : "a line that is not a transaction");
       continue;
     }
@@ -450,7 +520,29 @@ export function parseRxTransactions(text: string): TransactionParse {
   }
   if (rows.length === 0 && problems.length === 0 && ordinal === 0) problems.push("No transactions were found in the report.");
 
-  return { rows, period, printedOn, headers: [...headers], skipped, reasons, problems };
+  /*
+   * The report's answer for the whole file: its "Grand Total", or the widest total it printed.
+   *
+   * Section totals are kept too — they are how a single payer's figures can be checked — but the
+   * one that matters is the last and largest, because that is the line somebody reconciles against
+   * the bank.
+   */
+  const grand =
+    totals.find((t) => /grand total/i.test(t.label)) ??
+    totals.filter((t) => /^transmitted/i.test(t.label)).slice(-1)[0] ??
+    null;
+
+  return {
+    rows,
+    period,
+    printedOn,
+    headers: [...headers],
+    skipped,
+    reasons,
+    problems,
+    totals,
+    grandTotal: grand ? readTotalsLine(grand.amounts) : null,
+  };
 }
 
 function readRow(parts: string[], POS: Layout, section: ReturnType<typeof parseSectionLabel>, submissionType: string | null, ordinal: number): Transaction | string {

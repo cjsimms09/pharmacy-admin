@@ -1577,6 +1577,24 @@ export const claimImports = sqliteTable("claim_imports", {
   unmappedColumns: text("unmapped_columns").notNull().default("[]"),
   periodFrom: text("period_from"),
   periodTo: text("period_to"),
+  /*
+   * The report's own bottom line for this file — the only figures here nobody computed.
+   *
+   * PioneerRx prints a grand total: what the pharmacy took, what the drugs cost, what it made.
+   * Kept because it is the one check on our arithmetic that did not come from our arithmetic, and
+   * because it is the only place total sales for a period exist as a single authoritative number.
+   */
+  reportSalesCents: integer("report_sales_cents"),
+  reportAcquisitionCents: integer("report_acquisition_cents"),
+  reportGrossProfitCents: integer("report_gross_profit_cents"),
+  /*
+   * The same figure added up from the rows this reader actually got out of the file.
+   *
+   * Set against the report's own total it answers a question nothing else can: did we read
+   * everything? A row skipped for a status this reader does not know does not announce itself —
+   * the file simply loads, looks fine, and is quietly short. This is what makes that visible.
+   */
+  readGrossProfitCents: integer("read_gross_profit_cents"),
   createdBy: text("created_by").notNull(),
   createdAt: text("created_at").notNull().default(now()),
 });
