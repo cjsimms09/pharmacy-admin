@@ -456,8 +456,8 @@ export default async function SupplierTermsPage({
     <>
       <PageHeader
         back={{ href: "/suppliers", label: "Suppliers" }}
-        title={`${supplier.name} — rebates and returns`}
-        subtitle="What comes off this supplier's prices, why, and how anybody knows it is right. Almost none of it should be typed: send the rebate report and the returns policy and both are read."
+        title={`${supplier.name} — ordering, rebates and returns`}
+        subtitle="How they will take an order, what comes off their prices, and how anybody knows it is right. Almost none of the rebate and return detail should be typed: send the report and the policy and both are read."
       />
 
       {ok && <Notice kind="ok">{ok}</Notice>}

@@ -150,6 +150,29 @@ export default async function SuppliersPage({
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
 
+      {/*
+        No primary supplier is not a blank field, it is a silent switch.
+
+        The buy list prices every move to a secondary against the primary's compliance ratio,
+        because a generic bought elsewhere is a generic that did not go through the contract and
+        can cost a whole band. With nobody marked primary that arithmetic has no supplier to ask
+        and returns "not known" — so the site quietly stops warning about the one thing that can
+        make a cheaper invoice the more expensive order.
+      */}
+      {suppliers.length > 0 && !suppliers.some((x) => x.primarySupplier) && (
+        <Notice kind="warn">
+          <b>No supplier is marked primary.</b> Until one is, the buy list cannot price what moving
+          spend to a secondary does to the rebate band — it will say &ldquo;not known&rdquo; rather than warn you.
+          Open the supplier that carries the contract and set it under <b>Ordering, rebate and return terms</b>.
+        </Notice>
+      )}
+      {suppliers.length > 0 && suppliers.every((x) => x.minimumOrderCents === null) && (
+        <Notice kind="warn">
+          <b>No supplier has an order minimum on file.</b> The buy list will happily recommend a basket a
+          wholesaler refuses to ship, and you would find out at their website rather than here.
+        </Notice>
+      )}
+
       {positions.map(({ rates, earning, ratio }) => (
         <Card
           key={rates.supplierId}
@@ -321,10 +344,32 @@ export default async function SuppliersPage({
                   <dd>{terms.get(sup.id)?.rebate ? describeRebate(terms.get(sup.id)!.rebate!.terms) : <span className="text-ink-3">not recorded</span>}</dd>
                   <dt className="text-ink-3">Returns</dt>
                   <dd>{terms.get(sup.id)?.returns ? describeReturns(terms.get(sup.id)!.returns!.terms) : <span className="text-ink-3">not recorded</span>}</dd>
+                  {/*
+                    How they will take an order, on the card rather than behind a link called
+                    something else.
+
+                    The minimum and the primary flag were reachable only through a link labelled
+                    "Rebate and return terms", which is a fair description of what used to be
+                    there and no help at all to somebody looking for an order minimum. Nothing on
+                    this page said the settings existed, so as far as the pharmacy was concerned
+                    they did not.
+                  */}
+                  <dt className="text-ink-3">Ordering</dt>
+                  <dd>
+                    {sup.minimumOrderCents === null ? (
+                      <span className="text-warn">no minimum on file</span>
+                    ) : (
+                      <>
+                        minimum {money(sup.minimumOrderCents)}
+                        {sup.leadTimeDays !== null ? ` · ${sup.leadTimeDays} day${sup.leadTimeDays === 1 ? "" : "s"} to arrive` : ""}
+                      </>
+                    )}
+                    {sup.primarySupplier && <span className="badge badge-ok ml-1.5">primary</span>}
+                  </dd>
                 </dl>
-                <p className="mt-2 text-xs">
-                  <Link href={`/suppliers/${sup.id}/terms`} className="text-accent hover:underline">
-                    {terms.get(sup.id)?.rebate || terms.get(sup.id)?.returns ? "Rebate and return terms" : "Record their rebate schedule and return policy"}
+                <p className="mt-2 flex flex-wrap gap-2 text-xs">
+                  <Link href={`/suppliers/${sup.id}/terms`} className="btn btn-sm">
+                    Ordering, rebate and return terms
                   </Link>
                 </p>
 
