@@ -120,9 +120,12 @@ was everything after the draft. Pure and tested now:
       person accepts: rate rows (new/same/changed against `network_rates`, with the quote),
       the appeal terms, contacts by purpose, the payment path, and the plans the document
       governs (BIN+PCN before BIN; group alone never; contested BINs named). `groupByCounterparty`
-      is the third-parties page. **Page to build:** `/payers/contracts`: index → name → read with
-      the cost shown (`estimateCost`) → review each draft as this checklist → accept writes the
-      tables and `payer_links` → `applyLinksToClaims`.
+      is the third-parties page. **Built by the cloud session:** `/payers/contracts` (look in the
+      folder: every PDF adopted as a document, named from the manifest's `pbm_name` column or by
+      hand; read with the cost shown; collect; read again) and `/payers/contracts/[id]` (the draft
+      as a checklist; accept writes `network_rates`, `mac_appeal_terms`, `pbm_contacts`,
+      `payment_routing`, `payer_links`, then `applyLinksToClaims`). `contract-docs.ts` is the
+      server side. Driven end to end with `AI_MOCK=1` on a scratch database. Linked from Payers.
 - [ ] **`appeal-packet.ts`**: `buildPacket()` assembles a MAC appeal from the claim, the contract
       figure, the invoice line, the PBM's terms and the deadline, or refuses with every reason.
       **Page to build:** an appeals queue under `/claims`: claims paid under the contract figure

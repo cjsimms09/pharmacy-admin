@@ -123,6 +123,7 @@ export default async function PayersPage({ searchParams }: { searchParams: Promi
         actions={
           <>
             <Link href="/payers/performance" className="btn btn-primary">Who pays best</Link>
+            <Link href="/payers/contracts" className="btn">The contracts</Link>
             <Link href="/claims/floor" className="btn">Kansas floor (SB 20)</Link>
             <Link href="/plans" className="btn">Classify plans</Link>
           </>
