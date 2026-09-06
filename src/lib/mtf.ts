@@ -64,6 +64,27 @@ export function splitCommand(configured: string): { bin: string; prefix: string[
   return { bin: clean[0] ?? "mtf-cli", prefix: clean.slice(1) };
 }
 
+/**
+ * What to actually spawn, which on Windows is not always what was configured.
+ *
+ * Node refuses to launch a .cmd or .bat file directly. It has done since April 2024, when the fix
+ * for CVE-2024-27980 stopped `spawn` running batch files without a shell, because the way Windows
+ * parses a batch file's arguments allowed command injection. The refusal surfaces as `spawn
+ * EINVAL` — five characters that say nothing about batch files, nothing about which file, and read
+ * exactly like the path being wrong.
+ *
+ * And this tool's Windows package is a batch launcher: bin holds node.exe, run.js and mtf-cli.cmd,
+ * and the .cmd is the only one of the three Windows knows how to start. So a batch file is routed
+ * through the command interpreter, which is what a shell would have done, with the arguments still
+ * passed as an array so each is quoted by Node rather than pasted into a command line.
+ */
+export function spawnPlan(bin: string, args: string[]): { command: string; args: string[] } {
+  if (/\.(cmd|bat)$/i.test(bin)) {
+    return { command: process.env.ComSpec || "cmd.exe", args: ["/c", bin, ...args] };
+  }
+  return { command: bin, args };
+}
+
 async function downloadDir(): Promise<string> {
   const s = await getSettings();
   const configured = s.mtf_download_dir?.trim();
@@ -80,8 +101,9 @@ async function downloadDir(): Promise<string> {
  */
 async function cli(args: string[], timeoutMs = 120_000): Promise<{ ok: boolean; out: string; err: string }> {
   const { bin, prefix } = splitCommand(await cliPath());
+  const plan = spawnPlan(bin, [...prefix, ...args]);
   try {
-    const { stdout, stderr } = await run(bin, [...prefix, ...args], { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 });
+    const { stdout, stderr } = await run(plan.command, plan.args, { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 });
     return { ok: true, out: stdout ?? "", err: stderr ?? "" };
   } catch (e) {
     const err = e as NodeJS.ErrnoException & { stdout?: string; stderr?: string; killed?: boolean };
@@ -104,6 +126,16 @@ async function cli(args: string[], timeoutMs = 120_000): Promise<{ ok: boolean; 
      * "downloaded from the internet" flag and every file extracted from it inherited it. The fix is
      * a checkbox, and nobody finds it by guessing.
      */
+    if (err.code === "EINVAL") {
+      return {
+        ok: false,
+        out: "",
+        err:
+          `Windows would not start "${bin}" the way it was asked to. This is a known refusal in the version of Node ` +
+          `this site runs on — it will not launch a .cmd or .bat file directly — and it has been worked around, so ` +
+          `try again. If it persists, point at the launcher script (mtf-cli.cmd) rather than node.exe.`,
+      };
+    }
     if (err.code === "EACCES" || err.code === "EPERM" || err.code === "UNKNOWN") {
       return {
         ok: false,

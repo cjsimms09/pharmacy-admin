@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { splitCommand } from "../src/lib/mtf";
+import { splitCommand, spawnPlan } from "../src/lib/mtf";
 
 /**
  * What "where the tool is" is allowed to be.
@@ -34,5 +34,31 @@ describe("what can be pointed at", () => {
 
   test("nothing configured falls back to the name, for a tool on the system PATH", () => {
     assert.deepEqual(splitCommand("   "), { bin: "mtf-cli", prefix: [] });
+  });
+});
+
+describe("starting it on Windows", () => {
+  test("a batch launcher goes through the command interpreter", () => {
+    /*
+     * Node refuses to launch a .cmd or .bat directly, and has since the April 2024 fix for
+     * CVE-2024-27980 — the way Windows parses a batch file's arguments allowed command injection.
+     * The refusal surfaces as "spawn EINVAL", which says nothing about batch files and reads
+     * exactly like a wrong path. This tool's Windows package is a batch launcher, so every run of
+     * it hit that.
+     */
+    const p = spawnPlan(String.raw`C:\Users\wwfprx\mtf-cli\bin\mtf-cli.cmd`, ["config", "get"]);
+    assert.match(p.command, /cmd\.exe$/i);
+    assert.deepEqual(p.args, ["/c", String.raw`C:\Users\wwfprx\mtf-cli\bin\mtf-cli.cmd`, "config", "get"]);
+  });
+
+  test("the arguments stay an array, so Node quotes them rather than a command line being pasted together", () => {
+    const p = spawnPlan(String.raw`C:\a b\mtf-cli.bat`, ["download835", "--date=2026-09-06"]);
+    assert.ok(p.args.includes("--date=2026-09-06"), "passed as one argument, not split on its spaces");
+  });
+
+  test("an ordinary executable is started directly, as before", () => {
+    const p = spawnPlan(String.raw`C:\mtf\bin\mtf-cli.exe`, ["--version"]);
+    assert.equal(p.command, String.raw`C:\mtf\bin\mtf-cli.exe`);
+    assert.deepEqual(p.args, ["--version"]);
   });
 });
