@@ -855,16 +855,51 @@ export default async function InvoicesPage({
                 {i.basis && <p className="mt-1 text-xs text-ink-3">{i.basis}</p>}
                 {i.controlledItems && <p className="mt-1 whitespace-pre-wrap text-xs text-ink-2">{i.controlledItems}</p>}
                 {canManage && (
-                  <form action={confirm} className="mt-2 flex flex-wrap items-center gap-1.5">
-                    <input type="hidden" name="id" value={i.id} />
-                    <select name="schedule" className="field w-auto py-1 text-xs" defaultValue="">
-                      <option value="" disabled>What does it carry?</option>
-                      <option value="schedule_2">A Schedule II line</option>
-                      <option value="schedule_3_5">Schedule III-V only</option>
-                      <option value="none">No controlled substances</option>
-                    </select>
-                    <button className="btn btn-sm btn-primary">File it</button>
-                  </form>
+                  <>
+                    <form action={confirm} className="mt-2 flex flex-wrap items-center gap-1.5">
+                      <input type="hidden" name="id" value={i.id} />
+                      <select name="schedule" className="field w-auto py-1 text-xs" defaultValue="">
+                        <option value="" disabled>What does it carry?</option>
+                        <option value="schedule_2">A Schedule II line</option>
+                        <option value="schedule_3_5">Schedule III-V only</option>
+                        <option value="none">No controlled substances</option>
+                      </select>
+                      <button className="btn btn-sm btn-primary">File it</button>
+                    </form>
+                    {/*
+                      The way out, which this queue did not have.
+
+                      Every action here filed the thing as an invoice. A statement of account that
+                      landed in the queue could therefore only be confirmed as an invoice or left
+                      sitting, and this list is drawn above the table, so it is the first thing
+                      seen and the last place anybody would look for a way to remove something. The
+                      table below has had these two buttons all along; the queue is where they were
+                      needed.
+                    */}
+                    <form className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                      <input type="hidden" name="unfileId" value={i.id} />
+                      <input type="hidden" name="back" value="/inventory/invoices" />
+                      <input type="hidden" name={`as_${i.id}`} value="statement" />
+                      <button
+                        formAction={notAnInvoice}
+                        formNoValidate
+                        className="btn btn-sm text-[11px]"
+                        title="Keeps the document, files it under supplier statements, and stops offering it as an invoice."
+                      >
+                        Not an invoice — it is a statement
+                      </button>
+                      <button
+                        formAction={destroyInvoice}
+                        formNoValidate
+                        name="destroyId"
+                        value={i.id}
+                        className="btn btn-sm border-crit text-[11px] text-crit hover:bg-crit-soft"
+                        title="Deletes the document, this record and every line read off it. Nothing is kept."
+                      >
+                        Delete it
+                      </button>
+                    </form>
+                  </>
                 )}
               </li>
             ))}
