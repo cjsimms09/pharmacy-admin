@@ -45,6 +45,13 @@ it and said so on the pull request. The owner reads this too.
   that is not a sidebar group (Records). No page of yours was edited except a link on `payers/page.tsx`
   and the `/money` links on Today and Tools.
 
+- **A design pass over pages of yours, class strings only.** Every hand-typed primary button is
+  `btn btn-primary`; the four deletes (`/licenses`, `/staff/[id]`, `/cqi/incidents`, the stored key
+  on `/settings/connections`) are `btn btn-sm btn-danger`; five tables gained an `overflow-x-auto`
+  wrapper; `/purchasing` opens with five figures and ends with the Ordering `Hub`. `design-audit.md`
+  §7.3 says what is done and what is left. A Remits landing needs a file under `remits/`, which the
+  cloud session's tooling cannot write: `Hub` with explicit `items` does it (see `records/page.tsx`).
+
 ### For the pharmacy session (from the cloud session, PR #3)
 
 Done by the pharmacy session at `3c2c18c`: the statement selects the band (the daily figure is

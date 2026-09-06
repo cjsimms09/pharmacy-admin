@@ -170,7 +170,9 @@ key itself is spelt three ways: `?ok=` in 31 files, `?saved=` in 14, `?done=` in
 - **`Empty` on 35 pages; ten more hand-write "Nothing yet"**: `/forms`, `/documents`,
   `/settings`, `/staff/technician-list`, the supplier terms page, `/cqi/import/[id]`,
   `/compliance`. `StatusBadge` on 4 pages; `className="badge …"` hand-written on about 30.
-- **`Hub`** is used by `/records` and `/settings` only; nine other group landings hand-roll it.
+- **`Hub`** is used by `/records`, `/settings`, `/tools` and now `/purchasing`, which also opens
+  with five figures (today's order, saved, next band, switches, losses), each a link to the card
+  or page that explains it. The other group landings still hand-roll it.
 - **Tables without an overflow wrapper** — done for the screens (`/settings`, `/inventory`, `/cqi`,
   `/cqi/import`, the CQI summary); the print sheets (`/compliance/training/records`,
   `/staff/technician-list`, `/forms/vaccine-administration`, `/documents/manual`, the training
