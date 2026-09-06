@@ -150,6 +150,21 @@ export async function setExpenseStatus(id: string, status: Expense["status"]): P
   await db.update(schema.expenses).set({ status }).where(eq(schema.expenses.id, id));
 }
 
+export async function expenseById(id: string): Promise<Expense | null> {
+  return (await db.query.expenses.findFirst({ where: eq(schema.expenses.id, id) })) ?? null;
+}
+
+/**
+ * A bill is voided, never deleted.
+ *
+ * The row stays, marked, so a bill read off an email and voided by mistake can be found again and
+ * the audit trail says what was recorded and by whom. A voided bill counts on no month and no
+ * total; the screens simply stop showing it.
+ */
+export async function voidExpense(id: string): Promise<void> {
+  await setExpenseStatus(id, "void");
+}
+
 /** Bills in a month, by whichever date the basis asks for. */
 export async function expensesIn(month: string, basis: "accrual" | "cash" = "accrual"): Promise<Expense[]> {
   const from = `${month}-01`;
@@ -163,7 +178,7 @@ export async function expensesIn(month: string, basis: "accrual" | "cash" = "acc
 
 /** Everything recent, for the screen. Drafts first, because they are the ones needing a person. */
 export async function recentExpenses(limit = 200): Promise<Expense[]> {
-  const rows = await db.query.expenses.findMany({ orderBy: [desc(schema.expenses.invoiceDate)], limit });
+  const rows = (await db.query.expenses.findMany({ orderBy: [desc(schema.expenses.invoiceDate)], limit })).filter((r) => r.status !== "void");
   return [...rows.filter((r) => r.status === "draft"), ...rows.filter((r) => r.status !== "draft")];
 }
 
@@ -182,7 +197,8 @@ export async function unpaid(): Promise<Expense[]> {
  * profit figure is wrong in the flattering direction — which is the direction nobody questions.
  */
 export async function missingThisMonth(month = todayIso().slice(0, 7)): Promise<{ vendor: Vendor; lastSeen: string | null }[]> {
-  const [all, bills] = await Promise.all([vendors(), db.query.expenses.findMany({ columns: { vendorId: true, invoiceDate: true } })]);
+  const [all, allBills] = await Promise.all([vendors(), db.query.expenses.findMany({ columns: { vendorId: true, invoiceDate: true, status: true } })]);
+  const bills = allBills.filter((b) => b.status !== "void");
   const out: { vendor: Vendor; lastSeen: string | null }[] = [];
   for (const v of all) {
     if (v.cadence !== "monthly") continue;

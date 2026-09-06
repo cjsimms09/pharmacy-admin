@@ -112,7 +112,9 @@ by what changes the owner's morning most. Each is small on its own; none needs a
 
 - [ ] **The sidebar bug above**, first: filter `NAV` items on the flag in `nav.tsx`, or drop
       the flag (design-audit §6).
-- [ ] **Row actions everywhere** (§7.1): `/expenses` bills, `/inventory/discrepancies`,
+- [ ] **Row actions everywhere** (§7.1). Done by the cloud session: `/expenses` bills (Edit
+      reopens the form with the bill in it; Void keeps the row marked void and out of every month
+      and total; `expense.edit` and `expense.void` audited). Still to do: `/inventory/discrepancies`,
       `/staff/rotations`, `/plans`, `/payers/[pbm]` contacts, rates and documents, `/deliveries`
       days and invoices, `/settings/backups` archives, and delete-or-retire on `/suppliers`.
       `/agreements` is the model: Edit and Delete on the row, a confirmation that names what

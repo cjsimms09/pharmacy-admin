@@ -3,11 +3,12 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireManager, requireUser } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { categories, vendors, recentExpenses, unpaid, missingThisMonth, seedCategories, addCategory, saveVendor, saveExpense, setExpenseStatus } from "@/lib/expenses";
+import { categories, vendors, recentExpenses, unpaid, missingThisMonth, seedCategories, addCategory, saveVendor, saveExpense, setExpenseStatus, expenseById, voidExpense } from "@/lib/expenses";
 import { formatCents } from "@/lib/money";
 import { fmt, todayIso } from "@/lib/dates";
 import { PageHeader, Notice, Empty } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
+import { ConfirmButton } from "@/components/confirm-button";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Spending" };
@@ -28,27 +29,37 @@ const KIND_LABEL: Record<string, string> = {
  * The rule lives on the vendor rather than in a rules screen of its own, because the thing somebody
  * wants to say is "bills from Stamps.com are postage" — a fact about Stamps.com.
  */
-export default async function ExpensesPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
+export default async function ExpensesPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string; edit?: string }> }) {
   await requireUser();
-  const { ok, error } = await searchParams;
+  const { ok, error, edit } = await searchParams;
 
   // Standard chart of accounts on first visit. An empty one gets filled badly.
   await seedCategories();
 
-  const [cats, vend, recent, owed, missing] = await Promise.all([
+  const [cats, vend, recent, owed, missing, editing] = await Promise.all([
     categories(),
     vendors(),
     recentExpenses(100),
     unpaid(),
     missingThisMonth(),
+    edit ? expenseById(edit) : Promise.resolve(null),
   ]);
 
   async function addBill(form: FormData) {
     "use server";
     const u = await requireManager();
     const amount = Number(String(form.get("amount") ?? "").replace(/[$,\s]/g, ""));
+    // Editing keeps the bill's standing and where it came from; only the facts on it change.
+    const id = String(form.get("id") ?? "") || null;
+    const existing = id ? await expenseById(id) : null;
+    if (id && !existing) redirect("/expenses?error=" + encodeURIComponent("That bill is no longer on file."));
     try {
       await saveExpense({
+        id,
+        status: existing?.status,
+        source: existing?.source,
+        documentId: existing?.documentId,
+        notes: existing?.notes,
         vendorId: String(form.get("vendorId") ?? "") || null,
         categoryId: String(form.get("categoryId") ?? "") || null,
         invoiceNumber: String(form.get("invoiceNumber") ?? ""),
@@ -58,13 +69,26 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
         description: String(form.get("description") ?? ""),
         createdBy: u.name,
       });
-      await audit({ action: "expense.add", userId: u.id, userName: u.name, details: `${amount}` });
+      await audit({ action: id ? "expense.edit" : "expense.add", userId: u.id, userName: u.name, details: `${id ?? "new"} ${amount}` });
     } catch (e) {
       redirect("/expenses?error=" + encodeURIComponent(e instanceof Error ? e.message : String(e)));
     }
     revalidatePath("/expenses");
     revalidatePath("/money/monthly");
-    redirect("/expenses?ok=" + encodeURIComponent("Bill recorded."));
+    redirect("/expenses?ok=" + encodeURIComponent(id ? "Bill updated." : "Bill recorded."));
+  }
+
+  async function voidBill(form: FormData) {
+    "use server";
+    const u = await requireManager();
+    const id = String(form.get("id") ?? "");
+    const existing = await expenseById(id);
+    if (!existing) redirect("/expenses?error=" + encodeURIComponent("That bill is no longer on file."));
+    await voidExpense(id);
+    await audit({ action: "expense.void", userId: u.id, userName: u.name, details: `${id} ${existing.amountCents / 100} ${existing.description ?? ""}` });
+    revalidatePath("/expenses");
+    revalidatePath("/money/monthly");
+    redirect("/expenses?ok=" + encodeURIComponent("Bill voided. It counts on no month now; the record is kept."));
   }
 
   async function addVendor(form: FormData) {
@@ -154,12 +178,13 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
       )}
 
       {/* ── Record a bill ────────────────────────────────────────────────── */}
-      <details className="my-4 rounded-lg border border-line bg-surface p-4" open={recent.length === 0}>
-        <summary className="cursor-pointer text-sm font-semibold">Record a bill</summary>
+      <details id="bill" className="my-4 rounded-lg border border-line bg-surface p-4" open={recent.length === 0 || !!editing}>
+        <summary className="cursor-pointer text-sm font-semibold">{editing ? "Edit this bill" : "Record a bill"}</summary>
         <form action={addBill} className="mt-3 grid gap-2 sm:grid-cols-3">
+          {editing && <input type="hidden" name="id" value={editing.id} />}
           <label className="text-xs">
             <span className="block text-ink-3">Vendor</span>
-            <select name="vendorId" className="mt-0.5 w-full rounded-md border border-line px-2 py-1 text-sm">
+            <select name="vendorId" defaultValue={editing?.vendorId ?? ""} className="mt-0.5 w-full rounded-md border border-line px-2 py-1 text-sm">
               <option value="">—</option>
               {vend.map((v) => (
                 <option key={v.id} value={v.id}>{v.name}</option>
@@ -168,7 +193,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
           </label>
           <label className="text-xs">
             <span className="block text-ink-3">Category</span>
-            <select name="categoryId" className="mt-0.5 w-full rounded-md border border-line px-2 py-1 text-sm">
+            <select name="categoryId" defaultValue={editing?.categoryId ?? ""} className="mt-0.5 w-full rounded-md border border-line px-2 py-1 text-sm">
               <option value="">—</option>
               {cats.map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
@@ -177,26 +202,27 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
           </label>
           <label className="text-xs">
             <span className="block text-ink-3">Amount</span>
-            <input name="amount" inputMode="decimal" placeholder="129.00" className="mt-0.5 w-full rounded-md border border-line px-2 py-1 text-sm" />
+            <input name="amount" inputMode="decimal" placeholder="129.00" defaultValue={editing ? (editing.amountCents / 100).toFixed(2) : ""} className="mt-0.5 w-full rounded-md border border-line px-2 py-1 text-sm" />
           </label>
           <label className="text-xs">
             <span className="block text-ink-3">Invoiced on</span>
-            <input type="date" name="invoiceDate" defaultValue={todayIso()} className="mt-0.5 w-full rounded-md border border-line px-2 py-1 text-sm" />
+            <input type="date" name="invoiceDate" defaultValue={editing?.invoiceDate ?? todayIso()} className="mt-0.5 w-full rounded-md border border-line px-2 py-1 text-sm" />
           </label>
           <label className="text-xs">
             <span className="block text-ink-3">Paid on <span className="text-ink-3">(blank if still owed)</span></span>
-            <input type="date" name="paidOn" className="mt-0.5 w-full rounded-md border border-line px-2 py-1 text-sm" />
+            <input type="date" name="paidOn" defaultValue={editing?.paidOn ?? ""} className="mt-0.5 w-full rounded-md border border-line px-2 py-1 text-sm" />
           </label>
           <label className="text-xs">
             <span className="block text-ink-3">Invoice number</span>
-            <input name="invoiceNumber" className="mt-0.5 w-full rounded-md border border-line px-2 py-1 text-sm" />
+            <input name="invoiceNumber" defaultValue={editing?.invoiceNumber ?? ""} className="mt-0.5 w-full rounded-md border border-line px-2 py-1 text-sm" />
           </label>
           <label className="text-xs sm:col-span-2">
             <span className="block text-ink-3">What it was for</span>
-            <input name="description" className="mt-0.5 w-full rounded-md border border-line px-2 py-1 text-sm" />
+            <input name="description" defaultValue={editing?.description ?? ""} className="mt-0.5 w-full rounded-md border border-line px-2 py-1 text-sm" />
           </label>
-          <div className="flex items-end">
-            <SubmitButton className="btn btn-primary" pendingLabel="Saving…">Record it</SubmitButton>
+          <div className="flex items-end gap-2">
+            <SubmitButton className="btn btn-primary" pendingLabel="Saving…">{editing ? "Save changes" : "Record it"}</SubmitButton>
+            {editing && <Link href="/expenses" className="btn">Cancel</Link>}
           </div>
         </form>
         <p className="mt-2 text-xs text-ink-3">
@@ -317,13 +343,25 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
                   <td className="px-3 py-2 text-xs">
                     {e.paidOn ? fmt(e.paidOn) : <span className="badge badge-warn">owed</span>}
                   </td>
-                  <td className="px-3 py-2 text-right">
-                    {e.status === "draft" && (
-                      <form action={confirmDraft}>
+                  <td className="px-3 py-2">
+                    <div className="flex items-center justify-end gap-1.5">
+                      {e.status === "draft" && (
+                        <form action={confirmDraft}>
+                          <input type="hidden" name="id" value={e.id} />
+                          <SubmitButton className="btn btn-sm btn-primary" pendingLabel="…">Confirm</SubmitButton>
+                        </form>
+                      )}
+                      <Link href={`/expenses?edit=${e.id}#bill`} className="btn btn-sm">Edit</Link>
+                      <form action={voidBill}>
                         <input type="hidden" name="id" value={e.id} />
-                        <SubmitButton className="btn btn-sm" pendingLabel="…">Confirm</SubmitButton>
+                        <ConfirmButton
+                          className="btn btn-sm btn-danger"
+                          message={`Void this bill of ${formatCents(e.amountCents)}? It will stop counting on the month. The record is kept, marked void.`}
+                        >
+                          Void
+                        </ConfirmButton>
                       </form>
-                    )}
+                    </div>
                   </td>
                 </tr>
               ))}
