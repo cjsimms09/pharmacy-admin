@@ -176,14 +176,37 @@ export async function planRegister(): Promise<PlanRow[]> {
  * determination is the thing that collapses a filing under questioning, so the register will not
  * hold one.
  */
+/**
+ * Which classifications somebody has to justify, and which the claim justifies itself.
+ *
+ * The basis requirement exists because an unsourced ERISA determination collapses under
+ * questioning: it is the finding that decides whether the Kansas floor reaches a plan, and it will
+ * be argued about. Applying that rule to every class was over-reach, and it stopped the work it was
+ * meant to protect — being refused when marking an obvious Part D plan as Medicare teaches somebody
+ * that the register is not worth using.
+ *
+ * So it is required for the four that decide whether the floor applies: the three that put a plan
+ * in scope, and the ERISA exclusion that takes it out. The rest identify themselves on the claim —
+ * a Part D BIN, a state Medicaid processor, a card that names itself — and the payer's own name is
+ * recorded as the basis.
+ */
+export function needsBasis(cls: PlanClass): boolean {
+  return cls === "commercial_fully_insured" || cls === "commercial_self_funded" || cls === "governmental" || cls === "church_plan";
+}
+
 export async function classifyPlan(
   id: string,
   input: { classification: PlanClass; sponsorName?: string; basis?: string; sourceUrl?: string; notes?: string },
   user: { id: string; name: string },
 ): Promise<void> {
   const basis = (input.basis ?? "").trim();
-  if (input.classification !== "unknown" && basis.length < 10) {
-    throw new Error("Say how this was established — a Form 5500 filing, the plan document, or who confirmed it. A determination without a basis cannot be relied on.");
+  if (needsBasis(input.classification) && basis.length < 10) {
+    throw new Error(
+      `Marking a plan as ${CLASS_INFO[input.classification].label} decides whether the Kansas floor reaches it, and ` +
+        "that is the finding an appeal turns on — so say how it was established: a Form 5500 filing, the plan " +
+        "document, the employer's own answer, or who confirmed it. Medicare, Medicaid, workers' compensation and " +
+        "cards need no basis; the claim itself says what they are.",
+    );
   }
   await db
     .update(schema.planGroups)
@@ -257,9 +280,13 @@ export async function classifyPlanByKey(
   const rows = await db.query.planGroups.findMany();
   const row = rows.find((r) => key(r.bin, r.groupNumber) === key(bin, groupNumber)) ?? null;
 
-  const selfEvident = classification === "copay_card" || classification === "discount_card";
+  const selfEvident = !needsBasis(classification);
   const said = (basis ?? "").trim();
-  const useBasis = said || (selfEvident ? `The payer on the claim identifies itself as one: ${row?.payerLabel ?? bin ?? "on the claim"}. Recorded by ${user.name}.` : "");
+  const useBasis =
+    said ||
+    (selfEvident
+      ? `The payer on the claim identifies itself as one: ${row?.payerLabel ?? bin ?? "on the claim"}. Recorded by ${user.name}.`
+      : "");
 
   if (!row) {
     /*
@@ -272,8 +299,11 @@ export async function classifyPlanByKey(
     const { newId } = await import("./crypto");
     const claims = await db.query.claims.findMany({ columns: { id: true, bin: true, groupNumber: true } });
     const mine = claims.filter((c) => key(c.bin, c.groupNumber) === key(bin, groupNumber));
-    if (classification !== "unknown" && useBasis.length < 10) {
-      throw new Error("Say how this was established — a Form 5500 filing, the plan document, or who confirmed it. A determination without a basis cannot be relied on.");
+    if (needsBasis(classification) && useBasis.length < 10) {
+      throw new Error(
+        `Marking a plan as ${CLASS_INFO[classification].label} decides whether the Kansas floor reaches it, so say how ` +
+          "it was established. Medicare, Medicaid, workers' compensation and cards need no basis.",
+      );
     }
     await db.insert(schema.planGroups).values({
       id: newId(),

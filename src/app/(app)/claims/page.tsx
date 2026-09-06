@@ -1,3 +1,4 @@
+import React from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -341,7 +342,8 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
                 </thead>
                 <tbody>
                   {flags.lossFills.slice(0, 50).map((f) => (
-                    <tr key={f.key} className="border-t border-line">
+                    <React.Fragment key={f.key}>
+                    <tr className="border-t border-line">
                       <td className="px-3 py-2 whitespace-nowrap text-xs">{f.dateFilled}</td>
                       <td className="px-3 py-2">
                         {f.itemName ?? f.ndc11 ?? "—"}
@@ -360,6 +362,52 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
                       <td className="px-3 py-2 text-right tabular-nums">{formatCents(f.acquisitionCents ?? 0)}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-red-700">{formatCents(f.marginCents ?? 0)}</td>
                     </tr>
+                    {/*
+                      What actually arrived, field by field.
+
+                      Column positions in this report are worked out by counting, and a report whose
+                      columns move by one produces figures that are individually plausible and
+                      collectively wrong — a dispensing fee read as a patient total, a tax read as a
+                      quantity. Arguing about a loss from a screen showing only conclusions is
+                      guesswork on both sides. This is the evidence.
+                    */}
+                    <tr>
+                      <td colSpan={6} className="px-3 pb-2">
+                        <details>
+                          <summary className="cursor-pointer text-[11px] text-ink-3 hover:text-accent">
+                            Why is this a loss? Show the row exactly as it arrived
+                          </summary>
+                          <div className="mt-1 space-y-2">
+                            {(flags.rawByFill.get(f.key) ?? []).map((c, i) => (
+                              <div key={i} className="rounded-md border border-line bg-ground p-2">
+                                <p className="text-[11px] font-semibold">{c.payer ?? "unnamed payer"}</p>
+                                <dl className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 sm:grid-cols-4">
+                                  {c.fields.map((x) => (
+                                    <div key={x.name} className="flex justify-between gap-2 text-[11px]">
+                                      <dt className="text-ink-3">{x.name}</dt>
+                                      <dd className="font-mono">{x.value || "—"}</dd>
+                                    </div>
+                                  ))}
+                                </dl>
+                              </div>
+                            ))}
+                            {(flags.rawByFill.get(f.key) ?? []).length === 0 && (
+                              <p className="text-[11px] text-ink-3">
+                                This claim came from an older load that did not keep the original row, so there is
+                                nothing to show. Load that day&rsquo;s report again and it will be here.
+                              </p>
+                            )}
+                            <p className="text-[11px] text-ink-2">
+                              What this site made of it: {formatCents(f.remitCents)} from the plans, {formatCents(f.patientPaidCents)}{" "}
+                              from the patient{f.laterPaymentsCents ? `, ${formatCents(f.laterPaymentsCents)} arrived later` : ""}, against{" "}
+                              {formatCents(f.acquisitionCents ?? 0)} of drug. If a figure above is not where this site
+                              thinks it is, that is the bug — send me this box.
+                            </p>
+                          </div>
+                        </details>
+                      </td>
+                    </tr>
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>

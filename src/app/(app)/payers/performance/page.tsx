@@ -8,7 +8,7 @@ import { revalidatePath } from "next/cache";
 import { requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { savePayerLink, applyLinksToClaims } from "@/lib/payer-links";
-import { CLASS_INFO } from "@/lib/plans";
+import { CLASS_INFO, needsBasis } from "@/lib/plans";
 import { PLAN_CLASSES, type PlanClass } from "@/db/schema";
 import { searchContracts } from "@/lib/contract-search";
 import { PageHeader, Card, Notice, Empty, Figure } from "@/components/ui";
@@ -358,7 +358,12 @@ export default async function PayerPerformancePage({ searchParams }: { searchPar
                                       or discount card needs none: the payer's own name on the claim
                                       is the evidence, and that is recorded for you.
                                     */}
-                                    <input name="basis" className="field w-40 px-1 py-0.5 text-[11px]" placeholder="how do you know? (not needed for a card)" />
+                                    <input
+                                      name="basis"
+                                      className="field w-44 px-1 py-0.5 text-[11px]"
+                                      placeholder="only for commercial, ERISA, governmental or church"
+                                      title="Needed only where the classification decides whether the Kansas floor reaches the plan. Medicare, Medicaid, workers' compensation and cards identify themselves on the claim."
+                                    />
                                     <button className="btn btn-sm px-1.5 py-0.5 text-[11px]">Set</button>
                                   </form>
                                 ) : (

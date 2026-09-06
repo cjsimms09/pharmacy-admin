@@ -578,6 +578,36 @@ export async function claimFlags() {
     belowCostTotalCents: sum(belowCost),
     /** One row per dispensing, with every payer that priced it. */
     fills,
+    /*
+     * The rows behind each fill, exactly as the report sent them.
+     *
+     * Column positions in this report are worked out by counting, and a report whose columns move
+     * by one produces figures that are all individually plausible and collectively wrong — a
+     * dispensing fee read as a patient total, a tax read as a quantity. Arguing about it from a
+     * screen that shows only the conclusions is guesswork on both sides. This is the evidence: for
+     * any fill, what arrived, field by field, with the name this reader gave each one.
+     */
+    rawByFill: (() => {
+      const by = new Map<string, { payer: string | null; fields: { name: string; value: string }[] }[]>();
+      for (const c of rows) {
+        if (!c.rawJson) continue;
+        const key = [c.rxNumber.trim(), c.fillNumber ?? "", c.dateFilled, c.ndc11 ?? ""].join("|");
+        let parsed: Record<string, unknown>;
+        try {
+          parsed = JSON.parse(c.rawJson) as Record<string, unknown>;
+        } catch {
+          continue;
+        }
+        by.set(key, [
+          ...(by.get(key) ?? []),
+          {
+            payer: c.pbmName ?? c.payerLabel,
+            fields: Object.entries(parsed).map(([name, value]) => ({ name, value: String(value ?? "") })),
+          },
+        ]);
+      }
+      return by;
+    })(),
     lossFills,
     lossFillsTotalCents: lossFills.reduce((n, f) => n + (f.marginCents ?? 0), 0),
     coordination,
