@@ -127,10 +127,11 @@ by what changes the owner's morning most. Each is small on its own; none needs a
       in place of the raw `<h2>` on `/settings`, `/nadac`, `/remits/mtf`, `/purchasing`, `/cqi`;
       explanatory prose behind a "How this works" disclosure, one line left in place. Delete the
       unused `.section*` classes or use them.
-- [ ] **Tables get tools** (§3.4): a `DataTable` component (sort, filter box, sticky head,
-      "show 50 more", right-aligned money with `tabular-nums`, trailing row menu) and use it on
-      `/purchasing`, `/payers/performance`, `/claims`, `/inventory/invoices`; wrap the fourteen
-      unwrapped tables in the meantime.
+- [x] **Tables get tools** (§3.4): `src/components/data-table.tsx` (sort by any column, a
+      filter box, "show 50 more", money right-aligned by the column, `th scope`, `aria-sort`),
+      used on `/payers/performance` (per drug, the payer ranking) and `/purchasing` (the ledger,
+      the comparison). Still to move: `/claims`, `/inventory/invoices`, and the fourteen
+      unwrapped tables.
 - [ ] **Forms out of the flow** (§3.5): "Add a supplier", "Load a price file", "Add an invoice
       by hand", "Create login" become a header button opening a drawer or its own page.
 - [ ] **Today leads with money** (§3.3): scoreboard, then the top three rows of `moneyFound()`
