@@ -308,6 +308,30 @@ async function main() {
   fs.mkdirSync(path.join(root, "data"), { recursive: true });
   ensureFolders();
   ensureEnv();
+  /*
+   * With no site at all, take the latest code before trying to build one.
+   *
+   * A build that fails leaves .next half written: the working site gone and the new one not there.
+   * The app then cannot start, and the only way to ask for an update was a button inside the app —
+   * so the fix for the failure sat on GitHub with no way to reach it, and every restart rebuilt the
+   * same code the same way and failed the same way.
+   *
+   * A computer with no site has nothing to lose by taking the newest code first. If GitHub cannot
+   * be reached, that is not a reason to stop: it builds what is here, which is what it would have
+   * done anyway.
+   */
+  const noSite = !fs.existsSync(path.join(root, ".next", "BUILD_ID"));
+  if (noSite && fs.existsSync(path.join(root, ".git"))) {
+    const branch = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8", shell: isWin }).stdout.trim() || "main";
+    log(`No built site found. Taking the latest ${branch} before building…`);
+    for (const args of [["checkout", "--", "."], ["fetch", "origin", branch], ["merge", "--ff-only", `origin/${branch}`]]) {
+      const r = spawnSync("git", args, { encoding: "utf8", shell: isWin, timeout: 5 * 60_000 });
+      if (r.status !== 0) {
+        log(`  git ${args[0]} did not run (${(r.stderr || "").trim().split("\n")[0] || "no network"}). Building what is here.`);
+        break;
+      }
+    }
+  }
   if (!fs.existsSync(path.join(root, "node_modules")) || needsBuild()) build();
   let first = true;
   for (;;) {
