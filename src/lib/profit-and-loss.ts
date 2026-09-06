@@ -47,6 +47,14 @@ export type PLLine = { label: string; amountCents: number; note?: string };
 export type MonthlyPL = {
   month: string;
   basis: "accrual" | "cash";
+  /**
+   * Dispensings in the month, one per bottle rather than one per transmission.
+   *
+   * On the result as well as the inputs because every per-script figure divides by it, and a
+   * period report that had to reach back into the loader for it would end up with a second
+   * definition of "a script".
+   */
+  claimsCount: number;
 
   /** What the month took, before anything is taken back out of it. */
   revenue: PLLine[];
@@ -368,6 +376,7 @@ export function monthlyPL(i: PLInputs): MonthlyPL {
   return {
     month: i.month,
     basis: i.basis,
+    claimsCount: i.claimsCount ?? 0,
     revenue,
     revenueCents,
     offsets,
@@ -659,4 +668,49 @@ export async function driverCostFor(month: string): Promise<number> {
   const invoices = await db.query.driverInvoices.findMany({ where: eq(schema.driverInvoices.month, month) });
   // Drafts are not yet a bill: the month is unfinished and the figure would change under the account.
   return invoices.filter((i) => i.status !== "draft").reduce((n, i) => n + i.totalCents, 0);
+}
+
+/**
+ * A quarter or a year, and the months behind it.
+ *
+ * Each month is computed by `monthlyAccount` exactly as the monthly screen computes it, and then
+ * added up by `period-account.ts`. Nothing is recomputed a second way, so a quarter can never
+ * disagree with the three months printed inside it — which is the failure mode of every
+ * spreadsheet this replaces.
+ *
+ * Only months with something recorded are loaded. A year of empty months would be twelve full
+ * passes over the claims to produce twelve zeroes, and the period names its empty months anyway.
+ */
+export async function periodAccount(
+  periodKey: string,
+  basis: "accrual" | "cash" = "accrual",
+): Promise<import("./period-account").PeriodTotals | null> {
+  const { parsePeriod, periodTotals } = await import("./period-account");
+  const period = parsePeriod(periodKey);
+  if (!period) return null;
+  const have = new Set(await accountMonths());
+  const wanted = period.months.filter((m) => have.has(m));
+  const months = await Promise.all(wanted.map((m) => monthlyAccount(m, basis)));
+  return periodTotals(period, basis, months);
+}
+
+/**
+ * The last `count` months as a series, for the charts.
+ *
+ * Ends at `through` (or the most recent month with anything in it) and reaches back from there, so
+ * a chart drawn in the first week of a month does not open with an empty column that reads as a
+ * collapse.
+ */
+export async function monthlyTrend(
+  count = 12,
+  basis: "accrual" | "cash" = "accrual",
+  through?: string,
+): Promise<import("./period-account").TrendPoint[]> {
+  const { trend } = await import("./period-account");
+  const all = await accountMonths();
+  if (all.length === 0) return [];
+  const end = through && all.includes(through) ? through : all[0];
+  const wanted = all.filter((m) => m <= end).slice(0, Math.max(1, count));
+  const months = await Promise.all(wanted.map((m) => monthlyAccount(m, basis)));
+  return trend(months);
 }
