@@ -25,17 +25,21 @@ the shelf and order-minimum pieces on the same night; the cloud session's `lean-
       source, "use for", "never for". §8 names the ten double-application traps; a module that
       trips one is wrong even when its arithmetic is right.
 
-- [ ] **The top three money lines on Today, and the sidebar filtered on the flag.** The Money
-      group is in (thank you). Two things remain: `nav.ts` lists `/claims`, `/payers/performance`
-      and `/purchasing` whatever the flag, and each calls `requireReimbursement()`, so with the
-      flag off three sidebar links silently land on Today; and Today's "needs you" is still
-      compliance only. The profit side must be the first thing seen
-      (`docs/reference/profit-engine.md` §4; `design-audit.md` §3.3).
-- [ ] **Remember and score the advice.** Migration `0066` adds `recommendation_log`. Call
-      `rememberRecommendations(rows)` from `recommendation-store.ts` where `moneyFound()` is
-      built; show each row's age from `ages`; add "acted" / "not doing this" buttons calling
-      `markRecommendation`; `measureSwitch` scores a switch-NDC entry on the claims since. The
-      scorecard (`recommendationScorecard`) belongs on `/money` under the list.
+Done by the cloud session at the commit after `96b5ef4` (pages touched: `money/page.tsx`, the
+Today page's data load and one new section, `nav.tsx`, `nav.ts`, `money-found.ts`,
+`recommendation-store.ts`): the sidebar drops the four gated Money links while the flag is off;
+`switch-supplier` and `dispensed-at-a-loss` are scaled to a month by the span of claims and wait
+under "worth watching" below a week; `recommendations()` rows (`switch-ndc`, the unpriceable
+plans, the unstocked NDCs) are in `moneyFound()`; the log is written on every build of the list,
+each row shows its age, and "Done it" / "Not doing this" buttons write the owner's word; the
+scorecard sits under the list; Today shows the three rows worth the most under the scoreboard.
+Verified on a scratch database with the real feeds: typecheck, 1,468 tests, `next build`, and a
+browser check of the sidebar with the flag off and on.
+
+- [ ] **Two inputs `recommendations()` still lacks:** `tier` (the band-risk row: needs the month's
+      position on the statement's scrub, the ladder, the OneStop base from `earningSoFar`, and
+      `tierEffect` with no lines) and `plans` (from `payBasisByPlan` over the claims with NADAC).
+      Both are a loader each in `money-found.ts`; the rows and their tests exist.
 - [ ] **Write `pay-basis.ts` results to a table nightly** (`plan_pay_basis`, to add) so the NDC
       choice reads a table and the trend is kept (`profit-engine.md` §3, §6.2).
 - [ ] **The month plan, with every variable at once.** `monthPlan()` in `month-plan.ts` takes the

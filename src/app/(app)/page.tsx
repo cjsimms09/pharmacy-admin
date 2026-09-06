@@ -14,6 +14,7 @@ import { getSettings } from "@/lib/settings";
 import { mailHealth } from "@/lib/mail-health";
 import { pendingUpdates } from "@/lib/updates";
 import { moneyPosition } from "@/lib/money-position";
+import { moneyFound } from "@/lib/money-found";
 import { formatCents } from "@/lib/money";
 import { requireUser } from "@/lib/auth";
 import { Notice, Card, Figure, PageHeader } from "@/components/ui";
@@ -85,7 +86,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const { ok, error } = await searchParams;
   // The signer's own name, to fill in the attestation form without asking them to remember it.
   const user = await requireUser();
-  const [compliance, dated, matrix, cqi, cs, jobs, selfFindings, settings, mail, updates, invoiceProblems, alertList, money] =
+  const [compliance, dated, matrix, cqi, cs, jobs, selfFindings, settings, mail, updates, invoiceProblems, alertList, money, found] =
     await Promise.all([
     complianceSummary(),
     dueList({ horizonDays: 60 }),
@@ -100,6 +101,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     invoiceIssues(),
     alerts(),
     moneyPosition(),
+    moneyFound().catch(() => null),
   ]);
 
   /*
@@ -435,6 +437,46 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           </p>
         )}
       </section>
+
+      {/*
+        The three things worth the most, before anything that is merely due.
+
+        The scoreboard says how the month stands; this says what to do about it. Three, not the
+        whole list, because the whole list is a page of its own and the point here is that a
+        pharmacist who reads nothing else knows the one action worth the most this morning.
+      */}
+      {found && found.rows.length > 0 && (
+        <section className="mb-6">
+          <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-sm font-semibold">Worth the most this morning</h2>
+            <span className="text-xs text-ink-3">
+              {formatCents(found.firstYearCents)} in the first year if all of it is done ·{" "}
+              <Link href="/money" className="text-accent underline">all {found.rows.length}</Link>
+            </span>
+          </div>
+          <ol className="grid gap-3 lg:grid-cols-3">
+            {found.rows.slice(0, 3).map((r, i) => (
+              <li key={r.key} className="card flex flex-col">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-xs text-ink-3">{i + 1}.</span>
+                  <span className="text-right">
+                    <span className="block text-lg font-bold tabular-nums text-accent">{formatCents(r.amountCents)}</span>
+                    <span className="block text-[11px] text-ink-3">{r.cadence === "recurring_monthly" ? "a month" : "one-off"}</span>
+                  </span>
+                </div>
+                <p className="mt-1 text-sm font-medium">{r.says}</p>
+                <p className="mt-1 flex-1 text-xs text-ink-2">{r.todo}</p>
+                <div className="mt-2 flex items-center gap-2">
+                  <Link href={r.href} className="btn btn-sm btn-primary">Go and do it</Link>
+                  {found.ages[r.key] !== undefined && (
+                    <span className="text-[11px] text-ink-3">{found.ages[r.key] <= 1 ? "new today" : `${found.ages[r.key]} days on the list`}</span>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
 
       {/*
         Two levels, and nothing else on the screen shouts.

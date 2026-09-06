@@ -39,6 +39,14 @@ export async function rememberRecommendations(rows: MoneyRow[], on = todayIso())
   return { ages: r.ages, started: r.insert.length, closed: r.resolve.length };
 }
 
+/** The open entries keyed the way the money list is, so a page can put an age and a status beside each row. */
+export async function openEntries(): Promise<Map<string, LogEntry>> {
+  const open = await db.query.recommendationLog.findMany({ where: isNull(schema.recommendationLog.resolvedOn) });
+  const by = new Map<string, LogEntry>();
+  for (const e of open) by.set(e.subject ? `${e.key}|${e.subject}` : e.key, e);
+  return by;
+}
+
 /** The owner's word on an entry: acted on it, or not going to. */
 export async function markRecommendation(id: string, status: "acted" | "dismissed" | "open", note: string | null): Promise<void> {
   await db.update(schema.recommendationLog).set({ status, note }).where(eq(schema.recommendationLog.id, id));

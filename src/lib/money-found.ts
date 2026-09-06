@@ -56,6 +56,12 @@ export type MoneyFound = {
   oneOffCents: number;
   /** Things that would put money on this list if they were settled. */
   blocked: { says: string; todo: string; href: string }[];
+  /** Worth a look and not yet worth a figure: measured on too few days, or on nothing dispensed. */
+  watch: { says: string; todo: string; href: string }[];
+  /** Days each row has been on the list, by key, from the recommendation log. Empty if the log could not be written. */
+  ages: Record<string, number>;
+  /** The log entry behind each row, by key: its id for the buttons, and the owner's word on it so far. */
+  log: Record<string, { id: string; firstSeenOn: string; status: string; note: string | null }>;
 };
 
 const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -100,40 +106,72 @@ export async function moneyFound(): Promise<MoneyFound> {
   const rows: MoneyRow[] = [];
   const blocked: MoneyFound["blocked"] = [];
 
+  const watch: MoneyFound["watch"] = [];
+
   // ── What the pharmacy is overpaying for ──
   try {
     const { productLedger, opportunities, margins, losers } = await import("./product-ledger");
+    const { perMonthCents, spanDays, recommendations } = await import("./recommendations");
+    const { db, schema } = await import("@/db");
+    const { min, max } = await import("drizzle-orm");
     const ledger = await productLedger();
+
+    /*
+     * The claims held are not a month.
+     *
+     * Every figure below is summed over every claim on file, and the file grows with the calendar:
+     * after ninety days of feed the same sentence would say three times the truth. So each is
+     * scaled to thirty days by the span of days the claims cover, and a span under a week is not
+     * offered as a month at all — a week is a guess about a month, and the row waits.
+     */
+    const [span] = await db.select({ from: min(schema.claims.dateFilled), to: max(schema.claims.dateFilled) }).from(schema.claims);
+    const periodDays = spanDays(span?.from ?? null, span?.to ?? null);
+    const overDays = periodDays ? `on the units dispensed over ${periodDays} day${periodDays === 1 ? "" : "s"} of claims, scaled to thirty` : "on the claims held";
+
     const cheaper = opportunities(ledger.rows).filter((r) => r.flags.includes("cheaper_elsewhere") && (r.switchSavingCents ?? 0) > 0);
     const switchTotal = cheaper.reduce((n, r) => n + (r.switchSavingCents ?? 0), 0);
-    if (switchTotal > 0) {
+    const switchMonthly = perMonthCents(switchTotal, periodDays);
+    if (switchTotal > 0 && switchMonthly !== null) {
       const top = cheaper[0];
       rows.push({
         key: "switch-supplier",
-        says: `${money(switchTotal)} a month buying ${cheaper.length} drug${cheaper.length === 1 ? "" : "s"} from a cheaper supplier already on file.`,
+        says: `${money(switchMonthly)} a month buying ${cheaper.length} drug${cheaper.length === 1 ? "" : "s"} from a cheaper supplier already on file.`,
         todo: `Start with ${top.name ?? top.ndc11}: ${money(top.switchSavingCents ?? 0)} on what you dispensed, buying from ${top.best?.supplier ?? "the cheaper source"} instead.`,
-        amountCents: switchTotal,
+        amountCents: switchMonthly,
         cadence: "recurring_monthly",
         confidence: "likely",
         basis:
-          "Your invoice price against the cheapest price on any catalogue held, both per unit and both after the rebate that supplier actually pays. It assumes you go on dispensing the same quantities.",
+          `Your invoice price against the cheapest price on any catalogue held, both per unit and both after the rebate that supplier actually pays, ${overDays}. It assumes you go on dispensing the same quantities.`,
+        href: "/purchasing",
+      });
+    } else if (switchTotal > 0) {
+      watch.push({
+        says: `${money(switchTotal)} from buying ${cheaper.length} drug${cheaper.length === 1 ? "" : "s"} at a cheaper supplier, measured on ${periodDays ?? 0} day${periodDays === 1 ? "" : "s"} of claims — too few to call a month.`,
+        todo: `Start with ${cheaper[0].name ?? cheaper[0].ndc11} from ${cheaper[0].best?.supplier ?? "the cheaper source"}; the monthly figure appears after a week of claims.`,
         href: "/purchasing",
       });
     }
 
     const losing = losers(margins(ledger.rows));
     const lossTotal = losing.reduce((n, m) => n + Math.abs(m.marginCents), 0);
-    if (lossTotal > 0) {
+    const lossMonthly = perMonthCents(lossTotal, periodDays);
+    if (lossTotal > 0 && lossMonthly !== null) {
       rows.push({
         key: "dispensed-at-a-loss",
-        says: `${money(lossTotal)} lost dispensing ${losing.length} product${losing.length === 1 ? "" : "s"} for less than they cost.`,
+        says: `${money(lossMonthly)} a month lost dispensing ${losing.length} product${losing.length === 1 ? "" : "s"} for less than they cost.`,
         todo: `Look at ${losing[0].name ?? losing[0].ndc11} first — ${money(Math.abs(losing[0].marginCents))} on ${losing[0].claims} claim${losing[0].claims === 1 ? "" : "s"} from ${losing[0].supplier ?? "your supplier"}. Either the price is wrong or the plan is.`,
-        amountCents: lossTotal,
+        amountCents: lossMonthly,
         cadence: "recurring_monthly",
         confidence: "certain",
-        basis: "What the plans and patients paid against the effective cost of what you bought — the invoice price less the rebate that supplier really pays on the line.",
+        basis: `What the plans and patients paid against the effective cost of what you bought — the invoice price less the rebate that supplier really pays on the line — ${overDays}.`,
         href: "/purchasing",
         overlapsWith: ["switch-supplier"],
+      });
+    } else if (lossTotal > 0) {
+      watch.push({
+        says: `${money(lossTotal)} lost on ${losing.length} product${losing.length === 1 ? "" : "s"} dispensed for less than they cost, on ${periodDays ?? 0} day${periodDays === 1 ? "" : "s"} of claims.`,
+        todo: `Look at ${losing[0].name ?? losing[0].ndc11}: ${money(Math.abs(losing[0].marginCents))} on ${losing[0].claims} claim${losing[0].claims === 1 ? "" : "s"}.`,
+        href: "/purchasing",
       });
     }
     if (ledger.rate === null) {
@@ -142,6 +180,31 @@ export async function moneyFound(): Promise<MoneyFound> {
         todo: "Send the monthly rebate report, or enter the tier ladder, so a contract generic is priced at what it really costs.",
         href: "/suppliers",
       });
+    }
+
+    /*
+     * The buying logic's own rows: a better NDC of the same product, and the plans it cannot price.
+     *
+     * Products are grouped on NADAC's own description, so a switch is between genuine equivalents
+     * (`product-groups.ts`); the rows come from `recommendations.ts`, already scaled to a month
+     * and already marked as overlapping the supplier switch above, so nothing is added twice.
+     */
+    try {
+      const { underNadac } = await import("./under-nadac");
+      const { groupKey } = await import("./product-groups");
+      const nadacRows = await db.query.nadacPrices.findMany({ columns: { ndc11: true, description: true, classification: true, pricingUnit: true } });
+      const groupByNdc = new Map<string, string | null>();
+      for (const r of nadacRows) {
+        if (groupByNdc.has(r.ndc11)) continue;
+        groupByNdc.set(r.ndc11, groupKey({ ndc11: r.ndc11, description: r.description, classification: r.classification, pricingUnit: r.pricingUnit }));
+      }
+      const under = underNadac(ledger.rows, (ndc) => groupByNdc.get(ndc) ?? null);
+      const rec = recommendations({ under, periodDays }, { materialityCents: ledger.materialityCents });
+      rows.push(...rec.rows);
+      blocked.push(...rec.blocked);
+      watch.push(...rec.watch);
+    } catch {
+      /* No NADAC held: products cannot be grouped, and the NDC choice says nothing. */
     }
   } catch {
     // Purchasing needs invoices, catalogues and claims. Missing any, it contributes nothing.
@@ -304,5 +367,26 @@ export async function moneyFound(): Promise<MoneyFound> {
   }
 
   const ranked = rank(rows);
-  return { rows: ranked, ...totals(ranked), blocked };
+
+  /*
+   * Remembered from the morning it first appears.
+   *
+   * A row that is shown and forgotten teaches nobody anything. The log starts an entry for each
+   * new row, touches the ones still showing and closes the ones that went, so the page can say
+   * "on the list since 3 September" and the scorecard can say what became of the advice. The
+   * list itself does not depend on it: if the log cannot be written the rows still show, with no
+   * ages beside them.
+   */
+  const ages: MoneyFound["ages"] = {};
+  const log: MoneyFound["log"] = {};
+  try {
+    const { rememberRecommendations, openEntries } = await import("./recommendation-store");
+    const r = await rememberRecommendations(ranked);
+    for (const [k, v] of r.ages) ages[k] = v;
+    for (const [k, e] of await openEntries()) log[k] = { id: e.id, firstSeenOn: e.firstSeenOn, status: e.status, note: e.note };
+  } catch {
+    /* The log is a convenience over the list, never a condition of it. */
+  }
+
+  return { rows: ranked, ...totals(ranked), blocked, watch, ages, log };
 }
