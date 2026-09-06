@@ -1,5 +1,6 @@
 import { requireManager } from "@/lib/auth";
-import { cqiPeriods, fmt, nextCqiPeriod, todayIso } from "@/lib/dates";
+import { cqiPeriods, fmt, todayIso } from "@/lib/dates";
+import { currentCqiObligation } from "@/lib/cqi";
 import { PageHeader, BackLink, Notice, Field } from "@/components/ui";
 import { createSummary } from "../../actions";
 
@@ -11,7 +12,8 @@ export default async function NewSummaryPage({ searchParams }: { searchParams: P
   const today = todayIso();
   const y = Number(today.slice(0, 4));
   const options = cqiPeriods(y - 1, y).filter((p) => p.periodEnd <= today).reverse();
-  const def = due ?? nextCqiPeriod(today).dueOn;
+  // The period still outstanding, so a finalized one is never offered back as the default.
+  const def = due ?? (await currentCqiObligation()).period.dueOn;
   return (
     <>
       <BackLink href="/cqi">CQI program</BackLink>

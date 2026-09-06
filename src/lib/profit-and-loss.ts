@@ -349,8 +349,8 @@ export function monthlyPL(i: PLInputs): MonthlyPL {
     cogs: reconcileCogs({
       dispensed: { cents: i.dispensedCostCents, from: "the acquisition cost on each dispensing" },
       purchases: { cents: i.purchasesCents, from: "the wholesaler invoices dated in the month" },
-      openingStock: { cents: i.openingStockCents ?? null, from: "the first inventory count of the month" },
-      closingStock: { cents: i.closingStockCents ?? null, from: "the last inventory count of the month" },
+      openingStock: { cents: i.openingStockCents ?? null, from: "the dispensing shelf at the first inventory count of the month" },
+      closingStock: { cents: i.closingStockCents ?? null, from: "the dispensing shelf at the last inventory count of the month" },
     }),
     revenue: reconcileRevenue({
       claims: { cents: i.claimsRevenueCents ?? null, from: "every plan's remittance plus what the patient paid" },
@@ -475,9 +475,21 @@ export async function monthlyAccount(month: string, basis: "accrual" | "cash" = 
    */
   const counts = await db.query.onHandImports.findMany({
     where: and(gte(schema.onHandImports.countedOn, `${month}-01`), lte(schema.onHandImports.countedOn, `${month}-31`)),
-    columns: { countedOn: true, valueCents: true },
+    columns: { countedOn: true, valueCents: true, rxValueCents: true },
   });
-  const valued = counts.filter((c) => c.valueCents !== null).sort((a, b) => a.countedOn.localeCompare(b.countedOn));
+  /*
+   * The dispensing shelf, not the whole building.
+   *
+   * This figure exists to check cost of goods: opening + purchases − closing should come out at
+   * what the claims say was dispensed. Both sides of that have to count the same shelf. Front-shop
+   * stock moves on retail sales that leave no claim behind them, so a month where the shop sold
+   * well would show as unexplained drug cost. Counts filed before the reader could tell the two
+   * apart carry no Rx figure and fall back to the whole value, which is what they meant then.
+   */
+  const valued = counts
+    .map((c) => ({ countedOn: c.countedOn, valueCents: c.rxValueCents ?? c.valueCents }))
+    .filter((c) => c.valueCents !== null)
+    .sort((a, b) => a.countedOn.localeCompare(b.countedOn));
   const openingStockCents = valued.length > 1 ? valued[0].valueCents : null;
   const closingStockCents = valued.length > 1 ? valued[valued.length - 1].valueCents : null;
 

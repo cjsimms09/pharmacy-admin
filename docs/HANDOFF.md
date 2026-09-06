@@ -16,7 +16,7 @@ it and said so on the pull request. The owner reads this too.
 Done by the pharmacy session at `3c2c18c`: the statement selects the band (the daily figure is
 shown as a position, with the gap to the scrubbed figure carried live); invoices de-duplicate on
 the supplier's number and date; the database-backed tests use a migrated scratch file; gitleaks
-has `pull-requests: read`. Migrations `0062` and `0063` are theirs; the recommendation log is `0067` (their `0064`, `0065` and `0066` came first). Both sessions built
+has `pull-requests: read`. Migrations `0062` and `0063` are theirs; the recommendation log and the plan PCN are `0068` (their `0064`–`0067` came first). Both sessions built
 the shelf and order-minimum pieces on the same night; the cloud session's `lean-stock.ts` and
 `order-basket.ts` were withdrawn for the pharmacy session's `usage.ts`, `on-hand.ts`,
 `order-plan.ts` and `lean-shelf.ts`, which are wired and have a real on-hand reader.
@@ -48,7 +48,7 @@ browser check of the sidebar with the flag off and on.
       with minimums; it returns the band to aim at, every line's NDC and supplier, the moves, and
       the total, with the next best band beside it. This supersedes wiring the band strategy on
       its own. Demand and shelf come from your `usage.ts` and `on-hand.ts`; minimums from the supplier
-      fields you added at `0e14cb4`. The recommendation log is now migration `0067`.
+      fields you added at `0e14cb4`. The recommendation log is now migration `0068`, with the plan PCN column.
 - [ ] **The McKesson question, monthly.** `bandStrategy()` in `band-strategy.ts` needs: the
       position (drill-down, restated to the statement's scrub), the ladder, the month's OneStop
       base, and two levers from the catalogues: unscrubbed brand spend that could move and its
@@ -152,7 +152,7 @@ was everything after the draft. Pure and tested now:
 **From the claims-field review of 6 September** (the real 5 Sept report: 123 paid/adjusted rows,
 19 BINs, 22 PCNs, 35 groups, 26 network reimbursement ids; `contract-reading.md` §1 and §4).
 
-- [x] **A plan is BIN, PCN and group, not BIN and group** (cloud session, migration 0068,
+- [x] **A plan is BIN, PCN and group, not BIN and group** (cloud session, migration 0068 shared with the recommendation log,
       `plan_groups.pcn`). `planKey(bin, pcn, group)` and `planLookup()` live in `plan-key.ts`
       (pure, shared with the floor review). An old row with a blank PCN stands as the fallback for
       any PCN on that BIN and group until a row for the PCN is decided; the sync notes on the new
@@ -419,7 +419,7 @@ id only), and twelve further uses of the data ranked by value against readiness.
 now delegates to `product-key.ts`, which it had duplicated.
 
 ### Files this branch touched
-`src/db/schema.ts`, `drizzle/0048_*`, `drizzle/0049_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down,recommendations,recommendation-log,recommendation-store,reimbursement-fit,band-strategy,month-plan,price-moves,rate-formula,contract-apply,appeal-packet}.ts` (new), `drizzle/0067_*`,
+`src/db/schema.ts`, `drizzle/0048_*`, `drizzle/0049_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down,recommendations,recommendation-log,recommendation-store,reimbursement-fit,band-strategy,month-plan,price-moves,rate-formula,contract-apply,appeal-packet}.ts` (new), `drizzle/0068_*`,
 `src/lib/{claims,rx-transactions,suppliers,suppliers-registry,pioneer-catalog,invoices,nadac-fetch,settings}.ts`,
 `src/app/(app)/suppliers/page.tsx`, `src/app/(app)/suppliers/[id]/terms/page.tsx` (new),
 `src/app/(app)/inventory/invoices/page.tsx`, `src/app/(app)/nadac/page.tsx`, `src/app/(app)/claims/page.tsx`,

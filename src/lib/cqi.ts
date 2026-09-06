@@ -79,7 +79,16 @@ export async function incidentsWithStage() {
     db.query.cqiIncidents.findMany({ orderBy: (i, { desc }) => [desc(i.incidentNumber)] }),
     db.query.cqiCapReviews.findMany(),
   ]);
-  const due = nextCqiPeriod().dueOn;
+  /*
+   * The deadline an incident is measured against is the summary it will actually be carried onto.
+   *
+   * nextCqiPeriod answers a calendar question and keeps naming a period for six weeks after its
+   * due date, finalized or not. An incident waiting for its effectiveness review would then be
+   * shown against a summary that has already been filed and locked — permanently late, with
+   * nothing anyone could do about it.
+   */
+  const { period } = await currentCqiObligation();
+  const due = period.dueOn;
   return incidents.map((i) => ({ incident: i, stage: incidentStage(i, reviews.filter((r) => r.incidentId === i.id), due) }));
 }
 

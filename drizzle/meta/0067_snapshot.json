@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "21180047-f8eb-4101-8b81-5d5de00d66c2",
+  "id": "dc116616-d805-463d-a4e4-3b0c31fe2ec0",
   "prevId": "2768192d-f3bc-4791-bc60-c03b717b7591",
   "tables": {
     "audit_events": {
@@ -4418,11 +4418,26 @@
           "notNull": true,
           "autoincrement": false
         },
+        "code": {
+          "name": "code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "code_kind": {
+          "name": "code_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'ndc11'"
+        },
         "ndc11": {
           "name": "ndc11",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "description": {
@@ -4439,12 +4454,41 @@
           "notNull": false,
           "autoincrement": false
         },
+        "inventory_group": {
+          "name": "inventory_group",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "quantity_thousandths": {
           "name": "quantity_thousandths",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "on_order_thousandths": {
+          "name": "on_order_thousandths",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pack_qty": {
+          "name": "pack_qty",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "counted_in_packages": {
+          "name": "counted_in_packages",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
         },
         "unit": {
           "name": "unit",
@@ -4476,13 +4520,20 @@
           ],
           "isUnique": false
         },
-        "on_hand_counted_ndc_idx": {
-          "name": "on_hand_counted_ndc_idx",
+        "on_hand_counted_code_idx": {
+          "name": "on_hand_counted_code_idx",
           "columns": [
             "counted_on",
-            "ndc11"
+            "code"
           ],
           "isUnique": true
+        },
+        "on_hand_ndc_idx": {
+          "name": "on_hand_ndc_idx",
+          "columns": [
+            "ndc11"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {
@@ -4570,6 +4621,13 @@
         },
         "value_cents": {
           "name": "value_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "rx_value_cents": {
+          "name": "rx_value_cents",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
@@ -5374,144 +5432,6 @@
           "name": "plan_groups_class_idx",
           "columns": [
             "classification"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "recommendation_log": {
-      "name": "recommendation_log",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "key": {
-          "name": "key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "subject": {
-          "name": "subject",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "says": {
-          "name": "says",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "todo": {
-          "name": "todo",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "amount_cents": {
-          "name": "amount_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "cadence": {
-          "name": "cadence",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "confidence": {
-          "name": "confidence",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "first_seen_on": {
-          "name": "first_seen_on",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "last_seen_on": {
-          "name": "last_seen_on",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "resolved_on": {
-          "name": "resolved_on",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'open'"
-        },
-        "outcome_cents": {
-          "name": "outcome_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "outcome_basis": {
-          "name": "outcome_basis",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "measured_on": {
-          "name": "measured_on",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "note": {
-          "name": "note",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "recommendation_log_key_idx": {
-          "name": "recommendation_log_key_idx",
-          "columns": [
-            "key"
-          ],
-          "isUnique": false
-        },
-        "recommendation_log_status_idx": {
-          "name": "recommendation_log_status_idx",
-          "columns": [
-            "status"
           ],
           "isUnique": false
         }

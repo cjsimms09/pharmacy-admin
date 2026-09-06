@@ -74,6 +74,14 @@ export function cqiPeriods(fromYear: number, toYear: number) {
   return out;
 }
 
+/**
+ * The bimonthly period the calendar says is due about now.
+ *
+ * It knows nothing about what has been filed, and goes on naming a period for six weeks after its
+ * due date. Nothing that shows a person a due date should call this: use `currentCqiObligation`,
+ * which walks past the summaries already finalized. A screen that used this told the pharmacy a
+ * summary it had finished and locked was twenty-two days overdue.
+ */
 export function nextCqiPeriod(today = todayIso()) {
   const y = Number(today.slice(0, 4));
   const all = cqiPeriods(y - 1, y + 1);

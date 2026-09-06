@@ -181,8 +181,8 @@ export function classify(fileName: string, buf: Buffer): Classification {
   if (looksLikeOnHand(buf.subarray(0, 20_000).toString("utf8"))) {
     return {
       kind: "on_hand",
-      why: "An inventory on-hand export: an NDC column beside a quantity-on-hand column. Filed as the count for its own date, replacing any earlier upload for that day.",
-      headers: ["NDC", "Description", "Quantity On Hand"],
+      why: "An inventory count: either PioneerRx's Inventory Search Results, or an export with an NDC column beside a quantity-on-hand column. Filed as the count for its own date, replacing any earlier upload for that day.",
+      headers: ["NDC/UPC", "Description", "On Hand", "On Order", "Cost"],
     };
   }
   /*

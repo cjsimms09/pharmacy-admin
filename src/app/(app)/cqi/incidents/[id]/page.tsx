@@ -4,8 +4,8 @@ import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requireManager } from "@/lib/auth";
 import { daysUntil, fmt } from "@/lib/dates";
-import { employeeReviewsOf, incidentStage, reviewCompleteDeadline, reviewStartDeadline, rxNumbersOf } from "@/lib/cqi";
-import { nextCqiPeriod } from "@/lib/dates";
+import { currentCqiObligation, employeeReviewsOf, incidentStage, reviewCompleteDeadline, reviewStartDeadline, rxNumbersOf } from "@/lib/cqi";
+
 import { PageHeader, BackLink, Notice } from "@/components/ui";
 import { DocumentList, UploadForm } from "@/components/documents";
 import { IncidentForm } from "../../incident-form";
@@ -30,7 +30,9 @@ export default async function IncidentPage({ params, searchParams }: { params: P
     db.query.documents.findMany({ where: eq(schema.documents.cqiIncidentId, id) }),
     db.query.cqiCapReviews.findMany({ where: eq(schema.cqiCapReviews.incidentId, id) }),
   ]);
-  const stage = incidentStage(incident, reviews, nextCqiPeriod().dueOn);
+  // The summary this will be carried onto, which is not the calendar's period once one is filed.
+  const { period: obligation } = await currentCqiObligation();
+  const stage = incidentStage(incident, reviews, obligation.dueOn);
   const busy = incident.aiState === "queued";
   const here = `/cqi/incidents/${id}`;
   const startDue = reviewStartDeadline(incident.reportCreatedOn);
