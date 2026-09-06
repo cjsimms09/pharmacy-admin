@@ -13,6 +13,10 @@ it and said so on the pull request. The owner reads this too.
 
 ### For the pharmacy session (from the cloud session, PR #3)
 
+- [ ] **Hold every new figure to `docs/reference/data-dictionary.md`** before it is used: unit,
+      source, "use for", "never for". §8 names the ten double-application traps; a module that
+      trips one is wrong even when its arithmetic is right.
+
 - [ ] **A Money group in the navigation, and the top three money lines on Today.** `/money`,
       `/purchasing`, `/claims`, `/payers` are behind the "extra sections" flag and absent from
       `nav.ts`; Today's "needs you" is compliance only. The profit side must be one page and the
@@ -230,7 +234,7 @@ now delegates to `product-key.ts`, which it had duplicated.
 `src/app/(app)/suppliers/page.tsx`, `src/app/(app)/suppliers/[id]/terms/page.tsx` (new),
 `src/app/(app)/inventory/invoices/page.tsx`, `src/app/(app)/nadac/page.tsx`, `src/app/(app)/claims/page.tsx`,
 `tests/{ndc,supplier-terms,invoice-lines,nadac-datasets,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down,recommendations,recommendation-log}.test.ts` (new), `tests/{claims,suppliers-registry,rx-transactions}.test.ts`,
-`CLAUDE.md` (new), `docs/HANDOFF.md`, `docs/reference/nadac-api.md`, `docs/reference/buying-logic.md`, `docs/reference/data-audit.md`, `docs/reference/profit-engine.md` (new), `fixtures/README.md`, `fixtures/rx-transactions.txt` (new).
+`CLAUDE.md` (new), `docs/HANDOFF.md`, `docs/reference/nadac-api.md`, `docs/reference/buying-logic.md`, `docs/reference/data-audit.md`, `docs/reference/profit-engine.md`, `docs/reference/data-dictionary.md` (new), `fixtures/README.md`, `fixtures/rx-transactions.txt` (new).
 
 ## Who owns what now
 

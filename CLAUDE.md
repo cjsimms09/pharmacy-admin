@@ -17,8 +17,9 @@ Rules that hold on both sides:
   credentials or database files in git. A feed's *shape* goes in `fixtures/` with every
   identifier changed (`fixtures/README.md`). No patient information anywhere.
 - **Nothing is inferred where a document could say it**, and every reader that decides money is
-  checked by arithmetic before anything is stored. See `docs/reference/buying-logic.md` and
-  `docs/reference/data-audit.md` for the reasoning the site rests on.
+  checked by arithmetic before anything is stored. Every figure has one meaning, one unit and a
+  list of what it must never be used for: `docs/reference/data-dictionary.md`. The reasoning is
+  in `docs/reference/buying-logic.md`, `data-audit.md` and `profit-engine.md`.
 - Migrations are additive and numbered; the second session to merge renumbers its own.
 - Files the other session has changed on an open branch are listed in `docs/HANDOFF.md`; say so
   on the pull request before editing one.
