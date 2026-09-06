@@ -188,9 +188,25 @@ describe("deciding what each transaction does", () => {
     assert.equal(parseRxTransactions(typed).rows[0].pcn, "MEDDPRIME");
   });
 
-  test("a rejected row and the cash plan are set aside with reasons", () => {
+  test("a rejected row is set aside with a reason", () => {
     assert.ok(plan.skipped.some((s) => s.txn.rxNumber === "336856" && /rejected/.test(s.why)));
-    assert.ok(plan.skipped.some((s) => s.txn.rxNumber === "324333" && /cash plan/.test(s.why)));
+  });
+
+  test("the cash plan is kept and marked, not thrown away", () => {
+    /*
+     * It used to be discarded on import, which silently deleted the margin on the only business
+     * the pharmacy prices itself — on one real week that was $4,250.50 of gross profit, better than
+     * a quarter of everything the dispensary made, simply absent. It is a fill: it sold a bottle and
+     * it made or lost money.
+     *
+     * Marked rather than merged, because no question about plans applies to it. There is no floor
+     * for the state to enforce on a price the pharmacy set, no contract to appeal under, and a
+     * number below NADAC is what it charged rather than a shortfall to claim.
+     */
+    assert.ok(!plan.skipped.some((s) => s.txn.rxNumber === "324333"), "no longer set aside");
+    const kept = plan.insertPaid.find((t) => t.rxNumber === "324333");
+    assert.ok(kept, "and it is stored");
+    assert.equal(kept!.cashPlan, true, "flagged as the pharmacy's own price, not an insurer's");
   });
 
   test("paid, reversed and resubmitted in one file: the first is stored reversed, the second stands", () => {
@@ -264,5 +280,95 @@ describe("the fixture cut from a real day's report", () => {
     assert.ok(plan.insertPaid.some((t) => t.rxNumber === "400002" && t.completedAt === null));
     assert.equal(plan.insertReversedPaid.filter((x) => x.paid.rxNumber === "400004").length, 1);
     assert.ok(plan.skipped.every((s) => /rejected|cash plan/.test(s.why)));
+  });
+});
+
+/**
+ * The report gaining a column, which is the failure this reader most has to survive.
+ *
+ * A column added anywhere but the end shifts every field after it, and every figure then read is
+ * individually plausible and collectively wrong — a dispensing fee taken for a patient total, a tax
+ * for a quantity. Nothing downstream can notice: it does not look like an error, it looks like a
+ * bad day's trading. So the layout is no longer assumed, it is chosen by evidence, and the strongest
+ * evidence is the report's own arithmetic: GrossProfit = Amount + Total − Acq. Inv. Cost.
+ */
+describe("a column added to the report", () => {
+  const HEAD17 = [
+    "Rx Transaction Details By Submission Type (BETA)",
+    "West Wichita Family Pharmacy",
+    "9/5/2026 12:00:00 AM, to ,9/6/2026 12:00:00 AM",
+    "Third Party,Script",
+    "Dispensing Fee,Completed Date",
+    "Rx Number,Status,Amount,Group,Ntw Reim. Id,Copay,Total,Date Filled,BIN,Tax,QTY,Acq. Inv. Cost,PCN,NDC,GrossProfit,Est MTF",
+    "Transmitted",
+  ];
+  const FOOT17 = ["9/5/2026 1:51 PM,Page 1 of 1"];
+
+  /*
+   * Rows whose gross profit is the report's own arithmetic, which is what it became once the
+   * rebate estimate was taken back out of that column — the flaw that made the report and this
+   * site disagree on thirty-two fills.
+   */
+  const rows17 = [
+    "Third Party:,610097(A4) - 610097",
+    // $204.57 in on a $328.23 drug: a real loss on the day, with $146.18 of facilitator money promised.
+    "332359-1,P,$204.57,KS20B2,IRX9TP,$0.00,$10.50,$0.00,9/5/2026 9:23:51 AM,09/05/26,610097,30.0000,$328.23,A4,00597015230,($123.66),$146.18",
+    // An ordinary generic, nothing promised.
+    "321666-4,P,$11.36,2CYA,EN45,$0.00,$10.50,$0.00,9/5/2026 9:24:00 AM,09/05/26,610097,30.0000,$0.71,A4,68094090460,$10.65,$0.00",
+  ];
+
+  const parsed = parseRxTransactions([...HEAD17, ...rows17, ...FOOT17].join("\r\n"));
+
+  test("the file loads instead of being rejected as a different report", () => {
+    assert.deepEqual(parsed.problems, []);
+    assert.equal(parsed.rows.length, 2);
+  });
+
+  test("every other column is still read from where it actually is", () => {
+    /*
+     * The point of the whole exercise. A layout off by one would give figures that all look
+     * reasonable — so these are checked against the row by hand, not against each other.
+     */
+    const [jardiance] = parsed.rows;
+    assert.equal(jardiance.rxNumber, "332359");
+    assert.equal(jardiance.fillNumber, 1);
+    assert.equal(jardiance.bin, "610097");
+    assert.equal(jardiance.ndc11, "00597015230");
+    assert.equal(jardiance.remitCents, 20_457);
+    assert.equal(jardiance.dispensingFeeCents, 1_050);
+    assert.equal(jardiance.acquisitionCents, 32_823);
+    assert.equal(jardiance.grossProfitCents, -12_366);
+    assert.equal(jardiance.quantityThousandths, 30_000);
+  });
+
+  test("the promised facilitator payment is read, and a promise of nothing is not a promise", () => {
+    /*
+     * $146.18 with a source — the plan's own response — rather than a number this site inferred
+     * from a gap it could not explain. That inference was wrong: it turned a $5.56 rounding on a
+     * generic Losartan into a facilitator payment that was never coming.
+     */
+    assert.equal(parsed.rows[0].expectedFacilitatorCents, 14_618);
+    assert.equal(parsed.rows[1].expectedFacilitatorCents, 0, "printed as zero, which is a real answer");
+  });
+
+  test("the old sixteen-column report still reads exactly as it did", () => {
+    // The pharmacy has months of these. A reader that only understands the new shape is a regression.
+    const old = parseRxTransactions(SAMPLE);
+    assert.deepEqual(old.problems, []);
+    assert.ok(old.rows.length > 0);
+    assert.equal(old.rows[0].expectedFacilitatorCents, null, "no column, so nothing is claimed");
+  });
+
+  test("a report rebuilt beyond recognition loads nothing and says so", () => {
+    /*
+     * The one thing worse than refusing a file is reading it on a guess. Two columns added at once
+     * is a report that has been rebuilt, and the figures it would yield are not worth having.
+     */
+    const twoMore = [...HEAD17, "Third Party:,610097(A4) - 610097",
+      "332359-1,P,$204.57,KS20B2,IRX9TP,$0.00,$10.50,$0.00,9/5/2026 9:23:51 AM,09/05/26,610097,30.0000,$328.23,A4,00597015230,($123.66),$146.18,$1.00",
+      ...FOOT17].join("\r\n");
+    const bad = parseRxTransactions(twoMore);
+    assert.equal(bad.rows.length, 0);
+    assert.ok(bad.problems.length > 0, "and it explains itself rather than loading a plausible lie");
   });
 });

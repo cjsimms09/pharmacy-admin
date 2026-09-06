@@ -1635,6 +1635,27 @@ export const claims = sqliteTable(
     awpCents: integer("awp_cents"),
     acquisitionCents: integer("acquisition_cents"),
     grossProfitCents: integer("gross_profit_cents"),
+    /*
+     * The facilitator payment the plan promised at adjudication, where the report carries one.
+     *
+     * PioneerRx knows a Part D fill has a manufacturer share coming because the plan's response
+     * says so; the money follows weeks later from the Medicare Transaction Facilitator. Held here,
+     * a fill that lost money on the day can say what it is still owed and by whom — and a promise
+     * that never turns into a payment becomes chaseable instead of invisible.
+     *
+     * Null means the report said nothing, which is not the same as a promise of zero.
+     */
+    expectedFacilitatorCents: integer("expected_facilitator_cents"),
+    /*
+     * The pharmacy's own cash programme rather than a third party.
+     *
+     * These fills were dropped on import for months, which quietly deleted the margin on the only
+     * business the pharmacy prices itself. They are kept now and counted in what the day made —
+     * and excluded from every question that presumes an insurer: there is no floor for the state
+     * to enforce on a price the pharmacy set, no contract to appeal under, and a low number is
+     * simply what it charged.
+     */
+    cashPlan: integer("cash_plan", { mode: "boolean" }).notNull().default(false),
     ingredientPaidCents: integer("ingredient_paid_cents"),
     dispensingFeePaidCents: integer("dispensing_fee_paid_cents"),
     daw: text("daw"),

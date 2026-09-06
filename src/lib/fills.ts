@@ -63,9 +63,17 @@ export type ClaimRow = {
   acquisitionCents: number | null;
   /** The gross profit the report itself printed for this row. The check on our own arithmetic. */
   grossProfitCents?: number | null;
+  /**
+   * The facilitator payment the plan promised at adjudication, where the report carries one.
+   *
+   * Null means the report said nothing. A promise of zero is a different fact and is kept as zero.
+   */
+  expectedFacilitatorCents?: number | null;
   status: string;
   /** True where this is a reversal that matched no claim held. */
   unmatchedReversal?: boolean;
+  /** True where the pharmacy set this price itself: its cash programme, not a third party. */
+  cashPlan?: boolean;
 };
 
 export type FillPayer = {
@@ -89,6 +97,14 @@ export type Fill = {
   payers: FillPayer[];
   /** True where more than one plan paid: the case this exists for. */
   coordinated: boolean;
+  /**
+   * The pharmacy's own cash price rather than an insurer's.
+   *
+   * Its margin counts like any other — it is a bottle sold — but nothing here is owed by anybody.
+   * There is no floor for the state to enforce on a price the pharmacy set, no contract to appeal
+   * under, and a number below NADAC is what it charged rather than a shortfall to claim.
+   */
+  cashPlan: boolean;
   quantityThousandths: number | null;
   /** What every payer remitted, added. */
   remitCents: number;
@@ -100,6 +116,18 @@ export type Fill = {
    */
   laterPaymentsCents: number;
   laterPayments: { source: string; payer: string | null; amountCents: number }[];
+  /**
+   * Money promised at adjudication and not yet in the bank, on this fill.
+   *
+   * The report says what the facilitator will pay; the payment arrives weeks later. Held together,
+   * a fill can say it is owed $146.18 rather than reading as a $123.66 loss — and when the payment
+   * lands and is matched, what is left outstanding falls to nothing on its own.
+   *
+   * Null where no row on the fill carried a promise, which is not the same as being owed nothing.
+   */
+  expectedFacilitatorCents: number | null;
+  /** The promise less what has actually arrived, floored at nothing. What is still to come. */
+  facilitatorOutstandingCents: number | null;
   /** Remit, plus what the patient paid, plus anything that arrived afterwards. */
   revenueCents: number;
   /**
@@ -244,6 +272,19 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
     const revenueCents = remitCents + patientPaidCents + laterPaymentsCents;
 
     /*
+     * What was promised, taken once.
+     *
+     * A coordinated fill can carry the same promise on both of its rows — it is one manufacturer
+     * share on one bottle, not two — so the largest is taken, exactly as the acquisition cost is.
+     * Adding them would invent money in the direction that flatters the pharmacy, which is the
+     * worst direction for a figure somebody is going to chase a payer over.
+     */
+    const promised = rows.map((r) => r.expectedFacilitatorCents).filter((x): x is number => x !== null && x !== undefined);
+    const expectedFacilitatorCents = promised.length ? Math.max(...promised) : null;
+    const facilitatorOutstandingCents =
+      expectedFacilitatorCents === null ? null : Math.max(0, expectedFacilitatorCents - laterPaymentsCents);
+
+    /*
      * The report's own answer, for comparison — but only where it is comparable.
      *
      * A payment that arrived weeks later cannot be in a figure printed on the day, so a fill
@@ -272,11 +313,14 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
       itemName: rows.find((r) => r.itemName)?.itemName ?? null,
       payers,
       coordinated: payers.length > 1,
+      cashPlan: rows.some((r) => r.cashPlan === true),
       quantityThousandths,
       remitCents,
       patientPaidCents,
       laterPaymentsCents,
       laterPayments: mine.map((p) => ({ source: p.source, payer: p.payer, amountCents: p.amountCents })),
+      expectedFacilitatorCents,
+      facilitatorOutstandingCents,
       revenueCents,
       patientShareUncertain,
       acquisitionCents,

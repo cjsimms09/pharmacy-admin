@@ -117,6 +117,8 @@ export type ImportReport = {
   rowsRead: number;
   claimsAdded: number;
   duplicates: number;
+  /** Rows already held whose figures this file corrected. A re-sent report is how a fix arrives. */
+  restated?: number;
   skipped: number;
   skipReasons: Record<string, number>;
   unmappedColumns: string[];
@@ -342,13 +344,18 @@ export async function importRxTransactions(file: Buffer, fileName: string, userI
   });
   const keys = new Set<string>();
   const unsold = new Map<string, string>();
+  const byKey = new Map<string, string>();
   for (const c of held) {
-    if (c.transactionKey) { keys.add(c.transactionKey); if (!c.completedAt) unsold.set(c.transactionKey, c.id); }
+    if (c.transactionKey) {
+      keys.add(c.transactionKey);
+      byKey.set(c.transactionKey, c.id);
+      if (!c.completedAt) unsold.set(c.transactionKey, c.id);
+    }
     if (c.reversalKey) keys.add(c.reversalKey);
   }
   const paid = held.filter((c) => c.status === "paid");
 
-  const plan = planTransactions(parsed.rows, { keys, paid, unsold }, { ignoreBins: ["028249"] });
+  const plan = planTransactions(parsed.rows, { keys, paid, unsold, byKey }, { ignoreBins: ["028249"] });
   const skipReasons = { ...parsed.reasons };
   for (const s of plan.skipped) skipReasons[s.why] = (skipReasons[s.why] ?? 0) + 1;
 
@@ -376,6 +383,8 @@ export async function importRxTransactions(file: Buffer, fileName: string, userI
       quantityThousandths: t.quantityThousandths, quantityUnit: null,
       remitCents: t.remitCents, copayCents: t.copayCents, patientTotalCents: t.patientTotalCents,
       acquisitionCents: t.acquisitionCents, grossProfitCents: t.grossProfitCents,
+      expectedFacilitatorCents: t.expectedFacilitatorCents ?? null,
+      cashPlan: t.cashPlan === true,
       ingredientPaidCents: t.ingredientPaidCents, dispensingFeePaidCents: t.dispensingFeeCents,
       status, reversedOn: status === "reversed" ? reversedOn : null,
       completedAt: t.completedAt ? mdyToIso(t.completedAt) : null,
@@ -396,6 +405,37 @@ export async function importRxTransactions(file: Buffer, fileName: string, userI
   for (const s of plan.markSold) {
     await db.update(schema.claims).set({ completedAt: mdyToIso(s.completedAt) }).where(eq(schema.claims.id, s.claimId));
   }
+  /*
+   * What the report now says about a claim already held, written over what it used to say.
+   *
+   * Only the report's own figures — never this site's status, its reversal pairing or the payments
+   * matched to it. Re-sending a corrected file is how a restated gross profit and a newly added
+   * column reach rows that were loaded before either existed, and without this the pharmacy would
+   * have had to delete its claims and start again to get the truth in.
+   */
+  let restated = 0;
+  for (const r of plan.refresh) {
+    const changed =
+      r.txn.grossProfitCents !== null || r.txn.expectedFacilitatorCents !== null || r.txn.patientTotalCents !== null;
+    if (!changed) continue;
+    await db
+      .update(schema.claims)
+      .set({
+        remitCents: r.txn.remitCents,
+        copayCents: r.txn.copayCents,
+        patientTotalCents: r.txn.patientTotalCents,
+        acquisitionCents: r.txn.acquisitionCents,
+        grossProfitCents: r.txn.grossProfitCents,
+        expectedFacilitatorCents: r.txn.expectedFacilitatorCents ?? null,
+        dispensingFeePaidCents: r.txn.dispensingFeeCents,
+        ingredientPaidCents: r.txn.ingredientPaidCents,
+        quantityThousandths: r.txn.quantityThousandths,
+        cashPlan: r.txn.cashPlan === true,
+        rawJson: JSON.stringify(r.txn.raw),
+      })
+      .where(eq(schema.claims.id, r.claimId));
+    restated++;
+  }
 
   const dates = inserts.map((c) => c.dateFilled).sort();
   return finish({
@@ -411,6 +451,7 @@ export async function importRxTransactions(file: Buffer, fileName: string, userI
     unmatchedReversals: plan.insertUnmatchedReversal.length,
     notYetSold: plan.insertPaid.filter((t) => !t.completedAt).length,
     nowSold: plan.markSold.length,
+    restated,
   });
 }
 
@@ -439,6 +480,7 @@ export function describeTransactionImport(r: TransactionImportReport): string {
   if (r.notYetSold) bits.push(`${r.notYetSold} of them not yet picked up when the report ran (kept; a return to stock comes in as a reversal)`);
   if (r.nowSold) bits.push(`${r.nowSold} held earlier now shown sold`);
   if (r.duplicates) bits.push(`${r.duplicates} already held`);
+  if (r.restated) bits.push(`${r.restated} of those restated from this file, because the report's own figures had changed`);
   const other = Object.entries(r.skipReasons).filter(([k]) => !/not yet sold/.test(k));
   if (other.length) bits.push(other.map(([k, v]) => `${v} ${k}`).join(", "));
   if (r.period) bits.push(`claims transmitted ${r.period.from}${r.period.to !== r.period.from ? ` to ${r.period.to}` : ""}`);
@@ -529,6 +571,8 @@ export async function claimFlags() {
       patientTotalCents: c.patientTotalCents,
       acquisitionCents: c.acquisitionCents,
       grossProfitCents: c.grossProfitCents,
+      expectedFacilitatorCents: c.expectedFacilitatorCents,
+      cashPlan: c.cashPlan,
       status: c.status,
       // A reversal kept because it matched nothing: negative money against a fill never counted.
       unmatchedReversal: (c.remitCents ?? 0) < 0 && !c.reversalKey,
@@ -550,11 +594,19 @@ export async function claimFlags() {
   const byKey = new Map(groups.map((g) => [planKey(g.bin, g.groupNumber), g.classification]));
   const classOf = (c: { bin: string | null; groupNumber: string | null }) => byKey.get(planKey(c.bin, c.groupNumber));
 
-  const inScope = rows.filter((c) => {
+  /*
+   * The cash programme is not a plan, and no question about plans applies to it.
+   *
+   * It has no classification to be missing, no floor to fall under and nobody to appeal to — the
+   * pharmacy set the price. Counting it among the unclassified would put every cash fill on a list
+   * of things somebody has to go and settle, which is a list of work that does not exist.
+   */
+  const thirdParty = rows.filter((c) => !c.cashPlan);
+  const inScope = thirdParty.filter((c) => {
     const cls = classOf(c);
     return cls !== undefined && CLASS_INFO[cls].inScope;
   });
-  const undetermined = rows.filter((c) => {
+  const undetermined = thirdParty.filter((c) => {
     const cls = classOf(c);
     return cls === undefined || cls === "unknown";
   });
@@ -575,6 +627,11 @@ export async function claimFlags() {
 
   return {
     total: rows.length,
+    /** Claims on somebody else's plan. Every classification and floor figure is drawn from these. */
+    thirdParty: thirdParty.length,
+    /** Fills the pharmacy priced itself, and what they made. Business it fully controls. */
+    cashFills: fills.filter((f) => f.cashPlan).length,
+    cashMarginCents: fills.filter((f) => f.cashPlan).reduce((n, f) => n + (f.marginCents ?? 0), 0),
     belowCost,
     belowCostTotalCents: sum(belowCost),
     /** One row per dispensing, with every payer that priced it. */
@@ -686,6 +743,8 @@ export async function allFills() {
       patientTotalCents: c.patientTotalCents,
       acquisitionCents: c.acquisitionCents,
       grossProfitCents: c.grossProfitCents,
+      expectedFacilitatorCents: c.expectedFacilitatorCents,
+      cashPlan: c.cashPlan,
       status: c.status,
       // A reversal kept because it matched nothing: negative money against a fill never counted.
       unmatchedReversal: (c.remitCents ?? 0) < 0 && !c.reversalKey,

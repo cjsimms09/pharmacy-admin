@@ -24,7 +24,7 @@ import { ALLOWED_MIME } from "./files";
  * behaviour we already had and is never wrong, only unhelpful.
  */
 
-export type RouteKind = "claims" | "rx_transactions" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "return_policy" | "nadac" | "unrecognised";
+export type RouteKind = "claims" | "rx_transactions" | "accrual_sales" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "return_policy" | "nadac" | "unrecognised";
 
 export type Classification = {
   kind: RouteKind;
@@ -43,6 +43,19 @@ const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
  * so only the most robust markers are worth testing. These two labels appear on no other report
  * the pharmacy receives.
  */
+/**
+ * The monthly "Accrual System Sales" report, by its title line or its file name.
+ *
+ * It is the one report that carries the whole till — front-of-shop merchandise as well as
+ * prescriptions — so it is the only thing that can answer "what did the pharmacy take this month".
+ * The transaction report cannot: it is dispensing only, and reading it as total revenue would
+ * understate the business by everything sold over the counter.
+ */
+export function looksLikeAccrualSales(text: string, fileName = ""): boolean {
+  const head = text.slice(0, 4000);
+  return /accrual\s*system\s*sales/i.test(head) || /accrual[_ -]*system[_ -]*sales/i.test(fileName);
+}
+
 export function looksLikeDrillDown(text: string, fileName = ""): boolean {
   if (/purchase[_\s-]*drill[_\s-]*down/i.test(fileName)) return true;
   return /GCR/.test(text) && /OS\/Rx/.test(text);
@@ -134,6 +147,23 @@ export function classify(fileName: string, buf: Buffer): Classification {
       kind: "rx_transactions",
       why: "Begins with PioneerRx's \"Rx Transaction Details By Submission Type\" title; one row per claim transaction.",
       headers: ["Rx Number", "Status", "Amount", "Group", "Ntw Reim. Id", "Copay", "Dispensing Fee", "Completed Date", "Date Filled", "BIN", "QTY", "Acq. Inv. Cost", "PCN", "NDC", "GrossProfit"],
+    };
+  }
+  /*
+   * PioneerRx's "Accrual System Sales", which the pharmacy sends monthly.
+   *
+   * Recognised before it can be read. Nothing about its columns is guessed at — guessing a layout
+   * is precisely the failure the transaction reader was rebuilt to prevent, and a sales figure
+   * invented from the wrong column would be worse than no figure at all. So it is identified,
+   * filed against the month it covers and named on the Inbox as understood but not yet read, which
+   * is what stops a report the pharmacy went to the trouble of sending from vanishing into the
+   * documents pile while everybody assumes it is being counted.
+   */
+  if (looksLikeAccrualSales(buf.subarray(0, 8192).toString("utf8"), fileName)) {
+    return {
+      kind: "accrual_sales",
+      why: "PioneerRx's \"Accrual System Sales\" — the whole till for the month, retail alongside prescriptions. Recognised and filed; the reader for it is not built yet, so send one and it will be read.",
+      headers: [],
     };
   }
   /*

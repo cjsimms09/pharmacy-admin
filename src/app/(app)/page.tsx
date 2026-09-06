@@ -268,12 +268,69 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       */}
       <section className="mb-6">
         <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="text-sm font-semibold">Where the money stands</h2>
+          <h2 className="text-sm font-semibold">Scoreboard</h2>
           <span className="text-xs text-ink-3">
             Month to date · {fmtLong(today)} · <Link href="/money" className="text-accent underline">all of it</Link>
           </span>
         </div>
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {/*
+            What was dispensed and what it made — prescriptions only.
+
+            The transaction report does not carry front-of-shop merchandise, so this is not the
+            whole till and does not pretend to be. Cash fills are in it: a bottle the pharmacy
+            priced itself is revenue like any other, and for months they were thrown away on import,
+            which silently deleted the margin on the only business the pharmacy fully controls.
+          */}
+          <Figure
+            value={formatCents(money.dispensing.marginCents)}
+            label="Gross profit this month"
+            tone={money.dispensing.marginCents < 0 ? "crit" : "ok"}
+            href="/claims"
+            sub={
+              money.dispensing.fills === 0
+                ? "No fills loaded for this month yet."
+                : [
+                    `on ${formatCents(money.dispensing.revenueCents)} dispensed across ${money.dispensing.fills.toLocaleString()} fills`,
+                    money.dispensing.cashFills > 0
+                      ? `${formatCents(money.dispensing.cashMarginCents)} of it from cash`
+                      : null,
+                    money.dispensing.promisedCents > 0
+                      ? `${formatCents(money.dispensing.promisedCents)} promised and unpaid`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")
+            }
+          />
+
+          {/*
+            Money actually banked from the facilitator, and only that.
+
+            An earlier version put "still owed" here from the gap between the report's gross profit
+            and ours. That gap is real but its cause is not knowable from a fill — one was $146.18
+            of facilitator money, another $5.56 on a generic Losartan that no facilitator would ever
+            pay — so forecasting from it invented a receivable. The gap belongs on the claims screen
+            as a reconciliation, not here as money coming.
+          */}
+          <Figure
+            value={formatCents(money.facilitator.receivedCents)}
+            label="Facilitator money in"
+            tone={money.facilitator.receivedCents > 0 ? "ok" : "muted"}
+            href="/remits/mtf"
+            sub={
+              [
+                money.facilitator.payments > 0
+                  ? `${money.facilitator.payments} payment${money.facilitator.payments === 1 ? "" : "s"} this month`
+                  : "nothing received this month",
+                money.facilitator.lastMonthCents > 0 ? `${formatCents(money.facilitator.lastMonthCents)} last month` : null,
+                money.facilitator.unmatched > 0 ? `${money.facilitator.unmatched} not yet matched to a claim` : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")
+            }
+          />
+
           {/* ── The ratio, which is the lever ───────────────────────── */}
           <Figure
             value={money.ratio?.percent !== null && money.ratio?.percent !== undefined ? `${money.ratio.percent.toFixed(2)}%` : "—"}
@@ -316,33 +373,6 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                   ]
                     .filter(Boolean)
                     .join(" · ")
-            }
-          />
-
-          {/*
-            Money actually banked from the facilitator, and only that.
-
-            An earlier version put "still owed" here from the gap between the report's gross profit
-            and ours. That gap is real but its cause is not knowable from a fill — one was $146.18
-            of facilitator money, another $5.56 on a generic Losartan that no facilitator would ever
-            pay — so forecasting from it invented a receivable. The gap belongs on the claims screen
-            as a reconciliation, not here as money coming.
-          */}
-          <Figure
-            value={formatCents(money.facilitator.receivedCents)}
-            label="Facilitator money in"
-            tone={money.facilitator.receivedCents > 0 ? "ok" : "muted"}
-            href="/remits/mtf"
-            sub={
-              [
-                money.facilitator.payments > 0
-                  ? `${money.facilitator.payments} payment${money.facilitator.payments === 1 ? "" : "s"} this month`
-                  : "nothing received this month",
-                money.facilitator.lastMonthCents > 0 ? `${formatCents(money.facilitator.lastMonthCents)} last month` : null,
-                money.facilitator.unmatched > 0 ? `${money.facilitator.unmatched} not yet matched to a claim` : null,
-              ]
-                .filter(Boolean)
-                .join(" · ")
             }
           />
         </div>

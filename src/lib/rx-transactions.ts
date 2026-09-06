@@ -60,6 +60,21 @@ export type Transaction = {
   dateFilled: string;
   completedAt: string | null;
   quantityThousandths: number | null;
+  /**
+   * True where this is the pharmacy's own cash programme rather than a third party.
+   *
+   * Its margins are as real as any other — it is a fill, and it made or lost money — but there is
+   * no plan behind it, no floor for the state to enforce and no payer to appeal to. So it is kept
+   * and counted, and held out of every question that only makes sense about an insurer.
+   */
+  cashPlan?: boolean;
+  /**
+   * The facilitator payment the report says to expect on this fill, where it carries one.
+   *
+   * Null where the report has no such column, or printed nothing for this row — which is not the
+   * same as zero, and only a promise can be chased.
+   */
+  expectedFacilitatorCents?: number | null;
   /** What the plan paid (the report's first "Amount"). Negative on a reversal. */
   remitCents: number | null;
   copayCents: number | null;
@@ -98,18 +113,164 @@ export const TITLE = "Rx Transaction Details By Submission Type";
 /** The column names the report carries, on both header lines, in any order. */
 export const EXPECTED_HEADERS = [
   "Rx Number", "Status", "Amount", "Group", "Ntw Reim. Id", "Copay", "Dispensing Fee", "Total", "Completed Date",
-  "Date Filled", "BIN", "Tax", "QTY", "Acq. Inv. Cost", "PCN", "NDC", "GrossProfit",
+  "Date Filled", "BIN", "Tax", "Est", "QTY", "Acq. Inv. Cost", "PCN", "NDC", "GrossProfit",
 ];
 
 /**
- * Where each field sits in a data row. Fixed, because the wrapped header gives no positions;
- * verified on every row by the shape checks in readRow.
+ * Names whose disappearance is not evidence that anything moved.
+ *
+ * "Tax" was printed in the header and had no cell beneath it — and it is the slot the report's new
+ * estimate column was built into, so it has become "Est". Treating that rename as a lost column
+ * refused a perfectly good file. The columns that carry figures are the ones whose absence means
+ * every field after them has shifted, and those are still checked.
  */
-const POS = {
+const HEADER_ONLY = new Set(["Tax", "Est"]);
+
+/** The pharmacy's own cash programme: its loyalty plan's BIN, and the section print name. */
+export const CASH_BINS = new Set(["028249"]);
+export const CASH_LABEL = /pharmd|private pay|\bcash\b/i;
+
+/**
+ * Where each field sits in a data row.
+ *
+ * The header cannot be used to work this out: it wraps across two lines, so two column names sit
+ * above the others, and the "Tax" column it names has no cell in the data at all. Positions are
+ * therefore taken from the file itself — but they are no longer *assumed*, because a column added
+ * to the report shifts every field after it, and every figure then read is individually plausible
+ * and collectively wrong. That is the worst failure this reader has: it does not look like an
+ * error, it looks like a bad day's trading.
+ *
+ * So the layout is chosen by evidence. Each candidate is tried against the first rows of the file
+ * and scored on things only the true layout can satisfy — a six-digit BIN in the BIN cell, dates in
+ * the date cells, an NDC in the NDC cell, and above all the report's own arithmetic:
+ *
+ *   GrossProfit = Amount + Total − Acq. Inv. Cost
+ *
+ * A layout off by one fails that on nearly every row. The right one satisfies it on nearly all.
+ */
+type Layout = {
+  rxFill: number; status: number; amount: number; group: number; network: number; copay: number;
+  dispensingFee: number; patientTotal: number; completed: number; dateFilled: number; bin: number;
+  qty: number; acquisition: number; pcn: number; ndc: number; grossProfit: number;
+  /** The column the report gained, where it has one. Null on the layout this began with. */
+  extra: number | null;
+};
+
+const BASE: Layout = {
   rxFill: 0, status: 1, amount: 2, group: 3, network: 4, copay: 5, dispensingFee: 6, patientTotal: 7,
   completed: 8, dateFilled: 9, bin: 10, qty: 11, acquisition: 12, pcn: 13, ndc: 14, grossProfit: 15,
-} as const;
-const FIELD_COUNT = 16;
+  extra: null,
+};
+const BASE_COUNT = 16;
+
+const FIELDS = [
+  "rxFill", "status", "amount", "group", "network", "copay", "dispensingFee", "patientTotal",
+  "completed", "dateFilled", "bin", "qty", "acquisition", "pcn", "ndc", "grossProfit",
+] as const;
+
+/**
+ * Every layout a row of this width could plausibly have.
+ *
+ * One extra column can land anywhere, so every landing place is offered and the evidence picks.
+ * More than one added at once is not guessed at — the file is refused and somebody looks, which is
+ * the right answer for a report that has been rebuilt rather than extended.
+ */
+export function candidateLayouts(fieldCount: number): Layout[] {
+  if (fieldCount === BASE_COUNT) return [BASE];
+  if (fieldCount !== BASE_COUNT + 1) return [];
+  const out: Layout[] = [];
+  for (let at = 0; at <= BASE_COUNT; at++) {
+    const l = { extra: at } as Layout;
+    for (const f of FIELDS) l[f] = BASE[f] >= at ? BASE[f] + 1 : BASE[f];
+    out.push(l);
+  }
+  return out;
+}
+
+const isMoney = (s: string) => s.trim() === "" || /^\(?-?\$?[\d,]*\.?\d*\)?$/.test(s.trim());
+
+/**
+ * How well a layout explains a row. The arithmetic is worth more than any single shape check,
+ * because it is the one thing a shifted layout cannot accidentally satisfy.
+ */
+export function scoreLayout(layout: Layout, rows: string[][]): number {
+  let score = 0;
+  for (const parts of rows) {
+    if (RX_FILL.test(parts[layout.rxFill] ?? "")) score += 1;
+    if (["P", "A", "R"].includes(parts[layout.status] ?? "")) score += 1;
+    /*
+     * A cell must be right to earn, and wrong to lose. Merely being *allowed* to be blank earns
+     * nothing, because a blank is what a shifted layout lands on as often as the true one.
+     *
+     * This is what separates the only two layouts that ever genuinely compete here — insertion
+     * before the BIN and insertion after it, which agree about every other field in the row. On a
+     * cash row the BIN is empty and both look equally good; on a third-party row one finds six
+     * digits and the other finds a dollar sign, and that is the whole answer.
+     */
+    const bin = (parts[layout.bin] ?? "").trim();
+    if (/^\d{6}$/.test(bin)) score += 4;
+    else if (bin !== "") score -= 4;
+    if (DATE_MDY.test(parts[layout.dateFilled] ?? "")) score += 1;
+    const ndc = (parts[layout.ndc] ?? "").replace(/\D/g, "");
+    if (ndc.length === 10 || ndc.length === 11) score += 4;
+    else if (ndc !== "") score -= 4;
+    /*
+     * The quantity, which is the check that actually separates the two layouts that matter.
+     *
+     * The column the report gained sits directly beside QTY, so "inserted before the quantity" and
+     * "inserted after it" agree about every other field and score identically on all of them. They
+     * differ on one thing: a quantity is a bare number and a money cell is not. Without this the
+     * evidence ties, the file is refused, and a correct report does not load.
+     */
+    const qty = (parts[layout.qty] ?? "").trim();
+    if (qty !== "" && /^-?[\d.]+$/.test(qty)) score += 4;
+    else if (qty !== "") score -= 4;
+    // And the added column should look like the money it is, not like a quantity or an NDC.
+    if (layout.extra !== null && isMoney(parts[layout.extra] ?? "")) score += 2;
+    for (const f of ["amount", "copay", "patientTotal", "acquisition", "grossProfit"] as const) {
+      if (isMoney(parts[layout[f]] ?? "")) score += 1;
+    }
+    // The report checking itself. Worth ten shape checks, because only the true layout satisfies it.
+    const amount = parseCents(parts[layout.amount]);
+    const total = parseCents(parts[layout.patientTotal]);
+    const acq = parseCents(parts[layout.acquisition]);
+    const gp = parseCents(parts[layout.grossProfit]);
+    if (amount !== null && total !== null && acq !== null && gp !== null && Math.abs(amount + total - acq - gp) <= 2) {
+      score += 10;
+    }
+  }
+  return score;
+}
+
+/** The layout the rows themselves say this file has, or null where nothing fits convincingly. */
+export function chooseLayout(rows: string[][]): { layout: Layout; confident: boolean } | null {
+  /*
+   * Sampled across the whole report, never off the top of it.
+   *
+   * The report is grouped by payer and the first section is Private Pay, where the BIN cell is
+   * empty on every row — so the first forty rows are exactly the forty that cannot tell the two
+   * competing layouts apart. Taking a stride through the file guarantees third-party rows, which
+   * are the ones that decide it.
+   */
+  const stride = Math.max(1, Math.floor(rows.length / 120));
+  const sample = rows.filter((_, i) => i % stride === 0).slice(0, 120);
+  if (sample.length === 0) return null;
+  const scored = candidateLayouts(sample[0].length)
+    .map((layout) => ({ layout, score: scoreLayout(layout, sample) }))
+    .sort((a, b) => b.score - a.score);
+  if (scored.length === 0) return null;
+  const [best, next] = scored;
+  /*
+   * A clear winner, or nothing. Two layouts scoring alike means the evidence does not distinguish
+   * them, and picking one anyway is exactly the silent mis-read this exists to prevent.
+   *
+   * The margin is absolute rather than proportional: what matters is that the winner explains
+   * something about most rows that the runner-up cannot, and a percentage of a score that grows
+   * with the file says nothing about that.
+   */
+  const confident = best.score > 0 && (next === undefined || best.score - next.score >= sample.length);
+  return confident ? { layout: best.layout, confident } : null;
+}
 
 const RX_FILL = /^(\d+)-(\d+)$/;
 const DATE_MDY = /^(\d{1,2})\/(\d{1,2})\/(\d{4}|\d{2})(?!\d)/;
@@ -164,6 +325,7 @@ export function parseRxTransactions(text: string): TransactionParse {
   let submissionType: string | null = null;
   let ordinal = 0;
   const keysSeen = new Map<string, number>();
+  const pending: { parts: string[]; section: ReturnType<typeof parseSectionLabel>; submissionType: string | null }[] = [];
 
   for (const raw of lines) {
     const line = raw.trim();
@@ -192,9 +354,17 @@ export function parseRxTransactions(text: string): TransactionParse {
 
     const parts = splitRow(raw, ",").map((x) => x.trim());
 
-    // Header lines: every field is a column name we know. Both lines feed one set.
-    if (parts.length > 1 && parts.every((p) => EXPECTED_HEADERS.includes(p))) {
-      parts.forEach((p) => headers.add(p));
+    /*
+     * Header lines, which must survive the report gaining a column.
+     *
+     * Requiring every name to be one we already knew meant the day a column was added the header
+     * stopped being recognised at all, and the file was rejected as "not this report" — the least
+     * useful thing it could have said. Two known names are enough to identify a header line, and
+     * anything unfamiliar alongside them is kept rather than rejected: it is the new column, and
+     * naming it is how the screen can say what was added.
+     */
+    if (parts.length > 1 && parts.filter((p) => EXPECTED_HEADERS.includes(p)).length >= 2 && !parts.some((p) => /^\(?\$/.test(p))) {
+      parts.forEach((p) => { if (p) headers.add(p); });
       if (parts.includes("Rx Number")) headerSeen = true;
       continue;
     }
@@ -221,25 +391,59 @@ export function parseRxTransactions(text: string): TransactionParse {
       continue;
     }
     if (!headerSeen) { skip("a transaction before the header row"); continue; }
-    if (parts.length !== FIELD_COUNT) { skip(`a transaction with ${parts.length} fields where ${FIELD_COUNT} were expected`); continue; }
     if (!section) { skip("a transaction under no Third Party line"); continue; }
+    /*
+     * Held, not read. Which cell is which cannot be known from one row — it is decided below, from
+     * all of them at once, so that a column added to the report is detected rather than absorbed.
+     */
+    pending.push({ parts, section, submissionType });
+  }
 
-    const t = readRow(parts, section, submissionType, ++ordinal);
-    if (typeof t === "string") { skip(t); continue; }
-    const n = (keysSeen.get(t.transactionKey) ?? 0) + 1;
-    keysSeen.set(t.transactionKey, n);
-    t.transactionKey = `${t.transactionKey}#${n}`;
-    rows.push(t);
+  /*
+   * Now the layout, from the rows themselves.
+   *
+   * Widths are counted rather than assumed: a file whose rows disagree about how many fields they
+   * have is not a layout problem, it is a broken file, and the majority width is used so a handful
+   * of mangled lines cannot outvote a good report.
+   */
+  const widths = new Map<number, number>();
+  for (const r of pending) widths.set(r.parts.length, (widths.get(r.parts.length) ?? 0) + 1);
+  const width = [...widths.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? BASE_COUNT;
+  const usable = pending.filter((r) => r.parts.length === width);
+  for (const r of pending) {
+    if (r.parts.length !== width) skip(`a transaction with ${r.parts.length} fields where ${width} were expected`);
+  }
+
+  const chosen = usable.length > 0 ? chooseLayout(usable.map((r) => r.parts)) : null;
+  const layout = chosen?.layout ?? null;
+
+  if (usable.length > 0 && layout === null) {
+    problems.push(
+      width === BASE_COUNT || width === BASE_COUNT + 1
+        ? `The report's columns are not where this reader expects them, and nothing it tried explains the rows — every figure it read would be plausible and wrong, so nothing was loaded. Send me the file and I will fix the reader.`
+        : `The report now has ${width} columns where ${BASE_COUNT} were expected, which is more than one change at a time. Nothing was loaded until somebody has looked — reading it on a guess would give figures that look reasonable and are not.`,
+    );
+  }
+
+  if (layout) {
+    for (const r of usable) {
+      const t = readRow(r.parts, layout, r.section, r.submissionType, ++ordinal);
+      if (typeof t === "string") { skip(t); continue; }
+      const n = (keysSeen.get(t.transactionKey) ?? 0) + 1;
+      keysSeen.set(t.transactionKey, n);
+      t.transactionKey = `${t.transactionKey}#${n}`;
+      rows.push(t);
+    }
   }
 
   if (!headerSeen) {
     problems.push(`This does not look like the "${TITLE}" report — no header row beginning "Rx Number" was found.`);
   } else {
-    const missing = EXPECTED_HEADERS.filter((h) => !headers.has(h));
+    const missing = EXPECTED_HEADERS.filter((h) => !HEADER_ONLY.has(h) && !headers.has(h));
     if (missing.length) {
       problems.push(
         `The report's columns have changed: ${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} no longer in the header. ` +
-          "The positions this reads by are fixed for the report as it was set up, so nothing was loaded until somebody has looked.",
+          "Nothing was loaded until somebody has looked — a column that has gone means every figure after it has moved.",
       );
       rows.length = 0;
     }
@@ -249,10 +453,18 @@ export function parseRxTransactions(text: string): TransactionParse {
   return { rows, period, printedOn, headers: [...headers], skipped, reasons, problems };
 }
 
-function readRow(parts: string[], section: ReturnType<typeof parseSectionLabel>, submissionType: string | null, ordinal: number): Transaction | string {
+function readRow(parts: string[], POS: Layout, section: ReturnType<typeof parseSectionLabel>, submissionType: string | null, ordinal: number): Transaction | string {
   const rx = RX_FILL.exec(parts[POS.rxFill])!;
   const status = parts[POS.status];
-  if (status !== "P" && status !== "A" && status !== "R") return `a status other than P, A or R ("${status}")`;
+  /*
+   * A status this reader does not know is set aside by name, never guessed at.
+   *
+   * The live report carries "AR" on a handful of rows, one of them with $1,492.61 of patient
+   * responsibility on it. Read as paid it would invent revenue; dropped as a malformed row it would
+   * vanish silently. Named, it shows up in the import summary as something to ask about — which is
+   * the only honest thing to do with a code whose meaning nobody here knows yet.
+   */
+  if (status !== "P" && status !== "A" && status !== "R") return `a status this reader does not know yet ("${status}")`;
   const dateFilled = mdyToIso(parts[POS.dateFilled]);
   if (!dateFilled) return "a row whose date-filled cell is not a date";
   const binRaw = parts[POS.bin];
@@ -281,6 +493,28 @@ function readRow(parts: string[], section: ReturnType<typeof parseSectionLabel>,
   const ndcBare10 = ndcRaw.length === 10 ? ndcRaw : null;
   const quantityThousandths = parseQuantityThousandths(qtyRaw);
 
+  /*
+   * The facilitator payment the plan said to expect, where the report now carries one.
+   *
+   * The whole reason the report and this site used to disagree: PioneerRx knew a Part D fill had a
+   * manufacturer share coming and this reader had nowhere to put it, so every one of them looked
+   * like a fill that lost money. Now it is a figure with a source — the plan's own response — and
+   * the loop it opens closes when the money arrives and is matched to the fill.
+   *
+   * A blank cell is not zero. A plan that promised nothing and a report that printed nothing are
+   * different facts, and only the first can be chased.
+   */
+  const expectedFacilitatorCents = POS.extra === null ? null : parseCents(parts[POS.extra]);
+
+  /*
+   * The pharmacy's own cash programme, named from the section it was printed under.
+   *
+   * "Private Pay (Cash)" carries no BIN at all and "PharmD Loyalty Plan" carries 028249. Both are
+   * the same thing: the pharmacy setting its own price. Recognising them here rather than throwing
+   * the rows away means the margin still counts, which is the only thing about them that matters.
+   */
+  const cashPlan = CASH_BINS.has(bin ?? "") || CASH_LABEL.test(section.label);
+
   const raw: Record<string, string> = {
     "Rx Number": parts[POS.rxFill], Status: status, Amount: parts[POS.amount], Group: parts[POS.group], "Ntw Reim. Id": parts[POS.network],
     Copay: parts[POS.copay], "Dispensing Fee": parts[POS.dispensingFee], Total: parts[POS.patientTotal], "Completed Date": completed,
@@ -288,6 +522,7 @@ function readRow(parts: string[], section: ReturnType<typeof parseSectionLabel>,
     NDC: parts[POS.ndc], GrossProfit: parts[POS.grossProfit], "Third Party": section.label, "Submission Type": submissionType ?? "",
     "Ingredient Cost Paid (derived)": ingredientPaidCents === null ? "" : (ingredientPaidCents / 100).toFixed(2),
   };
+  if (POS.extra !== null) raw["Est. MTF"] = parts[POS.extra] ?? "";
 
   return {
     ordinal,
@@ -309,6 +544,8 @@ function readRow(parts: string[], section: ReturnType<typeof parseSectionLabel>,
     patientTotalCents: parseCents(parts[POS.patientTotal]),
     acquisitionCents: parseCents(parts[POS.acquisition]),
     grossProfitCents: parseCents(parts[POS.grossProfit]),
+    expectedFacilitatorCents,
+    cashPlan,
     ingredientPaidCents,
     ndc11,
     ndcBare10,
@@ -341,6 +578,8 @@ export type TransactionPlan = {
   insertUnmatchedReversal: Transaction[];
   /** Rows already held without a sale date that this file now shows sold: the claim and the date. */
   markSold: { claimId: string; completedAt: string }[];
+  /** Rows already held whose figures the report has since restated, and the row to restate from. */
+  refresh: { claimId: string; txn: Transaction }[];
   skipped: { txn: Transaction; why: string }[];
   duplicates: number;
 };
@@ -373,10 +612,10 @@ export type TransactionPlan = {
  */
 export function planTransactions(
   txns: Transaction[],
-  existing: { keys: Set<string>; paid: PaidClaimRef[]; unsold?: Map<string, string> },
+  existing: { keys: Set<string>; paid: PaidClaimRef[]; unsold?: Map<string, string>; byKey?: Map<string, string> },
   opts: { ignoreBins?: string[]; ignoreLabels?: RegExp; requireCompleted?: boolean } = {},
 ): TransactionPlan {
-  const plan: TransactionPlan = { insertPaid: [], insertReversedPaid: [], reverseExisting: [], insertUnmatchedReversal: [], markSold: [], skipped: [], duplicates: 0 };
+  const plan: TransactionPlan = { insertPaid: [], insertReversedPaid: [], reverseExisting: [], insertUnmatchedReversal: [], markSold: [], refresh: [], skipped: [], duplicates: 0 };
   const ignoreBins = new Set(opts.ignoreBins ?? []);
   const ignore = opts.ignoreLabels ?? /pharmd/i;
   const usedExisting = new Set<string>();
@@ -388,9 +627,32 @@ export function planTransactions(
       plan.duplicates++;
       const id = t.completedAt ? existing.unsold?.get(t.transactionKey) : undefined;
       if (id) plan.markSold.push({ claimId: id, completedAt: t.completedAt! });
+      /*
+       * A row already held is counted again rather than stored again — but it is also re-read.
+       *
+       * The report is not immutable. Its gross profit column was quietly carrying an estimated
+       * rebate, which made every figure drawn from it disagree with the pharmacy's own arithmetic;
+       * when that was fixed at source, the corrected numbers arrived in a file whose rows this site
+       * already held, and skipping them as duplicates would have kept the wrong figures for ever.
+       * The same is true of a column the report gains: the promised facilitator payment exists only
+       * in the new file, on rows loaded before it was added.
+       *
+       * So a duplicate refreshes the figures it carries. Its identity, its status and the reversal
+       * that cancelled it are untouched — this replaces what the report says about a claim, never
+       * what this site has worked out about one.
+       */
+      const held = existing.byKey?.get(t.transactionKey);
+      if (held) plan.refresh.push({ claimId: held, txn: t });
       continue;
     }
-    if ((t.bin && ignoreBins.has(t.bin)) || ignore.test(t.payerLabel)) { plan.skipped.push({ txn: t, why: "cash plan (PharmD), not a third-party claim" }); continue; }
+    /*
+     * The cash programme is kept now, not discarded.
+     *
+     * Throwing it away lost the margin on every fill the pharmacy priced itself — which is business
+     * it fully controls, and therefore the business where a bad margin is most fixable. The rows
+     * are marked instead, so nothing downstream mistakes them for an insurer with a floor to owe.
+     */
+    if ((t.bin && ignoreBins.has(t.bin)) || ignore.test(t.payerLabel)) t.cashPlan = true;
     if (t.status === "R") { plan.skipped.push({ txn: t, why: "rejected by the plan, nothing paid" }); continue; }
     if (opts.requireCompleted === true && !t.completedAt) { plan.skipped.push({ txn: t, why: "not yet sold (no completed date)" }); continue; }
     if (t.status === "P") { plan.insertPaid.push(t); continue; }

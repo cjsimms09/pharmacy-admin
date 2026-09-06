@@ -24,6 +24,26 @@ import { allFills } from "./claims";
  */
 
 export type MoneyPosition = {
+  /**
+   * What the pharmacy dispensed this month and what it made on it.
+   *
+   * Prescriptions only — this is the transaction report, and it does not carry front-of-shop
+   * merchandise. Cash fills are counted here with the rest, because a bottle the pharmacy priced
+   * itself is revenue like any other, and it is the business it has the most control over.
+   */
+  dispensing: {
+    month: string;
+    fills: number;
+    revenueCents: number;
+    marginCents: number;
+    /** The pharmacy's own cash programme, shown apart because it is priced rather than negotiated. */
+    cashFills: number;
+    cashRevenueCents: number;
+    cashMarginCents: number;
+    /** Promised at adjudication by a plan and not yet paid. Real, sourced, and chaseable. */
+    promisedCents: number;
+    promisedFills: number;
+  };
   /** Where the compliance ratio stands, and what it is buying. */
   ratio: {
     supplierId: string;
@@ -172,7 +192,29 @@ export async function moneyPosition(today = new Date()): Promise<MoneyPosition> 
   const [mtf, fills] = await Promise.all([facilitatorMoney("mtf", today), allFills()]);
   const gaps = fills.filter((f) => f.unreconciledCents !== null);
 
+  /*
+   * This month's dispensing, by the date the drug was actually handed over.
+   *
+   * Not by the date a payment settled — that is a different question with a different answer, and
+   * mixing them gives a figure that agrees with neither the bank nor the shop floor.
+   */
+  const mine = fills.filter((f) => f.dateFilled.startsWith(month));
+  const cash = mine.filter((f) => f.cashPlan);
+  const promised = mine.filter((f) => (f.facilitatorOutstandingCents ?? 0) > 0);
+  const dispensing: MoneyPosition["dispensing"] = {
+    month,
+    fills: mine.length,
+    revenueCents: mine.reduce((n, f) => n + f.revenueCents, 0),
+    marginCents: mine.reduce((n, f) => n + (f.marginCents ?? 0), 0),
+    cashFills: cash.length,
+    cashRevenueCents: cash.reduce((n, f) => n + f.revenueCents, 0),
+    cashMarginCents: cash.reduce((n, f) => n + (f.marginCents ?? 0), 0),
+    promisedCents: promised.reduce((n, f) => n + (f.facilitatorOutstandingCents ?? 0), 0),
+    promisedFills: promised.length,
+  };
+
   return {
+    dispensing,
     ratio,
     rebates,
     facilitator: {

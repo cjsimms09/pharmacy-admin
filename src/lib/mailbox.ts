@@ -608,6 +608,15 @@ async function importRecognised(
       const r = await importRxTransactions(buf, fileName, ctx.userId ?? "mailbox-sweep");
       routeResult = describeTransactionImport(r);
       if (r.claimsAdded || r.reversed) imported = true;
+    } else if (cls.kind === "accrual_sales") {
+      /*
+       * Recognised, kept, and honestly described as not yet counted.
+       *
+       * The alternative — filing it silently among the documents — is how a report somebody goes to
+       * the trouble of sending every month gets assumed to be feeding a figure it is not feeding.
+       */
+      routeResult =
+        "PioneerRx's Accrual System Sales: the whole month's till, retail alongside prescriptions. Filed and kept, but not yet counted — the reader for this report is not built. Nothing else on the site reports total sales, so this is the only thing that can.";
     } else if (cls.kind === "pioneer_catalog") {
       // Names its own supplier inside the file, so no sender rule is needed — and the filename
       // is checked against it, so MCKCatalog carrying IPD prices is refused.
