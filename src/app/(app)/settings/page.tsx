@@ -6,7 +6,7 @@ import { db, schema } from "@/db";
 import { requireManager, createUser } from "@/lib/auth";
 import { getSettings, setSetting, SETTING_KEYS, type SettingKey } from "@/lib/settings";
 import { audit } from "@/lib/audit";
-import { apiKeyHint, clearApiKey, saveApiKey, testConnection, DEFAULT_MODEL } from "@/lib/ai";
+import { apiKeyHint, clearApiKey, saveApiKey, testConnection, hasApiKey, DEFAULT_MODEL } from "@/lib/ai";
 import { spend, rates, dollars, monthlyCap, DEFAULT_RATE_IN, DEFAULT_RATE_OUT } from "@/lib/ai-spend";
 import { logo, saveLogo, clearLogo } from "@/lib/branding";
 import { fmt } from "@/lib/dates";
@@ -41,20 +41,58 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     const u = await requireManager();
     const key = String(fd.get("apiKey") ?? "").trim();
     const model = String(fd.get("ai_model") ?? "").trim() || DEFAULT_MODEL;
-    if (!key.startsWith("sk-ant-") || key.length < 30) redirect("/settings?error=" + encodeURIComponent("That doesn't look like an Anthropic API key (they start with sk-ant-)."));
-    try {
-      await saveApiKey(key);
-    } catch (e) {
-      redirect("/settings?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not store the key."));
+
+    /*
+     * The ceiling and the key share a form, and the key must not be needed to change the ceiling.
+     *
+     * A stored key is never rendered back into the page — it is a secret, and that is right — so
+     * the box is always empty. Requiring it meant that raising the ceiling, which is the one thing
+     * anybody wants to do at the moment everything has stopped, was refused with "that doesn't
+     * look like an Anthropic API key" unless the owner went and found the key again. The setting
+     * you need when the site has stopped is the setting you could not reach.
+     *
+     * So a blank box means "leave the key alone" where one is already stored, and only a pharmacy
+     * with no key at all is asked for one.
+     */
+    const hadKey = await hasApiKey();
+    if (key === "" && hadKey) {
+      // Nothing to save on the key; everything below still saves.
+    } else if (!key.startsWith("sk-ant-") || key.length < 30) {
+      redirect(
+        "/settings?error=" +
+          encodeURIComponent(
+            hadKey
+              ? "That doesn't look like an Anthropic API key (they start with sk-ant-). Leave the box empty to keep the key you already have and change only the settings below it."
+              : "That doesn't look like an Anthropic API key (they start with sk-ant-).",
+          ),
+      );
+    } else {
+      try {
+        await saveApiKey(key);
+      } catch (e) {
+        redirect("/settings?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not store the key."));
+      }
     }
     await setSetting("ai_model", model);
     await setSetting("ai_price_in", String(fd.get("ai_price_in") ?? "").trim());
     await setSetting("ai_price_out", String(fd.get("ai_price_out") ?? "").trim());
     await setSetting("ai_monthly_cap", String(fd.get("ai_monthly_cap") ?? "").trim());
-    await audit({ action: "ai.key.set", userId: u.id, userName: u.name, details: `model=${model}` });
+    const cap = String(fd.get("ai_monthly_cap") ?? "").trim();
+    await audit({
+      action: key === "" && hadKey ? "ai.settings.set" : "ai.key.set",
+      userId: u.id,
+      userName: u.name,
+      details: `model=${model}${cap ? `, ceiling=$${cap}` : ", no ceiling"}`,
+    });
     const t = await testConnection();
     revalidatePath("/settings");
-    redirect(t.ok ? "/settings?saved=1" : "/settings?error=" + encodeURIComponent("Key saved, but the test failed: " + t.error));
+    if (t.ok) {
+      redirect(
+        "/settings?saved=" +
+          encodeURIComponent(cap ? `The monthly ceiling is now $${cap}.` : "There is no monthly ceiling any more."),
+      );
+    }
+    redirect("/settings?error=" + encodeURIComponent("Settings saved, but the connection test failed: " + t.error));
   }
 
   async function removeKey() {
@@ -126,7 +164,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         title="Settings"
         subtitle="The pharmacy's own details — these go on every printed Board form — plus the connections, the backups and who can sign in."
       />
-      {saved && <Notice>{ai ? `Connected to Claude (${ai}).` : "Saved."}</Notice>}
+      {/* `saved` carries the sentence where there is one to say, so a ceiling change confirms itself. */}
+      {saved && <Notice>{ai ? `Connected to Claude (${ai}).` : saved === "1" ? "Saved." : saved}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
 
       <form action={save} className="card mb-6 grid max-w-3xl gap-4 sm:grid-cols-2">
@@ -238,7 +277,26 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <p className="mb-3 text-sm text-warn">No key on file.</p>
         )}
         <form action={setKey} className="grid gap-3 sm:grid-cols-3">
-          <Field label={keyHint ? "Replace key" : "API key"} className="sm:col-span-2"><input name="apiKey" type="password" className="field font-mono" placeholder="sk-ant-…" autoComplete="off" required /></Field>
+          {/*
+            Required only when there is no key. With one on file the box must be optional, or the
+            browser refuses to submit the form at all and the ceiling below it cannot be changed
+            without going to find a secret — at exactly the moment the ceiling has stopped
+            everything and is the thing you came here to raise.
+          */}
+          <Field
+            label={keyHint ? "Replace key" : "API key"}
+            hint={keyHint ? "Leave empty to keep the key on file and change only the settings below." : undefined}
+            className="sm:col-span-2"
+          >
+            <input
+              name="apiKey"
+              type="password"
+              className="field font-mono"
+              placeholder={keyHint ? "leave empty to keep the current key" : "sk-ant-…"}
+              autoComplete="off"
+              required={!keyHint}
+            />
+          </Field>
           <Field label="Model" hint="Leave as is unless told otherwise."><input name="ai_model" className="field font-mono" defaultValue={s.ai_model} /></Field>
           {/*
             The price list, as a setting.
