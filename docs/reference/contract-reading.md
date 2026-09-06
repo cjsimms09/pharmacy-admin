@@ -67,9 +67,8 @@ EFT/ERA enrollment is changed, whom to ask. *Why:* §6.
 AWP, as of when); where the MAC list is published and how often it changes; every performance
 measure with its threshold and its effect on DIR, bonus or penalty; DAW and brand penalties;
 days to pay a clean claim and interest when late; recoupment and offset rights with the notice
-owed; whether the rates are confidential. *Why:* two "AWP-15%" contracts pay differently on the
-compendium alone; the MAC list is the first line of an appeal; the measures are what DIR is
-actually driven by; confidentiality decides what an appeal or a PSAO may be shown.
+owed. *Why:* two "AWP-15%" contracts pay differently on the compendium alone; the MAC list is
+the first line of an appeal; the measures are what DIR is actually driven by.
 
 **Honesty.** What could not be read, and a confidence.
 

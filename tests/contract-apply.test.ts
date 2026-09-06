@@ -50,7 +50,6 @@ const draft = (): ContractTermsT => ({
   promptPayDays: 30,
   latePaymentInterest: null,
   recoupmentTerms: { value: null, citation: null },
-  rateConfidentiality: { value: null, citation: null },
   keyDefinitions: [],
   incorporatesByReference: ["PBM Provider Manual"],
   definitionsDelegatedTo: "PBM Provider Manual §2",

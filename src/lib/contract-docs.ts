@@ -5,7 +5,8 @@ import { eq, and, isNull } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId, sha256 } from "./crypto";
 import { contractsDir } from "./reference";
-import { parseTerms, estimateCost } from "./contract-extract";
+import { parseTerms, estimateCost, pdfPageCount, PDF_PAGE_LIMIT } from "./contract-extract";
+import { rates as aiRates } from "./ai-spend";
 import { proposeFromContract, type Proposals, type Existing, type PlanForMatch } from "./contract-apply";
 import { savePayerLink, applyLinksToClaims } from "./payer-links";
 import { getSettings } from "./settings";
@@ -29,6 +30,9 @@ export type LibraryDoc = {
   matchedBy: string | null;
   state: "none" | "queued" | "done" | "failed";
   error: string | null;
+  pages: number | null;
+  /** Over the one-request page limit: must be split before it can be read. */
+  tooLong: boolean;
   counterparty: string | null;
   role: string | null;
   rates: number;
@@ -60,12 +64,9 @@ async function pdfFiles(): Promise<string[]> {
   }
 }
 
-function pageCount(buf: Buffer): number {
-  return Math.max(1, (buf.toString("latin1").match(/\/Type\s*\/Page[^s]/g) || []).length);
-}
 
 export async function contractLibrary(): Promise<Library> {
-  const [files, docs, s] = await Promise.all([pdfFiles(), db.query.contractDocs.findMany({ orderBy: (t, { asc }) => [asc(t.pbmName), asc(t.documentName)] }), getSettings()]);
+  const [files, docs, s, r] = await Promise.all([pdfFiles(), db.query.contractDocs.findMany({ orderBy: (t, { asc }) => [asc(t.pbmName), asc(t.documentName)] }), getSettings(), aiRates()]);
   const attached = new Set(docs.map((d) => d.fileName).filter(Boolean) as string[]);
   const model = s.ai_model || MODEL_DEFAULT;
   let pendingPages = 0;
@@ -74,16 +75,17 @@ export async function contractLibrary(): Promise<Library> {
   const rows: LibraryDoc[] = [];
   for (const d of docs) {
     const terms = d.extractionState === "done" ? parseTerms(d.extractionJson) : null;
+    let pages: number | null = null;
     if (d.fileName) {
       withFile++;
-      let pages = 0;
-      try { pages = pageCount(await fs.readFile(path.join(contractsDir(), d.fileName))); } catch { /* counted as nothing */ }
-      allPages += pages;
-      if (d.extractionState !== "done" && d.extractionState !== "queued") pendingPages += pages;
+      try { pages = pdfPageCount(await fs.readFile(path.join(contractsDir(), d.fileName))); } catch { /* counted as nothing */ }
+      allPages += pages ?? 0;
+      if (d.extractionState !== "done" && d.extractionState !== "queued") pendingPages += pages ?? 0;
     }
     rows.push({
       id: d.id, documentName: d.documentName, pbmName: d.pbmName, fileName: d.fileName, matchedBy: d.matchedBy,
       state: d.extractionState, error: d.extractionError,
+      pages, tooLong: (pages ?? 0) > PDF_PAGE_LIMIT,
       counterparty: terms?.counterparty ?? null, role: terms?.documentRole ?? null, rates: terms?.rates.length ?? 0,
       confidence: terms?.confidence ?? null, caveats: terms?.unclearOrMissing.length ?? 0,
     });
@@ -95,10 +97,10 @@ export async function contractLibrary(): Promise<Library> {
     docs: rows,
     pending,
     pendingPages,
-    estimate: estimateCost(pendingPages, model),
+    estimate: estimateCost(pendingPages, model, r),
     withFile,
     allPages,
-    estimateAll: estimateCost(allPages, model),
+    estimateAll: estimateCost(allPages, model, r),
     model,
     keyPresent: Boolean(s.anthropic_api_key_enc),
     folder: contractsDir(),

@@ -62,7 +62,7 @@ export default async function ContractsPage({ searchParams }: { searchParams: Pr
           encodeURIComponent(
             r.queued === 0
               ? r.skipped.join(" ")
-              : `${r.queued} document${r.queued === 1 ? "" : "s"} sent to Claude as batch ${r.batchId}. About ${money(r.estimate.low)}–${money(r.estimate.high)}. It runs while the pharmacy is closed; press “Collect the results” later.${r.skipped.length ? ` Could not send: ${r.skipped.join(", ")}.` : ""}`,
+              : `${r.queued} document${r.queued === 1 ? "" : "s"} sent to Claude in ${r.batches.length} batch${r.batches.length === 1 ? "" : "es"}. About ${money(r.estimate.low)}–${money(r.estimate.high)}. It runs while the pharmacy is closed; press “Collect the results” later.${r.skipped.length ? ` Not sent: ${r.skipped.join("; ")}.` : ""}`,
           ),
       );
     } catch (e) {
@@ -85,7 +85,7 @@ export default async function ContractsPage({ searchParams }: { searchParams: Pr
           encodeURIComponent(
             r.queued === 0
               ? r.skipped.join(" ")
-              : `${r.queued} document${r.queued === 1 ? "" : "s"} sent to Claude as batch ${r.batchId}, the whole library. About ${money(r.estimate.low)}–${money(r.estimate.high)}. Press “Collect the results” when it is done.${r.skipped.length ? ` Could not send: ${r.skipped.join(", ")}.` : ""}`,
+              : `${r.queued} document${r.queued === 1 ? "" : "s"} sent to Claude in ${r.batches.length} batch${r.batches.length === 1 ? "" : "es"}, the whole library. About ${money(r.estimate.low)}–${money(r.estimate.high)}. Press “Collect the results” when it is done.${r.skipped.length ? ` Not sent: ${r.skipped.join("; ")}.` : ""}`,
           ),
       );
     } catch (e) {
@@ -112,6 +112,29 @@ export default async function ContractsPage({ searchParams }: { searchParams: Pr
     }
   }
 
+  /** One document on its own: the way to prove the run on a few cents before the library goes. */
+  async function readOne(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const id = String(fd.get("id") ?? "");
+    try {
+      await resetDocument(id);
+      const r = await queueExtraction(u.id, u.name, [id]);
+      revalidatePath("/payers/contracts");
+      redirect(
+        "/payers/contracts?ok=" +
+          encodeURIComponent(
+            r.queued === 0
+              ? r.skipped.join(" ")
+              : `Sent to Claude as batch ${r.batchId}. About ${money(r.estimate.low)}–${money(r.estimate.high)}. Press “Collect the results” in a while.`,
+          ),
+      );
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/payers/contracts?error=" + encodeURIComponent(e instanceof Error ? e.message : "The read could not be started."));
+    }
+  }
+
   async function rename(fd: FormData) {
     "use server";
     const u = await requireManager();
@@ -121,16 +144,6 @@ export default async function ContractsPage({ searchParams }: { searchParams: Pr
     await audit({ action: "contracts.name", userId: u.id, userName: u.name, details: `${id} → ${pbm}` });
     revalidatePath("/payers/contracts");
     redirect("/payers/contracts?ok=" + encodeURIComponent("Named."));
-  }
-
-  async function reset(fd: FormData) {
-    "use server";
-    const u = await requireManager();
-    const id = String(fd.get("id") ?? "");
-    await resetDocument(id);
-    await audit({ action: "contracts.reset", userId: u.id, userName: u.name, details: id });
-    revalidatePath("/payers/contracts");
-    redirect("/payers/contracts?ok=" + encodeURIComponent("Put back to unread. The next read will include it."));
   }
 
   const read_ = lib.docs.filter((d) => d.state === "done");
@@ -197,7 +210,8 @@ export default async function ContractsPage({ searchParams }: { searchParams: Pr
         <ol className="list-decimal space-y-1 pl-5 text-sm text-ink-2">
           <li><b>Look in the folder.</b> Every PDF becomes a document, named from the portal's manifest where there is one, otherwise from its filename. Its words are indexed for search.</li>
           <li><b>Name what is unnamed.</b> The counterparty is the first axis; a document the read cannot name is still yours to name.</li>
-          <li><b>Read with Claude.</b> One request per document through the Batch API, the cost shown first. It runs while the pharmacy is closed; collect the results when it is done.</li>
+          <li><b>Read one first.</b> “Read this one” on the most important exhibit costs a few cents and proves the whole path: the read, the collect, the review, the accept. Then read the library.</li>
+          <li><b>Read with Claude.</b> One request per document through the Batch API, the cost shown first and refused if it would carry the month past the ceiling. A document over {100} pages is not sent and is named; split it. It runs while the pharmacy is closed; collect the results within a month.</li>
           <li><b>Review and accept.</b> Each draft opens as a checklist: rates, appeal terms, contacts, the payment path, and the plans it governs, each with the contract's own sentence. What you accept is written; what you do not is not.</li>
         </ol>
       </Card>
@@ -239,16 +253,19 @@ export default async function ContractsPage({ searchParams }: { searchParams: Pr
                       {d.state === "failed" && <span className="badge badge-crit" title={d.error ?? undefined}>failed</span>}
                       {d.state === "none" && (d.fileName ? <span className="badge badge-muted">not yet</span> : <span className="text-ink-3">—</span>)}
                       {d.state === "failed" && d.error && <span className="mt-1 block max-w-xs text-ink-3">{d.error}</span>}
+                      {d.tooLong && <span className="badge badge-crit mt-1 block w-fit" title={`${d.pages} pages; the limit is 100 a document`}>{d.pages} pages: split it</span>}
                     </td>
                     <td className="num text-sm">{d.state === "done" ? d.rates : "—"}</td>
                     <td className="text-xs">{d.confidence !== null ? `${Math.round(d.confidence * 100)}%${d.caveats ? ` · ${d.caveats} caveat${d.caveats === 1 ? "" : "s"}` : ""}` : "—"}</td>
                     <td>
                       <div className="flex items-center justify-end gap-1.5">
                         {d.state === "done" && <Link href={`/payers/contracts/${d.id}`} className="btn btn-sm btn-primary">Review</Link>}
-                        {canManage && (d.state === "done" || d.state === "failed") && (
-                          <form action={reset}>
+                        {canManage && d.fileName && !d.tooLong && d.state !== "queued" && (
+                          <form action={readOne}>
                             <input type="hidden" name="id" value={d.id} />
-                            <SubmitButton className="btn btn-sm" pendingLabel="…">Read again</SubmitButton>
+                            <ConfirmButton className="btn btn-sm" message={`Read “${d.documentName}” on its own now? About ${d.pages ?? "?"} page${d.pages === 1 ? "" : "s"}, a few cents at batch prices.`}>
+                              {d.state === "done" || d.state === "failed" ? "Read again" : "Read this one"}
+                            </ConfirmButton>
                           </form>
                         )}
                       </div>

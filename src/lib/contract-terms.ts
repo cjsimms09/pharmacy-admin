@@ -230,8 +230,6 @@ export const ContractTerms = z.object({
   latePaymentInterest: z.string().nullable(),
   /** Whether money may be offset against future payments, and the notice owed first. */
   recoupmentTerms: cited(z.string().nullable()),
-  /** Whether rates may be shown to anyone, which decides what an appeal or a PSAO may see. */
-  rateConfidentiality: cited(z.string().nullable()),
   keyDefinitions: z.array(KeyDefinition).describe("Brand, generic, AWP, WAC, MAC, U&C, specialty, compound: each as this document defines it, where it does."),
   /**
    * Documents this one cannot be read without. A PSAO network agreement routinely delegates the
@@ -315,7 +313,7 @@ RULES, in order of importance:
 
 13. **Map the document.** List every section, exhibit and schedule with its pages and one sentence on what it decides. This read happens once; the map is how a question nobody has asked yet is answered from the document without reading it again.
 
-14. **Capture what moves the money after the formula.** The pricing compendium and its date basis; where the MAC list is published and how often it changes; every performance measure with its threshold and its effect on DIR, bonus or penalty; DAW and brand penalties; days to pay a clean claim and interest when late; recoupment and offset rights with the notice owed; and whether the rates are confidential.
+14. **Capture what moves the money after the formula.** The pricing compendium and its date basis; where the MAC list is published and how often it changes; every performance measure with its threshold and its effect on DIR, bonus or penalty; DAW and brand penalties; days to pay a clean claim and interest when late; and recoupment and offset rights with the notice owed.
 
 15. **Capture the identifiers the claims will carry and the definitions the money rests on.** Network reimbursement ids (NCPDP 545-2F) printed in the exhibits; the pharmacy's own NCPDP and NPI where the document names them; every per-claim or per-transaction fee; and each defined term — brand, generic, AWP, WAC, MAC, U&C, specialty, compound — as this document defines it, with the sentence. Claim submission and reversal windows go with the other clocks.
 
