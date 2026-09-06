@@ -2,7 +2,7 @@ import Link from "next/link";
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requireManager } from "@/lib/auth";
-import { cqiPeriods, daysUntil, fmt, nextCqiPeriod, periodLabel, todayIso } from "@/lib/dates";
+import { cqiPeriods, daysUntil, fmt, periodLabel, todayIso } from "@/lib/dates";
 import { PageHeader, Notice, Field, Empty } from "@/components/ui";
 import { uploadHistoricalSummary } from "./actions";
 import { carriedForward, ensureCurrentSummary, incidentsWithStage } from "@/lib/cqi";
@@ -16,10 +16,17 @@ export default async function CqiPage({ searchParams }: { searchParams: Promise<
   await requireManager();
   const { saved, error } = await searchParams;
   const today = todayIso();
-  const next = nextCqiPeriod(today);
-  // The summary for the period now running is opened as soon as it exists, so incidents collect into
-  // it as they are logged and there is never a "start it" step to forget.
+  /*
+   * The summary for the period now running is opened as soon as it exists, so incidents collect
+   * into it as they are logged and there is never a "start it" step to forget.
+   *
+   * The heading, the due date and the buttons all come from this one summary. They used to come
+   * from two places — the label and date from the calendar, the buttons from the outstanding
+   * obligation — so once a summary was finalized the card named the finished period, called it
+   * overdue, and opened the next one.
+   */
   const { summary: current } = await ensureCurrentSummary();
+  const next = { label: periodLabel(current.periodStart, current.periodEnd), dueOn: current.dueOn };
   const [summaries, rows, docs, carried] = await Promise.all([
     db.query.cqiSummaries.findMany({ orderBy: (s, { desc }) => [desc(s.periodStart)] }),
     incidentsWithStage(),
