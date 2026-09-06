@@ -498,6 +498,13 @@
       "when": 1788725330200,
       "tag": "0070_lyrical_stepford_cuckoos",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "6",
+      "when": 1788727364584,
+      "tag": "0071_stale_smasher",
+      "breakpoints": true
     }
   ]
 }

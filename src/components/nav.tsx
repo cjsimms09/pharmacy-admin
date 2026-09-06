@@ -25,9 +25,8 @@ export function Nav({ tools }: { tools: boolean }) {
    * than the pages behind the flag.
    */
   const visible = tools ? NAV : NAV.map((g) => ({ ...g, items: g.items.filter((i) => !i.gated) }));
-  const groups = tools
-    ? [...visible.slice(0, -1), { href: "/tools", label: "Tools", blurb: "Work in progress", items: [] }, visible[visible.length - 1]]
-    : visible;
+  // A group whose every page is behind the flag has nowhere to land, so it goes with them.
+  const groups = visible.filter((g, i) => NAV[i].items.length === 0 || g.items.length > 0 || !NAV[i].items.every((it) => it.gated));
 
   return (
     <nav className="px-2 pb-4">

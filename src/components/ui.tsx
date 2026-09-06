@@ -90,18 +90,21 @@ export function Figure({
   sub,
   tone = "ok",
   href,
+  size = "lg",
 }: {
   value: number | string;
   label: string;
   sub?: string;
   tone?: "ok" | "warn" | "crit" | "muted";
   href?: string;
+  /** "sm" for a row of five dollar figures, which do not fit at the large size. */
+  size?: "lg" | "sm";
 }) {
   const ring = tone === "crit" ? "border-crit" : tone === "warn" ? "border-warn" : "border-line";
   const ink = tone === "crit" ? "text-crit" : tone === "warn" ? "text-warn" : tone === "muted" ? "text-ink-2" : "text-accent";
   const body = (
     <>
-      <div className={`text-4xl font-bold leading-none tabular-nums ${ink}`}>{value}</div>
+      <div className={`${size === "sm" ? "text-2xl" : "text-4xl"} font-bold leading-none tabular-nums ${ink}`}>{value}</div>
       <div className="mt-2.5 text-sm font-semibold">{label}</div>
       {sub && <div className="mt-0.5 text-xs leading-snug text-ink-3">{sub}</div>}
     </>

@@ -244,7 +244,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
               The one thing on this page that is about making money rather than keeping out of
               trouble. Everything else here protects revenue; this is where it is found.
             */}
-            <Link href="/money" className="btn btn-primary">Where the money is</Link>
+            <Link href="/money/found" className="btn btn-primary">Where the money is</Link>
             <Link href="/compliance" className="btn">Compliance</Link>
             <Link href="/compliance/training" className="btn">Training</Link>
             {lateCount > 0 && <Link href="#now" className="btn btn-primary">Work through {lateCount}</Link>}
@@ -272,7 +272,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-sm font-semibold">Scoreboard</h2>
           <span className="text-xs text-ink-3">
-            Month to date · {fmtLong(today)} · <Link href="/money" className="text-accent underline">all of it</Link>
+            Month to date · {fmtLong(today)} · <Link href="/money" className="text-accent underline">the books</Link>
           </span>
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -451,7 +451,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
             <h2 className="text-sm font-semibold">Worth the most this morning</h2>
             <span className="text-xs text-ink-3">
               {formatCents(found.firstYearCents)} in the first year if all of it is done ·{" "}
-              <Link href="/money" className="text-accent underline">all {found.rows.length}</Link>
+              <Link href="/money/found" className="text-accent underline">all {found.rows.length}</Link>
             </span>
           </div>
           <ol className="grid gap-3 lg:grid-cols-3">

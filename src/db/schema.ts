@@ -1389,6 +1389,17 @@ export const contractDocs = sqliteTable(
     extractionState: text("extraction_state", { enum: ["none", "queued", "done", "failed"] }).notNull().default("none"),
     extractionJson: text("extraction_json"),
     extractionError: text("extraction_error"),
+    /**
+     * What the cheap sort made of the document before the expensive read: contract, rate_sheet,
+     * notice, manual, not_relevant or unsure (`contract-triage.ts`). The full read skips only
+     * not_relevant. A person may overrule it; `triage_by` says who decided ("rule", "model", or
+     * the person's name).
+     */
+    triage: text("triage"),
+    triageWhy: text("triage_why"),
+    triageBy: text("triage_by"),
+    /** The batch the model sort is running in, until it is collected. */
+    triageBatch: text("triage_batch"),
     loadedAt: text("loaded_at").notNull().default(now()),
   },
   (t) => [index("contract_docs_pbm_idx").on(t.pbmName), index("contract_docs_priority_idx").on(t.priority)],

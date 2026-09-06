@@ -213,3 +213,13 @@ run. Scans with no text are read as images and cost the same.
 
 Steps 1 to 3 exist. Steps 4 to 8 are the pure modules named above plus the pages, which are on
 the handoff for the pharmacy session (or this one) to build.
+
+**Sort before reading (`/payers/sort`, `contract-triage.ts`).** Not every PDF from the portals
+is a contract. A document with its own text layer is sorted by its words for nothing; a scan goes
+to the small model (`TRIAGE_MODEL`) with a one-line question, in a batch, for a few cents. Kinds:
+contract, rate_sheet, notice, manual, not_relevant, unsure. The full read skips only
+`not_relevant`, and only when the model was confident; a person's word on the sort page overrules
+either sorter. A refused read now records the API's own reason in plain words (too long for one
+read: split it; not a PDF: re-save it; key refused; busy, try again), and a refused request costs
+nothing. The per-request page limit is 50, not 100: a scanned page is sent as an image and costs
+up to 3,000 tokens, so a hundred of them overflow a 200,000-token window.

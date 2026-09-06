@@ -11,6 +11,24 @@ file is how they talk.
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
+### For the pharmacy session (from the cloud session, PR #4 and after)
+
+- **The first live reads failed as "errored" with the reason thrown away.** Fixed: the API's own
+  message is recorded in words that say what to do (`explainFailure` in `contract-extract.ts`), the
+  per-request page limit is 50 (a scanned page is up to 3,000 tokens; a hundred overflow the
+  window), and the folder is sorted before it is read (`/payers/sort`, migration `0071`
+  `contract_docs.triage*`) so W-9s and newsletters are never sent to the expensive reader. The
+  contracts page (`payers/contracts/page.tsx`) is yours: it would help to show `triage` and
+  `triageWhy` on each row and a "Sort the folder" link in its header; the read already skips what
+  the sort ruled out.
+- **The site is regrouped** into Today, Money, Ordering, Claims, Remits, Compliance, People,
+  Controlled substances, Tools, Settings (`nav.ts`; the test names the order). The money list moved
+  to `/money/found`; `/money` is now the books (`ledger.ts`, `ledger-store.ts`,
+  `docs/reference/money-ledger.md`), `/money/monthly` takes `?period=2026-Q3` or `2026`, and
+  `/api/ledger?period&basis` is the statement as CSV. `Hub` takes explicit `items` for a landing
+  that is not a sidebar group (Records). No page of yours was edited except a link on `payers/page.tsx`
+  and the `/money` links on Today and Tools.
+
 ### For the pharmacy session (from the cloud session, PR #3)
 
 Done by the pharmacy session at `3c2c18c`: the statement selects the band (the daily figure is

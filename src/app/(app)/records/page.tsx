@@ -36,7 +36,18 @@ export default async function RecordsPage() {
       </div>
 
       <h2 className="mb-3">In this section</h2>
-      <Hub href="/records" />
+      <Hub
+        href="/records"
+        items={[
+          { href: "/forms", label: "Forms", blurb: "Every form this pharmacy uses, and what each records" },
+          { href: "/documents", label: "Pharmacy documents", blurb: "Protocols, policies and everything else on file" },
+          { href: "/agreements", label: "Agreements", blurb: "Business associates and everyone else with access" },
+          { href: "/compliance/attestations", label: "Attestations", blurb: "Every standing duty confirmed, in the wording used" },
+          { href: "/invoices", label: "Invoices", blurb: "Both kinds: what suppliers bill us, and what we bill for deliveries" },
+          { href: "/inbox", label: "Inbox", blurb: "Reports that arrived by email and what was made of them" },
+          { href: "/audit", label: "Activity log", blurb: "Who did what in this system, and when" },
+        ]}
+      />
 
       <Card title="The one that cannot be electronic" tone="warn" className="mt-6">
         <p className="text-sm text-ink-2">

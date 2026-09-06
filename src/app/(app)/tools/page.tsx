@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import { requireReimbursement } from "@/lib/features";
+import { reimbursementEnabled } from "@/lib/features";
 import { PageHeader } from "@/components/ui";
+import { Hub } from "@/components/hub";
 
 export const metadata = { title: "Tools" };
 
@@ -13,7 +14,7 @@ export const metadata = { title: "Tools" };
  * useful than a menu item that opens an empty page.
  */
 const TOOLS = [
-  { href: "/money", title: "Where the money is", state: "ready", what: "One list, in dollars, of everything this site can see that is worth acting on — what to buy elsewhere, what a rebate band is worth, what stock has to go back this week, what a plan underpaid — with what to do about each. Nothing estimated." },
+  { href: "/money/found", title: "Where the money is", state: "ready", what: "One list, in dollars, of everything this site can see that is worth acting on — what to buy elsewhere, what a rebate band is worth, what stock has to go back this week, what a plan underpaid — with what to do about each. Nothing estimated." },
   { href: "/payers", title: "Payers", state: "ready", what: "Every BIN we bill, its contracted rates, MAC appeal route and payment routing. Look up a BIN from a claim, or search the contracts on file for one." },
   { href: "/payers/performance", title: "Who pays best", state: "ready", what: "Every claim followed through to the money — BIN and group, to plan, to PBM, to the contract and rate sheet behind it. Which payers pay well, which drugs are reimbursed best, and where the chain breaks." },
   { href: "/claims", title: "Claims", state: "waiting", what: "Loads a PioneerRx export and matches each claim to its payer. Waiting on dispensed quantity, which comes through blank." },
@@ -25,16 +26,18 @@ const TOOLS = [
 ];
 
 export default async function ToolsPage() {
-  await requireReimbursement();
   await requireUser();
+  const extra = await reimbursementEnabled();
   return (
     <>
       <PageHeader
         title="Tools"
-        subtitle="The reimbursement side. Real, and not finished — each one says what it is waiting for rather than opening an empty page."
+        subtitle="The feeds and the reference data behind every figure, and the log of who did what."
       />
+      <Hub href="/tools" />
+      {extra && <h2 className="mb-3 mt-8">The reimbursement side</h2>}
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        {TOOLS.map((t) => (
+        {extra && TOOLS.map((t) => (
           <Link key={t.href} href={t.href} className="rounded-lg border border-line bg-surface p-4 hover:border-ink-3">
             <div className="flex items-baseline justify-between gap-2">
               <h2 className="font-semibold">{t.title}</h2>

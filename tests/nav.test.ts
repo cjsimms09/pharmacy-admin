@@ -67,16 +67,34 @@ describe("navigation", () => {
   test("a sub-page opens its own group, not its prefix's", () => {
     assert.equal(groupFor("/compliance/training")?.label, "People");
     assert.equal(groupFor("/compliance/training/records")?.label, "People");
-    assert.equal(groupFor("/compliance")?.label, "Inspection");
-    assert.equal(groupFor("/compliance/attestations")?.label, "Records");
+    assert.equal(groupFor("/compliance")?.label, "Compliance");
+    assert.equal(groupFor("/compliance/attestations")?.label, "Compliance");
+    // Supplier invoices are an ordering page even though they live under /inventory.
+    assert.equal(groupFor("/inventory/invoices")?.label, "Ordering");
+    assert.equal(groupFor("/inventory/returns")?.label, "Ordering");
+    // Who pays best is a money question; the payer register is a claims one.
+    assert.equal(groupFor("/payers/performance")?.label, "Money");
+    assert.equal(groupFor("/payers/contracts/abc")?.label, "Claims");
   });
 
   test("a page reached from a list still opens its section", () => {
     assert.equal(groupFor("/staff/abc123")?.label, "People");
     assert.equal(groupFor("/inventory/abc/print")?.label, "Controlled substances");
-    assert.equal(groupFor("/cqi/incidents/xyz")?.label, "Quality (CQI)");
-    assert.equal(groupFor("/manual/print")?.label, "P&P manual");
+    assert.equal(groupFor("/cqi/incidents/xyz")?.label, "Compliance");
+    assert.equal(groupFor("/manual/print")?.label, "Compliance");
     assert.equal(groupFor("/settings/backups")?.label, "Settings");
+    assert.equal(groupFor("/money/found")?.label, "Money");
+    assert.equal(groupFor("/money/monthly")?.label, "Money");
+    assert.equal(groupFor("/purchasing/shelf")?.label, "Ordering");
+    assert.equal(groupFor("/remits/mtf")?.label, "Remits");
+    assert.equal(groupFor("/inbox")?.label, "Tools");
+  });
+
+  test("the sections are the ones the owner named, in the order the day runs", () => {
+    assert.deepEqual(
+      NAV.map((g) => g.label),
+      ["Today", "Money", "Ordering", "Claims", "Remits", "Compliance", "People", "Controlled substances", "Tools", "Settings"],
+    );
   });
 
   test("a path nobody has claimed does not guess", () => {

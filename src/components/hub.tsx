@@ -11,10 +11,9 @@ import { NAV } from "@/lib/nav";
  *
  * Driven from the same NAV data as the sidebar, so a page added to a group appears in both.
  */
-export function Hub({ href, exclude = [] }: { href: string; exclude?: string[] }) {
+export function Hub({ href, exclude = [], items: given }: { href: string; exclude?: string[]; /** Pages to list when the section is not a sidebar group of its own. */ items?: { href: string; label: string; blurb?: string }[] }) {
   const group = NAV.find((g) => g.href === href);
-  if (!group) return null;
-  const items = group.items.filter((i) => i.href !== href && !exclude.includes(i.href));
+  const items = (given ?? group?.items ?? []).filter((i) => i.href !== href && !exclude.includes(i.href));
   if (items.length === 0) return null;
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

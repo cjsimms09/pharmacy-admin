@@ -6,6 +6,7 @@ import { db, schema } from "@/db";
 import { newId, sha256 } from "./crypto";
 import { contractsDir, pbmResolver } from "./reference";
 import { parseTerms, estimateCost, pdfPageCount, PDF_PAGE_LIMIT } from "./contract-extract";
+import { shouldRead } from "./contract-triage";
 import { rates as aiRates } from "./ai-spend";
 import { proposeFromContract, type Proposals, type Existing, type PlanForMatch } from "./contract-apply";
 import { savePayerLink, applyLinksToClaims } from "./payer-links";
@@ -33,6 +34,11 @@ export type LibraryDoc = {
   pages: number | null;
   /** Over the one-request page limit: must be split before it can be read. */
   tooLong: boolean;
+  /** What the sort made of it, or null while unsorted; `sorting` while the model's answer is awaited. */
+  triage: string | null;
+  triageWhy: string | null;
+  triageBy: string | null;
+  sorting: boolean;
   counterparty: string | null;
   role: string | null;
   rates: number;
@@ -80,17 +86,19 @@ export async function contractLibrary(): Promise<Library> {
       withFile++;
       try { pages = pdfPageCount(await fs.readFile(path.join(contractsDir(), d.fileName))); } catch { /* counted as nothing */ }
       allPages += pages ?? 0;
-      if (d.extractionState !== "done" && d.extractionState !== "queued") pendingPages += pages ?? 0;
+      // What a read would cost counts only what a read would send: the sort's rejects are out.
+      if (d.extractionState !== "done" && d.extractionState !== "queued" && shouldRead(d.triage as never)) pendingPages += pages ?? 0;
     }
     rows.push({
       id: d.id, documentName: d.documentName, pbmName: d.pbmName, fileName: d.fileName, matchedBy: d.matchedBy,
       state: d.extractionState, error: d.extractionError,
       pages, tooLong: (pages ?? 0) > PDF_PAGE_LIMIT,
+      triage: d.triage, triageWhy: d.triageWhy, triageBy: d.triageBy, sorting: Boolean(d.triageBatch),
       counterparty: terms?.counterparty ?? null, role: terms?.documentRole ?? null, rates: terms?.rates.length ?? 0,
       confidence: terms?.confidence ?? null, caveats: terms?.unclearOrMissing.length ?? 0,
     });
   }
-  const pending = rows.filter((r) => r.fileName && r.state !== "done" && r.state !== "queued").length;
+  const pending = rows.filter((r) => r.fileName && r.state !== "done" && r.state !== "queued" && shouldRead(r.triage as never)).length;
   return {
     filesInFolder: files.length,
     unattached: files.filter((f) => !attached.has(f)),

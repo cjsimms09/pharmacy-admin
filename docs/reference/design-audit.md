@@ -180,15 +180,15 @@ key itself is spelt three ways: `?ok=` in 31 files, `?saved=` in 14, `?done=` in
 
 ### 7.4 Navigation
 
-Eleven groups, Money and Settings at the eight-item cap. **A bug:** the Money group lists
-`/claims`, `/payers/performance` and `/purchasing` whatever the flag, and each of those pages
-calls `requireReimbursement()`, which redirects to Today when the flag is off. The sidebar must
-filter on the flag (or the flag must go, per §6).
-
-Pages that are starting points but sit in no group: `/intake` (**no inbound link anywhere**),
-`/nadac`, `/reports`, `/tools`, `/payers`, `/plans`, `/claims/floor`, `/purchasing/shelf`,
-`/cqi/import`, `/compliance/register`, `/manual/decisions`, `/staff/new`,
-the sensor "what iMonnit holds" page. `/find` is reached only from the sidebar search box.
+Regrouped on 6 September into the sections the owner named, in the order the day runs: Today,
+Money (the books, statement, spending, driver invoices, money found, who pays best), Ordering (what
+to buy, the shelf, suppliers and rebates, supplier invoices, returns, supplies), Claims (claims,
+Kansas floor, payers, contracts, plans), Remits, Compliance (register, licences, inspection, walk,
+manual, CQI, temperatures, records), People, Controlled substances, Tools (inbox, add documents,
+NADAC, report check, find, activity log), Settings. Ten groups, none over eight items; a group whose
+every page is behind the flag is hidden with them. `/money` is the books; the money list is
+`/money/found`. Section landings still to build as dashboards: Ordering (`/purchasing` has no
+figures), Claims (has them), Remits (lands on the facilitator page), Compliance (has them).
 
 ### 7.5 Design tokens (`src/app/globals.css`)
 

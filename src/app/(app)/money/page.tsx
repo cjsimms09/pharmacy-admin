@@ -1,261 +1,217 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth";
 import { formatCents } from "@/lib/money";
-import { moneyFound, type MoneyFound, type MoneyRow } from "@/lib/money-found";
-import { markRecommendation, recommendationScorecard } from "@/lib/recommendation-store";
-import { PageHeader, Card, Notice, Empty, Figure } from "@/components/ui";
+import { todayIso } from "@/lib/dates";
+import { parsePeriod, periodOf, neighbours, type PeriodKind } from "@/lib/ledger";
+import { booksFor, recentMonths } from "@/lib/ledger-store";
+import { moneyFound } from "@/lib/money-found";
+import { PageHeader, Card, Notice, Figure } from "@/components/ui";
+import { Bars } from "@/components/charts";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Where the money is" };
+export const metadata = { title: "Money" };
 
 /**
- * One list, in dollars, of everything this site can see that is worth acting on.
+ * The books.
  *
- * The site had grown six answers to six questions and every one lived on its own page: what a drug
- * costs elsewhere, what a plan pays, what a rebate band is worth, what a return is still worth,
- * what a claim was paid against the Kansas floor. A pharmacist who wanted to know what to do this
- * morning had to open six screens and add up in his head, which is the same as not being told.
+ * One screen that says what the period took, what the goods cost, what the doors cost, and what
+ * is left — on both bases, with the gap between them named for what it is — and puts a link on
+ * every figure to the rows it was added from. It refuses to print a confident bottom line over a
+ * hole: what is missing is said first, and the total is marked for what it is.
  *
- * Every row is an amount and an instruction. A row that cannot say what to do about it does not
- * belong here — this is not a dashboard of metrics, and a number with no action attached is
- * decoration.
- *
- * The three things that would make it useless are guarded against in the arithmetic rather than in
- * the wording: money is never invented, the same problem is never counted twice, and a saving that
- * recurs every month is never ranked against a one-off recovery as though they were the same thing.
- *
- * Each row is remembered from the morning it first appears, and the owner's word on it — done, or
- * not doing this — is kept beside it. That is what lets the scorecard at the bottom say what the
- * advice has been worth, and lets a row that was tried and did nothing stop being repeated.
+ * The specification is docs/reference/money-ledger.md.
  */
-export default async function MoneyPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
+export default async function MoneyPage({ searchParams }: { searchParams: Promise<{ period?: string; ok?: string; error?: string }> }) {
   await requireUser();
-  const { ok, error } = await searchParams;
-  const found = await moneyFound();
-  const { rows, firstYearCents, recurringMonthlyCents, oneOffCents, blocked, watch } = found;
-  const card = await recommendationScorecard().catch(() => null);
+  const { period: periodParam, ok, error } = await searchParams;
+  const today = todayIso();
+  const period = (periodParam && parsePeriod(periodParam)) || periodOf("month", today.slice(0, 7));
+  const [books, recent, found] = await Promise.all([booksFor(period, today), recentMonths(6, today), moneyFound().catch(() => null)]);
+  const { accrual, cash, scripts, gap, pace, sources } = books;
+  const { before, after } = neighbours(period);
+  const isCurrent = period.kind === "month" && period.key === today.slice(0, 7);
+  const link = (kind: PeriodKind) => `/money?period=${periodOf(kind, period.months[period.months.length - 1]).key}`;
 
-  async function mark(fd: FormData) {
-    "use server";
-    await requireUser();
-    const id = String(fd.get("id") ?? "");
-    const status = String(fd.get("status") ?? "");
-    const note = String(fd.get("note") ?? "").trim() || null;
-    if (!id || (status !== "acted" && status !== "dismissed" && status !== "open")) redirect("/money?error=" + encodeURIComponent("Nothing to record."));
-    await markRecommendation(id, status, note);
-    revalidatePath("/money");
-    revalidatePath("/");
-    redirect("/money?ok=" + encodeURIComponent(status === "acted" ? "Recorded as done. The claims from here on will say what it was worth." : status === "dismissed" ? "Recorded. It stays on the list, marked as not being done, so the total is honest." : "Reopened."));
-  }
+  const tone = (c: number) => (c < 0 ? "crit" : "ok");
+  const pct = (c: number) => (accrual.netRevenueCents > 0 ? `${Math.round((c / accrual.netRevenueCents) * 1000) / 10}% of net revenue` : undefined);
 
   return (
     <>
       <PageHeader
-        title="Where the money is"
-        subtitle="Everything this site can currently see that is worth acting on, in what it is worth, with what to do about each. Nothing here is estimated — every figure is arithmetic on a document the pharmacy holds."
+        title="Money"
+        subtitle="The books: what the period earned and what reached the bank, both kept, neither mixed."
+        actions={
+          <>
+            <Link href={`/money/monthly?period=${period.key}`} className="btn btn-primary">Statement</Link>
+            <Link href="/expenses" className="btn">Spending</Link>
+            <Link href="/money/found" className="btn">Money found</Link>
+          </>
+        }
       />
 
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
 
-      {rows.length === 0 ? (
-        <Empty>
-          Nothing yet. This fills in as invoices are read, the catalogues land, claims arrive and the supplier terms are
-          on file — each of those turns on one more of the comparisons below.
-        </Empty>
-      ) : (
-        <>
-          <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            <Figure value={formatCents(firstYearCents)} label="in the first year" sub="One-off recoveries plus twelve months of the recurring savings" tone="ok" />
-            <Figure value={formatCents(recurringMonthlyCents)} label="a month, recurring" sub="Buying and rebates, if nothing else changes" tone="muted" />
-            <Figure value={formatCents(oneOffCents)} label="one-off" sub="Returns and underpayments, recoverable once" tone="muted" />
-          </div>
+      {/* The period, chosen and stated. Arrows step it; the three words change its size. */}
+      <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
+        <Link href={`/money?period=${before.key}`} className="btn btn-sm" aria-label="Earlier">←</Link>
+        <span className="font-semibold">{period.label}</span>
+        <Link href={`/money?period=${after.key}`} className="btn btn-sm" aria-label="Later">→</Link>
+        <span className="ml-2 inline-flex overflow-hidden rounded-md border border-line text-xs">
+          {(["month", "quarter", "year"] as PeriodKind[]).map((k) => (
+            <Link key={k} href={link(k)} className={`px-2.5 py-1 ${period.kind === k ? "bg-accent-soft font-semibold text-accent" : "text-ink-2 hover:bg-ground"}`}>
+              {k}
+            </Link>
+          ))}
+        </span>
+        {isCurrent && pace && <span className="text-xs text-ink-3">{pace.says}</span>}
+      </div>
 
-          <div className="mt-4 space-y-3">
-            {rows.map((r, i) => <Row key={r.key} r={r} n={i + 1} age={found.ages[r.key]} entry={found.log[r.key]} mark={mark} />)}
-          </div>
-        </>
+      {!accrual.usable && (
+        <Notice kind="crit">
+          <b>Not yet a complete account of {period.label}.</b> Until these are in, the bottom line is wrong in the flattering direction:
+          <ul className="mt-1 list-disc space-y-0.5 pl-5">
+            {accrual.missing.slice(0, 6).map((m, i) => <li key={i}>{m}</li>)}
+            {accrual.missing.length > 6 && <li>and {accrual.missing.length - 6} more on the statement.</li>}
+          </ul>
+          <span className="mt-1 block">
+            Record them on <Link href="/expenses" className="underline">Spending</Link>.
+          </span>
+        </Notice>
       )}
 
-      {watch.length > 0 && (
-        <Card
-          className="mt-6"
-          title="Worth watching, not yet worth a figure"
-          count={watch.length}
-          subtitle="Measured on too few days to call a month, or on something not yet dispensed. Each becomes a row above when the claims say so."
-        >
+      {/* The five figures the period comes down to, on the accrual basis, each a link to its rows. */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <Figure size="sm" value={formatCents(accrual.netRevenueCents)} label="Net revenue" sub={pace?.netRevenueCents ? `${formatCents(pace.netRevenueCents)} at this pace` : "after DIR and chargebacks"} tone="muted" href={sources.revenue} />
+        <Figure size="sm" value={formatCents(accrual.grossProfitCents)} label="Gross profit" sub={accrual.grossMarginPercent !== null ? `${accrual.grossMarginPercent}% of net revenue` : "cost of goods not known"} tone={tone(accrual.grossProfitCents)} href={sources.costOfGoods} />
+        <Figure size="sm" value={formatCents(accrual.operatingCents)} label="Keeping the doors open" sub={pct(accrual.operatingCents) ?? "operating costs entered"} tone="muted" href={sources.expenses} />
+        <Figure size="sm" value={formatCents(accrual.netProfitCents)} label={accrual.netProfitCents < 0 ? "Net loss" : "Net profit"} sub={accrual.usable ? "every line in" : "lines missing, see above"} tone={accrual.usable ? tone(accrual.netProfitCents) : "warn"} href={`/money/monthly?period=${period.key}`} />
+        <Figure size="sm" value={scripts.scripts.toLocaleString()} label="Scripts" sub={scripts.perDay !== null ? `${scripts.perDay} a day · ${scripts.cash} cash` : "none in the period"} tone="muted" href={sources.scripts} />
+      </div>
+
+      {/* Both bases, side by side, and the gap said for what it is. */}
+      <Card className="mt-4" title="Earned against banked" subtitle="Accrual is what the period earned; cash is what reached the bank and left it. The difference is money owed, not money missing.">
+        <div className="overflow-x-auto">
+          <table className="table text-sm">
+            <thead>
+              <tr>
+                <th></th>
+                <th className="num">Accrual</th>
+                <th className="num">Cash</th>
+                <th className="num">Gap</th>
+              </tr>
+            </thead>
+            <tbody>
+              <Line label="Revenue" a={accrual.revenueCents} c={cash.revenueCents} href={sources.revenue} note={cash.revenue.length === 0 ? "no receipts entered for the period" : undefined} />
+              <Line label="Net revenue" a={accrual.netRevenueCents} c={cash.netRevenueCents} />
+              <Line label="Cost of goods" a={accrual.costOfGoodsCents} c={cash.costOfGoodsCents} href={sources.purchases} note={cash.costOfGoods.length === 0 ? "no invoice marked paid in the period" : undefined} />
+              <Line label="Gross profit" a={accrual.grossProfitCents} c={cash.grossProfitCents} strong />
+              <Line label="Operating" a={accrual.operatingCents} c={cash.operatingCents} href={sources.expenses} />
+              <Line label="Net" a={accrual.netProfitCents} c={cash.netProfitCents} strong />
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-2 text-xs text-ink-2">{gap.says}</p>
+        {accrual.stockMovementCents !== null && accrual.stockMovementCents !== 0 && (
+          <p className="mt-1 text-xs text-ink-3">
+            {formatCents(Math.abs(accrual.stockMovementCents))} {accrual.stockMovementCents > 0 ? "went onto the shelf" : "came off the shelf"} in the period: bought less dispensed. Not profit; where the cash went.
+          </p>
+        )}
+      </Card>
+
+      {/* The trend, because the trend is the point here. Each bar opens its month. */}
+      <Card className="mt-4" title="The last six months" subtitle="Net revenue and gross profit on the accrual basis, with scripts. A bar with nothing on it is a month with no account.">
+        <Bars
+          labels={recent.map((r) => r.month.slice(5) + "/" + r.month.slice(2, 4))}
+          series={[
+            { label: "Net revenue", values: recent.map((r) => (r.pl.revenue.length ? r.pl.netRevenueCents : null)) },
+            { label: "Gross profit", values: recent.map((r) => (r.pl.revenue.length ? r.pl.grossProfitCents : null)), tone: "ink" },
+          ]}
+          hrefs={recent.map((r) => `/money?period=${r.month}`)}
+        />
+        <div className="mt-2 overflow-x-auto">
+          <table className="table text-xs">
+            <thead>
+              <tr>
+                <th>Month</th>
+                {recent.map((r) => <th key={r.month} className="num">{r.month}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>Scripts</td>{recent.map((r) => <td key={r.month} className="num">{r.scripts.toLocaleString()}</td>)}</tr>
+              <tr><td>Gross margin</td>{recent.map((r) => <td key={r.month} className="num">{r.pl.grossMarginPercent !== null ? `${r.pl.grossMarginPercent}%` : "—"}</td>)}</tr>
+              <tr><td>Net</td>{recent.map((r) => <td key={r.month} className={`num ${r.pl.netProfitCents < 0 ? "text-crit" : ""}`}>{r.pl.revenue.length ? formatCents(r.pl.netProfitCents) : "—"}</td>)}</tr>
+              <tr><td>Complete</td>{recent.map((r) => <td key={r.month} className="num">{r.pl.usable ? "yes" : `${r.pl.missing.length} missing`}</td>)}</tr>
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        {/* What the period's cost of goods was checked against. A finding is a finding on the statement. */}
+        <Card title="Does it tie out?" subtitle="Each month's figures against their independent record.">
           <ul className="rows">
-            {watch.map((w) => (
-              <li key={w.says} className="py-2">
-                <p className="text-sm">{w.says}</p>
-                <p className="mt-0.5 text-xs text-ink-2">
-                  {w.todo} <Link href={w.href} className="text-accent underline">Look</Link>
-                </p>
-              </li>
-            ))}
+            {accrual.months.map((m) => {
+              const checks = [...m.reconciliation.cogs.checks, ...m.reconciliation.revenue];
+              const findings = checks.filter((c) => !c.expected && c.agrees === false).length;
+              const ties = checks.filter((c) => c.agrees === true).length;
+              return (
+                <li key={m.month} className="row">
+                  <div className="min-w-0">
+                    <div className="row-title">
+                      <Link href={`/money/monthly?period=${m.month}`} className="text-accent underline">{m.month}</Link>
+                      {findings > 0 ? <span className="badge badge-warn ml-2">{findings} to look at</span> : ties > 0 ? <span className="badge badge-ok ml-2">ties</span> : <span className="badge badge-muted ml-2">not enough held</span>}
+                    </div>
+                    <p className="row-why">{checks.map((c) => c.what).join(" · ")}</p>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         </Card>
-      )}
 
-      {blocked.length > 0 && (
-        <Card
-          className="mt-6"
-          tone="warn"
-          title="Money this cannot see yet"
-          count={blocked.length}
-          subtitle="Each of these is one fact away from being an amount on the list above. They are named rather than left as a shorter list, because a silently short list reads as good news."
-        >
-          <ul className="rows">
-            {blocked.map((b) => (
-              <li key={b.says} className="py-2">
-                <p className="text-sm">{b.says}</p>
-                <p className="mt-0.5 text-xs text-ink-2">
-                  {b.todo} <Link href={b.href} className="text-accent underline">Do it</Link>
-                </p>
-              </li>
-            ))}
-          </ul>
+        {/* The three lines worth the most from the money list, so the books lead to the action. */}
+        <Card title="Worth the most right now" subtitle="From the money list: amounts this site can see and what to do about each." actions={<Link href="/money/found" className="btn btn-sm">All of it</Link>}>
+          {found && found.rows.length > 0 ? (
+            <ol className="rows">
+              {found.rows.slice(0, 3).map((r) => (
+                <li key={r.key} className="row">
+                  <div className="min-w-0">
+                    <div className="row-title">{r.says}</div>
+                    <p className="row-why">{r.todo}</p>
+                  </div>
+                  <div className="whitespace-nowrap text-right text-sm">
+                    <Link href={r.href} className="font-semibold tabular-nums text-accent">{formatCents(r.amountCents)}</Link>
+                    <span className="block text-[11px] text-ink-3">{r.cadence === "recurring_monthly" ? "a month" : "one-off"}</span>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="text-sm text-ink-3">Nothing on the list yet. It fills in as invoices, catalogues and claims arrive.</p>
+          )}
         </Card>
-      )}
-
-      {card && (card.open + card.acted + card.dismissed + card.resolved) > 0 && <Scorecard card={card} />}
+      </div>
 
       <p className="mt-4 text-xs text-ink-3">
-        Two problems with the same cause are not added together — a drug bought dearly and dispensed at a loss is one
-        problem with two symptoms, and the total counts it once. A recurring saving is shown as a monthly figure and
-        only multiplied out in the first-year total, so nothing here is a year&rsquo;s money dressed up as this
-        month&rsquo;s. A row measured on less than a week of claims waits under &ldquo;worth watching&rdquo; rather than
-        being called a month.
+        Every figure links to the rows it was added from; a wrong figure is corrected there, never here. The statement carries every
+        line with its source, printable and as a file: <Link href={`/money/monthly?period=${period.key}`} className="text-accent underline">open it</Link>.
       </p>
     </>
   );
 }
 
-function Row({
-  r,
-  n,
-  age,
-  entry,
-  mark,
-}: {
-  r: MoneyRow;
-  n: number;
-  age?: number;
-  entry?: MoneyFound["log"][string];
-  mark: (fd: FormData) => Promise<void>;
-}) {
-  const yearly = r.cadence === "recurring_monthly" ? r.amountCents * 12 : r.amountCents;
-  const tone = r.confidence === "certain" ? "badge-ok" : r.confidence === "likely" ? "badge-muted" : "badge-warn";
-  const status = entry?.status ?? "open";
+function Line({ label, a, c, href, note, strong }: { label: string; a: number; c: number; href?: string; note?: string; strong?: boolean }) {
+  const gap = a - c;
   return (
-    <section className={`card ${status === "dismissed" ? "opacity-70" : ""}`}>
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-base font-semibold">
-          <span className="mr-2 text-ink-3">{n}.</span>
-          {r.says}
-        </h2>
-        <span className="whitespace-nowrap text-right">
-          <span className="block text-xl font-bold tabular-nums text-accent">{formatCents(r.amountCents)}</span>
-          <span className="block text-[11px] text-ink-3">
-            {r.cadence === "recurring_monthly" ? `a month · ${formatCents(yearly)} a year` : "one-off"}
-          </span>
-        </span>
-      </div>
-      <p className="mt-1.5 text-sm text-ink-2">{r.todo}</p>
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        <Link href={r.href} className="btn btn-sm btn-primary">Go and do it</Link>
-        {entry && status === "open" && (
-          <>
-            <form action={mark}>
-              <input type="hidden" name="id" value={entry.id} />
-              <input type="hidden" name="status" value="acted" />
-              <button type="submit" className="btn btn-sm">Done it</button>
-            </form>
-            <form action={mark}>
-              <input type="hidden" name="id" value={entry.id} />
-              <input type="hidden" name="status" value="dismissed" />
-              <button type="submit" className="btn btn-sm">Not doing this</button>
-            </form>
-          </>
-        )}
-        {entry && status !== "open" && (
-          <form action={mark} className="flex items-center gap-2">
-            <input type="hidden" name="id" value={entry.id} />
-            <input type="hidden" name="status" value="open" />
-            <span className={`badge ${status === "acted" ? "badge-ok" : "badge-muted"}`}>{status === "acted" ? "done" : "not doing this"}</span>
-            <button type="submit" className="text-xs text-ink-3 underline hover:text-accent">reopen</button>
-          </form>
-        )}
-        <span className={`badge ${tone}`}>{r.confidence}</span>
-        {age !== undefined && (
-          <span className="text-[11px] text-ink-3">
-            {age <= 1 ? "new today" : `on the list ${age} days`}{entry ? `, since ${entry.firstSeenOn}` : ""}
-          </span>
-        )}
-        {r.overlapsWith && r.overlapsWith.length > 0 && (
-          <span className="text-[11px] text-ink-3">counted once with the row above it that shares a cause</span>
-        )}
-      </div>
-      <details className="mt-2">
-        <summary className="cursor-pointer text-xs text-ink-3 hover:text-accent">Where the figure comes from</summary>
-        <p className="mt-1 text-xs text-ink-2">{r.basis}</p>
-      </details>
-    </section>
-  );
-}
-
-/**
- * What the advice has been worth.
- *
- * Promised is what the rows said when they were shown; realised is what the claims showed
- * afterwards, where the site could measure it (only a switch of NDC is scored so far). A kind of
- * advice that is shown often and acted on never is either wrong or badly put, and this is where
- * that shows.
- */
-function Scorecard({ card }: { card: NonNullable<Awaited<ReturnType<typeof recommendationScorecard>>> }) {
-  return (
-    <Card
-      className="mt-6"
-      title="How the advice has done"
-      subtitle="Every row is remembered from the day it first appears. Promised is what it said; realised is what the claims showed afterwards, where that can be measured."
-    >
-      <div className="grid gap-3 sm:grid-cols-4">
-        <Figure value={card.open} label="open" tone="muted" />
-        <Figure value={card.acted} label="done" tone="ok" />
-        <Figure value={card.dismissed} label="not doing" tone="muted" />
-        <Figure value={card.resolved} label="went away on their own" sub="The facts moved before anyone acted" tone="muted" />
-      </div>
-      {card.byKey.length > 0 && (
-        <div className="mt-3 overflow-x-auto">
-          <table className="table text-sm">
-            <thead>
-              <tr>
-                <th>Kind of advice</th>
-                <th className="num">Shown</th>
-                <th className="num">Done</th>
-                <th className="num">Not doing</th>
-                <th className="num">Realised</th>
-              </tr>
-            </thead>
-            <tbody>
-              {card.byKey.map((k) => (
-                <tr key={k.key}>
-                  <td className="font-mono text-xs">{k.key}</td>
-                  <td className="num">{k.shown}</td>
-                  <td className="num">{k.acted}</td>
-                  <td className="num">{k.dismissed}</td>
-                  <td className="num">{k.realisedCents === 0 ? "—" : formatCents(k.realisedCents)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      <p className="mt-2 text-xs text-ink-3">
-        Promised {formatCents(card.promisedCents)} across every row ever shown; realised {formatCents(card.realisedCents)} where measured.
-      </p>
-    </Card>
+    <tr className={strong ? "font-semibold" : ""}>
+      <td>
+        {href ? <Link href={href} className="text-accent underline">{label}</Link> : label}
+        {note && <span className="block text-[11px] font-normal text-ink-3">{note}</span>}
+      </td>
+      <td className="num">{formatCents(a)}</td>
+      <td className="num">{formatCents(c)}</td>
+      <td className={`num ${gap < 0 ? "text-crit" : "text-ink-2"}`}>{formatCents(gap)}</td>
+    </tr>
   );
 }

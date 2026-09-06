@@ -1,13 +1,16 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import { monthlyAccount, accountMonths } from "@/lib/profit-and-loss";
+import { accountMonths } from "@/lib/profit-and-loss";
+import { parsePeriod, periodOf, neighbours, type PeriodKind } from "@/lib/ledger";
+import { booksFor } from "@/lib/ledger-store";
+import { PrintButton } from "@/components/print-button";
 import { formatCents } from "@/lib/money";
 import { todayIso } from "@/lib/dates";
 import { PageHeader, Notice, Empty, Card } from "@/components/ui";
 import { ExportData } from "@/components/export-data";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Monthly profit and loss" };
+export const metadata = { title: "Statement" };
 
 /**
  * A month, honestly.
@@ -25,30 +28,52 @@ export const metadata = { title: "Monthly profit and loss" };
 export default async function MonthlyPLPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string; basis?: string }>;
+  searchParams: Promise<{ month?: string; period?: string; basis?: string }>;
 }) {
   await requireUser();
-  const { month: monthParam, basis: basisParam } = await searchParams;
+  const { month: monthParam, period: periodParam, basis: basisParam } = await searchParams;
   const basis = basisParam === "cash" ? "cash" : "accrual";
 
   const months = await accountMonths();
-  const month = monthParam && /^\d{4}-\d{2}$/.test(monthParam) ? monthParam : (months[0] ?? todayIso().slice(0, 7));
-  const pl = await monthlyAccount(month, basis);
+  const fallback = months[0] ?? todayIso().slice(0, 7);
+  const period = (periodParam && parsePeriod(periodParam)) || (monthParam && parsePeriod(monthParam)) || parsePeriod(fallback)!;
+  const month = period.key;
+  const books = await booksFor(period);
+  const pl = basis === "cash" ? books.cash : books.accrual;
+  const { before, after } = neighbours(period);
+  const kindLink = (k: PeriodKind) => `/money/monthly?period=${periodOf(k, period.months[period.months.length - 1]).key}&basis=${basis}`;
 
   const pct = (c: number) => (pl.netRevenueCents > 0 ? `${Math.round((c / pl.netRevenueCents) * 1000) / 10}%` : "—");
 
   return (
     <>
       <PageHeader
-        title="Monthly profit and loss"
-        subtitle="What the month took, what the goods cost, and what it cost to keep the doors open."
-        actions={<Link href="/expenses" className="btn">Spending</Link>}
+        title={`Statement · ${period.label}`}
+        subtitle="What the period took, what the goods cost, and what it cost to keep the doors open."
+        back={{ href: `/money?period=${period.key}`, label: "The books" }}
+        actions={
+          <>
+            <Link href={`/api/ledger?period=${period.key}&basis=${basis}`} prefetch={false} className="btn" download>Download CSV</Link>
+            <PrintButton />
+            <Link href="/expenses" className="btn">Spending</Link>
+          </>
+        }
       />
 
-      <form method="get" className="my-4 flex flex-wrap items-end gap-2 rounded-lg border border-line bg-surface p-3">
+      <form method="get" className="my-4 flex flex-wrap items-end gap-2 rounded-lg border border-line bg-surface p-3 no-print">
+        <span className="inline-flex items-center gap-1 text-sm">
+          <Link href={`/money/monthly?period=${before.key}&basis=${basis}`} className="btn btn-sm" aria-label="Earlier">←</Link>
+          <span className="inline-flex overflow-hidden rounded-md border border-line text-xs">
+            {(["month", "quarter", "year"] as PeriodKind[]).map((k) => (
+              <Link key={k} href={kindLink(k)} className={`px-2.5 py-1 ${period.kind === k ? "bg-accent-soft font-semibold text-accent" : "text-ink-2 hover:bg-ground"}`}>{k}</Link>
+            ))}
+          </span>
+          <Link href={`/money/monthly?period=${after.key}&basis=${basis}`} className="btn btn-sm" aria-label="Later">→</Link>
+        </span>
         <label className="text-xs">
           <span className="block text-ink-3">Month</span>
-          <select name="month" defaultValue={month} className="mt-0.5 rounded-md border border-line px-2 py-1 text-sm">
+          <select name="period" defaultValue={period.kind === "month" ? month : ""} className="mt-0.5 rounded-md border border-line px-2 py-1 text-sm">
+            {period.kind !== "month" && <option value={period.key}>{period.label}</option>}
             {(months.length ? months : [month]).map((m) => (
               <option key={m} value={m}>{m}</option>
             ))}
@@ -75,7 +100,7 @@ export default async function MonthlyPLPage({
       */}
       {pl.missing.length > 0 && (
         <Notice kind="crit">
-          <b>This is not a complete account of {month}.</b> Until these are in it, the bottom line is wrong in the
+          <b>This is not a complete account of {period.label}.</b> Until these are in it, the bottom line is wrong in the
           flattering direction:
           <ul className="mt-1 list-disc space-y-0.5 pl-5">
             {pl.missing.map((m, i) => (
@@ -89,7 +114,7 @@ export default async function MonthlyPLPage({
       )}
 
       {pl.revenue.length === 0 && pl.costOfGoods.length === 0 && pl.operating.length === 0 ? (
-        <Empty>Nothing has been loaded for {month} yet.</Empty>
+        <Empty>Nothing has been loaded for {period.label} yet.</Empty>
       ) : (
         <div className="my-4 overflow-hidden rounded-lg border border-line bg-surface">
           <Group title="What the month took" lines={pl.revenue} total={pl.revenueCents} />
@@ -141,16 +166,17 @@ export default async function MonthlyPLPage({
         title="Does it tie out?"
         subtitle="Where two records of the same month exist, they are compared. A difference that is expected is said to be expected; one that is not is a finding."
         tone={
-          [...pl.reconciliation.cogs.checks, ...pl.reconciliation.revenue].some((c) => !c.expected && c.agrees === false)
+          pl.months.some((m) => [...m.reconciliation.cogs.checks, ...m.reconciliation.revenue].some((c) => !c.expected && c.agrees === false))
             ? "warn"
             : undefined
         }
       >
         <ul className="rows">
-          {[...pl.reconciliation.cogs.checks, ...pl.reconciliation.revenue].map((c) => (
-            <li key={c.what} className="row">
+          {pl.months.flatMap((m) => [...m.reconciliation.cogs.checks, ...m.reconciliation.revenue].map((c) => ({ ...c, month: m.month }))).map((c) => (
+            <li key={`${c.month}|${c.what}`} className="row">
               <div className="min-w-0">
                 <div className="row-title">
+                  {pl.months.length > 1 && <span className="mr-2 font-mono text-xs text-ink-3">{c.month}</span>}
                   {c.what}
                   {c.agrees === true && <span className="badge badge-ok ml-2">ties</span>}
                   {c.agrees === false && !c.expected && <span className="badge badge-warn ml-2">look at this</span>}
@@ -165,10 +191,10 @@ export default async function MonthlyPLPage({
             </li>
           ))}
         </ul>
-        {pl.reconciliation.cogs.impliedCogsCents !== null && (
+        {pl.months.length === 1 && pl.months[0].reconciliation.cogs.impliedCogsCents !== null && (
           <p className="mt-3 text-xs text-ink-3">
             The shelf&rsquo;s own answer for cost of goods this month is{" "}
-            <b className="text-ink-2">{formatCents(pl.reconciliation.cogs.impliedCogsCents)}</b> — opening stock plus what
+            <b className="text-ink-2">{formatCents(pl.months[0].reconciliation.cogs.impliedCogsCents)}</b> — opening stock plus what
             the wholesalers billed, less closing stock. Not one figure in it comes from the claims, which is what makes
             it worth comparing.
           </p>
@@ -203,7 +229,7 @@ export default async function MonthlyPLPage({
         </div>
       </details>
 
-      <ExportData page="monthly" params={{ month, basis }} className="mt-6" />
+      {period.kind === "month" && <ExportData page="monthly" params={{ month, basis }} className="mt-6" />}
     </>
   );
 }

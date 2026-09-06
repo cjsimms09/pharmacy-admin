@@ -16,7 +16,7 @@ const PAGES = [
   "purchasing/page.tsx",
   "reports/page.tsx",
   "remits/mtf/page.tsx",
-  "tools/page.tsx",
+  "payers/sort/page.tsx",
 ];
 
 /*
