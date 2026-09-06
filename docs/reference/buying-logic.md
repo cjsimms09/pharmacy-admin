@@ -256,6 +256,19 @@ last pack may overshoot the minimum and the page says by how much; where nothing
 page says so and what the alternative costs. Recomputed on every open from the latest count,
 claims and catalogues, starting from today's planned basket at each supplier.
 
+## Rule 8: the contract replay (`contract-replay.ts`, `/purchasing/replay`)
+
+Which wholesaler's terms would have cost least on what the pharmacy actually dispensed: every
+fill of the last twelve months, priced at each supplier's cheapest product in the same group
+(`product-groups.ts`: drug, strength, form, brand-or-generic, pricing unit; a brand is never
+replayed as its generic), run through that supplier's programmes in force. The ratio each ladder
+measures is computed from the replayed month, unscrubbed, so every ladder is understated the same
+way; the tier at that ratio is applied to the spend the programme calls eligible. A supplier with
+no ladder earns nothing and says so. Fills a supplier cannot supply are counted apart and its
+coverage is shown; the ranking is among suppliers covering at least 90% of the fills, and a
+head-to-head compares two suppliers on the products both can supply. To test a new wholesaler:
+add it, load its price file, type its ladder, open the page.
+
 ## Rule 7: lean stock, the order minimum and returns on the invoice clock
 
 Built by the pharmacy session, and the account of it is `docs/PURCHASING-STRATEGY.md`:
