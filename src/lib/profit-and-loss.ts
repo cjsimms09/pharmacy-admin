@@ -39,6 +39,8 @@
  * report a profit the pharmacy did not make, so the account says what is missing rather than
  * printing a confident total over a hole.
  */
+import { reconcileCogs, reconcileRevenue, type Check as ReconCheck } from "./reconcile";
+
 
 export type PLLine = { label: string; amountCents: number; note?: string };
 
@@ -71,6 +73,11 @@ export type MonthlyPL = {
    * one a pharmacy with a good month and an empty bank account needs answered.
    */
   stockMovementCents: number | null;
+  /** What each figure's independent source says, and where they disagree. */
+  reconciliation: {
+    cogs: { checks: ReconCheck[]; impliedCogsCents: number | null; stockMovementCents: number | null };
+    revenue: ReconCheck[];
+  };
 
   /**
    * What the account cannot see, named rather than left to be discovered.
@@ -102,6 +109,9 @@ export type PLInputs = {
    */
   claimsRevenueCents?: number | null;
   claimsCount?: number;
+  /** The value on the shelf at the first and last count of the month, for the independent check. */
+  openingStockCents?: number | null;
+  closingStockCents?: number | null;
   /** The acquisition cost of everything dispensed in the month, from the claims themselves. */
   dispensedCostCents: number | null;
   /** What the wholesalers were invoiced for in the month, for the stock comparison only. */
@@ -327,6 +337,34 @@ export function monthlyPL(i: PLInputs): MonthlyPL {
 
   const stockMovementCents = i.purchasesCents !== null && i.dispensedCostCents !== null ? i.purchasesCents - i.dispensedCostCents : null;
 
+  /*
+   * Where each figure came from, and what an independent record of the same month says.
+   *
+   * The account is only worth reading if a number that ought to be corroborated has been. Cost of
+   * goods has a genuinely independent second source — opening stock plus purchases less closing
+   * stock uses nothing from the claims — and revenue has one too, in the till report. Both are
+   * computed here so the page can show its working rather than only its verdict.
+   */
+  const reconciliation = {
+    cogs: reconcileCogs({
+      dispensed: { cents: i.dispensedCostCents, from: "the acquisition cost on each dispensing" },
+      purchases: { cents: i.purchasesCents, from: "the wholesaler invoices dated in the month" },
+      openingStock: { cents: i.openingStockCents ?? null, from: "the first inventory count of the month" },
+      closingStock: { cents: i.closingStockCents ?? null, from: "the last inventory count of the month" },
+    }),
+    revenue: reconcileRevenue({
+      claims: { cents: i.claimsRevenueCents ?? null, from: "every plan's remittance plus what the patient paid" },
+      tillRx: {
+        cents: i.sales ? (i.sales.rxRemitCents ?? 0) + (i.sales.rxPatientCents ?? 0) || null : null,
+        from: "the System Sales Summary's prescription lines",
+      },
+      banked: {
+        cents: i.receipts.filter((r) => r.kind !== "rebate").reduce((n, r) => n + r.amountCents, 0) || null,
+        from: "receipts recorded against the month",
+      },
+    }),
+  };
+
   return {
     month: i.month,
     basis: i.basis,
@@ -342,6 +380,7 @@ export function monthlyPL(i: PLInputs): MonthlyPL {
     operatingCents,
     netProfitCents,
     stockMovementCents,
+    reconciliation,
     missing,
     /* A bottom line is only worth printing when the biggest costs are actually in it. */
     usable: missing.length === 0,
@@ -426,6 +465,22 @@ export async function monthlyAccount(month: string, basis: "accrual" | "cash" = 
   const paidPurchasesCents = paidThisMonth.length ? paidThisMonth.reduce((n, v) => n + (v.totalCents ?? 0), 0) : null;
   const purchasesUnpaidCount = allInvoices.filter((v) => !v.paidOn && v.invoiceDate?.startsWith(month)).length;
 
+  /*
+   * The shelf at each end of the month, which is what makes the cost of goods checkable at all.
+   *
+   * The first count of the month stands for the opening position and the last for the closing one.
+   * They are the counts that exist, not the first and last day — a count taken on the 3rd is the
+   * best opening figure available and saying so is better than refusing to check anything until
+   * somebody counts on the 1st.
+   */
+  const counts = await db.query.onHandImports.findMany({
+    where: and(gte(schema.onHandImports.countedOn, `${month}-01`), lte(schema.onHandImports.countedOn, `${month}-31`)),
+    columns: { countedOn: true, valueCents: true },
+  });
+  const valued = counts.filter((c) => c.valueCents !== null).sort((a, b) => a.countedOn.localeCompare(b.countedOn));
+  const openingStockCents = valued.length > 1 ? valued[0].valueCents : null;
+  const closingStockCents = valued.length > 1 ? valued[valued.length - 1].valueCents : null;
+
   const earned = await Promise.all(suppliers.map((s) => earningSoFar(s.id, month)));
   const rebatesCents = earned.reduce((n, e) => n + (e?.estimatedRebateCents ?? 0), 0) || null;
 
@@ -442,6 +497,8 @@ export async function monthlyAccount(month: string, basis: "accrual" | "cash" = 
     purchasesCents,
     paidPurchasesCents,
     purchasesUnpaidCount,
+    openingStockCents,
+    closingStockCents,
     rebatesCents,
     onAccount,
     expenses: bills.map((b) => {
