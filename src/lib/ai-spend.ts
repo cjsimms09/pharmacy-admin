@@ -23,12 +23,14 @@ const TOKENS = /tokens in=(\d+) out=(\d+)/;
 /**
  * Default rates, in dollars per million tokens.
  *
- * The Opus-class figures, because that is what the site is set to out of the box. They are a
- * starting point and are meant to be corrected in settings — nothing here should be read as a
- * quotation.
+ * Claude Opus 5's list prices, because that is the model the site is set to out of the box: $5 in
+ * and $25 out per million tokens (the Batch API halves both). The earlier $15 and $75 were the
+ * prices of the Opus generation before it, and left the on-screen estimate three times too high.
+ * They are a starting point and are meant to be corrected in settings — nothing here should be
+ * read as a quotation.
  */
-export const DEFAULT_RATE_IN = 15;
-export const DEFAULT_RATE_OUT = 75;
+export const DEFAULT_RATE_IN = 5;
+export const DEFAULT_RATE_OUT = 25;
 
 export type Rates = { in: number; out: number; model: string };
 

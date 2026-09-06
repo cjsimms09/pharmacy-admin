@@ -15,8 +15,9 @@
  * cited term, runs 4,000–8,000 tokens out per document.
  */
 export function estimateCost(pages: number, model: string, rates?: { in: number; out: number }): { low: number; high: number } {
-  const inPerM = rates?.in ?? (model.includes("sonnet") ? 3 : 15);
-  const outPerM = rates?.out ?? (model.includes("sonnet") ? 15 : 75);
+  // List prices per million tokens, by family: Haiku 4.5 $1/$5, Sonnet 5 $2/$10, Opus 5 $5/$25.
+  const inPerM = rates?.in ?? (model.includes("haiku") ? 1 : model.includes("sonnet") ? 2 : 5);
+  const outPerM = rates?.out ?? (model.includes("haiku") ? 5 : model.includes("sonnet") ? 10 : 25);
   const batch = 0.5;
   const docs = Math.max(1, pages / 12);
   const lo = ((pages * 1500) / 1e6) * inPerM * batch + ((docs * 4000) / 1e6) * outPerM * batch;

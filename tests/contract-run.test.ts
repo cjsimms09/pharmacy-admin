@@ -24,12 +24,14 @@ describe("batches under the limits", () => {
 
 describe("the estimate", () => {
   test("uses the rates typed in settings, halved for the batch, and grows with pages", () => {
-    // 120 pages at $15/$75 per million, halved for the batch: in 180k–360k tokens → $1.35–$2.70;
-    // out 10 documents × 4k–8k tokens → $1.50–$3.00. Low $2.85, high $5.70.
-    const e = estimateCost(120, "claude-opus-5", { in: 15, out: 75 });
-    assert.ok(Math.abs(e.low - 2.85) < 0.01, String(e.low));
-    assert.ok(Math.abs(e.high - 5.7) < 0.01, String(e.high));
-    assert.ok(estimateCost(240, "claude-opus-5", { in: 15, out: 75 }).high > e.high);
+    // 120 pages at $5/$25 per million, halved for the batch: in 180k–360k tokens → $0.45–$0.90;
+    // out 10 documents × 4k–8k tokens → $0.50–$1.00. Low $0.95, high $1.90.
+    const e = estimateCost(120, "claude-opus-5", { in: 5, out: 25 });
+    assert.ok(Math.abs(e.low - 0.95) < 0.01, String(e.low));
+    assert.ok(Math.abs(e.high - 1.9) < 0.01, String(e.high));
+    // Untyped rates fall back to the family's list price: Sonnet under Opus, Haiku under Sonnet.
+    assert.ok(estimateCost(120, "claude-haiku-4-5").high < estimateCost(120, "claude-sonnet-5").high);
+    assert.ok(estimateCost(240, "claude-opus-5", { in: 5, out: 25 }).high > e.high);
     assert.ok(estimateCost(120, "claude-sonnet-5").high < e.high);
   });
 });
