@@ -8,6 +8,7 @@ import { readInvoice } from "./ai";
 import { getSettings } from "./settings";
 import { pdfText } from "./pdf-text";
 import { looksLikeRebateReport } from "./rebate-report";
+import { isDrillDownText } from "./drill-down-read";
 import { allSuppliers, supplierForSender } from "./suppliers-registry";
 import { scheduleFromNames, linesMatching } from "./controlled-names";
 import { audit } from "./audit";
@@ -57,7 +58,7 @@ export type SupplierInvoice = typeof schema.supplierInvoices.$inferSelect;
  * subject or file name says invoice. Everything else stays on the path it was on. A rule that
  * swept up too much would file the wrong things under a heading an inspector reads first.
  */
-export type SupplierDocumentKind = "invoice" | "statement" | "rebate_report" | "credit_memo" | "unknown";
+export type SupplierDocumentKind = "invoice" | "statement" | "rebate_report" | "credit_memo" | "purchase_report" | "unknown";
 
 /**
  * What a supplier actually sent, read off the document rather than off the subject line.
@@ -77,6 +78,17 @@ export type SupplierDocumentKind = "invoice" | "statement" | "rebate_report" | "
  */
 export function classifySupplierDocument(text: string | null | undefined, fileName = "", subject = ""): { kind: SupplierDocumentKind; why: string } {
   const words = text ?? "";
+  /*
+   * The pharmacy's own daily purchase report, named before anything else looks at it.
+   *
+   * It carries no NDCs and no statement wording, so it came out "unknown" — and unknown is what
+   * the invoice backlog offers for filing. It arrived every morning, went on the list every
+   * morning, and the only way off the list was a Delete that would have destroyed the month's
+   * GCR readings with it.
+   */
+  if (words && isDrillDownText(words, fileName)) {
+    return { kind: "purchase_report", why: "It is the daily Purchase Drill Down — a summary of what was bought, not a bill for it." };
+  }
   if (words && looksLikeRebateReport(words)) {
     return { kind: "rebate_report", why: "It is a rebate breakdown: it carries the tier table and the month's settlement, not goods." };
   }
@@ -1796,15 +1808,51 @@ export async function unfileInvoice(
 export async function recheckFiledInvoices(
   user: { id?: string | null; name: string },
   opts: { apply?: boolean } = {},
-): Promise<{ checked: number; found: { id: string; supplier: string | null; kind: SupplierDocumentKind; why: string }[]; moved: number; unreadable: number }> {
+): Promise<{
+  checked: number;
+  found: { id: string; supplier: string | null; kind: SupplierDocumentKind; why: string }[];
+  moved: number;
+  unreadable: number;
+  /** Invoice records whose document no longer exists — the ones nothing could reach. */
+  orphaned: { id: string; supplier: string | null; invoiceNumber: string | null }[];
+  removedOrphans: number;
+}> {
   const rows = await db.query.supplierInvoices.findMany();
   const found: { id: string; supplier: string | null; kind: SupplierDocumentKind; why: string }[] = [];
+  const orphaned: { id: string; supplier: string | null; invoiceNumber: string | null }[] = [];
   let unreadable = 0;
   let moved = 0;
+  let removedOrphans = 0;
 
   for (const inv of rows) {
     const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, inv.documentId) });
-    if (!doc) continue;
+    /*
+     * A filed invoice whose document has gone.
+     *
+     * It was skipped here, which meant nothing ever looked at it again: it sat in the invoice
+     * list, went on counting as purchases, and every button on its row worked through the
+     * document that no longer existed. That is the row that would not go away.
+     *
+     * An invoice record with no document proves nothing to an inspector and is evidence of
+     * nothing to the accounts, so it is counted and, on apply, taken out with its lines.
+     */
+    if (!doc) {
+      orphaned.push({ id: inv.id, supplier: inv.supplier, invoiceNumber: inv.invoiceNumber });
+      if (opts.apply) {
+        await db.delete(schema.invoiceLines).where(eq(schema.invoiceLines.invoiceId, inv.id));
+        await db.delete(schema.supplierInvoices).where(eq(schema.supplierInvoices.id, inv.id));
+        await audit({
+          action: "invoice.orphan_removed",
+          userId: user.id ?? null,
+          userName: user.name,
+          entity: "supplier_invoice",
+          entityId: inv.id,
+          details: `${inv.supplier ?? "a supplier"} ${inv.invoiceNumber ?? ""} — the document behind it no longer exists`.trim(),
+        });
+        removedOrphans++;
+      }
+      continue;
+    }
     let text: string;
     try {
       text = pdfText(await readStoredFile(doc.storageKey));
@@ -1822,5 +1870,5 @@ export async function recheckFiledInvoices(
       moved++;
     }
   }
-  return { checked: rows.length, found, moved, unreadable };
+  return { checked: rows.length, found, moved, unreadable, orphaned, removedOrphans };
 }
