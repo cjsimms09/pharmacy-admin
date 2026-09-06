@@ -7,7 +7,8 @@ import { parseFormula, expectedCents } from "../src/lib/rate-formula";
 const terms: AppealTerms = { pbmName: "Example PBM", submissionChannel: "Provider portal", submissionTarget: "https://portal.example.invalid/appeals", appealWindowDays: 30, windowBasis: "date_of_adjudication", requiredFields: "claim number; NDC; date of service; invoice", invoiceRequired: "yes", responseSlaDays: 10 };
 const claim: AppealClaim = { rxNumber: "336853", fillNumber: 0, dateFilled: "2026-09-01", adjudicatedOn: "2026-09-01", remittedOn: null, ndc11: "00093505698", drugName: "ATORVASTATIN 20MG TAB", quantityThousandths: 30_000, bin: "610455", pcn: "PDPPCN", groupNumber: "RX1234", pbmName: "Example PBM", paidCents: 1_150, ingredientPaidCents: 150 };
 const invoice = { supplier: "McKesson", invoiceNumber: "7788123", invoiceDate: "2026-08-28", unitCostMicros: 120_000, packUnits: 90 };
-const pharmacy = { name: "Example Pharmacy", ncpdp: "1712345", npi: "1234567890" };
+// No NPI-shaped literal here: the secret scanner treats ten digits after "npi" as one, made up or not.
+const pharmacy = { name: "Example Pharmacy", ncpdp: "1712345", npi: null };
 // Contract: Lesser of (MAC or AWP-25%) + $1.00; AWP $0.40 a unit → 30 × $0.30 = $9.00 + $1.00 = $10.00, a ceiling.
 const expected = () => { const e = expectedCents(parseFormula("Lesser of (MAC or AWP-25%) + $1.00"), 30_000, { awpMicros: 400_000 }); return { totalCents: e.totalCents, atMost: e.atMost, why: e.why, formulaText: "Lesser of (MAC or AWP-25%) + $1.00" }; };
 
