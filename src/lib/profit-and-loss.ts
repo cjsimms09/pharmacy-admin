@@ -404,13 +404,14 @@ export async function monthlyAccount(month: string, basis: "accrual" | "cash" = 
   const { db, schema } = await import("@/db");
   const { and, gte, lte } = await import("drizzle-orm");
 
-  const [months, bills, receipts, cats, fills, suppliers] = await Promise.all([
+  const [months, bills, receipts, cats, fills, suppliers, driverCents] = await Promise.all([
     salesMonths(),
     expensesIn(month, basis),
     cashReceiptsIn(month),
     categories(true),
     allFills(),
     allSuppliers(true),
+    driverCostFor(month),
   ]);
   void latestSalesMonth;
 
@@ -513,17 +514,30 @@ export async function monthlyAccount(month: string, basis: "accrual" | "cash" = 
     closingStockCents,
     rebatesCents,
     onAccount,
-    expenses: bills.map((b) => {
-      const c = b.categoryId ? byId.get(b.categoryId) : undefined;
-      return {
-        categoryId: b.categoryId,
-        categoryName: c?.name ?? "Uncategorised",
-        // A bill nobody has filed is an overhead until somebody says otherwise: it is the reading
-        // that keeps it out of gross profit, where a wrong guess would move the margin.
-        kind: c?.kind ?? "operating",
-        amountCents: b.amountCents,
-      };
-    }),
+    expenses: [
+      ...bills.map((b) => {
+        const c = b.categoryId ? byId.get(b.categoryId) : undefined;
+        return {
+          categoryId: b.categoryId,
+          categoryName: c?.name ?? "Uncategorised",
+          // A bill nobody has filed is an overhead until somebody says otherwise: it is the reading
+          // that keeps it out of gross profit, where a wrong guess would move the margin.
+          kind: c?.kind ?? "operating",
+          amountCents: b.amountCents,
+        };
+      }),
+      /*
+       * The delivery round, where the pharmacy is the one paying for it.
+       *
+       * Nought in this pharmacy's arrangement, where the invoice is raised on the driver's behalf
+       * and billed to the clinic — and `excludedFromAccount` says so on the page rather than
+       * leaving the omission to be noticed. One setting governs both, so the account and the note
+       * about it can never disagree.
+       */
+      ...(driverCents > 0
+        ? [{ categoryId: null, categoryName: "Delivery round", kind: "operating", amountCents: driverCents }]
+        : []),
+    ],
   });
 }
 
@@ -542,4 +556,107 @@ export async function accountMonths(): Promise<string[]> {
   for (const b of bills) set.add(b.invoiceDate.slice(0, 7));
   for (const c of claims) set.add(c.dateFilled.slice(0, 7));
   return [...set].filter((m) => /^\d{4}-\d{2}$/.test(m)).sort().reverse();
+}
+
+/**
+ * What the site knows about, in money, and deliberately keeps out of the month's account.
+ *
+ * The owner asked whether the money section takes the delivery charges into account. It does not,
+ * and it should not — but an account that silently omits something the site plainly holds is
+ * indistinguishable from one that forgot, and the only way to tell them apart was to read the
+ * code. So the omissions are named, with this month's actual figures against them and the reason
+ * in a sentence.
+ *
+ * The rule each of these follows is the same one: an account records the pharmacy's own money.
+ * Raising somebody else's invoice is administration, not trade, and an order is not a cost until
+ * somebody has priced it.
+ */
+export type AccountExclusion = {
+  label: string;
+  /** The money involved, where there is a figure. Null where the site holds no price. */
+  amountCents: number | null;
+  /** A count instead, where the figure is a number of things rather than an amount. */
+  count: number | null;
+  why: string;
+  href: string;
+};
+
+export async function excludedFromAccount(month: string): Promise<AccountExclusion[]> {
+  const out: AccountExclusion[] = [];
+  const { db, schema } = await import("@/db");
+  const { eq } = await import("drizzle-orm");
+  const { getSettings } = await import("./settings");
+  const s = await getSettings();
+
+  /*
+   * The delivery round.
+   *
+   * The site raises the driver's invoice, and raising an invoice says nothing about whose money it
+   * is: it is raised on his behalf and billed to the clinic, so it is neither revenue nor cost
+   * here. Where the pharmacy pays its own driver, the setting says so and the month's invoices go
+   * in as an operating cost instead — see `driverCostFor` below, which the account uses.
+   */
+  try {
+    const invoices = await db.query.driverInvoices.findMany({ where: eq(schema.driverInvoices.month, month) });
+    const total = invoices.reduce((n, i) => n + i.totalCents, 0);
+    if (invoices.length > 0 && (s.driver_paid_by ?? "clinic") !== "pharmacy") {
+      out.push({
+        label: `The delivery round — ${invoices.length} invoice${invoices.length === 1 ? "" : "s"}`,
+        amountCents: total,
+        count: null,
+        why:
+          `Raised here on the driver's behalf and billed to ${(s.driver_bill_to ?? "").trim() || "the clinic"}, so the money is ` +
+          "between the two of them. If the pharmacy is the one paying him, say so in Settings and it becomes an operating cost of the month.",
+        href: "/deliveries",
+      });
+    }
+  } catch {
+    /* No delivery records. */
+  }
+
+  /*
+   * Supply orders.
+   *
+   * The site records what was asked for, never what it cost — the order is an email, and the price
+   * arrives later on the vendor's own invoice. Booking the order would be inventing a figure; the
+   * invoice, when it comes, is an ordinary bill and goes in as one.
+   */
+  try {
+    const orders = await db.query.supplyOrders.findMany();
+    const mine = orders.filter((o) => o.placedOn.startsWith(month) && o.status !== "cancelled" && o.status !== "draft");
+    if (mine.length > 0) {
+      const vendors = [...new Set(mine.map((o) => o.vendorName))];
+      out.push({
+        label: `Supply orders sent — ${mine.length} to ${vendors.join(", ")}`,
+        amountCents: null,
+        count: mine.length,
+        why:
+          "The order is an email; the price arrives on the vendor's invoice afterwards. Booking the order would be " +
+          "inventing a figure. Record the invoice under Spending when it comes and it lands in this month's account.",
+        href: "/purchasing/supplies",
+      });
+    }
+  } catch {
+    /* No supply orders. */
+  }
+
+  return out;
+}
+
+/**
+ * The delivery round as a cost, where the pharmacy is the one paying for it.
+ *
+ * Nought in the ordinary arrangement here, where the clinic pays the driver directly. Kept apart
+ * from `excludedFromAccount` so the account can add it without deciding anything: one setting
+ * governs both, and they cannot disagree about which way it went.
+ */
+export async function driverCostFor(month: string): Promise<number> {
+  const { db, schema } = await import("@/db");
+  const { eq } = await import("drizzle-orm");
+  const { getSettings } = await import("./settings");
+  const s = await getSettings();
+  if ((s.driver_paid_by ?? "clinic") !== "pharmacy") return 0;
+  const invoices = await db.query.driverInvoices.findMany({ where: eq(schema.driverInvoices.month, month) });
+  // Drafts are not yet a bill: the month is unfinished and the figure would change under the account.
+  return invoices.filter((i) => i.status !== "draft").reduce((n, i) => n + i.totalCents, 0);
 }

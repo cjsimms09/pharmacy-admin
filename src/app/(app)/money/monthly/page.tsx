@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import { monthlyAccount, accountMonths } from "@/lib/profit-and-loss";
+import { monthlyAccount, accountMonths, excludedFromAccount } from "@/lib/profit-and-loss";
 import { formatCents } from "@/lib/money";
 import { todayIso } from "@/lib/dates";
 import { PageHeader, Notice, Empty, Card } from "@/components/ui";
@@ -34,6 +34,14 @@ export default async function MonthlyPLPage({
   const months = await accountMonths();
   const month = monthParam && /^\d{4}-\d{2}$/.test(monthParam) ? monthParam : (months[0] ?? todayIso().slice(0, 7));
   const pl = await monthlyAccount(month, basis);
+  /*
+   * What the site holds and this account leaves out.
+   *
+   * An account that silently omits something the site plainly knows about cannot be told from one
+   * that forgot it, and the only way to tell was to read the code. Each omission is named with
+   * this month's own figure and the reason it is not trade.
+   */
+  const excluded = await excludedFromAccount(month);
 
   const pct = (c: number) => (pl.netRevenueCents > 0 ? `${Math.round((c / pl.netRevenueCents) * 1000) / 10}%` : "—");
 
@@ -174,6 +182,29 @@ export default async function MonthlyPLPage({
           </p>
         )}
       </Card>
+
+      {excluded.length > 0 && (
+        <Card className="my-4" title="Known to the site, and not in this account" count={excluded.length}>
+          <p className="mb-3 text-xs text-ink-3">
+            Money the site records and deliberately keeps out of the month, so an omission is never mistaken for an
+            oversight. An account records the pharmacy&rsquo;s own money: raising somebody else&rsquo;s invoice is
+            administration, not trade, and an order is not a cost until somebody has priced it.
+          </p>
+          <ul className="rows">
+            {excluded.map((x) => (
+              <li key={x.label} className="flex flex-wrap items-start justify-between gap-2 py-2">
+                <span className="min-w-0">
+                  <Link href={x.href} className="text-sm text-accent hover:underline">{x.label}</Link>
+                  <span className="mt-0.5 block text-xs text-ink-3">{x.why}</span>
+                </span>
+                <span className="shrink-0 text-sm tabular-nums text-ink-2">
+                  {x.amountCents !== null ? formatCents(x.amountCents) : "no price held"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       <details className="my-4 rounded-lg border border-line bg-surface p-4">
         <summary className="cursor-pointer text-sm font-semibold">How each figure is arrived at</summary>
