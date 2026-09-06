@@ -108,6 +108,30 @@ export const SOURCES: Source[] = [
     },
   },
   {
+    key: "report",
+    title: "Reports — quarters, years and the trend",
+    href: "/money/report",
+    load: async (p) => {
+      const { periodAccount, monthlyTrend, accountMonths } = await import("./profit-and-loss");
+      const { periodsFor, parsePeriod } = await import("./period-account");
+      const months = await accountMonths();
+      const choices = periodsFor(months);
+      const asked = p.get("period");
+      const period = asked && parsePeriod(asked) ? asked : (choices.quarters[0] ?? choices.months[0] ?? null);
+      const basis = p.get("basis") === "cash" ? "cash" : "accrual";
+      if (!period) return { data: null, notes: ["No month has anything to report on yet."] };
+      const [totals, trend] = await Promise.all([periodAccount(period, basis), monthlyTrend(24, basis)]);
+      return {
+        data: { totals, trend },
+        shownWith: { period, basis, periodsAvailable: choices },
+        notes: [
+          ...(totals?.missing ?? []),
+          ...(totals && totals.emptyMonths.length > 0 ? [`Nothing recorded in ${totals.emptyMonths.join(", ")}.`] : []),
+        ],
+      };
+    },
+  },
+  {
     key: "expenses",
     title: "Spending",
     href: "/expenses",

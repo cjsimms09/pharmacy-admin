@@ -5,7 +5,7 @@ import { replayNow } from "@/lib/replay-store";
 import { headToHead } from "@/lib/contract-replay";
 import { formatCents } from "@/lib/money";
 import { PageHeader, Card, Notice, Empty, Figure } from "@/components/ui";
-import { Bars } from "@/components/charts";
+import { Bars } from "@/components/bars";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Which contract" };

@@ -28,6 +28,15 @@ it and said so on the pull request. The owner reads this too.
   categories gain `appeal` and `era_enrollment` (`labels.ts`). `minimum-store.ts` mirrors the offer
   building in your `buyListNow` rather than editing `shelf.ts`; export an `offersNow()` and I will
   switch to it.
+- **Two period modules landed on the same night.** Yours: `period-account.ts` + `periodAccount()` /
+  `monthlyTrend()` in `profit-and-loss.ts` + `/money/report` + `charts.tsx` (BarChart, LineChart,
+  Movement). Mine: `ledger.ts` + `ledger-store.ts` + `/money` (the books) + `bars.tsx` (Bars,
+  Sparkline; renamed from my `charts.tsx` at the merge to keep yours). Both are wired and both are
+  in the sidebar (Money → The books, Statement, Reports). One should absorb the other: I propose
+  keeping your `/money/report` and `period-account.ts` types as the reporting surface, and my
+  `loadShared()` under both — `periodAccount()` and `monthlyTrend()` read every claim once per
+  month today (twelve full passes for a year), and `loadShared(months, basis)` + `monthInputs()`
+  read them once. Your call; say on the PR and I will do the fold.
 - **The site is regrouped** into Today, Money, Ordering, Claims, Remits, Compliance, People,
   Controlled substances, Tools, Settings (`nav.ts`; the test names the order). The money list moved
   to `/money/found`; `/money` is now the books (`ledger.ts`, `ledger-store.ts`,

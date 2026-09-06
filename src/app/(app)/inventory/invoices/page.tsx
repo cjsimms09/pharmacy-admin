@@ -28,6 +28,9 @@ import {
   recordReceipt,
   awaitingReceipt,
   unfileInvoice,
+  purgeFromInvoiceFile,
+  fileMisfiled,
+  misfiledInVault,
   recheckFiledInvoices,
   sumOf,
   money,
@@ -133,6 +136,8 @@ export default async function InvoicesPage({
     adoptableDocuments(),
     invoiceCompliance(),
   ]);
+  // What is in the invoice folder that is not an invoice. Only an invoice belongs there.
+  const misfiled = canManage ? await misfiledInVault() : [];
   const noAmountCount = await missingTotals();
   const noLinesCount = await invoicesWithoutLines();
   const unreceipted = await awaitingReceipt();
@@ -494,19 +499,36 @@ export default async function InvoicesPage({
     }
   }
 
-  /** Deletes an invoice outright: the document, the invoice record, and every line read off it. */
-  async function destroyInvoice(fd: FormData) {
+  /**
+   * Deletes, whatever the row is.
+   *
+   * One action behind every Delete on this page. It takes whichever ids the row has — an invoice
+   * id, a document id, or both — and removes everything reachable from either. There is deliberately
+   * no branch here that works out what the row is first: three delete paths that each began by
+   * establishing the case is exactly how deleting one statement failed four times running, each
+   * time in a state none of them covered.
+   */
+  async function destroy(fd: FormData) {
     "use server";
     const u = await requireManager();
-    const id = String(fd.get("destroyId") ?? "");
     const back = String(fd.get("back") ?? "/inventory/invoices");
-    const documentId = String(fd.get("documentId") ?? "") || null;
+    const ids = [String(fd.get("destroyId") ?? ""), String(fd.get("documentId") ?? "")].filter(Boolean);
     try {
-      const r = await unfileInvoice(id, { kind: "discard" }, u, documentId);
+      const said: string[] = [];
+      let removed = 0;
+      for (const id of ids) {
+        const r = await purgeFromInvoiceFile(id, u);
+        removed += r.removed.invoices + r.removed.documents;
+        said.push(r.message);
+      }
       revalidatePath("/inventory/invoices");
       revalidatePath("/documents");
       revalidatePath("/purchasing");
-      redirect(`${back}${back.includes("?") ? "&" : "?"}ok=` + encodeURIComponent(r.message));
+      revalidatePath("/money/monthly");
+      redirect(
+        `${back}${back.includes("?") ? "&" : "?"}ok=` +
+          encodeURIComponent(removed > 0 ? said.filter((x) => !x.startsWith("Nothing with")).join(" ") : said[0] ?? "Nothing to delete."),
+      );
     } catch (e) {
       if (e && typeof e === "object" && "digest" in e) throw e;
       redirect(`${back}${back.includes("?") ? "&" : "?"}error=` + encodeURIComponent(e instanceof Error ? e.message : "Could not delete that."));
@@ -520,18 +542,25 @@ export default async function InvoicesPage({
    * pointed at it is what left a statement that could not be opened, could not be taken out of the
    * invoice file, and went on counting as purchases — the one that would not go away.
    */
-  async function destroyDocument(fd: FormData) {
+  /** Files everything in the invoice folder that is not an invoice where it does belong. */
+  async function refile() {
     "use server";
     const u = await requireManager();
-    const documentId = String(fd.get("documentId") ?? "");
-    const { deleteDocument } = await import("@/app/(app)/documents/actions");
-    const r = await deleteDocument(documentId, "/inventory/invoices");
-    void u;
+    const r = await fileMisfiled(u);
     revalidatePath("/inventory/invoices");
+    revalidatePath("/documents");
+    revalidatePath("/suppliers");
+    revalidatePath("/purchasing");
     redirect(
-      r.ok
-        ? "/inventory/invoices?ok=" + encodeURIComponent("Deleted. The document is gone, along with anything filed from it.")
-        : "/inventory/invoices?error=" + encodeURIComponent(r.error ?? "Could not delete that."),
+      "/inventory/invoices?ok=" +
+        encodeURIComponent(
+          r.moved === 0
+            ? "Everything in the invoice folder reads as an invoice."
+            : `${r.moved} document${r.moved === 1 ? "" : "s"} filed where ${r.moved === 1 ? "it belongs" : "they belong"}: ` +
+              r.found.map((f) => f.title).join(", ") +
+              ". Anything counted as a purchase off them is gone." +
+              (r.ratioRead ? ` ${r.ratioRead}` : ""),
+        ),
     );
   }
 
@@ -715,6 +744,48 @@ export default async function InvoicesPage({
         in the building and not on this page, which is the worst of both worlds: the pharmacy
         holds Schedule II records it cannot produce on demand and believes it holds none.
       */}
+      {/*
+        Not an invoice, and in the invoice folder.
+
+        An invoice is a receipt record under 21 CFR 1304.22(c) and its Schedule II copy has to be
+        held apart from everything else. A statement records no receipt of anything, and the daily
+        purchase report is a summary of what was bought — filed here, the controlled-substance file
+        fills with documents that prove nothing, and the one question the folder exists to answer
+        stops having a clean answer.
+      */}
+      {misfiled.length > 0 && canManage && (
+        <Card
+          tone="crit"
+          title="In the invoice folder, and not invoices"
+          count={misfiled.length}
+          subtitle="Read on their own words. Filing them puts each where it belongs and takes anything counted as a purchase off them — and a purchase drill down has its compliance ratio read while it goes."
+          className="mt-4 mb-6"
+          actions={
+            <form action={refile}>
+              <button className="btn btn-sm btn-primary">Put {misfiled.length === 1 ? "it" : "them"} where {misfiled.length === 1 ? "it belongs" : "they belong"}</button>
+            </form>
+          }
+        >
+          <ul className="rows">
+            {misfiled.map((m) => (
+              <li key={m.id} className="flex flex-wrap items-start justify-between gap-2 py-2">
+                <span className="min-w-0">
+                  <a href={`/files/${m.id}`} target="_blank" rel="noreferrer" className="text-sm text-accent hover:underline">{m.title}</a>
+                  <span className="mt-0.5 block text-xs text-ink-3">{m.why}</span>
+                </span>
+                <span className="flex shrink-0 gap-1">
+                  <span className="badge badge-warn self-center">{m.kind.replace(/_/g, " ")}</span>
+                  <form action={destroy}>
+                    <input type="hidden" name="documentId" value={m.id} />
+                    <button className="btn btn-sm border-crit text-crit hover:bg-crit-soft" formNoValidate title="Deletes it outright.">Delete</button>
+                  </form>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
       {adoptable.length > 0 && canManage && (
         <Card
           tone="warn"
@@ -753,7 +824,7 @@ export default async function InvoicesPage({
                       Not an invoice
                     </button>
                   </form>
-                  <form action={destroyDocument}>
+                  <form action={destroy}>
                     <input type="hidden" name="documentId" value={d.id} />
                     <button className="btn btn-sm border-crit text-crit hover:bg-crit-soft" formNoValidate title="Deletes the document outright.">
                       Delete
@@ -901,7 +972,7 @@ export default async function InvoicesPage({
                         Not an invoice — it is a statement
                       </button>
                       <button
-                        formAction={destroyInvoice}
+                        formAction={destroy}
                         formNoValidate
                         name="destroyId"
                         value={i.id}
@@ -1109,7 +1180,7 @@ export default async function InvoicesPage({
                               */}
                               <input type="hidden" name="documentId" value={i.documentId} />
                               <button
-                                formAction={destroyInvoice}
+                                formAction={destroy}
                                 formNoValidate
                                 name="destroyId"
                                 value={i.id}

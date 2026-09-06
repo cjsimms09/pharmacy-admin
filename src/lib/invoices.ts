@@ -1330,11 +1330,32 @@ export async function adoptableDocuments(): Promise<
    */
   const out: { id: string; title: string; fileName: string; receivedFrom: string | null; effectiveOn: string | null }[] = [];
   for (const d of candidates) {
+    /*
+     * Only a document that reads as an invoice is offered as one.
+     *
+     * This used to keep "unknown" as well, on the reasoning that an unreadable scan is exactly what
+     * the list is for. But unknown is not the same as unreadable: a PDF whose text extracts
+     * perfectly well and says nothing invoice-shaped is a document the site does not recognise, and
+     * offering it here — under a heading that says these are invoices waiting to be filed, beside a
+     * button that files them as invoices — is how the pharmacy's own daily purchase report ended up
+     * on the list every morning with a Delete beside it.
+     *
+     * So the two cases are separated. Text that reads as an invoice is offered. Text that reads as
+     * anything else is not, and `misfiledInVault` files it as what it is. Text that will not come
+     * out at all is a scan, and a scan whose name or title says invoice is still offered, because
+     * that is a real invoice with no text layer and there is nothing else to go on.
+     */
+    let words = "";
     try {
-      const kind = classifySupplierDocument(pdfText(await readStoredFile(d.storageKey)), d.fileName, d.title).kind;
-      if (kind !== "invoice" && kind !== "unknown") continue;
+      words = pdfText(await readStoredFile(d.storageKey));
     } catch {
-      // Unreadable as text — a scan. Those are exactly what this list is for.
+      words = "";
+    }
+    if (words.trim().length > 40) {
+      if (classifySupplierDocument(words, d.fileName, d.title).kind !== "invoice") continue;
+    } else if (!/invoice|\binv\b|packing (list|slip)/i.test(`${d.title} ${d.fileName}`)) {
+      // A scan that does not even claim to be an invoice is not offered as one.
+      continue;
     }
     out.push({
       id: d.id,
@@ -1871,4 +1892,213 @@ export async function recheckFiledInvoices(
     }
   }
   return { checked: rows.length, found, moved, unreadable, orphaned, removedOrphans };
+}
+
+/**
+ * Delete something from the invoice file, whatever state it is in, in one action.
+ *
+ * This exists because deleting a statement failed four times running, each time for a different
+ * reason, and each fix only covered the state it was reported in. There were three delete paths —
+ * one for an invoice with its document, one for a document with no invoice, one for an invoice
+ * whose document had gone — and every one of them began by working out which case it was in. That
+ * is the bug: the page shows a row, the person wants the row gone, and a delete that first has to
+ * agree with itself about what the row *is* will always have a fourth case.
+ *
+ * So this takes an id — an invoice id, a document id, either, both, it does not care — and removes
+ * everything reachable from it: the invoice record, its lines, the document, and the stored file
+ * when nothing else points at it. Then it says exactly what went. It cannot report "already gone,
+ * nothing further to do" over a row still on the screen, because it looks in every place the row
+ * could be coming from rather than the one place it expected.
+ */
+export async function purgeFromInvoiceFile(
+  id: string,
+  user: { id?: string | null; name: string },
+): Promise<{ removed: { invoices: number; lines: number; documents: number }; message: string }> {
+  const wanted = id.trim();
+  if (!wanted) return { removed: { invoices: 0, lines: 0, documents: 0 }, message: "Nothing was named to delete." };
+
+  // Every invoice record reachable from this id, by either of the two ways a row can name one.
+  const byId = await db.query.supplierInvoices.findFirst({ where: eq(schema.supplierInvoices.id, wanted) });
+  const byDoc = await db.query.supplierInvoices.findMany({ where: eq(schema.supplierInvoices.documentId, wanted) });
+  const invoices = [...(byId ? [byId] : []), ...byDoc.filter((i) => i.id !== byId?.id)];
+
+  // Every document reachable from it: the id itself, and whatever those invoices were filed from.
+  const docIds = [...new Set([wanted, ...invoices.map((i) => i.documentId)].filter(Boolean) as string[])];
+  const docs = (
+    await Promise.all(docIds.map((d) => db.query.documents.findFirst({ where: eq(schema.documents.id, d) })))
+  ).filter((d): d is NonNullable<typeof d> => Boolean(d));
+
+  if (invoices.length === 0 && docs.length === 0) {
+    return {
+      removed: { invoices: 0, lines: 0, documents: 0 },
+      message:
+        "Nothing with that reference is in the invoice file or the document vault, so there was nothing left to delete. " +
+        "If it is still on the screen, the page is showing a copy from before it went — reload it.",
+    };
+  }
+
+  let lines = 0;
+  for (const inv of invoices) {
+    const its = await db.query.invoiceLines.findMany({ where: eq(schema.invoiceLines.invoiceId, inv.id), columns: { id: true } });
+    lines += its.length;
+    await db.delete(schema.invoiceLines).where(eq(schema.invoiceLines.invoiceId, inv.id));
+    await db.delete(schema.supplierInvoices).where(eq(schema.supplierInvoices.id, inv.id));
+  }
+
+  const { deleteFile } = await import("./files");
+  for (const doc of docs) {
+    /*
+     * The mail record keeps its history and loses its pointer.
+     *
+     * Deleting the inbox row would erase the fact that the message arrived, which is the one thing
+     * worth keeping; leaving the pointer would leave a "re-read this attachment" button aimed at a
+     * document that no longer exists.
+     */
+    await db
+      .update(schema.inboxItems)
+      .set({ documentId: null })
+      .where(eq(schema.inboxItems.documentId, doc.id));
+    await db.delete(schema.documents).where(eq(schema.documents.id, doc.id));
+    const others = await db.query.documents.findMany({ where: eq(schema.documents.storageKey, doc.storageKey), columns: { id: true } });
+    if (others.length === 0) await deleteFile(doc.storageKey).catch(() => {});
+  }
+
+  const named = docs[0]?.title || invoices[0]?.supplier || "It";
+  await audit({
+    action: "invoice.purged",
+    userId: user.id ?? null,
+    userName: user.name,
+    entity: "document",
+    entityId: docs[0]?.id ?? invoices[0]?.id ?? wanted,
+    details: `${named} · ${invoices.length} invoice record(s), ${lines} line(s), ${docs.length} document(s)`,
+  });
+
+  const bits: string[] = [];
+  if (docs.length > 0) bits.push(`${docs.length === 1 ? "the document" : `${docs.length} documents`}`);
+  if (invoices.length > 0) bits.push(`${invoices.length === 1 ? "its invoice record" : `${invoices.length} invoice records`}`);
+  if (lines > 0) bits.push(`${lines} line${lines === 1 ? "" : "s"} read off it`);
+  return {
+    removed: { invoices: invoices.length, lines, documents: docs.length },
+    message: `Deleted ${bits.join(", ")}. Nothing from it counts as a purchase any more.`,
+  };
+}
+
+/**
+ * Documents in the vault that are not invoices and are sitting where invoices go.
+ *
+ * The owner's words: only an invoice should flow to the invoice folder. Two things were letting
+ * others through. The list above offered anything unrecognised for filing as an invoice, which is
+ * fixed at source. And nothing ever went back over what was already there — a statement filed as an
+ * invoice last month stayed one, and the daily purchase report sat in the vault with its ratio
+ * unread because nobody had told the site what it was.
+ *
+ * This reads each one on its own words and says where it belongs. Applying it files them, and for a
+ * purchase drill down that means reading the compliance ratio off it as well — the report is not
+ * merely misfiled, it is the figure that prices every generic, and moving it without reading it
+ * would be tidying the shelf and leaving the money on it.
+ */
+export type Misfiled = {
+  id: string;
+  title: string;
+  fileName: string;
+  /** Carried so re-reading it needs no second query. */
+  storageKey: string;
+  category: string;
+  kind: SupplierDocumentKind;
+  why: string;
+  /** The category it should be in. */
+  belongsIn: "supplier_statement" | "report";
+};
+
+const NOT_AN_INVOICE: Record<string, { belongsIn: Misfiled["belongsIn"]; word: string }> = {
+  statement: { belongsIn: "supplier_statement", word: "statement of account" },
+  rebate_report: { belongsIn: "supplier_statement", word: "rebate breakdown" },
+  credit_memo: { belongsIn: "supplier_statement", word: "credit memo" },
+  purchase_report: { belongsIn: "report", word: "purchase drill down" },
+};
+
+export async function misfiledInVault(): Promise<Misfiled[]> {
+  const docs = await db.query.documents.findMany();
+  const out: Misfiled[] = [];
+  for (const d of docs) {
+    // Only where invoices live. A statement already filed under statements is where it belongs.
+    if (!["invoice", "invoice_schedule_2", "invoice_schedule_3_5"].includes(d.category)) continue;
+    if (!/\.pdf$/i.test(d.fileName) && d.mimeType !== "application/pdf") continue;
+    let words = "";
+    try {
+      words = pdfText(await readStoredFile(d.storageKey));
+    } catch {
+      continue; // A scan says nothing about itself; it is left alone rather than moved on a guess.
+    }
+    if (words.trim().length <= 40) continue;
+    const c = classifySupplierDocument(words, d.fileName, d.title);
+    const where = NOT_AN_INVOICE[c.kind];
+    if (!where) continue;
+    out.push({ id: d.id, title: d.title || d.fileName, fileName: d.fileName, storageKey: d.storageKey, category: d.category, kind: c.kind, why: c.why, belongsIn: where.belongsIn });
+  }
+  return out;
+}
+
+/** Files them where they belong, and reads a drill down's ratio while it is at it. */
+export async function fileMisfiled(
+  user: { id?: string | null; name: string },
+): Promise<{ moved: number; ratioRead: string | null; found: Misfiled[] }> {
+  const found = await misfiledInVault();
+  let ratioRead: string | null = null;
+  for (const m of found) {
+    const word = NOT_AN_INVOICE[m.kind]?.word ?? "document";
+    // Any invoice record filed from it goes too: it was never a receipt of goods, and leaving it
+    // would keep counting a statement's figures as purchases.
+    const invoices = await db.query.supplierInvoices.findMany({ where: eq(schema.supplierInvoices.documentId, m.id) });
+    for (const inv of invoices) {
+      await db.delete(schema.invoiceLines).where(eq(schema.invoiceLines.invoiceId, inv.id));
+      await db.delete(schema.supplierInvoices).where(eq(schema.supplierInvoices.id, inv.id));
+    }
+    await db
+      .update(schema.documents)
+      .set({ category: m.belongsIn, notes: `Filed as a ${word} by ${user.name}: ${m.why}` })
+      .where(eq(schema.documents.id, m.id));
+
+    if (m.kind === "purchase_report" && ratioRead === null) {
+      /*
+       * The report is the ratio. Moving it without reading it would file the paper and leave the
+       * figure that prices every contract generic unread, which is the state this pharmacy was
+       * actually in.
+       */
+      try {
+        const { readDrillDown } = await import("./drill-down-read");
+        const { filePurchaseDrillDown } = await import("./purchase-ratio");
+        const read = readDrillDown(await readStoredFile(m.storageKey));
+        if (read.months.length > 0 && read.problems.length === 0) {
+          const current = read.months[0];
+          const r = await filePurchaseDrillDown(
+            {
+              generatedOn: read.generatedOn,
+              currentMonth: current.month,
+              currentGcrPercent: current.gcrPercent,
+              currentOsRxPercent: current.osRxPercent,
+              currentOsGxPercent: current.osGxPercent,
+              scrubbed: read.scrubbed,
+              exclusions: read.exclusions,
+              months: read.months.map((x) => ({ month: x.month, gcrPercent: x.gcrPercent, osRxPercent: x.osRxPercent, netPurchasesCents: x.netPurchasesCents })),
+            },
+            { documentId: m.id, supplierId: null },
+          );
+          ratioRead = r.message;
+        }
+      } catch {
+        /* Unreadable as a drill down; it is still filed as a report rather than left as an invoice. */
+      }
+    }
+
+    await audit({
+      action: "invoice.refiled",
+      userId: user.id ?? null,
+      userName: user.name,
+      entity: "document",
+      entityId: m.id,
+      details: `${m.title} · filed as a ${word}${invoices.length ? ` · ${invoices.length} invoice record(s) removed` : ""}`,
+    });
+  }
+  return { moved: found.length, ratioRead, found };
 }

@@ -6,7 +6,7 @@ import { parsePeriod, periodOf, neighbours, type PeriodKind } from "@/lib/ledger
 import { booksFor, recentMonths } from "@/lib/ledger-store";
 import { moneyFound } from "@/lib/money-found";
 import { PageHeader, Card, Notice, Figure } from "@/components/ui";
-import { Bars } from "@/components/charts";
+import { Bars } from "@/components/bars";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Money" };

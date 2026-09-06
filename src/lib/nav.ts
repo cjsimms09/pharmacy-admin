@@ -65,6 +65,7 @@ export const NAV: NavGroup[] = [
     items: [
       { href: "/money", label: "The books", blurb: "The period on both bases, every figure linked to its rows" },
       { href: "/money/monthly", label: "Statement", blurb: "Profit and loss for a month, a quarter or a year, printable and as a file" },
+      { href: "/money/report", label: "Reports", blurb: "The business over time: scripts, margin and profit per script, month by month" },
       { href: "/expenses", label: "Spending", blurb: "Bills, the vendors who send them, and the rules that file them" },
       { href: "/deliveries", label: "Driver invoices", blurb: "Deliveries per day, and the monthly invoice that sends itself" },
       { href: "/money/found", label: "Money found", blurb: "Everything worth chasing, ranked, with what to do about each" },
