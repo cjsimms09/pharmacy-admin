@@ -1862,6 +1862,18 @@ export const claimPayments = sqliteTable(
     /** Who paid it, as the remittance names them. */
     payer: text("payer"),
     amountCents: integer("amount_cents").notNull(),
+    /*
+     * How much of this payment is money the claim did not already carry.
+     *
+     * Not every payment is new revenue. The RxRescue credit memo settles the copay assistance that
+     * the ACR claim was already adjudicated for — the same money, arriving — while its top-off is
+     * genuinely additional. Adding the whole credit would count the assistance twice: on one real
+     * fill that is $1,096.91 counted as though the pharmacy had been paid it twice over.
+     *
+     * A facilitator remittance is the opposite: the claim's Amount never contained it, so all of it
+     * is new. Defaults to the whole amount, which is right for every source but this one.
+     */
+    revenueCents: integer("revenue_cents"),
     /** When the money was received, not when the claim was filled. */
     receivedOn: text("received_on"),
     /** The remittance or file this came from, so it can be traced back. */

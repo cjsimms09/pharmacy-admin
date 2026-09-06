@@ -117,6 +117,8 @@ export type ImportReport = {
   rowsRead: number;
   claimsAdded: number;
   duplicates: number;
+  /** Reversals held but never paired, matched to the claims they cancel by this load. */
+  reversalsPaired?: number;
   /** What the report itself said this file came to: total sales, and total gross profit. */
   reportSalesCents?: number | null;
   reportGrossProfitCents?: number | null;
@@ -467,6 +469,14 @@ export async function importRxTransactions(file: Buffer, fileName: string, userI
     restated++;
   }
 
+  /*
+   * Reversals that could not be paired as they arrived, paired now against everything held.
+   *
+   * Cheap, and it is the only thing that can rescue a pair stranded by an earlier load — where the
+   * claim stands as live revenue and nothing about it looks wrong.
+   */
+  const repaired = await repairReversals();
+
   const dates = inserts.map((c) => c.dateFilled).sort();
   return finish({
     ...base,
@@ -482,10 +492,77 @@ export async function importRxTransactions(file: Buffer, fileName: string, userI
     notYetSold: plan.insertPaid.filter((t) => !t.completedAt).length,
     nowSold: plan.markSold.length,
     restated,
+    reversalsPaired: repaired.paired,
     reportSalesCents: parsed.grandTotal?.salesCents ?? null,
     reportGrossProfitCents: parsed.grandTotal?.grossProfitCents ?? null,
     readGrossProfitCents,
   });
+}
+
+/**
+ * Marks claims reversed where the reversal that cancels them is already held but never got paired.
+ *
+ * Pairing happens as a file is read, which works only while both halves are in the same file or the
+ * claim was stored before its reversal arrived. Everything else leaves the pair stranded: a reversal
+ * loaded before its claim, a file re-sent so that the reversal row is skipped as a duplicate before
+ * it can be matched, or an import that failed halfway. The claim then stands as live revenue for
+ * ever, and nothing about it looks wrong.
+ *
+ * Rx 331488 is what this is for. It ran for sixty tablets at $1,204.25, was reversed, and re-ran for
+ * thirty at $607.38 — a $30.62 fill. With the reversal stranded, both runs counted: $1,811.63 of
+ * revenue against one bottle, and a $658.11 profit on a script that made thirty dollars.
+ *
+ * Run after every import, and safe to run at any time: it only ever matches a reversal to a claim
+ * whose figures it exactly negates, and only where that leaves no ambiguity.
+ */
+export async function repairReversals(): Promise<{ paired: number }> {
+  const rows = await db.query.claims.findMany({
+    where: eq(schema.claims.source, "transaction_report"),
+    columns: {
+      id: true, rxNumber: true, fillNumber: true, bin: true, ndc11: true, status: true,
+      remitCents: true, copayCents: true, transactionKey: true, reversalKey: true, dateFilled: true,
+    },
+  });
+
+  const key = (c: { rxNumber: string; fillNumber: number | null; bin: string | null; ndc11: string | null }) =>
+    [c.rxNumber, c.fillNumber ?? "", c.bin ?? "", c.ndc11 ?? ""].join("|");
+
+  /*
+   * A reversal already recorded as one: negative money, held as reversed, pointing at itself
+   * because nothing was found to pair it with when it arrived.
+   */
+  const strays = rows.filter(
+    (c) => (c.remitCents ?? 0) < 0 && c.status === "reversed" && c.reversalKey !== null && c.reversalKey === c.transactionKey,
+  );
+  if (strays.length === 0) return { paired: 0 };
+
+  const live = new Map<string, typeof rows>();
+  for (const c of rows) {
+    if (c.status !== "paid") continue;
+    const k = key(c);
+    live.set(k, [...(live.get(k) ?? []), c]);
+  }
+
+  const used = new Set<string>();
+  let paired = 0;
+  for (const rev of strays) {
+    const candidates = (live.get(key(rev)) ?? []).filter(
+      (c) => !used.has(c.id) && c.remitCents === -(rev.remitCents ?? 0) && c.copayCents === -(rev.copayCents ?? 0),
+    );
+    /*
+     * Exactly one, or nothing. Two claims a reversal could equally well cancel is not an answer,
+     * and cancelling the wrong run of a prescription deletes revenue that was really earned.
+     */
+    if (candidates.length !== 1) continue;
+    const hit = candidates[0];
+    used.add(hit.id);
+    await db
+      .update(schema.claims)
+      .set({ status: "reversed", reversedOn: rev.dateFilled, reversalKey: rev.transactionKey })
+      .where(eq(schema.claims.id, hit.id));
+    paired++;
+  }
+  return { paired };
 }
 
 /** Drug names by NDC from what we already hold: the supplier catalogues first, then NADAC. */
@@ -514,6 +591,10 @@ export function describeTransactionImport(r: TransactionImportReport): string {
   if (r.notYetSold) bits.push(`${r.notYetSold} of them not yet picked up when the report ran (kept; a return to stock comes in as a reversal)`);
   if (r.nowSold) bits.push(`${r.nowSold} held earlier now shown sold`);
   if (r.duplicates) bits.push(`${r.duplicates} already held`);
+  if (r.reversalsPaired)
+    bits.push(
+      `${r.reversalsPaired} reversal${r.reversalsPaired === 1 ? "" : "s"} held from an earlier load finally matched the claim${r.reversalsPaired === 1 ? "" : "s"} they cancel, which had been standing as live revenue`,
+    );
   if (r.restated) bits.push(`${r.restated} of those re-read from this file, so a figure the report has since corrected replaces the one held`);
   const other = Object.entries(r.skipReasons).filter(([k]) => !/not yet sold/.test(k));
   if (other.length) bits.push(other.map(([k, v]) => `${v} ${k}`).join(", "));
@@ -748,7 +829,41 @@ export async function claimFlags() {
       .filter((f) => (f.facilitatorOutstandingCents ?? 0) > 0)
       .sort((a, b) => (b.facilitatorOutstandingCents ?? 0) - (a.facilitatorOutstandingCents ?? 0)),
     awaitingFacilitatorCents: fills.reduce((n, f) => n + (f.facilitatorOutstandingCents ?? 0), 0),
-    unreconciled: fills.filter((f) => f.unreconciledCents !== null).sort((a, b) => b.unreconciledCents! - a.unreconciledCents!),
+    /*
+     * ── Do the books balance? ─────────────────────────────────────────────────────
+     *
+     * Three totals that must agree, drawn three different ways:
+     *
+     *   ours      every dispensing's revenue less the cost of the bottle, taken once
+     *   report    PioneerRx's own per-row gross profit, added over the live rows
+     *   later     money that arrived after the day, which only ours can know about
+     *
+     *   ours − later = report
+     *
+     * This is the standing tripwire. Every arithmetic error this site has had was found by the
+     * pharmacist reading a PDF and knowing the real answer — the smallest copay, a residual read
+     * from the wrong column, a reversal left unpaired so one bottle counted twice. Each was a rule
+     * inferred from a single example, and each survived because nothing independent contradicted
+     * it. This does, on every fill, every day, without anybody having to look.
+     */
+    balance: (() => {
+      const ours = fills.reduce((n, f) => n + (f.marginCents ?? 0), 0);
+      const later = fills.reduce((n, f) => n + f.laterPaymentsCents, 0);
+      const report = fills.reduce((n, f) => n + (f.reportedMarginCents ?? 0), 0);
+      const off = fills.filter((f) => f.agreesWithReport === false);
+      const unchecked = fills.filter((f) => f.agreesWithReport === null).length;
+      return {
+        ourMarginCents: ours,
+        laterCents: later,
+        reportMarginCents: report,
+        differenceCents: ours - later - report,
+        fillsOff: off.length,
+        /** Fills the report gave nothing to check against: no gross profit, or no acquisition cost. */
+        unchecked,
+        balances: Math.abs(ours - later - report) <= 2 && off.length === 0,
+      };
+    })(),
+    unreconciled: fills.filter((f) => f.unreconciledCents !== null).sort((a, b) => Math.abs(b.unreconciledCents!) - Math.abs(a.unreconciledCents!)),
     unreconciledCents: fills.reduce((n, f) => n + (f.unreconciledCents ?? 0), 0),
     lossFillsTotalCents: lossFills.reduce((n, f) => n + (f.marginCents ?? 0), 0),
     /*

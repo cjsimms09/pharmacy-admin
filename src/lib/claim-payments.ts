@@ -36,6 +36,13 @@ export type RecordPayment = {
    * own terms.
    */
   source: "mtf" | "dir" | "copay_card" | "secondary" | "manual" | "rxrescue";
+  /**
+   * How much of this is money the claim did not already carry. Defaults to the whole amount.
+   *
+   * Only different where a payment settles something the claim was already adjudicated for — the
+   * RxRescue copay assistance being the case this exists for.
+   */
+  revenueCents?: number;
   payer?: string | null;
   amountCents: number;
   receivedOn?: string | null;
@@ -67,6 +74,7 @@ export async function recordClaimPayment(p: RecordPayment, user: { name: string 
     source: p.source,
     payer: p.payer ?? null,
     amountCents: Math.round(p.amountCents),
+    revenueCents: Math.round(p.revenueCents ?? p.amountCents),
     receivedOn: p.receivedOn ?? null,
     reference: p.reference ?? null,
     notes: p.notes ?? null,
@@ -116,7 +124,18 @@ export async function laterPayments(): Promise<LaterPayment[]> {
     ndc11: r.ndc11,
     source: r.source,
     payer: r.payer,
-    amountCents: r.amountCents,
+    /*
+     * What the pharmacy actually received, for the record and for the screen.
+     */
+    receivedCents: r.amountCents,
+    /*
+     * And the part of it that is new money, which is what a margin may be moved by.
+     *
+     * They differ only where a payment settles something the claim already carried. Using the
+     * received figure for both would count the RxRescue copay assistance twice — once when the ACR
+     * claim adjudicated it and again when the memo paid it.
+     */
+    amountCents: r.revenueCents ?? r.amountCents,
   }));
 }
 
@@ -450,6 +469,17 @@ export async function importRxRescueCredit(
         source: RXRESCUE,
         payer: "Aytu / IPD (RxRescue)",
         amountCents: r.totalCreditCents,
+        /*
+         * Only the top-off is money the claim did not already carry.
+         *
+         * The ACR claim adjudicates for the copay assistance — Rx 335504's claim row reads
+         * $1,096.91, which is exactly the assistance the memo then pays — so counting the whole
+         * credit would book that money twice. The top-off is the part the claim never saw.
+         *
+         * This is the pharmacist's reading of the programme, and it is checked rather than trusted:
+         * `topOffCheck` below re-tests it against every line that can settle it.
+         */
+        revenueCents: r.topOffCents ?? 0,
         receivedOn: r.issuedOn,
         reference: r.transactionId,
         notes: [r.memoId, r.productName, r.topOffCents ? `top-off ${(r.topOffCents / 100).toFixed(2)}` : null, r.copayAssistCents ? `assistance ${(r.copayAssistCents / 100).toFixed(2)}` : null]

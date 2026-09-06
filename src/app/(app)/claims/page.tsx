@@ -260,41 +260,47 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
         built a queue of receivables that were never coming, which is the same mistake as the red
         "the arithmetic is broken" banner it replaced, made in the opposite direction.
       */}
-      {flags.unreconciled.length > 0 && (
-        <Notice kind="warn">
-          <b>{formatCents(flags.unreconciledCents)} the report counted that this site has not found in the row.</b>{" "}
-          Across {flags.unreconciled.length} fill{flags.unreconciled.length === 1 ? "" : "s"} — biggest is Rx{" "}
-          {flags.unreconciled[0].rxNumber}
-          {flags.unreconciled[0].fillNumber !== null ? `-${flags.unreconciled[0].fillNumber}` : ""}
-          {flags.unreconciled[0].itemName ? ` (${flags.unreconciled[0].itemName})` : ""} at{" "}
-          {formatCents(flags.unreconciled[0].unreconciledCents ?? 0)}. PioneerRx computes its gross profit from the same
-          row, so it is revenue we did not pick up: a patient total in a column this reader is missing, or money the
-          plan promised at adjudication and pays later. Open <b>Why is this a loss?</b> on one below — the row is
-          printed there exactly as it arrived, and it says which.
-        </Notice>
-      )}
-
       {/*
-        The one direction that really is a reading error.
+        The standing tripwire, said in one line whether it is good news or bad.
 
-        Column positions here are worked out by counting, and a report whose columns shift by one
-        gives figures that are each plausible and collectively wrong. Where this site holds *more*
-        than the report did and nothing arrived later to explain it, that cannot be a timing
-        difference — a column is not where this reader thinks it is.
+        Every arithmetic error this site has had was found by the pharmacist reading a printout and
+        knowing the real answer. That is the wrong way round. This states the identity the report
+        itself guarantees and reports whether it holds — so a mistake announces itself here on the
+        day it happens, instead of being discovered in a PDF a fortnight later.
       */}
-      {flags.disagreeing.length > 0 && (
-        <Notice kind="crit">
-          <b>
-            {flags.disagreeing.length} fill{flags.disagreeing.length === 1 ? "" : "s"} where this site counts more than
-            the report did, and nothing arrived later to explain it.
-          </b>{" "}
-          That can only mean a column is not where this reader thinks it is. First one: Rx{" "}
-          {flags.disagreeing[0].rxNumber}
-          {flags.disagreeing[0].fillNumber !== null ? `-${flags.disagreeing[0].fillNumber}` : ""} — this site makes it{" "}
-          {formatCents(flags.disagreeing[0].marginCents ?? 0)}, the report says{" "}
-          {formatCents(flags.disagreeing[0].reportedMarginCents ?? 0)}. Open it below and send me the row.
-        </Notice>
-      )}
+      <Notice kind={flags.balance.balances ? "ok" : "crit"}>
+        {flags.balance.balances ? (
+          <>
+            <b>The books balance.</b> This site makes these dispensings{" "}
+            {formatCents(flags.balance.ourMarginCents)}, and PioneerRx&rsquo;s own gross profit over the same rows comes
+            to {formatCents(flags.balance.reportMarginCents)}
+            {flags.balance.laterCents !== 0 ? ` once the ${formatCents(flags.balance.laterCents)} that arrived after the day is taken out` : ""}
+            . Two answers worked out independently, agreeing to the cent.
+            {flags.balance.unchecked > 0 && ` ${flags.balance.unchecked} fills carried nothing to check against.`}
+          </>
+        ) : (
+          <>
+            <b>
+              The books do not balance: {formatCents(Math.abs(flags.balance.differenceCents))}{" "}
+              {flags.balance.differenceCents > 0 ? "more" : "less"} than the report, across{" "}
+              {flags.balance.fillsOff} fill{flags.balance.fillsOff === 1 ? "" : "s"}.
+            </b>{" "}
+            This site makes them {formatCents(flags.balance.ourMarginCents)} and PioneerRx makes them{" "}
+            {formatCents(flags.balance.reportMarginCents)}. Both are computed from the same rows, so a column is not
+            where this reader thinks it is — and every figure on this page drawn from those rows is wrong the same way.
+            {flags.unreconciled.length > 0 && (
+              <>
+                {" "}
+                Worst is Rx {flags.unreconciled[0].rxNumber}
+                {flags.unreconciled[0].fillNumber !== null ? `-${flags.unreconciled[0].fillNumber}` : ""}
+                {flags.unreconciled[0].itemName ? ` (${flags.unreconciled[0].itemName})` : ""}, out by{" "}
+                {formatCents(Math.abs(flags.unreconciled[0].unreconciledCents ?? 0))}. Open <b>Why is this a loss?</b> on
+                it below and send me the box.
+              </>
+            )}
+          </>
+        )}
+      </Notice>
 
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}

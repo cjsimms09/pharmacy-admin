@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { parseRxRescueCredit, looksLikeRxRescueCredit, unpadRx } from "../src/lib/rxrescue-credit";
+import { parseRxRescueCredit, looksLikeRxRescueCredit, unpadRx, topOffCheck } from "../src/lib/rxrescue-credit";
 
 /**
  * The Aytu / IPD credit memo: top-off money for the RxRescue programme (BIN 024284).
@@ -94,5 +94,59 @@ describe("reading a credit memo", () => {
     const wrong = parseRxRescueCredit("Rx Number,NDC\n333801,62542002030");
     assert.equal(wrong.rows.length, 0);
     assert.ok(wrong.problems.length > 0);
+  });
+});
+
+/**
+ * The one thing about this memo that was taken on advice rather than derived, and the check that
+ * will settle it the moment real data can.
+ *
+ * The pharmacist's reading: a claim on this plan is adjudicated for the copay assistance, so only
+ * the top-off is money the claim never carried. Every line available when that was decided agreed
+ * with it — and equally with the opposite reading, because on those lines the top-off was zero and
+ * the assistance and the whole credit are then the same number.
+ *
+ * The lesson from everything that went wrong before this: a rule taken from one example, with
+ * nothing able to contradict it, is a rule that will be wrong silently. So it keeps being asked.
+ */
+describe("re-testing what only the top-off adds", () => {
+  test("a zero top-off decides nothing, however many such lines there are", () => {
+    const r = topOffCheck([
+      { topOffCents: 0, copayAssistCents: 109_691, totalCreditCents: 109_691, claimRemitCents: 109_691 },
+      { topOffCents: 0, copayAssistCents: 54_720, totalCreditCents: 54_720, claimRemitCents: 54_720 },
+    ]);
+    assert.equal(r.decisive, 0);
+    assert.equal(r.verdict, "inconclusive", "agreement by accident is not evidence");
+  });
+
+  test("a line with a top-off, where the claim carried only the assistance, confirms the reading", () => {
+    // Rx 333801's shape: assistance $60.00, top-off $49.94, credit $109.94.
+    const r = topOffCheck([{ topOffCents: 4_994, copayAssistCents: 6_000, totalCreditCents: 10_994, claimRemitCents: 6_000 }]);
+    assert.equal(r.assistOnly, 1);
+    assert.equal(r.verdict, "the top-off is new money");
+  });
+
+  test("the same line, where the claim already carried the whole credit, overturns it", () => {
+    /*
+     * The failure this exists to catch. Applying the top-off on top of a claim that already holds
+     * it books the money twice, and nothing else in the system would ever notice.
+     */
+    const r = topOffCheck([{ topOffCents: 4_994, copayAssistCents: 6_000, totalCreditCents: 10_994, claimRemitCents: 10_994 }]);
+    assert.equal(r.wholeCredit, 1);
+    assert.equal(r.verdict, "the whole credit is already in the claim");
+  });
+
+  test("lines that disagree with each other are called contradictory, not averaged", () => {
+    const r = topOffCheck([
+      { topOffCents: 4_994, copayAssistCents: 6_000, totalCreditCents: 10_994, claimRemitCents: 6_000 },
+      { topOffCents: 1_762, copayAssistCents: 3_000, totalCreditCents: 4_762, claimRemitCents: 4_762 },
+    ]);
+    assert.equal(r.verdict, "contradictory", "a rule that holds sometimes is not a rule");
+  });
+
+  test("a claim remittance matching neither figure is a third possibility, and is counted as one", () => {
+    const r = topOffCheck([{ topOffCents: 4_994, copayAssistCents: 6_000, totalCreditCents: 10_994, claimRemitCents: 1_234 }]);
+    assert.equal(r.neither, 1);
+    assert.equal(r.verdict, "contradictory");
   });
 });

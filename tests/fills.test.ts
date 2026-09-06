@@ -127,24 +127,23 @@ describe("one fill, however many payers priced it", () => {
     assert.equal(e.falseLossCents, 12_868, "$128.68 of loss that was never real");
   });
 
-  test("counting money the report did not is a reading error, and is named as one", () => {
+  test("the identity: what we make, less what arrived later, is what the report made of it", () => {
     /*
-     * The check that can catch a mis-read column from the inside.
+     * ── The check that would have caught every mistake this file has ever had ──
      *
-     * Column positions in the daily report are worked out by counting. A report whose columns shift
-     * by one gives figures that are each individually plausible and collectively wrong, and nothing
-     * inside our own arithmetic can notice. PioneerRx computes its own gross profit from the same
-     * row, so where this site holds *more* than the report did and nothing arrived later to explain
-     * it, that cannot be a timing difference: a column is not where this reader thinks it is.
+     * PioneerRx prints GrossProfit = Amount + Total − Acq. Inv. Cost for every row. Added over the
+     * live rows of one dispensing, that is the report's answer for that bottle. Ours is revenue less
+     * the cost taken once. They are the same arithmetic over the same numbers, so they must agree to
+     * the cent — and the only legitimate difference is money the report could not have known about,
+     * which is what arrives afterwards from a facilitator or a credit memo.
+     *
+     *     ourMargin − laterMoney = reportedMargin
+     *
+     * Every error here was a rule inferred from one example that nothing independent could
+     * contradict: the smallest copay, the patient's residual taken from the wrong column, a gap
+     * called a facilitator payment, a reversal left unpaired so one bottle counted twice. This
+     * contradicts all of them, on every fill, every day.
      */
-    const [wrong] = groupIntoFills([
-      claim({ remitCents: 20_000, copayCents: 0, patientTotalCents: 0, acquisitionCents: 12_868, grossProfitCents: 3_315 }),
-    ]);
-    assert.equal(wrong.marginCents, 20_000 - 12_868);
-    assert.equal(wrong.reportedMarginCents, 3_315);
-    assert.equal(wrong.agreesWithReport, false, "the site and the report cannot both be right");
-    assert.equal(wrong.unreconciledCents, null, "and nothing here is owed to the pharmacy");
-
     const [right] = groupIntoFills([
       claim({ remitCents: 4_626, copayCents: 0, patientTotalCents: 11_557, acquisitionCents: 12_868, grossProfitCents: 3_315 }),
     ]);
@@ -153,51 +152,65 @@ describe("one fill, however many payers priced it", () => {
     assert.equal(right.unreconciledCents, null);
   });
 
-  test("the report ahead of us is revenue we did not pick up, named by amount and not by cause", () => {
+  test("a fill that fails the identity is named, whichever way it fails", () => {
     /*
-     * Rx 332359, a real fill: the report reads $22.52 made and this site a $123.66 loss, and the
-     * whole of the difference is $146.18 the pharmacy is owed by the Medicare Transaction
-     * Facilitator. PioneerRx books that share at adjudication because the plan's response says what
-     * it will be; the cash follows weeks later.
-     *
-     * So the gap is real and is not a bug — but the *cause* is not something a fill can know, and
-     * asserting it was the second mistake. See the Losartan test below: an identically-shaped $5.56
-     * gap on a generic that no facilitator was ever going to pay. Calling every gap a facilitator
-     * payment built a queue of receivables that were never coming, which is the red "the arithmetic
-     * is broken" banner's mistake made in the opposite direction. State the amount; show the row.
+     * Both directions are the same fact — a column is not where this reader thinks it is — and
+     * treating them as two different stories is how a queue of receivables that were never coming
+     * got built out of ordinary reading errors.
      */
-    const [waiting] = groupIntoFills([
-      claim({ rxNumber: "332359", fillNumber: 1, dateFilled: "2026-09-05", remitCents: 20_457, copayCents: 0, patientTotalCents: 0, acquisitionCents: 32_823, grossProfitCents: 2_252 }),
+    const [over] = groupIntoFills([
+      claim({ remitCents: 20_000, copayCents: 0, patientTotalCents: 0, acquisitionCents: 12_868, grossProfitCents: 3_315 }),
     ]);
-    assert.equal(waiting.marginCents, -12_366);
-    assert.equal(waiting.unreconciledCents, 14_618, "$146.18 the report counted and the pharmacy has not got");
-    assert.equal(waiting.agreesWithReport, true, "nothing here says a column was mis-read");
+    assert.equal(over.marginCents, 20_000 - 12_868);
+    assert.equal(over.agreesWithReport, false, "we cannot be holding money the report never counted");
+    assert.equal(over.unreconciledCents, 3_315 - (20_000 - 12_868));
 
-    const [paid] = groupIntoFills(
-      [claim({ rxNumber: "332359", fillNumber: 1, dateFilled: "2026-09-05", ndc11: "81968004560", remitCents: 20_457, copayCents: 0, patientTotalCents: 0, acquisitionCents: 32_823, grossProfitCents: 2_252 })],
-      [{ rxNumber: "332359", fillNumber: 1, dateFilled: "2026-09-05", ndc11: "81968004560", source: "mtf", payer: "Medicare Transaction Facilitator", amountCents: 14_618 }],
-    );
-    assert.equal(paid.marginCents, 2_252, "which is exactly what the report said all along");
-    assert.equal(paid.unreconciledCents, null, "nothing outstanding once it is matched to the fill");
-    assert.equal(paid.agreesWithReport, true);
+    /*
+     * Rx 316890, from the report as it used to be printed: $7.85 in on a $13.90 drug, which is a
+     * $6.05 loss, against a gross profit column reading −$0.49 because it was quietly carrying an
+     * estimated rebate. The identity puts the $5.56 on screen instead of leaving it to be found in
+     * a PDF weeks later.
+     */
+    const [under] = groupIntoFills([
+      claim({ rxNumber: "316890", remitCents: 785, copayCents: 0, patientTotalCents: 0, acquisitionCents: 1_390, grossProfitCents: -49 }),
+    ]);
+    assert.equal(under.marginCents, -605);
+    assert.equal(under.agreesWithReport, false);
+    assert.equal(under.unreconciledCents, 556);
   });
 
-  test("a gap far too small to be facilitator money is reported the same way, and claims nothing", () => {
+  test("money that arrived later is the one difference the identity allows", () => {
     /*
-     * Rx 316890, a real fill. Express Scripts paid $7.85 on a Losartan that cost $13.90, and the
-     * report makes it a $0.49 loss where this site makes it $6.05 — a gap of $5.56.
-     *
-     * No facilitator pays $5.56 on a generic Losartan. On a fill this shape the money is almost
-     * certainly the patient's, sitting in a column this reader is not picking up, and the fix is
-     * here rather than in the post. The grouping does not try to tell those apart — it states what
-     * the gap is and leaves the row on screen to answer the rest.
+     * Rx 332359. The report, now that its gross profit column is only gross profit, makes this a
+     * $123.66 loss — and so do we, exactly. The $146.18 the plan promised sits in its own column,
+     * and when the facilitator pays it the fill becomes $22.52 while the identity still holds,
+     * because the payment is subtracted before the comparison.
      */
-    const [f] = groupIntoFills([
-      claim({ rxNumber: "316890", fillNumber: 1, dateFilled: "2026-09-05", itemName: "LOSARTAN POTASSIUM 50 MG TAB", remitCents: 785, copayCents: 0, patientTotalCents: 0, acquisitionCents: 1_390, grossProfitCents: -49 }),
-    ]);
-    assert.equal(f.marginCents, -605);
-    assert.equal(f.unreconciledCents, 556, "the amount, which is knowable");
-    assert.equal(f.agreesWithReport, true, "and no claim about what it is, which is not");
+    const row = {
+      rxNumber: "332359",
+      fillNumber: 1,
+      dateFilled: "2026-09-05",
+      ndc11: "00597015290",
+      remitCents: 20_457,
+      copayCents: 0,
+      patientTotalCents: 0,
+      acquisitionCents: 32_823,
+      grossProfitCents: -12_366,
+      expectedFacilitatorCents: 14_618,
+    };
+
+    const [waiting] = groupIntoFills([claim(row)]);
+    assert.equal(waiting.marginCents, -12_366);
+    assert.equal(waiting.agreesWithReport, true, "the books balance even while the money is outstanding");
+    assert.equal(waiting.facilitatorOutstandingCents, 14_618);
+
+    const [paid] = groupIntoFills(
+      [claim(row)],
+      [{ rxNumber: "332359", fillNumber: 1, dateFilled: "2026-09-05", ndc11: "00597015290", source: "mtf", payer: "MTF", amountCents: 14_618 }],
+    );
+    assert.equal(paid.marginCents, 2_252, "the script is worth $22.52 once the money lands");
+    assert.equal(paid.agreesWithReport, true, "and the identity still holds, because the payment is taken out of both sides");
+    assert.equal(paid.unreconciledCents, null);
   });
 
   test("a copay card takes money off the copay; the rest does not disappear", () => {

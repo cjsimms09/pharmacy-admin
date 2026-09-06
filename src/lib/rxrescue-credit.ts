@@ -165,3 +165,58 @@ export function parseRxRescueCredit(text: string): CreditMemo {
     problems,
   };
 }
+
+
+/**
+ * Re-tests, against real data, the one thing about this memo that was taken on advice.
+ *
+ * The pharmacist's reading is that a claim on this plan is adjudicated for the copay assistance and
+ * that only the top-off is money the claim never carried. Every line available when that was
+ * settled agreed with it — and also agreed with the opposite reading, because on those lines the
+ * top-off was zero, so the assistance and the whole credit are the same number and nothing can tell
+ * them apart.
+ *
+ * A line with a top-off can. If the claim's own remittance equals the assistance, the reading is
+ * right and only the top-off is new. If it equals the whole credit, the top-off is already in the
+ * claim too and applying it books that money twice.
+ *
+ * So the question is asked again of every line that can answer it, rather than being closed. This
+ * is the discipline that was missing everywhere else in this system: a rule taken from one example,
+ * with nothing able to contradict it, is a rule that will be wrong silently.
+ */
+export type TopOffCheck = {
+  /** Lines where the top-off is non-zero and a claim remittance is known: the ones that decide. */
+  decisive: number;
+  /** Lines where the claim carried only the assistance, as the pharmacist read it. */
+  assistOnly: number;
+  /** Lines where the claim already carried the whole credit — which would make applying it a double count. */
+  wholeCredit: number;
+  /** Lines that match neither, which means something else again and needs a person. */
+  neither: number;
+  verdict: "the top-off is new money" | "the whole credit is already in the claim" | "inconclusive" | "contradictory";
+};
+
+export function topOffCheck(
+  lines: { topOffCents: number | null; copayAssistCents: number | null; totalCreditCents: number | null; claimRemitCents: number | null }[],
+): TopOffCheck {
+  let assistOnly = 0;
+  let wholeCredit = 0;
+  let neither = 0;
+  for (const l of lines) {
+    // Only a non-zero top-off can separate the two readings; anything else is agreement by accident.
+    if (!l.topOffCents || l.claimRemitCents === null || l.copayAssistCents === null || l.totalCreditCents === null) continue;
+    if (Math.abs(l.claimRemitCents - l.copayAssistCents) <= 2) assistOnly++;
+    else if (Math.abs(l.claimRemitCents - l.totalCreditCents) <= 2) wholeCredit++;
+    else neither++;
+  }
+  const decisive = assistOnly + wholeCredit + neither;
+  const verdict: TopOffCheck["verdict"] =
+    decisive === 0
+      ? "inconclusive"
+      : neither > 0 || (assistOnly > 0 && wholeCredit > 0)
+        ? "contradictory"
+        : assistOnly > 0
+          ? "the top-off is new money"
+          : "the whole credit is already in the claim";
+  return { decisive, assistOnly, wholeCredit, neither, verdict };
+}

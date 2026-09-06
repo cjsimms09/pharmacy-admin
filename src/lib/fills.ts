@@ -179,8 +179,10 @@ export type Fill = {
    */
   unreconciledCents: number | null;
   /**
-   * False only where this site holds *more* than the report did and nothing arrived later to
-   * explain it — which cannot be a timing difference, so a column is not where this reader thinks.
+   * True where this fill satisfies the identity above, to the cent.
+   *
+   * The one check on this module that does not come from this module. Null only where the report
+   * carried no gross profit for a row, or no acquisition cost, so there is nothing to check against.
    */
   agreesWithReport: boolean | null;
 };
@@ -206,7 +208,15 @@ export type LaterPayment = {
   ndc11: string | null;
   source: string;
   payer: string | null;
+  /**
+   * The part of the payment that is money the claim did not already carry — what a margin moves by.
+   *
+   * A facilitator remittance is new money in full. A credit memo that settles what the claim was
+   * already adjudicated for is not: counting it would book the same money twice.
+   */
   amountCents: number;
+  /** What actually arrived, for the record. Defaults to the same figure. */
+  receivedCents?: number;
 };
 
 export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): Fill[] {
@@ -332,10 +342,27 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
      * Where the report and this site differ, and by how much. Positive means the report counted
      * money the pharmacy has not got.
      */
+    /*
+     * ── The identity this whole module is now held to ──────────────────────────────
+     *
+     *     what we make on a fill  −  money that arrived after the day  =  what the report made of it
+     *
+     * PioneerRx prints, for every row, GrossProfit = Amount + Total − Acq. Inv. Cost. Add that up
+     * over the live rows of one dispensing and you have the report's answer for that bottle. Our
+     * answer is revenue less the cost taken once. The two must agree exactly, because they are the
+     * same arithmetic over the same numbers — the only legitimate difference is money the report
+     * could not have known about, which is what arrives later from a facilitator or a credit memo.
+     *
+     * Every error this file has had would have been caught the moment this was stated: the smallest
+     * copay, the patient's residual read from the wrong column, a reversal left unpaired so one
+     * bottle counted twice, a gap called a facilitator payment on a fill no facilitator would ever
+     * pay. Each was a rule inferred from one example, and each survived because nothing independent
+     * could contradict it. This can, on every fill, every day.
+     */
     const gapCents =
       reportedMarginCents === null || acquisitionCents === null
         ? null
-        : reportedMarginCents - (revenueCents - acquisitionCents);
+        : reportedMarginCents - (revenueCents - acquisitionCents - laterPaymentsCents);
 
     const first = rows[0];
     out.push({
@@ -352,7 +379,7 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
       remitCents,
       patientPaidCents,
       laterPaymentsCents,
-      laterPayments: mine.map((p) => ({ source: p.source, payer: p.payer, amountCents: p.amountCents })),
+        laterPayments: mine.map((p) => ({ source: p.source, payer: p.payer, amountCents: p.receivedCents ?? p.amountCents })),
       expectedFacilitatorCents,
       facilitatorOutstandingCents,
       topOffExpected:
@@ -370,8 +397,8 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
        * mis-read column. Neither deserves the red "the arithmetic is broken" banner that used to
        * cover both.
        */
-      unreconciledCents: gapCents !== null && gapCents > 2 ? gapCents : null,
-      agreesWithReport: gapCents === null ? null : gapCents >= -2 || laterPaymentsCents !== 0,
+      unreconciledCents: gapCents !== null && Math.abs(gapCents) > 2 ? gapCents : null,
+      agreesWithReport: gapCents === null ? null : Math.abs(gapCents) <= 2,
     });
   }
   return out.sort((a, b) => b.dateFilled.localeCompare(a.dateFilled) || a.rxNumber.localeCompare(b.rxNumber));

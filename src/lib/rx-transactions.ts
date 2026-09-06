@@ -61,6 +61,14 @@ export type Transaction = {
   completedAt: string | null;
   quantityThousandths: number | null;
   /**
+   * The NCPDP other coverage code (308-C8), where the report carries it.
+   *
+   * "08" means the row bills only the patient's financial responsibility, so its amount is not a
+   * price for the drug; "03" means other coverage was billed and did not cover. Without it, whether
+   * a secondary row is pricing the drug or only covering a copay has to be inferred.
+   */
+  otherCoverageCode?: string | null;
+  /**
    * True where this is the pharmacy's own cash programme rather than a third party.
    *
    * Its margins are as real as any other — it is a fill, and it made or lost money — but there is
@@ -161,14 +169,20 @@ type Layout = {
   rxFill: number; status: number; amount: number; group: number; network: number; copay: number;
   dispensingFee: number; patientTotal: number; completed: number; dateFilled: number; bin: number;
   qty: number; acquisition: number; pcn: number; ndc: number; grossProfit: number;
-  /** The column the report gained, where it has one. Null on the layout this began with. */
-  extra: number | null;
+  /**
+   * The columns the report has gained, in position order. Empty on the layout this began with.
+   *
+   * More than one is expected now: the estimated facilitator payment arrived first, and the other
+   * coverage code is the obvious next one to ask for, since it says outright what this reader
+   * currently has to infer — whether a row is pricing the drug or only billing the patient's share.
+   */
+  extras: number[];
 };
 
 const BASE: Layout = {
   rxFill: 0, status: 1, amount: 2, group: 3, network: 4, copay: 5, dispensingFee: 6, patientTotal: 7,
   completed: 8, dateFilled: 9, bin: 10, qty: 11, acquisition: 12, pcn: 13, ndc: 14, grossProfit: 15,
-  extra: null,
+  extras: [],
 };
 const BASE_COUNT = 16;
 
@@ -185,15 +199,60 @@ const FIELDS = [
  * the right answer for a report that has been rebuilt rather than extended.
  */
 export function candidateLayouts(fieldCount: number): Layout[] {
-  if (fieldCount === BASE_COUNT) return [BASE];
-  if (fieldCount !== BASE_COUNT + 1) return [];
+  const added = fieldCount - BASE_COUNT;
+  if (added === 0) return [BASE];
+  /*
+   * Two at once is as far as this will guess. Beyond that the report has been rebuilt rather than
+   * extended, and the honest answer is to refuse it and have somebody look — reading it on a guess
+   * gives figures that are individually plausible and collectively wrong, which is the one failure
+   * worth refusing a file over.
+   */
+  if (added < 0 || added > 2) return [];
+
   const out: Layout[] = [];
-  for (let at = 0; at <= BASE_COUNT; at++) {
-    const l = { extra: at } as Layout;
-    for (const f of FIELDS) l[f] = BASE[f] >= at ? BASE[f] + 1 : BASE[f];
-    out.push(l);
+  const place = (at: number[]) => {
+    const sorted = [...at].sort((a, b) => a - b);
+    /*
+     * Insertion points are given in the original layout's coordinates; the positions they end up at
+     * are not the same thing. The second column inserted sits one further along than it was asked
+     * for, because the first one is already in front of it — and a version of this that forgot to
+     * shift them had an added column land on top of the BIN it was supposed to sit beside, which
+     * scored well and read the wrong cell.
+     */
+    const l = { extras: sorted.map((a, i) => a + i) } as Layout;
+    for (const f of FIELDS) {
+      // Each added column at or before a field pushes it one further along.
+      l[f] = BASE[f] + sorted.filter((x) => x <= BASE[f]).length;
+    }
+    return l;
+  };
+  if (added === 1) {
+    for (let a = 0; a <= BASE_COUNT; a++) out.push(place([a]));
+    return out;
+  }
+  for (let a = 0; a <= BASE_COUNT; a++) {
+    for (let b = a; b <= BASE_COUNT + 1; b++) out.push(place([a, b]));
   }
   return out;
+}
+
+/**
+ * What an added column is, decided by what is in it rather than by where it sits.
+ *
+ * With two of them, position says nothing about which is which — and the header cannot be used,
+ * because it wraps and carries a name with no cell beneath it. But the contents are unmistakable:
+ * a money column holds amounts, and an other-coverage code holds a two-digit code and never a
+ * currency symbol. Read this way the report can gain them in either order and nothing has to change.
+ */
+/** Which added column plays which part, once the contents have said. */
+export type ExtraRoles = { money: number | null; code: number | null };
+
+export function classifyExtra(values: string[]): "money" | "code" | "unknown" {
+  const seen = values.map((v) => v.trim()).filter((v) => v !== "");
+  if (seen.length === 0) return "unknown";
+  if (seen.every((v) => /^\(?-?\$[\d,]+\.\d{2}\)?$/.test(v) || /^-?\d+\.\d{2}$/.test(v))) return "money";
+  if (seen.every((v) => /^\d{1,2}$/.test(v))) return "code";
+  return "unknown";
 }
 
 const isMoney = (s: string) => s.trim() === "" || /^\(?-?\$?[\d,]*\.?\d*\)?$/.test(s.trim());
@@ -234,8 +293,12 @@ export function scoreLayout(layout: Layout, rows: string[][]): number {
     const qty = (parts[layout.qty] ?? "").trim();
     if (qty !== "" && /^-?[\d.]+$/.test(qty)) score += 4;
     else if (qty !== "") score -= 4;
-    // And the added column should look like the money it is, not like a quantity or an NDC.
-    if (layout.extra !== null && isMoney(parts[layout.extra] ?? "")) score += 2;
+    // And an added column should hold something a column holds — money, or a short code.
+    for (const x of layout.extras) {
+      const v = (parts[x] ?? "").trim();
+      if (v === "" || isMoney(v) || /^\d{1,2}$/.test(v)) score += 2;
+      else score -= 2;
+    }
     for (const f of ["amount", "copay", "patientTotal", "acquisition", "grossProfit"] as const) {
       if (isMoney(parts[layout[f]] ?? "")) score += 1;
     }
@@ -495,9 +558,23 @@ export function parseRxTransactions(text: string): TransactionParse {
     );
   }
 
+  /*
+   * Which added column is which, from what they contain rather than where they sit. With two of
+   * them position says nothing, and the header cannot say either — it wraps, and it names a column
+   * that has no cell.
+   */
+  const roles: ExtraRoles = { money: null, code: null };
+  if (layout) {
+    for (const x of layout.extras) {
+      const kind = classifyExtra(usable.slice(0, 200).map((r) => r.parts[x] ?? ""));
+      if (kind === "money" && roles.money === null) roles.money = x;
+      else if (kind === "code" && roles.code === null) roles.code = x;
+    }
+  }
+
   if (layout) {
     for (const r of usable) {
-      const t = readRow(r.parts, layout, r.section, r.submissionType, ++ordinal);
+      const t = readRow(r.parts, layout, roles, r.section, r.submissionType, ++ordinal);
       if (typeof t === "string") { skip(t); continue; }
       const n = (keysSeen.get(t.transactionKey) ?? 0) + 1;
       keysSeen.set(t.transactionKey, n);
@@ -545,7 +622,7 @@ export function parseRxTransactions(text: string): TransactionParse {
   };
 }
 
-function readRow(parts: string[], POS: Layout, section: ReturnType<typeof parseSectionLabel>, submissionType: string | null, ordinal: number): Transaction | string {
+function readRow(parts: string[], POS: Layout, roles: ExtraRoles, section: ReturnType<typeof parseSectionLabel>, submissionType: string | null, ordinal: number): Transaction | string {
   const rx = RX_FILL.exec(parts[POS.rxFill])!;
   const status = parts[POS.status];
   /*
@@ -596,7 +673,17 @@ function readRow(parts: string[], POS: Layout, section: ReturnType<typeof parseS
    * A blank cell is not zero. A plan that promised nothing and a report that printed nothing are
    * different facts, and only the first can be chased.
    */
-  const expectedFacilitatorCents = POS.extra === null ? null : parseCents(parts[POS.extra]);
+  const expectedFacilitatorCents = roles.money === null ? null : parseCents(parts[roles.money]);
+
+  /*
+   * The other coverage code, where the report carries it.
+   *
+   * NCPDP field 308-C8, and the one thing that would let this reader stop inferring what a
+   * secondary row means. An "08" row is billing for the patient's financial responsibility only —
+   * so its amount is not a price for the drug, and it must never be allowed to set one. Today that
+   * has to be guessed from the shape of the row.
+   */
+  const otherCoverageCode = roles.code === null ? null : (parts[roles.code] ?? "").trim() || null;
 
   /*
    * The pharmacy's own cash programme, named from the section it was printed under.
@@ -614,7 +701,8 @@ function readRow(parts: string[], POS: Layout, section: ReturnType<typeof parseS
     NDC: parts[POS.ndc], GrossProfit: parts[POS.grossProfit], "Third Party": section.label, "Submission Type": submissionType ?? "",
     "Ingredient Cost Paid (derived)": ingredientPaidCents === null ? "" : (ingredientPaidCents / 100).toFixed(2),
   };
-  if (POS.extra !== null) raw["Est. MTF"] = parts[POS.extra] ?? "";
+  if (roles.money !== null) raw["Est. MTF"] = parts[roles.money] ?? "";
+  if (roles.code !== null) raw["OCC"] = parts[roles.code] ?? "";
 
   return {
     ordinal,
@@ -637,6 +725,7 @@ function readRow(parts: string[], POS: Layout, section: ReturnType<typeof parseS
     acquisitionCents: parseCents(parts[POS.acquisition]),
     grossProfitCents: parseCents(parts[POS.grossProfit]),
     expectedFacilitatorCents,
+    otherCoverageCode,
     cashPlan,
     ingredientPaidCents,
     ndc11,
