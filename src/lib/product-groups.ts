@@ -1,16 +1,13 @@
 /**
- * Which NDCs are the same product.
+ * Which NDCs are the same product, for buying.
  *
  * "Which NDC should I buy" is a question about a product, and a product is several NDCs: the same
  * drug, strength and form from different manufacturers, each with its own price at each supplier
- * and its own NADAC. Nothing the site holds groups them. The catalogues describe a product in each
- * supplier's own words, the invoices in another, and the claims not at all. NADAC does: CMS prints
- * one description per NDC, and it is the same words for every manufacturer's version of the same
- * thing ("ATORVASTATIN CALCIUM 40 MG TABLET"), because the file is built from the drug, not from
- * the label.
- *
- * So the grouping key is NADAC's description, with three more things that must match before two
- * NDCs are treated as interchangeable here:
+ * and its own NADAC. The site keys products off their description in `product-key.ts`, which is
+ * careful about exactly the things a price comparison must never blur — salt forms, release
+ * profiles, strength and its units, dosage form — and returns no key at all for a description too
+ * thin to be safe. This module adds what a *buying* group needs on top of that key, using NADAC's
+ * row for the NDC as the source, because NADAC prints one description per NDC in one house style:
  *
  *   - **classification** — NADAC's brand/generic flag. A brand and its generic are the same drug
  *     and are not the same buying decision; substituting one for the other is a DAW question that
@@ -19,15 +16,13 @@
  *     margin, whatever their descriptions say.
  *   - **OTC** — an OTC row is reimbursed differently or not at all.
  *
- * This is deliberately not therapeutic equivalence. It does not know AB ratings, it does not know
- * that a capsule and a tablet are interchangeable for some drugs and not others, and it never puts
- * two different descriptions together. It errs towards too many groups rather than too few: a
- * product split in two loses a comparison, a product wrongly merged recommends a switch that
- * cannot be dispensed. When an Orange Book or RxNorm reference is added it replaces this key; the
- * callers only ask for the key.
+ * It errs towards too many groups rather than too few: a product split in two loses a comparison,
+ * a product wrongly merged recommends a switch that cannot be dispensed.
  *
  * Pure. Everything comes in as arguments.
  */
+
+import { productKey } from "./product-key";
 
 export type GroupSource = {
   ndc11: string;
@@ -39,26 +34,13 @@ export type GroupSource = {
   otc?: boolean | null;
 };
 
-/**
- * NADAC descriptions are consistent but not identical in spacing across years of files:
- * "5 MG" and "5MG" both occur. The key folds case, collapses whitespace, and closes the gap
- * between a number and its unit so that those read as one product.
- */
-export function normalizeDescription(s: string): string {
-  return s
-    .toUpperCase()
-    .replace(/\s+/g, " ")
-    .replace(/(\d)\s+(MG|MCG|ML|GM|G|IU|UNIT|UNITS|%|MEQ|MMOL)\b/g, "$1$2")
-    .replace(/\s*\/\s*/g, "/")
-    .trim();
-}
-
-/** The key two NDCs must share to be one product here, or null where the NDC cannot be placed. */
+/** The key two NDCs must share to be one product here, or null where the NDC cannot be placed safely. */
 export function groupKey(src: GroupSource): string | null {
-  if (!src.description || !src.description.trim()) return null;
+  const k = productKey(src.description).key;
+  if (!k) return null;
   const cls = (src.classification ?? "").trim().toUpperCase() || "?";
   const unit = (src.pricingUnit ?? "").trim().toUpperCase() || "?";
-  return `${normalizeDescription(src.description)}|${cls}|${unit}|${src.otc ? "OTC" : "RX"}`;
+  return `${k}|${cls}|${unit}|${src.otc ? "OTC" : "RX"}`;
 }
 
 /**

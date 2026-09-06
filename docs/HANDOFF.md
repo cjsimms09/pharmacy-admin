@@ -154,13 +154,21 @@ or "cannot say" with the reason), `ratio-effect.ts` (what an order does to the r
 band, in money). None of them touches the database or a page. Wiring them to the product ledger
 and an order screen is the next step, and is the pharmacy session's call on where.
 
+### Data audit
+`docs/reference/data-audit.md`: how every feed lands and ties, what is well organised, ten fixes
+in order of consequence (catalogue price history is discarded weekly; the drill-down is the one
+unchecked model read that selects money; the rebate settlement is stored three ways; supplier
+and payer are each keyed two ways; cash sales are dropped; an invoice de-duplicates on document
+id only), and twelve further uses of the data ranked by value against readiness. `product-groups.ts`
+now delegates to `product-key.ts`, which it had duplicated.
+
 ### Files this branch touched
 `src/db/schema.ts`, `drizzle/0048_*`, `drizzle/0049_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down}.ts` (new),
 `src/lib/{claims,rx-transactions,suppliers,suppliers-registry,pioneer-catalog,invoices,nadac-fetch,settings}.ts`,
 `src/app/(app)/suppliers/page.tsx`, `src/app/(app)/suppliers/[id]/terms/page.tsx` (new),
 `src/app/(app)/inventory/invoices/page.tsx`, `src/app/(app)/nadac/page.tsx`, `src/app/(app)/claims/page.tsx`,
 `tests/{ndc,supplier-terms,invoice-lines,nadac-datasets,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down}.test.ts` (new), `tests/{claims,suppliers-registry,rx-transactions}.test.ts`,
-`docs/HANDOFF.md`, `docs/reference/nadac-api.md`, `docs/reference/buying-logic.md` (new), `fixtures/README.md`, `fixtures/rx-transactions.txt` (new).
+`docs/HANDOFF.md`, `docs/reference/nadac-api.md`, `docs/reference/buying-logic.md`, `docs/reference/data-audit.md` (new), `fixtures/README.md`, `fixtures/rx-transactions.txt` (new).
 
 ## Who owns what now
 
