@@ -269,6 +269,8 @@ export const SETTING_KEYS = [
   "mtf_payee_id",
   "mtf_download_dir",
   "mtf_cli_path",
+  /* Whether the daily fetch runs on its own. Anything but "no" means it does. */
+  "mtf_auto",
   "mtf_last_pull",
   "mtf_last_result",
 ] as const;

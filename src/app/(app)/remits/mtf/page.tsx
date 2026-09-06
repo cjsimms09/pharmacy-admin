@@ -6,6 +6,7 @@ import { testMtf, downloadMtf, mtfStatus, saveCliLocation, findCli } from "@/lib
 import { getSettings } from "@/lib/settings";
 import { requireReimbursement } from "@/lib/features";
 import { PageHeader, Notice, Field, Empty, BackLink } from "@/components/ui";
+import { SubmitButton } from "@/components/submit-button";
 
 export const metadata = { title: "Medicare MFP refunds" };
 export const dynamic = "force-dynamic";
@@ -67,6 +68,19 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
       );
     }
     redirect("/remits/mtf?found=" + encodeURIComponent(r.found.join("|")));
+  }
+
+  /** The whole cycle at once — fetch, read, post — for somebody who does not want to wait a day. */
+  async function runNow() {
+    "use server";
+    const u = await requireManager();
+    const { mtfCycle } = await import("@/lib/mtf");
+    const r = await mtfCycle(u);
+    await audit({ action: "mtf.cycle", userId: u.id, userName: u.name, details: r.message.slice(0, 200) });
+    revalidatePath("/remits/mtf");
+    revalidatePath("/claims");
+    revalidatePath("/money");
+    redirect("/remits/mtf?" + new URLSearchParams(r.ran ? { ok: r.message } : { error: r.message }).toString());
   }
 
   /** Records where the tool is, checks it runs, and points its downloads at the folder this reads. */
@@ -250,7 +264,39 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
         </section>
       </div>
 
+      {/*
+        What happens without anybody here.
+
+        Downloading and reading were two buttons, which means the money only arrives when somebody
+        remembers to go and get it — and the reason these payments were invisible for so long is
+        that nobody was going to check a portal every day.
+      */}
       <section className="mb-4 rounded-lg border border-accent bg-surface p-4">
+        <h2 className="text-sm font-semibold">This runs on its own</h2>
+        <p className="mt-1 text-sm text-ink-2">
+          Once a day the site fetches anything new, reads it, and posts each payment onto the fill it names. It looks
+          three weeks back every time, because CMS publishes a remittance days after the fill and not on a schedule —
+          asking only for today would miss a late one for ever. Nothing is fetched twice: the tool skips files it has
+          taken and this site skips payments it has already posted.
+        </p>
+        <p className="mt-1 text-xs text-ink-3">
+          {s.lastPull ? (
+            <>
+              Last run {new Date(s.lastPull).toLocaleString()}
+              {s.lastResult ? ` — ${s.lastResult}` : ""}
+            </>
+          ) : (
+            "It has not run yet. It starts within a few minutes of the site starting up, and the buttons below do the same thing by hand."
+          )}
+        </p>
+        <form action={runNow} className="mt-3">
+          <SubmitButton className="rounded-md bg-ink px-3 py-2 text-sm text-white" pendingLabel="Fetching and posting…">
+            Do it now rather than waiting
+          </SubmitButton>
+        </form>
+      </section>
+
+      <section className="mb-4 rounded-lg border border-line bg-surface p-4">
         <h2 className="text-sm font-semibold">Put the money against the claims</h2>
         <p className="mt-1 text-sm text-ink-2">
           Reads every 835 in the folder below and records what each one paid against the prescription it names. The

@@ -541,3 +541,61 @@ function sharedPrefixLength(a: string, b: string): number {
   while (n < x.length && n < y.length && x[n].toLowerCase() === y[n].toLowerCase()) n++;
   return n;
 }
+
+/**
+ * The whole MTF cycle, unattended: fetch what is new, read it, put it on the claims.
+ *
+ * Downloading and reading were two buttons on a page, which means the money only arrives when
+ * somebody remembers to go and get it. That is not automation, it is a chore with a nicer
+ * interface — and the whole reason the payments were invisible in the first place is that nobody
+ * was going to check a portal every day.
+ *
+ * A rolling window rather than yesterday alone. CMS publishes a remittance days after the fill and
+ * not on a schedule anybody here controls, so asking only for today would miss anything that
+ * appeared late, for ever. Asking for the last few weeks every time costs nothing — the tool is
+ * told to fetch only files not already taken, and a payment already recorded is recognised by its
+ * trace number and skipped.
+ */
+export async function mtfCycle(user: { name: string }, days = 21): Promise<{
+  ran: boolean;
+  why?: string;
+  downloaded: number;
+  payments: number;
+  amountCents: number;
+  matched: number;
+  unmatched: number;
+  message: string;
+}> {
+  const idle = { ran: false, downloaded: 0, payments: 0, amountCents: 0, matched: 0, unmatched: 0 };
+  const key = await readSecret("mtf");
+  if (!key) return { ...idle, why: "no API key stored", message: "No MTF API key is stored, so nothing was fetched." };
+
+  const to = new Date();
+  const from = new Date(to.getTime() - days * 24 * 60 * 60 * 1000);
+  const iso = (d: Date) => d.toISOString().slice(0, 10);
+
+  const pulled = await downloadMtf(iso(from), iso(to), true);
+  const { sweepRemittances } = await import("./claim-payments");
+  // Read whatever is in the folder even when the fetch failed: a file from an earlier run that
+  // has never been read is money sitting on the disk, and a network failure should not hide it.
+  const read = await sweepRemittances(user);
+
+  const { setSetting } = await import("./settings");
+  const message =
+    (pulled.ok ? pulled.message : `Could not fetch: ${pulled.message}`) +
+    (read.payments
+      ? ` ${read.payments} payment${read.payments === 1 ? "" : "s"} worth $${(read.amountCents / 100).toFixed(2)} posted, ${read.matched} onto claims we hold.`
+      : " Nothing new to post.");
+  await setSetting("mtf_last_pull", new Date().toISOString());
+  await setSetting("mtf_last_result", message.slice(0, 500));
+
+  return {
+    ran: true,
+    downloaded: countFiles(pulled.output ?? ""),
+    payments: read.payments,
+    amountCents: read.amountCents,
+    matched: read.matched,
+    unmatched: read.unmatched,
+    message,
+  };
+}
