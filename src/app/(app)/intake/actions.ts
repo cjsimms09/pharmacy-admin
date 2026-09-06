@@ -25,7 +25,10 @@ export async function dropFiles(fd: FormData) {
   const user = await requireManager();
   const files = fd.getAll("files").filter((f): f is File => f instanceof File && f.size > 0);
   if (files.length === 0) fail("/intake", "Choose at least one file to add.");
-  if (!(await hasApiKey())) fail("/intake", "Add your Anthropic API key under Settings → Connections so dropped files can be read and sorted for you.");
+  /*
+   * No key is needed for a report the site can read itself, so the door is not shut on the way in.
+   * A file Claude would have to read is refused later, per file, with the reason attached to it.
+   */
 
   const people = await db.query.people.findMany({ where: eq(schema.people.active, true) });
   const names = people.map((p) => `${p.firstName} ${p.lastName}`);
@@ -61,8 +64,52 @@ export async function dropFiles(fd: FormData) {
     const intakeId = newId();
     await db.insert(schema.intakeItems).values({ id: intakeId, documentId: docId, createdBy: user.id });
     ids.push(intakeId);
+
+    /*
+     * A report the site already knows how to read is read, not described.
+     *
+     * Everything dropped here used to go to Claude to be classified, which is right for a licence
+     * photographed on a phone and wrong for a file whose first line is its own title. A claims file
+     * dragged onto this page was filed as an unrecognised document while the same file, arriving by
+     * email, loaded itself — and a tool that behaves differently depending on how a file reached it
+     * is one people stop trusting.
+     *
+     * The deterministic reader runs first because it is free and certain. Anything it does not
+     * recognise still goes to Claude below.
+     */
+    const bytes = Buffer.from(await file.arrayBuffer());
     try {
-      const result = await classifyDocument({ buffer: Buffer.from(await file.arrayBuffer()), mimeType: stored.mimeType, fileName: file.name }, names, {
+      const { importDropped } = await import("@/lib/mailbox");
+      const routed = await importDropped(bytes, file.name, { userId: user.id, userName: user.name }, docId);
+      if (routed.recognised) {
+        await db
+          .update(schema.intakeItems)
+          .set({
+            status: routed.imported ? "applied" : "extracted",
+            resultJson: JSON.stringify({
+              kind: "report",
+              routedAs: routed.routedAs,
+              summary: routed.routeResult ?? "Recognised and filed.",
+            }),
+          })
+          .where(eq(schema.intakeItems.id, intakeId));
+        continue;
+      }
+    } catch (e) {
+      // A reader that threw is not a reason to lose the file: fall through and let Claude look.
+      void e;
+    }
+
+    if (!(await hasApiKey())) {
+      await db
+        .update(schema.intakeItems)
+        .set({ status: "failed", error: "This is not a report the site recognises, and there is no API key set for Claude to read it." })
+        .where(eq(schema.intakeItems.id, intakeId));
+      continue;
+    }
+
+    try {
+      const result = await classifyDocument({ buffer: bytes, mimeType: stored.mimeType, fileName: file.name }, names, {
         userId: user.id,
         userName: user.name,
       });

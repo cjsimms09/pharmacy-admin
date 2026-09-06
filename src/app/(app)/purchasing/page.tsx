@@ -30,6 +30,38 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
     purchasingOpportunities(), supplierSummary(), catalogSchedule(), getSettings(), hasMailPassword(), productLedger(),
   ]);
   const ledgerRows = opportunities(ledger.rows);
+
+  /*
+   * The buy list: every NDC offered under what the benchmark says the drug costs, after the rebate.
+   *
+   * The table below answers "what did we pay against what everyone else charges". This answers the
+   * one the owner actually asks — what should we be buying — by ranking the gap under NADAC and
+   * then, per product, naming the NDC that beats the one being dispensed today. NDCs are grouped
+   * into products on NADAC's own description, so a switch is between genuine equivalents.
+   */
+  /*
+   * Today's order: what the shelf is short of, who sells it cheapest, and whether that supplier
+   * will actually ship it. Loaded here rather than on its own page because it is the answer the
+   * three tables below only inform — they say where the money is, this says what to do about it.
+   */
+  const { buyListNow, SHELF_POLICY } = await import("@/lib/shelf");
+  const buyList = await buyListNow();
+
+  const { underNadac, switchNdc, notYetBought } = await import("@/lib/under-nadac");
+  const { groupKey } = await import("@/lib/product-groups");
+  const { db, schema } = await import("@/db");
+  const nadacForGroups = await db.query.nadacPrices.findMany({
+    columns: { ndc11: true, description: true, classification: true, pricingUnit: true },
+  });
+  void schema;
+  const groupByNdc = new Map<string, string | null>();
+  for (const r of nadacForGroups) {
+    if (groupByNdc.has(r.ndc11)) continue;
+    groupByNdc.set(r.ndc11, groupKey({ ndc11: r.ndc11, description: r.description, classification: r.classification, pricingUnit: r.pricingUnit }));
+  }
+  const buys = underNadac(ledger.rows, (ndc) => groupByNdc.get(ndc) ?? null);
+  const switches = switchNdc(buys);
+  const unstocked = notYetBought(buys);
   /*
    * What each drug earns, which is a different question from what it costs.
    *
@@ -92,6 +124,153 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
 
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
+
+      {/*
+        Today's order.
+
+        Three things had to be joined for this to exist and none of them was: what is on the shelf
+        (a count, uploaded daily), how fast it leaves (the claims, one row per dispensing), and
+        what each supplier charges after their rebate. The interesting part is not the arithmetic —
+        it is the minimum. A secondary is cheaper on eleven items and will not ship under $500, and
+        the three ways out of that are lose the saving, pad the order with stock nobody wanted, or
+        find the items this supplier is *also* cheapest on that move fast enough to buy deep. Only
+        the third is a decision, and it needs numbers nobody has in their head at the order screen.
+      */}
+      <section className="my-4 rounded-lg border border-line bg-surface p-4">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-sm font-semibold">Today&rsquo;s order</h2>
+          <Link href="/purchasing/shelf" className="text-xs underline">
+            The shelf: days of stock, surplus and what to send back →
+          </Link>
+        </div>
+
+        {buyList.missing.length > 0 && (
+          <ul className="mt-2 space-y-1 text-xs text-ink-3">
+            {buyList.missing.map((m) => (
+              <li key={m}>• {m}</li>
+            ))}
+          </ul>
+        )}
+
+        {buyList.plan.baskets.length === 0 ? (
+          <p className="mt-2 text-xs text-ink-3">
+            Nothing to order: either the shelf holds {SHELF_POLICY.targetDays} days of everything that moves, or the
+            figures above have not been loaded yet.
+          </p>
+        ) : (
+          <>
+            <p className="mt-1 text-xs text-ink-3">
+              {buyList.needs.length.toLocaleString()} {buyList.needs.length === 1 ? "item is" : "items are"} under a{" "}
+              {SHELF_POLICY.targetDays}-day hold. Prices are after each supplier&rsquo;s rebate, so a contract line is
+              compared at what it actually costs. A bulk buy to reach a minimum is capped at{" "}
+              {SHELF_POLICY.maxTopUpDays} days of real movement and never offered on something that has not been
+              dispensing.
+            </p>
+            <div className="mt-3 space-y-4">
+              {buyList.plan.baskets.map((b) => (
+                <div key={b.supplier} className="rounded-md border border-line p-3">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <div>
+                      <b className="text-sm">{b.supplier}</b>{" "}
+                      <span className="text-xs text-ink-3">
+                        {b.lines.length} {b.lines.length === 1 ? "line" : "lines"} · {money(b.subtotalCents)}
+                        {b.freightCents > 0 && ` + ${money(b.freightCents)} freight`}
+                        {b.minimumCents !== null && ` · minimum ${money(b.minimumCents)}`}
+                      </span>
+                    </div>
+                    <span
+                      className={`badge ${
+                        b.verdict === "order" || b.verdict === "top_up_to_order"
+                          ? "badge-ok"
+                          : b.verdict === "hold"
+                            ? "badge-warn"
+                            : "badge-muted"
+                      }`}
+                    >
+                      {b.verdict === "order"
+                        ? "Order it"
+                        : b.verdict === "top_up_to_order"
+                          ? "Order with the top-ups"
+                          : b.verdict === "hold"
+                            ? "Hold"
+                            : "Buy at the primary instead"}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-ink-3">{b.why}</p>
+                  {b.bandDeltaCents !== null && b.bandDeltaCents !== 0 && (
+                    <p className="mt-1 text-xs">
+                      <b className={b.bandDeltaCents < 0 ? "text-crit" : "text-accent"}>
+                        {b.bandDeltaCents < 0 ? "−" : "+"}
+                        {money(Math.abs(b.bandDeltaCents))}
+                      </b>{" "}
+                      through the rebate band, against {money(b.savingCents)} on the invoice.
+                    </p>
+                  )}
+                  <div className="mt-2 overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead className="text-ink-3">
+                        <tr>
+                          <th className="py-1 text-left font-medium">Drug</th>
+                          <th className="py-1 text-right font-medium">Packs</th>
+                          <th className="py-1 text-right font-medium">Cost</th>
+                          <th className="py-1 text-right font-medium">Saves</th>
+                          <th className="py-1 text-right font-medium">Days of stock after</th>
+                          <th className="py-1 text-left font-medium">Why</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {b.lines.map((l) => (
+                          <tr key={l.ndc11} className="border-t border-line">
+                            <td className="py-1">
+                              {l.name ?? l.ndc11}
+                              <div className="text-ink-3">{l.ndc11}</div>
+                            </td>
+                            <td className="py-1 text-right">
+                              {l.packs} × {l.packQty}
+                              {l.packOverageThousandths > 0 && (
+                                <div className="text-ink-3">{Math.round(l.packOverageThousandths / 1000)} over the need</div>
+                              )}
+                            </td>
+                            <td className="py-1 text-right">{money(l.costCents)}</td>
+                            <td className="py-1 text-right">{l.savingCents > 0 ? money(l.savingCents) : "—"}</td>
+                            <td className="py-1 text-right">
+                              {Number.isFinite(l.daysOfStockAfter) ? Math.round(l.daysOfStockAfter) : "—"}
+                            </td>
+                            <td className="py-1">
+                              {l.reason === "need" ? "Short of the target" : "Added to reach the minimum"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {b.refusals.length > 0 && (
+                    <details className="mt-2">
+                      <summary className="cursor-pointer text-xs text-ink-3">
+                        {b.refusals.length} {b.refusals.length === 1 ? "item was" : "items were"} considered for the
+                        top-up and refused
+                      </summary>
+                      <ul className="mt-1 space-y-0.5 text-xs text-ink-3">
+                        {b.refusals.slice(0, 25).map((r) => (
+                          <li key={r.ndc11}>
+                            <b className="text-ink-2">{r.name ?? r.ndc11}</b> — {r.why}
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                </div>
+              ))}
+            </div>
+            {buyList.plan.unfilled.length > 0 && (
+              <p className="mt-3 text-xs text-ink-3">
+                {buyList.plan.unfilled.length} needed {buyList.plan.unfilled.length === 1 ? "item has" : "items have"} no
+                supplier price with a known pack size, so nothing can be ordered for {buyList.plan.unfilled.length === 1 ? "it" : "them"} here.
+              </p>
+            )}
+          </>
+        )}
+      </section>
 
       <section className="my-4 rounded-lg border border-line bg-surface p-4">
         <h2 className="text-sm font-semibold">Load a supplier price file</h2>
@@ -193,6 +372,90 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
         of the door. Each on its own is a page somebody has to reconcile in their head. Together
         they say which drugs to move, where to, and what it is worth.
       */}
+      {/*
+        The switches worth making, above the table that explains them.
+        
+        A table of every drug is a reference; this is the list of things to actually do this week,
+        ranked by what each is worth on the quantities this pharmacy dispenses — because a large
+        percentage off something bought twice a year is not worth an afternoon.
+      */}
+      {(switches.length > 0 || unstocked.length > 0) && (
+        <section className="my-4 rounded-lg border border-line bg-surface p-4">
+          <h2 className="text-sm font-semibold">Buy these instead</h2>
+          <p className="mt-1 text-xs text-ink-2">
+            Every NDC offered under what the federal benchmark says the drug costs, after the rebate this pharmacy
+            actually earns. Grouped into products on NADAC&rsquo;s own description, so a switch is between genuine
+            equivalents rather than between things that merely sound alike.
+          </p>
+
+          {switches.length > 0 && (
+            <div className="mt-3 overflow-x-auto rounded-lg border border-line">
+              <table className="w-full text-sm">
+                <thead className="bg-ground text-left text-xs uppercase tracking-wide text-ink-3">
+                  <tr>
+                    <th className="px-3 py-2">Product</th>
+                    <th className="px-3 py-2">Buying now</th>
+                    <th className="px-3 py-2">Better</th>
+                    <th className="px-3 py-2 text-right">Worth</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {switches.slice(0, 25).map((p) => (
+                    <tr key={p.groupKey} className="border-t border-line align-top">
+                      <td className="px-3 py-2">
+                        {p.name ?? p.pick.ndc11}
+                        <span className="block text-[11px] text-ink-3">{p.units.toLocaleString()} units dispensed</span>
+                      </td>
+                      <td className="px-3 py-2 font-mono text-[11px]">{p.current?.ndc11 ?? "—"}</td>
+                      <td className="px-3 py-2">
+                        <span className="font-mono text-[11px]">{p.pick.ndc11}</span>
+                        <span className="block text-[11px] text-ink-3">{p.pick.buy.supplier}</span>
+                      </td>
+                      <td className="px-3 py-2 text-right font-medium tabular-nums text-accent">{formatCents(p.gainCents)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {switches.length > 0 && (
+            <ul className="mt-2 space-y-0.5 text-xs text-ink-2">
+              {switches.slice(0, 5).map((p) => (
+                <li key={`says-${p.groupKey}`}>{p.says}</li>
+              ))}
+            </ul>
+          )}
+
+          {unstocked.length > 0 && (
+            <details className="mt-3">
+              <summary className="cursor-pointer text-xs text-ink-3">
+                {unstocked.length} NDCs offered well under the benchmark that this pharmacy neither buys nor dispenses
+              </summary>
+              <p className="mt-1 text-xs text-ink-3">
+                Not a recommendation on its own — a drug nobody here dispenses is not worth stocking however cheap it
+                is. It is the shelf the pharmacy does not have, for the day somebody asks why a script went elsewhere.
+              </p>
+              <ul className="mt-2 grid gap-0.5 text-xs sm:grid-cols-2">
+                {unstocked.slice(0, 30).map((r) => (
+                  <li key={r.ndc11} className="flex justify-between gap-2">
+                    <span className="truncate">{r.name ?? r.ndc11}</span>
+                    <span className="shrink-0 tabular-nums text-ink-3">{r.underNadacPercent.toFixed(0)}% under</span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+
+          {buys.excluded.length > 0 && (
+            <p className="mt-2 text-[11px] text-ink-3">
+              {buys.excluded.length} rows could not be measured and are named rather than dropped — a shorter list reads
+              as good news.
+            </p>
+          )}
+        </section>
+      )}
+
       <section className="my-4 rounded-lg border border-line bg-surface p-4">
         <h2 className="text-sm font-semibold">What to do about it</h2>
         <p className="mt-1 text-sm text-ink-2">

@@ -244,17 +244,18 @@ is sized as if the shelf were empty, and the plan says so), **each secondary's o
 lead time** on the supplier register, **which brands McKesson scrubs** (a scrubbed brand moved
 off McKesson changes nothing), and the plan bases from Rule 1 with enough claims behind them.
 
-## Rule 7: lean stock, and the last good day to send it back
+## Rule 7: lean stock, the order minimum and returns on the invoice clock
 
-`lean-stock.ts`. Units a day per product from the claims, reversals out, one bottle per fill.
-Target = usage × (lead time + review + safety days); a must-stock product keeps a pack; a product
-with fewer than three fills in the window is ordered when prescribed, not shelved. The order is
-what brings the shelf to target in whole packs less what is on order. The excess is what is over
-target; the return goes on the last day of the highest credit step on which the excess still
-exists after usage until then, with the credit in dollars and what waiting would cost. No policy
-on file, no return proposed. `order-basket.ts` meets a secondary's minimum with what is needed
-today plus the fastest movers pulled forward inside the days cap, returnable lines only, and
-otherwise says to buy from the primary this time.
+Built by the pharmacy session, and the account of it is `docs/PURCHASING-STRATEGY.md`:
+`usage.ts` (velocity from fills, with how concentrated it is), `on-hand.ts` (the daily count,
+matched by column meaning), `order-plan.ts` (the minimum game: top-ups ranked by saving per
+dollar committed, capped by days of real movement, refused on anything without velocity, and
+each basket priced against the band it would cost through `ratio-effect.ts`), `lean-shelf.ts`
+(days of stock against the target, surplus, dead stock, and what the supplier still credits on
+the invoice clock, ranked by money at risk), and the supplier fields for minimum, freight and
+lead time. The cloud session's own versions of these were withdrawn in favour of them. Rule 6's
+month plan takes `usage.ts` velocity and `on-hand.ts` quantities as its demand and shelf inputs,
+and `order-plan.ts`'s supplier terms as its minimums.
 
 ## What is missing, in order of value
 
@@ -274,7 +275,7 @@ otherwise says to buy from the primary this time.
 Each module's tests use round figures that can be checked by hand: `tests/pay-basis.test.ts`,
 `tests/ndc-choice.test.ts`, `tests/ratio-effect.test.ts`, `tests/product-groups.test.ts`,
 `tests/drill-down.test.ts`, `tests/under-nadac.test.ts`, `tests/reimbursement-fit.test.ts`,
-`tests/band-strategy.test.ts`, `tests/month-plan.test.ts`, `tests/lean-stock.test.ts`. When a
+`tests/band-strategy.test.ts`, `tests/month-plan.test.ts`. When a
 real statement, a real month of claims, or a real order is available on the pharmacy machine, the
 right test to add is the one that takes those figures (redacted) and pins the answer the module
 gives, so that the answer cannot drift.

@@ -28,18 +28,25 @@ export function Nav({ tools }: { tools: boolean }) {
         const here = pathname === g.href;
         return (
           <div key={g.href} className="mb-0.5">
+            {/*
+              The group you are in is marked by a rule down its edge as well as by its colour.
+              
+              A tinted pill on its own is a weak signal in a column of them — the eye reads the
+              block of colour before it reads which block. A bar against the margin says "here"
+              from the corner of the eye, which is the only way a sidebar is ever actually read.
+            */}
             <Link
               href={g.href}
-              className={`block rounded-md px-3 py-1.5 text-sm transition-colors ${
+              className={`relative block rounded-md py-1.5 pl-3 pr-3 text-sm transition-colors ${
                 here || open
-                  ? "bg-accent-soft font-semibold text-accent"
+                  ? "bg-accent-soft font-semibold text-accent before:absolute before:inset-y-1 before:-left-1 before:w-[3px] before:rounded-full before:bg-accent"
                   : "text-ink-2 hover:bg-ground hover:text-ink"
               }`}
             >
               {g.label}
             </Link>
             {open && g.items.length > 0 && (
-              <ul className="mb-1 mt-0.5 space-y-px border-l border-line pl-2 ml-3">
+              <ul className="mb-2 ml-3 mt-1 space-y-px border-l border-line pl-2">
                 {g.items.map((i) => {
                   const on = pathname === i.href || pathname.startsWith(`${i.href}/`);
                   return (
@@ -47,7 +54,7 @@ export function Nav({ tools }: { tools: boolean }) {
                       <Link
                         href={i.href}
                         className={`block rounded-md px-2.5 py-1 text-[13px] transition-colors ${
-                          on ? "bg-ground font-medium text-ink" : "text-ink-3 hover:bg-ground hover:text-ink-2"
+                          on ? "bg-ground font-semibold text-ink" : "text-ink-3 hover:bg-ground hover:text-ink-2"
                         }`}
                       >
                         {i.label}

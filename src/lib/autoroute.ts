@@ -6,6 +6,7 @@ import { mapSupplierColumns } from "./suppliers";
 import { looksLikePioneerCatalog } from "./pioneer-catalog";
 import { looksLikeRxTransactions } from "./rx-transactions";
 import { looksLikeSystemSales } from "./system-sales";
+import { looksLikeOnHand } from "./on-hand";
 import { looksLikeRxRescueCredit } from "./rxrescue-credit";
 import { pdfText } from "./pdf-text";
 import { looksLikeRebateReport } from "./rebate-report";
@@ -26,7 +27,7 @@ import { ALLOWED_MIME } from "./files";
  * behaviour we already had and is never wrong, only unhelpful.
  */
 
-export type RouteKind = "claims" | "rx_transactions" | "accrual_sales" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "return_policy" | "nadac" | "unrecognised";
+export type RouteKind = "claims" | "rx_transactions" | "accrual_sales" | "on_hand" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "return_policy" | "nadac" | "unrecognised";
 
 export type Classification = {
   kind: RouteKind;
@@ -166,6 +167,22 @@ export function classify(fileName: string, buf: Buffer): Classification {
       kind: "accrual_sales",
       why: "PioneerRx's System Sales Summary — the whole till for a month, retail alongside prescriptions. The only report that answers what the pharmacy took.",
       headers: ["Sales", "Discounts", "Returns", "Subtotal", "Tax Calculated", "Total"],
+    };
+  }
+  /*
+   * The daily inventory count.
+   *
+   * Checked before the generic header reader because it is a printed report with page furniture,
+   * and ahead of the catalogue rules because an on-hand export carries NDCs and costs and would
+   * otherwise be a plausible price list — filed as one, it would overwrite what the pharmacy pays
+   * with what it happens to hold, which is the same shape of number and a completely different
+   * fact. `looksLikeOnHand` requires both an on-hand quantity column and the words to go with it.
+   */
+  if (looksLikeOnHand(buf.subarray(0, 20_000).toString("utf8"))) {
+    return {
+      kind: "on_hand",
+      why: "An inventory on-hand export: an NDC column beside a quantity-on-hand column. Filed as the count for its own date, replacing any earlier upload for that day.",
+      headers: ["NDC", "Description", "Quantity On Hand"],
     };
   }
   /*

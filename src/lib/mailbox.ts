@@ -578,6 +578,31 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
  * arrival and loads on a second reading did so for the reason the person changed, not because
  * the two paths differ.
  */
+/**
+ * A file somebody dropped on the site, put through exactly the path an emailed one takes.
+ *
+ * The drop zone sent everything to Claude to be classified, which is right for a licence
+ * photographed on a phone and wrong for a report whose first line is its own title. A claims file
+ * dropped there was read as an unrecognised document and filed — so the same file loaded itself
+ * when it arrived by email and did nothing when it was dragged onto the page, which is exactly the
+ * sort of inconsistency that makes somebody stop trusting a tool.
+ *
+ * The deterministic reader goes first because it is free and certain. Anything it does not know is
+ * still Claude's to read.
+ */
+export async function importDropped(
+  buf: Buffer,
+  fileName: string,
+  ctx: { userId?: string | null; userName?: string | null },
+  documentId?: string | null,
+): Promise<{ recognised: boolean; routedAs: string; routeResult: string | null; imported: boolean }> {
+  const cls = classify(fileName, buf);
+  if (cls.kind === "unrecognised") return { recognised: false, routedAs: cls.kind, routeResult: cls.why, imported: false };
+  const s = await getSettings();
+  const r = await importRecognised(buf, fileName, "", fileName, s, ctx, { documentId: documentId ?? null });
+  return { recognised: true, ...r };
+}
+
 async function importRecognised(
   buf: Buffer,
   fileName: string,
@@ -594,6 +619,12 @@ async function importRecognised(
    */
   filed?: { documentId?: string | null; supplierId?: string | null; supplierName?: string | null },
 ): Promise<{ routedAs: string; routeResult: string | null; imported: boolean }> {
+  /* Who, if anybody, has claimed this sender as their own. */
+  const vendorBill = async (addr: string) => {
+    const { vendors, vendorForSender } = await import("./expenses");
+    return vendorForSender(addr, await vendors());
+  };
+
   const cls = classify(fileName, buf);
   const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   let routeResult: string | null = null;
@@ -609,6 +640,34 @@ async function importRecognised(
       const r = await importRxTransactions(buf, fileName, ctx.userId ?? "mailbox-sweep");
       routeResult = describeTransactionImport(r);
       if (r.claimsAdded || r.reversed) imported = true;
+    } else if (await vendorBill(from)) {
+      /*
+       * A bill from somebody the pharmacy has told us about.
+       *
+       * Checked before the generic readers, because a Stamps.com PDF has a header row about as much
+       * as a wholesaler catalogue does and would otherwise land in "unrecognised". The rule is the
+       * vendor's own sender address, so the pharmacist says "bills from here are postage" once.
+       *
+       * Filed as a draft with no amount. Reading a total off an arbitrary vendor's PDF is a guess
+       * with a number attached, and a guess that walks straight into the month's profit is worse
+       * than no figure — so it waits for somebody to agree with it.
+       */
+      const v = (await vendorBill(from))!;
+      const { saveExpense } = await import("./expenses");
+      await saveExpense({
+        vendorId: v.id,
+        categoryId: v.categoryId,
+        // The day it arrived, until somebody reads the bill and says otherwise.
+        invoiceDate: new Date().toISOString().slice(0, 10),
+        amountCents: v.typicalCents ?? 1,
+        description: subject || fileName,
+        documentId: filed?.documentId ?? null,
+        status: "draft",
+        source: "email",
+        createdBy: ctx.userName ?? "mailbox-sweep",
+      });
+      routeResult = `A bill from ${v.name}, filed as a draft under ${v.categoryId ? "its usual category" : "no category yet"}. Nothing counts on the month until somebody confirms the amount — reading a total off a PDF is a guess with a number attached.`;
+      imported = true;
     } else if (cls.kind === "rxrescue_credit") {
       /*
        * Top-off money applied to the fills it names. Idempotent on the memo's own transaction ids,
@@ -639,6 +698,27 @@ async function importRecognised(
       ].filter(Boolean);
       routeResult = bits.join(" ");
       if (r.applied) imported = true;
+    } else if (cls.kind === "on_hand") {
+      /*
+       * The day's shelf, filed against the date it counts rather than the date it arrived.
+       *
+       * A snapshot, not a ledger: the same day sent twice is the same shelf, so it replaces. The
+       * date is read off the file where it prints one; where it does not, nothing is filed, because
+       * a count dated a day out misplaces a whole day of dispensing and would then recommend
+       * sending back stock that has already gone.
+       */
+      const { fileOnHand } = await import("./shelf");
+      const r = await fileOnHand(buf, fileName, { userId: ctx.userId ?? "mailbox-sweep" }, { documentId: filed?.documentId ?? null });
+      if (r.ok) {
+        routeResult =
+          `${r.items.toLocaleString()} items counted on ${r.countedOn}` +
+          (r.replaced ? ", replacing the earlier upload for that day" : "") +
+          (r.unmappedColumns.length ? `. Columns not used: ${r.unmappedColumns.join(", ")}` : "") +
+          ".";
+        imported = true;
+      } else {
+        routeResult = `Recognised as an inventory count but nothing was filed: ${r.why}`;
+      }
     } else if (cls.kind === "accrual_sales") {
       /*
        * Recognised, kept, and honestly described as not yet counted.

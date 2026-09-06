@@ -84,7 +84,29 @@ export const NAV: NavGroup[] = [
       { href: "/inventory/returns", label: "What to send back", blurb: "Return deadlines counted from the invoice, and what each is worth" },
       // Next to the invoices because that is what it is for: an invoice files itself only if the
       // address it came from is recognised, and this is where the addresses live.
-      { href: "/suppliers", label: "Suppliers", blurb: "Who we buy from, and the addresses their invoices arrive from" },
+    ],
+  },
+  {
+    /*
+     * The money, which had no group at all.
+     *
+     * Every screen that decides what this pharmacy earns — the claims, who pays best, what to buy,
+     * what the wholesalers owe in rebates, what it all costs — was reachable only by knowing the
+     * address. The toolbar was compliance from end to end, which is what the site was when it was
+     * built and is no longer what it mostly does.
+     */
+    href: "/money",
+    label: "Money",
+    blurb: "What the pharmacy earns, what it spends, and what the month came to.",
+    items: [
+      { href: "/money/monthly", label: "Monthly profit and loss", blurb: "What the month took, what the goods cost, and what is left" },
+      { href: "/claims", label: "Claims", blurb: "Every dispensing, what it made, and what is still owed on it" },
+      { href: "/payers/performance", label: "Who pays best", blurb: "Every plan ranked by what it actually pays" },
+      { href: "/purchasing", label: "What to buy", blurb: "Which NDC of a product pays most against what it costs" },
+      { href: "/suppliers", label: "Suppliers and rebates", blurb: "The ladders, the ratio, and what this month's buying is earning" },
+      { href: "/expenses", label: "Spending", blurb: "Bills, the vendors who send them, and the rules that file them" },
+      { href: "/money", label: "Money found", blurb: "Everything worth chasing, ranked" },
+      { href: "/remits/mtf", label: "Facilitator payments", blurb: "What the Medicare Transaction Facilitator has brought in" },
     ],
   },
   {

@@ -43,7 +43,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               <span className="text-base font-bold tracking-tight">Pharmacy Admin</span>
             )}
           </Link>
-          <div className="mt-1 text-xs text-ink-3">{mark ? s.pharmacy_name || "Compliance desk" : "Compliance desk"}</div>
+          {/*
+            What this is, in the pharmacy's own terms.
+
+            It said "Compliance desk", which was true when compliance was all it did and is now
+            most of the way to an insult: the system runs the claims, the buying, the rebates and
+            the month's profit. A tool that describes itself as the smallest thing it does teaches
+            its owner to think of it that way.
+          */}
+          <div className="mt-1 text-xs text-ink-3">{mark ? s.pharmacy_name || "Pharmacy desk" : "Compliance, claims and money"}</div>
           {/*
             On every screen, because the moment it is needed is not a moment for navigating to it.
 

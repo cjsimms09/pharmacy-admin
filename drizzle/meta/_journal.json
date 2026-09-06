@@ -446,8 +446,15 @@
     {
       "idx": 63,
       "version": "6",
-      "when": 1788672142729,
-      "tag": "0063_faithful_vulcan",
+      "when": 1788673990136,
+      "tag": "0063_early_doorman",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "6",
+      "when": 1788675963226,
+      "tag": "0064_bright_wendigo",
       "breakpoints": true
     }
   ]
