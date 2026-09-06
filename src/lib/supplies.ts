@@ -89,7 +89,7 @@ export function receivedBetween(receipts: Receipt[], from: string, to: string): 
  * How long an interval can be and still say anything about today.
  *
  * A count from two years ago against one from last week describes a pharmacy that no longer
- * exists. Ninety days is long enough to smooth out a quiet fortnight and short enough to follow a
+ * exists. Six months is long enough to smooth out a quiet fortnight and short enough to follow a
  * change in how busy the place is.
  */
 export const RATE_WINDOW_DAYS = 180;
@@ -260,13 +260,25 @@ export function position(a: {
   const multiple = a.policy.orderMultiple && a.policy.orderMultiple > 0 ? a.policy.orderMultiple : 1;
   const suggested = need <= 0 ? 0 : Math.ceil(need / multiple) * multiple;
 
+  /*
+   * Out is about the shelf, not the order.
+   *
+   * This decided "out" on what is available including stock on order, so an empty shelf with a
+   * delivery due in five days read "ok" for those five days — while the technician had nothing to
+   * put a prescription in. What is on a truck settles when to order again; it does not fill a vial
+   * today. So the state is decided on what is here, and the days left still count what is coming,
+   * because that is the question the reorder date turns on.
+   */
   const state: Position["state"] =
-    available <= 0 ? "out" : daysRemaining <= cushion ? "order now" : daysRemaining <= cushion + 7 ? "order soon" : "ok";
+    projected <= 0 ? "out" : daysRemaining <= cushion ? "order now" : daysRemaining <= cushion + 7 ? "order soon" : "ok";
 
   const round = (n: number) => Math.round(n * 10) / 10;
+
   const says =
     state === "out"
-      ? `Out, or as near as makes no difference. ${suggested} to bring it back to ${a.policy.targetDays} days.`
+      ? onOrder > 0
+        ? `Out on the shelf, with ${round(onOrder)} on order — ${round(daysRemaining)} days' cover once it lands.${suggested > 0 ? ` ${suggested} more to reach ${a.policy.targetDays} days.` : ""}`
+        : `Out, or as near as makes no difference. ${suggested} to bring it back to ${a.policy.targetDays} days.`
       : state === "order now"
         ? `${round(daysRemaining)} days left and ${cushion} of those are the lead time and cushion. Send it today — ${suggested} covers ${a.policy.targetDays} days.`
         : state === "order soon"
