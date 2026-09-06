@@ -1690,6 +1690,20 @@ export const PLAN_CLASSES = [
   "medicaid",                 // governed separately
   "workers_comp",             // priced by a different scheme entirely
   "discount_card",            // not insurance at all; no plan to regulate
+  /*
+   * A manufacturer copay or savings card, which is not a plan at all.
+   *
+   * Kept apart from a discount card, which it is constantly confused with, because the two behave
+   * in opposite directions. A discount card *replaces* insurance and sets the price: a low payment
+   * on one is the price, not a shortfall. A copay card sits *on top of* a plan and pays down what
+   * the patient was left owing on a brand drug — so it arrives as a second claim on a fill that
+   * already has a payer, and it pays a residual rather than a drug.
+   *
+   * Both are out of the Kansas floor's reach, and neither is a payer worth ranking. Ranked as one,
+   * a copay card is the best payer in the pharmacy — it covers a hundred percent of whatever is put
+   * to it — and the brand plan it is subsidising, which may be paying badly, is flattered by it.
+   */
+  "copay_card",
   "unknown",                  // not yet determined. Never files.
 ] as const;
 export type PlanClass = (typeof PLAN_CLASSES)[number];

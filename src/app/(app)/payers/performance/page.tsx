@@ -8,6 +8,8 @@ import { revalidatePath } from "next/cache";
 import { requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { savePayerLink, applyLinksToClaims } from "@/lib/payer-links";
+import { CLASS_INFO } from "@/lib/plans";
+import { PLAN_CLASSES, type PlanClass } from "@/db/schema";
 import { searchContracts } from "@/lib/contract-search";
 import { PageHeader, Card, Notice, Empty, Figure } from "@/components/ui";
 
@@ -38,7 +40,7 @@ export default async function PayerPerformancePage({ searchParams }: { searchPar
   const user = await requireUser();
   const { ok, error } = await searchParams;
   const canManage = user.role !== "staff";
-  const { links, scores, ndcs, totals } = await payerMap();
+  const { links, scores, ndcs, totals, subsidy } = await payerMap();
   const { companies, unnamedRevenueCents } = await payerTree();
 
   /*
@@ -80,6 +82,33 @@ export default async function PayerPerformancePage({ searchParams }: { searchPar
     }
   }
 
+  /** Records what kind of plan a BIN-and-group is, from the tree where it is visible. */
+  async function classify(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const bin = String(fd.get("bin") ?? "") || null;
+    const groupNumber = String(fd.get("groupNumber") ?? "") || null;
+    const cls = String(fd.get("classification") ?? "unknown") as PlanClass;
+    if (cls === "unknown") redirect("/payers/performance?error=" + encodeURIComponent("Choose what kind of plan it is."));
+    try {
+      const { classifyPlanByKey } = await import("@/lib/plans");
+      const r = await classifyPlanByKey(bin, groupNumber, cls, u, String(fd.get("basis") ?? ""));
+      await audit({ action: "plans.classify", userId: u.id, userName: u.name, details: `${bin ?? ""}/${groupNumber ?? ""} → ${cls}` });
+      revalidatePath("/payers/performance");
+      revalidatePath("/plans");
+      revalidatePath("/claims/floor");
+      redirect(
+        "/payers/performance?ok=" +
+          encodeURIComponent(
+            `Recorded as ${CLASS_INFO[cls].label}. ${CLASS_INFO[cls].inScope ? `${r.claims} claim${r.claims === 1 ? "" : "s"} on it are now checked against the Kansas floor.` : CLASS_INFO[cls].why}`,
+          ),
+      );
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/payers/performance?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not record that."));
+    }
+  }
+
   // The contract that mentions each unnamed BIN, offered as the candidate to confirm.
   const candidates = new Map<string, { fileName: string; snippet: string } | null>();
   for (const l of links) {
@@ -88,7 +117,14 @@ export default async function PayerPerformancePage({ searchParams }: { searchPar
     candidates.set(l.bin, hits[0] ? { fileName: hits[0].fileName, snippet: hits[0].snippets[0] ?? "" } : null);
   }
 
-  const ranked = scores.filter((s) => s.fills >= 1);
+  /*
+   * A copay card is not a payer, and ranking it as one is actively misleading.
+   *
+   * It covers a hundred percent of whatever residual is put to it, so it always tops the table —
+   * and the brand plan underneath, which may be paying badly, is flattered by having its shortfall
+   * quietly filled in. Counted below, kept out of here.
+   */
+  const ranked = scores.filter((s) => s.fills >= 1 && !s.isSubsidy);
   const best = ranked.slice(0, 8);
   const worst = [...ranked].reverse().slice(0, 8);
   const spread = ndcs.filter((n) => n.spreadPerFillCents !== null && n.spreadPerFillCents > 0).sort((a, b) => (b.spreadPerFillCents ?? 0) - (a.spreadPerFillCents ?? 0));
@@ -137,6 +173,24 @@ export default async function PayerPerformancePage({ searchParams }: { searchPar
               <Table rows={worst} />
             </Card>
           </div>
+
+          {subsidy.fills > 0 && (
+            <Card
+              className="mt-4"
+              title="Copay and savings cards"
+              subtitle="Counted, not ranked. A copay card pays down what a patient was left owing rather than paying for a drug, so it covers whatever is put to it — put in the table above it would top it every time, and flatter the brand plan underneath by filling in that plan's shortfall."
+            >
+              <p className="text-sm">
+                <b>{formatCents(subsidy.revenueCents)}</b> came in across {Math.round(subsidy.fills)} fill
+                {Math.round(subsidy.fills) === 1 ? "" : "s"} from {subsidy.sources.join(", ")}.
+              </p>
+              <p className="mt-1 text-xs text-ink-2">
+                Real money, and none of it owed under the Kansas floor — there is no plan to regulate. Mark one on{" "}
+                <Link href="/plans" className="text-accent underline">Plans</Link> as a manufacturer copay card or a
+                discount card and it is kept out of the ranking from then on.
+              </p>
+            </Card>
+          )}
 
           {/* ── The drugs, and who pays best for each ───────────────────── */}
           <Card
@@ -258,7 +312,36 @@ export default async function PayerPerformancePage({ searchParams }: { searchPar
                                 <span className="font-mono">group {g.groupNumber ?? "—"}</span>
                                 {g.sponsorName && <span className="ml-1 text-ink-2">{g.sponsorName}</span>}
                                 {g.classification && g.classification !== "unknown" ? (
-                                  <span className="badge badge-muted ml-1">{g.classification.replace(/_/g, " ")}</span>
+                                  <span className="badge badge-muted ml-1">{CLASS_INFO[g.classification as PlanClass]?.label ?? g.classification.replace(/_/g, " ")}</span>
+                                ) : canManage ? (
+                                  /*
+                                    Said where it is seen.
+
+                                    This is the level the answer actually lives at — one BIN carries
+                                    an ERISA plan and a fully-insured one — and asking somebody to
+                                    hold a group number in their head while they walk to another
+                                    screen is how it never gets done.
+                                  */
+                                  <form action={classify} className="ml-1 inline-flex items-center gap-1">
+                                    <input type="hidden" name="bin" value={b.bin ?? ""} />
+                                    <input type="hidden" name="groupNumber" value={g.groupNumber ?? ""} />
+                                    <select name="classification" className="field w-auto px-1 py-0.5 text-[11px]" defaultValue="unknown">
+                                      <option value="unknown">what kind of plan?</option>
+                                      {PLAN_CLASSES.filter((c) => c !== "unknown").map((c) => (
+                                        <option key={c} value={c}>
+                                          {CLASS_INFO[c].label}{CLASS_INFO[c].inScope ? " — floor applies" : ""}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    {/*
+                                      How it was established, because an unsourced ERISA finding is
+                                      the thing that collapses a filing under questioning. A copay
+                                      or discount card needs none: the payer's own name on the claim
+                                      is the evidence, and that is recorded for you.
+                                    */}
+                                    <input name="basis" className="field w-40 px-1 py-0.5 text-[11px]" placeholder="how do you know? (not needed for a card)" />
+                                    <button className="btn btn-sm px-1.5 py-0.5 text-[11px]">Set</button>
+                                  </form>
                                 ) : (
                                   <Link href="/plans" className="badge badge-warn ml-1">not classified</Link>
                                 )}

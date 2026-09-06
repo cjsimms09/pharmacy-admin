@@ -53,8 +53,20 @@ export type PayerLink = {
   marginCents: number;
 };
 
+/** Classes that are not plans at all, and must never be ranked as payers. */
+export const SUBSIDY_CLASSES = new Set(["copay_card", "discount_card"]);
+
 export type PayerScore = {
   pbmName: string;
+  /**
+   * True where this is a subsidy rather than a plan: a manufacturer copay card, or a discount card.
+   *
+   * Ranked among payers, a copay card is always the best payer in the pharmacy — it covers a
+   * hundred percent of whatever residual is put to it — and the brand plan underneath it, which may
+   * be paying badly, is flattered by having its shortfall quietly filled in. So they are counted,
+   * reported, and kept out of the league table.
+   */
+  isSubsidy: boolean;
   bins: string[];
   fills: number;
   revenueCents: number;
@@ -100,6 +112,8 @@ export async function payerMap(): Promise<{
   ndcs: NdcReimbursement[];
   fills: Fill[];
   totals: { fills: number; revenueCents: number; costCents: number; marginCents: number; mappedFills: number };
+  /** Copay and savings card money: counted, named, and deliberately not ranked. */
+  subsidy: { fills: number; revenueCents: number; sources: string[] };
 }> {
   const [claims, bins, groups, contracts, rates, confirmed] = await Promise.all([
     db.query.claims.findMany(),
@@ -205,14 +219,20 @@ export async function payerMap(): Promise<{
   const links = [...linkBy.values()].sort((a, b) => b.revenueCents - a.revenueCents);
 
   // ── The league table, per payer, over fills ──
+  // Which BIN-and-group is a subsidy rather than a plan, so it can be kept out of the ranking.
+  const subsidyKeys = new Set(
+    groups.filter((g) => SUBSIDY_CLASSES.has(g.classification)).map((g) => `${g.bin ?? ""}|${(g.groupNumber ?? "").toUpperCase()}`),
+  );
   const scoreBy = new Map<string, PayerScore>();
   for (const f of fills) {
     const { key, bin } = payerKey(f);
     let e = scoreBy.get(key);
     if (!e) {
       const link = links.find((l) => l.bin === bin) ?? null;
+      const primary = f.payers[0];
       e = {
         pbmName: key,
+        isSubsidy: subsidyKeys.has(`${primary.bin ?? ""}|${(primary.groupNumber ?? "").toUpperCase()}`),
         bins: [],
         fills: 0,
         revenueCents: 0,
@@ -242,6 +262,18 @@ export async function payerMap(): Promise<{
       marginPerFillCents: s.fills > 0 ? Math.round(s.marginCents / s.fills) : 0,
     }))
     .sort((a, b) => b.marginPerFillCents - a.marginPerFillCents);
+
+  /*
+   * What copay and savings cards brought in, counted rather than ranked.
+   *
+   * Real money, and it should be visible — but it is a subsidy on a fill, not a plan paying for a
+   * drug, and putting it in the same table as a PBM answers no question anybody has.
+   */
+  const subsidy = {
+    fills: scores.filter((s) => s.isSubsidy).reduce((n, s) => n + s.fills, 0),
+    revenueCents: scores.filter((s) => s.isSubsidy).reduce((n, s) => n + s.revenueCents, 0),
+    sources: scores.filter((s) => s.isSubsidy).map((s) => s.pbmName),
+  };
 
   // ── Per drug, and who pays best and worst for it ──
   const ndcBy = new Map<string, { r: NdcReimbursement; byPayer: Map<string, { marginCents: number; fills: number }> }>();
@@ -309,7 +341,7 @@ export async function payerMap(): Promise<{
     }).length,
   };
 
-  return { links, scores, ndcs, fills, totals };
+  return { links, scores, ndcs, fills, totals, subsidy };
 }
 
 /** What each broken link means, in the words of the job it creates. */

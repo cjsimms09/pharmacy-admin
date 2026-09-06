@@ -46,7 +46,15 @@ export const CLASS_INFO: Record<PlanClass, { label: string; inScope: boolean; wh
   medicare: { label: "Medicare", inScope: false, why: "Part D and MA-PD are federally governed; state pricing rules do not apply." },
   medicaid: { label: "Medicaid", inScope: false, why: "Priced under the state plan, not by this floor." },
   workers_comp: { label: "Workers' compensation", inScope: false, why: "Priced under the workers' compensation fee schedule." },
-  discount_card: { label: "Discount card / cash", inScope: false, why: "Not insurance. There is no plan for the state to regulate and no payer to owe a floor." },
+  discount_card: { label: "Discount card / cash", inScope: false, why: "Not insurance. There is no plan for the state to regulate and no payer to owe a floor, and a low payment on one is the price rather than a shortfall." },
+  copay_card: {
+    label: "Manufacturer copay / savings card",
+    inScope: false,
+    why:
+      "Not a plan. It sits on top of a plan and pays down what the patient was left owing on a brand drug, so it " +
+      "arrives as a second claim on a fill that already has a payer. Nothing owes a floor, and it is not a payer to " +
+      "be ranked — it covers whatever is put to it, which flatters the brand plan underneath it.",
+  },
   unknown: { label: "Not yet determined", inScope: false, why: "Nobody has established how this plan is funded. Investigate before treating it either way." },
 };
 
@@ -223,4 +231,63 @@ export async function inScopeClaims() {
   );
   const claims = await db.query.claims.findMany({ where: eq(schema.claims.status, "paid") });
   return claims.filter((c) => inScope.has(planKey(c.bin, c.groupNumber)));
+}
+
+/**
+ * Classifies a plan found by the BIN and group on a claim, rather than by a register row id.
+ *
+ * The register is keyed on id because that is what a list of rows has. The place somebody is
+ * actually standing when the answer occurs to them is a claim — or the payer tree, which shows the
+ * BIN and group and nothing else. Asking them to carry a group number to another screen is how it
+ * never gets done.
+ *
+ * The basis requirement is not relaxed. An unsourced ERISA determination is the thing that
+ * collapses a filing under questioning, so anything the floor turns on still has to say how it was
+ * established. The exception is a copay or discount card, where the evidence is the claim itself:
+ * the payer's own name on it is what says so, and that is recorded as the basis.
+ */
+export async function classifyPlanByKey(
+  bin: string | null,
+  groupNumber: string | null,
+  classification: PlanClass,
+  user: { id: string; name: string },
+  basis?: string,
+): Promise<{ claims: number; created: boolean }> {
+  const key = (b: string | null, g: string | null) => `${(b ?? "").trim()}|${(g ?? "").trim().toUpperCase()}`;
+  const rows = await db.query.planGroups.findMany();
+  const row = rows.find((r) => key(r.bin, r.groupNumber) === key(bin, groupNumber)) ?? null;
+
+  const selfEvident = classification === "copay_card" || classification === "discount_card";
+  const said = (basis ?? "").trim();
+  const useBasis = said || (selfEvident ? `The payer on the claim identifies itself as one: ${row?.payerLabel ?? bin ?? "on the claim"}. Recorded by ${user.name}.` : "");
+
+  if (!row) {
+    /*
+     * A plan billed but never registered.
+     *
+     * The register is built by sweeping the claims, so this only happens for a plan seen since the
+     * last sweep. Creating the row here rather than refusing means the answer is not lost for the
+     * sake of an ordering nobody outside this code knows about.
+     */
+    const { newId } = await import("./crypto");
+    const claims = await db.query.claims.findMany({ columns: { id: true, bin: true, groupNumber: true } });
+    const mine = claims.filter((c) => key(c.bin, c.groupNumber) === key(bin, groupNumber));
+    if (classification !== "unknown" && useBasis.length < 10) {
+      throw new Error("Say how this was established — a Form 5500 filing, the plan document, or who confirmed it. A determination without a basis cannot be relied on.");
+    }
+    await db.insert(schema.planGroups).values({
+      id: newId(),
+      bin,
+      groupNumber,
+      classification,
+      basis: useBasis || null,
+      decidedBy: classification === "unknown" ? null : user.name,
+      decidedOn: classification === "unknown" ? null : new Date().toISOString().slice(0, 10),
+    });
+    return { claims: mine.length, created: true };
+  }
+
+  await classifyPlan(row.id, { classification, basis: useBasis }, user);
+  const claims = await db.query.claims.findMany({ columns: { id: true, bin: true, groupNumber: true } });
+  return { claims: claims.filter((c) => key(c.bin, c.groupNumber) === key(bin, groupNumber)).length, created: false };
 }

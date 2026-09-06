@@ -230,8 +230,24 @@ export async function moneyFound(): Promise<MoneyFound> {
   // ── The same drug, paid better by another plan ──
   try {
     const { payerMap } = await import("./payer-map");
-    const { ndcs, links } = await payerMap();
-    const spread = ndcs.filter((n) => (n.spreadPerFillCents ?? 0) > 0 && n.worstPayer && n.worstPayer.fills >= 2);
+    const { ndcs, links, scores } = await payerMap();
+    /*
+     * A subsidy is not a payer, and a card is not an underpayment.
+     *
+     * A copay card covers whatever residual is put to it, so it always looks like the best payer
+     * for a drug — and a discount card sets the price rather than paying a rate, so paying little
+     * on one is correct. Left in, the biggest "opportunity" on this list would be to move brand
+     * volume onto copay cards, which is not a thing a pharmacy can do.
+     */
+    const subsidyNames = new Set(scores.filter((x) => x.isSubsidy).map((x) => x.pbmName));
+    const spread = ndcs.filter(
+      (n) =>
+        (n.spreadPerFillCents ?? 0) > 0 &&
+        n.worstPayer &&
+        n.worstPayer.fills >= 2 &&
+        !subsidyNames.has(n.bestPayer?.name ?? "") &&
+        !subsidyNames.has(n.worstPayer.name),
+    );
     const worth = spread.reduce((n, x) => n + (x.spreadPerFillCents ?? 0) * (x.worstPayer?.fills ?? 0), 0);
     if (worth > 0) {
       const top = spread.sort((a, b) => (b.spreadPerFillCents ?? 0) * (b.worstPayer?.fills ?? 0) - (a.spreadPerFillCents ?? 0) * (a.worstPayer?.fills ?? 0))[0];
