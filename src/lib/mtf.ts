@@ -46,6 +46,24 @@ async function cliPath(): Promise<string> {
   return s.mtf_cli_path?.trim() || "mtf-cli";
 }
 
+/**
+ * Splits what was configured into a program and the arguments that must come before ours.
+ *
+ * The MTF tool ships as a Node application with its own copy of Node beside it, so on some builds
+ * there is no single executable to point at — the way to run it is one program with a script as its
+ * first argument. Accepting only a bare path would make that layout unusable, and the person
+ * looking at a bin folder containing node.exe would reasonably conclude node.exe was the answer.
+ * It is not: node.exe with no script runs nothing.
+ *
+ * So the setting is a command line. A plain path is the ordinary case and behaves as before;
+ * quotes hold a path containing spaces together, which every path under "Program Files" does.
+ */
+export function splitCommand(configured: string): { bin: string; prefix: string[] } {
+  const parts = configured.trim().match(/"[^"]*"|\S+/g) ?? [];
+  const clean = parts.map((p) => (p.startsWith('"') && p.endsWith('"') ? p.slice(1, -1) : p));
+  return { bin: clean[0] ?? "mtf-cli", prefix: clean.slice(1) };
+}
+
 async function downloadDir(): Promise<string> {
   const s = await getSettings();
   const configured = s.mtf_download_dir?.trim();
@@ -61,9 +79,9 @@ async function downloadDir(): Promise<string> {
  * error handler, so they are separated here.
  */
 async function cli(args: string[], timeoutMs = 120_000): Promise<{ ok: boolean; out: string; err: string }> {
-  const bin = await cliPath();
+  const { bin, prefix } = splitCommand(await cliPath());
   try {
-    const { stdout, stderr } = await run(bin, args, { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 });
+    const { stdout, stderr } = await run(bin, [...prefix, ...args], { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 });
     return { ok: true, out: stdout ?? "", err: stderr ?? "" };
   } catch (e) {
     const err = e as NodeJS.ErrnoException & { stdout?: string; stderr?: string; killed?: boolean };
@@ -373,7 +391,24 @@ export async function findCli(): Promise<{ found: string[]; searched: string[] }
   const found: string[] = [];
   const searched: string[] = [];
   const skip = /^(node_modules|\.git|AppData|Windows|\$Recycle|OneDrive.*Temp|Library|Pictures|Music|Videos)$/i;
-  const wanted = /^mtf-cli(\.exe|\.bat|\.cmd)?$/i;
+  /*
+   * What counts as "the tool", which is not always one file.
+   *
+   * Some builds are a single executable. Others are a Node application shipped with its own copy of
+   * Node, where the thing to run is a launcher script — and the bin folder contains node.exe, which
+   * is the engine and not the program. Both shapes are looked for, and node.exe on its own never
+   * counts: it would run nothing and the failure would be silent.
+   */
+  const wanted = /^mtf-cli(\.exe|\.bat|\.cmd|\.ps1|\.js)?$/i;
+  /*
+   * A Node application's entry point is rarely named after the product.
+   *
+   * It is index.js, cli.js, main.js or bundle.js in a lib or app folder, and only the folder it
+   * sits under says which product it belongs to. So a generic name counts only when the path
+   * itself mentions MTF — otherwise every Node project on the computer would be a candidate.
+   */
+  const entryName = /^(index|cli|main|bundle|mtf.*)\.js$/i;
+  const nodeScripts: { node: string; script: string }[] = [];
 
   const walk = async (dir: string, depth: number): Promise<void> => {
     if (depth > 4 || found.length >= 8) return;
@@ -391,11 +426,53 @@ export async function findCli(): Promise<{ found: string[]; searched: string[] }
         if (skip.test(e.name)) continue;
         await walk(full, depth + 1);
       } else if (wanted.test(e.name)) {
+        // A .js entry needs the Node beside it; it is paired below rather than offered bare.
+        if (/\.js$/i.test(e.name)) nodeScripts.push({ node: "", script: full });
+        else found.push(full);
+      } else if (entryName.test(e.name) && /mtf/i.test(full)) {
+        nodeScripts.push({ node: "", script: full });
+      } else if (/\.(cmd|bat)$/i.test(e.name) && /mtf/i.test(full)) {
+        /*
+         * A launcher script under an MTF folder, whatever it is called.
+         *
+         * The Windows package ships one in bin beside its bundled node.exe, and it is not always
+         * named after the product. It is offered as a candidate rather than assumed to be right —
+         * pressing Save runs it, which is what settles the question.
+         */
         found.push(full);
+      } else if (/^node(\.exe)?$/i.test(e.name) && /mtf/i.test(full)) {
+        nodeScripts.push({ node: full, script: "" });
       }
     }
   };
 
   for (const r of roots) await walk(r, 0);
+
+  /*
+   * Pair a bundled Node with the script it is there to run.
+   *
+   * Offered separately they are two useless answers: node.exe runs nothing without a script, and a
+   * .js file is not a program Windows knows how to start. Together they are the command line.
+   */
+  const nodes = nodeScripts.filter((x) => x.node).map((x) => x.node);
+  const scripts = nodeScripts.filter((x) => x.script).map((x) => x.script);
+  for (const script of scripts) {
+    // The Node that belongs to this script is the one under the same product folder — matched by
+    // the longest shared path rather than by an assumed depth, because layouts differ.
+    const near = nodes
+      .map((n) => ({ n, shared: sharedPrefixLength(n, script) }))
+      .sort((a, b) => b.shared - a.shared)[0];
+    if (near && near.shared > 0) found.push(`"${near.n}" "${script}"`);
+  }
+
   return { found: [...new Set(found)], searched };
+}
+
+/** How many path segments two paths have in common, for pairing a runtime with its script. */
+function sharedPrefixLength(a: string, b: string): number {
+  const x = a.split(/[\\/]/);
+  const y = b.split(/[\\/]/);
+  let n = 0;
+  while (n < x.length && n < y.length && x[n].toLowerCase() === y[n].toLowerCase()) n++;
+  return n;
 }
