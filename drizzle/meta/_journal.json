@@ -477,6 +477,13 @@
       "when": 1788723047169,
       "tag": "0067_square_master_chief",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "6",
+      "when": 1788724507562,
+      "tag": "0068_early_fallen_one",
+      "breakpoints": true
     }
   ]
 }

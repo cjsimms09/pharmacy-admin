@@ -2147,6 +2147,14 @@ export const supplierItems = sqliteTable(
     unitCostMicros: integer("unit_cost_micros"),
     /** Cost of the whole package, in cents. */
     packCostCents: integer("pack_cost_cents"),
+    /**
+     * Average Wholesale Price for the package, in cents, where the catalogue prints it.
+     *
+     * Never a cost and never a price the pharmacy pays or charges — it is the published list
+     * figure, and it is here because a good many contracts and reimbursement formulas are still
+     * quoted as a discount off it, so a margin cannot be argued without it.
+     */
+    awpCents: integer("awp_cents"),
     /** Whether this line sits on a purchasing contract — buying off it can cost rebate tiers. */
     contractFlag: text("contract_flag"),
     availability: text("availability"),

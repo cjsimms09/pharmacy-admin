@@ -218,6 +218,9 @@ async function writeSection(
       packSize: pick.packQty !== null && pick.unit ? `${pick.orderMultiple && pick.orderMultiple > 1 ? `(${pick.orderMultiple}) ` : ""}${pick.packQty} ${pick.unit}` : null,
       unitCostMicros: pick.unitCostMicros,
       packCostCents: pick.unitCostMicros !== null && pick.packQty ? Math.round((pick.unitCostMicros * pick.packQty) / 10_000) : null,
+      // AWP off whichever row was picked, and off any row in the group that has one — the same
+      // product at a short date is the same product, and only one of the rows tends to carry it.
+      awpCents: pick.awpCents ?? group.find((r) => r.awpCents !== null)?.awpCents ?? null,
       /*
        * Whether the tier rebate applies to this item — the one fact that lets a comparison take
        * the rebate off a McKesson generic's gross price and nothing else's. Read from the file's

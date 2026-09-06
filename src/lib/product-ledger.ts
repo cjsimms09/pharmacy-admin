@@ -140,6 +140,16 @@ export type LedgerInput = {
   invoiceLines: { ndc11: string; supplier: string | null; description: string | null; unitCostCents: number; rebated: boolean | null; invoiceDate: string | null }[];
   /** `packQty` is how many units are in the package the invoice prices. Without it nothing compares. */
   catalogue: { ndc11: string; supplier: string; description: string | null; unitCostMicros: number | null; packQty: number | null; contractFlag: string | null; pricedOn: string | null; availability: string | null }[];
+  /**
+   * Pack sizes from somewhere other than a catalogue — today, the pharmacy's own inventory count,
+   * which prints "Package Info: 180 EA" against every item it holds.
+   *
+   * An invoice prices a package and everything else here prices a unit inside it, so without a
+   * pack size a line cannot be compared to NADAC at all and drops out of the buying screens
+   * silently. The catalogue answers it for anything a supplier lists; this answers it for the
+   * rest, and only where the catalogue did not, so a supplier's own pack size always wins.
+   */
+  packFallback?: { ndc11: string; packQty: number }[];
   nadac: { ndc11: string; unitMicros: number; effectiveOn: string; description: string | null }[];
   claims: { ndc11: string | null; itemName: string | null; quantityThousandths: number | null; remitCents: number | null; copayCents: number | null; status?: string }[];
   contract: Contract;
@@ -178,6 +188,11 @@ export function buildLedger(input: LedgerInput): LedgerRow[] {
   const packOf = new Map<string, number>();
   for (const c of input.catalogue) {
     if (c.packQty && c.packQty > 0 && !packOf.has(c.ndc11)) packOf.set(c.ndc11, c.packQty);
+  }
+  // Only where no catalogue said: a supplier's own pack size is the better authority on what it
+  // sells, and this is here to answer the NDCs no catalogue covers.
+  for (const f of input.packFallback ?? []) {
+    if (f.packQty > 0 && !packOf.has(f.ndc11)) packOf.set(f.ndc11, f.packQty);
   }
 
   // ── What was actually paid ──
@@ -304,12 +319,22 @@ export async function productLedger(): Promise<{ rows: LedgerRow[]; rate: number
   const { getSettings } = await import("./settings");
   const { eq } = await import("drizzle-orm");
 
-  const [lines, catalogue, nadac, rawClaims, s] = await Promise.all([
+  const [lines, catalogue, nadac, rawClaims, s, shelf] = await Promise.all([
     db.query.invoiceLines.findMany(),
     db.query.supplierItems.findMany(),
     db.query.nadacPrices.findMany({ columns: { ndc11: true, unitMicros: true, effectiveOn: true, description: true } }),
     db.query.claims.findMany(),
     getSettings(),
+    // The latest count, for the pack sizes it carries against everything actually on the shelf.
+    (async () => {
+      const imp = await db.query.onHandImports.findFirst({ orderBy: (i, { desc }) => [desc(i.countedOn)] });
+      if (!imp) return [] as { ndc11: string; packQty: number }[];
+      const rows = await db.query.onHand.findMany({
+        where: eq(schema.onHand.countedOn, imp.countedOn),
+        columns: { ndc11: true, packQty: true },
+      });
+      return rows.flatMap((r) => (r.ndc11 && r.packQty && r.packQty > 0 ? [{ ndc11: r.ndc11, packQty: r.packQty }] : []));
+    })(),
   ]);
 
   /*
@@ -372,6 +397,7 @@ export async function productLedger(): Promise<{ rows: LedgerRow[]; rate: number
 
   const rows = buildLedger({
     invoiceLines: lines,
+    packFallback: shelf,
     catalogue: catalogue.map((c) => ({
       ndc11: c.ndc11, supplier: c.supplier, description: c.description,
       unitCostMicros: c.unitCostMicros, packQty: packQtyOf(c.packSize), contractFlag: c.contractFlag, pricedOn: c.pricedOn, availability: c.availability,
