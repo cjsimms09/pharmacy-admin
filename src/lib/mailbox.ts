@@ -595,6 +595,7 @@ async function importRecognised(
   filed?: { documentId?: string | null; supplierId?: string | null; supplierName?: string | null },
 ): Promise<{ routedAs: string; routeResult: string | null; imported: boolean }> {
   const cls = classify(fileName, buf);
+  const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   let routeResult: string | null = null;
   let imported = false;
   try {
@@ -615,8 +616,18 @@ async function importRecognised(
        * The alternative — filing it silently among the documents — is how a report somebody goes to
        * the trouble of sending every month gets assumed to be feeding a figure it is not feeding.
        */
-      routeResult =
-        "PioneerRx's Accrual System Sales: the whole month's till, retail alongside prescriptions. Filed and kept, but not yet counted — the reader for this report is not built. Nothing else on the site reports total sales, so this is the only thing that can.";
+      /*
+       * A month's takings, filed against the month rather than added to it.
+       *
+       * The same month re-run after a correction is still one month; appending it would report the
+       * pharmacy as having taken twice what it did, which is the worst arithmetic error available.
+       */
+      const { fileSystemSales } = await import("./sales-store");
+      const r = await fileSystemSales(buf, fileName, ctx.userId ?? "mailbox-sweep", filed?.documentId ?? null);
+      routeResult = r.problems.length
+        ? `Recognised as the System Sales Summary but nothing was filed: ${r.problems.join(" ")}`
+        : `${r.month}: ${money(r.totalCents ?? 0)} taken in total, retail and prescriptions together${r.replaced ? " — replacing the copy already held for that month" : ""}.`;
+      if (r.problems.length === 0) imported = true;
     } else if (cls.kind === "pioneer_catalog") {
       // Names its own supplier inside the file, so no sender rule is needed — and the filename
       // is checked against it, so MCKCatalog carrying IPD prices is refused.

@@ -377,6 +377,29 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           />
         </div>
         {/*
+          The whole till, which is the only figure here that includes the front of shop.
+
+          Every other number on this scoreboard is dispensing. The System Sales Summary is the one
+          report that carries over-the-counter business too, and it is drawn by the calendar month
+          rather than by the day a claim was transmitted — so it is the figure that reconciles
+          against the bank, and it is labelled with the month it actually covers rather than being
+          quietly presented as this one.
+        */}
+        {money.sales && (
+          <p className="mt-3 rounded-lg border border-line bg-surface p-3 text-xs text-ink-2">
+            <b>
+              {formatCents(money.sales.totalCents ?? 0)} taken in {money.sales.month}
+              {money.sales.isCurrentMonth ? "" : " — the last month closed"}
+            </b>{" "}
+            — the whole till, retail and prescriptions together, from the System Sales Summary. Of that,{" "}
+            {formatCents(money.sales.rxRemitCents ?? 0)} came from the plans,{" "}
+            {formatCents(money.sales.rxPatientCents ?? 0)} from patients at the counter and{" "}
+            {formatCents(money.sales.retailCents ?? 0)} over the counter. This is the only figure on this
+            page that includes the front of shop; everything above it is dispensing.
+          </p>
+        )}
+
+        {/*
           The report's own bottom line, which nothing on this site computed.
 
           It is the only authoritative total sales figure the pharmacy has — the transaction report

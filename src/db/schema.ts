@@ -1599,6 +1599,41 @@ export const claimImports = sqliteTable("claim_imports", {
   createdAt: text("created_at").notNull().default(now()),
 });
 
+/**
+ * A month's takings, from the System Sales Summary — the only report that carries the whole till.
+ *
+ * One row per month, replaced when a later copy of the same month arrives, because these are
+ * restatements rather than additions: a month re-run after a correction is the same month, and
+ * keeping both would double the pharmacy's revenue.
+ *
+ * Kept apart from claims on purpose. Claims are dispensings, drawn by the day a claim was
+ * transmitted; this is money, drawn by the calendar month, and it includes the front of shop that
+ * no claim will ever describe. Reconciling the two is worth doing; merging them is not.
+ */
+export const salesMonths = sqliteTable("sales_months", {
+  /** YYYY-MM. The primary key, so a re-sent month replaces rather than repeats. */
+  month: text("month").primaryKey(),
+  periodFrom: text("period_from").notNull(),
+  periodTo: text("period_to").notNull(),
+  /** Over the counter — the part of the business no prescription report can see. */
+  retailCents: integer("retail_cents"),
+  /** What patients paid at the till for prescriptions. */
+  rxPatientCents: integer("rx_patient_cents"),
+  /** What the plans remitted. */
+  rxRemitCents: integer("rx_remit_cents"),
+  rxCents: integer("rx_cents"),
+  /** Everything: the figure to reconcile against the bank. */
+  totalCents: integer("total_cents"),
+  /** Every line as printed, so a figure on screen can always be traced to the page it came from. */
+  rowsJson: text("rows_json").notNull().default("[]"),
+  fileName: text("file_name"),
+  printedOn: text("printed_on"),
+  documentId: text("document_id"),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull().default(now()),
+  updatedAt: text("updated_at").notNull().default(now()),
+});
+
 export const claims = sqliteTable(
   "claims",
   {

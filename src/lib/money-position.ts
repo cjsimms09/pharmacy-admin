@@ -53,6 +53,24 @@ export type MoneyPosition = {
      */
     reported: { salesCents: number; grossProfitCents: number; from: string | null; to: string | null; fileName: string } | null;
   };
+  /**
+   * The whole till for a month, from the System Sales Summary.
+   *
+   * The only report that carries the front of shop, and therefore the only answer to "what did the
+   * pharmacy take". Everything else here is dispensing — on one real month that left $5,458.88 of
+   * over-the-counter business invisible, and reported takings drawn by the day a claim was
+   * transmitted rather than by the month the money moved.
+   */
+  sales: {
+    month: string;
+    retailCents: number | null;
+    rxPatientCents: number | null;
+    rxRemitCents: number | null;
+    rxCents: number | null;
+    totalCents: number | null;
+    /** True where the month on file is not the month now running: last month's close, not this one. */
+    isCurrentMonth: boolean;
+  } | null;
   /** Where the compliance ratio stands, and what it is buying. */
   ratio: {
     supplierId: string;
@@ -242,8 +260,22 @@ export async function moneyPosition(today = new Date()): Promise<MoneyPosition> 
     reported,
   };
 
+  const { latestSalesMonth } = await import("./sales-store");
+  const filed = await latestSalesMonth();
+
   return {
     dispensing,
+    sales: filed
+      ? {
+          month: filed.month,
+          retailCents: filed.retailCents,
+          rxPatientCents: filed.rxPatientCents,
+          rxRemitCents: filed.rxRemitCents,
+          rxCents: filed.rxCents,
+          totalCents: filed.totalCents,
+          isCurrentMonth: filed.month === month,
+        }
+      : null,
     ratio,
     rebates,
     facilitator: {
