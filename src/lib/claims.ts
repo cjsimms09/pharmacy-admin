@@ -374,7 +374,8 @@ export async function importRxTransactions(file: Buffer, fileName: string, userI
       bin: t.bin, pcn: t.pcn, groupNumber: t.groupNumber, networkId: t.networkId,
       payerLabel: t.payerLabel, pbmName: resolved.pbmName, matchMethod: resolved.method, payerAmbiguous: resolved.ambiguous,
       quantityThousandths: t.quantityThousandths, quantityUnit: null,
-      remitCents: t.remitCents, copayCents: t.copayCents, acquisitionCents: t.acquisitionCents, grossProfitCents: t.grossProfitCents,
+      remitCents: t.remitCents, copayCents: t.copayCents, patientTotalCents: t.patientTotalCents,
+      acquisitionCents: t.acquisitionCents, grossProfitCents: t.grossProfitCents,
       ingredientPaidCents: t.ingredientPaidCents, dispensingFeePaidCents: t.dispensingFeeCents,
       status, reversedOn: status === "reversed" ? reversedOn : null,
       completedAt: t.completedAt ? mdyToIso(t.completedAt) : null,
@@ -495,6 +496,50 @@ export async function claimFlags() {
     orderBy: (c, { asc }) => [asc(c.dateFilled)],
   });
 
+  /*
+   * Losses are counted per dispensing, not per transmission.
+   *
+   * A prescription billed to a primary plan and then a secondary appears twice in the report, and
+   * both rows carry the same acquisition cost, because it is the same bottle. Read as two claims,
+   * the cost is counted twice and the primary row alone — a plan paying eight dollars towards a
+   * six-hundred-dollar pen — reads as a catastrophic loss. And a reversal matching no claim held
+   * reverses a dispensing from before this feed began, whose revenue was never counted here, so
+   * subtracting it invents a loss out of a correction to a figure the site never had.
+   *
+   * Both together put a real day $459 in the red on this pharmacy's first live file.
+   */
+  const { groupIntoFills, fillsAtALoss, coordinationEffect } = await import("./fills");
+  const { laterPayments } = await import("./claim-payments");
+  const later = await laterPayments();
+  const heldKeys = new Set(rows.filter((c) => c.status === "paid").map((c) => c.transactionKey ?? c.id));
+  const fills = groupIntoFills(
+    rows.map((c) => ({
+      id: c.id,
+      rxNumber: c.rxNumber,
+      fillNumber: c.fillNumber,
+      dateFilled: c.dateFilled,
+      ndc11: c.ndc11,
+      itemName: c.itemName,
+      bin: c.bin,
+      pbmName: c.pbmName,
+      payerLabel: c.payerLabel,
+      quantityThousandths: c.quantityThousandths,
+      remitCents: c.remitCents,
+      copayCents: c.copayCents,
+      patientTotalCents: c.patientTotalCents,
+      acquisitionCents: c.acquisitionCents,
+      grossProfitCents: c.grossProfitCents,
+      status: c.status,
+      // A reversal kept because it matched nothing: negative money against a fill never counted.
+      unmatchedReversal: (c.remitCents ?? 0) < 0 && !c.reversalKey,
+    })),
+    later,
+  );
+  void heldKeys;
+  const lossFills = fillsAtALoss(fills);
+  const coordination = coordinationEffect(fills);
+
+  // Kept for the per-claim view, which is still how somebody looks a single claim up.
   const belowCost = rows.filter((c) => c.grossProfitCents !== null && c.grossProfitCents < 0);
 
   // Which claims are candidates for the statutory floor is a question about the plan, not about
@@ -532,6 +577,70 @@ export async function claimFlags() {
     total: rows.length,
     belowCost,
     belowCostTotalCents: sum(belowCost),
+    /** One row per dispensing, with every payer that priced it. */
+    fills,
+    /*
+     * The rows behind each fill, exactly as the report sent them.
+     *
+     * Column positions in this report are worked out by counting, and a report whose columns move
+     * by one produces figures that are all individually plausible and collectively wrong — a
+     * dispensing fee read as a patient total, a tax read as a quantity. Arguing about it from a
+     * screen that shows only the conclusions is guesswork on both sides. This is the evidence: for
+     * any fill, what arrived, field by field, with the name this reader gave each one.
+     */
+    rawByFill: (() => {
+      const by = new Map<string, { payer: string | null; fields: { name: string; value: string }[] }[]>();
+      for (const c of rows) {
+        if (!c.rawJson) continue;
+        const key = [c.rxNumber.trim(), c.fillNumber ?? "", c.dateFilled, c.ndc11 ?? ""].join("|");
+        let parsed: Record<string, unknown>;
+        try {
+          parsed = JSON.parse(c.rawJson) as Record<string, unknown>;
+        } catch {
+          continue;
+        }
+        by.set(key, [
+          ...(by.get(key) ?? []),
+          {
+            payer: c.pbmName ?? c.payerLabel,
+            fields: Object.entries(parsed).map(([name, value]) => ({ name, value: String(value ?? "") })),
+          },
+        ]);
+      }
+      return by;
+    })(),
+    lossFills,
+    /*
+     * Fills where our arithmetic and the report's own gross profit disagree.
+     *
+     * Not a rounding quibble: it means a column is not where this reader thinks it is, and every
+     * figure derived from that row is wrong in the same direction. It is the one check that can
+     * catch a mis-read column from the inside, because the report computed its own answer from the
+     * same row.
+     */
+    disagreeing: fills.filter((f) => f.agreesWithReport === false),
+    /*
+     * Fills where the report booked revenue this site has not found in the row — biggest first.
+     *
+     * PioneerRx computes its gross profit from the same row we read, so a gap means it counted
+     * money we did not. The cause is not knowable from the fill and is deliberately not asserted:
+     * one real gap was $146.18 of facilitator money, another $5.56 that no facilitator would ever
+     * pay. What is knowable is the amount and the row it is on, and both are shown.
+     */
+    unreconciled: fills.filter((f) => f.unreconciledCents !== null).sort((a, b) => b.unreconciledCents! - a.unreconciledCents!),
+    unreconciledCents: fills.reduce((n, f) => n + (f.unreconciledCents ?? 0), 0),
+    lossFillsTotalCents: lossFills.reduce((n, f) => n + (f.marginCents ?? 0), 0),
+    /*
+     * What these dispensings actually made, which is the only reason any of this is being counted.
+     *
+     * One row per bottle, cost taken once, the patient counted once, and anything that arrived
+     * afterwards added. Fills whose acquisition cost never came through are left out of both sides
+     * rather than counted as pure profit, and named, so the figure is of a knowable population.
+     */
+    pricedFills: fills.filter((f) => f.marginCents !== null).length,
+    revenueCents: fills.filter((f) => f.marginCents !== null).reduce((n, f) => n + f.revenueCents, 0),
+    marginCents: fills.reduce((n, f) => n + (f.marginCents ?? 0), 0),
+    coordination,
     inScope: inScope.length,
     undetermined: undetermined.length,
     underFeeUndetermined: underFeeUndetermined.length,
@@ -549,26 +658,122 @@ export async function claimFlags() {
 }
 
 /** Claims grouped by the payer that priced them — the view a contract review works from. */
-export async function claimsByPayer() {
+/**
+ * Every dispensing this site holds, grouped from the claim rows.
+ *
+ * One place, because three screens were each building this the same way and a fourth would have
+ * made it four — and the whole point of the grouping is that the claims screen, the payer table
+ * and the dashboard cannot be allowed to give different answers to the same question.
+ */
+export async function allFills() {
   const rows = await db.query.claims.findMany();
-  type Row = { pbmName: string; claims: number; receivedCents: number; profitCents: number; belowCost: number; bins: Set<string>; networks: Set<string> };
+  const { groupIntoFills } = await import("./fills");
+  const { laterPayments } = await import("./claim-payments");
+  return groupIntoFills(
+    rows.map((c) => ({
+      id: c.id,
+      rxNumber: c.rxNumber,
+      fillNumber: c.fillNumber,
+      dateFilled: c.dateFilled,
+      ndc11: c.ndc11,
+      itemName: c.itemName,
+      bin: c.bin,
+      pbmName: c.pbmName,
+      payerLabel: c.payerLabel,
+      quantityThousandths: c.quantityThousandths,
+      remitCents: c.remitCents,
+      copayCents: c.copayCents,
+      patientTotalCents: c.patientTotalCents,
+      acquisitionCents: c.acquisitionCents,
+      grossProfitCents: c.grossProfitCents,
+      status: c.status,
+      // A reversal kept because it matched nothing: negative money against a fill never counted.
+      unmatchedReversal: (c.remitCents ?? 0) < 0 && !c.reversalKey,
+    })),
+    await laterPayments(),
+  );
+}
+
+/**
+ * What each payer is actually worth to this pharmacy.
+ *
+ * Per dispensing, not per transmission — the same correction the rest of this file makes, because
+ * otherwise this table answers the same question as the loss list and gives a different number.
+ * Summing the report's per-row gross profit counted one bottle's cost against every plan that
+ * priced it, which is how a copay card that paid $46.25 into a profitable fill came to be shown as
+ * a $62.99 loss, and how CVS Caremark read $95.13 in the red on a day it was not.
+ *
+ * A fill with one payer is that payer's, whole. A fill that two plans coordinated on belongs to
+ * neither of them alone, and there is no honest way to split one bottle between them — so it is
+ * held out of the profit column entirely and shown separately, with each plan credited only with
+ * the money it actually sent. Two figures that are true beat one that is tidy.
+ */
+export async function claimsByPayer() {
+  const [rows, fills] = await Promise.all([db.query.claims.findMany(), allFills()]);
+
+  type Row = {
+    pbmName: string;
+    /** Fills this payer priced on its own, which are the ones its profit figure is drawn from. */
+    fills: number;
+    receivedCents: number;
+    profitCents: number;
+    belowCost: number;
+    /** Fills it shared with another plan: real business, but not separable into one plan's margin. */
+    coordinatedFills: number;
+    coordinatedRemitCents: number;
+    bins: Set<string>;
+    networks: Set<string>;
+  };
   const map = new Map<string, Row>();
-  for (const c of rows) {
-    const name = c.pbmName ?? (c.payerLabel ? `${c.payerLabel} (unmatched)` : "Unidentified payer");
+  const named = (p: { name: string | null; bin: string | null }) =>
+    p.name ?? (p.bin ? `BIN ${p.bin} (unmatched)` : "Unidentified payer");
+  const at = (name: string) => {
     let e = map.get(name);
     if (!e) {
-      e = { pbmName: name, claims: 0, receivedCents: 0, profitCents: 0, belowCost: 0, bins: new Set(), networks: new Set() };
+      e = { pbmName: name, fills: 0, receivedCents: 0, profitCents: 0, belowCost: 0, coordinatedFills: 0, coordinatedRemitCents: 0, bins: new Set(), networks: new Set() };
       map.set(name, e);
     }
-    e.claims++;
-    e.receivedCents += receivedCents(c.remitCents, c.copayCents) ?? 0;
-    e.profitCents += c.grossProfitCents ?? 0;
-    if ((c.grossProfitCents ?? 0) < 0) e.belowCost++;
-    if (c.bin) e.bins.add(c.bin);
-    if (c.networkId) e.networks.add(c.networkId);
+    return e;
+  };
+
+  for (const f of fills) {
+    if (f.coordinated) {
+      for (const p of f.payers) {
+        const e = at(named(p));
+        e.coordinatedFills++;
+        e.coordinatedRemitCents += p.remitCents;
+        if (p.bin) e.bins.add(p.bin);
+      }
+      continue;
+    }
+    const p = f.payers[0];
+    if (!p) continue;
+    const e = at(named(p));
+    e.fills++;
+    e.receivedCents += f.revenueCents;
+    e.profitCents += f.marginCents ?? 0;
+    if ((f.marginCents ?? 0) < 0) e.belowCost++;
+    if (p.bin) e.bins.add(p.bin);
   }
+
+  /*
+   * Networks belong to the claim row rather than the fill, and are joined back on the BIN — which
+   * is the one identifier both sides certainly agree on. Joining on the payer's display name would
+   * quietly drop every network for a payer the listing does not name.
+   */
+  const networksByBin = new Map<string, Set<string>>();
+  for (const c of rows) {
+    if (!c.networkId || !c.bin) continue;
+    const set = networksByBin.get(c.bin) ?? new Set<string>();
+    set.add(c.networkId);
+    networksByBin.set(c.bin, set);
+  }
+  for (const e of map.values()) {
+    for (const bin of e.bins) for (const n of networksByBin.get(bin) ?? []) e.networks.add(n);
+  }
+
   return [...map.values()]
-    .map((e) => ({ ...e, bins: [...e.bins].sort(), networks: [...e.networks].sort() }))
+    .map((e) => ({ ...e, claims: e.fills + e.coordinatedFills, bins: [...e.bins].sort(), networks: [...e.networks].sort() }))
     .sort((a, b) => b.claims - a.claims);
 }
 

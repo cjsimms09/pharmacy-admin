@@ -13,7 +13,9 @@ export const metadata = { title: "Tools" };
  * useful than a menu item that opens an empty page.
  */
 const TOOLS = [
-  { href: "/payers", title: "Payers", state: "ready", what: "Every BIN we bill, its contracted rates, MAC appeal route and payment routing. Look up a BIN from a claim." },
+  { href: "/money", title: "Where the money is", state: "ready", what: "One list, in dollars, of everything this site can see that is worth acting on — what to buy elsewhere, what a rebate band is worth, what stock has to go back this week, what a plan underpaid — with what to do about each. Nothing estimated." },
+  { href: "/payers", title: "Payers", state: "ready", what: "Every BIN we bill, its contracted rates, MAC appeal route and payment routing. Look up a BIN from a claim, or search the contracts on file for one." },
+  { href: "/payers/performance", title: "Who pays best", state: "ready", what: "Every claim followed through to the money — BIN and group, to plan, to PBM, to the contract and rate sheet behind it. Which payers pay well, which drugs are reimbursed best, and where the chain breaks." },
   { href: "/claims", title: "Claims", state: "waiting", what: "Loads a PioneerRx export and matches each claim to its payer. Waiting on dispensed quantity, which comes through blank." },
   { href: "/plans", title: "Plans", state: "needs work", what: "Which plans the Kansas floor can reach. 64 groups still to be determined from Form 5500 filings." },
   { href: "/nadac", title: "NADAC", state: "waiting", what: "The federal benchmark price. Nothing loaded yet — the weekly files have to be downloaded from data.medicaid.gov." },

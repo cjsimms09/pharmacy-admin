@@ -372,6 +372,27 @@
       "when": 1788647970590,
       "tag": "0052_claims_completed_at",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "6",
+      "when": 1788651650715,
+      "tag": "0053_clever_silver_sable",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "6",
+      "when": 1788652110678,
+      "tag": "0054_glossy_sprite",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "6",
+      "when": 1788653729656,
+      "tag": "0055_nervous_ares",
+      "breakpoints": true
     }
   ]
 }

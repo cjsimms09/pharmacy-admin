@@ -183,6 +183,7 @@ export async function register() {
     await whenIdle("updates", updateTick);
     await whenIdle("manual-audit", manualAuditTick);
     await whenIdle("deliveries", deliveryTick);
+    await whenIdle("mtf", mtfTick);
   };
 
   /**
@@ -345,6 +346,33 @@ export async function register() {
   };
 
   /** Files the technician list for any whole month that does not have one. */
+  /**
+   * Fetches and posts Medicare Transaction Facilitator payments, unattended.
+   *
+   * These arrive weeks after the fill and never on a schedule. Left to a button, the money only
+   * lands when somebody remembers to go and get it — and the reason it was invisible for so long
+   * is that nobody was going to check a portal every day. A fill sitting on the "dispensed at a
+   * loss" list because of a payment that has since arrived is a wrong number the pharmacy acts on.
+   *
+   * Once a day. The remittances are published daily at most, the window looked at is three weeks
+   * wide so a late one is never missed, and both the tool and this site skip what they already
+   * have — so running it again costs a request and changes nothing.
+   */
+  const mtfTick = async () => {
+    try {
+      const { getSettings } = await import("./lib/settings");
+      const s = await getSettings();
+      if (s.mtf_auto === "no") return;
+      if (!s.mtf_api_key_enc) return; // Nothing configured; not a failure, just nothing to do.
+      const last = s.mtf_last_pull ? Date.parse(s.mtf_last_pull) : 0;
+      if (Number.isFinite(last) && Date.now() - last < 20 * 60 * 60 * 1000) return;
+      const { mtfCycle } = await import("./lib/mtf");
+      await mtfCycle({ name: "Automatic check" });
+    } catch {
+      // Never allowed to stop the app. The outcome is on the Medicare MFP refunds page either way.
+    }
+  };
+
   const technicianListTick = async () => {
     try {
       const { fileDueSnapshots } = await import("./lib/technician-list");

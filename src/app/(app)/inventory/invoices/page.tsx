@@ -484,6 +484,46 @@ export default async function InvoicesPage({
     }
   }
 
+  /** Deletes an invoice outright: the document, the invoice record, and every line read off it. */
+  async function destroyInvoice(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const id = String(fd.get("destroyId") ?? "");
+    const back = String(fd.get("back") ?? "/inventory/invoices");
+    try {
+      const r = await unfileInvoice(id, { kind: "discard" }, u);
+      revalidatePath("/inventory/invoices");
+      revalidatePath("/documents");
+      revalidatePath("/purchasing");
+      redirect(`${back}${back.includes("?") ? "&" : "?"}ok=` + encodeURIComponent(r.message));
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect(`${back}${back.includes("?") ? "&" : "?"}error=` + encodeURIComponent(e instanceof Error ? e.message : "Could not delete that."));
+    }
+  }
+
+  /**
+   * Deletes a document in the vault, and anything filed off the back of it.
+   *
+   * The same cascade the Documents page uses. Deleting a document while an invoice record still
+   * pointed at it is what left a statement that could not be opened, could not be taken out of the
+   * invoice file, and went on counting as purchases — the one that would not go away.
+   */
+  async function destroyDocument(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const documentId = String(fd.get("documentId") ?? "");
+    const { deleteDocument } = await import("@/app/(app)/documents/actions");
+    const r = await deleteDocument(documentId, "/inventory/invoices");
+    void u;
+    revalidatePath("/inventory/invoices");
+    redirect(
+      r.ok
+        ? "/inventory/invoices?ok=" + encodeURIComponent("Deleted. The document is gone, along with anything filed from it.")
+        : "/inventory/invoices?error=" + encodeURIComponent(r.error ?? "Could not delete that."),
+    );
+  }
+
   async function saveExpected(fd: FormData) {
     "use server";
     const u = await requireManager();
@@ -695,12 +735,20 @@ export default async function InvoicesPage({
                   supplier's name on it lands here — and without this, a document that is not an
                   invoice can never leave, and the list can never be emptied.
                 */}
-                <form action={notAnInvoiceDocument} className="shrink-0">
-                  <input type="hidden" name="documentId" value={d.id} />
-                  <button className="btn btn-sm" formNoValidate title="Leaves the document where it is and stops offering it here.">
-                    Not an invoice
-                  </button>
-                </form>
+                <span className="flex shrink-0 gap-1">
+                  <form action={notAnInvoiceDocument}>
+                    <input type="hidden" name="documentId" value={d.id} />
+                    <button className="btn btn-sm" formNoValidate title="Keeps the document, files it as a supplier statement, and stops offering it here.">
+                      Not an invoice
+                    </button>
+                  </form>
+                  <form action={destroyDocument}>
+                    <input type="hidden" name="documentId" value={d.id} />
+                    <button className="btn btn-sm border-crit text-crit hover:bg-crit-soft" formNoValidate title="Deletes the document outright.">
+                      Delete
+                    </button>
+                  </form>
+                </span>
               </li>
             ))}
           </ul>
@@ -1004,6 +1052,25 @@ export default async function InvoicesPage({
                           {canManage && (
                             <details className="mt-1">
                               <summary className="cursor-pointer text-[11px] text-ink-3 hover:text-accent">Not an invoice?</summary>
+                              {/*
+                                Delete, plainly, without a menu in front of it.
+
+                                The choice below decides where a document goes when it is kept. This
+                                is for the case where it should not be kept at all, and burying that
+                                behind a select was how somebody ended up going round in circles
+                                with a statement that would not leave.
+                              */}
+                              <button
+                                formAction={destroyInvoice}
+                                formNoValidate
+                                name="destroyId"
+                                value={i.id}
+                                className="btn btn-sm mt-1 w-full border-crit text-[11px] text-crit hover:bg-crit-soft"
+                                title="Deletes the document, this invoice record and every line read off it. Nothing is kept."
+                              >
+                                Delete it and everything read off it
+                              </button>
+                              <p className="mt-1 text-[11px] text-ink-3">or say what it actually is:</p>
                               <div className="mt-1 flex flex-col gap-1">
                                 <select name={`as_${i.id}`} className="field px-2 py-1 text-[11px]" defaultValue="statement">
                                   <option value="statement">It is a statement of account</option>

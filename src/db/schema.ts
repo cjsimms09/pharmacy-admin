@@ -1304,6 +1304,34 @@ export const payerBins = sqliteTable(
   (t) => [index("payer_bins_bin_idx").on(t.bin), index("payer_bins_pbm_idx").on(t.pbmName)],
 );
 
+/**
+ * The words inside each contract PDF, so the contracts can be searched.
+ *
+ * They were filed, matched to a checklist and never opened. That is a filing cabinet, not a
+ * record: the question actually asked of a contract is "which one covers BIN 610011", and the
+ * only way to answer it was to open twenty PDFs by hand — which is why eighteen BINs went unnamed
+ * while the contracts naming them sat on the same disk.
+ *
+ * Keyed on the file rather than on a checklist row, so a contract that arrived before anybody
+ * added it to the checklist is searchable too. The text is a copy of what is already on disk, so
+ * it can be rebuilt at any time and nothing is lost if it is dropped.
+ */
+export const contractText = sqliteTable(
+  "contract_text",
+  {
+    id: text("id").primaryKey(),
+    fileName: text("file_name").notNull(),
+    /** The checklist row this file was matched to, where it was matched to one. */
+    contractDocId: text("contract_doc_id"),
+    sha256: text("sha256").notNull(),
+    /** How many characters came out. Zero means a scan with no text layer. */
+    chars: integer("chars").notNull().default(0),
+    body: text("body").notNull().default(""),
+    indexedAt: text("indexed_at").notNull().default(now()),
+  },
+  (t) => [index("contract_text_file_idx").on(t.fileName)],
+);
+
 /** Every document known to exist, whether or not its file has arrived. Drives the checklist. */
 export const contractDocs = sqliteTable(
   "contract_docs",
@@ -1591,6 +1619,19 @@ export const claims = sqliteTable(
     daysSupply: integer("days_supply"),
     remitCents: integer("remit_cents"),
     copayCents: integer("copay_cents"),
+    /**
+     * What the patient was left owing after this adjudication — the report's "Total" column.
+     *
+     * Not the same as the copay, and the difference is money. On a fill where the plan pays nothing
+     * and applies it to a deductible, the copay column reads $0.00 while the patient is left owing
+     * the lot; taking the copay as the patient's payment then loses the whole of it. On one real
+     * fill that was $115.57 on a $161.83 prescription, which turned $33.14 of margin into an
+     * $82.43 loss on the screen.
+     *
+     * In a coordinated chain each adjudication leaves a smaller figure here, and the last one is
+     * what the patient actually hands over.
+     */
+    patientTotalCents: integer("patient_total_cents"),
     awpCents: integer("awp_cents"),
     acquisitionCents: integer("acquisition_cents"),
     grossProfitCents: integer("gross_profit_cents"),
@@ -1662,9 +1703,101 @@ export const PLAN_CLASSES = [
   "medicaid",                 // governed separately
   "workers_comp",             // priced by a different scheme entirely
   "discount_card",            // not insurance at all; no plan to regulate
+  /*
+   * A manufacturer copay or savings card, which is not a plan at all.
+   *
+   * Kept apart from a discount card, which it is constantly confused with, because the two behave
+   * in opposite directions. A discount card *replaces* insurance and sets the price: a low payment
+   * on one is the price, not a shortfall. A copay card sits *on top of* a plan and pays down what
+   * the patient was left owing on a brand drug — so it arrives as a second claim on a fill that
+   * already has a payer, and it pays a residual rather than a drug.
+   *
+   * Both are out of the Kansas floor's reach, and neither is a payer worth ranking. Ranked as one,
+   * a copay card is the best payer in the pharmacy — it covers a hundred percent of whatever is put
+   * to it — and the brand plan it is subsidising, which may be paying badly, is flattered by it.
+   */
+  "copay_card",
   "unknown",                  // not yet determined. Never files.
 ] as const;
 export type PlanClass = (typeof PLAN_CLASSES)[number];
+
+/**
+ * A key seen on a claim, tied once to the payer and the contract behind it.
+ *
+ * The alternative is searching the contracts every time, which is what the site did first: it found
+ * the answer, showed it, and forgot it, so the same twenty PDFs were read again on the next page
+ * load and nobody's decision was ever recorded. A search finds a candidate; a person confirms it;
+ * this is where that confirmation lives.
+ *
+ * Keyed on whatever the claim actually carried. A BIN alone identifies a processor, not a plan —
+ * one BIN can front a dozen employers — so the group number and the network or contract id printed
+ * on the claim are part of the key where they exist. A row with a null group matches any group,
+ * which is the right answer for a processor that runs one contract.
+ */
+export const payerLinks = sqliteTable(
+  "payer_links",
+  {
+    id: text("id").primaryKey(),
+    bin: text("bin"),
+    /** The processor control number, where the claim carried one. */
+    pcn: text("pcn"),
+    groupNumber: text("group_number"),
+    /** The network reimbursement or contract id PioneerRx prints on the claim. */
+    contractId: text("contract_id"),
+    /** Who this is, settled. */
+    pbmName: text("pbm_name").notNull(),
+    /** The contract document this plan is priced under, where one is on file. */
+    contractDocId: text("contract_doc_id"),
+    /** The contract PDF's own file name, so the link survives a checklist rebuild. */
+    contractFileName: text("contract_file_name"),
+    /** Why this is the answer: the sentence from the contract, or who said so. */
+    basis: text("basis"),
+    confirmedBy: text("confirmed_by").notNull(),
+    confirmedOn: text("confirmed_on").notNull().default(now()),
+  },
+  (t) => [index("payer_links_bin_idx").on(t.bin), index("payer_links_pbm_idx").on(t.pbmName)],
+);
+
+/**
+ * Money that reaches a claim after it was adjudicated.
+ *
+ * A claim's revenue is not settled on the day it is transmitted. A Medicare Transaction Facilitator
+ * payment arrives later and has to be matched back to the fill it belongs to. So does a DIR
+ * reconciliation, a copay card posted after the fact, or a secondary that adjudicated a week on.
+ * Held only as what the daily report said on the day, every one of those is money the pharmacy
+ * received and this system never counted — and a fill sits on the "dispensed at a loss" list
+ * because of a payment that has since arrived.
+ *
+ * Kept as its own rows rather than added into the claim, so what was paid on the day stays
+ * distinguishable from what arrived afterwards. That distinction is the whole point when a payer
+ * is being judged: the plan paid what the plan paid, and a facilitator payment on top of it is not
+ * the plan's money.
+ */
+export const claimPayments = sqliteTable(
+  "claim_payments",
+  {
+    id: text("id").primaryKey(),
+    claimId: text("claim_id").references(() => claims.id, { onDelete: "cascade" }),
+    /** Where the fill can be found again when the claim row is not known: the natural key. */
+    rxNumber: text("rx_number").notNull(),
+    fillNumber: integer("fill_number"),
+    dateFilled: text("date_filled"),
+    ndc11: text("ndc11"),
+    /** "mtf", "dir", "copay_card", "secondary", "manual". */
+    source: text("source").notNull(),
+    /** Who paid it, as the remittance names them. */
+    payer: text("payer"),
+    amountCents: integer("amount_cents").notNull(),
+    /** When the money was received, not when the claim was filled. */
+    receivedOn: text("received_on"),
+    /** The remittance or file this came from, so it can be traced back. */
+    reference: text("reference"),
+    notes: text("notes"),
+    recordedBy: text("recorded_by").notNull(),
+    createdAt: text("created_at").notNull().default(now()),
+  },
+  (t) => [index("claim_payments_claim_idx").on(t.claimId), index("claim_payments_rx_idx").on(t.rxNumber)],
+);
 
 export const planGroups = sqliteTable(
   "plan_groups",

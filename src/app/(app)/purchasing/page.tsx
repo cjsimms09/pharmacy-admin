@@ -7,7 +7,7 @@ import { importSupplierCatalog, importPioneerCatalog, purchasingOpportunities, s
 import { getSettings } from "@/lib/settings";
 import { hasMailPassword } from "@/lib/mailbox";
 import { FILE_NAME_CODES } from "@/lib/pioneer-catalog";
-import { productLedger, opportunities, type Flag } from "@/lib/product-ledger";
+import { productLedger, opportunities, margins, losers, type Flag } from "@/lib/product-ledger";
 import Link from "next/link";
 import { looksLikePioneerCatalog } from "@/lib/pioneer-catalog";
 import { formatCents } from "@/lib/money";
@@ -18,6 +18,7 @@ export const metadata = { title: "Purchasing" };
 export const dynamic = "force-dynamic";
 
 /** Micros to a displayable per-unit price, at the five decimals these prices are quoted in. */
+const money = (cents: number) => formatCents(cents);
 const perUnit = (micros: number | null) =>
   micros === null ? "—" : `${micros < 0 ? "-" : ""}$${(Math.abs(micros) / 1_000_000).toFixed(5)}`;
 
@@ -29,6 +30,17 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
     purchasingOpportunities(), supplierSummary(), catalogSchedule(), getSettings(), hasMailPassword(), productLedger(),
   ]);
   const ledgerRows = opportunities(ledger.rows);
+  /*
+   * What each drug earns, which is a different question from what it costs.
+   *
+   * A drug bought well below the benchmark can still be dispensed at a loss where the plan pays
+   * below acquisition, and a drug bought above it can be the best margin on the shelf. The
+   * comparison above answers "am I paying too much"; this answers "is this worth dispensing".
+   */
+  const earned = margins(ledger.rows);
+  const losing = losers(earned);
+  const bestEarners = earned.filter((m) => m.marginCents > 0).slice(0, 15);
+  const totalMarginCents = earned.reduce((n, m) => n + m.marginCents, 0);
   const autoImport = (s.mail_auto_import ?? "").toLowerCase() === "yes";
   const mailOn = s.mail_enabled === "yes";
 
@@ -265,6 +277,97 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
           </div>
         )}
       </section>
+
+      {/*
+        Margin, which is the question the comparison does not answer.
+
+        Everything above says what the pharmacy pays against what it could pay and against the
+        benchmark. None of that says whether dispensing the drug makes money, and the two do not
+        follow from each other. This is revenue received against the cost actually paid — after the
+        rebate the supplier really pays on that line, because a margin worked out on gross invoice
+        prices understates every contract generic by the tier rate, which here is enough to turn a
+        profitable drug into an apparent loss and get it dropped.
+      */}
+      {earned.length > 0 && (
+        <section className="my-4 rounded-lg border border-line bg-surface p-4">
+          <h2 className="text-sm font-semibold">What each drug earns</h2>
+          <p className="mt-1 text-sm text-ink-2">
+            What the plans and patients paid, against what the drug actually cost this pharmacy — the invoice price less
+            the rebate that supplier really pays on the line. Across everything held, {money(totalMarginCents)} on{" "}
+            {earned.length.toLocaleString()} product{earned.length === 1 ? "" : "s"}.
+          </p>
+
+          {losing.length > 0 && (
+            <div className="mt-3 rounded-md border border-crit bg-crit-soft p-3">
+              <p className="text-sm font-semibold text-crit">
+                {losing.length} dispensed at a loss, costing {money(Math.abs(losing.reduce((n, m) => n + m.marginCents, 0)))} so far
+              </p>
+              <div className="mt-2 overflow-x-auto">
+                <table className="table">
+                  <thead>
+                    <tr><th>Drug</th><th>From</th><th className="text-right">Came in</th><th className="text-right">Cost</th><th className="text-right">Loss</th><th className="text-right">Per unit</th></tr>
+                  </thead>
+                  <tbody>
+                    {losing.slice(0, 10).map((m) => (
+                      <tr key={m.ndc11}>
+                        <td>
+                          <span className="block text-sm">{m.name ?? "—"}</span>
+                          <span className="font-mono text-[11px] text-ink-3">{m.ndc11} · {m.claims} claim{m.claims === 1 ? "" : "s"}</span>
+                        </td>
+                        <td className="text-xs">{m.supplier ?? "—"}{m.rebated === true && <span className="badge badge-ok ml-1">rebated</span>}</td>
+                        <td className="num text-sm">{money(m.receivedCents)}</td>
+                        <td className="num text-sm">{money(m.costCents)}</td>
+                        <td className="num text-sm font-medium text-crit">{money(m.marginCents)}</td>
+                        <td className="num text-xs">{perUnit(m.marginPerUnitMicros)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-2 text-xs text-ink-2">
+                A loss here is the plan paying below what the drug cost. It is not always a reason to stop dispensing —
+                but it is always a reason to know, and the ones bought above the benchmark are also the ones worth
+                appealing or sourcing elsewhere.
+              </p>
+            </div>
+          )}
+
+          <div className="mt-3 overflow-x-auto">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Best earners</th><th>From</th>
+                  <th className="text-right">Came in</th><th className="text-right">True cost</th>
+                  <th className="text-right">Margin</th><th className="text-right">%</th><th className="text-right">vs NADAC</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bestEarners.map((m) => (
+                  <tr key={m.ndc11}>
+                    <td>
+                      <span className="block text-sm">{m.name ?? "—"}</span>
+                      <span className="font-mono text-[11px] text-ink-3">{m.ndc11} · {m.unitsDispensed.toLocaleString()} units</span>
+                    </td>
+                    <td className="text-xs">{m.supplier ?? "—"}{m.rebated === true && <span className="badge badge-ok ml-1">rebated</span>}</td>
+                    <td className="num text-sm">{money(m.receivedCents)}</td>
+                    <td className="num text-sm">{money(m.costCents)}</td>
+                    <td className="num text-sm font-medium text-accent">{money(m.marginCents)}</td>
+                    <td className="num text-sm">{m.marginPercent === null ? "—" : `${m.marginPercent}%`}</td>
+                    <td className={`num text-xs ${m.vsNadacMicros === null ? "" : m.vsNadacMicros > 0 ? "text-crit" : "text-accent"}`}>
+                      {m.vsNadacMicros === null ? "—" : `${m.vsNadacMicros > 0 ? "+" : ""}${perUnit(m.vsNadacMicros)}`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-2 text-xs text-ink-3">
+            Nothing appears here without a price this pharmacy actually paid and a pack size to convert it by. NADAC is
+            what pharmacies on average paid, not what this one paid, so it is never used as the cost side — a margin
+            worked out from it would be a statement about somebody else&rsquo;s business.
+          </p>
+        </section>
+      )}
 
       {!opps.ready ? (
         <Notice kind="warn">{opps.reason}</Notice>

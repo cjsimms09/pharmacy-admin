@@ -275,8 +275,16 @@ export async function duplicateRebatePrograms(supplierId: string): Promise<{ kee
   const out: { keep: RebateProgramRow; drop: RebateProgramRow[] }[] = [];
   for (const g of groups.values()) {
     if (g.length < 2) continue;
-    // Keep the earliest created, which is the one anything else may already point at.
-    const sorted = [...g].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    /*
+     * Keep the most recently filed copy.
+     *
+     * These duplicates exist because the same report was read twice under names that differed only
+     * in the spelling of the supplier — "McKesson generics (OneStop) rebate" against "Mckesson …".
+     * The terms are identical, so which row survives changes nothing about the arithmetic; what it
+     * changes is the name on the card, and the newest copy carries the current one. Nothing else in
+     * the site points at a programme by id, so there is no reference to preserve.
+     */
+    const sorted = [...g].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     out.push({ keep: sorted[0], drop: sorted.slice(1) });
   }
   return out;

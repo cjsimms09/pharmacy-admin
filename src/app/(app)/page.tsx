@@ -13,6 +13,8 @@ import { daysUntil, fmt, fmtLong, todayIso } from "@/lib/dates";
 import { getSettings } from "@/lib/settings";
 import { mailHealth } from "@/lib/mail-health";
 import { pendingUpdates } from "@/lib/updates";
+import { moneyPosition } from "@/lib/money-position";
+import { formatCents } from "@/lib/money";
 import { requireUser } from "@/lib/auth";
 import { Notice, Card, Figure, PageHeader } from "@/components/ui";
 import { AttestForm } from "@/components/attest-form";
@@ -83,7 +85,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const { ok, error } = await searchParams;
   // The signer's own name, to fill in the attestation form without asking them to remember it.
   const user = await requireUser();
-  const [compliance, dated, matrix, cqi, cs, jobs, selfFindings, settings, mail, updates, invoiceProblems, alertList] =
+  const [compliance, dated, matrix, cqi, cs, jobs, selfFindings, settings, mail, updates, invoiceProblems, alertList, money] =
     await Promise.all([
     complianceSummary(),
     dueList({ horizonDays: 60 }),
@@ -97,6 +99,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     pendingUpdates(),
     invoiceIssues(),
     alerts(),
+    moneyPosition(),
   ]);
 
   /*
@@ -235,6 +238,11 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         subtitle={fmtLong(today)}
         actions={
           <>
+            {/*
+              The one thing on this page that is about making money rather than keeping out of
+              trouble. Everything else here protects revenue; this is where it is found.
+            */}
+            <Link href="/money" className="btn btn-primary">Where the money is</Link>
             <Link href="/compliance" className="btn">Compliance</Link>
             <Link href="/compliance/training" className="btn">Training</Link>
             {lateCount > 0 && <Link href="#now" className="btn btn-primary">Work through {lateCount}</Link>}
@@ -244,6 +252,109 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
 
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
+
+      {/*
+        Where the money stands, before anything else on the page.
+
+        The rest of this screen protects revenue by keeping the pharmacy out of trouble. These three
+        figures are the revenue itself, and they are the three levers there are: the ratio picks the
+        band, the band prices every generic bought today, and the facilitator owes what it owes.
+        A pharmacist who reads nothing else should still know, by lunchtime, whether the ratio moved,
+        what this month's buying is earning, and whether the money that was promised has arrived.
+
+        Each is a position, not a settlement — the drill down arrives daily and the statement a month
+        later. Where a link in the chain is missing the card says which link and where to fix it,
+        because the alternative is a confident zero that somebody prices an order against.
+      */}
+      <section className="mb-6">
+        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-sm font-semibold">Where the money stands</h2>
+          <span className="text-xs text-ink-3">
+            Month to date · {fmtLong(today)} · <Link href="/money" className="text-accent underline">all of it</Link>
+          </span>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          {/* ── The ratio, which is the lever ───────────────────────── */}
+          <Figure
+            value={money.ratio?.percent !== null && money.ratio?.percent !== undefined ? `${money.ratio.percent.toFixed(2)}%` : "—"}
+            label={money.ratio ? `Scrubbed GCR — ${money.ratio.supplierName}` : "Scrubbed GCR"}
+            tone={money.ratio?.percent === null || money.ratio === null ? "muted" : money.ratio.next ? "warn" : "ok"}
+            href={money.ratio ? `/suppliers/${money.ratio.supplierId}/terms` : "/suppliers"}
+            sub={
+              money.ratio === null
+                ? "No supplier on file yet."
+                : money.ratio.percent === null
+                  ? "No drill down has been read yet — it arrives daily and files itself."
+                  : [
+                      money.ratio.contractGenericPercent !== null
+                        ? `${money.ratio.contractGenericPercent}% off a contract generic today`
+                        : "no ladder on file to price it",
+                      money.ratio.next
+                        ? `${money.ratio.next.shortByPercent.toFixed(2)}% short of ${money.ratio.next.rebatePercent}%`
+                        : "top band",
+                      money.ratio.source === "daily report" ? `today's report` : money.ratio.source === "monthly statement" ? `last statement` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")
+            }
+          />
+
+          {/* ── What the buying already done is earning ─────────────── */}
+          <Figure
+            value={formatCents(money.rebates.estimatedCents)}
+            label="Rebates earned this month"
+            tone={money.rebates.incomplete || money.rebates.unmarkedLines > 0 ? "warn" : money.rebates.estimatedCents > 0 ? "ok" : "muted"}
+            href="/suppliers"
+            sub={
+              money.rebates.purchasedCents === 0
+                ? "No invoices loaded for this month yet."
+                : [
+                    `on ${formatCents(money.rebates.purchasedCents)} bought`,
+                    money.rebates.bySupplier.length === 1 ? money.rebates.bySupplier[0].supplierName : `${money.rebates.bySupplier.length} suppliers`,
+                    money.rebates.unmarkedLines > 0 ? `${money.rebates.unmarkedLines} lines unmarked, earning nothing here` : null,
+                    money.rebates.incomplete ? "a supplier has no ladder on file" : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")
+            }
+          />
+
+          {/*
+            Money actually banked from the facilitator, and only that.
+
+            An earlier version put "still owed" here from the gap between the report's gross profit
+            and ours. That gap is real but its cause is not knowable from a fill — one was $146.18
+            of facilitator money, another $5.56 on a generic Losartan that no facilitator would ever
+            pay — so forecasting from it invented a receivable. The gap belongs on the claims screen
+            as a reconciliation, not here as money coming.
+          */}
+          <Figure
+            value={formatCents(money.facilitator.receivedCents)}
+            label="Facilitator money in"
+            tone={money.facilitator.receivedCents > 0 ? "ok" : "muted"}
+            href="/remits/mtf"
+            sub={
+              [
+                money.facilitator.payments > 0
+                  ? `${money.facilitator.payments} payment${money.facilitator.payments === 1 ? "" : "s"} this month`
+                  : "nothing received this month",
+                money.facilitator.lastMonthCents > 0 ? `${formatCents(money.facilitator.lastMonthCents)} last month` : null,
+                money.facilitator.unmatched > 0 ? `${money.facilitator.unmatched} not yet matched to a claim` : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")
+            }
+          />
+        </div>
+        {money.unreconciled.fills > 0 && (
+          <p className="mt-2 text-xs text-ink-3">
+            Separately, {formatCents(money.unreconciled.cents)} across {money.unreconciled.fills} fills is revenue the
+            daily report booked that this site has not found in the claim rows. It is not money coming — it is a column
+            to identify, and it may already be in the bank.{" "}
+            <Link href="/claims" className="text-accent underline">Reconcile it on Claims</Link>.
+          </p>
+        )}
+      </section>
 
       {/*
         Two levels, and nothing else on the screen shouts.

@@ -1,3 +1,4 @@
+import React from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -10,15 +11,111 @@ import { hasMailPassword } from "@/lib/mailbox";
 import { formatCents } from "@/lib/money";
 import { requireReimbursement } from "@/lib/features";
 import { PageHeader, Notice, Empty } from "@/components/ui";
+import { SubmitButton } from "@/components/submit-button";
 
 export const metadata = { title: "Claims" };
 export const dynamic = "force-dynamic";
 
 export default async function ClaimsPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
+  const { laterPaymentSummary } = await import("@/lib/claim-payments");
+  const laterMoney = await laterPaymentSummary();
   await requireReimbursement();
   await requireUser();
   const { ok, error } = await searchParams;
   const [flags, byPayer, imports, s, mailReady] = await Promise.all([claimFlags(), claimsByPayer(), claimImports(), getSettings(), hasMailPassword()]);
+
+  /*
+   * Every dispensing against NADAC plus the dispensing fee.
+   *
+   * The floor review answers the narrow question — which claims can be filed on — and stays silent
+   * about every plan the statute cannot reach, which is most of the money. A Part D plan paying
+   * below what the government reckons the drug costs is not a filing, but it is the thing a
+   * contract conversation is made of.
+   */
+  const { againstNadac, STANDING_MEANS } = await import("@/lib/against-nadac");
+  const nadacStanding = await againstNadac(flags.fills);
+  /*
+   * Three lists, because they need three different things done to them.
+   *
+   * Measuring every dispensing against the benchmark is right; printing every dispensing is not.
+   * A row that came in above NADAC needs nothing, and a row on an unclassified plan cannot be
+   * judged at all until somebody says what kind of plan it is — so neither belongs in the list of
+   * work. What is left is the money: a shortfall the Kansas floor lets us file, and a rate that is
+   * bad but lawful and has to be argued commercially.
+   */
+  const short = nadacStanding.rows.filter((r) => r.againstBenchmarkCents < 0);
+  const actionable = short.filter((r) => r.standing === "owed" || r.standing === "argue");
+  const unsettled = short.filter((r) => r.standing === "unclassified");
+  const settled = nadacStanding.rows.filter((r) => r.againstBenchmarkCents >= 0 || r.standing === "the price");
+
+  /* One table, rendered against whichever of those lists is being shown. */
+  function NadacTable({ rows }: { rows: typeof nadacStanding.rows }) {
+    return (
+      <div className="mt-2 overflow-x-auto rounded-lg border border-line">
+        <table className="w-full text-sm">
+          <thead className="bg-ground text-left text-xs uppercase tracking-wide text-ink-3">
+            <tr>
+              <th className="px-3 py-2">Filled</th>
+              <th className="px-3 py-2">Drug</th>
+              <th className="px-3 py-2">Payer</th>
+              <th className="px-3 py-2 text-right">Came in</th>
+              <th className="px-3 py-2 text-right">NADAC + fee</th>
+              <th className="px-3 py-2 text-right">Against it</th>
+              <th className="px-3 py-2">What it means</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.slice(0, 60).map((r) => (
+              <tr key={r.key} className="border-t border-line">
+                <td className="px-3 py-2 whitespace-nowrap text-xs">{r.dateFilled}</td>
+                <td className="px-3 py-2">
+                  {r.itemName ?? r.ndc11}
+                  <span className="block font-mono text-[11px] text-ink-3">
+                    Rx {r.rxNumber}{r.fillNumber !== null ? `-${r.fillNumber}` : ""} · NADAC of {r.nadacOn}
+                  </span>
+                </td>
+                <td className="px-3 py-2 text-xs">{r.payer}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{formatCents(r.receivedCents)}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-ink-2">
+                  {formatCents(r.benchmarkCents)}
+                  <span className="block text-[11px] text-ink-3">
+                    {formatCents(r.nadacCents)} + {formatCents(r.dispensingFeeCents)}
+                  </span>
+                </td>
+                <td className={`px-3 py-2 text-right tabular-nums font-medium ${r.againstBenchmarkCents < 0 ? "text-red-700" : "text-accent"}`}>
+                  {r.againstBenchmarkCents > 0 ? "+" : ""}{formatCents(r.againstBenchmarkCents)}
+                </td>
+                <td className="px-3 py-2 text-xs">
+                  {r.againstBenchmarkCents >= 0 ? (
+                    <span className="text-ink-3">at or above it</span>
+                  ) : (
+                    <span
+                      className={`badge ${r.standing === "owed" ? "badge-crit" : r.standing === "argue" ? "badge-warn" : "badge-muted"}`}
+                      title={STANDING_MEANS[r.standing]}
+                    >
+                      {r.standing === "owed"
+                        ? "owed — file it"
+                        : r.standing === "argue"
+                          ? "argue it, cannot file"
+                          : r.standing === "the price"
+                            ? "the price, not a shortfall"
+                            : "classify the plan first"}
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {rows.length > 60 && (
+          <p className="border-t border-line px-3 py-2 text-xs text-ink-3">
+            The worst 60 of {rows.length} are shown.
+          </p>
+        )}
+      </div>
+    );
+  }
+
   const autoImport = (s.mail_auto_import ?? "").toLowerCase() === "yes";
   const mailOn = s.mail_enabled === "yes";
   const lastImport = imports[0] ?? null;
@@ -33,7 +130,10 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
       const buf = Buffer.from(await file.arrayBuffer());
       if (looksLikeRxTransactions(buf.subarray(0, 8192).toString("utf8"))) {
         const t = await importRxTransactions(buf, file.name, u.id);
-        const text = describeTransactionImport(t);
+        // A remittance can beat the daily report. Anything waiting for this prescription attaches now.
+        const { matchOrphanPayments } = await import("@/lib/claim-payments");
+        const attached = await matchOrphanPayments();
+        const text = describeTransactionImport(t) + (attached.matched ? ` ${attached.matched} payment${attached.matched === 1 ? "" : "s"} that arrived before the claim ${attached.matched === 1 ? "was" : "were"} attached.` : "");
         await audit({ action: "claims.import", userId: u.id, userName: u.name, details: `${file.name}: ${text.slice(0, 200)}` });
         revalidatePath("/claims");
         redirect(`/claims?${t.problems.length && !t.claimsAdded ? "error" : "ok"}=` + encodeURIComponent(text));
@@ -58,25 +158,550 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
     }
   }
 
+  /**
+   * Recovers the patient's residual on claims loaded before it was being kept.
+   *
+   * The report's "Total" column was read and thrown away, so every claim already held records the
+   * patient as having paid nothing — which on a fill applied to a deductible is the whole of the
+   * money. The raw row is stored against each claim, so nothing has to be sent again.
+   */
+  async function repairPatientTotals() {
+    "use server";
+    const u = await requireManager();
+    const { backfillPatientTotals } = await import("@/lib/claim-payments");
+    const r = await backfillPatientTotals();
+    await audit({ action: "claims.backfill_patient", userId: u.id, userName: u.name, details: `${r.filled} of ${r.read}` });
+    revalidatePath("/claims");
+    revalidatePath("/purchasing");
+    revalidatePath("/payers/performance");
+    redirect(
+      "/claims?ok=" +
+        encodeURIComponent(
+          r.filled === 0
+            ? "Nothing to recover — every claim already carries what the patient was left owing."
+            : `${r.filled} claim${r.filled === 1 ? "" : "s"} now carry what the patient was actually left owing, read back out of the row as it arrived. Every margin on the site follows.`,
+        ),
+    );
+  }
+
   return (
     <>
       <PageHeader
         title="Claims"
         subtitle="Dispensing and adjudication detail from PioneerRx, matched to the payer that priced it."
-        actions={<Link href="/claims/floor" className="btn btn-primary">Paid under the floor</Link>}
+        actions={
+          <>
+            <Link href="/payers/performance" className="btn btn-primary">Who pays best</Link>
+            <Link href="/claims/floor" className="btn">Paid under the floor</Link>
+            <Link href="/plans" className="btn">Classify plans</Link>
+            <form action={repairPatientTotals}>
+              <SubmitButton className="btn" pendingLabel="Recovering…">Recover patient payments</SubmitButton>
+            </form>
+          </>
+        }
       />
+
+      {/*
+        Money that reached a fill after the day it was transmitted.
+
+        A facilitator payment arrives weeks later and is real revenue. Counted only as what the
+        daily report said on the day, a fill sits on the loss list because of a payment that has
+        since arrived — and the plan that underpaid is judged on money it never sent.
+      */}
+      {laterMoney.length > 0 && (
+        <Notice kind="ok">
+          <b>
+            {formatCents(laterMoney.reduce((n, x) => n + x.amountCents, 0))} has reached these claims since they were
+            transmitted
+          </b>{" "}
+          — {laterMoney.map((x) => `${x.payments} from ${x.source.toUpperCase()}`).join(", ")}. It is added to the fill it
+          belongs to and kept apart from what the plan itself paid.
+          {laterMoney.some((x) => x.unmatched > 0) && (
+            <>
+              {" "}
+              {laterMoney.reduce((n, x) => n + x.unmatched, 0)} of them name a prescription this site has not loaded yet;
+              they attach themselves when it arrives.
+            </>
+          )}
+        </Notice>
+      )}
+
+      {/*
+        Revenue the report booked that this site did not find in the row.
+
+        PioneerRx computes its gross profit from the same row we read, so a gap means it counted
+        money we did not — and the amount is the only part of that this site actually knows. On one
+        Jardiance fill the gap was $146.18 of facilitator money the plan promised at adjudication.
+        On a Losartan fill it was $5.56, which no facilitator was ever going to pay and is far more
+        likely to be a patient total sitting in a column this reader is not picking up.
+
+        So the gap is stated and the cause is not. Calling every one of them a facilitator payment
+        built a queue of receivables that were never coming, which is the same mistake as the red
+        "the arithmetic is broken" banner it replaced, made in the opposite direction.
+      */}
+      {flags.unreconciled.length > 0 && (
+        <Notice kind="warn">
+          <b>{formatCents(flags.unreconciledCents)} the report counted that this site has not found in the row.</b>{" "}
+          Across {flags.unreconciled.length} fill{flags.unreconciled.length === 1 ? "" : "s"} — biggest is Rx{" "}
+          {flags.unreconciled[0].rxNumber}
+          {flags.unreconciled[0].fillNumber !== null ? `-${flags.unreconciled[0].fillNumber}` : ""}
+          {flags.unreconciled[0].itemName ? ` (${flags.unreconciled[0].itemName})` : ""} at{" "}
+          {formatCents(flags.unreconciled[0].unreconciledCents ?? 0)}. PioneerRx computes its gross profit from the same
+          row, so it is revenue we did not pick up: a patient total in a column this reader is missing, or money the
+          plan promised at adjudication and pays later. Open <b>Why is this a loss?</b> on one below — the row is
+          printed there exactly as it arrived, and it says which.
+        </Notice>
+      )}
+
+      {/*
+        The one direction that really is a reading error.
+
+        Column positions here are worked out by counting, and a report whose columns shift by one
+        gives figures that are each plausible and collectively wrong. Where this site holds *more*
+        than the report did and nothing arrived later to explain it, that cannot be a timing
+        difference — a column is not where this reader thinks it is.
+      */}
+      {flags.disagreeing.length > 0 && (
+        <Notice kind="crit">
+          <b>
+            {flags.disagreeing.length} fill{flags.disagreeing.length === 1 ? "" : "s"} where this site counts more than
+            the report did, and nothing arrived later to explain it.
+          </b>{" "}
+          That can only mean a column is not where this reader thinks it is. First one: Rx{" "}
+          {flags.disagreeing[0].rxNumber}
+          {flags.disagreeing[0].fillNumber !== null ? `-${flags.disagreeing[0].fillNumber}` : ""} — this site makes it{" "}
+          {formatCents(flags.disagreeing[0].marginCents ?? 0)}, the report says{" "}
+          {formatCents(flags.disagreeing[0].reportedMarginCents ?? 0)}. Open it below and send me the row.
+        </Notice>
+      )}
 
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
 
-      {/*
-        The daily feed, and whether the door is open for it.
+      {flags.total === 0 ? (
+        <Empty>No claims loaded yet.</Empty>
+      ) : (
+        <>
+          {/*
+            What the pharmacy made, first, and then what it is still owed.
 
-        PioneerRx emails the "Rx Transaction Details By Submission Type" report at 6:30 every evening
-        as "Daily (date)". Everything that has to be true for it to load on its own is listed here
-        with its state, and the last file that came is named with what was made of it — so the
-        morning after, "did it come in right" is one glance here, and "what went wrong" is the Inbox
-        line this points to.
+            The four figures here used to be "claims held" and three kinds of problem, which is a
+            screen that can only ever deliver bad news. The reason any of this is counted is to find
+            money, so the money leads: what these dispensings made, what has been counted but not
+            received, what can be filed, and what actually lost.
+          */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <Stat
+              label="What these fills made"
+              value={formatCents(flags.marginCents)}
+              tone={flags.marginCents < 0 ? "warn" : undefined}
+              sub={`${formatCents(flags.revenueCents)} taken in on ${flags.pricedFills.toLocaleString()} of ${flags.fills.length.toLocaleString()} dispensings`}
+            />
+            <Stat
+              label="Counted, not found in the row"
+              value={formatCents(flags.unreconciledCents)}
+              tone={flags.unreconciledCents ? "warn" : undefined}
+              sub={flags.unreconciled.length ? `${flags.unreconciled.length} fills the report values higher than we can` : "the report and this site agree"}
+            />
+            <Stat
+              label="In-scope under $10.50"
+              value={formatCents(flags.underFeeShortfallCents)}
+              tone={flags.underFee.length ? "warn" : undefined}
+              sub={`${flags.underFee.length} claims — a shortfall to file`}
+            />
+            <Stat
+              label="Dispensed at a loss"
+              value={formatCents(flags.lossFillsTotalCents)}
+              tone={flags.lossFills.length ? "warn" : undefined}
+              sub={`${flags.lossFills.length} dispensings, after every payer is counted`}
+            />
+          </div>
+          <p className="mt-1 text-xs text-ink-3">
+            {flags.total.toLocaleString()} claim rows became {flags.fills.length.toLocaleString()} dispensings — a
+            prescription billed to a plan and then to a card is one bottle, and counting it twice doubles its cost and
+            invents a loss.
+            {flags.unpriceable > 0 && ` ${flags.unpriceable} carry no dispensed quantity and cannot be priced at all.`}
+          </p>
+
+          {flags.undetermined > 0 && (
+            <Notice kind="warn">
+              {flags.undetermined} of {flags.total} claims are on plans nobody has classified yet, and{" "}
+              {flags.underFeeUndetermined} of those received less than $10.50
+              {flags.underFeeUndetermined > 0 && ` — ${formatCents(flags.underFeeUndeterminedShortfallCents)} that may or may not be owed`}.
+              A low payment is only a shortfall on a plan the Kansas floor reaches; on a cash discount programme it is
+              simply the price. Settle them in <a href="/plans" className="underline">Plans</a>.
+            </Notice>
+          )}
+
+          {flags.unpriceable > 0 && (
+            <Notice kind="warn">
+              {flags.unpriceable} of {flags.total} claims carry no dispensed quantity, so they cannot be priced against
+              a contract or against NADAC. That column comes through blank on the current PioneerRx export — it is the
+              first thing to get fixed.
+            </Notice>
+          )}
+
+          {flags.ambiguousPayer > 0 && (
+            <Notice kind="warn">
+              {flags.ambiguousPayer} claim{flags.ambiguousPayer === 1 ? "" : "s"} sit on a BIN that the listing gives to
+              more than one PBM, and the payer name did not settle which. Read the PCN or network ID off the claim to
+              decide — they are not attached to a guess.
+            </Notice>
+          )}
+
+          {flags.unlistedBins.length > 0 && (
+            <Notice kind="crit">
+              {flags.unlistedClaims} claim{flags.unlistedClaims === 1 ? "" : "s"} adjudicated to{" "}
+              {flags.unlistedBins.length} BIN{flags.unlistedBins.length === 1 ? "" : "s"} that Health Mart Atlas does
+              not publish at all: {flags.unlistedBins.join(", ")}. We hold no contract reference for these payers, so
+              nothing they pay can be checked against a rate. Getting these identified is the highest-value thing on
+              the contract review.
+            </Notice>
+          )}
+
+          <h2 className="mt-8 text-sm font-semibold">By payer</h2>
+          <p className="mb-2 text-xs text-ink-3">
+            Per dispensing, on the same arithmetic as everything else on this page — one bottle counted once, the
+            patient counted once. A fill two plans coordinated on cannot be split between them honestly, so it is held
+            out of the profit column and shown on its own, with each plan credited only with the money it sent.{" "}
+            Open a payer to see its contracted rates and appeal route next to its claims.
+          </p>
+          <div className="overflow-x-auto rounded-lg border border-line">
+            <table className="w-full text-sm">
+              <thead className="bg-ground text-left text-xs uppercase tracking-wide text-ink-3">
+                <tr>
+                  <th className="px-3 py-2">Payer</th>
+                  <th className="px-3 py-2 text-right">Fills</th>
+                  <th className="px-3 py-2 text-right">Received</th>
+                  <th className="px-3 py-2 text-right">Gross profit</th>
+                  <th className="px-3 py-2 text-right">At a loss</th>
+                  <th className="px-3 py-2 text-right">Shared</th>
+                  <th className="px-3 py-2">Networks</th>
+                </tr>
+              </thead>
+              <tbody>
+                {byPayer.map((p) => (
+                  <tr key={p.pbmName} className="border-t border-line align-top">
+                    <td className="px-3 py-2">
+                      {p.pbmName.includes("unmatched") || p.pbmName === "Unidentified payer" ? (
+                        <span>{p.pbmName}</span>
+                      ) : (
+                        <Link href={`/payers/${encodeURIComponent(p.pbmName)}`} className="font-medium underline">{p.pbmName}</Link>
+                      )}
+                      <div className="text-xs text-ink-3">{p.bins.join(", ") || "—"}</div>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">{p.fills || <span className="text-ink-3">—</span>}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{p.fills ? formatCents(p.receivedCents) : <span className="text-ink-3">—</span>}</td>
+                    <td className={`px-3 py-2 text-right tabular-nums ${p.profitCents < 0 ? "text-red-700" : ""}`}>
+                      {p.fills ? formatCents(p.profitCents) : <span className="text-ink-3">—</span>}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">{p.belowCost || <span className="text-ink-3">—</span>}</td>
+                    <td className="px-3 py-2 text-right text-xs tabular-nums text-ink-3">
+                      {p.coordinatedFills ? (
+                        <span title="Fills this plan priced alongside another. One bottle cannot be split between two plans honestly, so only the money this plan sent is shown.">
+                          {p.coordinatedFills} · {formatCents(p.coordinatedRemitCents)}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-ink-3">{p.networks.join(", ") || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* ── Against the benchmark ─────────────────────────────────── */}
+          <h2 className="mt-8 text-sm font-semibold">Against NADAC + the dispensing fee</h2>
+          <p className="mt-1 text-xs text-ink-2">
+            Every dispensing measured against what the federal benchmark says the drug cost, plus the greater of $10.50
+            and the Kansas Medicaid dispensing fee. What is <b>true</b> of a claim and what can be <b>done</b> about it
+            are different things, so they are said separately: a plan the Kansas floor reaches that paid under this is
+            money owed; a plan it cannot reach is a rate to argue commercially; a discount card is simply the price.
+            NADAC is taken at the price in force on the fill date, never today&rsquo;s — pricing a July claim against
+            this week&rsquo;s file gives a plausible figure that is not what applied.
+          </p>
+
+          {nadacStanding.rows.length === 0 ? (
+            <Empty>
+              Nothing can be compared yet.
+              {nadacStanding.notCompared.length > 0 && (
+                <> {nadacStanding.notCompared.map((x) => `${x.fills} ${x.reason}`).join("; ")}.</>
+              )}{" "}
+              This needs NADAC loaded for the dates these claims were filled.
+            </Empty>
+          ) : (
+            <>
+              <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <Stat label="Compared" value={String(nadacStanding.rows.length)} sub="dispensings with a NADAC for that date" />
+                <Stat
+                  label="Owed — the floor reaches them"
+                  value={formatCents(nadacStanding.owedCents)}
+                  tone={nadacStanding.owedCents ? "warn" : undefined}
+                  sub="A shortfall to claim"
+                />
+                <Stat
+                  label="Under, but out of reach"
+                  value={formatCents(nadacStanding.argueCents)}
+                  sub="Not a claim — a rate to argue"
+                />
+                <Stat label="At or above the benchmark" value={String(nadacStanding.atOrAbove)} sub="Paid what the drug cost, and the fee" />
+              </div>
+
+              {/*
+                Only the rows somebody can do something about.
+
+                Every dispensing is measured, but printing all of them put fifty-nine rows and seven
+                pages of red numbers on this screen whose every actionable total was $0.00 — and a
+                list that long, that alarming and that inert is worse than no list, because it
+                teaches the reader to scroll past the section that holds the money. What is settled
+                stays one keystroke away below; what needs a decision is here.
+              */}
+              {actionable.length > 0 ? (
+                <NadacTable rows={actionable} />
+              ) : (
+                <p className="mt-2 rounded-lg border border-line bg-surface p-3 text-xs text-ink-2">
+                  Nothing here is a shortfall to file or a rate to argue{unsettled.length > 0 ? " yet" : ""}. Every
+                  dispensing with a classified plan came in at or above NADAC plus the fee, or is a discount programme
+                  where the low number is simply the price.
+                </p>
+              )}
+
+              {unsettled.length > 0 && (
+                <div className="mt-3 rounded-lg border border-warn/40 bg-warn/5 p-3 text-xs">
+                  <b>
+                    {unsettled.length} dispensing{unsettled.length === 1 ? "" : "s"} came in under NADAC + the fee on a
+                    plan nobody has classified — {formatCents(unsettled.reduce((n, r) => n + r.againstBenchmarkCents, 0))}{" "}
+                    between them.
+                  </b>{" "}
+                  Whether that is money owed or simply the price depends entirely on what kind of plan it is: the Kansas
+                  floor reaches a commercial or governmental plan and does not reach a discount card. Nothing can be
+                  claimed until they are told apart.{" "}
+                  <Link href="/plans" className="font-medium underline">Classify these plans</Link> and every one of
+                  these rows answers itself.
+                  <details className="mt-2">
+                    <summary className="cursor-pointer text-ink-3">Show the {unsettled.length} dispensings</summary>
+                    <div className="mt-2"><NadacTable rows={unsettled} /></div>
+                  </details>
+                </div>
+              )}
+
+              {settled.length > 0 && (
+                <details className="mt-3">
+                  <summary className="cursor-pointer text-xs text-ink-3">
+                    {settled.length} dispensing{settled.length === 1 ? "" : "s"} that need nothing — paid at or above the
+                    benchmark, or a discount programme where the low number is the price
+                  </summary>
+                  <div className="mt-2"><NadacTable rows={settled} /></div>
+                </details>
+              )}
+
+              {nadacStanding.notCompared.length > 0 && (
+                <p className="mt-1 text-xs text-ink-3">
+                  Not compared: {nadacStanding.notCompared.map((x) => `${x.fills} with ${x.reason}`).join(", ")}. Named
+                  rather than dropped — a shorter list reads as good news.
+                </p>
+              )}
+            </>
+          )}
+
+          <h2 className="mt-8 text-sm font-semibold">Dispensed at a loss</h2>
+          {/*
+            Per dispensing, not per transmission.
+
+            A prescription billed to a primary plan and then a secondary is one bottle and two
+            rows, and both rows carry the same acquisition cost. Counted as two claims the cost is
+            counted twice, and the primary row alone — a plan paying eight dollars towards a
+            six-hundred-dollar pen — reads as a catastrophic loss when the secondary paid the rest.
+          */}
+          <p className="mt-1 text-xs text-ink-2">
+            One row per dispensing. Where a fill went to a primary and then a secondary plan, both
+            plans&rsquo; payments are added and the bottle is counted once — the two rows are one bottle, and reading
+            them as two claims doubles the cost and turns a paid fill into an invented loss.
+            {flags.coordination.coordinatedFills > 0 && (
+              <>
+                {" "}
+                <b>
+                  {flags.coordination.coordinatedFills} fill{flags.coordination.coordinatedFills === 1 ? "" : "s"} here went to
+                  more than one plan
+                </b>
+                {flags.coordination.falseLosses > 0 && (
+                  <>
+                    , and {flags.coordination.falseLosses} of them would have shown{" "}
+                    {formatCents(flags.coordination.falseLossCents)} of losses that were never real
+                  </>
+                )}
+                .
+              </>
+            )}{" "}
+            A reversal matching no claim held is left out entirely: it reverses a dispensing from before this feed
+            began, whose revenue was never counted here.
+          </p>
+          {flags.lossFills.length === 0 ? (
+            <Empty>None — every dispensing brought in at least what the drug cost.</Empty>
+          ) : (
+            <div className="mt-2 overflow-x-auto rounded-lg border border-line">
+              <table className="w-full text-sm">
+                <thead className="bg-ground text-left text-xs uppercase tracking-wide text-ink-3">
+                  <tr>
+                    <th className="px-3 py-2">Filled</th>
+                    <th className="px-3 py-2">Drug</th>
+                    <th className="px-3 py-2">Paid by</th>
+                    <th className="px-3 py-2 text-right">Came in</th>
+                    <th className="px-3 py-2 text-right">Cost</th>
+                    <th className="px-3 py-2 text-right">Loss</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {flags.lossFills.slice(0, 50).map((f) => (
+                    <React.Fragment key={f.key}>
+                    <tr className="border-t border-line">
+                      <td className="px-3 py-2 whitespace-nowrap text-xs">{f.dateFilled}</td>
+                      <td className="px-3 py-2">
+                        {f.itemName ?? f.ndc11 ?? "—"}
+                        <span className="block font-mono text-[11px] text-ink-3">Rx {f.rxNumber}{f.fillNumber !== null ? `-${f.fillNumber}` : ""}</span>
+                      </td>
+                      <td className="px-3 py-2 text-xs">
+                        {f.payers.map((p) => p.name ?? p.bin ?? "—").join(" then ")}
+                        {f.coordinated && <span className="badge badge-muted ml-1">two plans</span>}
+                        {f.patientShareUncertain && (
+                          <span className="badge badge-warn ml-1" title="These rows remit more between them than any of them said the drug cost, so they cannot be one chain. The patient's share is floored at nothing rather than invented.">
+                            patient share unclear
+                          </span>
+                        )}
+                        {/*
+                          A loss the report does not agree is a loss is worth saying before somebody
+                          goes and argues with the plan about it.
+                        */}
+                        {f.unreconciledCents !== null && (
+                          <span
+                            className="badge badge-warn ml-1"
+                            title="The report booked this much revenue on this fill that the site did not find in the row. Open the row below to see which column it is in."
+                          >
+                            {formatCents(f.unreconciledCents)} unaccounted
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums">{formatCents(f.revenueCents)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{formatCents(f.acquisitionCents ?? 0)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-red-700">
+                        {formatCents(f.marginCents ?? 0)}
+                        {f.unreconciledCents !== null && (
+                          <span className="block text-[11px] font-normal text-ink-3">
+                            the report says {formatCents((f.marginCents ?? 0) + f.unreconciledCents)}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                    {/*
+                      What actually arrived, field by field.
+
+                      Column positions in this report are worked out by counting, and a report whose
+                      columns move by one produces figures that are individually plausible and
+                      collectively wrong — a dispensing fee read as a patient total, a tax read as a
+                      quantity. Arguing about a loss from a screen showing only conclusions is
+                      guesswork on both sides. This is the evidence.
+                    */}
+                    <tr>
+                      <td colSpan={6} className="px-3 pb-2">
+                        <details>
+                          <summary className="cursor-pointer text-[11px] text-ink-3 hover:text-accent">
+                            Why is this a loss? Show the row exactly as it arrived
+                          </summary>
+                          <div className="mt-1 space-y-2">
+                            {(flags.rawByFill.get(f.key) ?? []).map((c, i) => (
+                              <div key={i} className="rounded-md border border-line bg-ground p-2">
+                                <p className="text-[11px] font-semibold">{c.payer ?? "unnamed payer"}</p>
+                                <dl className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 sm:grid-cols-4">
+                                  {c.fields.map((x) => (
+                                    <div key={x.name} className="flex justify-between gap-2 text-[11px]">
+                                      <dt className="text-ink-3">{x.name}</dt>
+                                      <dd className="font-mono">{x.value || "—"}</dd>
+                                    </div>
+                                  ))}
+                                </dl>
+                              </div>
+                            ))}
+                            {(flags.rawByFill.get(f.key) ?? []).length === 0 && (
+                              <p className="text-[11px] text-ink-3">
+                                This claim came from an older load that did not keep the original row, so there is
+                                nothing to show. Load that day&rsquo;s report again and it will be here.
+                              </p>
+                            )}
+                            {/*
+                              What the gap is, without pretending to know what caused it.
+
+                              The two candidates want opposite responses — a missing column is fixed
+                              here, a promised payment is waited for — and the fill cannot tell them
+                              apart. The row above can, which is why it is printed.
+                            */}
+                            {f.unreconciledCents !== null && (
+                              <p className="rounded-md border border-warn/50 bg-warn/10 p-2 text-[11px] text-ink-2">
+                                The report says this fill made {formatCents(f.reportedMarginCents ?? 0)} and this site
+                                makes it {formatCents(f.marginCents ?? 0)}. PioneerRx computes its figure from the row
+                                above, so <b>{formatCents(f.unreconciledCents)} of revenue is on that row and this site
+                                did not pick it up</b>. Two things it can be: a patient total in a column this reader is
+                                not reading — the usual cause on a small generic, and fixable here — or money the plan
+                                promised at adjudication and pays weeks later through{" "}
+                                <Link href="/remits/mtf" className="underline">the facilitator</Link>, which is the
+                                usual cause on a Part D brand. Compare the figures above against what this site made of
+                                them, below, and send me this box: the column it is hiding in will be one of them.
+                              </p>
+                            )}
+                            {f.agreesWithReport === false && (
+                              <p className="rounded-md border border-crit bg-crit-soft p-2 text-[11px] text-crit">
+                                This site makes this fill {formatCents(f.marginCents ?? 0)} and the report only{" "}
+                                {formatCents(f.reportedMarginCents ?? 0)}. We cannot be holding money the report never
+                                counted, so one of the columns above is not what this reader thinks it is — that is the
+                                bug, not the claim.
+                              </p>
+                            )}
+                            <p className="text-[11px] text-ink-2">
+                              What this site made of it: {formatCents(f.remitCents)} from the plans, {formatCents(f.patientPaidCents)}{" "}
+                              from the patient{f.laterPaymentsCents ? `, ${formatCents(f.laterPaymentsCents)} arrived later` : ""}, against{" "}
+                              {formatCents(f.acquisitionCents ?? 0)} of drug. If a figure above is not where this site
+                              thinks it is, that is the bug — send me this box.
+                            </p>
+                          </div>
+                        </details>
+                      </td>
+                    </tr>
+                    </React.Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {imports.length > 0 && (
+            <>
+              <h2 className="mt-8 text-sm font-semibold">Loads</h2>
+              <ul className="divide-y divide-line rounded-lg border border-line bg-surface text-sm">
+                {imports.map((i) => (
+                  <li key={i.id} className="px-3 py-2">
+                    <div className="font-medium">{i.fileName}</div>
+                    <div className="text-xs text-ink-3">
+                      {i.claimsAdded} added
+                      {i.duplicates ? `, ${i.duplicates} already held` : ""}
+                      {i.skipped ? `, ${i.skipped} skipped` : ""}
+                      {i.periodFrom ? ` · ${i.periodFrom} to ${i.periodTo}` : ""}
+                      {" · "}{new Date(i.createdAt).toLocaleString()}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </>
+      )}
+      {/*
+        Where these claims come from, and how to feed it by hand.
+
+        It belongs on this page — the morning after, "did last night's file come in" is one glance
+        here. It does not belong above the money. Anyone opening this screen is asking what the
+        pharmacy made and what it is owed, and four paragraphs of plumbing before the first figure
+        is how a working screen turns into a wall.
       */}
       <section className="my-4 rounded-lg border border-line bg-surface p-4">
         <h2 className="text-sm font-semibold">Daily claims feed</h2>
@@ -133,145 +758,6 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
         </form>
       </section>
 
-      {flags.total === 0 ? (
-        <Empty>No claims loaded yet.</Empty>
-      ) : (
-        <>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Stat label="Claims held" value={flags.total.toLocaleString()} />
-            <Stat label="Dispensed at a loss" value={String(flags.belowCost.length)} tone={flags.belowCost.length ? "warn" : undefined} sub={formatCents(flags.belowCostTotalCents)} />
-            <Stat
-              label="In-scope under $10.50"
-              value={String(flags.underFee.length)}
-              tone={flags.underFee.length ? "warn" : undefined}
-              sub={`${formatCents(flags.underFeeShortfallCents)} short`}
-            />
-            <Stat label="Cannot be priced" value={String(flags.unpriceable)} tone={flags.unpriceable ? "warn" : undefined} sub="no quantity" />
-          </div>
-
-          {flags.undetermined > 0 && (
-            <Notice kind="warn">
-              {flags.undetermined} of {flags.total} claims are on plans nobody has classified yet, and{" "}
-              {flags.underFeeUndetermined} of those received less than $10.50
-              {flags.underFeeUndetermined > 0 && ` — ${formatCents(flags.underFeeUndeterminedShortfallCents)} that may or may not be owed`}.
-              A low payment is only a shortfall on a plan the Kansas floor reaches; on a cash discount programme it is
-              simply the price. Settle them in <a href="/plans" className="underline">Plans</a>.
-            </Notice>
-          )}
-
-          {flags.unpriceable > 0 && (
-            <Notice kind="warn">
-              {flags.unpriceable} of {flags.total} claims carry no dispensed quantity, so they cannot be priced against
-              a contract or against NADAC. That column comes through blank on the current PioneerRx export — it is the
-              first thing to get fixed.
-            </Notice>
-          )}
-
-          {flags.ambiguousPayer > 0 && (
-            <Notice kind="warn">
-              {flags.ambiguousPayer} claim{flags.ambiguousPayer === 1 ? "" : "s"} sit on a BIN that the listing gives to
-              more than one PBM, and the payer name did not settle which. Read the PCN or network ID off the claim to
-              decide — they are not attached to a guess.
-            </Notice>
-          )}
-
-          {flags.unlistedBins.length > 0 && (
-            <Notice kind="crit">
-              {flags.unlistedClaims} claim{flags.unlistedClaims === 1 ? "" : "s"} adjudicated to{" "}
-              {flags.unlistedBins.length} BIN{flags.unlistedBins.length === 1 ? "" : "s"} that Health Mart Atlas does
-              not publish at all: {flags.unlistedBins.join(", ")}. We hold no contract reference for these payers, so
-              nothing they pay can be checked against a rate. Getting these identified is the highest-value thing on
-              the contract review.
-            </Notice>
-          )}
-
-          <h2 className="mt-8 text-sm font-semibold">By payer</h2>
-          <p className="mb-2 text-xs text-ink-3">Open a payer to see its contracted rates and appeal route next to its claims.</p>
-          <div className="overflow-x-auto rounded-lg border border-line">
-            <table className="w-full text-sm">
-              <thead className="bg-ground text-left text-xs uppercase tracking-wide text-ink-3">
-                <tr>
-                  <th className="px-3 py-2">Payer</th>
-                  <th className="px-3 py-2 text-right">Claims</th>
-                  <th className="px-3 py-2 text-right">Received</th>
-                  <th className="px-3 py-2 text-right">Gross profit</th>
-                  <th className="px-3 py-2 text-right">At a loss</th>
-                  <th className="px-3 py-2">Networks</th>
-                </tr>
-              </thead>
-              <tbody>
-                {byPayer.map((p) => (
-                  <tr key={p.pbmName} className="border-t border-line align-top">
-                    <td className="px-3 py-2">
-                      {p.pbmName.includes("unmatched") || p.pbmName === "Unidentified payer" ? (
-                        <span>{p.pbmName}</span>
-                      ) : (
-                        <Link href={`/payers/${encodeURIComponent(p.pbmName)}`} className="font-medium underline">{p.pbmName}</Link>
-                      )}
-                      <div className="text-xs text-ink-3">{p.bins.join(", ") || "—"}</div>
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums">{p.claims}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{formatCents(p.receivedCents)}</td>
-                    <td className={`px-3 py-2 text-right tabular-nums ${p.profitCents < 0 ? "text-red-700" : ""}`}>{formatCents(p.profitCents)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{p.belowCost || <span className="text-ink-3">—</span>}</td>
-                    <td className="px-3 py-2 text-xs text-ink-3">{p.networks.join(", ") || "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <h2 className="mt-8 text-sm font-semibold">Dispensed at a loss</h2>
-          {flags.belowCost.length === 0 ? (
-            <Empty>None.</Empty>
-          ) : (
-            <div className="overflow-x-auto rounded-lg border border-line">
-              <table className="w-full text-sm">
-                <thead className="bg-ground text-left text-xs uppercase tracking-wide text-ink-3">
-                  <tr>
-                    <th className="px-3 py-2">Filled</th>
-                    <th className="px-3 py-2">Drug</th>
-                    <th className="px-3 py-2">Payer</th>
-                    <th className="px-3 py-2">Network</th>
-                    <th className="px-3 py-2 text-right">Loss</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[...flags.belowCost].sort((a, b) => (a.grossProfitCents ?? 0) - (b.grossProfitCents ?? 0)).slice(0, 50).map((c) => (
-                    <tr key={c.id} className="border-t border-line">
-                      <td className="px-3 py-2 whitespace-nowrap text-xs">{c.dateFilled}</td>
-                      <td className="px-3 py-2">{c.itemName ?? c.ndc11 ?? "—"}</td>
-                      <td className="px-3 py-2">{c.pbmName ?? c.payerLabel ?? "—"}</td>
-                      <td className="px-3 py-2 text-xs text-ink-3">{c.networkId ?? "—"}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-red-700">{formatCents(c.grossProfitCents ?? 0)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {imports.length > 0 && (
-            <>
-              <h2 className="mt-8 text-sm font-semibold">Loads</h2>
-              <ul className="divide-y divide-line rounded-lg border border-line bg-surface text-sm">
-                {imports.map((i) => (
-                  <li key={i.id} className="px-3 py-2">
-                    <div className="font-medium">{i.fileName}</div>
-                    <div className="text-xs text-ink-3">
-                      {i.claimsAdded} added
-                      {i.duplicates ? `, ${i.duplicates} already held` : ""}
-                      {i.skipped ? `, ${i.skipped} skipped` : ""}
-                      {i.periodFrom ? ` · ${i.periodFrom} to ${i.periodTo}` : ""}
-                      {" · "}{new Date(i.createdAt).toLocaleString()}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-        </>
-      )}
     </>
   );
 }
