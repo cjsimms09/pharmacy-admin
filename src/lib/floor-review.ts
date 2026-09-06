@@ -1,4 +1,5 @@
 import { receivedCents, isPricingUnit } from "./money";
+import { planLookup } from "./plan-key";
 import {
   verifyClaim,
   SB20_MIN_DISPENSING_FEE_CENTS,
@@ -140,14 +141,13 @@ export type FloorReview = {
 const DEFAULT_MATERIALITY_CENTS = 100;
 
 /*
- * The natural key of a plan, and the scope a classification implies.
+ * The scope a classification implies.
  *
- * Restated here rather than imported, because the register that owns them reaches the database
- * and this module must not: everything a filing asserts is decided in this file, so it has to be
- * runnable — and checkable by hand — with nothing behind it. The plan register's own tests hold
- * the same two facts, so a change to either would fail there.
+ * Restated here rather than imported, because the register that owns it reaches the database and
+ * this module must not: everything a filing asserts is decided in this file, so it has to be
+ * runnable — and checkable by hand — with nothing behind it. The plan key itself comes from
+ * plan-key.ts, which reaches nothing either.
  */
-const planKey = (bin: string | null, groupNumber: string | null) => `${bin ?? ""}|${groupNumber ?? ""}`;
 
 const SCOPE_OF: Record<string, PlanScope> = {
   commercial_fully_insured: "commercial_non_erisa",
@@ -168,6 +168,7 @@ export type ClaimRow = {
   payerLabel: string | null;
   pbmName: string | null;
   bin: string | null;
+  pcn?: string | null;
   groupNumber: string | null;
   quantityThousandths: number | null;
   quantityUnit: string | null;
@@ -175,7 +176,7 @@ export type ClaimRow = {
   copayCents: number | null;
 };
 
-export type PlanRow = { bin: string | null; groupNumber: string | null; classification: string | null };
+export type PlanRow = { bin: string | null; pcn?: string | null; groupNumber: string | null; classification: string | null };
 
 /**
  * The whole review, as a pure function.
@@ -190,14 +191,14 @@ export function reviewClaims(
   opts: { ksMedicaidDispensingFeeCents: number | null; materialityCents: number },
 ): FloorReview {
   const { ksMedicaidDispensingFeeCents, materialityCents } = opts;
-  const classBy = new Map(plans.map((g) => [planKey(g.bin, g.groupNumber), g.classification]));
+  const lookup = planLookup(plans);
 
   const reviewed: ReviewedClaim[] = [];
   for (const c of claims) {
     // A claim with no NDC cannot be priced against anything and is not a floor question.
     if (!c.ndc11) continue;
 
-      const cls = classBy.get(planKey(c.bin, c.groupNumber)) ?? undefined;
+      const cls = lookup(c)?.classification ?? undefined;
     const got = receivedCents(c.remitCents, c.copayCents);
 
     const forFloor: ClaimForFloor = {

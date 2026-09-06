@@ -477,6 +477,13 @@
       "when": 1788722173053,
       "tag": "0067_futuristic_roulette",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "6",
+      "when": 1788723883729,
+      "tag": "0068_ancient_jubilee",
+      "breakpoints": true
     }
   ]
 }

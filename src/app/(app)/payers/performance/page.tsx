@@ -56,10 +56,11 @@ export default async function PayerPerformancePage({ searchParams }: { searchPar
     "use server";
     const u = await requireManager();
     const bin = String(fd.get("bin") ?? "") || null;
+    const pcn = String(fd.get("pcn") ?? "") || null;
     const groupNumber = String(fd.get("groupNumber") ?? "") || null;
     try {
       const r = await savePayerLink(
-        { bin, pcn: null, groupNumber, contractId: null },
+        { bin, pcn, groupNumber, contractId: null },
         {
           pbmName: String(fd.get("pbmName") ?? ""),
           contractFileName: String(fd.get("contractFileName") ?? "") || null,
@@ -94,7 +95,7 @@ export default async function PayerPerformancePage({ searchParams }: { searchPar
     if (cls === "unknown") redirect("/payers/performance?error=" + encodeURIComponent("Choose what kind of plan it is."));
     try {
       const { classifyPlanByKey } = await import("@/lib/plans");
-      const r = await classifyPlanByKey(bin, groupNumber, cls, u, String(fd.get("basis") ?? ""));
+      const r = await classifyPlanByKey(bin, String(fd.get("pcn") ?? "") || null, groupNumber, cls, u, String(fd.get("basis") ?? ""));
       await audit({ action: "plans.classify", userId: u.id, userName: u.name, details: `${bin ?? ""}/${groupNumber ?? ""} → ${cls}` });
       revalidatePath("/payers/performance");
       revalidatePath("/plans");
@@ -329,8 +330,10 @@ export default async function PayerPerformancePage({ searchParams }: { searchPar
                           </p>
                           <ul className="ml-4 mt-1 space-y-1">
                             {b.groups.map((g) => (
-                              <li key={g.groupNumber ?? "none"} className="text-xs">
-                                <span className="font-mono">group {g.groupNumber ?? "—"}</span>
+                              <li key={`${g.pcn ?? ""}|${g.groupNumber ?? ""}`} className="text-xs">
+                                <span className="font-mono">
+                                  {g.pcn ? `PCN ${g.pcn} · ` : ""}group {g.groupNumber ?? "—"}
+                                </span>
                                 {g.sponsorName && <span className="ml-1 text-ink-2">{g.sponsorName}</span>}
                                 {g.classification && g.classification !== "unknown" ? (
                                   <span className="badge badge-muted ml-1">{CLASS_INFO[g.classification as PlanClass]?.label ?? g.classification.replace(/_/g, " ")}</span>
@@ -345,6 +348,7 @@ export default async function PayerPerformancePage({ searchParams }: { searchPar
                                   */
                                   <form action={classify} className="ml-1 inline-flex items-center gap-1">
                                     <input type="hidden" name="bin" value={b.bin ?? ""} />
+                                    <input type="hidden" name="pcn" value={g.pcn ?? ""} />
                                     <input type="hidden" name="groupNumber" value={g.groupNumber ?? ""} />
                                     <select name="classification" className="field w-auto px-1 py-0.5 text-[11px]" defaultValue="unknown">
                                       <option value="unknown">what kind of plan?</option>
@@ -400,8 +404,9 @@ export default async function PayerPerformancePage({ searchParams }: { searchPar
             </ul>
             <p className="mt-2 text-xs text-ink-3">
               A BIN is a processing route, not a plan: the same BIN carries a fully-insured commercial plan the Kansas
-              floor applies to and a self-funded ERISA plan it cannot touch. The group number separates them, and the
-              contract id printed on the claim names the agreement that priced it.
+              floor applies to and a self-funded ERISA plan it cannot touch. The PCN separates the lines of business
+              and the group number the plans under them, and the network id printed on the claim names the agreement
+              that priced it.
             </p>
           </Card>
 
@@ -419,13 +424,14 @@ export default async function PayerPerformancePage({ searchParams }: { searchPar
               <div className="overflow-x-auto">
                 <table className="table">
                   <thead>
-                    <tr><th>BIN / group</th><th>Who</th><th className="text-right">Fills</th><th className="text-right">Came in</th><th>What is missing</th></tr>
+                    <tr><th>BIN / PCN / group</th><th>Who</th><th className="text-right">Fills</th><th className="text-right">Came in</th><th>What is missing</th></tr>
                   </thead>
                   <tbody>
                     {unmapped.slice(0, 40).map((l) => (
-                      <tr key={`${l.bin}|${l.groupNumber}`}>
+                      <tr key={`${l.bin}|${l.pcn}|${l.groupNumber}`}>
                         <td className="font-mono text-xs">
                           {l.bin ?? "—"}
+                          {l.pcn && <span className="block text-ink-3">PCN {l.pcn}</span>}
                           {l.groupNumber && <span className="block text-ink-3">{l.groupNumber}</span>}
                         </td>
                         <td className="text-sm">
@@ -448,6 +454,7 @@ export default async function PayerPerformancePage({ searchParams }: { searchPar
                           {canManage && (
                             <form action={confirm} className="mt-1.5 flex flex-wrap items-center gap-1.5">
                               <input type="hidden" name="bin" value={l.bin ?? ""} />
+                              <input type="hidden" name="pcn" value={l.pcn ?? ""} />
                               <input type="hidden" name="groupNumber" value={l.groupNumber ?? ""} />
                               <input
                                 name="pbmName"

@@ -1,0 +1,1 @@
+ALTER TABLE `plan_groups` ADD `pcn` text;

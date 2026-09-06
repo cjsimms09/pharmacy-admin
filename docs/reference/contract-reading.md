@@ -105,6 +105,30 @@ BIN/PCN/group the pharmacy has billed, with claim counts) and proposes links:
 Expect a remainder: plans on BINs no document prints. Those are the ones to ask the PSAO about,
 listed with their claim volume so the largest is asked about first.
 
+## 4a. Group when you can, never where you should not
+
+The tree, from the claim's own fields: **BIN** → **PCN** → **group** → **network reimbursement
+id**. Each level is a different question, and each answer is only ever shared downward.
+
+| Level | Identifies | Shared across it | Never shared across it |
+|---|---|---|---|
+| BIN | the processor (the company) | contacts, appeal process, 835 routing, "who pays best" as a company | the classification, the formula, the rate |
+| BIN + PCN | the line of business (commercial, Part D, Medicaid, a card) | the classification is usually one per PCN; the formula often | the rate (Preferred and Standard sit under one PCN) |
+| BIN + PCN + group | the plan (the sponsor) | the classification: this is the row in the plan register | a rate read off another group's claims |
+| network reimbursement id | the contract that priced the claim | the rate: this is the row in `network_rates` | anything with a different id, even under the same PCN |
+
+Rules the code holds:
+
+1. **Same BIN is the same company, not the same contract.** Contacts, the appeal address and the
+   835 routing come from the BIN's counterparty; nothing about money does.
+2. **A plan is BIN, PCN and group** (`plan-key.ts`). A register row with a blank PCN is the old
+   register and is a fallback only; it is marked "any PCN" on the page until the PCN is decided.
+3. **Group alone is never an identity**: group numbers repeat across processors.
+4. **A rate belongs to a network id**, and a claim with no network id is priced "at most" until a
+   person links it (`payer_links` on BIN + PCN, or on the id).
+5. **Two PCNs under one BIN and group are two plans**, never folded on any page, and each is
+   classified on its own.
+
 ## 5. MAC appeals, automated as far as is honest
 
 `src/lib/appeal-packet.ts` assembles an appeal from six facts the site holds: the claim, what it

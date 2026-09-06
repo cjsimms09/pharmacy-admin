@@ -74,7 +74,7 @@ export type AgainstNadac = {
 export async function againstNadac(fills: Fill[]): Promise<AgainstNadac> {
   const { db } = await import("@/db");
   const { getSettings } = await import("./settings");
-  const { planKey, CLASS_INFO } = await import("./plans");
+  const { planLookup, CLASS_INFO } = await import("./plans");
 
   /*
    * Only the prices for the drugs actually on these fills.
@@ -110,7 +110,7 @@ export async function againstNadac(fills: Fill[]): Promise<AgainstNadac> {
 
   const [groups, s] = await Promise.all([db.query.planGroups.findMany(), getSettings()]);
   const records: NadacRecord[] = nadacRows;
-  const byKey = new Map(groups.map((g) => [planKey(g.bin, g.groupNumber), g.classification]));
+  const lookup = planLookup(groups);
 
   const feeRaw = Number((s.ks_medicaid_dispensing_fee_cents ?? "").trim());
   const ksFee = Number.isFinite(feeRaw) && feeRaw > 0 ? feeRaw : null;
@@ -151,7 +151,7 @@ export async function againstNadac(fills: Fill[]): Promise<AgainstNadac> {
     }
     const floor = computeFloor(f.quantityThousandths, nadac, ksFee);
     const primary = f.payers[0];
-    const cls = byKey.get(planKey(primary.bin, primary.groupNumber)) ?? null;
+    const cls = lookup({ bin: primary.bin, pcn: primary.pcn ?? null, groupNumber: primary.groupNumber })?.classification ?? null;
     const inScope = cls ? CLASS_INFO[cls as keyof typeof CLASS_INFO]?.inScope === true : false;
     const against = f.revenueCents - floor.floorCents;
 

@@ -158,7 +158,7 @@ export async function movement(lookbackDays = SHELF_POLICY.lookbackDays): Promis
   const fills = groupIntoFills(
     claims.map((c) => ({
       id: c.id, rxNumber: c.rxNumber, fillNumber: c.fillNumber, dateFilled: c.dateFilled,
-      ndc11: c.ndc11, itemName: c.itemName, bin: c.bin, groupNumber: c.groupNumber,
+      ndc11: c.ndc11, itemName: c.itemName, bin: c.bin, pcn: c.pcn, groupNumber: c.groupNumber,
       pbmName: c.pbmName, payerLabel: c.payerLabel, quantityThousandths: c.quantityThousandths,
       remitCents: c.remitCents, copayCents: c.copayCents, patientTotalCents: c.patientTotalCents,
       acquisitionCents: c.acquisitionCents, status: c.status, onAccount: c.onAccount,

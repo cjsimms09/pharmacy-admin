@@ -2120,6 +2120,13 @@ export const planGroups = sqliteTable(
     id: text("id").primaryKey(),
     /** The natural key of a plan on a claim: who processes it and under which group. */
     bin: text("bin"),
+    /**
+     * The processor control number, which with the BIN says which processor and usually which line
+     * of business. One BIN carries a commercial PCN and a Part D PCN side by side; a register keyed
+     * on BIN and group alone classified them as one plan. Null on rows made before the PCN was kept:
+     * those stand as a fallback for any PCN until a row for the PCN is decided.
+     */
+    pcn: text("pcn"),
     groupNumber: text("group_number"),
     /** The payer name as the claims wrote it, for recognising the row. */
     payerLabel: text("payer_label"),

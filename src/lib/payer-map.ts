@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { groupIntoFills, type Fill, type ClaimRow } from "./fills";
 import { laterPayments } from "./claim-payments";
 import { allPayerLinks, linkFor, type PayerLinkRow } from "./payer-links";
+import { planKey, planLookup } from "./plan-key";
 
 /**
  * The line from a claim to the money: BIN and group, to plan, to PBM, to contract, to rate sheet.
@@ -32,12 +33,14 @@ export type ChainGap = "no_pbm" | "bin_ambiguous" | "no_plan_class" | "no_contra
 
 export type PayerLink = {
   bin: string | null;
+  /** The processor control number. One BIN carries a commercial PCN and a Part D one side by side. */
+  pcn: string | null;
   groupNumber: string | null;
   /** Who the listing says this BIN belongs to. Several where the BIN is shared. */
   pbmNames: string[];
   /** The one name to use, where it is not in doubt. */
   pbmName: string | null;
-  /** What the plan register says this BIN-and-group is: commercial, Medicaid, cash discount… */
+  /** What the plan register says this BIN, PCN and group is: commercial, Medicaid, cash discount… */
   classification: string | null;
   sponsorName: string | null;
   /** Contracts on file for that PBM. */
@@ -147,8 +150,13 @@ export async function payerMap(): Promise<{
   const later = await laterPayments();
   // What somebody has already settled, keyed by the claim it came from, so it can be read here
   // rather than searched for again.
-  const keyOfClaim = new Map<string, { pcn: string | null; contractId: string | null }>();
-  for (const c of claims) keyOfClaim.set(`${c.bin ?? ""}|${(c.groupNumber ?? "").toUpperCase()}`, { pcn: c.pcn, contractId: c.networkId });
+  // The network reimbursement id, per plan. The fill carries the BIN, PCN and group; the claim
+  // row carries the id of the contract that priced it, so it is joined on the plan key here.
+  const contractOfPlan = new Map<string, string | null>();
+  for (const c of claims) {
+    const k = planKey(c.bin, c.pcn, c.groupNumber);
+    if (c.networkId || !contractOfPlan.has(k)) contractOfPlan.set(k, c.networkId);
+  }
 
   const fills = groupIntoFills(
     claims.map(
@@ -160,6 +168,7 @@ export async function payerMap(): Promise<{
         ndc11: c.ndc11,
         itemName: c.itemName,
         bin: c.bin,
+        pcn: c.pcn,
         groupNumber: c.groupNumber,
         pbmName: c.pbmName,
         payerLabel: c.payerLabel,
@@ -176,11 +185,10 @@ export async function payerMap(): Promise<{
     later,
   );
 
-  // ── The chain, per BIN and group actually billed ──
+  // ── The chain, per BIN, PCN and group actually billed ──
   const binsByNumber = new Map<string, typeof bins>();
   for (const b of bins) binsByNumber.set(b.bin, [...(binsByNumber.get(b.bin) ?? []), b]);
-  const groupKey = (bin: string | null, g: string | null) => `${bin ?? ""}|${(g ?? "").toUpperCase()}`;
-  const planByKey = new Map(groups.map((g) => [groupKey(g.bin, g.groupNumber), g]));
+  const planOf = planLookup(groups);
   const contractsByPbm = new Map<string, typeof contracts>();
   for (const c of contracts) contractsByPbm.set(c.pbmName, [...(contractsByPbm.get(c.pbmName) ?? []), c]);
   const ratesByPbm = new Map<string, typeof rates>();
@@ -190,12 +198,12 @@ export async function payerMap(): Promise<{
   for (const f of fills) {
     for (const p of f.payers) {
       const g = p.groupNumber;
-      const key = groupKey(p.bin, g);
+      const key = planKey(p.bin, p.pcn, g);
       let e = linkBy.get(key);
       if (!e) {
         const candidates = p.bin ? (binsByNumber.get(p.bin) ?? []) : [];
         const names = [...new Set(candidates.map((c) => c.pbmName))];
-        const plan = planByKey.get(key) ?? null;
+        const plan = planOf(p) ?? null;
         /*
          * A confirmed link beats every guess, including an unambiguous listing.
          *
@@ -203,8 +211,7 @@ export async function payerMap(): Promise<{
          * BIN shared by several PBMs — which is precisely where a wrong answer sends an appeal to
          * the wrong agreement.
          */
-        const extra = keyOfClaim.get(key) ?? { pcn: null, contractId: null };
-        const hit: PayerLinkRow | null = linkFor(confirmed, { bin: p.bin, pcn: extra.pcn, groupNumber: g, contractId: extra.contractId });
+        const hit: PayerLinkRow | null = linkFor(confirmed, { bin: p.bin, pcn: p.pcn, groupNumber: g, contractId: contractOfPlan.get(key) ?? null });
         const settled = hit?.pbmName ?? (names.length === 1 ? names[0] : (plan?.pbmName ?? null));
         const forPbm = settled ? (contractsByPbm.get(settled) ?? []) : [];
         const rateRows = settled ? (ratesByPbm.get(settled) ?? []) : [];
@@ -217,6 +224,7 @@ export async function payerMap(): Promise<{
         if (settled && rateRows.length === 0) gaps.push("no_rates");
         e = {
           bin: p.bin,
+          pcn: p.pcn,
           groupNumber: g,
           pbmNames: names,
           pbmName: settled,
@@ -244,10 +252,11 @@ export async function payerMap(): Promise<{
   const links = [...linkBy.values()].sort((a, b) => b.revenueCents - a.revenueCents);
 
   // ── The league table, per payer, over fills ──
-  // Which BIN-and-group is a subsidy rather than a plan, so it can be kept out of the ranking.
-  const subsidyKeys = new Set(
-    groups.filter((g) => SUBSIDY_CLASSES.has(g.classification)).map((g) => `${g.bin ?? ""}|${(g.groupNumber ?? "").toUpperCase()}`),
-  );
+  // Which plan is a subsidy rather than a plan, so it can be kept out of the ranking.
+  const isSubsidy = (p: { bin: string | null; pcn: string | null; groupNumber: string | null }) => {
+    const cls = planOf(p)?.classification;
+    return cls !== undefined && SUBSIDY_CLASSES.has(cls);
+  };
   const scoreBy = new Map<string, PayerScore>();
   for (const f of fills) {
     const { key, bin } = payerKey(f);
@@ -257,7 +266,7 @@ export async function payerMap(): Promise<{
       const primary = f.payers[0];
       e = {
         pbmName: key,
-        isSubsidy: subsidyKeys.has(`${primary.bin ?? ""}|${(primary.groupNumber ?? "").toUpperCase()}`),
+        isSubsidy: isSubsidy(primary),
         sharedWithCardFills: 0,
         cardSupportBesideThisCents: 0,
         bins: [],
@@ -277,7 +286,7 @@ export async function payerMap(): Promise<{
     // What a card put in beside this payer on the same fill, held apart from this payer's own money.
     const cardBeside = f.payers
       .slice(1)
-      .filter((p) => subsidyKeys.has(`${p.bin ?? ""}|${(p.groupNumber ?? "").toUpperCase()}`))
+      .filter((p) => isSubsidy(p))
       .reduce((n, p) => n + p.remitCents, 0);
     if (cardBeside > 0) {
       e.sharedWithCardFills++;
@@ -420,8 +429,10 @@ export type ContractNode = {
 };
 
 export type GroupNode = {
+  /** The processor control number the plan bills under. Two PCNs under one BIN are two plans. */
+  pcn: string | null;
   groupNumber: string | null;
-  /** What the plan register says this BIN-and-group is — the level ERISA or Part D is decided at. */
+  /** What the plan register says this BIN, PCN and group is — the level ERISA or Part D is decided at. */
   classification: string | null;
   sponsorName: string | null;
   contracts: ContractNode[];
@@ -470,6 +481,7 @@ export async function payerTree(): Promise<{ companies: CompanyNode[]; unnamedRe
         ndc11: c.ndc11,
         itemName: c.itemName,
         bin: c.bin,
+        pcn: c.pcn,
         groupNumber: c.groupNumber,
         pbmName: c.pbmName,
         payerLabel: c.payerLabel,
@@ -486,15 +498,15 @@ export async function payerTree(): Promise<{ companies: CompanyNode[]; unnamedRe
     later,
   );
 
-  // The claim carries the contract id and PCN; the fill carries the payers. Join on the claim.
-  const extraByClaim = new Map<string, { pcn: string | null; contractId: string | null }>();
+  // The claim carries the contract id; the fill carries the payers. Join on the claim.
+  const contractByClaim = new Map<string, string | null>();
   for (const c of claims) {
-    extraByClaim.set(`${c.rxNumber}|${c.fillNumber ?? ""}|${c.dateFilled}|${c.bin ?? ""}`, { pcn: c.pcn, contractId: c.networkId });
+    contractByClaim.set(`${c.rxNumber}|${c.fillNumber ?? ""}|${c.dateFilled}|${c.bin ?? ""}`, c.networkId);
   }
 
   const companyOfBin = new Map<string, string[]>();
   for (const b of bins) companyOfBin.set(b.bin, [...new Set([...(companyOfBin.get(b.bin) ?? []), b.pbmName])]);
-  const planByKey = new Map(groups.map((g) => [`${g.bin ?? ""}|${(g.groupNumber ?? "").toUpperCase()}`, g]));
+  const planOf = planLookup(groups);
 
   type Acc = { fills: number; revenueCents: number; marginCents: number };
   const add = (a: Acc, share: number, f: Fill) => {
@@ -508,10 +520,10 @@ export async function payerTree(): Promise<{ companies: CompanyNode[]; unnamedRe
   for (const f of fills) {
     const share = 1 / f.payers.length;
     for (const p of f.payers) {
-      const extra = extraByClaim.get(`${f.rxNumber}|${f.fillNumber ?? ""}|${f.dateFilled}|${p.bin ?? ""}`) ?? { pcn: null, contractId: null };
-      const link = linkFor(confirmed, { bin: p.bin, pcn: extra.pcn, groupNumber: p.groupNumber, contractId: extra.contractId });
+      const contractId = contractByClaim.get(`${f.rxNumber}|${f.fillNumber ?? ""}|${f.dateFilled}|${p.bin ?? ""}`) ?? null;
+      const link = linkFor(confirmed, { bin: p.bin, pcn: p.pcn, groupNumber: p.groupNumber, contractId });
       const listed = p.bin ? (companyOfBin.get(p.bin) ?? []) : [];
-      const plan = planByKey.get(`${p.bin ?? ""}|${(p.groupNumber ?? "").toUpperCase()}`) ?? null;
+      const plan = planOf(p) ?? null;
       /*
        * The company, settled in the order the answers can be trusted.
        *
@@ -541,11 +553,13 @@ export async function payerTree(): Promise<{ companies: CompanyNode[]; unnamedRe
       }
       add(b.node, share, f);
 
-      const gKey = (p.groupNumber ?? "").toUpperCase();
+      // Two PCNs under one BIN and group are two plans, and are never folded together.
+      const gKey = `${(p.pcn ?? "").trim().toUpperCase()}|${(p.groupNumber ?? "").trim().toUpperCase()}`;
       let g = b.groups.get(gKey);
       if (!g) {
         g = {
           node: {
+            pcn: p.pcn,
             groupNumber: p.groupNumber,
             classification: plan?.classification ?? null,
             sponsorName: plan?.sponsorName ?? null,
@@ -560,7 +574,7 @@ export async function payerTree(): Promise<{ companies: CompanyNode[]; unnamedRe
       }
       add(g.node, share, f);
 
-      const cid = extra.contractId ?? null;
+      const cid = contractId;
       const cKey = cid ?? "";
       let ct = g.contracts.get(cKey);
       if (!ct) {

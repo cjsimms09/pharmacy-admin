@@ -2,6 +2,7 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { PlanClass } from "@/db/schema";
+import { planKey, planLookup } from "./plan-key";
 import { newId } from "./crypto";
 import { receivedCents } from "./money";
 import type { PlanScope } from "./reimbursement-rules";
@@ -76,8 +77,9 @@ export function planScopeOf(cls: PlanClass): PlanScope {
   }
 }
 
-/** The natural key of a plan: who processes it, under which group. */
-export const planKey = (bin: string | null, groupNumber: string | null) => `${bin ?? ""}|${groupNumber ?? ""}`;
+/** The natural key of a plan and the lookup that applies it, from plan-key.ts so the floor review can share them. */
+export { planKey, planLookup } from "./plan-key";
+const norm = (v: string | null | undefined) => (v ?? "").trim().toUpperCase();
 
 /**
  * Creates a register row for every plan appearing in the claims, leaving existing rows alone.
@@ -88,21 +90,31 @@ export const planKey = (bin: string | null, groupNumber: string | null) => `${bi
  */
 export async function syncPlanGroups(): Promise<{ added: number; total: number }> {
   const claims = await db.query.claims.findMany({
-    columns: { bin: true, groupNumber: true, payerLabel: true, pbmName: true },
+    columns: { bin: true, pcn: true, groupNumber: true, payerLabel: true, pbmName: true, cashPlan: true },
   });
-  const existing = await db.query.planGroups.findMany({ columns: { bin: true, groupNumber: true } });
-  const have = new Set(existing.map((e) => planKey(e.bin, e.groupNumber)));
+  const existing = await db.query.planGroups.findMany();
+  const have = new Set(existing.map((e) => planKey(e.bin, e.pcn, e.groupNumber)));
+  const lookup = planLookup(existing);
 
-  const seen = new Map<string, { bin: string | null; groupNumber: string | null; payerLabel: string | null; pbmName: string | null }>();
+  const seen = new Map<string, { bin: string | null; pcn: string | null; groupNumber: string | null; payerLabel: string | null; pbmName: string | null }>();
   for (const c of claims) {
-    const k = planKey(c.bin, c.groupNumber);
-    if (!seen.has(k)) seen.set(k, { bin: c.bin, groupNumber: c.groupNumber, payerLabel: c.payerLabel, pbmName: c.pbmName });
+    if (c.cashPlan) continue;
+    const k = planKey(c.bin, c.pcn, c.groupNumber);
+    if (!seen.has(k)) seen.set(k, { bin: c.bin, pcn: c.pcn, groupNumber: c.groupNumber, payerLabel: c.payerLabel, pbmName: c.pbmName });
   }
 
   let added = 0;
   for (const [k, v] of seen) {
     if (have.has(k)) continue;
-    await db.insert(schema.planGroups).values({ id: newId(), ...v });
+    /*
+     * A row for a PCN whose BIN and group were classified before the PCN was kept starts unknown
+     * and says so: the earlier decision still governs its claims through the fallback, and the
+     * note is the prompt to confirm it for this PCN — which is exactly the case where the earlier
+     * decision may be wrong.
+     */
+    const prior = lookup({ bin: v.bin, pcn: null, groupNumber: v.groupNumber });
+    const notes = prior && prior.classification !== "unknown" && norm(prior.pcn) === "" ? `BIN ${v.bin ?? "—"} group ${v.groupNumber ?? "—"} was classified ${prior.classification} before the PCN was kept; confirm it for PCN ${v.pcn ?? "(blank)"}.` : null;
+    await db.insert(schema.planGroups).values({ id: newId(), ...v, notes });
     added++;
   }
   return { added, total: seen.size };
@@ -111,6 +123,7 @@ export async function syncPlanGroups(): Promise<{ added: number; total: number }
 export type PlanRow = {
   id: string;
   bin: string | null;
+  pcn: string | null;
   groupNumber: string | null;
   payerLabel: string | null;
   pbmName: string | null;
@@ -131,12 +144,12 @@ export async function planRegister(): Promise<PlanRow[]> {
     db.query.planGroups.findMany(),
     db.query.claims.findMany({
       where: eq(schema.claims.status, "paid"),
-      columns: { bin: true, groupNumber: true, remitCents: true, copayCents: true, planType: true },
+      columns: { bin: true, pcn: true, groupNumber: true, remitCents: true, copayCents: true, planType: true },
     }),
   ]);
-  const stats = new Map<string, { claims: number; receivedCents: number; underFeeClaims: number; planTypes: Set<string> }>();
-  for (const c of claims) {
-    const k = planKey(c.bin, c.groupNumber);
+  type Stat = { claims: number; receivedCents: number; underFeeClaims: number; planTypes: Set<string> };
+  const stats = new Map<string, Stat>();
+  const add = (k: string, c: (typeof claims)[number]) => {
     let e = stats.get(k);
     if (!e) { e = { claims: 0, receivedCents: 0, underFeeClaims: 0, planTypes: new Set() }; stats.set(k, e); }
     e.claims++;
@@ -144,14 +157,20 @@ export async function planRegister(): Promise<PlanRow[]> {
     e.receivedCents += got ?? 0;
     if (got !== null && got < 1050) e.underFeeClaims++;
     if (c.planType) e.planTypes.add(c.planType);
+  };
+  for (const c of claims) {
+    add(planKey(c.bin, c.pcn, c.groupNumber), c);
+    // A row with no PCN stands for every PCN under its BIN and group, so it is measured on all of them.
+    add(`${norm(c.bin)}|*|${norm(c.groupNumber)}`, c);
   }
 
   return groups
     .map((g) => {
-      const s = stats.get(planKey(g.bin, g.groupNumber));
+      const s = stats.get(norm(g.pcn) === "" ? `${norm(g.bin)}|*|${norm(g.groupNumber)}` : planKey(g.bin, g.pcn, g.groupNumber));
       return {
         id: g.id,
         bin: g.bin,
+        pcn: g.pcn,
         groupNumber: g.groupNumber,
         payerLabel: g.payerLabel,
         pbmName: g.pbmName,
@@ -249,11 +268,12 @@ export async function registerProgress() {
 /** Claims whose plan is in scope for the floor — the set a filing would be drawn from. */
 export async function inScopeClaims() {
   const groups = await db.query.planGroups.findMany();
-  const inScope = new Set(
-    groups.filter((g) => CLASS_INFO[g.classification].inScope).map((g) => planKey(g.bin, g.groupNumber)),
-  );
+  const lookup = planLookup(groups);
   const claims = await db.query.claims.findMany({ where: eq(schema.claims.status, "paid") });
-  return claims.filter((c) => inScope.has(planKey(c.bin, c.groupNumber)));
+  return claims.filter((c) => {
+    const g = lookup({ bin: c.bin, pcn: c.pcn, groupNumber: c.groupNumber });
+    return g !== undefined && CLASS_INFO[g.classification].inScope;
+  });
 }
 
 /**
@@ -271,14 +291,15 @@ export async function inScopeClaims() {
  */
 export async function classifyPlanByKey(
   bin: string | null,
+  pcn: string | null,
   groupNumber: string | null,
   classification: PlanClass,
   user: { id: string; name: string },
   basis?: string,
 ): Promise<{ claims: number; created: boolean }> {
-  const key = (b: string | null, g: string | null) => `${(b ?? "").trim()}|${(g ?? "").trim().toUpperCase()}`;
+  const key = (b: string | null, p: string | null, g: string | null) => planKey(b, p, g);
   const rows = await db.query.planGroups.findMany();
-  const row = rows.find((r) => key(r.bin, r.groupNumber) === key(bin, groupNumber)) ?? null;
+  const row = rows.find((r) => key(r.bin, r.pcn, r.groupNumber) === key(bin, pcn, groupNumber)) ?? null;
 
   const selfEvident = !needsBasis(classification);
   const said = (basis ?? "").trim();
@@ -297,8 +318,8 @@ export async function classifyPlanByKey(
      * sake of an ordering nobody outside this code knows about.
      */
     const { newId } = await import("./crypto");
-    const claims = await db.query.claims.findMany({ columns: { id: true, bin: true, groupNumber: true } });
-    const mine = claims.filter((c) => key(c.bin, c.groupNumber) === key(bin, groupNumber));
+    const claims = await db.query.claims.findMany({ columns: { id: true, bin: true, pcn: true, groupNumber: true } });
+    const mine = claims.filter((c) => key(c.bin, c.pcn, c.groupNumber) === key(bin, pcn, groupNumber));
     if (needsBasis(classification) && useBasis.length < 10) {
       throw new Error(
         `Marking a plan as ${CLASS_INFO[classification].label} decides whether the Kansas floor reaches it, so say how ` +
@@ -308,6 +329,7 @@ export async function classifyPlanByKey(
     await db.insert(schema.planGroups).values({
       id: newId(),
       bin,
+      pcn,
       groupNumber,
       classification,
       basis: useBasis || null,
@@ -318,6 +340,6 @@ export async function classifyPlanByKey(
   }
 
   await classifyPlan(row.id, { classification, basis: useBasis }, user);
-  const claims = await db.query.claims.findMany({ columns: { id: true, bin: true, groupNumber: true } });
-  return { claims: claims.filter((c) => key(c.bin, c.groupNumber) === key(bin, groupNumber)).length, created: false };
+  const claims = await db.query.claims.findMany({ columns: { id: true, bin: true, pcn: true, groupNumber: true } });
+  return { claims: claims.filter((c) => key(c.bin, c.pcn, c.groupNumber) === key(bin, pcn, groupNumber)).length, created: false };
 }

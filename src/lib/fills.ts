@@ -44,7 +44,9 @@ export type ClaimRow = {
   ndc11: string | null;
   itemName: string | null;
   bin: string | null;
-  /** The plan's group number, which with the BIN is what identifies the actual plan. */
+  /** The processor control number: with the BIN, the line of business; with the group, the plan. */
+  pcn?: string | null;
+  /** The plan's group number, which with the BIN and PCN is what identifies the actual plan. */
   groupNumber?: string | null;
   pbmName: string | null;
   payerLabel: string | null;
@@ -79,7 +81,8 @@ export type ClaimRow = {
 
 export type FillPayer = {
   bin: string | null;
-  /** BIN and group together identify the plan; the BIN alone often identifies only the processor. */
+  pcn: string | null;
+  /** BIN, PCN and group together identify the plan; the BIN alone often identifies only the processor. */
   groupNumber: string | null;
   name: string | null;
   remitCents: number;
@@ -258,6 +261,7 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
   for (const [key, rows] of by) {
     const payers: FillPayer[] = rows.map((r) => ({
       bin: r.bin,
+      pcn: r.pcn ?? null,
       groupNumber: r.groupNumber ?? null,
       name: r.pbmName ?? r.payerLabel,
       remitCents: r.remitCents ?? 0,

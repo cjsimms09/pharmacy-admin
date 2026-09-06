@@ -152,13 +152,14 @@ was everything after the draft. Pure and tested now:
 **From the claims-field review of 6 September** (the real 5 Sept report: 123 paid/adjusted rows,
 19 BINs, 22 PCNs, 35 groups, 26 network reimbursement ids; `contract-reading.md` §1 and §4).
 
-- [ ] **A plan is BIN, PCN and group, not BIN and group.** `planKey(bin, group)` in `plans.ts`
-      drops the PCN, and on one day three BIN+group pairs carry two PCNs: 003858 (MA / A4),
-      610014 (MEDDPRIME / blank), 610455 (BCBSKS / KSPDP). Those are different contracts and
-      different lines of business under one BIN; classified together, one of them is classified
-      wrong, and the pay-basis reading mixes two formulas. Fix: `planKey(bin, pcn, group)`, the
-      register keyed the same way, existing rows re-keyed (a plan with a blank PCN keeps matching
-      claims with a blank PCN only). `payer_links` already carries the PCN.
+- [x] **A plan is BIN, PCN and group, not BIN and group** (cloud session, migration 0068,
+      `plan_groups.pcn`). `planKey(bin, pcn, group)` and `planLookup()` live in `plan-key.ts`
+      (pure, shared with the floor review). An old row with a blank PCN stands as the fallback for
+      any PCN on that BIN and group until a row for the PCN is decided; the sync notes on the new
+      row which classification it inherited, so somebody confirms it. The payer chain, the payer
+      tree, the subsidy test, the NADAC standing and the pay-basis reading are all keyed the same
+      way; the classify and link forms on Payers carry the PCN. Found on the way: `allFills()` was
+      dropping the group number from the fill's payers, so the NADAC standing never found a plan.
 - [ ] **The network reimbursement id (NCPDP 545-2F, the report's "Ntw Reim. Id") is the contract's
       own name for the claim and is used nowhere but as a display list.** Filled on 63% of rows;
       10 of 25 BIN+PCN pairs see more than one value (Preferred against Standard, or a plan

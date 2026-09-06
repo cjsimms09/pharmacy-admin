@@ -25,7 +25,7 @@ gives units.
 | QTY | thousandths | Units dispensed on this transmission; negative on a reversal. | units per fill, taken once | summing across a fill's rows |
 | Completed Date (`completedAt`) | date | When the fill was sold, as of the report's printing. A property of the fill, not the row. | reporting; nothing selects on it | deciding whether to store the row (the row never comes round again) |
 | Status P / A / R | | Paid, reversal, rejected. | P stores a claim; A cancels the claim it negates; R is counted | treating an A whose claim is not held as a loss (it is stored as reversed, unmatched, and excluded from fills) |
-| Rx-fill, BIN, PCN, Group, Ntw Reim. Id | | Identity of the prescription and the payer route. | the fill key (rx, fill, date, NDC); the plan key (BIN, group); links to contract | a BIN alone as a plan (one BIN carries many plans) |
+| Rx-fill, BIN, PCN, Group, Ntw Reim. Id | | Identity of the prescription and the payer route. | the fill key (rx, fill, date, NDC); the plan key (BIN, PCN, group); links to contract | a BIN alone as a plan (one BIN carries many plans); a BIN and group alone (one BIN and group carries a commercial PCN and a Part D one) |
 | Cash plan (BIN 028249, "PharmD") | flag | The pharmacy's own cash programme. | margin and cash pricing | floor review, appeals, payer ranking (there is no payer) |
 | Transaction key | | rx, fill, status, date, BIN, NDC, remit, copay, qty, plus an ordinal for identical rows. | de-duplication across re-sent days | matching a reversal (that is by negated figures, not by key) |
 | Network reimbursement id (545-2F) | text | The PBM's name for the network contract the claim priced under. | matching a claim to its rate exhibit; splitting a PBM's plans by contract | a PBM name; a plan id |

@@ -249,11 +249,11 @@ export async function moneyFound(): Promise<MoneyFound> {
     const { payBasisByPlan } = await import("./pay-basis");
     const { planKey } = await import("./plans");
     const [claims, nadac] = await Promise.all([
-      db.query.claims.findMany({ columns: { bin: true, groupNumber: true, ndc11: true, dateFilled: true, quantityThousandths: true, ingredientPaidCents: true, status: true, cashPlan: true } }),
+      db.query.claims.findMany({ columns: { bin: true, pcn: true, groupNumber: true, ndc11: true, dateFilled: true, quantityThousandths: true, ingredientPaidCents: true, status: true, cashPlan: true } }),
       db.query.nadacPrices.findMany({ columns: { ndc11: true, unitMicros: true, pricingUnit: true, effectiveOn: true, fileAsOf: true } }),
     ]);
     // A cash fill is priced by the pharmacy, not by a plan, and says nothing about how a plan pays.
-    const paid = claims.filter((c) => !c.cashPlan).map((c) => ({ planKey: planKey(c.bin, c.groupNumber), ndc11: c.ndc11, dateFilled: c.dateFilled, quantityThousandths: c.quantityThousandths, ingredientPaidCents: c.ingredientPaidCents, status: c.status }));
+    const paid = claims.filter((c) => !c.cashPlan).map((c) => ({ planKey: planKey(c.bin, c.pcn, c.groupNumber), ndc11: c.ndc11, dateFilled: c.dateFilled, quantityThousandths: c.quantityThousandths, ingredientPaidCents: c.ingredientPaidCents, status: c.status }));
     if (paid.length > 0 && nadac.length > 0) {
       const bases = payBasisByPlan(paid, nadac.map((n) => ({ ...n, pricingUnit: n.pricingUnit as import("./reimbursement-rules").NadacRecord["pricingUnit"] })), groupOf);
       const units = new Map<string, number>();
