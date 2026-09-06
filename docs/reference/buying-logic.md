@@ -52,6 +52,29 @@ claim count. The expected shape: Kansas Medicaid tracks NADAC at about 1.00; Par
 flat; commercial mixed. Anything surprising is either a data problem (unit mismatch, NADAC gap) or
 a finding.
 
+## Rule 1a: back-calculating the plan's formula
+
+`reimbursement-fit.ts`. The report gives the ingredient cost paid on every fill and the site
+holds NADAC for the day and AWP off McKesson's invoices. A contract prices the ingredient one of
+three ways, and each leaves a signature across many fills that a guess does not:
+
+    NADAC + k%        paid ÷ (NADAC × qty) is one constant
+    AWP − d%          paid ÷ (AWP × qty) is one constant
+    a MAC per product paid per unit is one constant per product, whatever the NDC
+
+Brand and generic are fitted apart. The formula with the least scatter is named with its scatter
+("brand: AWP − 17.4%, ±1.2 points, on 212 fills"); two within a point of each other is "not
+settled"; under twelve fills with a benchmark nothing is said. The residuals name the fills the
+formula does not explain, which is where underpayments and DIR hide. A fit is the plan's
+behaviour measured, never its contract: the contract on file is what an appeal cites.
+
+**AWP.** The site holds AWP only where McKesson's invoice printed it. The weekly PioneerRx
+catalogue export carries no AWP (its columns are item number, name, NDC, pack size, cost per
+unit). PioneerRx itself licenses a drug file with AWP: the cheapest broad source is a scheduled
+PioneerRx item report (NDC, AWP, WAC, package size) emailed weekly, and "Dispensed AWP" added as a
+column to the daily transaction report, which the claims export already knows how to read. No
+free public source publishes AWP; it is Medi-Span's and First Databank's.
+
 ## Rule 2: within a product, score every NDC against the plan mix
 
 `ndc-choice.ts`. For one product, every NDC with a comparable per-unit cost is scored against the
@@ -133,6 +156,34 @@ tells the buyer every contract generic costs fourteen points more than it does. 
 3. Either way the reading is refused when the money does not reproduce the printed ratios
    (`checkMonth`), the way the statement is refused in `rebate-report.ts`.
 
+## Rule 3a: the McKesson question — where to draw the line
+
+`band-strategy.ts`. Generics are often dearer at McKesson and lift the ratio; brands are cheaper
+there and drag it. The answer is two rules, and the second is decided fresh each month:
+
+1. **Line by line, buy where the effective cost is lowest.** Effective means after the rebate that
+   line itself earns: a OneStop generic at the band rate, a McKesson brand at the brand factor,
+   anything elsewhere at its gross. This is not "ignoring the rebate game"; the rebate is part of
+   each line's price and the ledger already compares on it. A McKesson generic that is dearer
+   gross and cheaper effective is bought at McKesson; a brand that is cheaper at McKesson is
+   bought at McKesson.
+2. **Once a month, cross a band only when what it pays exceeds what it costs to get there.** The
+   band is a step. Two levers move the ratio: brand off McKesson (the denominator shrinks) and
+   generic on to McKesson (both sides grow). Each has a price per dollar moved (the secondary's
+   brand premium plus the brand factor forgone; McKesson's effective generic premium over the
+   secondary) and a supply (what can actually move this month, unscrubbed brands only). The
+   module works out the cheapest path to each band above, its cost, and the band's worth on the
+   month's OneStop base:
+
+       move only if  (rate_next − rate_now) × base  >  cost of the cheapest way there
+
+   and, the other way, how much brand can still go through McKesson before the current band is
+   lost. Where nothing pays, Rule 1 stands alone and the ratio lands where it lands.
+
+So the mixture is not a fixed share. On this pharmacy's own figures it will usually be: Rule 1
+for everything, plus a small, specific move at month end when a band is within reach and the
+move is cheaper than the band is worth. The module says which move, how much, and the net.
+
 ## Rule 4: what does not sell is a cost, and the return policy prices it
 
 A unit bought and not dispensed inside the supplier's full-credit window is worth the credit
@@ -175,7 +226,8 @@ traceable to a document.
 
 Each module's tests use round figures that can be checked by hand: `tests/pay-basis.test.ts`,
 `tests/ndc-choice.test.ts`, `tests/ratio-effect.test.ts`, `tests/product-groups.test.ts`,
-`tests/drill-down.test.ts`, `tests/under-nadac.test.ts`. When a
+`tests/drill-down.test.ts`, `tests/under-nadac.test.ts`, `tests/reimbursement-fit.test.ts`,
+`tests/band-strategy.test.ts`. When a
 real statement, a real month of claims, or a real order is available on the pharmacy machine, the
 right test to add is the one that takes those figures (redacted) and pins the answer the module
 gives, so that the answer cannot drift.

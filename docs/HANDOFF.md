@@ -28,6 +28,15 @@ it and said so on the pull request. The owner reads this too.
       scorecard (`recommendationScorecard`) belongs on `/money` under the list.
 - [ ] **Write `pay-basis.ts` results to a table nightly** (`plan_pay_basis`, to add) so the NDC
       choice reads a table and the trend is kept (`profit-engine.md` §3, §6.2).
+- [ ] **The McKesson question, monthly.** `bandStrategy()` in `band-strategy.ts` needs: the
+      position (drill-down, restated to the statement's scrub), the ladder, the month's OneStop
+      base, and two levers from the catalogues: unscrubbed brand spend that could move and its
+      premium at the secondary (plus the brand factor), generic spend that could come to McKesson
+      and its effective premium. Show `strategy.says` on the money page and on the supplier card.
+- [ ] **Back-calculate each plan's formula.** `fitPlan()` in `reimbursement-fit.ts` over the
+      claims with NADAC in force and AWP from `invoice_lines`; show the sentence per plan on
+      `/payers/[pbm]` and feed the residuals to the appeals list. Needs AWP beyond McKesson lines:
+      see the owner's items.
 - [ ] **Put the buy list on the purchasing page.** `underNadac(ledger.rows, groupOf)`,
       `switchNdc(u)`, `notYetBought(u)` from `src/lib/under-nadac.ts`; `groupOf` from
       `product-groups.ts` over the NADAC rows held. Each `ProductPick.says` is a sentence to print.
@@ -71,6 +80,9 @@ it and said so on the pull request. The owner reads this too.
 - [ ] Suppliers page: set the catalogue name on McKesson, IPD, IPC, ParMed.
 - [ ] Ask PioneerRx for an on-hand/expiry report, and for Basis of Reimbursement (522-FM) and
       Other Coverage Code (308-C8) on the daily report.
+- [ ] **AWP, free:** schedule a PioneerRx item report (NDC, AWP, WAC, package size) emailed
+      weekly, and add "Dispensed AWP" to the daily transaction report. The weekly catalogue export
+      carries no AWP; only McKesson's invoices print it.
 
 ## The rules that keep two sessions from colliding
 
@@ -229,11 +241,11 @@ id only), and twelve further uses of the data ranked by value against readiness.
 now delegates to `product-key.ts`, which it had duplicated.
 
 ### Files this branch touched
-`src/db/schema.ts`, `drizzle/0048_*`, `drizzle/0049_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down,recommendations,recommendation-log,recommendation-store}.ts` (new), `drizzle/0062_*`,
+`src/db/schema.ts`, `drizzle/0048_*`, `drizzle/0049_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down,recommendations,recommendation-log,recommendation-store,reimbursement-fit,band-strategy}.ts` (new), `drizzle/0062_*`,
 `src/lib/{claims,rx-transactions,suppliers,suppliers-registry,pioneer-catalog,invoices,nadac-fetch,settings}.ts`,
 `src/app/(app)/suppliers/page.tsx`, `src/app/(app)/suppliers/[id]/terms/page.tsx` (new),
 `src/app/(app)/inventory/invoices/page.tsx`, `src/app/(app)/nadac/page.tsx`, `src/app/(app)/claims/page.tsx`,
-`tests/{ndc,supplier-terms,invoice-lines,nadac-datasets,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down,recommendations,recommendation-log,invariants}.test.ts` (new), `tests/{claims,suppliers-registry,rx-transactions}.test.ts`,
+`tests/{ndc,supplier-terms,invoice-lines,nadac-datasets,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down,recommendations,recommendation-log,invariants,reimbursement-fit,band-strategy}.test.ts` (new), `tests/{claims,suppliers-registry,rx-transactions}.test.ts`,
 `CLAUDE.md` (new), `docs/HANDOFF.md`, `docs/reference/nadac-api.md`, `docs/reference/buying-logic.md`, `docs/reference/data-audit.md`, `docs/reference/profit-engine.md`, `docs/reference/data-dictionary.md` (new), `fixtures/README.md`, `fixtures/rx-transactions.txt` (new).
 
 ## Who owns what now
