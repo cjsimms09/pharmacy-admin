@@ -139,6 +139,30 @@ was everything after the draft. Pure and tested now:
       835 received) reading `payment_routing` and `pbm_contacts`; the `x12-835.ts` parser and the
       remittance reconciliation already exist for the facilitator files.
 
+**From the claims-field review of 6 September** (the real 5 Sept report: 123 paid/adjusted rows,
+19 BINs, 22 PCNs, 35 groups, 26 network reimbursement ids; `contract-reading.md` §1 and §4).
+
+- [ ] **A plan is BIN, PCN and group, not BIN and group.** `planKey(bin, group)` in `plans.ts`
+      drops the PCN, and on one day three BIN+group pairs carry two PCNs: 003858 (MA / A4),
+      610014 (MEDDPRIME / blank), 610455 (BCBSKS / KSPDP). Those are different contracts and
+      different lines of business under one BIN; classified together, one of them is classified
+      wrong, and the pay-basis reading mixes two formulas. Fix: `planKey(bin, pcn, group)`, the
+      register keyed the same way, existing rows re-keyed (a plan with a blank PCN keeps matching
+      claims with a blank PCN only). `payer_links` already carries the PCN.
+- [ ] **The network reimbursement id (NCPDP 545-2F, the report's "Ntw Reim. Id") is the contract's
+      own name for the claim and is used nowhere but as a display list.** Filled on 63% of rows;
+      10 of 25 BIN+PCN pairs see more than one value (Preferred against Standard, or a plan
+      sponsor's own network). It is the axis the rate exhibits are written on (§1), so: carry it
+      into `payer_links` matching as the `contractId` it already stands in for
+      (`applyLinksToClaims` passes it), let `proposeFromContract` match a document's network
+      names against the ids seen on its BINs, and split "who pays best" by it under each PBM.
+- [ ] **Columns the daily report does not carry** and no reader fills: `plan_id`, `plan_type`,
+      `pharmacy_service_type`, `basis_of_reimbursement` (522-FM), `basis_of_cost_determination`
+      (423-DN), `awp_cents`, `daw`, `days_supply`, `quantity_unit`. Every one is a PioneerRx
+      column the owner can add to the scheduled report; 522-FM settles the pay basis outright and
+      AWP settles the contract formula. Until then they are null, and nothing should read them as
+      zero. `other_coverage_code` is on the report and blank on every row.
+
 **From the design audit** (`docs/reference/design-audit.md`; the page inventory is §7). Ordered
 by what changes the owner's morning most. Each is small on its own; none needs a migration.
 
@@ -198,8 +222,10 @@ by what changes the owner's morning most. Each is small on its own; none needs a
 - [ ] NADAC page: "Read the listing now", then "Fetch this week" on a gap. Neither session can
       reach data.medicaid.gov.
 - [ ] Suppliers page: set the catalogue name on McKesson, IPD, IPC, ParMed.
-- [ ] Ask PioneerRx for an on-hand/expiry report, and for Basis of Reimbursement (522-FM) and
-      Other Coverage Code (308-C8) on the daily report.
+- [ ] Ask PioneerRx for an on-hand/expiry report, and add to the daily transaction report:
+      Basis of Reimbursement (522-FM), Basis of Cost Determination (423-DN), Dispensed AWP, DAW,
+      Days Supply, Plan ID. The report already carries the Network Reimbursement ID (545-2F);
+      Other Coverage Code (308-C8) is on it and blank.
 - [ ] **Schedule the daily on-hand export** out of PioneerRx to the mailbox; the reader exists
       (`on-hand.ts`, columns matched by meaning). Include lot and expiry and on-order if it can.
 - [ ] **Each supplier's order minimum, free-freight threshold, freight and lead time** on its

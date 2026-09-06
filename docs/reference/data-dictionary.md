@@ -28,6 +28,8 @@ gives units.
 | Rx-fill, BIN, PCN, Group, Ntw Reim. Id | | Identity of the prescription and the payer route. | the fill key (rx, fill, date, NDC); the plan key (BIN, group); links to contract | a BIN alone as a plan (one BIN carries many plans) |
 | Cash plan (BIN 028249, "PharmD") | flag | The pharmacy's own cash programme. | margin and cash pricing | floor review, appeals, payer ranking (there is no payer) |
 | Transaction key | | rx, fill, status, date, BIN, NDC, remit, copay, qty, plus an ordinal for identical rows. | de-duplication across re-sent days | matching a reversal (that is by negated figures, not by key) |
+| Network reimbursement id (545-2F) | text | The PBM's name for the network contract the claim priced under. | matching a claim to its rate exhibit; splitting a PBM's plans by contract | a PBM name; a plan id |
+| PCN | text | Processor control number: with the BIN, which processor and often which line of business. | plan identity (BIN, PCN, group); contract matching | dropped from the plan key |
 
 ## 2. Invoices (supplier PDFs, read to lines)
 
