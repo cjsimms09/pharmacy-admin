@@ -46,8 +46,17 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
    * will actually ship it. Loaded here rather than on its own page because it is the answer the
    * three tables below only inform — they say where the money is, this says what to do about it.
    */
-  const { buyListNow, SHELF_POLICY } = await import("@/lib/shelf");
+  const { buyListNow, SHELF_POLICY, nextTierNow } = await import("@/lib/shelf");
   const buyList = await buyListNow();
+  /*
+   * The band above, at the screen where the order is placed.
+   *
+   * Every line below is chosen on its own invoice price, which is right for the line and can be
+   * wrong for the month: a generic 8% dearer at the primary is a bad line and a good month if it
+   * carries the ratio into a band worth more than the premium. That comparison belongs here, above
+   * the basket, because it is the one thing on this page that changes where the whole order goes.
+   */
+  const nextTier = await nextTierNow();
 
   const { underNadac, switchNdc, notYetBought } = await import("@/lib/under-nadac");
   const { groupKey } = await import("@/lib/product-groups");
@@ -138,6 +147,17 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
         find the items this supplier is *also* cheapest on that move fast enough to buy deep. Only
         the third is a decision, and it needs numbers nobody has in their head at the order screen.
       */}
+      {nextTier && nextTier.worthCents > 0 && nextTier.breakEvenPremiumPercent !== null && (
+        <Notice kind={nextTier.daysLeft <= 7 ? "warn" : undefined}>
+          <b>
+            The {nextTier.nextRatePercent}% band at {nextTier.supplier} is worth {money(nextTier.worthCents)} more this
+            month{nextTier.daysLeft > 0 ? `, with ${nextTier.daysLeft} day${nextTier.daysLeft === 1 ? "" : "s"} to earn it` : ""}.
+          </b>{" "}
+          {nextTier.says} Where a line below sends generics elsewhere to save less than{" "}
+          {nextTier.breakEvenPremiumPercent.toFixed(2)}%, buying it at {nextTier.supplier} is the cheaper month.
+        </Notice>
+      )}
+
       <Card
         className="my-4"
         title="Today&rsquo;s order"

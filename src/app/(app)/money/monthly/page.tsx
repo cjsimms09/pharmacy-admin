@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import { accountMonths } from "@/lib/profit-and-loss";
+import { accountMonths, excludedFromAccount, type AccountExclusion } from "@/lib/profit-and-loss";
 import { parsePeriod, periodOf, neighbours, type PeriodKind } from "@/lib/ledger";
 import { booksFor } from "@/lib/ledger-store";
 import { PrintButton } from "@/components/print-button";
@@ -42,6 +42,15 @@ export default async function MonthlyPLPage({
   const pl = basis === "cash" ? books.cash : books.accrual;
   const { before, after } = neighbours(period);
   const kindLink = (k: PeriodKind) => `/money/monthly?period=${periodOf(k, period.months[period.months.length - 1]).key}&basis=${basis}`;
+  /*
+   * What the site holds and this account leaves out.
+   *
+   * An account that silently omits something the site plainly knows about cannot be told from one
+   * that forgot it, and the only way to tell was to read the code. Each omission is named with
+   * the month's own figure and the reason it is not trade; over a quarter or a year, per month.
+   */
+  const excludedByMonth = await Promise.all(period.months.map(async (m) => ({ month: m, items: await excludedFromAccount(m) })));
+  const excluded: (AccountExclusion & { month: string })[] = excludedByMonth.flatMap((e) => e.items.map((x) => ({ ...x, month: e.month })));
 
   const pct = (c: number) => (pl.netRevenueCents > 0 ? `${Math.round((c / pl.netRevenueCents) * 1000) / 10}%` : "—");
 
@@ -200,6 +209,30 @@ export default async function MonthlyPLPage({
           </p>
         )}
       </Card>
+
+      {excluded.length > 0 && (
+        <Card className="my-4" title="Known to the site, and not in this account" count={excluded.length}>
+          <p className="mb-3 text-xs text-ink-3">
+            Money the site records and deliberately keeps out of the month, so an omission is never mistaken for an
+            oversight. An account records the pharmacy&rsquo;s own money: raising somebody else&rsquo;s invoice is
+            administration, not trade, and an order is not a cost until somebody has priced it.
+          </p>
+          <ul className="rows">
+            {excluded.map((x) => (
+              <li key={`${x.month}|${x.label}`} className="flex flex-wrap items-start justify-between gap-2 py-2">
+                <span className="min-w-0">
+                  {period.months.length > 1 && <span className="mr-2 font-mono text-xs text-ink-3">{x.month}</span>}
+                  <Link href={x.href} className="text-sm text-accent hover:underline">{x.label}</Link>
+                  <span className="mt-0.5 block text-xs text-ink-3">{x.why}</span>
+                </span>
+                <span className="shrink-0 text-sm tabular-nums text-ink-2">
+                  {x.amountCents !== null ? formatCents(x.amountCents) : "no price held"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       <details className="my-4 rounded-lg border border-line bg-surface p-4">
         <summary className="cursor-pointer text-sm font-semibold">How each figure is arrived at</summary>

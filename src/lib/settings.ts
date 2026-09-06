@@ -192,6 +192,16 @@ export const SETTING_KEYS = [
   "driver_bill_to",
   "driver_invoice_to",
   "driver_rate_cents",
+  /**
+   * Who actually pays the driver: "clinic" (the default) or "pharmacy".
+   *
+   * The site raises the driver's invoice and sends it, but raising an invoice says nothing about
+   * whose money it is. Here it is raised on the driver's behalf and billed to the clinic, so the
+   * amount is neither the pharmacy's revenue nor its cost and must stay out of the account — and
+   * the account says so rather than leaving the omission to be noticed. Where a pharmacy pays its
+   * own driver, this makes the month's invoices an operating cost, which is what they are.
+   */
+  "driver_paid_by",
   "driver_payment_terms",
   "driver_invoice_auto",
   /** The first month this pharmacy started recording deliveries here. Nothing earlier is chased. */

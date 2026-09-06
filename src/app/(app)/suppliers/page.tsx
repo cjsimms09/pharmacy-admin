@@ -14,6 +14,7 @@ import { PageHeader, Card, Notice, Empty, Field } from "@/components/ui";
 import { ExportData } from "@/components/export-data";
 import { ratesFor, earningSoFar } from "@/lib/rebate-rates";
 import { ratioForSupplier } from "@/lib/purchase-ratio";
+import { nextTierNow } from "@/lib/shelf";
 import { INVOICE_SCHEDULES, type InvoiceSchedule } from "@/db/schema";
 
 export const dynamic = "force-dynamic";
@@ -59,6 +60,15 @@ export default async function SuppliersPage({
       }),
     )
   ).filter((x): x is NonNullable<typeof x> => x !== null);
+  /*
+   * What the next band is worth this month, and what it would take to reach it.
+   *
+   * Only the primary has one: the ratio is a property of where the buying goes, and the question
+   * "should I buy this dearer here anyway" is only ever asked about the supplier the ladder belongs
+   * to. It sits on that supplier's card rather than in a panel of its own, next to the ratio it is
+   * about.
+   */
+  const nextTier = await nextTierNow();
   const legacy = (s.mail_supplier_rules ?? "").trim();
   const editing = edit ? suppliers.find((x) => x.id === edit) : undefined;
   const today = todayIso();
@@ -232,11 +242,45 @@ export default async function SuppliersPage({
               )}
             </p>
           )}
-          {rates.view.nextBandWorthCents !== null && rates.view.nextBandWorthCents > 0 && (
-            <p className="mt-2 text-xs text-warn">
-              One more band would have paid {money(rates.view.nextBandWorthCents)} more on last period&rsquo;s buying.
-            </p>
+          {/*
+            The band above, priced against what it would cost to reach — the owner's question:
+            "if I am close to a higher tier and it's worth $500, I might want to order generics
+            from McKesson even if more expensive." The break-even premium is the answer to it, so
+            it is the sentence, not a footnote.
+          */}
+          {nextTier && nextTier.supplier === rates.supplierName && nextTier.worthCents > 0 && (
+            <div className={`mt-3 rounded-lg border p-3 ${nextTier.daysLeft <= 7 ? "border-warn bg-warn-soft" : "border-line bg-ground"}`}>
+              <p className="text-sm font-semibold">
+                The {nextTier.nextRatePercent}% band is worth {money(nextTier.worthCents)} more this month
+                {nextTier.daysLeft > 0 && (
+                  <span className="font-normal text-ink-2">
+                    {" "}· {nextTier.daysLeft} day{nextTier.daysLeft === 1 ? "" : "s"} left
+                  </span>
+                )}
+              </p>
+              <p className="mt-1 text-xs text-ink-2">{nextTier.says}</p>
+              <div className="mt-2 grid gap-3 sm:grid-cols-3">
+                <Stat value={money(nextTier.neededCents)} label="more contract generics needed" sub={`to pass ${nextTier.nextThresholdPercent}%`} />
+                <Stat value={money(nextTier.worthCents)} label="what the band pays" sub="on the month's contract generics" strong />
+                <Stat
+                  value={nextTier.breakEvenPremiumPercent !== null ? `${nextTier.breakEvenPremiumPercent.toFixed(2)}%` : "—"}
+                  label="break-even premium"
+                  sub={`Worth buying here while ${nextTier.supplier} is under this much dearer`}
+                />
+              </div>
+              <p className="mt-2 text-[11px] text-ink-3">
+                A projection on the month so far, from the ratio as the {rates.ratioSource === "daily report" ? "daily report" : "last statement"} left
+                it. It is not a promise — a fortnight of buying still moves it.
+              </p>
+            </div>
           )}
+          {(!nextTier || nextTier.supplier !== rates.supplierName) &&
+            rates.view.nextBandWorthCents !== null &&
+            rates.view.nextBandWorthCents > 0 && (
+              <p className="mt-2 text-xs text-warn">
+                One more band would have paid {money(rates.view.nextBandWorthCents)} more on last period&rsquo;s buying.
+              </p>
+            )}
         </Card>
       ))}
 

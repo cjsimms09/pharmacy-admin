@@ -60,6 +60,10 @@ export default async function DeliveriesPage({
     monthIsOurs(month),
   ]);
 
+  // Whose money the round is. Read here so the form shows what the account is actually using.
+  const { getSettings } = await import("@/lib/settings");
+  const paidBy = ((await getSettings()).driver_paid_by ?? "clinic") === "pharmacy" ? "pharmacy" : "clinic";
+
   const known = [...new Set([month, todayIso().slice(0, 7), ...months])].sort().reverse().slice(0, 24);
   const here = `/deliveries?month=${month}`;
 
@@ -187,6 +191,9 @@ export default async function DeliveriesPage({
     await setSetting("driver_invoice_to", String(fd.get("sendTo") ?? "").trim());
     await setSetting("driver_rate_cents", String(Math.round(dollars * 100)));
     await setSetting("driver_payment_terms", String(fd.get("terms") ?? "").trim());
+    // Whose money this is. It decides whether the month's invoices are a cost of the pharmacy or
+    // somebody else's bill the site merely raises, and the monthly account follows it either way.
+    await setSetting("driver_paid_by", fd.get("paidBy") === "pharmacy" ? "pharmacy" : "clinic");
     await setSetting("driver_invoice_auto", fd.get("auto") ? "yes" : "no");
     await audit({ action: "delivery.settings", userId: u.id, userName: u.name });
     revalidatePath("/deliveries");
@@ -249,6 +256,18 @@ export default async function DeliveriesPage({
             <label className="text-xs font-medium text-ink-2">
               Emailed to
               <input name="sendTo" type="email" defaultValue={parties.sendTo} className="field mt-1" placeholder="snelsen@wwfppa.com" />
+            </label>
+            <label className="text-xs font-medium text-ink-2">
+              Who pays the driver
+              <select name="paidBy" defaultValue={paidBy} className="field mt-1">
+                <option value="clinic">The clinic, direct — the pharmacy only raises the invoice</option>
+                <option value="pharmacy">The pharmacy</option>
+              </select>
+              <span className="mt-1 block font-normal text-ink-3">
+                This is the only thing that decides whether the round is a cost of the pharmacy. Raising an invoice
+                says nothing about whose money it is, so the monthly account either books it as an operating cost or
+                names it as money that is not the pharmacy&rsquo;s — and says which.
+              </span>
             </label>
             <label className="text-xs font-medium text-ink-2">
               Paid per trip — each delivery, and each mail run

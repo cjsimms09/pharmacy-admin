@@ -27,7 +27,7 @@ lines from the two.
 | Cost of goods | Σ `claims.acquisition_cents` once per fill, for fills dated in the period | Σ `supplier_invoices.total_cents` where `paid_on` is in the period | opening stock + invoiced purchases − closing stock (`on_hand_imports`, Rx shelf) | the invoice total as accrual cost; NADAC as any cost; the report's printed gross profit |
 | Wholesaler rebates | `earningSoFar()`: the period's invoice lines × the ladder rate in force, per supplier | `cash_receipts` kind `rebate` | the wholesaler's statement, when it lands (`rebate_statements`, to add) | booked as revenue; applied to a line that already carries it |
 | Operating expenses | `expenses` by invoice date, by category | `expenses` by `paid_on` | the vendor's typical amount and cadence (`vendors`) | wholesaler invoices entered here as well (double count) |
-| Delivery driver | the month's driver invoice or its running total (`deliveries.monthState`) | the driver invoice's `paid_on` when one is filed, else the sent date | an expense in a "Deliver…" category, if somebody entered one by hand (then the hand entry wins and the automatic line is dropped, and the page says so) | both |
+| Delivery round | Nothing, unless Settings says the pharmacy pays its own driver (`driver_paid_by`): the site raises the driver's invoice on his behalf and bills the clinic, which is administration, not trade. Where the pharmacy does pay, the month's issued driver invoices are an operating line (`driverCostFor`). | same | the statement's "known to the site, and not in this account" card names the round and its figure every month, so the omission is never mistaken for an oversight | counted while the clinic pays it |
 | Scripts | fills (one per bottle, `fills.ts`), dated in the period; cash fills counted apart | same | the claim import's own count | transmissions (a coordinated fill is one script) |
 | Stock movement | invoiced purchases − dispensed cost | — | the shelf counts | added to profit |
 
@@ -75,7 +75,7 @@ records, and a reading is corrected by correcting the record.
 ## 6. Reports
 
 - The statement for any period and basis, on screen, printable, and as CSV
-  (`/api/ledger.csv?period=2026-Q3&basis=accrual`): one row per line with the group, label, cents
+  (`/api/ledger?period=2026-Q3&basis=accrual`): one row per line with the group, label, cents
   and note.
 - Month-to-date on any day, with pace.
 - The last six months side by side: net revenue, gross profit, operating, net, scripts — the chart

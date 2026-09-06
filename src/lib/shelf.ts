@@ -751,3 +751,78 @@ export async function bandCostOfMoving(
     says,
   };
 }
+
+/**
+ * What the next rebate band is worth, and what it would take to get there before the month closes.
+ *
+ * The owner asked for this directly: "we also should be showing how much more the next rebate tier
+ * is worth, especially at end of the month — if I am close to a higher tier and it's worth $500, I
+ * might want to order generics from McKesson even if more expensive."
+ *
+ * Every part of the answer already existed and none of it was on a screen. `tierEffect` gives the
+ * band above where the month currently sits, the contract-generic spend that would reach it, and
+ * what that band pays on the period's base. The only thing to add is the comparison the decision
+ * actually turns on — the premium at which moving that buying stops paying — which is the band's
+ * worth divided by the spend it needs.
+ *
+ * It is a projection on the month so far, not a promise: the ratio is where the last statement or
+ * the last drill down left it, and a fortnight of buying can still move it. That is why the days
+ * left are part of the answer rather than a detail: the same $4,000 is a plan on the 8th and a
+ * scramble on the 29th.
+ */
+export type NextTier = {
+  supplier: string;
+  month: string;
+  /** Days left in the month, counting today. Nought on the last day. */
+  daysLeft: number;
+  ratioPercent: number;
+  currentRatePercent: number | null;
+  nextThresholdPercent: number;
+  nextRatePercent: number;
+  /** Contract-generic spend at the primary that would carry the ratio over the threshold. */
+  neededCents: number;
+  /** What the higher band pays, over the current one, on the period's contract generics. */
+  worthCents: number;
+  /** The most a dearer primary may cost on that spend before this stops paying. Null where moot. */
+  breakEvenPremiumPercent: number | null;
+  says: string;
+};
+
+export async function nextTierNow(month?: string): Promise<NextTier | null> {
+  const { allSuppliers } = await import("./suppliers-registry");
+  const primary = (await allSuppliers(true)).find((s) => s.primarySupplier === true);
+  if (!primary) return null;
+
+  const { ratesFor, earningSoFar } = await import("./rebate-rates");
+  const [rates, earning] = await Promise.all([ratesFor(primary.id), earningSoFar(primary.id, month)]);
+  if (!rates || !earning) return null;
+
+  // The same ladder bandCostOfMoving uses, so the two screens can never quote different bands.
+  const ladder = rates.view.programmes.find(
+    (p) => p.terms.kind === "tiered_ratio" && /compliance|gcr/i.test(p.measuredBy ?? p.name),
+  );
+  if (!ladder || ladder.achievedPercent === null || ladder.terms.tiers.length === 0) return null;
+  if (earning.totalPurchasedCents <= 0) return null;
+
+  const { tierEffect, nextTierAdvice } = await import("./ratio-effect");
+  const effect = tierEffect(
+    { ratioPercent: ladder.achievedPercent, denominatorCents: earning.totalPurchasedCents, definition: "generics_over_rx", scrub: "statement" },
+    ladder.terms.tiers.map((t) => ({ thresholdPercent: t.thresholdPercent, rebatePercent: t.rebatePercent })),
+    [],
+    earning.contractPurchasedCents,
+  );
+  if (!effect.next) return null;
+
+  const { lastDayOfMonth, daysBetween, todayIso } = await import("./dates");
+  const m = earning.month;
+  const [y, mm] = m.split("-").map(Number);
+  const today = todayIso();
+  // Nought once the month has closed, so a report run in arrears never asks for spend that is
+  // no longer possible.
+  const daysLeft = today.slice(0, 7) === m ? Math.max(0, daysBetween(today, lastDayOfMonth(y, mm))) : 0;
+
+  const advice = nextTierAdvice({ effect, supplier: primary.name, daysLeft });
+  if (!advice) return null;
+
+  return { supplier: primary.name, month: m, daysLeft, ...advice };
+}

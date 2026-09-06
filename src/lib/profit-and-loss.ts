@@ -133,15 +133,6 @@ export type PLInputs = {
   /** Every confirmed bill in the month, already placed on the right side of the account. */
   expenses: { categoryId: string | null; categoryName: string; kind: string; amountCents: number }[];
   /**
-   * What the delivery driver is owed for the month, from the delivery days the site counts.
-   *
-   * The site issues the driver's invoice itself, so this figure exists before anybody files a bill.
-   * It is an overhead like any other — unless somebody has also entered the driver's bill under a
-   * delivery category on Spending, in which case the hand-entered bill wins and this is dropped,
-   * because counting it twice is the one thing worse than missing it.
-   */
-  deliveryCostCents?: number | null;
-  /**
    * Revenue the month earned on account and has not collected, and cost that went out unbilled.
    *
    * Neither changes the profit — an accrual account counts a sale when it is made, and the cash
@@ -318,17 +309,6 @@ export function monthlyPL(i: PLInputs): MonthlyPL {
   const grossMarginPercent = netRevenueCents > 0 ? Math.round((grossProfitCents / netRevenueCents) * 1000) / 10 : null;
 
   const operating = byCategory(i.expenses, "operating");
-  const deliveryEntered = operating.find((l) => /deliver|driver|courier/i.test(l.label));
-  if (i.deliveryCostCents && !deliveryEntered) {
-    operating.push({
-      label: "Delivery driver",
-      amountCents: i.deliveryCostCents,
-      note: "From the delivery days counted on the Deliveries page, at the driver's rate. Enter the driver's bill on Spending under a delivery category and that entry replaces this line.",
-    });
-    operating.sort((a, b) => b.amountCents - a.amountCents);
-  } else if (i.deliveryCostCents && deliveryEntered) {
-    deliveryEntered.note = `Entered on Spending; the Deliveries page's own count for the month comes to $${(i.deliveryCostCents / 100).toFixed(2)} and is not added again.`;
-  }
   const operatingCents = sum(operating);
   const netProfitCents = grossProfitCents - operatingCents;
 
@@ -438,8 +418,8 @@ export type SharedInputs = {
   counts: { countedOn: string; valueCents: number | null; rxValueCents: number | null }[];
   /** Money received against fills, by the day it arrived, for the cash account. */
   payments: { source: string; receivedOn: string | null; amountCents: number; revenueCents: number | null }[];
-  /** Per month: the bills on the basis asked for, the receipts entered, the rebate earned, the driver's total. */
-  byMonth: Map<string, { bills: Awaited<ReturnType<typeof import("./expenses").expensesIn>>; receipts: { kind: string; amountCents: number }[]; rebatesCents: number | null; deliveryCostCents: number | null }>;
+  /** Per month: the bills on the basis asked for, the receipts entered, the rebate earned, and the driver's invoices where the pharmacy pays them. */
+  byMonth: Map<string, { bills: Awaited<ReturnType<typeof import("./expenses").expensesIn>>; receipts: { kind: string; amountCents: number }[]; rebatesCents: number | null; driverCents: number }>;
 };
 
 export async function loadShared(months: string[], basis: "accrual" | "cash"): Promise<SharedInputs> {
@@ -448,7 +428,6 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
   const { allFills } = await import("./claims");
   const { earningSoFar } = await import("./rebate-rates");
   const { allSuppliers } = await import("./suppliers-registry");
-  const { monthState } = await import("./deliveries");
   const { db, schema } = await import("@/db");
   const { and, gte, lte } = await import("drizzle-orm");
 
@@ -469,27 +448,17 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
 
   const byMonth: SharedInputs["byMonth"] = new Map();
   for (const month of sorted) {
-    const [bills, receipts, earned, delivery] = await Promise.all([
+    const [bills, receipts, earned, driverCents] = await Promise.all([
       expensesIn(month, basis),
       cashReceiptsIn(month),
       Promise.all(suppliers.map((s) => earningSoFar(s.id, month))),
-      monthState(month).catch(() => null),
+      driverCostFor(month),
     ]);
-    /*
-     * The driver's month. On an accrual basis the month's own count at the rate; on a cash basis
-     * the invoice, in the month it was sent, because that is the nearest thing to a payment date the
-     * site holds — a driver paid on receipt is paid that month.
-     */
-    let deliveryCostCents: number | null = null;
-    if (delivery) {
-      if (basis === "accrual") deliveryCostCents = delivery.invoice?.totalCents ?? (delivery.trips > 0 ? delivery.totalCents : null);
-      else deliveryCostCents = delivery.invoice?.sentAt?.startsWith(month) ? delivery.invoice.totalCents : null;
-    }
     byMonth.set(month, {
       bills,
       receipts: receipts.map((r) => ({ kind: r.kind, amountCents: r.amountCents })),
       rebatesCents: earned.reduce((n, e) => n + (e?.estimatedRebateCents ?? 0), 0) || null,
-      deliveryCostCents,
+      driverCents,
     });
   }
   return { basis, sales, cats, fills, suppliers, invoices, lines, counts, payments, byMonth };
@@ -498,7 +467,7 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
 /** One month's inputs, sliced from what was loaded. Nothing here computes; `monthlyPL` does. */
 export function monthInputs(month: string, basis: "accrual" | "cash", shared: SharedInputs): PLInputs {
   const { sales: months, cats, fills, invoices, lines, counts } = shared;
-  const per = shared.byMonth.get(month) ?? { bills: [], receipts: [], rebatesCents: null, deliveryCostCents: null };
+  const per = shared.byMonth.get(month) ?? { bills: [], receipts: [], rebatesCents: null, driverCents: 0 };
   const sales = months.find((m) => m.month === month) ?? null;
 
   /*
@@ -581,18 +550,30 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
     closingStockCents,
     rebatesCents: per.rebatesCents,
     onAccount,
-    deliveryCostCents: per.deliveryCostCents,
-    expenses: per.bills.map((b) => {
-      const c = b.categoryId ? byId.get(b.categoryId) : undefined;
-      return {
-        categoryId: b.categoryId,
-        categoryName: c?.name ?? "Uncategorised",
-        // A bill nobody has filed is an overhead until somebody says otherwise: it is the reading
-        // that keeps it out of gross profit, where a wrong guess would move the margin.
-        kind: c?.kind ?? "operating",
-        amountCents: b.amountCents,
-      };
-    }),
+    expenses: [
+      ...per.bills.map((b) => {
+        const c = b.categoryId ? byId.get(b.categoryId) : undefined;
+        return {
+          categoryId: b.categoryId,
+          categoryName: c?.name ?? "Uncategorised",
+          // A bill nobody has filed is an overhead until somebody says otherwise: it is the reading
+          // that keeps it out of gross profit, where a wrong guess would move the margin.
+          kind: c?.kind ?? "operating",
+          amountCents: b.amountCents,
+        };
+      }),
+      /*
+       * The delivery round, where the pharmacy is the one paying for it.
+       *
+       * Nought in this pharmacy's arrangement, where the invoice is raised on the driver's behalf
+       * and billed to the clinic — and `excludedFromAccount` says so on the page rather than
+       * leaving the omission to be noticed. One setting governs both, so the account and the note
+       * about it can never disagree.
+       */
+      ...(per.driverCents > 0
+        ? [{ categoryId: null, categoryName: "Delivery round", kind: "operating", amountCents: per.driverCents }]
+        : []),
+    ],
   };
 }
 
@@ -611,4 +592,107 @@ export async function accountMonths(): Promise<string[]> {
   for (const b of bills) set.add(b.invoiceDate.slice(0, 7));
   for (const c of claims) set.add(c.dateFilled.slice(0, 7));
   return [...set].filter((m) => /^\d{4}-\d{2}$/.test(m)).sort().reverse();
+}
+
+/**
+ * What the site knows about, in money, and deliberately keeps out of the month's account.
+ *
+ * The owner asked whether the money section takes the delivery charges into account. It does not,
+ * and it should not — but an account that silently omits something the site plainly holds is
+ * indistinguishable from one that forgot, and the only way to tell them apart was to read the
+ * code. So the omissions are named, with this month's actual figures against them and the reason
+ * in a sentence.
+ *
+ * The rule each of these follows is the same one: an account records the pharmacy's own money.
+ * Raising somebody else's invoice is administration, not trade, and an order is not a cost until
+ * somebody has priced it.
+ */
+export type AccountExclusion = {
+  label: string;
+  /** The money involved, where there is a figure. Null where the site holds no price. */
+  amountCents: number | null;
+  /** A count instead, where the figure is a number of things rather than an amount. */
+  count: number | null;
+  why: string;
+  href: string;
+};
+
+export async function excludedFromAccount(month: string): Promise<AccountExclusion[]> {
+  const out: AccountExclusion[] = [];
+  const { db, schema } = await import("@/db");
+  const { eq } = await import("drizzle-orm");
+  const { getSettings } = await import("./settings");
+  const s = await getSettings();
+
+  /*
+   * The delivery round.
+   *
+   * The site raises the driver's invoice, and raising an invoice says nothing about whose money it
+   * is: it is raised on his behalf and billed to the clinic, so it is neither revenue nor cost
+   * here. Where the pharmacy pays its own driver, the setting says so and the month's invoices go
+   * in as an operating cost instead — see `driverCostFor` below, which the account uses.
+   */
+  try {
+    const invoices = await db.query.driverInvoices.findMany({ where: eq(schema.driverInvoices.month, month) });
+    const total = invoices.reduce((n, i) => n + i.totalCents, 0);
+    if (invoices.length > 0 && (s.driver_paid_by ?? "clinic") !== "pharmacy") {
+      out.push({
+        label: `The delivery round — ${invoices.length} invoice${invoices.length === 1 ? "" : "s"}`,
+        amountCents: total,
+        count: null,
+        why:
+          `Raised here on the driver's behalf and billed to ${(s.driver_bill_to ?? "").trim() || "the clinic"}, so the money is ` +
+          "between the two of them. If the pharmacy is the one paying him, say so in Settings and it becomes an operating cost of the month.",
+        href: "/deliveries",
+      });
+    }
+  } catch {
+    /* No delivery records. */
+  }
+
+  /*
+   * Supply orders.
+   *
+   * The site records what was asked for, never what it cost — the order is an email, and the price
+   * arrives later on the vendor's own invoice. Booking the order would be inventing a figure; the
+   * invoice, when it comes, is an ordinary bill and goes in as one.
+   */
+  try {
+    const orders = await db.query.supplyOrders.findMany();
+    const mine = orders.filter((o) => o.placedOn.startsWith(month) && o.status !== "cancelled" && o.status !== "draft");
+    if (mine.length > 0) {
+      const vendors = [...new Set(mine.map((o) => o.vendorName))];
+      out.push({
+        label: `Supply orders sent — ${mine.length} to ${vendors.join(", ")}`,
+        amountCents: null,
+        count: mine.length,
+        why:
+          "The order is an email; the price arrives on the vendor's invoice afterwards. Booking the order would be " +
+          "inventing a figure. Record the invoice under Spending when it comes and it lands in this month's account.",
+        href: "/purchasing/supplies",
+      });
+    }
+  } catch {
+    /* No supply orders. */
+  }
+
+  return out;
+}
+
+/**
+ * The delivery round as a cost, where the pharmacy is the one paying for it.
+ *
+ * Nought in the ordinary arrangement here, where the clinic pays the driver directly. Kept apart
+ * from `excludedFromAccount` so the account can add it without deciding anything: one setting
+ * governs both, and they cannot disagree about which way it went.
+ */
+export async function driverCostFor(month: string): Promise<number> {
+  const { db, schema } = await import("@/db");
+  const { eq } = await import("drizzle-orm");
+  const { getSettings } = await import("./settings");
+  const s = await getSettings();
+  if ((s.driver_paid_by ?? "clinic") !== "pharmacy") return 0;
+  const invoices = await db.query.driverInvoices.findMany({ where: eq(schema.driverInvoices.month, month) });
+  // Drafts are not yet a bill: the month is unfinished and the figure would change under the account.
+  return invoices.filter((i) => i.status !== "draft").reduce((n, i) => n + i.totalCents, 0);
 }

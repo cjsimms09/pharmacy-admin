@@ -274,11 +274,48 @@ export async function moneyFound(): Promise<MoneyFound> {
     /* A loader above produced something the logic could not read; the other rows stand. */
   }
 
-  // ── What the rebate ladder is leaving behind ──
+  /*
+   * ── What the rebate ladder is leaving behind ──
+   *
+   * For the primary, this month, with the spend it would take and the premium at which it stops
+   * paying — because "one more band is worth $500" is not an instruction until it says what
+   * reaching it costs and how long is left to do it. `nextTierNow` answers all three; the ladder
+   * figure below is last period's buying and stands for the suppliers it has no position for.
+   */
+  let primaryBandKey: string | null = null;
+  try {
+    const { nextTierNow } = await import("./shelf");
+    const { allSuppliers } = await import("./suppliers-registry");
+    const tier = await nextTierNow();
+    const primary = (await allSuppliers(true)).find((x) => x.primarySupplier === true);
+    if (tier && primary && tier.worthCents > 0) {
+      primaryBandKey = `rebate-band-${primary.id}`;
+      rows.push({
+        key: primaryBandKey,
+        says:
+          `${money(tier.worthCents)} from the ${tier.nextRatePercent}% band at ${tier.supplier}` +
+          (tier.daysLeft > 0 ? `, with ${tier.daysLeft} day${tier.daysLeft === 1 ? "" : "s"} left this month.` : ", if the month were still open."),
+        todo:
+          tier.breakEvenPremiumPercent === null
+            ? `Move ${money(tier.neededCents)} more of contract generics to ${tier.supplier} to pass ${tier.nextThresholdPercent}%.`
+            : `Buy ${money(tier.neededCents)} more of contract generics at ${tier.supplier} — worth doing on anything they are less than ${tier.breakEvenPremiumPercent.toFixed(2)}% dearer on.`,
+        amountCents: tier.worthCents,
+        // The band is earned or missed once, in this month. It is not a rate that repeats.
+        cadence: "one_off",
+        confidence: tier.daysLeft > 0 ? "likely" : "worth checking",
+        basis: tier.says,
+        href: "/purchasing",
+      });
+    }
+  } catch {
+    /* No primary, no ladder, or no invoices this month. */
+  }
   try {
     const { allSuppliers } = await import("./suppliers-registry");
     const { ratesFor } = await import("./rebate-rates");
     for (const s of (await allSuppliers(true)).filter((x) => x.active)) {
+      // The primary already has the better row above; two would be the same band counted twice.
+      if (primaryBandKey === `rebate-band-${s.id}`) continue;
       const r = await ratesFor(s.id);
       if (!r || r.view.nextBandWorthCents === null || r.view.nextBandWorthCents <= 0) continue;
       const ladder = r.view.programmes.find((p) => p.next && (p.next.worthCents ?? 0) > 0);
