@@ -116,9 +116,10 @@ by what changes the owner's morning most. Each is small on its own; none needs a
       reopens the form with the bill in it; Void keeps the row marked void and out of every month
       and total; `expense.edit` and `expense.void` audited); `/inventory/discrepancies` ("correct it"
       reopens the entry, `discrepancy.edit` audited; a wrong entry is closed with the reason, never
-      deleted). `/plans` already had classify per row. Still to do: `/staff/rotations` (the student's
-      record has Edit; a link per row would do), `/plans`, `/payers/[pbm]` contacts, rates and documents, `/deliveries`
-      days and invoices, `/settings/backups` archives, and delete-or-retire on `/suppliers`.
+      deleted). `/plans` already had classify per row. `/suppliers` has Retire and `/deliveries` has Clear
+      on a day, which the inventory missed; `/staff/rotations` rows link to the student's Edit. Still
+      to do: `/payers/[pbm]` contacts, rates and documents; voiding an issued driver invoice on
+      `/deliveries`; `/settings/backups` archives (under a path the cloud session cannot read).
       `/agreements` is the model: Edit and Delete on the row, a confirmation that names what
       goes with it. Records the law keeps (invoices, C2 records) retire with a reason.
 - [ ] **One feedback helper and one key** (§7.2): `?ok=` everywhere, and a success notice on
