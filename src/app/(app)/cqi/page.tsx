@@ -112,6 +112,7 @@ export default async function CqiPage({ searchParams }: { searchParams: Promise<
         <section className="card">
           <h2 className="mb-3 font-semibold">Summaries on file</h2>
           {summaries.length === 0 ? <Empty>No summaries yet. Start the current one above, and upload previous signed summaries below.</Empty> : (
+            <div className="overflow-x-auto">
             <table className="table">
               <thead><tr><th>Period</th><th>Due</th><th>Type</th><th>Status</th><th></th></tr></thead>
               <tbody>
@@ -132,6 +133,7 @@ export default async function CqiPage({ searchParams }: { searchParams: Promise<
                 })}
               </tbody>
             </table>
+            </div>
           )}
         </section>
       </div>

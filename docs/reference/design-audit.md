@@ -162,23 +162,19 @@ key itself is spelt three ways: `?ok=` in 31 files, `?saved=` in 14, `?done=` in
   (9 headings), `/nadac` (8), `/remits/mtf` (8), `/purchasing` (7), the training course page (6),
   `/cqi` and the CQI summary (5 each). The `.section*` classes in `globals.css` are used by no
   file; 26 pages hand-roll `rounded-lg border border-line bg-surface` instead.
-- **A second primary button.** `rounded-md bg-ink px-3 py-2 text-sm text-white` appears on
-  `/plans`, `/money/monthly`, `/compliance` (three), `/payers`, `/nadac` (two), `/claims` (two),
-  `/inventory/discrepancies`, `/settings/backups`, `/settings/training`, `/settings/connections`,
-  `/remits/mtf` (two), and the temperature month page. Four pages have **no** `btn`-classed
-  button at all: `/nadac` (7 buttons), `/remits/mtf` (5), `/plans` (3), `/payers` (3). Over forty
-  buttons sit outside the button classes.
-- **Destructive actions as bare text links** instead of `btn-danger`: `/licenses` (line 100),
-  `/staff/[id]` (343), `/deliveries` (538), `/settings/connections` (151), `/manual` (1017).
-  `ConfirmButton` has no default class and `/cqi/incidents` passes none.
+- **A second primary button** — done at `66784b2`: the hand-typed `rounded-md bg-ink …` button is
+  gone from all twelve pages; every primary is `btn btn-primary` (`btn-sm` where it was small).
+- **Destructive actions as bare text links** — done: the deletes on `/licenses`, `/staff/[id]`,
+  `/cqi/incidents` and "Remove the stored key" on `/settings/connections` are `btn btn-sm btn-danger`.
+  Retire, make-inactive and put-back controls stay quiet links on purpose: they are reversible.
 - **`Empty` on 35 pages; ten more hand-write "Nothing yet"**: `/forms`, `/documents`,
   `/settings`, `/staff/technician-list`, the supplier terms page, `/cqi/import/[id]`,
   `/compliance`. `StatusBadge` on 4 pages; `className="badge …"` hand-written on about 30.
 - **`Hub`** is used by `/records` and `/settings` only; nine other group landings hand-roll it.
-- **Tables without an overflow wrapper** (non-print): `/compliance/training/records` (3),
-  `/staff/technician-list` (3), `/settings` (2), `/forms/vaccine-administration` (2), and one
-  each on `/licenses`, `/inventory`, `/remits/mtf`, `/cqi`, `/cqi/import`, the CQI summary,
-  `/documents/manual`, the training handout.
+- **Tables without an overflow wrapper** — done for the screens (`/settings`, `/inventory`, `/cqi`,
+  `/cqi/import`, the CQI summary); the print sheets (`/compliance/training/records`,
+  `/staff/technician-list`, `/forms/vaccine-administration`, `/documents/manual`, the training
+  handout) are paper-width by design and stay as they are.
 - **Headings off the type scale**: `/manual/print` (`text-[2.1rem]`), the temperature print
   (`text-xl` h1), `/staff/new-hire/pack` (`text-3xl` h1).
 

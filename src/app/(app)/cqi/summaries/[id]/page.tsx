@@ -98,6 +98,7 @@ export default async function SummaryPage({ params, searchParams }: { params: Pr
           {incidents.length === 0 ? (
             <p className="text-sm text-ink-2">No incident reports were created between {fmt(summary.periodStart)} and {fmt(summary.periodEnd)}. This summary is filed as a <b>null report</b> under K.A.R. 68-19-1(b)(4).</p>
           ) : (
+            <div className="overflow-x-auto">
             <table className="table">
               <thead><tr><th>#</th><th>Type</th><th>Rx numbers</th><th>Report created</th><th>Review</th><th>CAP</th></tr></thead>
               <tbody>
@@ -113,6 +114,7 @@ export default async function SummaryPage({ params, searchParams }: { params: Pr
                 ))}
               </tbody>
             </table>
+            </div>
           )}
           {incidents.length > 0 && (
             <label className="mt-3 flex items-center gap-2 text-sm"><input type="checkbox" name="isNullReport" defaultChecked={summary.isNullReport} disabled={final} /> File as a null report anyway (not recommended when incidents exist)</label>

@@ -386,6 +386,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                 {used.since ? ` since ${fmt(used.since.slice(0, 10))}` : ""} — {used.tokensIn.toLocaleString("en-US")} tokens
                 in, {used.tokensOut.toLocaleString("en-US")} out, at ${rate.in} and ${rate.out} per million.
               </p>
+              <div className="overflow-x-auto">
               <table className="table mt-2">
                 <thead><tr><th>What</th><th className="text-right">Calls</th><th className="text-right">Tokens</th><th className="text-right">Cost</th></tr></thead>
                 <tbody>
@@ -399,6 +400,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                   ))}
                 </tbody>
               </table>
+              </div>
             </>
           )}
           <p className="mt-2 text-xs text-ink-3">
@@ -411,6 +413,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
 
       <section className="card max-w-3xl">
         <h2 className="mb-3 font-semibold">Logins</h2>
+        <div className="overflow-x-auto">
         <table className="table mb-4">
           <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Linked staff record</th></tr></thead>
           <tbody>
@@ -424,6 +427,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             ))}
           </tbody>
         </table>
+        </div>
         {user.role === "owner" && (
           <details>
             <summary className="cursor-pointer text-sm font-medium text-accent">Add login</summary>

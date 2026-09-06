@@ -56,6 +56,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
       <section className="card mb-6">
         <h2 className="mb-3 font-semibold">Inventories on file</h2>
         {invs.length === 0 ? <Empty>None recorded yet.</Empty> : (
+          <div className="overflow-x-auto">
           <table className="table">
             <thead><tr><th>Date</th><th>Taken at</th><th>Type</th><th>Covers</th><th>Participants</th><th>Signed sheet</th><th></th></tr></thead>
             <tbody>
@@ -76,6 +77,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
               })}
             </tbody>
           </table>
+          </div>
         )}
       </section>
 

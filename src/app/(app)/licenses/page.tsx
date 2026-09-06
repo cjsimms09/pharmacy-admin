@@ -97,7 +97,7 @@ export default async function LicensesPage({ searchParams }: { searchParams: Pro
                         <label className="text-xs text-ink-2">Attach / replace document<input name="file" type="file" className="field" accept=".pdf,.jpg,.jpeg,.png,.heic,.webp,.doc,.docx" /></label>
                         <button className="btn btn-primary">Save</button>
                       </form>
-                      <form action={deleteCredential.bind(null, c.id, here)} className="mt-2"><button className="text-xs text-crit hover:underline">Delete</button></form>
+                      <form action={deleteCredential.bind(null, c.id, here)} className="mt-2"><button className="btn btn-sm btn-danger">Delete</button></form>
                     </details>
                   </td>
                 </tr>

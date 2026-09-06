@@ -106,7 +106,7 @@ export default async function IncidentsPage({ searchParams }: { searchParams: Pr
                   <td className="text-xs">
                     <form action={deleteIncident.bind(null, i.id)}>
                       <ConfirmButton
-                        className="text-crit hover:underline"
+                        className="btn btn-sm btn-danger"
                         message={`Delete incident #${i.incidentNumber} and everything recorded on it? This cannot be undone.`}
                       >
                         Delete
