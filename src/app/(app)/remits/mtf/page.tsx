@@ -5,7 +5,7 @@ import { audit } from "@/lib/audit";
 import { testMtf, downloadMtf, mtfStatus, saveCliLocation, findCli } from "@/lib/mtf";
 import { getSettings } from "@/lib/settings";
 import { requireReimbursement } from "@/lib/features";
-import { PageHeader, Notice, Field, Empty, BackLink } from "@/components/ui";
+import { PageHeader, Notice, Field, Empty, BackLink, Card } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import { formatCents } from "@/lib/money";
 
@@ -153,9 +153,7 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
         weeks after the fill, so counting by fill date would credit this month's receipts to a month
         that closed long ago and the figure would never agree with the bank.
       */}
-      <section className="my-4 rounded-lg border border-line bg-surface p-4">
-        <h2 className="text-sm font-semibold">What this has brought in</h2>
-        <div className="mt-3 grid gap-3 sm:grid-cols-4">
+      <Card title="What this has brought in" className="my-4">        <div className="mt-3 grid gap-3 sm:grid-cols-4">
           <Money value={money.monthToDateCents} label="This month so far" sub={`${money.monthToDatePayments} payment${money.monthToDatePayments === 1 ? "" : "s"}`} strong />
           <Money value={money.lastMonthCents} label="Last month" sub="The whole of it" />
           <Money value={money.allTimeCents} label="Since this started" sub={`${money.allTimePayments} payment${money.allTimePayments === 1 ? "" : "s"}`} />
@@ -175,27 +173,27 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
 
         {money.thisMonth.length > 0 && (
           <div className="mt-3 overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-ground text-left text-xs uppercase tracking-wide text-ink-3">
+            <table className="table">
+              <thead>
                 <tr>
-                  <th className="px-3 py-2">Prescription</th>
-                  <th className="px-3 py-2">Drug</th>
-                  <th className="px-3 py-2">Received</th>
-                  <th className="px-3 py-2 text-right">Amount</th>
-                  <th className="px-3 py-2">Trace</th>
+                  <th>Prescription</th>
+                  <th>Drug</th>
+                  <th>Received</th>
+                  <th className="text-right">Amount</th>
+                  <th>Trace</th>
                 </tr>
               </thead>
               <tbody>
                 {money.thisMonth.map((p, i) => (
-                  <tr key={`${p.rxNumber}-${i}`} className="border-t border-line">
-                    <td className="px-3 py-2 font-mono text-xs">
+                  <tr key={`${p.rxNumber}-${i}`}>
+                    <td className="font-mono text-xs">
                       {p.rxNumber}
                       {p.dateFilled && <span className="block text-ink-3">filled {p.dateFilled}</span>}
                     </td>
-                    <td className="px-3 py-2 text-xs">{p.itemName ?? p.ndc11 ?? <span className="text-warn">not on a claim we hold</span>}</td>
-                    <td className="px-3 py-2 text-xs">{p.receivedOn ?? "—"}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{formatCents(p.amountCents)}</td>
-                    <td className="px-3 py-2 font-mono text-[11px] text-ink-3">{p.reference ?? "—"}</td>
+                    <td className="text-xs">{p.itemName ?? p.ndc11 ?? <span className="text-warn">not on a claim we hold</span>}</td>
+                    <td className="text-xs">{p.receivedOn ?? "—"}</td>
+                    <td className="text-right tabular-nums">{formatCents(p.amountCents)}</td>
+                    <td className="font-mono text-[11px] text-ink-3">{p.reference ?? "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -213,7 +211,7 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
             <table className="mt-1 w-full max-w-md text-sm">
               <tbody>
                 {money.months.map((m) => (
-                  <tr key={m.month} className="border-t border-line">
+                  <tr key={m.month}>
                     <td className="py-1.5">{m.month}</td>
                     <td className="py-1.5 text-right text-xs text-ink-3">{m.payments} payment{m.payments === 1 ? "" : "s"}</td>
                     <td className="py-1.5 text-right tabular-nums">{formatCents(m.amountCents)}</td>
@@ -230,7 +228,7 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
             their Maximum Fair Price, and only once a qualifying fill has been adjudicated.
           </p>
         )}
-      </section>
+      </Card>
 
       {s.hasKey && s.keyDaysLeft !== null && s.keyDaysLeft <= 15 && (
         <Notice kind={s.keyDaysLeft <= 0 ? "crit" : "warn"}>
@@ -255,9 +253,7 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
         environment variable, a reopened terminal, and a failure mode ("mtf-cli is not recognised")
         that reads as the software being broken.
       */}
-      <section className="my-4 rounded-lg border border-line bg-surface p-4">
-        <h2 className="text-sm font-semibold">Where the tool is</h2>
-        <p className="mt-1 text-xs text-ink-2">
+      <Card title="Where the tool is" className="my-4">        <p className="mt-1 text-xs text-ink-2">
           Paste the full path to the program, including the file name. On Windows, extracting the download into your
           user folder puts it at <code>C:\Users\&lt;your user&gt;\mtf-cli\bin\mtf-cli.exe</code>. You do not need to
           touch the system PATH.
@@ -313,12 +309,10 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
             </p>
           </div>
         </form>
-      </section>
+      </Card>
 
       <div className="my-4 grid gap-4 md:grid-cols-2">
-        <section className="rounded-lg border border-line bg-surface p-4">
-          <h2 className="text-sm font-semibold">Test the connection</h2>
-          <p className="mt-1 text-xs text-ink-3">
+        <Card title="Test the connection">          <p className="mt-1 text-xs text-ink-3">
             Before this can work, the MTF portal's Developer Tools page must have <b>Enable report downloads</b>
             switched on. Without it CMS answers 404 even with a valid key. That page also has a
             <b> Generate test file</b> button, which puts a file in the mailbox so a search has something to find.
@@ -336,11 +330,9 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
               Test connection
             </button>
           </form>
-        </section>
+        </Card>
 
-        <section className="rounded-lg border border-line bg-surface p-4">
-          <h2 className="text-sm font-semibold">Download 835 files</h2>
-          <form action={pull} className="mt-3 space-y-3">
+        <Card title="Download 835 files">          <form action={pull} className="mt-3 space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <Field label="From"><input name="from" type="date" defaultValue={iso(ninetyAgo)} className="w-full rounded-md border border-line px-3 py-2 text-sm" /></Field>
               <Field label="To"><input name="to" type="date" defaultValue={iso(today)} className="w-full rounded-md border border-line px-3 py-2 text-sm" /></Field>
@@ -352,7 +344,7 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
               Download
             </button>
           </form>
-        </section>
+        </Card>
       </div>
 
       {/*
@@ -387,9 +379,7 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
         </form>
       </section>
 
-      <section className="mb-4 rounded-lg border border-line bg-surface p-4">
-        <h2 className="text-sm font-semibold">Put the money against the claims</h2>
-        <p className="mt-1 text-sm text-ink-2">
+      <Card title="Put the money against the claims" className="mb-4">        <p className="mt-1 text-sm text-ink-2">
           Reads every 835 in the folder below and records what each one paid against the prescription it names. The
           money is added to that fill&rsquo;s revenue and kept apart from what the plan itself paid, so a facilitator
           payment can never flatter the plan that underpaid.
@@ -402,11 +392,9 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
         <form action={readThem} className="mt-3">
           <button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Read the files and post the payments</button>
         </form>
-      </section>
+      </Card>
 
-      <section className="rounded-lg border border-line bg-surface p-4">
-        <h2 className="text-sm font-semibold">Files we hold</h2>
-        <p className="mt-1 text-xs text-ink-3">
+      <Card title="Files we hold">        <p className="mt-1 text-xs text-ink-3">
           Saved to <code>{s.dir}</code>
           {s.lastPull && <> · last run {new Date(s.lastPull).toLocaleString()}{s.lastResult ? ` — ${s.lastResult}` : ""}</>}
         </p>
@@ -417,7 +405,7 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
             {s.files.map((f) => <li key={f} className="py-1.5 font-mono text-xs">{f}</li>)}
           </ul>
         )}
-      </section>
+      </Card>
 
       {out && (
         <details className="mt-4 rounded-lg border border-line bg-surface p-4" open={Boolean(error)}>
@@ -430,9 +418,7 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
         </details>
       )}
 
-      <section className="mt-8 rounded-lg border border-line bg-surface p-4 text-sm">
-        <h2 className="text-sm font-semibold">What this does and does not cover</h2>
-        <p className="mt-2 text-ink-2">
+      <Card title="What this does and does not cover" className="mt-8  text-sm">        <p className="mt-2 text-ink-2">
           MTF carries Maximum Fair Price refunds only — the difference CMS refunds on the selected drugs subject to
           the negotiated price. It is not a source for ordinary Part D payments and carries nothing commercial. Those
           still come through Health Mart Atlas central pay and the payers directly.
@@ -442,7 +428,7 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
           Developer Tools page as the API key. Once it is installed, everything on this page works without a command
           prompt.
         </p>
-      </section>
+      </Card>
     </>
   );
 }

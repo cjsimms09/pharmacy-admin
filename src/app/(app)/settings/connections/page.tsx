@@ -4,7 +4,7 @@ import { requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { setSetting, type SettingKey } from "@/lib/settings";
 import { CONNECTIONS, connectionState, saveSecret, clearSecret } from "@/lib/connections";
-import { PageHeader, Notice, BackLink, Field } from "@/components/ui";
+import { PageHeader, Notice, BackLink, Field, Card } from "@/components/ui";
 
 export const metadata = { title: "Connections" };
 export const dynamic = "force-dynamic";
@@ -155,9 +155,7 @@ export default async function ConnectionsPage({ searchParams }: { searchParams: 
         ))}
       </div>
 
-      <section className="mt-8 rounded-lg border border-line bg-surface p-4 text-sm">
-        <h2 className="text-sm font-semibold">How these are protected</h2>
-        <ul className="mt-2 list-disc space-y-1 pl-5 text-ink-2">
+      <Card title="How these are protected" className="mt-8  text-sm">        <ul className="mt-2 list-disc space-y-1 pl-5 text-ink-2">
           <li>Encrypted with AES-256-GCM using <code>APP_ENCRYPTION_KEY</code> from the <code>.env</code> file on this machine.</li>
           <li>Stored in the local database only. Nothing is sent anywhere except to the service the key belongs to.</li>
           <li>Never rendered back to a page — only the last four characters, so you can tell which key is loaded.</li>
@@ -166,7 +164,7 @@ export default async function ConnectionsPage({ searchParams }: { searchParams: 
             pasted again. That is by design: the database on its own is not enough to use them.
           </li>
         </ul>
-      </section>
+      </Card>
     </>
   );
 }

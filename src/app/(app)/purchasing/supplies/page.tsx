@@ -228,11 +228,28 @@ export default async function SuppliesPage({ searchParams }: { searchParams: Pro
             </tbody>
           </table>
         </div>
-        {board.rows.some((r) => r.rate.problems.length > 0) && (
-          <ul className="mt-3 space-y-1 text-xs text-ink-3">
-            {board.rows.flatMap((r) => r.rate.problems.map((p) => <li key={`${r.id}-${p}`}>• <b className="text-ink-2">{r.name}</b> — {p}</li>))}
-          </ul>
-        )}
+        {/*
+          Only what the table has not already said.
+
+          Every row carries its own evidence in the last column, so repeating "nothing has been
+          counted yet" underneath it once per item is seven lines that say what seven cells already
+          say. What is worth the space is the anomaly — a count that rose with no delivery logged —
+          because that is the one a person has to do something about.
+        */}
+        {(() => {
+          const anomalies = board.rows.flatMap((r) =>
+            r.counts.length > 1 ? r.rate.problems.map((p) => ({ id: r.id, name: r.name, p })) : [],
+          );
+          return anomalies.length === 0 ? null : (
+            <ul className="mt-3 space-y-1 text-xs text-ink-3">
+              {anomalies.map((a) => (
+                <li key={`${a.id}-${a.p}`}>
+                  • <b className="text-ink-2">{a.name}</b> — {a.p}
+                </li>
+              ))}
+            </ul>
+          );
+        })()}
         <p className="mt-3 text-xs text-ink-3">
           Every figure here comes from the counts below and nothing else. Two counts give a rate; the rest is the lead
           time and the cushion, which are set per item and can be changed as the real delivery times become known.

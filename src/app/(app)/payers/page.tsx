@@ -5,7 +5,7 @@ import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { importReference, referenceCounts, pbmDirectory, lookupBin, scanContracts } from "@/lib/reference";
 import { requireReimbursement } from "@/lib/features";
-import { PageHeader, Notice, Empty, Field } from "@/components/ui";
+import { PageHeader, Notice, Empty, Field, Card, Figure } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import { unknownBins, nameBin } from "@/lib/unknown-bins";
 import { indexContracts, searchContracts, contractsForUnknownBins, contractIndexState, type ContractHit } from "@/lib/contract-search";
@@ -146,9 +146,7 @@ export default async function PayersPage({ searchParams }: { searchParams: Promi
         A filing cabinet is not a record. The question actually asked of a contract is "which one
         covers this BIN", and answering it meant opening twenty PDFs by hand.
       */}
-      <section className="mb-6 rounded-lg border border-line bg-surface p-4">
-        <h2 className="text-sm font-semibold">Search the contracts on file</h2>
-        <p className="mt-1 text-xs text-ink-2">
+      <Card title="Search the contracts on file" className="mb-6">        <p className="mt-1 text-xs text-ink-2">
           {indexState.files === 0 ? (
             <>
               Nothing has been read yet. The contract PDFs live in <code>data/contracts/</code>; press below and their
@@ -201,7 +199,7 @@ export default async function PayersPage({ searchParams }: { searchParams: Promi
             )}
           </div>
         )}
-      </section>
+      </Card>
 
       {gaps.length > 0 && (
         <section className="mb-6 rounded-lg border border-warn bg-surface p-4">
@@ -282,9 +280,7 @@ export default async function PayersPage({ searchParams }: { searchParams: Promi
       </div>
 
       {/* ── BIN lookup: the question actually asked at the counter ── */}
-      <section className="mb-6 rounded-lg border border-line bg-surface p-4">
-        <h2 className="text-sm font-semibold">Look up a BIN</h2>
-        <p className="mt-1 text-xs text-ink-3">
+      <Card title="Look up a BIN" className="mb-6">        <p className="mt-1 text-xs text-ink-3">
           Type the BIN from a claim. Sixty of them are used by more than one PBM, so where that happens every
           candidate is listed rather than one being guessed at.
         </p>
@@ -326,7 +322,7 @@ export default async function PayersPage({ searchParams }: { searchParams: Promi
             )}
           </div>
         )}
-      </section>
+      </Card>
 
       {/* ── Directory ── */}
       <form className="mb-3 flex gap-2" method="GET">
@@ -342,31 +338,31 @@ export default async function PayersPage({ searchParams }: { searchParams: Promi
       {shown.length === 0 ? (
         <Empty>No payer matches that.</Empty>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-line">
-          <table className="w-full text-sm">
-            <thead className="bg-ground text-left text-xs uppercase tracking-wide text-ink-3">
+        <div className="overflow-x-auto">
+          <table className="table">
+            <thead>
               <tr>
-                <th className="px-3 py-2">Payer</th>
-                <th className="px-3 py-2">BINs</th>
-                <th className="px-3 py-2">Rates</th>
-                <th className="px-3 py-2">Appeal route</th>
-                <th className="px-3 py-2">Payment</th>
-                <th className="px-3 py-2">Contracts held</th>
+                <th>Payer</th>
+                <th>BINs</th>
+                <th>Rates</th>
+                <th>Appeal route</th>
+                <th>Payment</th>
+                <th>Contracts held</th>
               </tr>
             </thead>
             <tbody>
               {shown.map((d) => (
-                <tr key={d.pbmName} className="border-t border-line">
-                  <td className="px-3 py-2">
+                <tr key={d.pbmName}>
+                  <td>
                     <Link href={`/payers/${encodeURIComponent(d.pbmName)}`} className="font-medium underline">
                       {d.pbmName}
                     </Link>
                   </td>
-                  <td className="px-3 py-2 tabular-nums">{d.bins.length || <span className="text-ink-3">—</span>}</td>
-                  <td className="px-3 py-2 tabular-nums">{d.rates || <span className="text-ink-3">—</span>}</td>
-                  <td className="px-3 py-2">{d.appeals ? "yes" : <span className="text-ink-3">—</span>}</td>
-                  <td className="px-3 py-2">{d.hasRouting ? "yes" : <span className="text-ink-3">—</span>}</td>
-                  <td className="px-3 py-2 tabular-nums">
+                  <td className="tabular-nums">{d.bins.length || <span className="text-ink-3">—</span>}</td>
+                  <td className="tabular-nums">{d.rates || <span className="text-ink-3">—</span>}</td>
+                  <td>{d.appeals ? "yes" : <span className="text-ink-3">—</span>}</td>
+                  <td>{d.hasRouting ? "yes" : <span className="text-ink-3">—</span>}</td>
+                  <td className="tabular-nums">
                     {d.docsKnown ? `${d.docsHere} / ${d.docsKnown}` : <span className="text-ink-3">—</span>}
                   </td>
                 </tr>
@@ -376,9 +372,7 @@ export default async function PayersPage({ searchParams }: { searchParams: Promi
         </div>
       )}
 
-      <section className="mt-8 rounded-lg border border-line bg-surface p-4">
-        <h2 className="text-sm font-semibold">Reload reference data</h2>
-        <p className="mt-1 text-xs text-ink-3">
+      <Card title="Reload reference data" className="mt-8">        <p className="mt-1 text-xs text-ink-3">
           Reads every CSV in <code>data/reference/</code> and rebuilds the tables above, then re-checks{" "}
           <code>data/contracts/</code> for the PDFs. Safe to run again at any time — it replaces rather than
           duplicates, and file matches already made are kept.
@@ -386,16 +380,18 @@ export default async function PayersPage({ searchParams }: { searchParams: Promi
         <form action={runImport} className="mt-3">
           <button className="rounded-md border border-line px-3 py-2 text-sm hover:bg-ground">Run import</button>
         </form>
-      </section>
+      </Card>
     </>
   );
 }
 
+/*
+ * The page's own tile, which is now the shared one wearing this page's prop names.
+ *
+ * It drew its own amber and emerald straight from Tailwind's palette rather than the theme's
+ * tokens, so a change to what "needs attention" looks like reached every screen except the five
+ * that had quietly forked it. The signature is kept so nothing at the call sites has to move.
+ */
 function Stat({ label, n }: { label: string; n: number }) {
-  return (
-    <div className="rounded-lg border border-line bg-surface p-3">
-      <div className="text-xl font-semibold tabular-nums">{n.toLocaleString()}</div>
-      <div className="text-xs text-ink-3">{label}</div>
-    </div>
-  );
+  return <Figure value={n.toLocaleString()} label={label} tone="muted" />;
 }

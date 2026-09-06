@@ -6,7 +6,7 @@ import { getSettings, setSetting } from "@/lib/settings";
 import { parseMaterials, STATEMENTS } from "@/lib/training-assignments";
 import { TRAINING_LABEL } from "@/lib/labels";
 import { TRAINING_TYPES, type TrainingType } from "@/db/schema";
-import { PageHeader, Notice, BackLink, Field } from "@/components/ui";
+import { PageHeader, Notice, BackLink, Field, Card } from "@/components/ui";
 
 export const metadata = { title: "Training material" };
 export const dynamic = "force-dynamic";
@@ -61,7 +61,7 @@ export default async function TrainingMaterialPage({ searchParams }: { searchPar
         <button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Save</button>
       </form>
 
-      <section className="mt-8 max-w-3xl rounded-lg border border-line bg-surface p-4 text-sm">
+      <Card className="mt-8 max-w-3xl  text-sm">
         <h2 className="font-semibold">Where to look</h2>
         <ul className="mt-2 list-disc space-y-2 pl-5 text-ink-2">
           <li>
@@ -90,7 +90,7 @@ export default async function TrainingMaterialPage({ searchParams }: { searchPar
           Leave a link blank and staff simply get the attestation without a link, which is right for training you run
           in person. The signature records what they confirmed either way.
         </p>
-      </section>
+      </Card>
     </>
   );
 }

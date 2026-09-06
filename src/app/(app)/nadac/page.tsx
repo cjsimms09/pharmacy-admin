@@ -10,7 +10,7 @@ import { yearArchiveUrlAsync, archiveYearsAsync, nadacAuto, nadacDatasets, weekS
 import { nadacJob, startNadacFetch, runNadacFetch, nadacJobRunning } from "@/lib/nadac-job";
 import { JobPanel } from "@/components/job-panel";
 import { getSettings, setSetting } from "@/lib/settings";
-import { PageHeader, Notice, Empty } from "@/components/ui";
+import { PageHeader, Notice, Empty, Card, Figure } from "@/components/ui";
 
 export const metadata = { title: "NADAC" };
 export const dynamic = "force-dynamic";
@@ -179,9 +179,7 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
       </div>
 
       {/* ── Automatic ── */}
-      <section className="my-4 rounded-lg border border-line bg-surface p-4">
-        <h2 className="text-sm font-semibold">Fetch it automatically</h2>
-        <p className="mt-1 text-sm text-ink-2">
+      <Card title="Fetch it automatically" className="my-4">        <p className="mt-1 text-sm text-ink-2">
           NADAC is free and public and needs no account. CMS publishes one file a week, on a Wednesday, of a few
           megabytes, at a fixed address ending in that Wednesday&rsquo;s date. Press <b>Fetch now</b> once to take the
           most recent one; after that it looks every day and downloads only a week it does not already hold. The
@@ -239,7 +237,7 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
             </p>
           )}
         </div>
-      </section>
+      </Card>
 
       {/*
         The weeks that are actually missing, named.
@@ -299,9 +297,7 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
         knew last year's would offer an archive that no longer exists, or fetch the wrong one, and
         say nothing. So the listing is read once a week and what it said is shown here.
       */}
-      <section className="my-4 rounded-lg border border-line bg-surface p-4">
-        <h2 className="text-sm font-semibold">What data.medicaid.gov calls these files</h2>
-        {datasets ? (
+      <Card title="What data.medicaid.gov calls these files" className="my-4">        {datasets ? (
           <p className="mt-1 text-sm text-ink-2">
             Read {new Date(datasets.readAt).toLocaleDateString()}: {datasets.weekly ? "the current weekly file" : "no current weekly file"}
             {Object.keys(datasets.years).length ? `, and yearly archives for ${Object.keys(datasets.years).sort().reverse().join(", ")}` : ", and no yearly archives"}.
@@ -316,9 +312,9 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
         <form action={refreshDatasets} className="mt-2">
           <button className="rounded-md border border-line px-3 py-2 text-sm hover:bg-ground" disabled={running}>Read the listing now</button>
         </form>
-      </section>
+      </Card>
 
-      <section className="my-4 rounded-lg border border-line bg-surface p-4">
+      <Card className="my-4">
         <h2 className="text-sm font-semibold">Earlier weeks of {years[0]}</h2>
         <p className="mt-1 text-sm text-ink-2">
           Only needed to price claims filled <b>before the first weekly pull</b>. The floor took effect on 1 July
@@ -338,11 +334,9 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
             A large file: it runs in the background and takes several minutes. The panel above shows it going.
           </span>
         </div>
-      </section>
+      </Card>
 
-      <section className="my-4 rounded-lg border border-line bg-surface p-4">
-        <h2 className="text-sm font-semibold">Load one file from an address</h2>
-        <p className="mt-1 text-sm text-ink-2">
+      <Card title="Load one file from an address" className="my-4">        <p className="mt-1 text-sm text-ink-2">
           For back files. Find the week you need on <code>data.medicaid.gov</code>, copy the link to its CSV, and
           paste it here — it is loaded through exactly the same checks as the automatic pull, so a page that is not a
           NADAC file is refused rather than saved.
@@ -351,11 +345,9 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
           <input name="url" placeholder="https://download.medicaid.gov/…" className="field flex-1 font-mono text-xs" />
           <button className="rounded-md border border-line px-3 py-2 text-sm hover:bg-ground">Fetch it</button>
         </form>
-      </section>
+      </Card>
 
-      <section className="my-4 rounded-lg border border-line bg-surface p-4">
-        <h2 className="text-sm font-semibold">Or load files by hand</h2>
-        <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-ink-2">
+      <Card title="Or load files by hand" className="my-4">        <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-ink-2">
           <li>
             Go to <code>data.medicaid.gov</code> and search for <b>NADAC (National Average Drug Acquisition Cost)</b>.
             It is free and needs no account.
@@ -378,7 +370,7 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
         <p className="mt-2 text-xs text-ink-3">
           Files can also be copied straight into <code>{nadacDir()}</code> and loaded from here.
         </p>
-      </section>
+      </Card>
 
       {cov.prices > 0 && (
         <>
@@ -414,17 +406,17 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
                     Usually means the weekly file covering that fill date has not been loaded. Some products genuinely
                     have no NADAC — CMS does not price everything.
                   </p>
-                  <div className="overflow-x-auto rounded-lg border border-line">
-                    <table className="w-full text-sm">
-                      <thead className="bg-ground text-left text-xs uppercase tracking-wide text-ink-3">
-                        <tr><th className="px-3 py-2">NDC</th><th className="px-3 py-2">Drug</th><th className="px-3 py-2 text-right">Claims</th></tr>
+                  <div className="overflow-x-auto">
+                    <table className="table">
+                      <thead>
+                        <tr><th>NDC</th><th>Drug</th><th className="text-right">Claims</th></tr>
                       </thead>
                       <tbody>
                         {claimCov.missing.slice(0, 40).map((m) => (
-                          <tr key={m.ndc11} className="border-t border-line">
-                            <td className="px-3 py-2 font-mono text-xs">{m.ndc11}</td>
-                            <td className="px-3 py-2">{m.itemName ?? "—"}</td>
-                            <td className="px-3 py-2 text-right tabular-nums">{m.claims}</td>
+                          <tr key={m.ndc11}>
+                            <td className="font-mono text-xs">{m.ndc11}</td>
+                            <td>{m.itemName ?? "—"}</td>
+                            <td className="text-right tabular-nums">{m.claims}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -439,16 +431,16 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
           {cov.weeks.length === 0 ? (
             <Empty>None.</Empty>
           ) : (
-            <div className="overflow-x-auto rounded-lg border border-line">
-              <table className="w-full text-sm">
-                <thead className="bg-ground text-left text-xs uppercase tracking-wide text-ink-3">
-                  <tr><th className="px-3 py-2">Effective date</th><th className="px-3 py-2 text-right">Prices</th></tr>
+            <div className="overflow-x-auto">
+              <table className="table">
+                <thead>
+                  <tr><th>Effective date</th><th className="text-right">Prices</th></tr>
                 </thead>
                 <tbody>
                   {cov.weeks.map((w) => (
-                    <tr key={w.effectiveOn} className="border-t border-line">
-                      <td className="px-3 py-2">{w.effectiveOn}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{Number(w.n).toLocaleString()}</td>
+                    <tr key={w.effectiveOn}>
+                      <td>{w.effectiveOn}</td>
+                      <td className="text-right tabular-nums">{Number(w.n).toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -461,12 +453,13 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
   );
 }
 
+/*
+ * The page's own tile, which is now the shared one wearing this page's prop names.
+ *
+ * It drew its own amber and emerald straight from Tailwind's palette rather than the theme's
+ * tokens, so a change to what "needs attention" looks like reached every screen except the five
+ * that had quietly forked it. The signature is kept so nothing at the call sites has to move.
+ */
 function Stat({ label, value, tone }: { label: string; value: string; tone?: "warn" | "ok" }) {
-  const border = tone === "warn" ? "border-amber-300 bg-amber-50" : tone === "ok" ? "border-emerald-300 bg-emerald-50" : "border-line bg-surface";
-  return (
-    <div className={`rounded-lg border p-3 ${border}`}>
-      <div className="text-lg font-semibold tabular-nums">{value}</div>
-      <div className="text-xs text-ink-3">{label}</div>
-    </div>
-  );
+  return <Figure value={value} label={label} tone={tone ?? "muted"} />;
 }

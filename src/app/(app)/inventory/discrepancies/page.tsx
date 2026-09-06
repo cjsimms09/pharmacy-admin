@@ -10,7 +10,7 @@ import { storeFile } from "@/lib/files";
 import { newId } from "@/lib/crypto";
 import { parseQuantityThousandths } from "@/lib/money";
 import { normalizeClaimNdc } from "@/lib/claims";
-import { PageHeader, Notice, BackLink, Empty, Field } from "@/components/ui";
+import { PageHeader, Notice, BackLink, Empty, Field, Card } from "@/components/ui";
 
 export const metadata = { title: "Inventory discrepancies" };
 export const dynamic = "force-dynamic";
@@ -112,8 +112,7 @@ export default async function DiscrepanciesPage({ searchParams }: { searchParams
         matter and still needs a DEA Form 106.
       </Notice>
 
-      <section id="log" className="my-4 rounded-lg border border-line bg-surface p-4">
-        <h2 className="text-sm font-semibold">{editing ? `Correct the entry for ${editing.drugName}` : "Log one"}</h2>
+<Card id="log" title={editing ? `Correct the entry for ${editing.drugName}` : "Log one"} className="my-4">
         <form key={editing?.id ?? "new"} action={log} className="mt-3 grid gap-3 sm:grid-cols-3">
           {editing && <input type="hidden" name="id" value={editing.id} />}
           <Field label="Date discovered">
@@ -162,7 +161,7 @@ export default async function DiscrepanciesPage({ searchParams }: { searchParams
             {editing && <Link href="/inventory/discrepancies" className="btn">Cancel</Link>}
           </div>
         </form>
-      </section>
+      </Card>
 
       <h2 className="mt-8 text-sm font-semibold">
         Logged {open.length > 0 && <span className="font-normal text-ink-3">· {open.length} still open</span>}

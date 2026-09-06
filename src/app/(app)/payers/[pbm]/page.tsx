@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { pbmProfile } from "@/lib/reference";
 import { requireReimbursement } from "@/lib/features";
-import { PageHeader, BackLink, Empty } from "@/components/ui";
+import { PageHeader, BackLink, Empty, Card } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -68,27 +68,27 @@ export default async function PayerPage({ params }: { params: Promise<{ pbm: str
       {p.rates.length === 0 ? (
         <Empty>No published rates for this payer.</Empty>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-line">
-          <table className="w-full text-sm">
-            <thead className="bg-ground text-left text-xs uppercase tracking-wide text-ink-3">
+        <div className="overflow-x-auto">
+          <table className="table">
+            <thead>
               <tr>
-                <th className="px-3 py-2">Line of business</th>
-                <th className="px-3 py-2">Network</th>
-                <th className="px-3 py-2">Days</th>
-                <th className="px-3 py-2">Brand</th>
-                <th className="px-3 py-2">Generic</th>
-                <th className="px-3 py-2">Effective</th>
+                <th>Line of business</th>
+                <th>Network</th>
+                <th>Days</th>
+                <th>Brand</th>
+                <th>Generic</th>
+                <th>Effective</th>
               </tr>
             </thead>
             <tbody>
               {p.rates.map((r) => (
                 <tr key={r.id} className="border-t border-line align-top">
-                  <td className="px-3 py-2">{r.lineOfBusiness}</td>
-                  <td className="px-3 py-2">{r.network}</td>
-                  <td className="px-3 py-2 whitespace-nowrap">{r.daysSupply ?? "—"}</td>
-                  <td className="px-3 py-2">{r.brandRate ?? "—"}</td>
-                  <td className="px-3 py-2">{r.genericRate ?? "—"}</td>
-                  <td className="px-3 py-2 whitespace-nowrap text-xs text-ink-3">{r.effectiveDate ?? "—"}</td>
+                  <td>{r.lineOfBusiness}</td>
+                  <td>{r.network}</td>
+                  <td className="whitespace-nowrap">{r.daysSupply ?? "—"}</td>
+                  <td>{r.brandRate ?? "—"}</td>
+                  <td>{r.genericRate ?? "—"}</td>
+                  <td className="whitespace-nowrap text-xs text-ink-3">{r.effectiveDate ?? "—"}</td>
                 </tr>
               ))}
             </tbody>
@@ -101,24 +101,24 @@ export default async function PayerPage({ params }: { params: Promise<{ pbm: str
       {p.bins.length === 0 ? (
         <Empty>This payer has no BINs on the HMA listing.</Empty>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-line">
-          <table className="w-full text-sm">
-            <thead className="bg-ground text-left text-xs uppercase tracking-wide text-ink-3">
+        <div className="overflow-x-auto">
+          <table className="table">
+            <thead>
               <tr>
-                <th className="px-3 py-2">BIN</th>
-                <th className="px-3 py-2">Sub-network</th>
-                <th className="px-3 py-2">Lines of business</th>
+                <th>BIN</th>
+                <th>Sub-network</th>
+                <th>Lines of business</th>
               </tr>
             </thead>
             <tbody>
               {p.bins.map((b) => (
                 <tr key={b.id} className="border-t border-line align-top">
-                  <td className="px-3 py-2 font-mono tabular-nums">
+                  <td className="font-mono tabular-nums">
                     {b.bin}
                     {b.collides && <span className="ml-2 rounded bg-amber-100 px-1 text-xs text-amber-900">shared</span>}
                   </td>
-                  <td className="px-3 py-2">{b.subNetwork ?? "—"}</td>
-                  <td className="px-3 py-2 text-xs text-ink-3">{b.linesOfBusiness ?? "—"}</td>
+                  <td>{b.subNetwork ?? "—"}</td>
+                  <td className="text-xs text-ink-3">{b.linesOfBusiness ?? "—"}</td>
                 </tr>
               ))}
             </tbody>
@@ -194,15 +194,6 @@ export default async function PayerPage({ params }: { params: Promise<{ pbm: str
         <Link href="/payers" className="underline">Back to payers</Link>
       </p>
     </>
-  );
-}
-
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="rounded-lg border border-line bg-surface p-4">
-      <h2 className="mb-3 text-sm font-semibold">{title}</h2>
-      {children}
-    </section>
   );
 }
 

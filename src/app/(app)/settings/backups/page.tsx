@@ -5,7 +5,7 @@ import { audit } from "@/lib/audit";
 import { setSetting } from "@/lib/settings";
 import { runBackup, backupStatus, pruneBackups, encryptionKey, rehearseRestore } from "@/lib/backup";
 import { detectCloudFolders, backupFolderIn, isInside } from "@/lib/cloud-folders";
-import { PageHeader, Notice, BackLink, Empty, Field, Figure } from "@/components/ui";
+import { PageHeader, Notice, BackLink, Empty, Field, Figure, Card } from "@/components/ui";
 import { fmtLong } from "@/lib/dates";
 
 export const metadata = { title: "Backups" };
@@ -169,9 +169,7 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
         sign a business associate agreement for a work or school account and not for a personal one.
       */}
       {clouds.length > 0 && (
-        <section className="my-4 rounded-lg border border-line bg-surface p-4">
-          <h2 className="text-sm font-semibold">Send a copy to OneDrive</h2>
-          <p className="mt-0.5 text-sm text-ink-2">
+        <Card title="Send a copy to OneDrive" className="my-4">          <p className="mt-0.5 text-sm text-ink-2">
             A folder that syncs to the cloud is the second copy that survives this building. Each archive is verified
             here, written there, and read back to prove it arrived &mdash; the sync client then carries it off the
             premises on its own, with nobody remembering to do anything.
@@ -219,7 +217,7 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
             none, because there is nobody to have it with. Do not share the folder with anybody. The API keys and the
             mail password are not in the archive at all.
           </p>
-        </section>
+        </Card>
       )}
 
       {clouds.length === 0 && s.destinations.length < 2 && (
@@ -245,7 +243,7 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
         </Notice>
       )}
 
-      <section className="my-4 rounded-lg border border-line bg-surface p-4">
+      <Card className="my-4">
         <form action={save} className="grid gap-3 sm:grid-cols-2">
           <Field
             label="Where to put them"
@@ -295,7 +293,7 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
             Last run {new Date(s.lastRun).toLocaleString()} — {s.lastResult}
           </p>
         )}
-      </section>
+      </Card>
 
       <h2 className="mt-8 text-sm font-semibold">Archives held</h2>
       {s.existing.length === 0 ? (
@@ -313,7 +311,7 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
 
       {/* ── The key ── */}
       <h2 className="mt-8 text-sm font-semibold">The encryption key</h2>
-      <section className="mt-2 rounded-lg border border-line bg-surface p-4 text-sm">
+      <Card className="mt-2  text-sm">
         <p className="text-ink-2">
           The Anthropic API key, the MTF key and the mail password are stored encrypted. The key that unlocks them
           lives in the <code>.env</code> file on this machine and is <b>deliberately kept out of the backups</b> — if it
@@ -334,10 +332,10 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
             Show the key so I can write it down
           </a>
         )}
-      </section>
+      </Card>
 
       <h2 className="mt-8 text-sm font-semibold">What is in a backup, and how to use one</h2>
-      <section className="mt-2 rounded-lg border border-line bg-surface p-4 text-sm">
+      <Card className="mt-2  text-sm">
         <ul className="list-disc space-y-1 pl-5 text-ink-2">
           <li>The whole database, and every document ever uploaded.</li>
           <li>
@@ -368,7 +366,7 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
             control, a locked drawer, a cloud account with two-factor sign-in on it.
           </li>
         </ul>
-      </section>
+      </Card>
     </>
   );
 }
