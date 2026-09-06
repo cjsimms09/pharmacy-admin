@@ -120,8 +120,13 @@ export type Fill = {
   /**
    * Revenue recognised on this fill that nobody has collected yet. Zero unless it is on account.
    *
-   * The whole of the fill's revenue, because an account sale is not part-collected: it was billed
-   * to the account instead of taken at the counter.
+   * The account legs' own money, not the whole fill's.
+   *
+   * A coordinated fill can have one leg billed to an account and another paid by a plan. Counting
+   * the whole fill's revenue as receivable put the plan's remit in this bucket as well as in the
+   * remittance reconciliation, where it was already being awaited: the same dollar in two
+   * "not money yet" lists. On Rx 333932-0 that read $491.67 owed on account when the $491.67 was
+   * the plan's, and on its way.
    */
   receivableCents: number;
   /**
@@ -436,7 +441,7 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
       coordinated: payers.length > 1,
       cashPlan: rows.some((r) => r.cashPlan === true),
       onAccount,
-      receivableCents: onAccount ? revenueCents : 0,
+      receivableCents: rows.reduce((n, r) => (r.onAccount === true ? n + (r.patientTotalCents ?? r.copayCents ?? 0) : n), 0),
       unbilledCostCents: onAccount && revenueCents === 0 ? acquisitionCents : null,
       quantityThousandths,
       remitCents,

@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { checkForUpdates, currentVersion, lastUpdateLog, launcherActive, requestUpdateAndRestart } from "@/lib/updates";
+import { checkForUpdates, currentVersion, lastUpdateLog, launcherActive, refreshUpdateCheck, requestUpdateAndRestart } from "@/lib/updates";
 import { PageHeader, BackLink, Notice } from "@/components/ui";
 
 export const metadata = { title: "Updates" };
@@ -11,7 +11,18 @@ export default async function UpdatesPage({ searchParams }: { searchParams: Prom
   const { check, error } = await searchParams;
   const version = await currentVersion();
   const launcher = launcherActive();
-  const result = check ? await checkForUpdates() : null;
+  /*
+   * Checked on arrival, not on a button.
+   *
+   * This page opened saying nothing at all until "Check for updates" was pressed, so somebody who
+   * came here because a fix had been promised was shown a blank page and left believing the fix
+   * had not shipped. Coming to this page IS the request. The button stays, as "Check again", for
+   * the minute after a push.
+   */
+  void check;
+  const result = await checkForUpdates();
+  // The once-a-day banner agrees with what this page just saw, rather than lagging it by a day.
+  await refreshUpdateCheck().catch(() => {});
   const log = lastUpdateLog();
 
   async function doCheck() {
@@ -47,7 +58,7 @@ export default async function UpdatesPage({ searchParams }: { searchParams: Prom
         ) : (
           <p className="text-sm text-ink-3">Version information isn't available (Git not found).</p>
         )}
-        <form action={doCheck} className="mt-3"><button className="btn">Check for updates</button></form>
+        <form action={doCheck} className="mt-3"><button className="btn">Check again</button></form>
       </section>
 
       {log && (
@@ -55,6 +66,14 @@ export default async function UpdatesPage({ searchParams }: { searchParams: Prom
           <summary className="cursor-pointer text-sm font-medium text-accent">What happened during the last update</summary>
           <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded bg-ground p-3 text-[11px] text-ink-2">{log}</pre>
         </details>
+      )}
+
+      {result?.ok && result.behind > 0 && (
+        <Notice kind="warn">
+          <b>{result.behind} update{result.behind === 1 ? "" : "s"} waiting.</b> Press <b>Install and restart</b> below. Until you
+          do, this computer is running the version it was running before them, so anything fixed in
+          them is still broken here.
+        </Notice>
       )}
 
       {result && (
