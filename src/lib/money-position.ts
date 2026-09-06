@@ -76,6 +76,10 @@ export type MoneyPosition = {
     supplierId: string;
     supplierName: string;
     percent: number | null;
+    /** Today's position from the drill-down, which is a different measure and never selects a band. */
+    dailyPercent: number | null;
+    /** How far apart the two are. Nothing to do while the scheduled report lacks the exclusions. */
+    driftPercent: number | null;
     /** The daily drill down beats the monthly statement: one is a position, the other a settlement. */
     source: "daily report" | "monthly statement" | null;
     asOf: string | null;
@@ -193,7 +197,16 @@ export async function moneyPosition(today = new Date()): Promise<MoneyPosition> 
     ? {
         supplierId: ratioSupplier.id,
         supplierName: ratioSupplier.name,
-        percent: daily?.supplierId === ratioSupplier.id || (!daily?.supplierId && /mckesson/i.test(ratioSupplier.name)) ? (daily?.gcrPercent ?? null) : null,
+        /*
+         * The settled ratio, which is the one the rebate is actually paid on.
+         *
+         * The daily drill-down's figure is a different measurement — it carries only the exclusions
+         * the scheduled report was set up with, and on one real month read 10.13% against a settled
+         * 20.64%. Showing it here as "the scrubbed GCR" put the wrong band on the scoreboard.
+         */
+        percent: rates?.view.programmes.find((p) => p.achievedPercent !== null)?.achievedPercent ?? rates?.dailyGcrPercent ?? null,
+        dailyPercent: rates?.dailyGcrPercent ?? null,
+        driftPercent: rates?.driftPercent ?? null,
         source: rates?.ratioSource ?? null,
         asOf: rates?.ratioAsOf ?? daily?.generatedOn ?? null,
         contractGenericPercent: rates?.view.contractGenericPercent ?? null,

@@ -349,7 +349,10 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                       money.ratio.next
                         ? `${money.ratio.next.shortByPercent.toFixed(2)}% short of ${money.ratio.next.rebatePercent}%`
                         : "top band",
-                      money.ratio.source === "daily report" ? `today's report` : money.ratio.source === "monthly statement" ? `last statement` : null,
+                      money.ratio.source === "daily report" ? `today's report` : money.ratio.source === "monthly statement" ? `settled figure` : null,
+                      money.ratio.driftPercent !== null && Math.abs(money.ratio.driftPercent) > 0.5
+                        ? `today's drill down reads ${money.ratio.dailyPercent?.toFixed(2)}%, a different measure`
+                        : null,
                     ]
                       .filter(Boolean)
                       .join(" · ")

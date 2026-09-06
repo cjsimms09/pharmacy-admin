@@ -446,7 +446,14 @@ export function classifyInvoiceText(text: string): TextVerdict {
   };
 }
 
-export type FiledInvoice = { id: string; documentId: string; schedule: InvoiceSchedule; needsReview: boolean };
+export type FiledInvoice = {
+  id: string;
+  documentId: string;
+  schedule: InvoiceSchedule;
+  needsReview: boolean;
+  /** Set where this bill was already on file: the copy is kept, the money is not counted twice. */
+  duplicateOf?: string;
+};
 
 /**
  * Reads an invoice, files it where its schedule says, and records why.
@@ -544,6 +551,34 @@ export async function fileInvoice(
     notes: `Received from ${meta.from}. ${basis}`,
     uploadedBy: ctx.userId || "mailbox-sweep",
   });
+
+  /*
+   * The same invoice, sent twice, is one invoice.
+   *
+   * These arrive by email, and an email gets forwarded, replied to and swept again. Every copy used
+   * to become its own invoice with its own lines, which doubles that week's purchases — and
+   * purchases feed the rebate estimate, the cost of goods and the stock position, none of which
+   * would look wrong. Identity is the supplier's own number and date, which is what makes two PDFs
+   * the same bill however many times they arrive.
+   */
+  if (invoiceNumber && invoiceDate && supplier) {
+    const already = await db.query.supplierInvoices.findFirst({
+      where: and(
+        eq(schema.supplierInvoices.invoiceNumber, invoiceNumber),
+        eq(schema.supplierInvoices.invoiceDate, invoiceDate),
+        eq(schema.supplierInvoices.supplier, supplier),
+      ),
+    });
+    if (already) {
+      await audit({
+        action: "invoice.duplicate",
+        userId: ctx.userId,
+        userName: ctx.userName,
+        details: `${supplier} invoice ${invoiceNumber} of ${invoiceDate} was already filed; this copy was kept as a document and not counted again.`,
+      });
+      return { id: already.id, documentId: already.documentId, schedule, needsReview: already.needsReview, duplicateOf: already.id };
+    }
+  }
 
   const id = newId();
   await db.insert(schema.supplierInvoices).values({
@@ -1384,6 +1419,34 @@ export async function adoptDocument(documentId: string, ctx: { userId: string; u
 
   const filing = FILING[schedule];
   await db.update(schema.documents).set({ category: filing.category, effectiveOn: invoiceDate }).where(eq(schema.documents.id, documentId));
+
+  /*
+   * The same invoice, sent twice, is one invoice.
+   *
+   * These arrive by email, and an email gets forwarded, replied to and swept again. Every copy used
+   * to become its own invoice with its own lines, which doubles that week's purchases — and
+   * purchases feed the rebate estimate, the cost of goods and the stock position, none of which
+   * would look wrong. Identity is the supplier's own number and date, which is what makes two PDFs
+   * the same bill however many times they arrive.
+   */
+  if (invoiceNumber && invoiceDate && supplier) {
+    const already = await db.query.supplierInvoices.findFirst({
+      where: and(
+        eq(schema.supplierInvoices.invoiceNumber, invoiceNumber),
+        eq(schema.supplierInvoices.invoiceDate, invoiceDate),
+        eq(schema.supplierInvoices.supplier, supplier),
+      ),
+    });
+    if (already) {
+      await audit({
+        action: "invoice.duplicate",
+        userId: ctx.userId,
+        userName: ctx.userName,
+        details: `${supplier} invoice ${invoiceNumber} of ${invoiceDate} was already filed; this copy was kept as a document and not counted again.`,
+      });
+      return { id: already.id, documentId: already.documentId, schedule, needsReview: already.needsReview, duplicateOf: already.id };
+    }
+  }
 
   const id = newId();
   await db.insert(schema.supplierInvoices).values({
