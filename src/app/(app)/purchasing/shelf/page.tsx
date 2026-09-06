@@ -6,6 +6,7 @@ import { audit } from "@/lib/audit";
 import { fileOnHand, leanShelfNow, latestShelf, movement, SHELF_POLICY } from "@/lib/shelf";
 import { units } from "@/lib/usage";
 import { PageHeader, Card, Notice, Empty, Figure, Field } from "@/components/ui";
+import { ExportData } from "@/components/export-data";
 import { requireReimbursement } from "@/lib/features";
 
 export const dynamic = "force-dynamic";
@@ -203,6 +204,8 @@ export default async function ShelfPage({ searchParams }: { searchParams: Promis
         line whether or not it is surplus. This page is the other half of the question: of what is returnable, what does
         the pharmacy not need.
       </p>
+
+      <ExportData page="shelf" className="mt-6" />
     </>
   );
 }

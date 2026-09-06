@@ -12,6 +12,7 @@ import { CLASS_INFO, needsBasis } from "@/lib/plans";
 import { PLAN_CLASSES, type PlanClass } from "@/db/schema";
 import { searchContracts } from "@/lib/contract-search";
 import { PageHeader, Card, Notice, Empty, Figure } from "@/components/ui";
+import { ExportData } from "@/components/export-data";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Who pays best" };
@@ -484,6 +485,8 @@ export default async function PayerPerformancePage({ searchParams }: { searchPar
           </Card>
         </>
       )}
+
+      <ExportData page="payers" className="mt-6" />
     </>
   );
 }

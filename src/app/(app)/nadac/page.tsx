@@ -11,6 +11,7 @@ import { nadacJob, startNadacFetch, runNadacFetch, nadacJobRunning } from "@/lib
 import { JobPanel } from "@/components/job-panel";
 import { getSettings, setSetting } from "@/lib/settings";
 import { PageHeader, Notice, Empty, Card, Figure } from "@/components/ui";
+import { ExportData } from "@/components/export-data";
 
 export const metadata = { title: "NADAC" };
 export const dynamic = "force-dynamic";
@@ -449,6 +450,8 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
           )}
         </>
       )}
+
+      <ExportData page="nadac" className="mt-6" />
     </>
   );
 }

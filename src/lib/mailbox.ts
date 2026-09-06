@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
-import { eq } from "drizzle-orm";
+import { eq, like } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { getSettings, setSetting } from "./settings";
 import { decryptText, encryptText, newId } from "./crypto";
@@ -132,6 +132,26 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
    */
   const register = await allSuppliers(true);
   const result: SweepResult = { stored: 0, rejected: 0, ignored: 0, imported: 0, errors: [] };
+
+  /*
+   * Anything the ceiling turned away comes back first, before new mail is even fetched.
+   *
+   * The loop this closes: the cost ceiling is reached, a report that arrives every day is filed
+   * unread, the pharmacist raises the ceiling — and nothing brings the held reports back, because
+   * the sweep only ever looks at unread mail and that message was read days ago. Doing it here
+   * means raising the ceiling is the whole of the fix, and nobody has to remember which reports
+   * were held.
+   */
+  try {
+    const held = await retryHeldByBudget({ userId: ctx.userId ?? "mailbox-sweep", userName: ctx.userName ?? "Automatic check" });
+    result.imported += held.loaded;
+    if (held.retried > 0 && held.loaded === 0 && held.stillHeld > 0) {
+      result.errors.push(`${held.stillHeld} report${held.stillHeld === 1 ? "" : "s"} held by the monthly ceiling could still not be read.`);
+    }
+  } catch (e) {
+    result.errors.push(`Could not retry the reports held by the ceiling: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
   let client: ImapFlow | null = null;
   try {
     client = await connect();
@@ -833,9 +853,62 @@ async function importRecognised(
     }
   } catch (e) {
     // A failed import must not lose the document or stop the sweep.
-    routeResult = `Filed, but could not be loaded: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`;
+    const first = e instanceof Error ? e.message.split("\n")[0] : String(e);
+    /*
+     * A refusal on cost is not a failure to read, and must not be filed as one.
+     *
+     * The document is fine, the reader is fine, and the only thing wrong is that the month's
+     * ceiling has been reached. Marked so it can be found again: raising the ceiling should bring
+     * back everything it turned away, without the pharmacist having to remember which reports
+     * those were. A daily report — the Purchase Drill Down that prices every order — is exactly
+     * the one nobody would notice had quietly stopped arriving.
+     */
+    const { AiCapReachedError } = await import("./ai");
+    routeResult =
+      e instanceof AiCapReachedError
+        ? `${BUDGET_MARK} ${first} The file is kept and will be read on the next check once the ceiling allows it.`
+        : `Filed, but could not be loaded: ${first}`;
   }
   return { routedAs: cls.kind, routeResult, imported };
+}
+
+/**
+ * How a "we did not read this because of the ceiling" line is recognised again later.
+ *
+ * A marker rather than a search for the wording, so rephrasing the sentence somebody reads cannot
+ * quietly break the retry that depends on it.
+ */
+export const BUDGET_MARK = "[held: monthly ceiling]";
+
+/**
+ * Re-reads everything the cost ceiling turned away, once it no longer does.
+ *
+ * Run at the start of every sweep, so the loop closes itself: the ceiling is raised, the next
+ * check picks up the reports that were held, and nothing depends on anybody remembering which
+ * ones they were. Returns silently when the ceiling is still reached — retrying then would only
+ * rewrite the same line with the same reason.
+ */
+export async function retryHeldByBudget(ctx: { userId: string; userName: string }): Promise<{ retried: number; loaded: number; stillHeld: number }> {
+  const { monthlyCap } = await import("./ai-spend");
+  const limit = await monthlyCap().catch(() => null);
+  if (!limit || limit.over) return { retried: 0, loaded: 0, stillHeld: 0 };
+
+  const held = await db.query.inboxItems.findMany({
+    where: like(schema.inboxItems.routeResult, `${BUDGET_MARK}%`),
+  });
+  let loaded = 0;
+  let stillHeld = 0;
+  for (const item of held) {
+    try {
+      const text = await rereadInboxItem(item.id, ctx);
+      if (text.includes(BUDGET_MARK)) stillHeld++;
+      else loaded++;
+    } catch {
+      // One document that will not read again must not stop the others.
+      stillHeld++;
+    }
+  }
+  return { retried: held.length, loaded, stillHeld };
 }
 
 /**

@@ -4,6 +4,7 @@ import { monthlyAccount, accountMonths } from "@/lib/profit-and-loss";
 import { formatCents } from "@/lib/money";
 import { todayIso } from "@/lib/dates";
 import { PageHeader, Notice, Empty } from "@/components/ui";
+import { ExportData } from "@/components/export-data";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Monthly profit and loss" };
@@ -153,6 +154,8 @@ export default async function MonthlyPLPage({
           </p>
         </div>
       </details>
+
+      <ExportData page="monthly" params={{ month, basis }} className="mt-6" />
     </>
   );
 }

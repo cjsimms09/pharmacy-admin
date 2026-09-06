@@ -11,6 +11,7 @@ import { hasMailPassword } from "@/lib/mailbox";
 import { formatCents } from "@/lib/money";
 import { requireReimbursement } from "@/lib/features";
 import { PageHeader, Notice, Empty, Figure } from "@/components/ui";
+import { ExportData } from "@/components/export-data";
 import { SubmitButton } from "@/components/submit-button";
 
 export const metadata = { title: "Claims" };
@@ -1069,6 +1070,8 @@ export default async function ClaimsPage({
         </form>
       </details>
 
+
+      <ExportData page="claims" params={{ from, to, rx, payer }} className="mt-6" />
     </>
   );
 }
