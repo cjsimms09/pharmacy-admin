@@ -104,7 +104,9 @@ what has been dismissed. This is the difference between a report and something t
    and the weekly call are the pharmacy session's.)
 4. Returns to stock as a number, by product and plan, from the reversals the feed now keeps.
 5. MAC appeal packets: `against-nadac.ts` "argue" rows joined to the invoice line that proves
-   acquisition cost and the PBM's appeal window.
+   acquisition cost and the PBM's appeal window. (`appeal-packet.ts`, `rate-formula.ts` and
+   `contract-apply.ts` are the pure side, tested; the pages are on the handoff. The specification
+   is `contract-reading.md`.)
 6. Brand steering: which brands to move to a secondary this month, and what the band is worth.
 7. Cash pricing against cost and NADAC + fee, now that cash fills are kept.
 

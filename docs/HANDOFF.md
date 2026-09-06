@@ -107,6 +107,38 @@ clean; 1,468 tests; the real 5 Sept report reads as before, 135 rows, no AR rows
       appeal). Transitions only, so the standing buy list is not counted twice; `overlapsWith`
       set. This is `profit-engine.md` §6.3 done on the pure side.
 
+**The contracts** (`docs/reference/contract-reading.md` is the specification the owner asked for:
+what to get from every document, why, and where it goes). The reader (`contract-extract.ts`,
+Batch API, cited schema) and the index (`contract-search.ts`) already existed; what was missing
+was everything after the draft. Pure and tested now:
+
+- [ ] **`rate-formula.ts`**: a contract's sentence ("Lesser of (MAC or AWP-25%) + $1.00") into
+      legs, lesser-of and fee; `expectedCents()` prices a claim on the benchmarks held, "at most"
+      when a MAC leg is not held, null with the reason when nothing is. Wire into the claims page
+      once `payer_links` carry a contract: expected beside paid, per claim.
+- [ ] **`contract-apply.ts`**: `proposeFromContract(draft, plans, existing)` → the checklist a
+      person accepts: rate rows (new/same/changed against `network_rates`, with the quote),
+      the appeal terms, contacts by purpose, the payment path, and the plans the document
+      governs (BIN+PCN before BIN; group alone never; contested BINs named). `groupByCounterparty`
+      is the third-parties page. **Page to build:** `/payers/contracts`: index → name → read with
+      the cost shown (`estimateCost`) → review each draft as this checklist → accept writes the
+      tables and `payer_links` → `applyLinksToClaims`.
+- [ ] **`appeal-packet.ts`**: `buildPacket()` assembles a MAC appeal from the claim, the contract
+      figure, the invoice line, the PBM's terms and the deadline, or refuses with every reason.
+      **Page to build:** an appeals queue under `/claims`: claims paid under the contract figure
+      or under acquisition cost → packet → send by the PBM's channel (email through the mailbox
+      where accepted; otherwise the fields and attachments prepared for the portal) → logged
+      against the claim, scored by the next remittance.
+- [ ] **`contract-terms.ts` gained** `contacts[]` (by purpose), `remittance` (who pays, method,
+      cycle, 835 offered, how enrollment is changed, whom to ask), `macAppealRequiredFields`,
+      `macAppealInvoiceRequired`, `macAppealSubmissionTarget`; the prompt asks for them (rule 12).
+      Old drafts still parse (`parseTerms` defaults the additions). Re-run the read on the
+      documents that matter most to pick them up.
+- [ ] **835 to the site** (spec §6): a mailbox address or SFTP folder the site owns as the ERA
+      delivery point; an enrollment checklist page per PBM (enrolled, delivery confirmed, first
+      835 received) reading `payment_routing` and `pbm_contacts`; the `x12-835.ts` parser and the
+      remittance reconciliation already exist for the facilitator files.
+
 **From the design audit** (`docs/reference/design-audit.md`; the page inventory is §7). Ordered
 by what changes the owner's morning most. Each is small on its own; none needs a migration.
 
@@ -337,7 +369,7 @@ id only), and twelve further uses of the data ranked by value against readiness.
 now delegates to `product-key.ts`, which it had duplicated.
 
 ### Files this branch touched
-`src/db/schema.ts`, `drizzle/0048_*`, `drizzle/0049_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down,recommendations,recommendation-log,recommendation-store,reimbursement-fit,band-strategy,month-plan,price-moves}.ts` (new), `drizzle/0066_*`,
+`src/db/schema.ts`, `drizzle/0048_*`, `drizzle/0049_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down,recommendations,recommendation-log,recommendation-store,reimbursement-fit,band-strategy,month-plan,price-moves,rate-formula,contract-apply,appeal-packet}.ts` (new), `drizzle/0066_*`,
 `src/lib/{claims,rx-transactions,suppliers,suppliers-registry,pioneer-catalog,invoices,nadac-fetch,settings}.ts`,
 `src/app/(app)/suppliers/page.tsx`, `src/app/(app)/suppliers/[id]/terms/page.tsx` (new),
 `src/app/(app)/inventory/invoices/page.tsx`, `src/app/(app)/nadac/page.tsx`, `src/app/(app)/claims/page.tsx`,

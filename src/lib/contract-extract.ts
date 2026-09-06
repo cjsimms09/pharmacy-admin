@@ -176,7 +176,10 @@ async function fail(id: string, why: string) {
 export function parseTerms(json: string | null): ContractTermsT | null {
   if (!json) return null;
   try {
-    return ContractTerms.parse(JSON.parse(json));
+    // Fields added to the schema after a document was read are absent from its draft; an old
+    // draft is still a draft, not a failure, so the additions default to "not stated".
+    const raw = JSON.parse(json) as Record<string, unknown>;
+    return ContractTerms.parse({ macAppealRequiredFields: [], macAppealInvoiceRequired: null, macAppealSubmissionTarget: null, contacts: [], remittance: null, ...raw });
   } catch {
     return null;
   }
@@ -235,6 +238,11 @@ function mockTerms(name: string, pbm: string): ContractTermsT {
     macAppealWindowBasis: "date_of_adjudication",
     macAppealMethod: { value: "Provider portal", citation: cite },
     macAppealResponseDays: 7,
+    macAppealRequiredFields: ["claim number", "NDC", "date of service", "invoice"],
+    macAppealInvoiceRequired: true,
+    macAppealSubmissionTarget: "https://portal.example.invalid/mac-appeals",
+    contacts: [{ purpose: "mac_appeals", name: "MAC Appeals Desk", organisation: pbm, phone: null, fax: null, email: "macappeals@example.invalid", portalUrl: "https://portal.example.invalid/mac-appeals", postalAddress: null, citation: cite }],
+    remittance: { paidBy: pbm, paymentMethod: "EFT", paymentCycle: "twice monthly", eraOffered: true, enrollmentMethod: "Provider portal, EFT/ERA enrollment form", remittanceContact: "providerpayments@example.invalid", citation: cite },
     macAppealRetroactive: true,
     auditLookbackYears: 2,
     auditExtrapolationAllowed: false,

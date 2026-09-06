@@ -107,6 +107,34 @@ export const ReportOwed = z.object({
   citation: Citation.nullable(),
 });
 
+/** A person or desk the contract names, and what they are for. */
+export const ContractContact = z.object({
+  purpose: z.enum(["mac_appeals", "provider_relations", "payment_or_eft", "audit", "notices", "credentialing", "other"]),
+  name: z.string().nullable(),
+  organisation: z.string().nullable(),
+  phone: z.string().nullable(),
+  fax: z.string().nullable(),
+  email: z.string().nullable(),
+  portalUrl: z.string().nullable(),
+  postalAddress: z.string().nullable(),
+  citation: Citation.nullable(),
+});
+
+/**
+ * How the money and the remittance travel. A contract rarely says how to *change* the routing —
+ * that is an enrollment form on the PBM's portal — but it does say who pays, how often, whether an
+ * 835 is offered, and whom to ask, which is what a pharmacy needs to start the change.
+ */
+export const RemittanceTerms = z.object({
+  paidBy: z.string().nullable().describe("Who actually pays: the PBM, the plan sponsor, a PSAO, a facilitator."),
+  paymentMethod: z.string().nullable().describe("EFT, check, or as stated."),
+  paymentCycle: z.string().nullable().describe("e.g. twice monthly, within 30 days of adjudication."),
+  eraOffered: z.boolean().nullable().describe("Whether an electronic remittance (835) is provided."),
+  enrollmentMethod: z.string().nullable().describe("How EFT/ERA is set up or changed: a form, a portal, a clearinghouse."),
+  remittanceContact: z.string().nullable(),
+  citation: Citation.nullable(),
+});
+
 export const ContractTerms = z.object({
   // ── Identity ───────────────────────────────────────────────────────
   counterparty: z.string().describe("The PBM, payer or wholesaler, as named on the document."),
@@ -162,6 +190,13 @@ export const ContractTerms = z.object({
   macAppealMethod: cited(z.string().nullable()),
   macAppealResponseDays: z.number().int().nullable(),
   macAppealRetroactive: z.boolean().nullable(),
+  macAppealRequiredFields: z.array(z.string()).describe("What an appeal must carry: claim number, NDC, invoice, date of service, and so on, as listed."),
+  macAppealInvoiceRequired: z.boolean().nullable(),
+  macAppealSubmissionTarget: z.string().nullable().describe("The address, portal or fax the appeal goes to, as written."),
+
+  // ── People and payment ─────────────────────────────────────────────
+  contacts: z.array(ContractContact),
+  remittance: RemittanceTerms.nullable(),
   auditLookbackYears: z.number().int().nullable(),
   auditExtrapolationAllowed: z.boolean().nullable(),
 
@@ -213,7 +248,9 @@ RULES, in order of importance:
 
 11. **Say what the document cannot answer on its own.** Many agreements delegate the pricing formula, and the meaning of AWP, brand, generic and usual & customary, to a separate PBM contract. Put those documents in "incorporatesByReference" and name where definitions live. An extraction that reports a rate while silently omitting that the lesser-of formula lives elsewhere is half an answer presented as a whole one.
 
-12. **Be specific in unclearOrMissing.** "Generic rate for the Medicare Preferred network is referenced as Exhibit C but Exhibit C is not attached" is useful. "Some terms unclear" is not.
+12. **Capture the people and the payment path.** Every contact the document names — an appeals desk, provider relations, an EFT/ERA enrollment address, an audit contact, where notices go — with its purpose. And how the money travels: who pays, by what method, on what cycle, whether an 835 remittance is offered, and how enrollment is changed. An appeal cannot be sent and a remittance cannot be re-routed without these.
+
+13. **Be specific in unclearOrMissing.** "Generic rate for the Medicare Preferred network is referenced as Exhibit C but Exhibit C is not attached" is useful. "Some terms unclear" is not.
 
 Set confidence honestly. A clean, complete rate exhibit is 0.9+. A scan where half the table is illegible is 0.4, and you say which half.`;
 

@@ -20,7 +20,8 @@ Rules that hold on both sides:
   checked by arithmetic before anything is stored. Every figure has one meaning, one unit and a
   list of what it must never be used for: `docs/reference/data-dictionary.md`. The reasoning is
   in `docs/reference/buying-logic.md`, `data-audit.md` and `profit-engine.md`; the site's design
-  rules and page inventory are in `docs/reference/design-audit.md`.
+  rules and page inventory are in `docs/reference/design-audit.md`; what is read from a contract,
+  why, and where it goes is `docs/reference/contract-reading.md`.
 - Migrations are additive and numbered; the second session to merge renumbers its own.
 - Files the other session has changed on an open branch are listed in `docs/HANDOFF.md`; say so
   on the pull request before editing one.
