@@ -244,6 +244,18 @@ is sized as if the shelf were empty, and the plan says so), **each secondary's o
 lead time** on the supplier register, **which brands McKesson scrubs** (a scrubbed brand moved
 off McKesson changes nothing), and the plan bases from Rule 1 with enough claims behind them.
 
+## Rule 7a: meeting a minimum with the right generics (`minimum-filler.ts`, `/purchasing/minimums`)
+
+A secondary's minimum is met from the generics it is genuinely the best place to buy, never from
+whatever is to hand. A pick must pass every test: CMS's flag says generic (never the name); no
+invoice class letter (X, B, D, E) and no name list says controlled; the claims show a steady rate;
+this supplier's effective price after the rebate is the lowest of every supplier who prices it;
+and whole packs fit inside sixty days of use counting what is on the shelf and on order. Picks are
+ranked by saving per dollar committed, then by velocity, greedily until the shortfall is met. The
+last pack may overshoot the minimum and the page says by how much; where nothing qualifies the
+page says so and what the alternative costs. Recomputed on every open from the latest count,
+claims and catalogues, starting from today's planned basket at each supplier.
+
 ## Rule 7: lean stock, the order minimum and returns on the invoice clock
 
 Built by the pharmacy session, and the account of it is `docs/PURCHASING-STRATEGY.md`:

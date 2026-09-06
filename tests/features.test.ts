@@ -17,6 +17,7 @@ const PAGES = [
   "reports/page.tsx",
   "remits/mtf/page.tsx",
   "payers/sort/page.tsx",
+  "purchasing/minimums/page.tsx",
 ];
 
 /*

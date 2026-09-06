@@ -78,6 +78,7 @@ export const NAV: NavGroup[] = [
     items: [
       { href: "/purchasing", label: "What to buy", blurb: "Today's order by supplier, and which NDC pays most against what it costs", gated: true },
       { href: "/purchasing/shelf", label: "The shelf", blurb: "Days of stock against the target, and what is surplus", gated: true },
+      { href: "/purchasing/minimums", label: "Order minimums", blurb: "What to add at each supplier to reach its minimum, chosen by use and price", gated: true },
       { href: "/suppliers", label: "Suppliers and rebates", blurb: "The ladders, the ratio, and what this month's buying is earning" },
       { href: "/inventory/invoices", label: "Supplier invoices", blurb: "Filed by schedule, with the C2s kept apart" },
       { href: "/inventory/returns", label: "What to send back", blurb: "Return deadlines counted from the invoice, and what each is worth" },
