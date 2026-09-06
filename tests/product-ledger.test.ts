@@ -370,3 +370,32 @@ describe("what each drug actually earns", () => {
     assert.equal(m.marginPerUnitMicros, Math.round((870 * 10_000) / 90));
   });
 });
+
+describe("a fill billed twice is still one dispensing", () => {
+  test("units and revenue come from the fill, not from each transmission", () => {
+    /*
+     * The inconsistency this closes: the purchasing page summed claims while the claims page
+     * grouped fills, so the same question had two answers depending on which screen it was asked
+     * from — and the purchasing one said a drug was dispensed twice as often as it was, which
+     * overstated every saving worked out on those quantities by the same factor.
+     *
+     * buildLedger is fed one row per dispensing. This asserts the shape that feeds it.
+     */
+    const rows = buildLedger({
+      invoiceLines: [
+        { ndc11: "81968004560", supplier: "McKesson", description: "OZEMPIC 1MG", unitCostCents: 57_676, rebated: false, invoiceDate: "2026-09-04" },
+      ],
+      catalogue: [
+        { ndc11: "81968004560", supplier: "McKesson", description: "OZEMPIC 1MG", unitCostMicros: 57_676 * 10_000, packQty: 1, contractFlag: null, pricedOn: "2026-09-01", availability: null },
+      ],
+      nadac: [],
+      // One fill: 30 units, $598 in — not two claims of 30 units each.
+      claims: [{ ndc11: "81968004560", itemName: "OZEMPIC 1MG", quantityThousandths: 30_000, remitCents: 59_800, copayCents: 0, status: "paid" }],
+      contract: { genericRebateRate: null },
+      materialityCents: 100,
+    });
+    assert.equal(rows[0].unitsDispensed, 30);
+    assert.equal(rows[0].claims, 1);
+    assert.equal(rows[0].receivedCents, 59_800);
+  });
+});

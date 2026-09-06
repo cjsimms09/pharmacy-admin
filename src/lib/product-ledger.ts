@@ -304,13 +304,53 @@ export async function productLedger(): Promise<{ rows: LedgerRow[]; rate: number
   const { getSettings } = await import("./settings");
   const { eq } = await import("drizzle-orm");
 
-  const [lines, catalogue, nadac, claims, s] = await Promise.all([
+  const [lines, catalogue, nadac, rawClaims, s] = await Promise.all([
     db.query.invoiceLines.findMany(),
     db.query.supplierItems.findMany(),
     db.query.nadacPrices.findMany({ columns: { ndc11: true, unitMicros: true, effectiveOn: true, description: true } }),
-    db.query.claims.findMany({ columns: { ndc11: true, itemName: true, quantityThousandths: true, remitCents: true, copayCents: true, status: true } }),
+    db.query.claims.findMany(),
     getSettings(),
   ]);
+
+  /*
+   * One row per dispensing, not per transmission — the same rule the claims screens use.
+   *
+   * A fill billed to a primary plan and then a secondary is two claim rows for one bottle. Summed
+   * as claims, its quantity is counted twice and its revenue is split across the two rows, so this
+   * page said a drug was dispensed twice as often as it was and every saving worked out on those
+   * quantities was overstated by the same factor. The same question was getting two answers
+   * depending on which screen it was asked from, which is worse than either answer being wrong.
+   */
+  const { groupIntoFills } = await import("./fills");
+  const fills = groupIntoFills(
+    rawClaims.map((c) => ({
+      id: c.id,
+      rxNumber: c.rxNumber,
+      fillNumber: c.fillNumber,
+      dateFilled: c.dateFilled,
+      ndc11: c.ndc11,
+      itemName: c.itemName,
+      bin: c.bin,
+      groupNumber: c.groupNumber,
+      pbmName: c.pbmName,
+      payerLabel: c.payerLabel,
+      quantityThousandths: c.quantityThousandths,
+      remitCents: c.remitCents,
+      copayCents: c.copayCents,
+      acquisitionCents: c.acquisitionCents,
+      status: c.status,
+      unmatchedReversal: (c.remitCents ?? 0) < 0 && !c.reversalKey,
+    })),
+  );
+  const claims = fills.map((f) => ({
+    ndc11: f.ndc11,
+    itemName: f.itemName,
+    quantityThousandths: f.quantityThousandths,
+    // The whole fill's revenue on one row: every plan's remit plus what the patient actually paid.
+    remitCents: f.remitCents,
+    copayCents: f.patientPaidCents,
+    status: "paid" as const,
+  }));
 
   /*
    * The discount each supplier is giving today, worked out rather than typed.

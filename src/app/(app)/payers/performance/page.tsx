@@ -118,13 +118,16 @@ export default async function PayerPerformancePage({ searchParams }: { searchPar
   }
 
   /*
-   * A copay card is not a payer, and ranking it as one is actively misleading.
+   * Cards are payers and are ranked as such — among their own kind.
    *
-   * It covers a hundred percent of whatever residual is put to it, so it always tops the table —
-   * and the brand plan underneath, which may be paying badly, is flattered by having its shortfall
-   * quietly filled in. Counted below, kept out of here.
+   * A copay card adjudicates through its own BIN, pays real money and can reject or underpay, so it
+   * is tracked like anything else. What it is not is comparable to a plan on margin per fill: it
+   * pays whatever residual is put to it, so one table sorted on that puts every card above every
+   * plan and sorts on the wrong thing. Two tables, both ranked.
    */
   const ranked = scores.filter((s) => s.fills >= 1 && !s.isSubsidy);
+  const cards = scores.filter((s) => s.fills >= 1 && s.isSubsidy).sort((a, b) => b.revenueCents - a.revenueCents);
+  const flattered = ranked.filter((s) => s.sharedWithCardFills > 0).sort((a, b) => b.cardSupportBesideThisCents - a.cardSupportBesideThisCents);
   const best = ranked.slice(0, 8);
   const worst = [...ranked].reverse().slice(0, 8);
   const spread = ndcs.filter((n) => n.spreadPerFillCents !== null && n.spreadPerFillCents > 0).sort((a, b) => (b.spreadPerFillCents ?? 0) - (a.spreadPerFillCents ?? 0));
@@ -174,20 +177,36 @@ export default async function PayerPerformancePage({ searchParams }: { searchPar
             </Card>
           </div>
 
-          {subsidy.fills > 0 && (
+          {(cards.length > 0 || flattered.length > 0) && (
             <Card
               className="mt-4"
               title="Copay and savings cards"
-              subtitle="Counted, not ranked. A copay card pays down what a patient was left owing rather than paying for a drug, so it covers whatever is put to it — put in the table above it would top it every time, and flatter the brand plan underneath by filling in that plan's shortfall."
+              count={subsidy.fills > 0 ? `${formatCents(subsidy.revenueCents)} in` : undefined}
+              subtitle="Payers like any other — they adjudicate through their own BIN, pay real money, and can reject or underpay. Ranked here rather than against the plans because margin per fill compares nothing meaningful between a card that covers whatever residual is put to it and a plan that prices a drug."
             >
-              <p className="text-sm">
-                <b>{formatCents(subsidy.revenueCents)}</b> came in across {Math.round(subsidy.fills)} fill
-                {Math.round(subsidy.fills) === 1 ? "" : "s"} from {subsidy.sources.join(", ")}.
-              </p>
-              <p className="mt-1 text-xs text-ink-2">
-                Real money, and none of it owed under the Kansas floor — there is no plan to regulate. Mark one on{" "}
-                <Link href="/plans" className="text-accent underline">Plans</Link> as a manufacturer copay card or a
-                discount card and it is kept out of the ranking from then on.
+              {cards.length > 0 && <Table rows={cards} />}
+              {flattered.length > 0 && (
+                <div className="mt-3 rounded-md border border-warn bg-ground p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-ink-3">Plans a card is propping up</p>
+                  <ul className="mt-1 space-y-1 text-sm">
+                    {flattered.slice(0, 6).map((s) => (
+                      <li key={s.pbmName}>
+                        <b>{s.pbmName}</b>: a card put in {formatCents(s.cardSupportBesideThisCents)} beside them across{" "}
+                        {s.sharedWithCardFills} fill{s.sharedWithCardFills === 1 ? "" : "s"}.
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-1 text-xs text-ink-2">
+                    Worth knowing because it is not the plan&rsquo;s money. A plan paying eight dollars towards a
+                    six-hundred-dollar pen looks respectable once a manufacturer has filled in the rest — and the card
+                    can be withdrawn, or the patient can lose eligibility, at which point that fill is what the plan
+                    alone pays.
+                  </p>
+                </div>
+              )}
+              <p className="mt-2 text-xs text-ink-3">
+                None of this is owed under the Kansas floor — there is no plan to regulate. Mark one on the tree below,
+                or on <Link href="/plans" className="text-accent underline">Plans</Link>.
               </p>
             </Card>
           )}
@@ -470,7 +489,10 @@ function Table({ rows }: { rows: import("@/lib/payer-map").PayerScore[] }) {
     <div className="overflow-x-auto">
       <table className="table">
         <thead>
-          <tr><th>Payer</th><th className="text-right">Fills</th><th className="text-right">Per fill</th><th className="text-right">Margin</th><th className="text-right">%</th></tr>
+          <tr>
+            <th>Payer</th><th className="text-right">Fills</th><th className="text-right">Per fill</th>
+            <th className="text-right">Margin</th><th className="text-right">%</th><th className="text-right">Card support</th>
+          </tr>
         </thead>
         <tbody>
           {rows.map((s) => (
@@ -487,6 +509,10 @@ function Table({ rows }: { rows: import("@/lib/payer-map").PayerScore[] }) {
               <td className={`num text-sm font-medium ${s.marginPerFillCents < 0 ? "text-crit" : "text-accent"}`}>{formatCents(s.marginPerFillCents)}</td>
               <td className="num text-sm">{formatCents(s.marginCents)}</td>
               <td className="num text-sm">{s.marginPercent === null ? "—" : `${s.marginPercent}%`}</td>
+              {/* Not this payer's money, and it can be withdrawn. */}
+              <td className="num text-xs text-ink-3">
+                {s.cardSupportBesideThisCents > 0 ? formatCents(s.cardSupportBesideThisCents) : "—"}
+              </td>
             </tr>
           ))}
         </tbody>

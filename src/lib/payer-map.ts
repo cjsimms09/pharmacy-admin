@@ -53,18 +53,29 @@ export type PayerLink = {
   marginCents: number;
 };
 
-/** Classes that are not plans at all, and must never be ranked as payers. */
+/**
+ * Payers that pay a patient's share rather than a plan benefit.
+ *
+ * A copay card is a payer. It adjudicates through its own BIN, it pays real money, it has terms
+ * behind it, and it can reject or underpay like anything else — so it is counted, ranked and
+ * tracked like anything else. What it is not is *comparable* to a plan on margin per fill: it pays
+ * whatever residual is put to it, so a table that sorts it against a PBM sorts on the wrong thing
+ * and always puts it top.
+ *
+ * So they are ranked among their own kind rather than left out, and the money they contribute is
+ * held separately from the plan's own payment — otherwise a brand plan paying badly is flattered by
+ * having its shortfall filled in by the manufacturer, and looks like a plan worth keeping.
+ */
 export const SUBSIDY_CLASSES = new Set(["copay_card", "discount_card"]);
 
 export type PayerScore = {
   pbmName: string;
   /**
-   * True where this is a subsidy rather than a plan: a manufacturer copay card, or a discount card.
+   * True where this payer pays a patient's share rather than a plan benefit.
    *
-   * Ranked among payers, a copay card is always the best payer in the pharmacy — it covers a
-   * hundred percent of whatever residual is put to it — and the brand plan underneath it, which may
-   * be paying badly, is flattered by having its shortfall quietly filled in. So they are counted,
-   * reported, and kept out of the league table.
+   * Still a payer, still ranked and tracked — but ranked among its own kind, because margin per
+   * fill compares nothing meaningful between a card that covers whatever residual is put to it and
+   * a plan that prices a drug.
    */
   isSubsidy: boolean;
   bins: string[];
@@ -77,6 +88,14 @@ export type PayerScore = {
   /** What one fill is worth on average, which is what decides whether a plan is worth being in. */
   marginPerFillCents: number;
   fillsAtALoss: number;
+  /**
+   * What this payer paid on fills it shared with a card, and what the card put in beside it.
+   *
+   * The number that stops a brand plan being flattered: a plan paying eight dollars towards a
+   * six-hundred-dollar pen looks respectable once a manufacturer has quietly filled in the rest.
+   */
+  sharedWithCardFills: number;
+  cardSupportBesideThisCents: number;
   /** True where the chain is complete: named, classified, contract and rates on file. */
   fullyMapped: boolean;
   gaps: ChainGap[];
@@ -233,6 +252,8 @@ export async function payerMap(): Promise<{
       e = {
         pbmName: key,
         isSubsidy: subsidyKeys.has(`${primary.bin ?? ""}|${(primary.groupNumber ?? "").toUpperCase()}`),
+        sharedWithCardFills: 0,
+        cardSupportBesideThisCents: 0,
         bins: [],
         fills: 0,
         revenueCents: 0,
@@ -247,6 +268,15 @@ export async function payerMap(): Promise<{
       scoreBy.set(key, e);
     }
     if (bin && !e.bins.includes(bin)) e.bins.push(bin);
+    // What a card put in beside this payer on the same fill, held apart from this payer's own money.
+    const cardBeside = f.payers
+      .slice(1)
+      .filter((p) => subsidyKeys.has(`${p.bin ?? ""}|${(p.groupNumber ?? "").toUpperCase()}`))
+      .reduce((n, p) => n + p.remitCents, 0);
+    if (cardBeside > 0) {
+      e.sharedWithCardFills++;
+      e.cardSupportBesideThisCents += cardBeside;
+    }
     e.fills++;
     e.revenueCents += f.revenueCents;
     e.costCents += f.acquisitionCents ?? 0;
