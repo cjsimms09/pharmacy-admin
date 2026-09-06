@@ -2,7 +2,8 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { testMtf, downloadMtf, mtfStatus } from "@/lib/mtf";
+import { testMtf, downloadMtf, mtfStatus, saveCliLocation } from "@/lib/mtf";
+import { getSettings } from "@/lib/settings";
 import { requireReimbursement } from "@/lib/features";
 import { PageHeader, Notice, Field, Empty, BackLink } from "@/components/ui";
 
@@ -16,6 +17,7 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
   await requireManager();
   const { ok, error, out } = await searchParams;
   const s = await mtfStatus();
+  const settings = await getSettings();
 
   const today = new Date();
   const ninetyAgo = new Date(today.getTime() - 90 * 24 * 60 * 60 * 1000);
@@ -42,6 +44,16 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
     const q = new URLSearchParams(r.ok ? { ok: r.message } : { error: r.message });
     if (r.output) q.set("out", r.output.slice(0, 4000));
     redirect("/remits/mtf?" + q.toString());
+  }
+
+  /** Records where the tool is, checks it runs, and points its downloads at the folder this reads. */
+  async function saveWhere(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const r = await saveCliLocation(String(fd.get("cliPath") ?? ""), String(fd.get("downloadDir") ?? ""));
+    await audit({ action: "mtf.configure", userId: u.id, userName: u.name, details: r.message.slice(0, 200) });
+    revalidatePath("/remits/mtf");
+    redirect("/remits/mtf?" + new URLSearchParams(r.ok ? { ok: r.message } : { error: r.message }).toString());
   }
 
   /**
@@ -107,6 +119,47 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
           previous one and the portal will not show it again.
         </Notice>
       )}
+
+      {/*
+        Where the tool is, typed in.
+
+        The path was a setting with no field, so the only way in was editing the system PATH — an
+        environment variable, a reopened terminal, and a failure mode ("mtf-cli is not recognised")
+        that reads as the software being broken.
+      */}
+      <section className="my-4 rounded-lg border border-line bg-surface p-4">
+        <h2 className="text-sm font-semibold">Where the tool is</h2>
+        <p className="mt-1 text-xs text-ink-2">
+          Paste the full path to the program, including the file name. On Windows, extracting the download into your
+          user folder puts it at <code>C:\Users\&lt;your user&gt;\mtf-cli\bin\mtf-cli.exe</code>. You do not need to
+          touch the system PATH.
+        </p>
+        <form action={saveWhere} className="mt-3 grid gap-3 sm:grid-cols-2">
+          <Field label="Program">
+            <input
+              name="cliPath"
+              className="w-full rounded-md border border-line px-3 py-2 font-mono text-xs"
+              defaultValue={settings.mtf_cli_path ?? ""}
+              placeholder="C:\Users\wwfprx\mtf-cli\bin\mtf-cli.exe"
+            />
+          </Field>
+          <Field label="Download folder" hint="Leave blank to use the folder beside this site's database, which is what it reads.">
+            <input
+              name="downloadDir"
+              className="w-full rounded-md border border-line px-3 py-2 font-mono text-xs"
+              defaultValue={settings.mtf_download_dir ?? ""}
+              placeholder={s.dir}
+            />
+          </Field>
+          <div className="sm:col-span-2">
+            <button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Save and check it runs</button>
+            <span className="ml-2 text-xs text-ink-3">
+              It is run once to prove it is really there, and the stored API key is written into it so a scheduled
+              download uses the same key and the same folder.
+            </span>
+          </div>
+        </form>
+      </section>
 
       <div className="my-4 grid gap-4 md:grid-cols-2">
         <section className="rounded-lg border border-line bg-surface p-4">

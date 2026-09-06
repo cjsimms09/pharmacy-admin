@@ -261,3 +261,66 @@ export async function mtfStatus() {
     lastResult: s.mtf_last_result || null,
   };
 }
+
+/**
+ * Where the tool is, and whether it is really there.
+ *
+ * The path was a setting with no way to enter it, so the only route in was putting the tool on the
+ * system PATH — an environment variable edit, a reboot of the terminal, and a class of failure
+ * ("mtf-cli is not recognised") that looks like the software is broken. A full path typed into a
+ * box is the same thing without any of that.
+ *
+ * It is checked rather than accepted: a path that is wrong should say so here, while somebody is
+ * looking at it, not three screens later as a download that mysteriously does nothing.
+ */
+export async function checkCli(candidate?: string): Promise<{ ok: boolean; message: string; version?: string }> {
+  const bin = (candidate ?? "").trim() || (await cliPath());
+  const r = await cli(["--version"], 20_000);
+  if (r.ok) {
+    const version = (r.out || r.err).trim().split("\n")[0] || undefined;
+    return { ok: true, message: `Found it${version ? `: ${version}` : ""}.`, version };
+  }
+  // Some builds answer only to help. A tool that responds at all is a tool that is there.
+  const h = await cli(["help"], 20_000);
+  if (h.ok) return { ok: true, message: "Found it." };
+  return {
+    ok: false,
+    message:
+      r.err ||
+      `Nothing runs at "${bin}". On Windows the tool is usually at ` +
+        `C:\\Users\\<your user>\\mtf-cli\\bin\\mtf-cli.exe — open that folder and check the file is there, then paste ` +
+        `the whole path including the file name.`,
+  };
+}
+
+/** Saves where the tool is and where its downloads should go, checking the tool before it agrees. */
+export async function saveCliLocation(
+  cliPathIn: string,
+  downloadDirIn: string,
+): Promise<{ ok: boolean; message: string }> {
+  const { setSetting } = await import("./settings");
+  const p = cliPathIn.trim();
+  const d = downloadDirIn.trim();
+  if (p) await setSetting("mtf_cli_path", p);
+  if (d) await setSetting("mtf_download_dir", d);
+
+  const check = await checkCli(p);
+  if (!check.ok) return { ok: false, message: check.message };
+
+  /*
+   * Push the settings into the tool's own configuration as well.
+   *
+   * A scheduled task runs the tool directly, not through this site, so the tool has to hold its own
+   * key and download directory. Setting them here means the scheduled download and the site put
+   * their files in the same place — otherwise the site watches an empty folder for ever while the
+   * money piles up in another one.
+   */
+  const applied = await applyKey();
+  const where = await downloadDir();
+  return {
+    ok: true,
+    message:
+      `${check.message} Downloads go to ${where}, and that is the folder this site reads.` +
+      (applied ? ` ${applied.message}` : " The stored API key has been written into the tool as well, so a scheduled download uses it too."),
+  };
+}
