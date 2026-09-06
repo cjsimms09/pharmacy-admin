@@ -70,6 +70,29 @@ with a unit invented a ninety-nine-thousand-dollar saving once); a short-dated p
 recommendation; the rebate comes off the cost once, in `effectiveMicros`, and the band effect is
 shown beside the choice rather than added into it.
 
+## Rule 2a: the buy list — furthest under NADAC after the rebate, not cheapest
+
+`under-nadac.ts` is the list the buyer asked for. For every NDC the site can price — every
+invoice line and every catalogue line, at every supplier — it takes the cheapest source that is
+not short-dated, with the rebate already off (`Buy.effectiveUnitMicros`), and measures the gap
+to NADAC per unit. The list is ordered by that gap and by what the gap is worth on the units
+actually dispensed. Within a product the NDC with the widest gap is the pick, and the gain is
+measured over the NDC dispensed most today, on the product's own volume. Three views:
+
+- **the rows**: every usable NDC, widest gap first, with the supplier to buy it from;
+- **switch NDC**: products where a different NDC than the one dispensed today clears the
+  materiality line — "buy B from McKesson instead of A: $80 more on 1,000 units";
+- **not yet bought**: NDCs offered well under NADAC that the pharmacy neither buys nor dispenses.
+
+Refused with the reason, never dropped: no NADAC, no per-unit price, only short-dated stock. A
+rebated line with no rate on file is compared gross and says so; that understates the gap, which
+is the safe direction. This is the NADAC-payer answer; Rule 2 (`ndc-choice.ts`) refines a
+product's pick by what each plan actually pays, once the claims have shown it.
+
+The rebate rate in every figure here comes from `rebate-rates.ts`, and so from whichever ratio
+selected the band. Rule 3 says why that ratio must be the statement's until the drill-down
+carries McKesson's own exclusions.
+
 ## Rule 3: every McKesson line has a second price, and the ratio is the generic share
 
 McKesson's daily Purchase Drill Down prints three ratios with the money under each, and the money
@@ -152,7 +175,7 @@ traceable to a document.
 
 Each module's tests use round figures that can be checked by hand: `tests/pay-basis.test.ts`,
 `tests/ndc-choice.test.ts`, `tests/ratio-effect.test.ts`, `tests/product-groups.test.ts`,
-`tests/drill-down.test.ts`. When a
+`tests/drill-down.test.ts`, `tests/under-nadac.test.ts`. When a
 real statement, a real month of claims, or a real order is available on the pharmacy machine, the
 right test to add is the one that takes those figures (redacted) and pins the answer the module
 gives, so that the answer cannot drift.

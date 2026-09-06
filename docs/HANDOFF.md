@@ -148,17 +148,18 @@ daily figure should not select the band — see `docs/reference/buying-logic.md`
 `docs/reference/buying-logic.md` is the reasoning. Modules, all pure, all under test:
 `product-groups.ts` (which NDCs are one product, keyed on NADAC's description), `pay-basis.ts`
 (how each plan pays, read off its claims against NADAC: tracks NADAC, flat per product, or
-unknown), `ndc-choice.ts` (which NDC of a product pays the most on this pharmacy's plan mix,
+unknown), `under-nadac.ts` (the buy list: every NDC ranked by its gap under NADAC after the
+rebate, the pick per product and the gain over what is dispensed today), `ndc-choice.ts` (which NDC of a product pays the most on this pharmacy's plan mix,
 or "cannot say" with the reason), `ratio-effect.ts` (what an order does to the ratio and the
 band, in money). None of them touches the database or a page. Wiring them to the product ledger
 and an order screen is the next step, and is the pharmacy session's call on where.
 
 ### Files this branch touched
-`src/db/schema.ts`, `drizzle/0048_*`, `drizzle/0049_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources,product-groups,pay-basis,ndc-choice,ratio-effect,drill-down}.ts` (new),
+`src/db/schema.ts`, `drizzle/0048_*`, `drizzle/0049_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down}.ts` (new),
 `src/lib/{claims,rx-transactions,suppliers,suppliers-registry,pioneer-catalog,invoices,nadac-fetch,settings}.ts`,
 `src/app/(app)/suppliers/page.tsx`, `src/app/(app)/suppliers/[id]/terms/page.tsx` (new),
 `src/app/(app)/inventory/invoices/page.tsx`, `src/app/(app)/nadac/page.tsx`, `src/app/(app)/claims/page.tsx`,
-`tests/{ndc,supplier-terms,invoice-lines,nadac-datasets,product-groups,pay-basis,ndc-choice,ratio-effect,drill-down}.test.ts` (new), `tests/{claims,suppliers-registry,rx-transactions}.test.ts`,
+`tests/{ndc,supplier-terms,invoice-lines,nadac-datasets,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down}.test.ts` (new), `tests/{claims,suppliers-registry,rx-transactions}.test.ts`,
 `docs/HANDOFF.md`, `docs/reference/nadac-api.md`, `docs/reference/buying-logic.md` (new), `fixtures/README.md`, `fixtures/rx-transactions.txt` (new).
 
 ## Who owns what now
