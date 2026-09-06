@@ -565,6 +565,98 @@ export async function repairReversals(): Promise<{ paired: number }> {
   return { paired };
 }
 
+/**
+ * Re-reads every claim held from the row the report actually sent, and restates what it says.
+ *
+ * A fix to this reader does nothing for claims already stored. They were read by the old one, and
+ * they keep its answers for ever — the patient's residual taken from the wrong column, a facilitator
+ * payment in a column nothing knew about, the cash programme dropped, a reversal left unpaired so a
+ * bottle counts twice. The pharmacy would otherwise have to delete its claims and start again to
+ * get the truth in, which is not a thing anybody should have to do.
+ *
+ * The row as it arrived is kept against every claim, so nothing has to be re-sent: this reads that
+ * row again through the current reader and writes back what it now says. Only figures the report
+ * itself printed are touched — never a status, a reversal pairing, or a payment matched to a claim.
+ *
+ * Then it says whether the books balance, which is the only way to know it worked.
+ */
+export async function recheckHeldClaims(): Promise<{
+  read: number;
+  restated: number;
+  reversalsPaired: number;
+  paymentsMatched: number;
+  before: { differenceCents: number; fillsOff: number };
+  after: { differenceCents: number; fillsOff: number };
+}> {
+  const before = (await claimFlags()).balance;
+
+  const rows = await db.query.claims.findMany({
+    where: eq(schema.claims.source, "transaction_report"),
+    columns: {
+      id: true, rawJson: true, bin: true, payerLabel: true,
+      remitCents: true, copayCents: true, patientTotalCents: true, acquisitionCents: true,
+      grossProfitCents: true, expectedFacilitatorCents: true, cashPlan: true, quantityThousandths: true,
+    },
+  });
+
+  /* The report prints money as "$1,204.25" and a negative as "($1,204.25)". Blank is not zero. */
+  const money = (v: string | undefined): number | null => {
+    if (v === undefined) return null;
+    const t = String(v).trim();
+    if (t === "") return null;
+    const n = Number(t.replace(/[$,()\s]/g, ""));
+    if (!Number.isFinite(n)) return null;
+    return Math.round(n * 100) * (/^\(.*\)$/.test(t) ? -1 : 1);
+  };
+
+  const { CASH_BINS, CASH_LABEL } = await import("./rx-transactions");
+  const { parseQuantityThousandths } = await import("./money");
+
+  let read = 0;
+  let restated = 0;
+  for (const r of rows) {
+    if (!r.rawJson) continue;
+    read++;
+    let raw: Record<string, string>;
+    try {
+      raw = JSON.parse(r.rawJson) as Record<string, string>;
+    } catch {
+      continue; // A row whose text cannot be read is left as it was rather than guessed at.
+    }
+
+    const next = {
+      remitCents: money(raw["Amount"]) ?? r.remitCents,
+      copayCents: money(raw["Copay"]) ?? r.copayCents,
+      patientTotalCents: money(raw["Total"]) ?? r.patientTotalCents,
+      acquisitionCents: money(raw["Acq. Inv. Cost"]) ?? r.acquisitionCents,
+      grossProfitCents: money(raw["GrossProfit"]) ?? r.grossProfitCents,
+      // Only where the report actually carried the column; absence is not a promise of zero.
+      expectedFacilitatorCents: raw["Est. MTF"] !== undefined ? money(raw["Est. MTF"]) : r.expectedFacilitatorCents,
+      quantityThousandths: parseQuantityThousandths(raw["QTY"] ?? "") ?? r.quantityThousandths,
+      cashPlan: CASH_BINS.has(r.bin ?? "") || CASH_LABEL.test(raw["Third Party"] ?? r.payerLabel ?? ""),
+    };
+
+    const changed = (Object.keys(next) as (keyof typeof next)[]).some((k) => next[k] !== (r as Record<string, unknown>)[k]);
+    if (!changed) continue;
+    await db.update(schema.claims).set(next).where(eq(schema.claims.id, r.id));
+    restated++;
+  }
+
+  const { paired } = await repairReversals();
+  const { matchOrphanPayments } = await import("./claim-payments");
+  const { matched } = await matchOrphanPayments();
+
+  const after = (await claimFlags()).balance;
+  return {
+    read,
+    restated,
+    reversalsPaired: paired,
+    paymentsMatched: matched,
+    before: { differenceCents: before.differenceCents, fillsOff: before.fillsOff },
+    after: { differenceCents: after.differenceCents, fillsOff: after.fillsOff },
+  };
+}
+
 /** Drug names by NDC from what we already hold: the supplier catalogues first, then NADAC. */
 async function drugNamesByNdc(ndcs: string[]): Promise<Map<string, string>> {
   const out = new Map<string, string>();

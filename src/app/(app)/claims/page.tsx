@@ -165,21 +165,52 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
    * patient as having paid nothing — which on a fill applied to a deductible is the whole of the
    * money. The raw row is stored against each claim, so nothing has to be sent again.
    */
-  async function repairPatientTotals() {
+  /*
+   * One button that makes everything held agree with the reader as it is today.
+   *
+   * A fix to this reader does nothing for claims already stored — they keep the old reader's
+   * answers for ever. The row as it arrived is kept against every claim, so nothing has to be
+   * re-sent from PioneerRx: this reads that row again, restates what the report said, pairs any
+   * reversal that was stranded, attaches any payment that arrived before its claim, and then says
+   * whether the books balance. That last part is the point: it is the only way to know it worked.
+   */
+  async function recheckEverything() {
     "use server";
     const u = await requireManager();
-    const { backfillPatientTotals } = await import("@/lib/claim-payments");
-    const r = await backfillPatientTotals();
-    await audit({ action: "claims.backfill_patient", userId: u.id, userName: u.name, details: `${r.filled} of ${r.read}` });
+    const { recheckHeldClaims } = await import("@/lib/claims");
+    const r = await recheckHeldClaims();
+    await audit({
+      action: "claims.recheck",
+      userId: u.id,
+      userName: u.name,
+      details: `${r.restated} of ${r.read} restated, ${r.reversalsPaired} reversals paired, ${r.paymentsMatched} payments matched`,
+    });
     revalidatePath("/claims");
     revalidatePath("/purchasing");
     revalidatePath("/payers/performance");
+    revalidatePath("/");
+
+    const nothing = r.restated === 0 && r.reversalsPaired === 0 && r.paymentsMatched === 0;
+    const did = [
+      r.restated ? `${r.restated} claim${r.restated === 1 ? "" : "s"} restated from the row the report actually sent` : null,
+      r.reversalsPaired
+        ? `${r.reversalsPaired} reversal${r.reversalsPaired === 1 ? "" : "s"} finally matched the claim${r.reversalsPaired === 1 ? "" : "s"} they cancel, which had been standing as live revenue`
+        : null,
+      r.paymentsMatched ? `${r.paymentsMatched} payment${r.paymentsMatched === 1 ? "" : "s"} attached to the fill it belongs to` : null,
+    ].filter(Boolean);
+
+    const balance =
+      r.after.fillsOff === 0 && Math.abs(r.after.differenceCents) <= 2
+        ? "The books now balance: this site and PioneerRx agree to the cent on every fill."
+        : `${r.after.fillsOff} fill${r.after.fillsOff === 1 ? "" : "s"} still disagree with the report` +
+          (r.before.fillsOff > r.after.fillsOff ? `, down from ${r.before.fillsOff}` : "") +
+          ". Open one below and send me the row.";
+
     redirect(
       "/claims?ok=" +
         encodeURIComponent(
-          r.filled === 0
-            ? "Nothing to recover — every claim already carries what the patient was left owing."
-            : `${r.filled} claim${r.filled === 1 ? "" : "s"} now carry what the patient was actually left owing, read back out of the row as it arrived. Every margin on the site follows.`,
+          (nothing ? `Nothing needed changing — all ${r.read.toLocaleString()} claims already read the way this site reads them today. ` : `${did.join(". ")}. `) +
+            balance,
         ),
     );
   }
@@ -194,8 +225,8 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
             <Link href="/payers/performance" className="btn btn-primary">Who pays best</Link>
             <Link href="/claims/floor" className="btn">Paid under the floor</Link>
             <Link href="/plans" className="btn">Classify plans</Link>
-            <form action={repairPatientTotals}>
-              <SubmitButton className="btn" pendingLabel="Recovering…">Recover patient payments</SubmitButton>
+            <form action={recheckEverything}>
+              <SubmitButton className="btn" pendingLabel="Rechecking…">Recheck every claim held</SubmitButton>
             </form>
           </>
         }

@@ -42,6 +42,16 @@ export type CreditRow = {
 
 export type CreditMemo = {
   rows: CreditRow[];
+  /**
+   * How the lines break down by other coverage code, which the memo carries even though the claims
+   * report does not.
+   *
+   * NCPDP 308-C8. "08" is billing for the patient's financial responsibility only — which is the
+   * standards-level reason the top-off is not in the claim, and on this memo it is exactly the code
+   * every non-zero top-off carries. "03" is other coverage billed and not covered, and those lines
+   * carry no top-off at all. Worth stating rather than leaving as a coincidence nobody noticed.
+   */
+  byOccCode: { code: string; lines: number; topOffCents: number; creditCents: number }[];
   memoId: string | null;
   issuedOn: string | null;
   /** The days the fills fall across, which is what the memo actually covers. */
@@ -87,7 +97,7 @@ export function unpadRx(s: string): string {
 export function parseRxRescueCredit(text: string): CreditMemo {
   const lines = text.replace(/^﻿/, "").split(/\r?\n/).filter((l) => l.trim() !== "");
   const problems: string[] = [];
-  if (lines.length === 0) return { rows: [], memoId: null, issuedOn: null, period: null, totalCreditCents: 0, problems: ["The file is empty."] };
+  if (lines.length === 0) return { rows: [], byOccCode: [], memoId: null, issuedOn: null, period: null, totalCreditCents: 0, problems: ["The file is empty."] };
 
   const header = splitRow(lines[0], ",").map((h) => h.trim());
   const at = (name: string) => header.indexOf(name);
@@ -96,6 +106,7 @@ export function parseRxRescueCredit(text: string): CreditMemo {
   if (missing.length) {
     return {
       rows: [],
+      byOccCode: [],
       memoId: null,
       issuedOn: null,
       period: null,
@@ -155,9 +166,20 @@ export function parseRxRescueCredit(text: string): CreditMemo {
     });
   }
 
+  const byCode = new Map<string, { code: string; lines: number; topOffCents: number; creditCents: number }>();
+  for (const r of rows) {
+    const code = r.occCode ?? "—";
+    const e = byCode.get(code) ?? { code, lines: 0, topOffCents: 0, creditCents: 0 };
+    e.lines++;
+    e.topOffCents += r.topOffCents ?? 0;
+    e.creditCents += r.totalCreditCents ?? 0;
+    byCode.set(code, e);
+  }
+
   const dates = rows.map((r) => r.transactionDate).filter((d): d is string => d !== null).sort();
   return {
     rows,
+    byOccCode: [...byCode.values()].sort((a, b) => b.creditCents - a.creditCents),
     memoId: rows.find((r) => r.memoId)?.memoId ?? null,
     issuedOn: rows.find((r) => r.issuedOn)?.issuedOn ?? null,
     period: dates.length ? { from: dates[0], to: dates[dates.length - 1] } : null,

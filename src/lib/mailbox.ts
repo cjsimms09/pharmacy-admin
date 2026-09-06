@@ -617,10 +617,22 @@ async function importRecognised(
        */
       const { importRxRescueCredit } = await import("./claim-payments");
       const r = await importRxRescueCredit(buf, fileName, { name: ctx.userName ?? "mailbox-sweep" });
+      /*
+       * What the memo settled, what is genuinely new money, and whether the rule that separates
+       * them still holds — said every time, because a rule nobody re-tests is a rule that will be
+       * wrong silently.
+       */
       const bits = [
         r.applied
-          ? `${money(r.totalCents)} of RxRescue credit applied across ${r.applied} line${r.applied === 1 ? "" : "s"}${r.memoId ? ` (memo ${r.memoId})` : ""}`
+          ? `${money(r.totalCents)} of RxRescue credit applied across ${r.applied} line${r.applied === 1 ? "" : "s"}${r.memoId ? ` (memo ${r.memoId})` : ""}. Only the top-off part moves a margin — the copay assistance settles what the claim was already adjudicated for, so counting all of it would book that money twice.`
           : "No new credit lines on this memo.",
+        r.check
+          ? r.check.decisive === 0
+            ? "Nothing on this memo could re-test that: every line with a claim to compare has a zero top-off, where the assistance and the whole credit are the same number and agree with either reading."
+            : r.check.verdict === "the top-off is new money"
+              ? `${r.check.decisive} line${r.check.decisive === 1 ? "" : "s"} could settle it, and confirmed it: the claim carried the assistance alone.`
+              : null
+          : null,
         r.matched < r.applied ? `${r.applied - r.matched} name a prescription this site has not loaded yet; they attach themselves when it arrives.` : null,
         r.alreadyHeld ? `${r.alreadyHeld} were already applied from an earlier copy of this memo.` : null,
         ...r.problems,
