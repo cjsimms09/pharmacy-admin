@@ -578,6 +578,31 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
  * arrival and loads on a second reading did so for the reason the person changed, not because
  * the two paths differ.
  */
+/**
+ * A file somebody dropped on the site, put through exactly the path an emailed one takes.
+ *
+ * The drop zone sent everything to Claude to be classified, which is right for a licence
+ * photographed on a phone and wrong for a report whose first line is its own title. A claims file
+ * dropped there was read as an unrecognised document and filed — so the same file loaded itself
+ * when it arrived by email and did nothing when it was dragged onto the page, which is exactly the
+ * sort of inconsistency that makes somebody stop trusting a tool.
+ *
+ * The deterministic reader goes first because it is free and certain. Anything it does not know is
+ * still Claude's to read.
+ */
+export async function importDropped(
+  buf: Buffer,
+  fileName: string,
+  ctx: { userId?: string | null; userName?: string | null },
+  documentId?: string | null,
+): Promise<{ recognised: boolean; routedAs: string; routeResult: string | null; imported: boolean }> {
+  const cls = classify(fileName, buf);
+  if (cls.kind === "unrecognised") return { recognised: false, routedAs: cls.kind, routeResult: cls.why, imported: false };
+  const s = await getSettings();
+  const r = await importRecognised(buf, fileName, "", fileName, s, ctx, { documentId: documentId ?? null });
+  return { recognised: true, ...r };
+}
+
 async function importRecognised(
   buf: Buffer,
   fileName: string,
