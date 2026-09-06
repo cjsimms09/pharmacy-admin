@@ -29,7 +29,7 @@ function log(msg) {
 
 function run(cmd, args, opts = {}) {
   log(`${cmd} ${args.join(" ")}`);
-  const r = spawnSync(cmd, args, { stdio: "inherit", shell: isWin, ...opts });
+  const r = spawnSync(cmd, args, { stdio: "inherit", shell: isWin, ...(opts ?? {}) });
   if (r.status !== 0) throw new Error(`${cmd} ${args.join(" ")} failed (exit ${r.status})`);
 }
 
@@ -55,9 +55,15 @@ function step(msg) {
  * Inheriting the console on Windows lets a stray click (QuickEdit selection) pause the process —
  * which is exactly what a frozen update looks like.
  */
-function runLogged(cmd, args, timeoutMs = 15 * 60_000) {
+function runLogged(cmd, args, timeoutMs = 30 * 60_000, env = undefined) {
   step(`${cmd} ${args.join(" ")}`);
-  const r = spawnSync(cmd, args, { shell: isWin, encoding: "utf8", timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024 });
+  const r = spawnSync(cmd, args, {
+    shell: isWin,
+    encoding: "utf8",
+    timeout: timeoutMs,
+    maxBuffer: 32 * 1024 * 1024,
+    env: env ? { ...process.env, ...env } : process.env,
+  });
   const out = `${r.stdout ?? ""}${r.stderr ?? ""}`.trim();
   if (out) {
     try {
@@ -207,10 +213,33 @@ function sourceStamp() {
   return `${head}:${lock}`;
 }
 
+/**
+ * The build, with the memory it needs and a second attempt if the machine could not give it.
+ *
+ * The pharmacy's update failed with "Next.js build worker exited with code 3221225786" — 0xC000013A,
+ * a Windows process killed rather than a compile error. That is a machine running out of room, not
+ * broken code: the dispensing system, the label printer software and a browser are all open while
+ * this runs. Nothing was changed, so the pharmacy stayed on the previous week's code with every fix
+ * since sitting on GitHub — which is the worst outcome available, because it looks like the fixes
+ * were never made.
+ *
+ * So the build gets a stated heap rather than whatever V8 guesses from the machine, and if it dies
+ * anyway it is tried once more with less: half the heap, no parallelism, no telemetry. A slow update
+ * that finishes beats a fast one that does not.
+ */
 function build(logged = false) {
   const r = logged ? runLogged : run;
-  r(npmCmd, ["install", "--no-audit", "--no-fund"]);
-  r(npmCmd, ["run", "build"]);
+  r(npmCmd, ["install", "--no-audit", "--no-fund"], logged ? 20 * 60_000 : undefined);
+  const buildEnv = { NODE_OPTIONS: "--max-old-space-size=4096", NEXT_TELEMETRY_DISABLED: "1" };
+  try {
+    if (logged) runLogged(npmCmd, ["run", "build"], 30 * 60_000, buildEnv);
+    else run(npmCmd, ["run", "build"], { env: { ...process.env, ...buildEnv } });
+  } catch (e) {
+    step(`The build ran out of room (${e.message.split("\n")[0]}). Trying again with less of it at once…`);
+    const lean = { NODE_OPTIONS: "--max-old-space-size=2048", NEXT_TELEMETRY_DISABLED: "1", UV_THREADPOOL_SIZE: "2" };
+    if (logged) runLogged(npmCmd, ["run", "build"], 40 * 60_000, lean);
+    else run(npmCmd, ["run", "build"], { env: { ...process.env, ...lean } });
+  }
   fs.writeFileSync(path.join(root, ".next", "source-stamp"), sourceStamp());
 }
 
