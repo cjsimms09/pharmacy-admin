@@ -14,6 +14,7 @@ import { formatCents } from "@/lib/money";
 import { requireReimbursement } from "@/lib/features";
 import { PageHeader, Notice, Empty, Field, Card } from "@/components/ui";
 import { DataTable } from "@/components/data-table";
+import { ExportData } from "@/components/export-data";
 
 export const metadata = { title: "Purchasing" };
 export const dynamic = "force-dynamic";
@@ -724,6 +725,8 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
           </li>
         </ul>
       </Card>
+
+      <ExportData page="purchasing" className="mt-6" />
     </>
   );
 }

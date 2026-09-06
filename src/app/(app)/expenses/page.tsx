@@ -7,6 +7,7 @@ import { categories, vendors, recentExpenses, unpaid, missingThisMonth, seedCate
 import { formatCents } from "@/lib/money";
 import { fmt, todayIso } from "@/lib/dates";
 import { PageHeader, Notice, Empty, Card, Figure, Field } from "@/components/ui";
+import { ExportData } from "@/components/export-data";
 import { SubmitButton } from "@/components/submit-button";
 import { ConfirmButton } from "@/components/confirm-button";
 
@@ -412,6 +413,8 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
           </Field>
         </form>
       </Card>
+
+      <ExportData page="expenses" className="mt-6" />
     </>
   );
 }

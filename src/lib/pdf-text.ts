@@ -26,7 +26,7 @@ import zlib from "node:zlib";
  * marking next to the wrong item, which is the one mistake that matters here.
  */
 const TOKENS =
-  /\/([A-Za-z0-9_.+-]+)\s+[\d.]+\s+Tf|([\d.-]+)\s+([\d.-]+)\s+Td|(?:[\d.-]+\s+){4}([\d.-]+)\s+([\d.-]+)\s+Tm|(?:<([0-9A-Fa-f\s]+)>|\(((?:[^()\\]|\\.)*)\))\s*Tj/g;
+  /(BT)\b|\/([A-Za-z0-9_.+-]+)\s+[\d.]+\s+Tf|([\d.-]+)\s+([\d.-]+)\s+T[dD]\b|(?:[\d.-]+\s+){4}([\d.-]+)\s+([\d.-]+)\s+Tm|(?:<([0-9A-Fa-f\s]+)>|\(((?:[^()\\]|\\.)*)\))\s*Tj/g;
 
 function inflate(chunk: Buffer): string | null {
   try {
@@ -181,6 +181,84 @@ function unescape(s: string): string {
  * generated invoice places each cell separately and the schedule code is only meaningful next to
  * the item it belongs to. Reading the operators in file order would scatter the columns.
  */
+/**
+ * One run of text, and where on the page it was drawn.
+ *
+ * A report laid out in tiles puts several unrelated figures on the same baseline, so joining a
+ * page by line alone interleaves them beyond recovery — which is what made McKesson's drill-down
+ * look unreadable even after the positions were being computed correctly. A parser that has the
+ * x as well can read a column.
+ */
+export type PdfItem = { page: number; x: number; y: number; text: string };
+
+/** Every run of text on every page, with its position. `pdfText` is this, joined by line. */
+export function pdfItems(buf: Buffer): PdfItem[] {
+  const items: PdfItem[] = [];
+  const fonts = (() => {
+    try {
+      return fontMaps(buf);
+    } catch {
+      return new Map() as FontMaps;
+    }
+  })();
+  let i = 0;
+  let page = 0;
+
+  while (true) {
+    const s = buf.indexOf("stream", i);
+    if (s < 0) break;
+    let start = s + 6;
+    if (buf[start] === 13) start++;
+    if (buf[start] === 10) start++;
+    const end = buf.indexOf("endstream", start);
+    if (end < 0) break;
+
+    const raw = buf.subarray(start, end);
+    const text = inflate(raw) ?? raw.toString("latin1");
+    i = end + 9;
+    if (!text.includes("Td") && !text.includes("Tm")) continue;
+    page++;
+
+    let m: RegExpExecArray | null;
+    let font: FontMap | undefined;
+    let x = 0;
+    let y = 0;
+    TOKENS.lastIndex = 0;
+
+    while ((m = TOKENS.exec(text))) {
+      if (m[1] !== undefined) {
+        x = 0;
+        y = 0;
+        continue;
+      }
+      if (m[2] !== undefined) {
+        font = fonts.get(m[2]);
+        continue;
+      }
+      if (m[3] !== undefined && m[4] !== undefined) {
+        x += Number.parseFloat(m[3]);
+        y += Number.parseFloat(m[4]);
+        continue;
+      }
+      if (m[5] !== undefined && m[6] !== undefined) {
+        x = Number.parseFloat(m[5]);
+        y = Number.parseFloat(m[6]);
+        continue;
+      }
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+
+      const bytes = m[7]
+        ? Buffer.from(m[7].replace(/\s+/g, ""), "hex")
+        : Buffer.from(unescape(m[8] ?? ""), "latin1");
+      if (bytes.length === 0) continue;
+      const piece = font ? decode(bytes, font) : plain(bytes);
+      if (!piece.trim()) continue;
+      items.push({ page, x, y, text: piece });
+    }
+  }
+  return items;
+}
+
 export function pdfText(buf: Buffer): string {
   const out: string[] = [];
   const fonts = (() => {
@@ -218,27 +296,40 @@ export function pdfText(buf: Buffer): string {
 
     while ((m = TOKENS.exec(text))) {
       if (m[1] !== undefined) {
-        font = fonts.get(m[1]);
+        // BT starts a text object and resets the line to the origin.
+        x = 0;
+        y = 0;
         continue;
       }
-      // Td offsets and a Tm text matrix are two ways of saying the same thing, and generators
-      // pick one or the other with no pattern. A reader that knows only Td silently returns an
-      // empty page for half the PDFs it is given — including the ones this system writes itself.
-      if (m[2] !== undefined && m[3] !== undefined) {
-        x = Number.parseFloat(m[2]);
-        y = Number.parseFloat(m[3]);
+      if (m[2] !== undefined) {
+        font = fonts.get(m[2]);
         continue;
       }
-      if (m[4] !== undefined && m[5] !== undefined) {
-        x = Number.parseFloat(m[4]);
-        y = Number.parseFloat(m[5]);
+      /*
+       * Td moves the line RELATIVE to the one before it. Tm sets it absolutely.
+       *
+       * They are not two spellings of the same thing, and reading Td as absolute is why a report
+       * laid out in tiles came back with its headings shuffled and its figures interleaved — every
+       * run after the first was placed at an offset as though it were a coordinate. McKesson's
+       * Purchase Drill Down uses 626 Td against 254 Tm, so almost the whole page was landing in
+       * the wrong place, and the damage was invisible: the words were all there, in an order
+       * nobody could read, which looks like a bad PDF rather than a bad reader.
+       */
+      if (m[3] !== undefined && m[4] !== undefined) {
+        x += Number.parseFloat(m[3]);
+        y += Number.parseFloat(m[4]);
+        continue;
+      }
+      if (m[5] !== undefined && m[6] !== undefined) {
+        x = Number.parseFloat(m[5]);
+        y = Number.parseFloat(m[6]);
         continue;
       }
       if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
 
-      const bytes = m[6]
-        ? Buffer.from(m[6].replace(/\s+/g, ""), "hex")
-        : Buffer.from(unescape(m[7] ?? ""), "latin1");
+      const bytes = m[7]
+        ? Buffer.from(m[7].replace(/\s+/g, ""), "hex")
+        : Buffer.from(unescape(m[8] ?? ""), "latin1");
       if (bytes.length === 0) continue;
 
       /*

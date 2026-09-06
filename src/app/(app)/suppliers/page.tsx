@@ -11,6 +11,7 @@ import { describeRebate, describeReturns } from "@/lib/supplier-terms";
 import { catalogSummaryBySupplier } from "@/lib/suppliers";
 import { fmt, todayIso, daysBetween } from "@/lib/dates";
 import { PageHeader, Card, Notice, Empty, Field } from "@/components/ui";
+import { ExportData } from "@/components/export-data";
 import { ratesFor, earningSoFar } from "@/lib/rebate-rates";
 import { ratioForSupplier } from "@/lib/purchase-ratio";
 import { INVOICE_SCHEDULES, type InvoiceSchedule } from "@/db/schema";
@@ -411,6 +412,8 @@ export default async function SuppliersPage({
           </form>
         </Card>
       )}
+
+      <ExportData page="suppliers" className="mt-6" />
     </>
   );
 }

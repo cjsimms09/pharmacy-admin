@@ -75,7 +75,25 @@ export async function ratesFor(supplierId: string, on = todayIso()): Promise<Sup
    */
   const dailyIsOurs = daily !== null && (daily.supplierId === supplierId || (!daily.supplierId && /mckesson/i.test(supplier.name)));
   const scrubbed = statement?.scrubbedGcrPercent ?? null;
-  const ratioSource = scrubbed !== null ? "monthly statement" : dailyIsOurs && daily.gcrPercent !== null ? "daily report" : null;
+
+  /*
+   * The day the note above anticipated has arrived, and the report itself says so.
+   *
+   * The drill down prints the exclusions it was run with. It used to carry "Flu or Dropship" — a
+   * wider denominator than McKesson settles on — which is the whole reason its ratio was shown and
+   * never used. The pharmacy's scheduled report now carries "Flu or Dropship or Specialty or
+   * GLP1", which is McKesson's own scrub, and a ratio measured on that basis is the settled figure
+   * rather than an approximation of it.
+   *
+   * So it selects the band, and it should: it is the same basis as the statement and it is this
+   * month rather than last. What decides is the line the document prints about itself, so a report
+   * re-scheduled with narrower exclusions goes back to being a position the next morning, with
+   * nobody editing anything.
+   */
+  const dailyScrubbed = dailyIsOurs && daily.scrubbed === true && daily.gcrPercent !== null;
+  const selectsBand = dailyScrubbed ? daily.gcrPercent : scrubbed;
+  const ratioSource =
+    dailyScrubbed ? "daily report" : scrubbed !== null ? "monthly statement" : dailyIsOurs && daily.gcrPercent !== null ? "daily report" : null;
   /*
    * How far the daily figure sits from the settled one, when both are known.
    *
@@ -90,8 +108,8 @@ export async function ratesFor(supplierId: string, on = todayIso()): Promise<Sup
     programmes.map((p) => ({ id: p.row.id, name: p.row.name, effectiveFrom: p.row.effectiveFrom, terms: p.terms })),
     statement || dailyIsOurs
       ? {
-          // The settled figure first: it is the one McKesson pays on. See the note above.
-          scrubbedGcrPercent: statement?.scrubbedGcrPercent ?? (dailyIsOurs ? daily.gcrPercent : null),
+          // Whichever figure is on McKesson's own basis, preferring the current month. See above.
+          scrubbedGcrPercent: selectsBand ?? (dailyIsOurs ? daily.gcrPercent : null),
           gprPercent: statement?.gprPercent ?? null,
           periodFrom: (dailyIsOurs ? daily.month : null) ?? statement?.periodFrom ?? null,
           oneStopPurchasedCents: statement?.oneStopPurchasedCents ?? null,
@@ -108,11 +126,17 @@ export async function ratesFor(supplierId: string, on = todayIso()): Promise<Sup
     supplierName: supplier.name,
     view,
     ratioSource,
-    /** The daily drill-down's ratio, shown as a position and never used to select a band. */
+    /** The daily drill-down's ratio. Selects the band where the report says it is scrubbed. */
     dailyGcrPercent: dailyIsOurs ? daily.gcrPercent : null,
     driftPercent,
     // The date belongs to whichever figure actually selected the band.
-    ratioAsOf: scrubbed !== null ? (statement?.periodFrom ?? null) : dailyIsOurs ? (daily.generatedOn ?? daily.month) : null,
+    ratioAsOf: dailyScrubbed
+      ? (daily.generatedOn ?? daily.month)
+      : scrubbed !== null
+        ? (statement?.periodFrom ?? null)
+        : dailyIsOurs
+          ? (daily.generatedOn ?? daily.month)
+          : null,
   };
 }
 

@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/auth";
 import { fmt } from "@/lib/dates";
 import { returnsDueNow, worthOf, actNow, type ReturnCandidate } from "@/lib/returns-due";
 import { PageHeader, Card, Notice, Empty, Figure } from "@/components/ui";
+import { ExportData } from "@/components/export-data";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "What to send back" };
@@ -99,6 +100,8 @@ export default async function ReturnsPage() {
         &ldquo;Dispensed since it arrived&rdquo; counts claims for that NDC dated on or after the invoice; it cannot know
         which bottle they came out of, so a line that has moved is flagged rather than hidden.
       </p>
+
+      <ExportData page="returns" className="mt-6" />
     </>
   );
 }

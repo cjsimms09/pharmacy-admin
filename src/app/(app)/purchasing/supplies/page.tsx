@@ -7,6 +7,7 @@ import { todayIso } from "@/lib/dates";
 import { getSettings } from "@/lib/settings";
 import { seedSupplies, supplyBoard, recordCount, placeOrder, receiveOrder, recentOrders, orderEmail, plural, RX_SYSTEMS } from "@/lib/supplies-store";
 import { PageHeader, Card, Notice, Empty, Figure, Field } from "@/components/ui";
+import { ExportData } from "@/components/export-data";
 import { SubmitButton } from "@/components/submit-button";
 
 export const dynamic = "force-dynamic";
@@ -390,6 +391,8 @@ export default async function SuppliesPage({ searchParams }: { searchParams: Pro
           as a draft above with the reason, never silently lost.
         </p>
       </Card>
+
+      <ExportData page="supplies" className="mt-6" />
     </>
   );
 }
