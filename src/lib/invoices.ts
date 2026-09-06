@@ -1676,6 +1676,8 @@ export async function unfileInvoice(
   invoiceId: string,
   outcome: Unfiling,
   user: { id?: string | null; name: string },
+  /** The document behind it, so the job can still be finished when the invoice record has gone. */
+  fallbackDocumentId?: string | null,
 ): Promise<{ message: string; documentId: string | null }> {
   const inv = await db.query.supplierInvoices.findFirst({ where: eq(schema.supplierInvoices.id, invoiceId) });
   /*
@@ -1687,7 +1689,41 @@ export async function unfileInvoice(
    * list below, where it was then offered for filing as an invoice all over again.
    */
   if (!inv) {
-    return { message: "That was already taken out of the invoice file — nothing further to do.", documentId: null };
+    /*
+     * The invoice record is gone and the document may not be.
+     *
+     * This returned "already taken out — nothing further to do", which was a report of success
+     * about a job half done: the invoice row had gone, the document had kept its invoice category,
+     * and so it came straight back through the adoptable-documents list as something waiting to be
+     * filed as an invoice. Pressing again got the same cheerful message, for ever.
+     *
+     * So where the caller can say which document it was, finish the job on the document instead of
+     * declaring victory.
+     */
+    if (!fallbackDocumentId) {
+      return { message: "That was already taken out of the invoice file — nothing further to do.", documentId: null };
+    }
+    const orphan = await db.query.documents.findFirst({ where: eq(schema.documents.id, fallbackDocumentId) });
+    if (!orphan) {
+      return { message: "That was already taken out of the invoice file, and the document has gone too.", documentId: null };
+    }
+    if (outcome.kind === "discard") {
+      const { deleteFile } = await import("./files");
+      const others = await db.query.documents.findMany({ where: eq(schema.documents.storageKey, orphan.storageKey), columns: { id: true } });
+      await db.delete(schema.documents).where(eq(schema.documents.id, orphan.id));
+      if (others.every((o) => o.id === orphan.id)) await deleteFile(orphan.storageKey).catch(() => {});
+      await audit({ action: "invoice.discarded", userId: user.id ?? null, userName: user.name, entity: "document", entityId: orphan.id, details: `${orphan.title} · document removed after its invoice record had already gone` });
+      return { message: "The invoice record had already gone; the document has now been deleted with it.", documentId: null };
+    }
+    await db
+      .update(schema.documents)
+      .set({
+        category: outcome.kind === "other" ? "other" : "supplier_statement",
+        notes: [orphan.notes, `Taken out of the invoice file by ${user.name}.`].filter(Boolean).join(" "),
+      })
+      .where(eq(schema.documents.id, orphan.id));
+    await audit({ action: "invoice.unfiled", userId: user.id ?? null, userName: user.name, entity: "document", entityId: orphan.id, details: `${orphan.title} · re-filed after its invoice record had already gone` });
+    return { message: "The invoice record had already gone; the document is now filed under supplier statements and will not be offered as an invoice again.", documentId: orphan.id };
   }
   const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, inv.documentId) });
 
