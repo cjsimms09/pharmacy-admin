@@ -285,3 +285,92 @@ export async function sweepRemittances(user: { name: string }): Promise<{
   }
   return out;
 }
+
+/**
+ * What the Medicare Transaction Facilitator has actually paid, and when.
+ *
+ * A refund channel is only worth having if somebody can see what came out of it. The payments land
+ * on individual fills, which is right for working out whether a fill made money — and useless for
+ * the question actually asked at the end of a month, which is how much this brought in.
+ *
+ * Counted by the date the money was received rather than the date the prescription was filled. A
+ * remittance settles weeks after the fill, so counting by fill date would credit this month's
+ * receipts to a month that closed long ago, and the figure would never agree with the bank.
+ */
+export type MoneyByMonth = { month: string; payments: number; amountCents: number };
+
+export type FacilitatorMoney = {
+  source: string;
+  monthToDateCents: number;
+  monthToDatePayments: number;
+  lastMonthCents: number;
+  allTimeCents: number;
+  allTimePayments: number;
+  months: MoneyByMonth[];
+  /** The largest payments this month, so the figure can be checked against a remittance. */
+  thisMonth: { rxNumber: string; dateFilled: string | null; ndc11: string | null; itemName: string | null; amountCents: number; receivedOn: string | null; reference: string | null }[];
+  /** Payments naming a prescription this site has not loaded — money real but unattached. */
+  unmatchedCents: number;
+  unmatched: number;
+  /** Payments with no received date, which cannot be put in a month. */
+  undatedCents: number;
+};
+
+export async function facilitatorMoney(source = "mtf", today = new Date()): Promise<FacilitatorMoney> {
+  const rows = (await db.query.claimPayments.findMany()).filter((r) => r.source === source);
+  const claims = await db.query.claims.findMany({ columns: { id: true, itemName: true } });
+  const nameOf = new Map(claims.map((c) => [c.id, c.itemName]));
+
+  const monthOf = (iso: string | null) => (iso && /^\d{4}-\d{2}/.test(iso) ? iso.slice(0, 7) : null);
+  const thisMonth = today.toISOString().slice(0, 7);
+  const lastMonth = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 1, 1)).toISOString().slice(0, 7);
+
+  const by = new Map<string, MoneyByMonth>();
+  let unmatchedCents = 0;
+  let unmatched = 0;
+  let undatedCents = 0;
+
+  for (const r of rows) {
+    const m = monthOf(r.receivedOn);
+    if (m === null) undatedCents += r.amountCents;
+    else {
+      const e = by.get(m) ?? { month: m, payments: 0, amountCents: 0 };
+      e.payments++;
+      e.amountCents += r.amountCents;
+      by.set(m, e);
+    }
+    if (!r.claimId) {
+      unmatched++;
+      unmatchedCents += r.amountCents;
+    }
+  }
+
+  const months = [...by.values()].sort((a, b) => b.month.localeCompare(a.month));
+  const mtd = by.get(thisMonth) ?? { month: thisMonth, payments: 0, amountCents: 0 };
+
+  return {
+    source,
+    monthToDateCents: mtd.amountCents,
+    monthToDatePayments: mtd.payments,
+    lastMonthCents: by.get(lastMonth)?.amountCents ?? 0,
+    allTimeCents: rows.reduce((n, r) => n + r.amountCents, 0),
+    allTimePayments: rows.length,
+    months,
+    thisMonth: rows
+      .filter((r) => monthOf(r.receivedOn) === thisMonth)
+      .sort((a, b) => b.amountCents - a.amountCents)
+      .slice(0, 50)
+      .map((r) => ({
+        rxNumber: r.rxNumber,
+        dateFilled: r.dateFilled,
+        ndc11: r.ndc11,
+        itemName: r.claimId ? (nameOf.get(r.claimId) ?? null) : null,
+        amountCents: r.amountCents,
+        receivedOn: r.receivedOn,
+        reference: r.reference,
+      })),
+    unmatchedCents,
+    unmatched,
+    undatedCents,
+  };
+}

@@ -7,6 +7,7 @@ import { getSettings } from "@/lib/settings";
 import { requireReimbursement } from "@/lib/features";
 import { PageHeader, Notice, Field, Empty, BackLink } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
+import { formatCents } from "@/lib/money";
 
 export const metadata = { title: "Medicare MFP refunds" };
 export const dynamic = "force-dynamic";
@@ -20,6 +21,8 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
   const candidates = (found ?? "").split("|").filter(Boolean);
   const s = await mtfStatus();
   const settings = await getSettings();
+  const { facilitatorMoney } = await import("@/lib/claim-payments");
+  const money = await facilitatorMoney("mtf");
 
   const today = new Date();
   const ninetyAgo = new Date(today.getTime() - 90 * 24 * 60 * 60 * 1000);
@@ -140,6 +143,94 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
 
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
+
+      {/*
+        What has actually come out of this channel.
+
+        The payments land on individual fills, which is right for working out whether a fill made
+        money and useless for the question asked at the end of a month. Counted by the date the
+        money was received rather than the date the prescription was filled: a remittance settles
+        weeks after the fill, so counting by fill date would credit this month's receipts to a month
+        that closed long ago and the figure would never agree with the bank.
+      */}
+      <section className="my-4 rounded-lg border border-line bg-surface p-4">
+        <h2 className="text-sm font-semibold">What this has brought in</h2>
+        <div className="mt-3 grid gap-3 sm:grid-cols-4">
+          <Money value={money.monthToDateCents} label="This month so far" sub={`${money.monthToDatePayments} payment${money.monthToDatePayments === 1 ? "" : "s"}`} strong />
+          <Money value={money.lastMonthCents} label="Last month" sub="The whole of it" />
+          <Money value={money.allTimeCents} label="Since this started" sub={`${money.allTimePayments} payment${money.allTimePayments === 1 ? "" : "s"}`} />
+          <Money
+            value={money.unmatchedCents}
+            label="Not yet on a claim"
+            sub={money.unmatched ? `${money.unmatched} name a prescription not loaded` : "All of it is matched"}
+            warn={money.unmatched > 0}
+          />
+        </div>
+        {money.undatedCents > 0 && (
+          <p className="mt-2 text-xs text-warn">
+            {formatCents(money.undatedCents)} carried no payment date on its remittance, so it is in the total but in no
+            month. It is counted once, not twice.
+          </p>
+        )}
+
+        {money.thisMonth.length > 0 && (
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-ground text-left text-xs uppercase tracking-wide text-ink-3">
+                <tr>
+                  <th className="px-3 py-2">Prescription</th>
+                  <th className="px-3 py-2">Drug</th>
+                  <th className="px-3 py-2">Received</th>
+                  <th className="px-3 py-2 text-right">Amount</th>
+                  <th className="px-3 py-2">Trace</th>
+                </tr>
+              </thead>
+              <tbody>
+                {money.thisMonth.map((p, i) => (
+                  <tr key={`${p.rxNumber}-${i}`} className="border-t border-line">
+                    <td className="px-3 py-2 font-mono text-xs">
+                      {p.rxNumber}
+                      {p.dateFilled && <span className="block text-ink-3">filled {p.dateFilled}</span>}
+                    </td>
+                    <td className="px-3 py-2 text-xs">{p.itemName ?? p.ndc11 ?? <span className="text-warn">not on a claim we hold</span>}</td>
+                    <td className="px-3 py-2 text-xs">{p.receivedOn ?? "—"}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{formatCents(p.amountCents)}</td>
+                    <td className="px-3 py-2 font-mono text-[11px] text-ink-3">{p.reference ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="mt-1 text-xs text-ink-3">
+              Every line carries the trace number from its remittance, which is what finds the deposit on a bank
+              statement.
+            </p>
+          </div>
+        )}
+
+        {money.months.length > 1 && (
+          <details className="mt-3">
+            <summary className="cursor-pointer text-xs text-ink-3 hover:text-accent">Month by month</summary>
+            <table className="mt-1 w-full max-w-md text-sm">
+              <tbody>
+                {money.months.map((m) => (
+                  <tr key={m.month} className="border-t border-line">
+                    <td className="py-1.5">{m.month}</td>
+                    <td className="py-1.5 text-right text-xs text-ink-3">{m.payments} payment{m.payments === 1 ? "" : "s"}</td>
+                    <td className="py-1.5 text-right tabular-nums">{formatCents(m.amountCents)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </details>
+        )}
+
+        {money.allTimePayments === 0 && (
+          <p className="mt-2 text-sm text-ink-2">
+            Nothing has been received yet. That is a normal answer — CMS issues these only for selected Part D drugs at
+            their Maximum Fair Price, and only once a qualifying fill has been adjudicated.
+          </p>
+        )}
+      </section>
 
       {s.hasKey && s.keyDaysLeft !== null && s.keyDaysLeft <= 15 && (
         <Notice kind={s.keyDaysLeft <= 0 ? "crit" : "warn"}>
@@ -353,5 +444,18 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
         </p>
       </section>
     </>
+  );
+}
+
+/** A money figure, sized so the month-to-date one is the thing seen first. */
+function Money({ value, label, sub, strong, warn }: { value: number; label: string; sub?: string; strong?: boolean; warn?: boolean }) {
+  return (
+    <div className={`rounded-lg border p-3 ${warn && value > 0 ? "border-warn" : "border-line"}`}>
+      <div className={`text-2xl font-bold leading-none tabular-nums ${strong ? "text-accent" : value === 0 ? "text-ink-3" : "text-ink"}`}>
+        {formatCents(value)}
+      </div>
+      <div className="mt-1.5 text-xs font-semibold">{label}</div>
+      {sub && <div className="mt-0.5 text-[11px] text-ink-3">{sub}</div>}
+    </div>
   );
 }

@@ -276,6 +276,33 @@ export async function moneyFound(): Promise<MoneyFound> {
     /* No claims or no payer reference loaded. */
   }
 
+  /*
+   * Money already in the bank, reported rather than ranked.
+   *
+   * This list is things to go and do, and a facilitator payment that has already arrived is not one
+   * of them. But somebody looking at "where the money is" and seeing no mention of a channel that
+   * paid four hundred dollars this month would reasonably conclude it was not being counted.
+   */
+  try {
+    const { facilitatorMoney } = await import("./claim-payments");
+    const m = await facilitatorMoney("mtf");
+    if (m.monthToDateCents > 0 || m.allTimeCents > 0) {
+      blocked.push({
+        says:
+          `${money(m.monthToDateCents)} has come in from the Medicare Transaction Facilitator this month` +
+          (m.allTimeCents !== m.monthToDateCents ? `, ${money(m.allTimeCents)} since it started` : "") +
+          ". It is already counted against the fills it paid.",
+        todo:
+          m.unmatched > 0
+            ? `${m.unmatched} of those payments name a prescription this site has not loaded, so ${money(m.unmatchedCents)} is not yet against a claim. Load the days they belong to.`
+            : "Nothing to do — it is collected and posted. Shown here so a channel that is working is not mistaken for one that is silent.",
+        href: "/remits/mtf",
+      });
+    }
+  } catch {
+    /* Nothing configured. */
+  }
+
   const ranked = rank(rows);
   return { rows: ranked, ...totals(ranked), blocked };
 }
