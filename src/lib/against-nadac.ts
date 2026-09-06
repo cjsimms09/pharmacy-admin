@@ -1,0 +1,158 @@
+import "server-only";
+import { computeFloor, nadacInForce, SB20_MIN_DISPENSING_FEE_CENTS, SB20_EFFECTIVE_FROM, type NadacRecord } from "./reimbursement-rules";
+import type { Fill } from "./fills";
+
+/**
+ * Every dispensing measured against NADAC plus the dispensing fee.
+ *
+ * The floor review already answered "which claims can I file on", which is a narrow question: it
+ * counts only plans the Kansas statute reaches, and stays silent about everything else. That
+ * silence covers most of the money. A Part D plan paying below acquisition is not a filing, but it
+ * is still a plan paying below what the government reckons the drug costs — and knowing that is
+ * what a contract negotiation, a network decision or a decision to stop stocking is made of.
+ *
+ * So every fill is measured, and what can be *done* about each is said separately from what is
+ * *true* of it. A plan the floor reaches and that paid under it is money owed. A plan the floor
+ * cannot reach that paid under it is a rate to argue commercially. A discount card paying under it
+ * is the price, and nothing at all.
+ *
+ * ── What it will not do ──
+ *
+ * A fill with no NADAC on file for its date is not compared. NADAC is published weekly and pricing
+ * a July claim against today's file produces a plausible figure that is simply not what applied at
+ * the time — the most likely way to be confidently wrong here. The same for a fill with no
+ * quantity: a per-unit benchmark cannot be extended without one.
+ */
+
+export type NadacStanding = {
+  key: string;
+  rxNumber: string;
+  fillNumber: number | null;
+  dateFilled: string;
+  ndc11: string | null;
+  itemName: string | null;
+  payer: string;
+  /** What the plans, the patient and anything later actually brought in. */
+  receivedCents: number;
+  /** NADAC for the quantity dispensed, at the price in force on the fill date. */
+  nadacCents: number;
+  /** The greater of $10.50 and the Kansas Medicaid dispensing fee. */
+  dispensingFeeCents: number;
+  /** NADAC plus that fee: the benchmark. */
+  benchmarkCents: number;
+  /** Received less the benchmark. Negative is paid under it. */
+  againstBenchmarkCents: number;
+  /** The NADAC date actually used, so a comparison can be checked. */
+  nadacOn: string;
+  /** Whether the Kansas floor can reach this plan at all. */
+  inScope: boolean;
+  classification: string | null;
+  /** What can be done about it, in the words of the action. */
+  standing: "owed" | "argue" | "the price" | "unclassified";
+};
+
+const STANDING_MEANS: Record<NadacStanding["standing"], string> = {
+  owed: "The Kansas floor reaches this plan and it paid under it. This is a shortfall to claim.",
+  argue:
+    "The floor cannot reach this plan — it is federally governed or preempted — so this is not a claim. It is a rate paying below the benchmark, which is what a contract conversation is made of.",
+  "the price": "A discount or savings card sets the price rather than paying a rate, so paying under the benchmark is not a shortfall.",
+  unclassified: "Nothing says what kind of plan this is, so nothing can say whether the floor reaches it. Classify it and this answers itself.",
+};
+
+export { STANDING_MEANS, SB20_MIN_DISPENSING_FEE_CENTS, SB20_EFFECTIVE_FROM };
+
+export type AgainstNadac = {
+  rows: NadacStanding[];
+  /** Fills that could not be compared, and why — never silently dropped. */
+  notCompared: { reason: "no NADAC held for that date" | "no quantity on the claim" | "no NDC on the claim"; fills: number }[];
+  owedCents: number;
+  argueCents: number;
+  /** How many of the compared fills are paid at or above the benchmark. */
+  atOrAbove: number;
+};
+
+export async function againstNadac(fills: Fill[]): Promise<AgainstNadac> {
+  const { db } = await import("@/db");
+  const { getSettings } = await import("./settings");
+  const { planKey, CLASS_INFO } = await import("./plans");
+
+  const [nadacRows, groups, s] = await Promise.all([
+    db.query.nadacPrices.findMany({ columns: { ndc11: true, unitMicros: true, effectiveOn: true, pricingUnit: true, fileAsOf: true } }),
+    db.query.planGroups.findMany(),
+    getSettings(),
+  ]);
+  const records: NadacRecord[] = nadacRows.map((r) => ({
+    ndc11: r.ndc11,
+    unitMicros: r.unitMicros,
+    effectiveOn: r.effectiveOn,
+    pricingUnit: r.pricingUnit as NadacRecord["pricingUnit"],
+    fileAsOf: r.fileAsOf,
+  }));
+  const byKey = new Map(groups.map((g) => [planKey(g.bin, g.groupNumber), g.classification]));
+
+  const feeRaw = Number((s.ks_medicaid_dispensing_fee_cents ?? "").trim());
+  const ksFee = Number.isFinite(feeRaw) && feeRaw > 0 ? feeRaw : null;
+
+  const rows: NadacStanding[] = [];
+  const missing = { "no NADAC held for that date": 0, "no quantity on the claim": 0, "no NDC on the claim": 0 };
+
+  for (const f of fills) {
+    if (!f.ndc11) {
+      missing["no NDC on the claim"]++;
+      continue;
+    }
+    if (!f.quantityThousandths || f.quantityThousandths <= 0) {
+      missing["no quantity on the claim"]++;
+      continue;
+    }
+    const nadac = nadacInForce(records, f.ndc11, f.dateFilled);
+    if (!nadac) {
+      missing["no NADAC held for that date"]++;
+      continue;
+    }
+    const floor = computeFloor(f.quantityThousandths, nadac, ksFee);
+    const primary = f.payers[0];
+    const cls = byKey.get(planKey(primary.bin, primary.groupNumber)) ?? null;
+    const inScope = cls ? CLASS_INFO[cls as keyof typeof CLASS_INFO]?.inScope === true : false;
+    const against = f.revenueCents - floor.floorCents;
+
+    const standing: NadacStanding["standing"] =
+      cls === null || cls === "unknown"
+        ? "unclassified"
+        : cls === "discount_card" || cls === "copay_card"
+          ? "the price"
+          : inScope
+            ? "owed"
+            : "argue";
+
+    rows.push({
+      key: f.key,
+      rxNumber: f.rxNumber,
+      fillNumber: f.fillNumber,
+      dateFilled: f.dateFilled,
+      ndc11: f.ndc11,
+      itemName: f.itemName,
+      payer: f.payers.map((p) => p.name ?? p.bin ?? "—").join(" then "),
+      receivedCents: f.revenueCents,
+      nadacCents: floor.ingredientFloorCents,
+      dispensingFeeCents: floor.dispensingFeeCents,
+      benchmarkCents: floor.floorCents,
+      againstBenchmarkCents: against,
+      nadacOn: nadac.effectiveOn,
+      inScope,
+      classification: cls,
+      standing,
+    });
+  }
+
+  rows.sort((a, b) => a.againstBenchmarkCents - b.againstBenchmarkCents);
+  return {
+    rows,
+    notCompared: (Object.entries(missing) as [keyof typeof missing, number][])
+      .filter(([, n]) => n > 0)
+      .map(([reason, fills]) => ({ reason, fills })),
+    owedCents: rows.filter((r) => r.standing === "owed" && r.againstBenchmarkCents < 0).reduce((n, r) => n + -r.againstBenchmarkCents, 0),
+    argueCents: rows.filter((r) => r.standing === "argue" && r.againstBenchmarkCents < 0).reduce((n, r) => n + -r.againstBenchmarkCents, 0),
+    atOrAbove: rows.filter((r) => r.againstBenchmarkCents >= 0).length,
+  };
+}

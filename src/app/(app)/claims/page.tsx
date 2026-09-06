@@ -23,6 +23,18 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
   await requireUser();
   const { ok, error } = await searchParams;
   const [flags, byPayer, imports, s, mailReady] = await Promise.all([claimFlags(), claimsByPayer(), claimImports(), getSettings(), hasMailPassword()]);
+
+  /*
+   * Every dispensing against NADAC plus the dispensing fee.
+   *
+   * The floor review answers the narrow question — which claims can be filed on — and stays silent
+   * about every plan the statute cannot reach, which is most of the money. A Part D plan paying
+   * below what the government reckons the drug costs is not a filing, but it is the thing a
+   * contract conversation is made of.
+   */
+  const { againstNadac, STANDING_MEANS } = await import("@/lib/against-nadac");
+  const nadacStanding = await againstNadac(flags.fills);
+
   const autoImport = (s.mail_auto_import ?? "").toLowerCase() === "yes";
   const mailOn = s.mail_enabled === "yes";
   const lastImport = imports[0] ?? null;
@@ -314,6 +326,115 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
               </tbody>
             </table>
           </div>
+
+          {/* ── Against the benchmark ─────────────────────────────────── */}
+          <h2 className="mt-8 text-sm font-semibold">Against NADAC + the dispensing fee</h2>
+          <p className="mt-1 text-xs text-ink-2">
+            Every dispensing measured against what the federal benchmark says the drug cost, plus the greater of $10.50
+            and the Kansas Medicaid dispensing fee. What is <b>true</b> of a claim and what can be <b>done</b> about it
+            are different things, so they are said separately: a plan the Kansas floor reaches that paid under this is
+            money owed; a plan it cannot reach is a rate to argue commercially; a discount card is simply the price.
+            NADAC is taken at the price in force on the fill date, never today&rsquo;s — pricing a July claim against
+            this week&rsquo;s file gives a plausible figure that is not what applied.
+          </p>
+
+          {nadacStanding.rows.length === 0 ? (
+            <Empty>
+              Nothing can be compared yet.
+              {nadacStanding.notCompared.length > 0 && (
+                <> {nadacStanding.notCompared.map((x) => `${x.fills} ${x.reason}`).join("; ")}.</>
+              )}{" "}
+              This needs NADAC loaded for the dates these claims were filled.
+            </Empty>
+          ) : (
+            <>
+              <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <Stat label="Compared" value={String(nadacStanding.rows.length)} sub="dispensings with a NADAC for that date" />
+                <Stat
+                  label="Owed — the floor reaches them"
+                  value={formatCents(nadacStanding.owedCents)}
+                  tone={nadacStanding.owedCents ? "warn" : undefined}
+                  sub="A shortfall to claim"
+                />
+                <Stat
+                  label="Under, but out of reach"
+                  value={formatCents(nadacStanding.argueCents)}
+                  sub="Not a claim — a rate to argue"
+                />
+                <Stat label="At or above the benchmark" value={String(nadacStanding.atOrAbove)} sub="Paid what the drug cost, and the fee" />
+              </div>
+
+              <div className="mt-2 overflow-x-auto rounded-lg border border-line">
+                <table className="w-full text-sm">
+                  <thead className="bg-ground text-left text-xs uppercase tracking-wide text-ink-3">
+                    <tr>
+                      <th className="px-3 py-2">Filled</th>
+                      <th className="px-3 py-2">Drug</th>
+                      <th className="px-3 py-2">Payer</th>
+                      <th className="px-3 py-2 text-right">Came in</th>
+                      <th className="px-3 py-2 text-right">NADAC + fee</th>
+                      <th className="px-3 py-2 text-right">Against it</th>
+                      <th className="px-3 py-2">What it means</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {nadacStanding.rows.slice(0, 60).map((r) => (
+                      <tr key={r.key} className="border-t border-line">
+                        <td className="px-3 py-2 whitespace-nowrap text-xs">{r.dateFilled}</td>
+                        <td className="px-3 py-2">
+                          {r.itemName ?? r.ndc11}
+                          <span className="block font-mono text-[11px] text-ink-3">
+                            Rx {r.rxNumber}{r.fillNumber !== null ? `-${r.fillNumber}` : ""} · NADAC of {r.nadacOn}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-xs">{r.payer}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{formatCents(r.receivedCents)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-ink-2">
+                          {formatCents(r.benchmarkCents)}
+                          <span className="block text-[11px] text-ink-3">
+                            {formatCents(r.nadacCents)} + {formatCents(r.dispensingFeeCents)}
+                          </span>
+                        </td>
+                        <td className={`px-3 py-2 text-right tabular-nums font-medium ${r.againstBenchmarkCents < 0 ? "text-red-700" : "text-accent"}`}>
+                          {r.againstBenchmarkCents > 0 ? "+" : ""}{formatCents(r.againstBenchmarkCents)}
+                        </td>
+                        <td className="px-3 py-2 text-xs">
+                          {r.againstBenchmarkCents >= 0 ? (
+                            <span className="text-ink-3">at or above it</span>
+                          ) : (
+                            <span
+                              className={`badge ${r.standing === "owed" ? "badge-crit" : r.standing === "argue" ? "badge-warn" : "badge-muted"}`}
+                              title={STANDING_MEANS[r.standing]}
+                            >
+                              {r.standing === "owed"
+                                ? "owed — file it"
+                                : r.standing === "argue"
+                                  ? "argue it, cannot file"
+                                  : r.standing === "the price"
+                                    ? "the price, not a shortfall"
+                                    : "classify the plan first"}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {nadacStanding.notCompared.length > 0 && (
+                <p className="mt-1 text-xs text-ink-3">
+                  Not compared: {nadacStanding.notCompared.map((x) => `${x.fills} with ${x.reason}`).join(", ")}. Named
+                  rather than dropped — a shorter list reads as good news.
+                </p>
+              )}
+              {nadacStanding.rows.some((r) => r.standing === "unclassified") && (
+                <p className="mt-1 text-xs text-warn">
+                  Some of these are on plans nobody has classified, so nothing can say whether the Kansas floor reaches
+                  them. <Link href="/plans" className="underline">Classify them</Link> and each answers itself.
+                </p>
+              )}
+            </>
+          )}
 
           <h2 className="mt-8 text-sm font-semibold">Dispensed at a loss</h2>
           {/*
