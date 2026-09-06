@@ -19,4 +19,5 @@ CREATE TABLE `recommendation_log` (
 --> statement-breakpoint
 CREATE INDEX `recommendation_log_key_idx` ON `recommendation_log` (`key`);--> statement-breakpoint
 CREATE INDEX `recommendation_log_status_idx` ON `recommendation_log` (`status`);--> statement-breakpoint
+ALTER TABLE `contract_text` ADD `source` text DEFAULT 'pdf' NOT NULL;--> statement-breakpoint
 ALTER TABLE `plan_groups` ADD `pcn` text;

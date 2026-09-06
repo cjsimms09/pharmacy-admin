@@ -40,3 +40,46 @@ describe("the page count", () => {
     assert.equal(pdfPageCount({ toString: () => "nothing" }), 1);
   });
 });
+
+import { searchBodyFromTerms } from "../src/lib/contract-run";
+
+/** A scan has no words of its own; the read's cited lines become what it is searched by. */
+describe("search text written back from a read", () => {
+  const terms = {
+    counterparty: "Example PBM",
+    documentTitle: "Pharmacy Network Agreement — Rate Exhibit",
+    contractType: "payer_network",
+    documentRole: "exhibit",
+    parentAgreement: "Pharmacy Network Agreement 2024",
+    amendmentNumber: null,
+    supersedes: ["Rate Exhibit 2025"],
+    bins: ["610455"],
+    pcns: ["MOCKPCN"],
+    groupIds: [],
+    chainCodes: ["605"],
+    networkNames: ["Preferred"],
+    networkReimbursementIds: ["PREF01"],
+    pharmacyNcpdps: [],
+    pharmacyNpis: [],
+    contacts: [{ purpose: "mac_appeals", name: null, organisation: "Example PBM MAC desk", phone: null, fax: "800-555-0100", email: "mac@example.invalid", portalUrl: null, postalAddress: null, citation: { page: 7 } }],
+    macAppealSubmissionTarget: "fax to 800-555-0100",
+    keyDefinitions: [{ term: "Generic", definition: "A drug rated AB by the FDA and listed on the MAC list.", citation: { page: 3 } }],
+    sections: [{ title: "Exhibit B-11", pageFrom: 5, pageTo: 6, gist: "Generic rate: lesser of MAC or AWP-25% plus $1.00." }, { title: "Term", pageFrom: null, pageTo: null, gist: "One year, evergreen." }],
+    incorporatesByReference: ["Provider Manual"],
+    unclearOrMissing: ["Brand rate not stated"],
+  };
+  test("every identifier, contact, definition and section is on its own line with its page", () => {
+    const body = searchBodyFromTerms(terms);
+    assert.match(body, /^\[From the read, not the scan/);
+    assert.match(body, /BIN: 610455/);
+    assert.match(body, /PCN: MOCKPCN/);
+    assert.match(body, /Network reimbursement id: PREF01/);
+    assert.match(body, /Contact for mac appeals \(page 7\): Example PBM MAC desk, fax 800-555-0100, mac@example.invalid/);
+    assert.match(body, /Defines Generic \(page 3\): A drug rated AB/);
+    assert.match(body, /Section Exhibit B-11 \(pages 5–6\): Generic rate/);
+    assert.match(body, /Section Term \(page not given\)/);
+    assert.match(body, /Not read or not stated: Brand rate not stated/);
+    // Empty lists print nothing, so a search for "Group" does not hit every read.
+    assert.doesNotMatch(body, /^Group:/m);
+  });
+});

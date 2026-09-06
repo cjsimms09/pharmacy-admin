@@ -62,3 +62,69 @@ export function planBatches<T>(items: { item: T; bytes: number }[], limits = { b
   return out;
 }
 
+
+/**
+ * What a scanned contract can be searched by, once it has been read.
+ *
+ * Ninety-nine of this pharmacy's hundred-odd contracts are scans with no text layer, so the
+ * search box on Payers could not see inside them: a BIN typed there found nothing, while the
+ * agreement naming it sat on the same disk. The reader does read scans, page by page as images,
+ * and everything it keeps is cited to a page. So the read is written back as the searchable text
+ * of the file: every identifier, name, contact, definition and section, each on its own line with
+ * its page where one was given. It is not the document — nothing quoted here is more than the
+ * reader kept — and a hit says so by naming the page to open.
+ */
+export function searchBodyFromTerms(t: {
+  counterparty: string;
+  documentTitle: string;
+  contractType: string;
+  documentRole: string;
+  parentAgreement: string | null;
+  amendmentNumber: string | null;
+  supersedes: string[];
+  bins: string[];
+  pcns: string[];
+  groupIds: string[];
+  chainCodes: string[];
+  networkNames: string[];
+  networkReimbursementIds: string[];
+  pharmacyNcpdps: string[];
+  pharmacyNpis?: string[];
+  contacts: { purpose: string; name: string | null; organisation: string | null; phone: string | null; fax: string | null; email: string | null; portalUrl: string | null; postalAddress: string | null; citation?: { page: number | null } | null }[];
+  macAppealSubmissionTarget: string | null;
+  keyDefinitions: { term: string; definition: string; citation?: { page?: number | null } | null }[];
+  sections: { title: string; pageFrom: number | null; pageTo: number | null; gist: string }[];
+  incorporatesByReference: string[];
+  unclearOrMissing: string[];
+}): string {
+  const lines: string[] = [];
+  const list = (label: string, xs: string[]) => {
+    const kept = xs.map((x) => x.trim()).filter(Boolean);
+    if (kept.length) lines.push(`${label}: ${kept.join(", ")}`);
+  };
+  lines.push(`[From the read, not the scan. Open the page it names.]`);
+  lines.push(`${t.documentTitle} — ${t.counterparty} (${t.contractType}, ${t.documentRole}${t.amendmentNumber ? `, amendment ${t.amendmentNumber}` : ""})`);
+  if (t.parentAgreement) lines.push(`Attaches to: ${t.parentAgreement}`);
+  list("Supersedes", t.supersedes);
+  list("BIN", t.bins);
+  list("PCN", t.pcns);
+  list("Group", t.groupIds);
+  list("Chain code", t.chainCodes);
+  list("Network", t.networkNames);
+  list("Network reimbursement id", t.networkReimbursementIds);
+  list("Pharmacy NCPDP", t.pharmacyNcpdps);
+  list("Pharmacy NPI", t.pharmacyNpis ?? []);
+  for (const c of t.contacts) {
+    const parts = [c.name, c.organisation, c.phone, c.fax ? `fax ${c.fax}` : null, c.email, c.portalUrl, c.postalAddress].filter((x): x is string => Boolean(x && x.trim()));
+    if (parts.length) lines.push(`Contact for ${c.purpose.replace(/_/g, " ")}${c.citation?.page ? ` (page ${c.citation.page})` : ""}: ${parts.join(", ")}`);
+  }
+  if (t.macAppealSubmissionTarget) lines.push(`MAC appeals go to: ${t.macAppealSubmissionTarget}`);
+  for (const d of t.keyDefinitions) lines.push(`Defines ${d.term}${d.citation?.page ? ` (page ${d.citation.page})` : ""}: ${d.definition}`);
+  list("Incorporates by reference", t.incorporatesByReference);
+  for (const s of t.sections) {
+    const pages = s.pageFrom ? (s.pageTo && s.pageTo !== s.pageFrom ? `pages ${s.pageFrom}–${s.pageTo}` : `page ${s.pageFrom}`) : "page not given";
+    lines.push(`Section ${s.title} (${pages}): ${s.gist}`);
+  }
+  list("Not read or not stated", t.unclearOrMissing);
+  return lines.join("\n");
+}

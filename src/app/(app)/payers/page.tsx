@@ -88,7 +88,7 @@ export default async function PayersPage({ searchParams }: { searchParams: Promi
           r.files === 0
             ? "No contract PDFs were found. They belong in the contracts folder inside the data directory."
             : `${r.indexed} contract${r.indexed === 1 ? "" : "s"} read${r.unchanged ? `, ${r.unchanged} unchanged since last time` : ""}` +
-              (r.scans ? `. ${r.scans} ${r.scans === 1 ? "is a scan with no text in it and cannot be searched" : "are scans with no text in them and cannot be searched"}` : "") +
+              (r.scans ? `. ${r.scans} ${r.scans === 1 ? "is a scan with no text of its own" : "are scans with no text of their own"}; a scan the reader has finished is searchable by what the read kept` : "") +
               (r.problems.length ? `. ${r.problems[0]}` : "") +
               ".",
         ),
@@ -160,8 +160,14 @@ export default async function PayersPage({ searchParams }: { searchParams: Promi
               {indexState.withText} contract{indexState.withText === 1 ? "" : "s"} readable
               {indexState.scans > 0 && (
                 <>
-                  , {indexState.scans} {indexState.scans === 1 ? "is a scan" : "are scans"} with no text in them — those
-                  cannot be searched and have to be read by eye
+                  , {indexState.scans} {indexState.scans === 1 ? "is a scan" : "are scans"} with no text of{" "}
+                  {indexState.scans === 1 ? "its" : "their"} own
+                  {indexState.fromRead > 0
+                    ? ` — ${indexState.fromRead} of those ${indexState.fromRead === 1 ? "is" : "are"} searchable by what the reader kept, cited to the page`
+                    : ""}
+                  {indexState.scans - indexState.fromRead > 0
+                    ? `; ${indexState.scans - indexState.fromRead} cannot be searched until read on the Contracts page`
+                    : ""}
                 </>
               )}
               .

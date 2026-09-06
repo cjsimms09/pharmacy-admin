@@ -1356,9 +1356,15 @@ export const contractText = sqliteTable(
     /** The checklist row this file was matched to, where it was matched to one. */
     contractDocId: text("contract_doc_id"),
     sha256: text("sha256").notNull(),
-    /** How many characters came out. Zero means a scan with no text layer. */
+    /** How many characters came out of the PDF's own text layer. Zero means a scan. */
     chars: integer("chars").notNull().default(0),
     body: text("body").notNull().default(""),
+    /**
+     * Where the body came from: "pdf" is the file's own text layer; "read" is the AI read written
+     * back for a scan that has none, every line of it cited to a page. A search hit on a "read"
+     * body is the reader's summary of the page, not the page.
+     */
+    source: text("source").notNull().default("pdf"),
     indexedAt: text("indexed_at").notNull().default(now()),
   },
   (t) => [index("contract_text_file_idx").on(t.fileName)],

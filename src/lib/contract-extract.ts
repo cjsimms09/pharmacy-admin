@@ -78,7 +78,9 @@ export async function queueExtraction(userId: string, userName: string, onlyIds?
 
   if (MOCK) {
     for (const d of pending) {
-      await db.update(schema.contractDocs).set({ extractionState: "done", extractionJson: JSON.stringify(mockTerms(d.documentName, d.pbmName)) }).where(eq(schema.contractDocs.id, d.id));
+      const terms = mockTerms(d.documentName, d.pbmName);
+      await db.update(schema.contractDocs).set({ extractionState: "done", extractionJson: JSON.stringify(terms) }).where(eq(schema.contractDocs.id, d.id));
+      if (d.fileName) await (await import("./contract-search")).rememberReadText(d.fileName, terms);
     }
     return { queued: pending.length, batchId: "mock", batches: ["mock"], skipped, estimate: { low: 0, high: 0 } };
   }
@@ -194,6 +196,8 @@ export async function collectExtraction(userId: string, userName: string): Promi
         .update(schema.contractDocs)
         .set({ extractionState: "done", extractionJson: JSON.stringify(terms), extractionError: null })
         .where(eq(schema.contractDocs.id, doc.id));
+      // A scan has no words of its own to search; the read's cited lines become them.
+      if (doc.fileName) await (await import("./contract-search")).rememberReadText(doc.fileName, terms);
       res.done++;
     }
   }

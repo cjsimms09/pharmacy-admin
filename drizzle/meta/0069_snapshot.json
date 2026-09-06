@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a0f3697d-e9c3-45d4-8fba-f8b95dce65d3",
+  "id": "ab89261d-812a-418e-b20e-4a88d4d4b224",
   "prevId": "764b2778-5415-4268-86f8-7b2f5641d98d",
   "tables": {
     "audit_events": {
@@ -1240,6 +1240,14 @@
           "notNull": true,
           "autoincrement": false,
           "default": "''"
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'pdf'"
         },
         "indexed_at": {
           "name": "indexed_at",
