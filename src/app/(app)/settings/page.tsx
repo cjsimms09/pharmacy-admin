@@ -92,7 +92,20 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           encodeURIComponent(cap ? `The monthly ceiling is now $${cap}.` : "There is no monthly ceiling any more."),
       );
     }
-    redirect("/settings?error=" + encodeURIComponent("Settings saved, but the connection test failed: " + t.error));
+    /*
+     * Saying "the connection test failed" when the ceiling is what stopped it sends somebody to
+     * look at their key and their network, which are both fine. Name the actual cause, and say
+     * plainly that the settings were kept — the sentence used to read as though nothing had saved.
+     */
+    const blockedByCeiling = /ceiling/i.test(t.error ?? "");
+    redirect(
+      "/settings?error=" +
+        encodeURIComponent(
+          blockedByCeiling
+            ? `Your settings were saved${cap ? ` and the ceiling is now $${cap}` : " with no ceiling"}, but the test itself could not run: ${t.error} If you meant to remove the limit entirely, enter 0 rather than leaving the box empty — empty means the built-in $50.`
+            : `Your settings were saved, but the connection test failed: ${t.error}`,
+        ),
+    );
   }
 
   async function removeKey() {
@@ -321,11 +334,19 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             model call passes through, so it covers everything the site does rather than the one
             screen somebody remembered to guard.
           */}
+          {/*
+            The label has to match the code, and it did not.
+
+            It said blank meant no ceiling. Blank actually means "nobody has set one", which falls
+            back to the built-in $50 — so clearing the box to remove the limit put the limit
+            straight back, and the next thing the page did was fail against it. Zero is the value
+            that means no ceiling, and now the field says so.
+          */}
           <Field
             label="Stop spending after, per month"
-            hint="Dollars. Blank means no ceiling. Nothing is sent to Claude once the last 31 days reach this."
+            hint="Dollars. Leave blank for the built-in $50 ceiling, or enter 0 for no ceiling at all. Nothing is sent to Claude once the last 31 days reach it."
           >
-            <input name="ai_monthly_cap" type="number" step="1" min="0" className="field" defaultValue={s.ai_monthly_cap} placeholder="no ceiling" />
+            <input name="ai_monthly_cap" type="number" step="1" min="0" className="field" defaultValue={s.ai_monthly_cap} placeholder="50 — the built-in ceiling" />
           </Field>
           <div className="sm:col-span-3"><button className="btn btn-primary">Save and test</button></div>
         </form>

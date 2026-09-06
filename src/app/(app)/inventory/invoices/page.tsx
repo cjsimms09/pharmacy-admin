@@ -356,11 +356,13 @@ export default async function InvoicesPage({
     const id = String(fd.get("unfileId") ?? "");
     const back = String(fd.get("back") ?? "/inventory/invoices");
     const choice = String(fd.get(`as_${id}`) ?? "statement");
+    const documentId = String(fd.get("documentId") ?? "") || null;
     try {
       const r = await unfileInvoice(
         id,
         choice === "discard" ? { kind: "discard" } : { kind: choice as "statement" | "rebate_report" | "credit_memo" | "other" },
         u,
+        documentId,
       );
       revalidatePath("/inventory/invoices");
       revalidatePath("/documents");
@@ -490,8 +492,9 @@ export default async function InvoicesPage({
     const u = await requireManager();
     const id = String(fd.get("destroyId") ?? "");
     const back = String(fd.get("back") ?? "/inventory/invoices");
+    const documentId = String(fd.get("documentId") ?? "") || null;
     try {
-      const r = await unfileInvoice(id, { kind: "discard" }, u);
+      const r = await unfileInvoice(id, { kind: "discard" }, u, documentId);
       revalidatePath("/inventory/invoices");
       revalidatePath("/documents");
       revalidatePath("/purchasing");
@@ -878,6 +881,7 @@ export default async function InvoicesPage({
                     */}
                     <form className="mt-1.5 flex flex-wrap items-center gap-1.5">
                       <input type="hidden" name="unfileId" value={i.id} />
+                      <input type="hidden" name="documentId" value={i.documentId} />
                       <input type="hidden" name="back" value="/inventory/invoices" />
                       <input type="hidden" name={`as_${i.id}`} value="statement" />
                       <button
@@ -1095,6 +1099,7 @@ export default async function InvoicesPage({
                                 behind a select was how somebody ended up going round in circles
                                 with a statement that would not leave.
                               */}
+                              <input type="hidden" name="documentId" value={i.documentId} />
                               <button
                                 formAction={destroyInvoice}
                                 formNoValidate
