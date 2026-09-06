@@ -162,6 +162,15 @@ export const SectionEntry = z.object({
   gist: z.string().describe("One sentence: what this section decides."),
 });
 
+/** A performance measure that moves money: what is measured, the threshold, and what it does to the payment. */
+export const PerformanceMeasure = z.object({
+  measure: z.string().describe("e.g. generic dispensing rate, adherence (PDC), formulary compliance."),
+  threshold: z.string().nullable(),
+  effect: z.string().nullable().describe("What meeting or missing it does: a DIR tier, a bonus, a penalty, as written."),
+  period: z.string().nullable(),
+  citation: Citation.nullable(),
+});
+
 export const ContractTerms = z.object({
   // ── Identity ───────────────────────────────────────────────────────
   counterparty: z.string().describe("The PBM, payer or wholesaler, as named on the document."),
@@ -209,6 +218,20 @@ export const ContractTerms = z.object({
   disputeWindows: z.array(DisputeWindow),
   reportsOwed: z.array(ReportOwed),
   transactionFees: z.array(TransactionFee),
+  /** Which AWP or WAC compendium prices the formula, and as of which date. Two "AWP-15%" contracts pay differently on this alone. */
+  pricingCompendium: cited(z.string().nullable()).describe("e.g. Medi-Span, First Databank, and the date basis: date of service, date of adjudication."),
+  /** Where the MAC list is published, how often it changes, and whether it is available on request. */
+  macListAccess: cited(z.string().nullable()),
+  performanceMeasures: z.array(PerformanceMeasure),
+  /** Penalties for dispensing brand where a generic exists, and which DAW codes are honoured. */
+  dawRules: cited(z.string().nullable()),
+  /** Days to pay a clean claim, and interest owed when late. */
+  promptPayDays: z.number().int().nullable(),
+  latePaymentInterest: z.string().nullable(),
+  /** Whether money may be offset against future payments, and the notice owed first. */
+  recoupmentTerms: cited(z.string().nullable()),
+  /** Whether rates may be shown to anyone, which decides what an appeal or a PSAO may see. */
+  rateConfidentiality: cited(z.string().nullable()),
   keyDefinitions: z.array(KeyDefinition).describe("Brand, generic, AWP, WAC, MAC, U&C, specialty, compound: each as this document defines it, where it does."),
   /**
    * Documents this one cannot be read without. A PSAO network agreement routinely delegates the
@@ -292,9 +315,11 @@ RULES, in order of importance:
 
 13. **Map the document.** List every section, exhibit and schedule with its pages and one sentence on what it decides. This read happens once; the map is how a question nobody has asked yet is answered from the document without reading it again.
 
-14. **Capture the identifiers the claims will carry and the definitions the money rests on.** Network reimbursement ids (NCPDP 545-2F) printed in the exhibits; the pharmacy's own NCPDP and NPI where the document names them; every per-claim or per-transaction fee; and each defined term — brand, generic, AWP, WAC, MAC, U&C, specialty, compound — as this document defines it, with the sentence. Claim submission and reversal windows go with the other clocks.
+14. **Capture what moves the money after the formula.** The pricing compendium and its date basis; where the MAC list is published and how often it changes; every performance measure with its threshold and its effect on DIR, bonus or penalty; DAW and brand penalties; days to pay a clean claim and interest when late; recoupment and offset rights with the notice owed; and whether the rates are confidential.
 
-15. **Be specific in unclearOrMissing.** "Generic rate for the Medicare Preferred network is referenced as Exhibit C but Exhibit C is not attached" is useful. "Some terms unclear" is not.
+15. **Capture the identifiers the claims will carry and the definitions the money rests on.** Network reimbursement ids (NCPDP 545-2F) printed in the exhibits; the pharmacy's own NCPDP and NPI where the document names them; every per-claim or per-transaction fee; and each defined term — brand, generic, AWP, WAC, MAC, U&C, specialty, compound — as this document defines it, with the sentence. Claim submission and reversal windows go with the other clocks.
+
+16. **Be specific in unclearOrMissing.** "Generic rate for the Medicare Preferred network is referenced as Exhibit C but Exhibit C is not attached" is useful. "Some terms unclear" is not.
 
 Set confidence honestly. A clean, complete rate exhibit is 0.9+. A scan where half the table is illegible is 0.4, and you say which half.`;
 

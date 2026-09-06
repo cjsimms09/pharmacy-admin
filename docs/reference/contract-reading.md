@@ -63,6 +63,14 @@ payment/EFT, audit, notices, credentialing. *Why:* §5 and §6.
 **Payment path.** Who pays, by what method, on what cycle, whether an 835 is offered, how
 EFT/ERA enrollment is changed, whom to ask. *Why:* §6.
 
+**What moves the money after the formula.** The pricing compendium and its date basis (which
+AWP, as of when); where the MAC list is published and how often it changes; every performance
+measure with its threshold and its effect on DIR, bonus or penalty; DAW and brand penalties;
+days to pay a clean claim and interest when late; recoupment and offset rights with the notice
+owed; whether the rates are confidential. *Why:* two "AWP-15%" contracts pay differently on the
+compendium alone; the MAC list is the first line of an appeal; the measures are what DIR is
+actually driven by; confidentiality decides what an appeal or a PSAO may be shown.
+
 **Honesty.** What could not be read, and a confidence.
 
 ## 3. Reimbursement: from the sentence to a figure
