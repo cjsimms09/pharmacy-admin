@@ -72,9 +72,29 @@ async function cli(args: string[], timeoutMs = 120_000): Promise<{ ok: boolean; 
         ok: false,
         out: "",
         err:
-          `Could not find the MTF command-line tool at "${bin}". Download it from the MTF portal ` +
-          `(Developer Tools → Download files), install it, then either put it on the system PATH or ` +
-          `enter its full path in Settings → Connections.`,
+          `Nothing is at "${bin}". There is no installer to run — the download is the program, so all that is ` +
+          `needed is the path to it. On Windows, extracting into your user folder puts it at ` +
+          `C:\\Users\\<your user>\\mtf-cli\\bin\\mtf-cli.exe: open that folder, check the file is there, and paste the ` +
+          `whole path including the file name into "Where the tool is" on the Medicare MFP refunds page.`,
+      };
+    }
+    /*
+     * Windows blocks a program that came out of a downloaded zip.
+     *
+     * The file is there, the path is right, and it refuses to run — which is the most confusing
+     * possible failure, because everything looks correct. It is Mark of the Web: the zip carried a
+     * "downloaded from the internet" flag and every file extracted from it inherited it. The fix is
+     * a checkbox, and nobody finds it by guessing.
+     */
+    if (err.code === "EACCES" || err.code === "EPERM" || err.code === "UNKNOWN") {
+      return {
+        ok: false,
+        out: "",
+        err:
+          `Windows would not run "${bin}". This is usually because the file came out of a downloaded zip and is still ` +
+          `marked as blocked: right-click the original zip, choose Properties, tick Unblock at the bottom, press OK, ` +
+          `then extract it again. Right-clicking the .exe itself and doing the same works too. If that is not it, ` +
+          `check the file is the Windows 64-bit build rather than another platform's.`,
       };
     }
     if (err.killed) return { ok: false, out: err.stdout ?? "", err: "The MTF tool did not finish in time." };
