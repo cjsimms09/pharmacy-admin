@@ -515,6 +515,56 @@ export async function importRxTransactions(file: Buffer, fileName: string, userI
  * Run after every import, and safe to run at any time: it only ever matches a reversal to a claim
  * whose figures it exactly negates, and only where that leaves no ambiguity.
  */
+/**
+ * A held reversal, and the live claim it cancels — as a rule, apart from the database.
+ *
+ * Extracted so the case that produced it can be reproduced: a daily file carrying a reversal and a
+ * rebill but not the original run, then a wider file carrying all three. The reversal is stored
+ * matching nothing; the original arrives later and is stored live; and the reversal is skipped as a
+ * duplicate before it can pair with it. Both runs then count, one bottle is billed twice, and
+ * nothing on the screen looks wrong.
+ */
+export type Pairable = {
+  id: string;
+  rxNumber: string;
+  fillNumber: number | null;
+  bin: string | null;
+  ndc11: string | null;
+  status: string;
+  remitCents: number | null;
+  copayCents: number | null;
+  transactionKey: string | null;
+  reversalKey: string | null;
+};
+
+/** A reversal held that was never matched to anything: negative, reversed, pointing at itself. */
+export function isStrandedReversal(c: Pairable): boolean {
+  return (c.remitCents ?? 0) < 0 && c.status === "reversed" && c.reversalKey !== null && c.reversalKey === c.transactionKey;
+}
+
+/**
+ * The live claim a stranded reversal cancels, or null with the reason it could not be told.
+ *
+ * Exactly one, or nothing. Two claims a reversal could equally well cancel is not an answer, and
+ * cancelling the wrong run of a prescription deletes revenue that was really earned.
+ */
+export function claimCancelledBy(rev: Pairable, live: Pairable[]): { hit: Pairable } | { hit: null; why: string } {
+  const same = (a: Pairable, b: Pairable) =>
+    a.rxNumber === b.rxNumber && a.fillNumber === b.fillNumber && a.bin === b.bin && a.ndc11 === b.ndc11;
+  const sameFill = live.filter((c) => c.status === "paid" && same(c, rev));
+  const hits = sameFill.filter((c) => c.remitCents === -(rev.remitCents ?? 0) && c.copayCents === -(rev.copayCents ?? 0));
+  if (hits.length === 1) return { hit: hits[0] };
+  return {
+    hit: null,
+    why:
+      sameFill.length === 0
+        ? "no live claim is held for that prescription, fill, BIN and NDC — it reverses a dispensing from before this feed began"
+        : hits.length === 0
+          ? `${sameFill.length} live claim${sameFill.length === 1 ? " is" : "s are"} held for that fill but none has figures this exactly cancels`
+          : `${hits.length} live claims match it equally well, and cancelling the wrong one would delete revenue that was really earned`,
+  };
+}
+
 export async function repairReversals(): Promise<{ paired: number; strays: number; stillStranded: { rxNumber: string; dateFilled: string; amountCents: number; why: string }[] }> {
   const rows = await db.query.claims.findMany({
     where: eq(schema.claims.source, "transaction_report"),
@@ -531,9 +581,7 @@ export async function repairReversals(): Promise<{ paired: number; strays: numbe
    * A reversal already recorded as one: negative money, held as reversed, pointing at itself
    * because nothing was found to pair it with when it arrived.
    */
-  const strays = rows.filter(
-    (c) => (c.remitCents ?? 0) < 0 && c.status === "reversed" && c.reversalKey !== null && c.reversalKey === c.transactionKey,
-  );
+  const strays = rows.filter((c) => isStrandedReversal(c));
   if (strays.length === 0) return { paired: 0, strays: 0, stillStranded: [] };
 
   const live = new Map<string, typeof rows>();
@@ -547,8 +595,7 @@ export async function repairReversals(): Promise<{ paired: number; strays: numbe
   const stillStranded: { rxNumber: string; dateFilled: string; amountCents: number; why: string }[] = [];
   let paired = 0;
   for (const rev of strays) {
-    const sameFill = (live.get(key(rev)) ?? []).filter((c) => !used.has(c.id));
-    const candidates = sameFill.filter((c) => c.remitCents === -(rev.remitCents ?? 0) && c.copayCents === -(rev.copayCents ?? 0));
+    const found = claimCancelledBy(rev, (live.get(key(rev)) ?? []).filter((c) => !used.has(c.id)));
     /*
      * Exactly one, or nothing. Two claims a reversal could equally well cancel is not an answer,
      * and cancelling the wrong run of a prescription deletes revenue that was really earned.
@@ -556,21 +603,11 @@ export async function repairReversals(): Promise<{ paired: number; strays: numbe
      * Where it cannot pair, it says why. A repair that quietly does nothing is indistinguishable
      * from one that had nothing to do, and the pharmacist is left pressing a button and hoping.
      */
-    if (candidates.length !== 1) {
-      stillStranded.push({
-        rxNumber: rev.rxNumber,
-        dateFilled: rev.dateFilled,
-        amountCents: rev.remitCents ?? 0,
-        why:
-          sameFill.length === 0
-            ? "no live claim is held for that prescription, fill, BIN and NDC — it reverses a dispensing from before this feed began"
-            : candidates.length === 0
-              ? `${sameFill.length} live claim${sameFill.length === 1 ? " is" : "s are"} held for that fill but none has figures this exactly cancels`
-              : `${candidates.length} live claims match it equally well, and cancelling the wrong one would delete revenue that was really earned`,
-      });
+    if (found.hit === null) {
+      stillStranded.push({ rxNumber: rev.rxNumber, dateFilled: rev.dateFilled, amountCents: rev.remitCents ?? 0, why: found.why });
       continue;
     }
-    const hit = candidates[0];
+    const hit = found.hit;
     used.add(hit.id);
     await db
       .update(schema.claims)
