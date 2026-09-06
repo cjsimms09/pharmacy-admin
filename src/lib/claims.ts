@@ -417,6 +417,7 @@ export async function importRxTransactions(file: Buffer, fileName: string, userI
       acquisitionCents: t.acquisitionCents, grossProfitCents: t.grossProfitCents,
       expectedFacilitatorCents: t.expectedFacilitatorCents ?? null,
       cashPlan: t.cashPlan === true,
+      onAccount: t.onAccount === true,
       ingredientPaidCents: t.ingredientPaidCents, dispensingFeePaidCents: t.dispensingFeeCents,
       status, reversedOn: status === "reversed" ? reversedOn : null,
       completedAt: t.completedAt ? mdyToIso(t.completedAt) : null,
@@ -463,6 +464,7 @@ export async function importRxTransactions(file: Buffer, fileName: string, userI
         ingredientPaidCents: r.txn.ingredientPaidCents,
         quantityThousandths: r.txn.quantityThousandths,
         cashPlan: r.txn.cashPlan === true,
+        onAccount: r.txn.onAccount === true,
         rawJson: JSON.stringify(r.txn.raw),
       })
       .where(eq(schema.claims.id, r.claimId));
@@ -939,6 +941,7 @@ export async function claimFlags(scope: ClaimScope = {}) {
       grossProfitCents: c.grossProfitCents,
       expectedFacilitatorCents: c.expectedFacilitatorCents,
       cashPlan: c.cashPlan,
+      onAccount: c.onAccount,
       status: c.status,
       // A reversal kept because it matched nothing: negative money against a fill never counted.
       unmatchedReversal: (c.remitCents ?? 0) < 0 && !c.reversalKey,
@@ -1109,6 +1112,36 @@ export async function claimFlags(scope: ClaimScope = {}) {
         balances: Math.abs(ours - later - report) <= 2 && off.length === 0,
       };
     })(),
+    /*
+     * Money on account: sold, counted, and not collected.
+     *
+     * Measured on the fill, never on the row, and the difference is the whole point.
+     *
+     * On the pharmacy's own first week five rows carried the AR status and not one of them was an
+     * uncollected debt: each was the cost leg of a dispensing whose money came in on another
+     * transmission, and one was reversed outright. Read row by row they look like $3,189.43 of
+     * stock out of the door with nothing billed. Grouped into the fills they belong to, every one
+     * was paid and the three that stood made $55.35 between them.
+     *
+     * So `receivableCents` is what a *fill* has billed and not collected, and `unbilledCostCents`
+     * is cost on a fill that brought in nothing at all — the case that is genuinely a hole rather
+     * than a coordination leg. Today both are quiet, which is the correct answer and not a reason
+     * to stop asking: the row status alone would have raised a four-figure alarm on money that was
+     * never missing.
+     */
+    onAccount: (() => {
+      const rowsOn = fills.filter((f) => f.onAccount);
+      const unbilled = rowsOn.filter((f) => (f.unbilledCostCents ?? 0) > 0);
+      return {
+        fills: rowsOn,
+        count: rowsOn.length,
+        /** Billed to an account and not yet collected. */
+        receivableCents: rowsOn.reduce((n, f) => n + f.receivableCents, 0),
+        /** Went out with no charge raised at all. */
+        unbilled,
+        unbilledCostCents: unbilled.reduce((n, f) => n + (f.unbilledCostCents ?? 0), 0),
+      };
+    })(),
     unreconciled: fills.filter((f) => f.unreconciledCents !== null).sort((a, b) => Math.abs(b.unreconciledCents!) - Math.abs(a.unreconciledCents!)),
     unreconciledCents: fills.reduce((n, f) => n + (f.unreconciledCents ?? 0), 0),
     lossFillsTotalCents: lossFills.reduce((n, f) => n + (f.marginCents ?? 0), 0),
@@ -1170,6 +1203,7 @@ export async function allFills() {
       grossProfitCents: c.grossProfitCents,
       expectedFacilitatorCents: c.expectedFacilitatorCents,
       cashPlan: c.cashPlan,
+      onAccount: c.onAccount,
       status: c.status,
       // A reversal kept because it matched nothing: negative money against a fill never counted.
       unmatchedReversal: (c.remitCents ?? 0) < 0 && !c.reversalKey,

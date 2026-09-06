@@ -286,6 +286,36 @@ export default async function ClaimsPage({
                 why: `The plan named the payment when it adjudicated the claim; the money comes weeks later. Every one of these shows as a loss below until it lands, and none of them is a rate to argue about. Biggest is Rx ${flags.awaitingFacilitator[0].rxNumber}${flags.awaitingFacilitator[0].fillNumber !== null ? `-${flags.awaitingFacilitator[0].fillNumber}` : ""}${flags.awaitingFacilitator[0].itemName ? ` (${flags.awaitingFacilitator[0].itemName})` : ""} at ${formatCents(flags.awaitingFacilitator[0].facilitatorOutstandingCents ?? 0)}.`,
               }
             : null,
+          /*
+           * Money on account, split into the two things it actually is.
+           *
+           * A charge raised and not collected is a debt with a name on it. A dispensing with no
+           * charge raised at all is the same money and no debt, so it shows up nowhere — it reads
+           * as a fill that lost its entire acquisition cost, which is exactly what it will keep
+           * looking like until somebody bills it.
+           */
+          flags.onAccount.unbilledCostCents > 0
+            ? {
+                key: "unbilled",
+                tone: "crit" as const,
+                amount: formatCents(flags.onAccount.unbilledCostCents),
+                title: `dispensed on account with nothing billed — ${flags.onAccount.unbilled.length} fill${flags.onAccount.unbilled.length === 1 ? "" : "s"}`,
+                href: "#on-account",
+                action: "See them",
+                why: `The drug left the shelf and no charge was raised against it, so it is not owed by anybody yet — it is simply cost the pharmacy has absorbed. Each one shows below as a loss of its whole acquisition cost, and will until it is billed. Biggest is Rx ${flags.onAccount.unbilled[0].rxNumber}${flags.onAccount.unbilled[0].fillNumber !== null ? `-${flags.onAccount.unbilled[0].fillNumber}` : ""}${flags.onAccount.unbilled[0].itemName ? ` (${flags.onAccount.unbilled[0].itemName})` : ""} at ${formatCents(flags.onAccount.unbilled[0].unbilledCostCents ?? 0)}.`,
+              }
+            : null,
+          flags.onAccount.receivableCents > 0
+            ? {
+                key: "receivable",
+                tone: "warn" as const,
+                amount: formatCents(flags.onAccount.receivableCents),
+                title: `billed to an account and not yet collected — ${flags.onAccount.fills.filter((f) => f.receivableCents > 0).length} fill${flags.onAccount.fills.filter((f) => f.receivableCents > 0).length === 1 ? "" : "s"}`,
+                href: "#on-account",
+                action: "See them",
+                why: "Counted as revenue, because the sale happened and the report counts it. The cash has not arrived, so it is not in the till and does not belong in any figure that says what the pharmacy took.",
+              }
+            : null,
           !flags.balance.balances
             ? {
                 key: "balance",
@@ -655,6 +685,81 @@ export default async function ClaimsPage({
           )}
 
           </details>
+
+          {/*
+            On account: the money that is not in the till.
+
+            Kept above the loss list on purpose, because most of it *is* in the loss list and would
+            be read wrongly there. A fill dispensed on account with nothing billed carries its whole
+            acquisition cost as a loss, and it is not a pricing problem or a plan paying badly — it
+            is a charge nobody raised. Reading it as a bad rate sends somebody to argue with a payer
+            about money that was never claimed from one.
+          */}
+          {flags.onAccount.count > 0 && (
+            <>
+              <h2 id="on-account" className="mt-8 text-sm font-semibold">On account</h2>
+              <p className="mt-1 text-xs text-ink-2">
+                PioneerRx&rsquo;s &ldquo;AR&rdquo; — accounts receivable. In practice these are usually the leg of a
+                dispensing that carries the acquisition cost while the money arrives on a different transmission, often
+                on a different plan altogether. Grouped into the fill they belong to, most turn out to have been paid;
+                what is listed here is the fill, not the row, so a cost leg that was settled elsewhere is not reported
+                as a debt.
+                {flags.onAccount.unbilled.length > 0 && (
+                  <>
+                    {" "}
+                    <b className="text-crit">
+                      {flags.onAccount.unbilled.length} of {flags.onAccount.count} had no charge raised at all
+                    </b>
+                    , so {formatCents(flags.onAccount.unbilledCostCents)} of cost is not owed by anybody yet — it is
+                    absorbed until somebody bills it.
+                  </>
+                )}
+              </p>
+              <div className="mt-2 overflow-x-auto">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Rx</th>
+                      <th>Drug</th>
+                      <th>Filled</th>
+                      <th>Plan</th>
+                      <th className="text-right">Cost</th>
+                      <th className="text-right">Billed</th>
+                      <th>What it is</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {flags.onAccount.fills.map((f) => (
+                      <tr key={f.key}>
+                        <td className="whitespace-nowrap">
+                          {f.rxNumber}
+                          {f.fillNumber !== null && `-${f.fillNumber}`}
+                        </td>
+                        <td>{f.itemName ?? f.ndc11 ?? "—"}</td>
+                        <td className="whitespace-nowrap text-xs">{f.dateFilled}</td>
+                        <td className="text-xs">{f.payers[0]?.name ?? f.payers[0]?.bin ?? "—"}</td>
+                        <td className="text-right">{f.acquisitionCents === null ? "—" : formatCents(f.acquisitionCents)}</td>
+                        <td className="text-right">{formatCents(f.receivableCents)}</td>
+                        <td className="text-xs">
+                          {(f.unbilledCostCents ?? 0) > 0 ? (
+                            <span className="text-crit">
+                              Cost out of the door and nothing billed on any leg. Raise the charge, or find out which
+                              plan should have had it.
+                            </span>
+                          ) : (
+                            <>Billed. Not cash until it is collected.</>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-2 text-xs text-ink-3">
+                Nothing before today has been carried in — these start from the first report loaded, as asked.
+              </p>
+            </>
+          )}
 
           <h2 id="loss" className="mt-8 text-sm font-semibold">Dispensed at a loss</h2>
           {/*

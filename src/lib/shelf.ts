@@ -161,7 +161,7 @@ export async function movement(lookbackDays = SHELF_POLICY.lookbackDays): Promis
       ndc11: c.ndc11, itemName: c.itemName, bin: c.bin, groupNumber: c.groupNumber,
       pbmName: c.pbmName, payerLabel: c.payerLabel, quantityThousandths: c.quantityThousandths,
       remitCents: c.remitCents, copayCents: c.copayCents, patientTotalCents: c.patientTotalCents,
-      acquisitionCents: c.acquisitionCents, status: c.status,
+      acquisitionCents: c.acquisitionCents, status: c.status, onAccount: c.onAccount,
       unmatchedReversal: (c.remitCents ?? 0) < 0 && !c.reversalKey,
     })),
     later,

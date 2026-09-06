@@ -42,7 +42,15 @@ import { splitRow } from "./pioneer-catalog";
  * "$714,553,005.00". The digits before the decimal point are the original, so they are put back.
  */
 
-export type TxnStatus = "P" | "A" | "R";
+/**
+ * The statuses the report prints.
+ *
+ * P paid, A a reversal (adjustment), R rejected by the plan — and AR, which is not a claim status
+ * at all but an accounts-receivable sale: the drug went out and the money is owed rather than
+ * collected. It is a real dispensing with a real acquisition cost, and PioneerRx counts it in its
+ * grand total, so anything that drops it reports the pharmacy as having made more than it did.
+ */
+export type TxnStatus = "P" | "A" | "R" | "AR";
 
 export type Transaction = {
   /** Position in the file, so two identical rows on one day are two transactions. */
@@ -76,6 +84,13 @@ export type Transaction = {
    * and counted, and held out of every question that only makes sense about an insurer.
    */
   cashPlan?: boolean;
+  /**
+   * Billed to an account rather than collected: the report's "AR" status.
+   *
+   * A property of where the money is, not of the dispensing, which is why it rides beside the
+   * status rather than in it. Everything about the drug leaving the shelf is unchanged.
+   */
+  onAccount?: boolean;
   /**
    * The facilitator payment the report says to expect on this fill, where it carries one.
    *
@@ -265,7 +280,7 @@ export function scoreLayout(layout: Layout, rows: string[][]): number {
   let score = 0;
   for (const parts of rows) {
     if (RX_FILL.test(parts[layout.rxFill] ?? "")) score += 1;
-    if (["P", "A", "R"].includes(parts[layout.status] ?? "")) score += 1;
+    if (["P", "A", "R", "AR"].includes(parts[layout.status] ?? "")) score += 1;
     /*
      * A cell must be right to earn, and wrong to lose. Merely being *allowed* to be blank earns
      * nothing, because a blank is what a shifted layout lands on as often as the true one.
@@ -628,12 +643,22 @@ function readRow(parts: string[], POS: Layout, roles: ExtraRoles, section: Retur
   /*
    * A status this reader does not know is set aside by name, never guessed at.
    *
-   * The live report carries "AR" on a handful of rows, one of them with $1,492.61 of patient
-   * responsibility on it. Read as paid it would invent revenue; dropped as a malformed row it would
-   * vanish silently. Named, it shows up in the import summary as something to ask about — which is
-   * the only honest thing to do with a code whose meaning nobody here knows yet.
+   * "AR" was one of those until the pharmacy said what it is: accounts receivable. It is not a
+   * claim state — it is the leg of a dispensing that carries the *cost* while the money arrives on
+   * a different row, usually a different BIN entirely. Rx 333932-0 in the live file is the shape:
+   * rejected on one plan, an AR row carrying $484.03 of acquisition cost and no revenue, and a paid
+   * row on another plan bringing in $491.67 against no cost. One bottle, $7.64 made.
+   *
+   * Dropping them is what this reader used to do, and it was not a small omission in the harmless
+   * direction. The cost went with them and the revenue stayed, so those three fills read as $2,205
+   * of pure profit on stock that had apparently cost nothing, and the site's gross profit came to
+   * $2,849.76 *more* than PioneerRx's over the same six days.
+   *
+   * So it is read like any other row and marked. Where the money genuinely has not arrived, the
+   * fill it groups into says so; where it arrived on another leg, grouping puts the two together
+   * and neither figure is invented.
    */
-  if (status !== "P" && status !== "A" && status !== "R") return `a status this reader does not know yet ("${status}")`;
+  if (status !== "P" && status !== "A" && status !== "R" && status !== "AR") return `a status this reader does not know yet ("${status}")`;
   const dateFilled = mdyToIso(parts[POS.dateFilled]);
   if (!dateFilled) return "a row whose date-filled cell is not a date";
   const binRaw = parts[POS.bin];
@@ -727,6 +752,7 @@ function readRow(parts: string[], POS: Layout, roles: ExtraRoles, section: Retur
     expectedFacilitatorCents,
     otherCoverageCode,
     cashPlan,
+    onAccount: status === "AR",
     ingredientPaidCents,
     ndc11,
     ndcBare10,
@@ -836,6 +862,16 @@ export function planTransactions(
     if ((t.bin && ignoreBins.has(t.bin)) || ignore.test(t.payerLabel)) t.cashPlan = true;
     if (t.status === "R") { plan.skipped.push({ txn: t, why: "rejected by the plan, nothing paid" }); continue; }
     if (opts.requireCompleted === true && !t.completedAt) { plan.skipped.push({ txn: t, why: "not yet sold (no completed date)" }); continue; }
+    /*
+     * An account sale goes in as a dispensing, because that is what it is.
+     *
+     * It is not a reversal and it is not a rejection: the drug left the shelf, the acquisition cost
+     * is real, and the report counts it in its grand total. What is different is only where the
+     * money is — owed rather than taken — and that is carried on the row, not in its status, so
+     * every figure that should include it (cost of goods, what moved, the report's own totals) does
+     * so without anything having to know about accounts receivable.
+     */
+    if (t.status === "AR") { plan.insertPaid.push(t); continue; }
     if (t.status === "P") { plan.insertPaid.push(t); continue; }
 
     // A reversal. Its figures are the negation of the claim it cancels.

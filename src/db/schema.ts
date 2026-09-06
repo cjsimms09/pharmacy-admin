@@ -1895,6 +1895,19 @@ export const claims = sqliteTable(
      * history still shows what was billed and taken back.
      */
     status: text("status", { enum: ["paid", "reversed"] }).notNull().default("paid"),
+    /**
+     * Billed to an account rather than collected at the counter: the report's "AR" status.
+     *
+     * Deliberately not a status. The status says what happened to the *dispensing* — it went out,
+     * or it was reversed — and an account sale went out like any other: the drug left the shelf,
+     * the acquisition cost is real, and PioneerRx counts it in its grand total. Setting these five
+     * rows aside is exactly why this site's totals came to $2,849.76 less than the report's.
+     *
+     * What is different is only where the money is, so it rides alongside. Everything that should
+     * include it — cost of goods, what moved, the report's own arithmetic — does so without
+     * knowing this column exists; only the cash side has to ask.
+     */
+    onAccount: integer("on_account", { mode: "boolean" }).notNull().default(false),
     reversedOn: text("reversed_on"),
     /**
      * The day the fill was sold, as the transaction report had it.
