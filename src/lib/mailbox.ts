@@ -595,6 +595,7 @@ async function importRecognised(
   filed?: { documentId?: string | null; supplierId?: string | null; supplierName?: string | null },
 ): Promise<{ routedAs: string; routeResult: string | null; imported: boolean }> {
   const cls = classify(fileName, buf);
+  const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   let routeResult: string | null = null;
   let imported = false;
   try {
@@ -608,6 +609,55 @@ async function importRecognised(
       const r = await importRxTransactions(buf, fileName, ctx.userId ?? "mailbox-sweep");
       routeResult = describeTransactionImport(r);
       if (r.claimsAdded || r.reversed) imported = true;
+    } else if (cls.kind === "rxrescue_credit") {
+      /*
+       * Top-off money applied to the fills it names. Idempotent on the memo's own transaction ids,
+       * because an emailed memo gets forwarded and swept more than once, and money applied twice to
+       * a claim is not something anybody re-checks.
+       */
+      const { importRxRescueCredit } = await import("./claim-payments");
+      const r = await importRxRescueCredit(buf, fileName, { name: ctx.userName ?? "mailbox-sweep" });
+      /*
+       * What the memo settled, what is genuinely new money, and whether the rule that separates
+       * them still holds — said every time, because a rule nobody re-tests is a rule that will be
+       * wrong silently.
+       */
+      const bits = [
+        r.applied
+          ? `${money(r.totalCents)} of RxRescue credit applied across ${r.applied} line${r.applied === 1 ? "" : "s"}${r.memoId ? ` (memo ${r.memoId})` : ""}. Only the top-off part moves a margin — the copay assistance settles what the claim was already adjudicated for, so counting all of it would book that money twice.`
+          : "No new credit lines on this memo.",
+        r.check
+          ? r.check.decisive === 0
+            ? "Nothing on this memo could re-test that: every line with a claim to compare has a zero top-off, where the assistance and the whole credit are the same number and agree with either reading."
+            : r.check.verdict === "the top-off is new money"
+              ? `${r.check.decisive} line${r.check.decisive === 1 ? "" : "s"} could settle it, and confirmed it: the claim carried the assistance alone.`
+              : null
+          : null,
+        r.matched < r.applied ? `${r.applied - r.matched} name a prescription this site has not loaded yet; they attach themselves when it arrives.` : null,
+        r.alreadyHeld ? `${r.alreadyHeld} were already applied from an earlier copy of this memo.` : null,
+        ...r.problems,
+      ].filter(Boolean);
+      routeResult = bits.join(" ");
+      if (r.applied) imported = true;
+    } else if (cls.kind === "accrual_sales") {
+      /*
+       * Recognised, kept, and honestly described as not yet counted.
+       *
+       * The alternative — filing it silently among the documents — is how a report somebody goes to
+       * the trouble of sending every month gets assumed to be feeding a figure it is not feeding.
+       */
+      /*
+       * A month's takings, filed against the month rather than added to it.
+       *
+       * The same month re-run after a correction is still one month; appending it would report the
+       * pharmacy as having taken twice what it did, which is the worst arithmetic error available.
+       */
+      const { fileSystemSales } = await import("./sales-store");
+      const r = await fileSystemSales(buf, fileName, ctx.userId ?? "mailbox-sweep", filed?.documentId ?? null);
+      routeResult = r.problems.length
+        ? `Recognised as the System Sales Summary but nothing was filed: ${r.problems.join(" ")}`
+        : `${r.month}: ${money(r.totalCents ?? 0)} taken in total, retail and prescriptions together${r.replaced ? " — replacing the copy already held for that month" : ""}.`;
+      if (r.problems.length === 0) imported = true;
     } else if (cls.kind === "pioneer_catalog") {
       // Names its own supplier inside the file, so no sender rule is needed — and the filename
       // is checked against it, so MCKCatalog carrying IPD prices is refused.

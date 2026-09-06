@@ -117,6 +117,23 @@ export type ImportReport = {
   rowsRead: number;
   claimsAdded: number;
   duplicates: number;
+  /** Reversals held but never paired, matched to the claims they cancel by this load. */
+  reversalsPaired?: number;
+  /** What the report itself said this file came to: total sales, and total gross profit. */
+  reportSalesCents?: number | null;
+  reportGrossProfitCents?: number | null;
+  /** The same gross profit added from the rows this reader got out of the file. */
+  readGrossProfitCents?: number;
+  /**
+   * Rows already held that this file re-stated.
+   *
+   * Written whether or not the figures actually moved — the site does not know what the previous
+   * file said, only what this one says, and the last word is the right one. Compared against
+   * `duplicates` it is also the check that a re-sent report landed: the two should match, and a
+   * restated count well below the duplicate count means rows did not line up and somebody should
+   * look before trusting the totals.
+   */
+  restated?: number;
   skipped: number;
   skipReasons: Record<string, number>;
   unmappedColumns: string[];
@@ -318,7 +335,24 @@ export async function importRxTransactions(file: Buffer, fileName: string, userI
     if (unresolved > 0) parsed.reasons["kept without an NDC: 10-digit NDC with no hyphens matched no product we hold, or more than one"] = unresolved;
   }
 
-  await db.insert(schema.claimImports).values({ id: importId, fileName, rowsRead, createdBy: userId });
+  /*
+   * The report's own bottom line, and ours over the rows we actually read.
+   *
+   * Kept side by side because together they answer "did we read all of it" — a question nothing
+   * inside our own arithmetic can ask. A row set aside for a status this reader does not recognise
+   * makes the file quietly short by exactly its gross profit, and the load otherwise looks perfect.
+   */
+  const readGrossProfitCents = parsed.rows.reduce((n, t) => n + (t.grossProfitCents ?? 0), 0);
+  await db.insert(schema.claimImports).values({
+    id: importId,
+    fileName,
+    rowsRead,
+    createdBy: userId,
+    reportSalesCents: parsed.grandTotal?.salesCents ?? null,
+    reportAcquisitionCents: parsed.grandTotal?.acquisitionCents ?? null,
+    reportGrossProfitCents: parsed.grandTotal?.grossProfitCents ?? null,
+    readGrossProfitCents,
+  });
 
   const base: TransactionImportReport = {
     importId, rowsRead, claimsAdded: 0, duplicates: 0, skipped: parsed.skipped, skipReasons: { ...parsed.reasons },
@@ -342,13 +376,18 @@ export async function importRxTransactions(file: Buffer, fileName: string, userI
   });
   const keys = new Set<string>();
   const unsold = new Map<string, string>();
+  const byKey = new Map<string, string>();
   for (const c of held) {
-    if (c.transactionKey) { keys.add(c.transactionKey); if (!c.completedAt) unsold.set(c.transactionKey, c.id); }
+    if (c.transactionKey) {
+      keys.add(c.transactionKey);
+      byKey.set(c.transactionKey, c.id);
+      if (!c.completedAt) unsold.set(c.transactionKey, c.id);
+    }
     if (c.reversalKey) keys.add(c.reversalKey);
   }
   const paid = held.filter((c) => c.status === "paid");
 
-  const plan = planTransactions(parsed.rows, { keys, paid, unsold }, { ignoreBins: ["028249"] });
+  const plan = planTransactions(parsed.rows, { keys, paid, unsold, byKey }, { ignoreBins: ["028249"] });
   const skipReasons = { ...parsed.reasons };
   for (const s of plan.skipped) skipReasons[s.why] = (skipReasons[s.why] ?? 0) + 1;
 
@@ -376,6 +415,8 @@ export async function importRxTransactions(file: Buffer, fileName: string, userI
       quantityThousandths: t.quantityThousandths, quantityUnit: null,
       remitCents: t.remitCents, copayCents: t.copayCents, patientTotalCents: t.patientTotalCents,
       acquisitionCents: t.acquisitionCents, grossProfitCents: t.grossProfitCents,
+      expectedFacilitatorCents: t.expectedFacilitatorCents ?? null,
+      cashPlan: t.cashPlan === true,
       ingredientPaidCents: t.ingredientPaidCents, dispensingFeePaidCents: t.dispensingFeeCents,
       status, reversedOn: status === "reversed" ? reversedOn : null,
       completedAt: t.completedAt ? mdyToIso(t.completedAt) : null,
@@ -396,6 +437,45 @@ export async function importRxTransactions(file: Buffer, fileName: string, userI
   for (const s of plan.markSold) {
     await db.update(schema.claims).set({ completedAt: mdyToIso(s.completedAt) }).where(eq(schema.claims.id, s.claimId));
   }
+  /*
+   * What the report now says about a claim already held, written over what it used to say.
+   *
+   * Only the report's own figures — never this site's status, its reversal pairing or the payments
+   * matched to it. Re-sending a corrected file is how a restated gross profit and a newly added
+   * column reach rows that were loaded before either existed, and without this the pharmacy would
+   * have had to delete its claims and start again to get the truth in.
+   */
+  let restated = 0;
+  for (const r of plan.refresh) {
+    const changed =
+      r.txn.grossProfitCents !== null || r.txn.expectedFacilitatorCents !== null || r.txn.patientTotalCents !== null;
+    if (!changed) continue;
+    await db
+      .update(schema.claims)
+      .set({
+        remitCents: r.txn.remitCents,
+        copayCents: r.txn.copayCents,
+        patientTotalCents: r.txn.patientTotalCents,
+        acquisitionCents: r.txn.acquisitionCents,
+        grossProfitCents: r.txn.grossProfitCents,
+        expectedFacilitatorCents: r.txn.expectedFacilitatorCents ?? null,
+        dispensingFeePaidCents: r.txn.dispensingFeeCents,
+        ingredientPaidCents: r.txn.ingredientPaidCents,
+        quantityThousandths: r.txn.quantityThousandths,
+        cashPlan: r.txn.cashPlan === true,
+        rawJson: JSON.stringify(r.txn.raw),
+      })
+      .where(eq(schema.claims.id, r.claimId));
+    restated++;
+  }
+
+  /*
+   * Reversals that could not be paired as they arrived, paired now against everything held.
+   *
+   * Cheap, and it is the only thing that can rescue a pair stranded by an earlier load — where the
+   * claim stands as live revenue and nothing about it looks wrong.
+   */
+  const repaired = await repairReversals();
 
   const dates = inserts.map((c) => c.dateFilled).sort();
   return finish({
@@ -411,7 +491,229 @@ export async function importRxTransactions(file: Buffer, fileName: string, userI
     unmatchedReversals: plan.insertUnmatchedReversal.length,
     notYetSold: plan.insertPaid.filter((t) => !t.completedAt).length,
     nowSold: plan.markSold.length,
+    restated,
+    reversalsPaired: repaired.paired,
+    reportSalesCents: parsed.grandTotal?.salesCents ?? null,
+    reportGrossProfitCents: parsed.grandTotal?.grossProfitCents ?? null,
+    readGrossProfitCents,
   });
+}
+
+/**
+ * Marks claims reversed where the reversal that cancels them is already held but never got paired.
+ *
+ * Pairing happens as a file is read, which works only while both halves are in the same file or the
+ * claim was stored before its reversal arrived. Everything else leaves the pair stranded: a reversal
+ * loaded before its claim, a file re-sent so that the reversal row is skipped as a duplicate before
+ * it can be matched, or an import that failed halfway. The claim then stands as live revenue for
+ * ever, and nothing about it looks wrong.
+ *
+ * Rx 331488 is what this is for. It ran for sixty tablets at $1,204.25, was reversed, and re-ran for
+ * thirty at $607.38 — a $30.62 fill. With the reversal stranded, both runs counted: $1,811.63 of
+ * revenue against one bottle, and a $658.11 profit on a script that made thirty dollars.
+ *
+ * Run after every import, and safe to run at any time: it only ever matches a reversal to a claim
+ * whose figures it exactly negates, and only where that leaves no ambiguity.
+ */
+/**
+ * A held reversal, and the live claim it cancels — as a rule, apart from the database.
+ *
+ * Extracted so the case that produced it can be reproduced: a daily file carrying a reversal and a
+ * rebill but not the original run, then a wider file carrying all three. The reversal is stored
+ * matching nothing; the original arrives later and is stored live; and the reversal is skipped as a
+ * duplicate before it can pair with it. Both runs then count, one bottle is billed twice, and
+ * nothing on the screen looks wrong.
+ */
+export type Pairable = {
+  id: string;
+  rxNumber: string;
+  fillNumber: number | null;
+  bin: string | null;
+  ndc11: string | null;
+  status: string;
+  remitCents: number | null;
+  copayCents: number | null;
+  transactionKey: string | null;
+  reversalKey: string | null;
+};
+
+/** A reversal held that was never matched to anything: negative, reversed, pointing at itself. */
+export function isStrandedReversal(c: Pairable): boolean {
+  return (c.remitCents ?? 0) < 0 && c.status === "reversed" && c.reversalKey !== null && c.reversalKey === c.transactionKey;
+}
+
+/**
+ * The live claim a stranded reversal cancels, or null with the reason it could not be told.
+ *
+ * Exactly one, or nothing. Two claims a reversal could equally well cancel is not an answer, and
+ * cancelling the wrong run of a prescription deletes revenue that was really earned.
+ */
+export function claimCancelledBy(rev: Pairable, live: Pairable[]): { hit: Pairable } | { hit: null; why: string } {
+  const same = (a: Pairable, b: Pairable) =>
+    a.rxNumber === b.rxNumber && a.fillNumber === b.fillNumber && a.bin === b.bin && a.ndc11 === b.ndc11;
+  const sameFill = live.filter((c) => c.status === "paid" && same(c, rev));
+  const hits = sameFill.filter((c) => c.remitCents === -(rev.remitCents ?? 0) && c.copayCents === -(rev.copayCents ?? 0));
+  if (hits.length === 1) return { hit: hits[0] };
+  return {
+    hit: null,
+    why:
+      sameFill.length === 0
+        ? "no live claim is held for that prescription, fill, BIN and NDC — it reverses a dispensing from before this feed began"
+        : hits.length === 0
+          ? `${sameFill.length} live claim${sameFill.length === 1 ? " is" : "s are"} held for that fill but none has figures this exactly cancels`
+          : `${hits.length} live claims match it equally well, and cancelling the wrong one would delete revenue that was really earned`,
+  };
+}
+
+export async function repairReversals(): Promise<{ paired: number; strays: number; stillStranded: { rxNumber: string; dateFilled: string; amountCents: number; why: string }[] }> {
+  const rows = await db.query.claims.findMany({
+    where: eq(schema.claims.source, "transaction_report"),
+    columns: {
+      id: true, rxNumber: true, fillNumber: true, bin: true, ndc11: true, status: true,
+      remitCents: true, copayCents: true, transactionKey: true, reversalKey: true, dateFilled: true,
+    },
+  });
+
+  const key = (c: { rxNumber: string; fillNumber: number | null; bin: string | null; ndc11: string | null }) =>
+    [c.rxNumber, c.fillNumber ?? "", c.bin ?? "", c.ndc11 ?? ""].join("|");
+
+  /*
+   * A reversal already recorded as one: negative money, held as reversed, pointing at itself
+   * because nothing was found to pair it with when it arrived.
+   */
+  const strays = rows.filter((c) => isStrandedReversal(c));
+  if (strays.length === 0) return { paired: 0, strays: 0, stillStranded: [] };
+
+  const live = new Map<string, typeof rows>();
+  for (const c of rows) {
+    if (c.status !== "paid") continue;
+    const k = key(c);
+    live.set(k, [...(live.get(k) ?? []), c]);
+  }
+
+  const used = new Set<string>();
+  const stillStranded: { rxNumber: string; dateFilled: string; amountCents: number; why: string }[] = [];
+  let paired = 0;
+  for (const rev of strays) {
+    const found = claimCancelledBy(rev, (live.get(key(rev)) ?? []).filter((c) => !used.has(c.id)));
+    /*
+     * Exactly one, or nothing. Two claims a reversal could equally well cancel is not an answer,
+     * and cancelling the wrong run of a prescription deletes revenue that was really earned.
+     *
+     * Where it cannot pair, it says why. A repair that quietly does nothing is indistinguishable
+     * from one that had nothing to do, and the pharmacist is left pressing a button and hoping.
+     */
+    if (found.hit === null) {
+      stillStranded.push({ rxNumber: rev.rxNumber, dateFilled: rev.dateFilled, amountCents: rev.remitCents ?? 0, why: found.why });
+      continue;
+    }
+    const hit = found.hit;
+    used.add(hit.id);
+    await db
+      .update(schema.claims)
+      .set({ status: "reversed", reversedOn: rev.dateFilled, reversalKey: rev.transactionKey })
+      .where(eq(schema.claims.id, hit.id));
+    paired++;
+  }
+  return { paired, strays: strays.length, stillStranded: stillStranded.slice(0, 20) };
+}
+
+/**
+ * Re-reads every claim held from the row the report actually sent, and restates what it says.
+ *
+ * A fix to this reader does nothing for claims already stored. They were read by the old one, and
+ * they keep its answers for ever — the patient's residual taken from the wrong column, a facilitator
+ * payment in a column nothing knew about, the cash programme dropped, a reversal left unpaired so a
+ * bottle counts twice. The pharmacy would otherwise have to delete its claims and start again to
+ * get the truth in, which is not a thing anybody should have to do.
+ *
+ * The row as it arrived is kept against every claim, so nothing has to be re-sent: this reads that
+ * row again through the current reader and writes back what it now says. Only figures the report
+ * itself printed are touched — never a status, a reversal pairing, or a payment matched to a claim.
+ *
+ * Then it says whether the books balance, which is the only way to know it worked.
+ */
+export async function recheckHeldClaims(): Promise<{
+  read: number;
+  restated: number;
+  reversalsPaired: number;
+  /** Reversals held that had never been matched to anything, before this ran. */
+  reversalsHeld: number;
+  /** The ones that still could not be paired, and why — so a repair that did nothing says so. */
+  stillStranded: { rxNumber: string; dateFilled: string; amountCents: number; why: string }[];
+  paymentsMatched: number;
+  before: { differenceCents: number; fillsOff: number };
+  after: { differenceCents: number; fillsOff: number };
+}> {
+  const before = (await claimFlags({ all: true })).balance;
+
+  const rows = await db.query.claims.findMany({
+    where: eq(schema.claims.source, "transaction_report"),
+    columns: {
+      id: true, rawJson: true, bin: true, payerLabel: true,
+      remitCents: true, copayCents: true, patientTotalCents: true, acquisitionCents: true,
+      grossProfitCents: true, expectedFacilitatorCents: true, cashPlan: true, quantityThousandths: true,
+    },
+  });
+
+  /* The report prints money as "$1,204.25" and a negative as "($1,204.25)". Blank is not zero. */
+  const money = (v: string | undefined): number | null => {
+    if (v === undefined) return null;
+    const t = String(v).trim();
+    if (t === "") return null;
+    const n = Number(t.replace(/[$,()\s]/g, ""));
+    if (!Number.isFinite(n)) return null;
+    return Math.round(n * 100) * (/^\(.*\)$/.test(t) ? -1 : 1);
+  };
+
+  const { CASH_BINS, CASH_LABEL } = await import("./rx-transactions");
+  const { parseQuantityThousandths } = await import("./money");
+
+  let read = 0;
+  let restated = 0;
+  for (const r of rows) {
+    if (!r.rawJson) continue;
+    read++;
+    let raw: Record<string, string>;
+    try {
+      raw = JSON.parse(r.rawJson) as Record<string, string>;
+    } catch {
+      continue; // A row whose text cannot be read is left as it was rather than guessed at.
+    }
+
+    const next = {
+      remitCents: money(raw["Amount"]) ?? r.remitCents,
+      copayCents: money(raw["Copay"]) ?? r.copayCents,
+      patientTotalCents: money(raw["Total"]) ?? r.patientTotalCents,
+      acquisitionCents: money(raw["Acq. Inv. Cost"]) ?? r.acquisitionCents,
+      grossProfitCents: money(raw["GrossProfit"]) ?? r.grossProfitCents,
+      // Only where the report actually carried the column; absence is not a promise of zero.
+      expectedFacilitatorCents: raw["Est. MTF"] !== undefined ? money(raw["Est. MTF"]) : r.expectedFacilitatorCents,
+      quantityThousandths: parseQuantityThousandths(raw["QTY"] ?? "") ?? r.quantityThousandths,
+      cashPlan: CASH_BINS.has(r.bin ?? "") || CASH_LABEL.test(raw["Third Party"] ?? r.payerLabel ?? ""),
+    };
+
+    const changed = (Object.keys(next) as (keyof typeof next)[]).some((k) => next[k] !== (r as Record<string, unknown>)[k]);
+    if (!changed) continue;
+    await db.update(schema.claims).set(next).where(eq(schema.claims.id, r.id));
+    restated++;
+  }
+
+  const reversals = await repairReversals();
+  const { matchOrphanPayments } = await import("./claim-payments");
+  const { matched } = await matchOrphanPayments();
+
+  const after = (await claimFlags({ all: true })).balance;
+  return {
+    read,
+    restated,
+    reversalsPaired: reversals.paired,
+    reversalsHeld: reversals.strays,
+    stillStranded: reversals.stillStranded,
+    paymentsMatched: matched,
+    before: { differenceCents: before.differenceCents, fillsOff: before.fillsOff },
+    after: { differenceCents: after.differenceCents, fillsOff: after.fillsOff },
+  };
 }
 
 /** Drug names by NDC from what we already hold: the supplier catalogues first, then NADAC. */
@@ -433,15 +735,49 @@ async function drugNamesByNdc(ndcs: string[]): Promise<Map<string, string>> {
 
 /** A one-line account of a transaction-report import, for the inbox and the claims page. */
 export function describeTransactionImport(r: TransactionImportReport): string {
+  const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const bits = [`${r.claimsAdded.toLocaleString()} paid claim${r.claimsAdded === 1 ? "" : "s"} added`];
   if (r.reversed) bits.push(`${r.reversed} reversed`);
   if (r.unmatchedReversals) bits.push(`${r.unmatchedReversals} reversal${r.unmatchedReversals === 1 ? "" : "s"} matched no claim we hold (kept, marked reversed)`);
   if (r.notYetSold) bits.push(`${r.notYetSold} of them not yet picked up when the report ran (kept; a return to stock comes in as a reversal)`);
   if (r.nowSold) bits.push(`${r.nowSold} held earlier now shown sold`);
   if (r.duplicates) bits.push(`${r.duplicates} already held`);
+  if (r.reversalsPaired)
+    bits.push(
+      `${r.reversalsPaired} reversal${r.reversalsPaired === 1 ? "" : "s"} held from an earlier load finally matched the claim${r.reversalsPaired === 1 ? "" : "s"} they cancel, which had been standing as live revenue`,
+    );
+  if (r.restated) bits.push(`${r.restated} of those re-read from this file, so a figure the report has since corrected replaces the one held`);
   const other = Object.entries(r.skipReasons).filter(([k]) => !/not yet sold/.test(k));
   if (other.length) bits.push(other.map(([k, v]) => `${v} ${k}`).join(", "));
   if (r.period) bits.push(`claims transmitted ${r.period.from}${r.period.to !== r.period.from ? ` to ${r.period.to}` : ""}`);
+  /*
+   * The report's own answer, said out loud, and whether we got all of it.
+   *
+   * This is the only total in the building that nothing here computed, so it is worth printing even
+   * when it agrees — and when it does not, the difference is exactly the rows that were set aside.
+   */
+  if (r.reportSalesCents !== null && r.reportSalesCents !== undefined) {
+    const short =
+      r.reportGrossProfitCents !== null && r.reportGrossProfitCents !== undefined && r.readGrossProfitCents !== undefined
+        ? r.reportGrossProfitCents - r.readGrossProfitCents
+        : 0;
+    /*
+     * The bridge from what this reader made of the file to what the report says the file came to.
+     *
+     * Every row is either read or set aside for a named reason, and the gross profit of the ones set
+     * aside is exactly the difference between the two totals. Stated in full, because "our figure
+     * and theirs differ" is only alarming until you can point at the rows, and on the live file the
+     * whole of the difference is five rows carrying a status this reader does not know.
+     */
+    bits.push(
+      `the report's own total for this file is ${money(r.reportSalesCents)} taken and ${money(r.reportGrossProfitCents ?? 0)} made` +
+        (Math.abs(short) <= 2
+          ? ", every penny of which this reader accounted for"
+          : short < 0
+            ? `, and this reader read ${money(r.readGrossProfitCents ?? 0)} of gross profit across the rows it could read — ${money(-short)} more, which is what sits on the rows it set aside and did not count`
+            : `, and this reader accounted for ${money(r.readGrossProfitCents ?? 0)} of that — ${money(short)} sits on rows it could not read`),
+    );
+  }
   if (r.unresolvedBins.length) bits.push(`BINs not on the listing: ${r.unresolvedBins.join(", ")}`);
   return bits.join(". ") + "." + (r.problems.length ? " " + r.problems.join(" ") : "");
 }
@@ -491,8 +827,72 @@ export function resolvePayer(
  * before any ingredient cost — which is a floor no contract can argue its way under. Neither is
  * a filing; both are a reason to look.
  */
-export async function claimFlags() {
+/**
+ * Which claims a screen is asking about.
+ *
+ * The claims screen used to answer for every claim ever loaded, on every render — grouping thousands
+ * of fills, pricing each against the whole federal NADAC table, and parsing the raw text of every row
+ * — to show one day's work. It got slower every week, by design, because the answer grew with the
+ * archive rather than with the question.
+ *
+ * A fill never spans two dates, so narrowing by the day dispensed splits nothing: every row of a
+ * dispensing shares its date. That makes a day a safe unit to load.
+ */
+export type ClaimScope = {
+  /** Inclusive, as YYYY-MM-DD. Both absent means the most recent day that has any claims. */
+  from?: string | null;
+  to?: string | null;
+  /** A prescription number, with or without its fill suffix. */
+  rx?: string | null;
+  /** Any part of a payer's name or BIN. */
+  payer?: string | null;
+  /**
+   * Every claim held, whatever the date.
+   *
+   * Has to be asked for. A screen answering about one day and a reconciliation answering about the
+   * whole archive are different questions, and the difference between them is the sort of thing that
+   * is invisible until a total is quietly a day's worth instead of a year's.
+   */
+  all?: boolean;
+};
+
+/** The most recent day this pharmacy dispensed anything, which is where the screen opens. */
+export async function latestClaimDay(): Promise<string | null> {
   const rows = await db.query.claims.findMany({
+    columns: { dateFilled: true },
+    orderBy: (c, { desc }) => [desc(c.dateFilled)],
+    limit: 1,
+  });
+  return rows[0]?.dateFilled ?? null;
+}
+
+export async function claimFlags(scope: ClaimScope = {}) {
+  const { and, gte, lte, like, or } = await import("drizzle-orm");
+
+  /*
+   * Resolved once, here, so every figure on the screen is drawn from the same population — and so a
+   * screen that shows one day cannot quietly report a balance struck over all of history.
+   */
+  const day = scope.all || scope.from || scope.to ? null : await latestClaimDay();
+  const from = scope.from ?? day;
+  const to = scope.to ?? day;
+
+  const rx = (scope.rx ?? "").trim().replace(/-.*$/, "");
+  const payer = (scope.payer ?? "").trim();
+
+  const where = and(
+    ...[
+      from ? gte(schema.claims.dateFilled, from) : null,
+      to ? lte(schema.claims.dateFilled, to) : null,
+      rx ? like(schema.claims.rxNumber, `%${rx}%`) : null,
+      payer
+        ? or(like(schema.claims.pbmName, `%${payer}%`), like(schema.claims.payerLabel, `%${payer}%`), like(schema.claims.bin, `%${payer}%`))
+        : null,
+    ].filter((x): x is NonNullable<typeof x> => x !== null),
+  );
+
+  const rows = await db.query.claims.findMany({
+    where,
     orderBy: (c, { asc }) => [asc(c.dateFilled)],
   });
 
@@ -529,6 +929,8 @@ export async function claimFlags() {
       patientTotalCents: c.patientTotalCents,
       acquisitionCents: c.acquisitionCents,
       grossProfitCents: c.grossProfitCents,
+      expectedFacilitatorCents: c.expectedFacilitatorCents,
+      cashPlan: c.cashPlan,
       status: c.status,
       // A reversal kept because it matched nothing: negative money against a fill never counted.
       unmatchedReversal: (c.remitCents ?? 0) < 0 && !c.reversalKey,
@@ -550,11 +952,19 @@ export async function claimFlags() {
   const byKey = new Map(groups.map((g) => [planKey(g.bin, g.groupNumber), g.classification]));
   const classOf = (c: { bin: string | null; groupNumber: string | null }) => byKey.get(planKey(c.bin, c.groupNumber));
 
-  const inScope = rows.filter((c) => {
+  /*
+   * The cash programme is not a plan, and no question about plans applies to it.
+   *
+   * It has no classification to be missing, no floor to fall under and nobody to appeal to — the
+   * pharmacy set the price. Counting it among the unclassified would put every cash fill on a list
+   * of things somebody has to go and settle, which is a list of work that does not exist.
+   */
+  const thirdParty = rows.filter((c) => !c.cashPlan);
+  const inScope = thirdParty.filter((c) => {
     const cls = classOf(c);
     return cls !== undefined && CLASS_INFO[cls].inScope;
   });
-  const undetermined = rows.filter((c) => {
+  const undetermined = thirdParty.filter((c) => {
     const cls = classOf(c);
     return cls === undefined || cls === "unknown";
   });
@@ -575,10 +985,19 @@ export async function claimFlags() {
 
   return {
     total: rows.length,
+    /** Claims on somebody else's plan. Every classification and floor figure is drawn from these. */
+    thirdParty: thirdParty.length,
+    /** Fills the pharmacy priced itself, and what they made. Business it fully controls. */
+    cashFills: fills.filter((f) => f.cashPlan).length,
+    cashMarginCents: fills.filter((f) => f.cashPlan).reduce((n, f) => n + (f.marginCents ?? 0), 0),
     belowCost,
     belowCostTotalCents: sum(belowCost),
     /** One row per dispensing, with every payer that priced it. */
     fills,
+    /** BIN and network for the rows in scope, so the payer table needs no query of its own. */
+    networks: rows.map((c) => ({ bin: c.bin, networkId: c.networkId })),
+    /** The day range these figures were drawn from, so the screen can say what it is showing. */
+    scope: { from, to, rx: rx || null, payer: payer || null },
     /*
      * The rows behind each fill, exactly as the report sent them.
      *
@@ -589,9 +1008,18 @@ export async function claimFlags() {
      * any fill, what arrived, field by field, with the name this reader gave each one.
      */
     rawByFill: (() => {
+      /*
+       * Only for the fills whose rows are actually on screen.
+       *
+       * This parses the stored text of every claim row, and it was doing it for every claim held to
+       * render the fifty on the loss list. The other several thousand were parsed, turned into
+       * objects, and thrown away on every load.
+       */
+      const wanted = new Set(lossFills.slice(0, 50).map((f) => f.key));
       const by = new Map<string, { payer: string | null; fields: { name: string; value: string }[] }[]>();
       for (const c of rows) {
         if (!c.rawJson) continue;
+        if (!wanted.has([c.rxNumber.trim(), c.fillNumber ?? "", c.dateFilled, c.ndc11 ?? ""].join("|"))) continue;
         const key = [c.rxNumber.trim(), c.fillNumber ?? "", c.dateFilled, c.ndc11 ?? ""].join("|");
         let parsed: Record<string, unknown>;
         try {
@@ -627,7 +1055,53 @@ export async function claimFlags() {
      * one real gap was $146.18 of facilitator money, another $5.56 that no facilitator would ever
      * pay. What is knowable is the amount and the row it is on, and both are shown.
      */
-    unreconciled: fills.filter((f) => f.unreconciledCents !== null).sort((a, b) => b.unreconciledCents! - a.unreconciledCents!),
+    /*
+     * Fills the plan promised a facilitator payment on that has not arrived — biggest first.
+     *
+     * These are not losses, they are unpaid. The report says at adjudication what the manufacturer
+     * share will be; the money follows weeks later through the Medicare Transaction Facilitator.
+     * Until it lands the fill sits in the red for the whole amount, and somebody looking at the
+     * loss list has no way to tell a rate worth arguing about from a bill nobody has paid yet.
+     */
+    awaitingFacilitator: fills
+      .filter((f) => (f.facilitatorOutstandingCents ?? 0) > 0)
+      .sort((a, b) => (b.facilitatorOutstandingCents ?? 0) - (a.facilitatorOutstandingCents ?? 0)),
+    awaitingFacilitatorCents: fills.reduce((n, f) => n + (f.facilitatorOutstandingCents ?? 0), 0),
+    /*
+     * ── Do the books balance? ─────────────────────────────────────────────────────
+     *
+     * Three totals that must agree, drawn three different ways:
+     *
+     *   ours      every dispensing's revenue less the cost of the bottle, taken once
+     *   report    PioneerRx's own per-row gross profit, added over the live rows
+     *   later     money that arrived after the day, which only ours can know about
+     *
+     *   ours − later = report
+     *
+     * This is the standing tripwire. Every arithmetic error this site has had was found by the
+     * pharmacist reading a PDF and knowing the real answer — the smallest copay, a residual read
+     * from the wrong column, a reversal left unpaired so one bottle counted twice. Each was a rule
+     * inferred from a single example, and each survived because nothing independent contradicted
+     * it. This does, on every fill, every day, without anybody having to look.
+     */
+    balance: (() => {
+      const ours = fills.reduce((n, f) => n + (f.marginCents ?? 0), 0);
+      const later = fills.reduce((n, f) => n + f.laterPaymentsCents, 0);
+      const report = fills.reduce((n, f) => n + (f.reportedMarginCents ?? 0), 0);
+      const off = fills.filter((f) => f.agreesWithReport === false);
+      const unchecked = fills.filter((f) => f.agreesWithReport === null).length;
+      return {
+        ourMarginCents: ours,
+        laterCents: later,
+        reportMarginCents: report,
+        differenceCents: ours - later - report,
+        fillsOff: off.length,
+        /** Fills the report gave nothing to check against: no gross profit, or no acquisition cost. */
+        unchecked,
+        balances: Math.abs(ours - later - report) <= 2 && off.length === 0,
+      };
+    })(),
+    unreconciled: fills.filter((f) => f.unreconciledCents !== null).sort((a, b) => Math.abs(b.unreconciledCents!) - Math.abs(a.unreconciledCents!)),
     unreconciledCents: fills.reduce((n, f) => n + (f.unreconciledCents ?? 0), 0),
     lossFillsTotalCents: lossFills.reduce((n, f) => n + (f.marginCents ?? 0), 0),
     /*
@@ -686,6 +1160,8 @@ export async function allFills() {
       patientTotalCents: c.patientTotalCents,
       acquisitionCents: c.acquisitionCents,
       grossProfitCents: c.grossProfitCents,
+      expectedFacilitatorCents: c.expectedFacilitatorCents,
+      cashPlan: c.cashPlan,
       status: c.status,
       // A reversal kept because it matched nothing: negative money against a fill never counted.
       unmatchedReversal: (c.remitCents ?? 0) < 0 && !c.reversalKey,
@@ -708,8 +1184,17 @@ export async function allFills() {
  * held out of the profit column entirely and shown separately, with each plan credited only with
  * the money it actually sent. Two figures that are true beat one that is tidy.
  */
-export async function claimsByPayer() {
-  const [rows, fills] = await Promise.all([db.query.claims.findMany(), allFills()]);
+export async function claimsByPayer(given?: { fills: Awaited<ReturnType<typeof allFills>>; networks: { bin: string | null; networkId: string | null }[] }) {
+  /*
+   * Given the fills the screen already grouped, rather than grouping them all over again.
+   *
+   * The claims page called this beside claimFlags, and between them they read every claim twice and
+   * grouped every dispensing twice — the same work, done again, to answer a question about the same
+   * rows. On a screen showing one day it was the difference between one query and thousands of rows.
+   */
+  const [rows, fills] = given
+    ? [given.networks, given.fills]
+    : await Promise.all([db.query.claims.findMany({ columns: { bin: true, networkId: true } }), allFills()]);
 
   type Row = {
     pbmName: string;

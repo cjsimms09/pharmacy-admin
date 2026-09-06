@@ -268,12 +268,69 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       */}
       <section className="mb-6">
         <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="text-sm font-semibold">Where the money stands</h2>
+          <h2 className="text-sm font-semibold">Scoreboard</h2>
           <span className="text-xs text-ink-3">
             Month to date · {fmtLong(today)} · <Link href="/money" className="text-accent underline">all of it</Link>
           </span>
         </div>
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {/*
+            What was dispensed and what it made — prescriptions only.
+
+            The transaction report does not carry front-of-shop merchandise, so this is not the
+            whole till and does not pretend to be. Cash fills are in it: a bottle the pharmacy
+            priced itself is revenue like any other, and for months they were thrown away on import,
+            which silently deleted the margin on the only business the pharmacy fully controls.
+          */}
+          <Figure
+            value={formatCents(money.dispensing.marginCents)}
+            label="Gross profit this month"
+            tone={money.dispensing.marginCents < 0 ? "crit" : "ok"}
+            href="/claims"
+            sub={
+              money.dispensing.fills === 0
+                ? "No fills loaded for this month yet."
+                : [
+                    `on ${formatCents(money.dispensing.revenueCents)} dispensed across ${money.dispensing.fills.toLocaleString()} fills`,
+                    money.dispensing.cashFills > 0
+                      ? `${formatCents(money.dispensing.cashMarginCents)} of it from cash`
+                      : null,
+                    money.dispensing.promisedCents > 0
+                      ? `${formatCents(money.dispensing.promisedCents)} promised and unpaid`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")
+            }
+          />
+
+          {/*
+            Money actually banked from the facilitator, and only that.
+
+            An earlier version put "still owed" here from the gap between the report's gross profit
+            and ours. That gap is real but its cause is not knowable from a fill — one was $146.18
+            of facilitator money, another $5.56 on a generic Losartan that no facilitator would ever
+            pay — so forecasting from it invented a receivable. The gap belongs on the claims screen
+            as a reconciliation, not here as money coming.
+          */}
+          <Figure
+            value={formatCents(money.facilitator.receivedCents)}
+            label="Facilitator money in"
+            tone={money.facilitator.receivedCents > 0 ? "ok" : "muted"}
+            href="/remits/mtf"
+            sub={
+              [
+                money.facilitator.payments > 0
+                  ? `${money.facilitator.payments} payment${money.facilitator.payments === 1 ? "" : "s"} this month`
+                  : "nothing received this month",
+                money.facilitator.lastMonthCents > 0 ? `${formatCents(money.facilitator.lastMonthCents)} last month` : null,
+                money.facilitator.unmatched > 0 ? `${money.facilitator.unmatched} not yet matched to a claim` : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")
+            }
+          />
+
           {/* ── The ratio, which is the lever ───────────────────────── */}
           <Figure
             value={money.ratio?.percent !== null && money.ratio?.percent !== undefined ? `${money.ratio.percent.toFixed(2)}%` : "—"}
@@ -318,34 +375,54 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                     .join(" · ")
             }
           />
-
-          {/*
-            Money actually banked from the facilitator, and only that.
-
-            An earlier version put "still owed" here from the gap between the report's gross profit
-            and ours. That gap is real but its cause is not knowable from a fill — one was $146.18
-            of facilitator money, another $5.56 on a generic Losartan that no facilitator would ever
-            pay — so forecasting from it invented a receivable. The gap belongs on the claims screen
-            as a reconciliation, not here as money coming.
-          */}
-          <Figure
-            value={formatCents(money.facilitator.receivedCents)}
-            label="Facilitator money in"
-            tone={money.facilitator.receivedCents > 0 ? "ok" : "muted"}
-            href="/remits/mtf"
-            sub={
-              [
-                money.facilitator.payments > 0
-                  ? `${money.facilitator.payments} payment${money.facilitator.payments === 1 ? "" : "s"} this month`
-                  : "nothing received this month",
-                money.facilitator.lastMonthCents > 0 ? `${formatCents(money.facilitator.lastMonthCents)} last month` : null,
-                money.facilitator.unmatched > 0 ? `${money.facilitator.unmatched} not yet matched to a claim` : null,
-              ]
-                .filter(Boolean)
-                .join(" · ")
-            }
-          />
         </div>
+        {/*
+          The whole till, which is the only figure here that includes the front of shop.
+
+          Every other number on this scoreboard is dispensing. The System Sales Summary is the one
+          report that carries over-the-counter business too, and it is drawn by the calendar month
+          rather than by the day a claim was transmitted — so it is the figure that reconciles
+          against the bank, and it is labelled with the month it actually covers rather than being
+          quietly presented as this one.
+        */}
+        {money.sales && (
+          <p className="mt-3 rounded-lg border border-line bg-surface p-3 text-xs text-ink-2">
+            <b>
+              {formatCents(money.sales.totalCents ?? 0)} taken in {money.sales.month}
+              {money.sales.isCurrentMonth ? "" : " — the last month closed"}
+            </b>{" "}
+            — the whole till, retail and prescriptions together, from the System Sales Summary. Of that,{" "}
+            {formatCents(money.sales.rxRemitCents ?? 0)} came from the plans,{" "}
+            {formatCents(money.sales.rxPatientCents ?? 0)} from patients at the counter and{" "}
+            {formatCents(money.sales.retailCents ?? 0)} over the counter. This is the only figure on this
+            page that includes the front of shop; everything above it is dispensing.
+          </p>
+        )}
+
+        {/*
+          The report's own bottom line, which nothing on this site computed.
+
+          It is the only authoritative total sales figure the pharmacy has — the transaction report
+          prints a grand total, and that total is the thing to reconcile against the bank. Said as
+          the report's figure for the report's period, never quietly reinterpreted as the month's:
+          those are the same only when the file sent is the monthly one.
+        */}
+        {money.dispensing.reported && (
+          <p className="mt-2 text-xs text-ink-2">
+            <b>{formatCents(money.dispensing.reported.salesCents)} taken and{" "}
+            {formatCents(money.dispensing.reported.grossProfitCents)} made</b>{" "}
+            — the report&rsquo;s own grand total for the last file loaded
+            {money.dispensing.reported.from
+              ? `, covering ${money.dispensing.reported.from}${
+                  money.dispensing.reported.to && money.dispensing.reported.to !== money.dispensing.reported.from
+                    ? ` to ${money.dispensing.reported.to}`
+                    : ""
+                }`
+              : ""}
+            . This is the one figure here nobody worked out — PioneerRx printed it — so it is what to
+            reconcile against the bank.
+          </p>
+        )}
         {money.unreconciled.fills > 0 && (
           <p className="mt-2 text-xs text-ink-3">
             Separately, {formatCents(money.unreconciled.cents)} across {money.unreconciled.fills} fills is revenue the

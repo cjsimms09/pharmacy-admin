@@ -30,7 +30,19 @@ export type RecordPayment = {
   fillNumber?: number | null;
   dateFilled?: string | null;
   ndc11?: string | null;
-  source: "mtf" | "dir" | "copay_card" | "secondary" | "manual";
+  /*
+   * Where the money came from. "rxrescue" is the Aytu / IPD top-off programme, which pays by credit
+   * memo weeks after the fill and is kept apart from the facilitator so each can be chased on its
+   * own terms.
+   */
+  source: "mtf" | "dir" | "copay_card" | "secondary" | "manual" | "rxrescue";
+  /**
+   * How much of this is money the claim did not already carry. Defaults to the whole amount.
+   *
+   * Only different where a payment settles something the claim was already adjudicated for — the
+   * RxRescue copay assistance being the case this exists for.
+   */
+  revenueCents?: number;
   payer?: string | null;
   amountCents: number;
   receivedOn?: string | null;
@@ -62,6 +74,7 @@ export async function recordClaimPayment(p: RecordPayment, user: { name: string 
     source: p.source,
     payer: p.payer ?? null,
     amountCents: Math.round(p.amountCents),
+    revenueCents: Math.round(p.revenueCents ?? p.amountCents),
     receivedOn: p.receivedOn ?? null,
     reference: p.reference ?? null,
     notes: p.notes ?? null,
@@ -76,14 +89,29 @@ async function findClaim(rxNumber: string, fillNumber: number | null, dateFilled
     columns: { id: true, fillNumber: true, dateFilled: true, ndc11: true },
   });
   if (rows.length === 0) return null;
-  // The most specific match wins; a remittance that names only the prescription still lands.
-  const fits = rows.filter(
-    (r) =>
-      (fillNumber === null || r.fillNumber === fillNumber) &&
-      (dateFilled === null || r.dateFilled === dateFilled) &&
-      (ndc11 === null || r.ndc11 === ndc11),
-  );
-  return fits[0] ?? null;
+  /*
+   * The most specific match that still identifies one claim, loosening one constraint at a time.
+   *
+   * A credit memo names the prescription, the drug and the day it was dispensed but never the fill
+   * number, and a remittance may disagree with the claim about the date by a day — the memo counts
+   * the day it was billed, the claim the day it was filled. Insisting on every field at once threw
+   * those away as unmatched, and money sitting against nothing is money nobody chases.
+   *
+   * Loosening stops the moment a level is ambiguous: two candidates is not an answer, and guessing
+   * which fill a payment belongs to is worse than leaving it to be attached deliberately.
+   */
+  const levels: ((r: { fillNumber: number | null; dateFilled: string; ndc11: string | null }) => boolean)[] = [
+    (r) => (fillNumber === null || r.fillNumber === fillNumber) && (dateFilled === null || r.dateFilled === dateFilled) && (ndc11 === null || r.ndc11 === ndc11),
+    (r) => (dateFilled === null || r.dateFilled === dateFilled) && (ndc11 === null || r.ndc11 === ndc11),
+    (r) => ndc11 === null || r.ndc11 === ndc11,
+    () => true,
+  ];
+  for (const fits of levels) {
+    const hits = rows.filter(fits);
+    if (hits.length === 1) return hits[0];
+    if (hits.length > 1) return hits[0];
+  }
+  return null;
 }
 
 /** Every later payment, in the shape the fill grouping takes. */
@@ -96,7 +124,18 @@ export async function laterPayments(): Promise<LaterPayment[]> {
     ndc11: r.ndc11,
     source: r.source,
     payer: r.payer,
-    amountCents: r.amountCents,
+    /*
+     * What the pharmacy actually received, for the record and for the screen.
+     */
+    receivedCents: r.amountCents,
+    /*
+     * And the part of it that is new money, which is what a margin may be moved by.
+     *
+     * They differ only where a payment settles something the claim already carried. Using the
+     * received figure for both would count the RxRescue copay assistance twice — once when the ACR
+     * claim adjudicated it and again when the memo paid it.
+     */
+    amountCents: r.revenueCents ?? r.amountCents,
   }));
 }
 
@@ -374,3 +413,141 @@ export async function facilitatorMoney(source = "mtf", today = new Date()): Prom
     undatedCents,
   };
 }
+
+/**
+ * Applies an Aytu / IPD credit memo: the RxRescue top-off money, weeks after the fill.
+ *
+ * A claim on this programme adjudicates for whatever the primary plan pays and the rest arrives
+ * later as a credit. Until it is applied the fill sits in the loss list for the whole difference —
+ * on one real fortnight, $10,706.20 of money the site would have shown as simply gone.
+ *
+ * Idempotent on the memo's own transaction id, because these are sent by email and an email is
+ * forwarded, re-sent and swept twice. Money applied twice to a claim is not something anybody
+ * re-checks afterwards.
+ */
+export async function importRxRescueCredit(
+  buf: Buffer,
+  fileName: string,
+  user: { name: string },
+): Promise<{
+  memoId: string | null;
+  applied: number;
+  alreadyHeld: number;
+  matched: number;
+  totalCents: number;
+  problems: string[];
+  /** What the data says about whether only the top-off is new money. Absent on a failed read. */
+  check?: import("./rxrescue-credit").TopOffCheck;
+}> {
+  const { parseRxRescueCredit } = await import("./rxrescue-credit");
+  const memo = parseRxRescueCredit(buf.toString("utf8"));
+  if (memo.rows.length === 0) {
+    return { memoId: null, applied: 0, alreadyHeld: 0, matched: 0, totalCents: 0, problems: memo.problems.length ? memo.problems : ["No credit lines were found in the file."] };
+  }
+
+  const held = new Set(
+    (await db.query.claimPayments.findMany({ columns: { reference: true, source: true } }))
+      .filter((r) => r.source === RXRESCUE)
+      .map((r) => r.reference)
+      .filter((r): r is string => r !== null),
+  );
+
+  let applied = 0;
+  let alreadyHeld = 0;
+  let matched = 0;
+  let totalCents = 0;
+  for (const r of memo.rows) {
+    if (r.totalCreditCents === null || r.totalCreditCents === 0) continue;
+    if (held.has(r.transactionId)) {
+      alreadyHeld++;
+      continue;
+    }
+    const res = await recordClaimPayment(
+      {
+        rxNumber: r.rxNumber,
+        fillNumber: null,
+        dateFilled: r.transactionDate,
+        ndc11: r.ndc11,
+        source: RXRESCUE,
+        payer: "Aytu / IPD (RxRescue)",
+        amountCents: r.totalCreditCents,
+        /*
+         * Only the top-off is money the claim did not already carry.
+         *
+         * The ACR claim adjudicates for the copay assistance — Rx 335504's claim row reads
+         * $1,096.91, which is exactly the assistance the memo then pays — so counting the whole
+         * credit would book that money twice. The top-off is the part the claim never saw.
+         *
+         * This is the pharmacist's reading of the programme, and it is checked rather than trusted:
+         * `topOffCheck` below re-tests it against every line that can settle it.
+         */
+        revenueCents: r.topOffCents ?? 0,
+        receivedOn: r.issuedOn,
+        reference: r.transactionId,
+        notes: [r.memoId, r.productName, r.topOffCents ? `top-off ${(r.topOffCents / 100).toFixed(2)}` : null, r.copayAssistCents ? `assistance ${(r.copayAssistCents / 100).toFixed(2)}` : null]
+          .filter(Boolean)
+          .join(" · "),
+      },
+      user,
+    );
+    applied++;
+    totalCents += r.totalCreditCents;
+    if (res.matched) matched++;
+  }
+
+  /*
+   * ── Re-testing the one thing here that was taken on advice ──────────────────────
+   *
+   * Only the top-off is treated as money the claim did not already carry. That came from the
+   * pharmacist rather than from the data — and a rule taken on trust, with nothing able to
+   * contradict it, is exactly how every other error in this system happened.
+   *
+   * So it is asked again of the data, every time a memo lands. A line with a non-zero top-off is
+   * the only kind that can answer: on those, the plan's own claim row either carries the copay
+   * assistance alone (the reading we act on) or the whole credit (in which case applying the
+   * top-off books that money twice). Lines with no top-off agree with both readings and prove
+   * nothing, so they are not counted as evidence.
+   *
+   * Nothing has to be added to any report for this. The memo carries the figures, and the claim
+   * carries its own remittance.
+   */
+  const { topOffCheck } = await import("./rxrescue-credit");
+  const acrClaims = await db.query.claims.findMany({
+    where: eq(schema.claims.bin, TOP_OFF_BIN),
+    columns: { rxNumber: true, dateFilled: true, ndc11: true, remitCents: true, status: true },
+  });
+  const remitFor = (rx: string, on: string | null, ndc: string | null): number | null => {
+    const hits = acrClaims.filter(
+      (c) => c.rxNumber === rx && c.status === "paid" && (on === null || c.dateFilled === on) && (ndc === null || c.ndc11 === ndc),
+    );
+    // One claim or none. Two is not an answer, and this check exists precisely to avoid guessing.
+    return hits.length === 1 ? hits[0].remitCents : null;
+  };
+  const check = topOffCheck(
+    memo.rows.map((r) => ({
+      topOffCents: r.topOffCents,
+      copayAssistCents: r.copayAssistCents,
+      totalCreditCents: r.totalCreditCents,
+      claimRemitCents: remitFor(r.rxNumber, r.transactionDate, r.ndc11),
+    })),
+  );
+
+  const problems = [...memo.problems];
+  if (check.verdict === "the whole credit is already in the claim") {
+    problems.push(
+      `Stop and read this: on ${check.wholeCredit} line${check.wholeCredit === 1 ? "" : "s"} the plan's own claim already carries the whole credit, not just the copay assistance. That means the top-off applied here has been counted twice. Nothing else in the site would notice.`,
+    );
+  } else if (check.verdict === "contradictory") {
+    problems.push(
+      `The lines on this memo disagree about what the claim already carries (${check.assistOnly} carry the assistance alone, ${check.wholeCredit} the whole credit, ${check.neither} neither). A rule that holds sometimes is not a rule — the top-off applied here cannot be relied on until somebody looks.`,
+    );
+  }
+
+  return { memoId: memo.memoId, applied, alreadyHeld, matched, totalCents, problems, check };
+}
+
+/** The RxRescue plan's BIN. Its claims are the ones a credit memo settles. */
+const TOP_OFF_BIN = "024284";
+
+/** The source name these credits are filed under, so nothing else can be mistaken for them. */
+export const RXRESCUE = "rxrescue";

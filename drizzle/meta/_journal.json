@@ -393,6 +393,48 @@
       "when": 1788653729656,
       "tag": "0055_nervous_ares",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "6",
+      "when": 1788660873202,
+      "tag": "0056_windy_sentinels",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "6",
+      "when": 1788661205332,
+      "tag": "0057_greedy_zarda",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "6",
+      "when": 1788662330139,
+      "tag": "0058_futuristic_outlaw_kid",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "6",
+      "when": 1788662712710,
+      "tag": "0059_rich_killmonger",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "6",
+      "when": 1788664198811,
+      "tag": "0060_keen_blonde_phantom",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "6",
+      "when": 1788665999010,
+      "tag": "0061_lyrical_photon",
+      "breakpoints": true
     }
   ]
 }

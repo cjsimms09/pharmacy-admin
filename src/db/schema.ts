@@ -1564,6 +1564,147 @@ export const csDiscrepancies = sqliteTable(
 // paid nothing, null is a claim we cannot yet judge, and collapsing them would put unpriceable
 // claims into a schedule as if they were underpayments.
 
+/**
+ * ── Running the pharmacy as a business ──────────────────────────────────────────
+ *
+ * Everything up to here answers "what did a prescription make". None of it answers "did the month".
+ * A pharmacy can dispense at a healthy margin every day and still lose money, because the margin
+ * pays for wages, rent, software, postage and a card processor before any of it is profit.
+ *
+ * Kept deliberately apart from supplier invoices. A drug purchase has NDCs, quantities, rebate flags
+ * and a returns clock; a bill from Stamps.com has a date and an amount. Forcing one shape onto both
+ * would wreck the part that already works.
+ */
+
+/**
+ * What a cost is, for the purpose of a profit and loss account.
+ *
+ * The kind matters more than the name: it decides where a figure lands in the account, and getting
+ * that wrong moves money between gross profit and net profit without changing either total, which
+ * is the kind of error that looks like a rounding difference and is not.
+ */
+export const EXPENSE_KINDS = ["operating", "cost_of_goods", "revenue_offset"] as const;
+
+export const expenseCategories = sqliteTable(
+  "expense_categories",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    kind: text("kind", { enum: EXPENSE_KINDS }).notNull().default("operating"),
+    /** Where it sits on the account. Lower first, so the big lines lead. */
+    sortOrder: integer("sort_order").notNull().default(100),
+    /** Seeded categories cannot be deleted, only renamed — a category with history behind it. */
+    builtIn: integer("built_in", { mode: "boolean" }).notNull().default(false),
+    /** What belongs in it, so two people file the same bill the same way. */
+    notes: text("notes"),
+    archivedAt: text("archived_at"),
+    createdAt: text("created_at").notNull().default(now()),
+  },
+  (t) => [index("expense_categories_kind_idx").on(t.kind)],
+);
+
+/**
+ * Somebody the pharmacy pays, and what to do with their email next time.
+ *
+ * The rule lives with the vendor rather than in a rules screen of its own: the thing a person wants
+ * to say is "bills from Stamps.com are postage", and that is a fact about Stamps.com.
+ */
+export const vendors = sqliteTable(
+  "vendors",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    /** Addresses their invoices arrive from, comma separated. The rule that files them on arrival. */
+    senderEmails: text("sender_emails").notNull().default(""),
+    /** Where their bills go unless somebody says otherwise. */
+    categoryId: text("category_id").references(() => expenseCategories.id, { onDelete: "set null" }),
+    /**
+     * Whether a bill is expected every month, so a month it does not arrive is visible.
+     *
+     * A missing invoice does not announce itself: the month simply looks cheaper than it was, and
+     * the profit figure is wrong in the flattering direction.
+     */
+    cadence: text("cadence", { enum: ["monthly", "quarterly", "annual", "irregular"] }).notNull().default("irregular"),
+    /** Roughly what to expect, so a bill ten times its usual size is questioned rather than filed. */
+    typicalCents: integer("typical_cents"),
+    accountNumber: text("account_number"),
+    website: text("website"),
+    notes: text("notes"),
+    archivedAt: text("archived_at"),
+    createdAt: text("created_at").notNull().default(now()),
+  },
+  (t) => [index("vendors_name_idx").on(t.name)],
+);
+
+/**
+ * One bill.
+ *
+ * Two dates, because there are two honest answers to "when was this a cost". The invoice date is
+ * when the pharmacy incurred it and is what an accrual account uses; the paid date is when the money
+ * left the bank. A month's profit differs between the two, and both are true — so both are kept and
+ * neither is derived from the other.
+ */
+export const expenses = sqliteTable(
+  "expenses",
+  {
+    id: text("id").primaryKey(),
+    vendorId: text("vendor_id").references(() => vendors.id, { onDelete: "set null" }),
+    categoryId: text("category_id").references(() => expenseCategories.id, { onDelete: "set null" }),
+    /** As the vendor wrote it, so a duplicate bill is recognisable. */
+    invoiceNumber: text("invoice_number"),
+    /** When it was incurred: the accrual date. */
+    invoiceDate: text("invoice_date").notNull(),
+    /** When the money actually left: the cash date. Null while it is still owed. */
+    paidOn: text("paid_on"),
+    amountCents: integer("amount_cents").notNull(),
+    taxCents: integer("tax_cents"),
+    description: text("description"),
+    notes: text("notes"),
+    /** The bill itself, so a figure on the account can always be opened. */
+    documentId: text("document_id").references(() => documents.id, { onDelete: "set null" }),
+    inboxItemId: text("inbox_item_id"),
+    source: text("source", { enum: ["email", "manual", "recurring"] }).notNull().default("manual"),
+    /**
+     * A bill read from an email is a draft until somebody agrees with it.
+     *
+     * Reading an amount off a PDF is a guess with a number attached, and a guess that walks straight
+     * into the month's profit is worse than no figure at all.
+     */
+    status: text("status", { enum: ["draft", "confirmed", "void"] }).notNull().default("draft"),
+    createdBy: text("created_by").notNull(),
+    createdAt: text("created_at").notNull().default(now()),
+  },
+  (t) => [
+    index("expenses_date_idx").on(t.invoiceDate),
+    index("expenses_paid_idx").on(t.paidOn),
+    index("expenses_category_idx").on(t.categoryId),
+  ],
+);
+
+/**
+ * Money that actually reached the bank in a month, which is not what was earned in it.
+ *
+ * A third party pays two to four weeks after the claim, so cash always lags accrual — and the gap
+ * between them is the pharmacy's receivable, which is real money and worth watching on its own.
+ * Entered by hand from the remittance statements, month by month.
+ */
+export const cashReceipts = sqliteTable(
+  "cash_receipts",
+  {
+    id: text("id").primaryKey(),
+    /** YYYY-MM: the month the money arrived, never the month it was earned. */
+    month: text("month").notNull(),
+    kind: text("kind", { enum: ["third_party", "patient", "retail", "rebate", "facilitator", "other"] }).notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    payer: text("payer"),
+    notes: text("notes"),
+    documentId: text("document_id").references(() => documents.id, { onDelete: "set null" }),
+    createdBy: text("created_by").notNull(),
+    createdAt: text("created_at").notNull().default(now()),
+  },
+  (t) => [index("cash_receipts_month_idx").on(t.month)],
+);
+
 export const claimImports = sqliteTable("claim_imports", {
   id: text("id").primaryKey(),
   fileName: text("file_name").notNull(),
@@ -1577,8 +1718,61 @@ export const claimImports = sqliteTable("claim_imports", {
   unmappedColumns: text("unmapped_columns").notNull().default("[]"),
   periodFrom: text("period_from"),
   periodTo: text("period_to"),
+  /*
+   * The report's own bottom line for this file — the only figures here nobody computed.
+   *
+   * PioneerRx prints a grand total: what the pharmacy took, what the drugs cost, what it made.
+   * Kept because it is the one check on our arithmetic that did not come from our arithmetic, and
+   * because it is the only place total sales for a period exist as a single authoritative number.
+   */
+  reportSalesCents: integer("report_sales_cents"),
+  reportAcquisitionCents: integer("report_acquisition_cents"),
+  reportGrossProfitCents: integer("report_gross_profit_cents"),
+  /*
+   * The same figure added up from the rows this reader actually got out of the file.
+   *
+   * Set against the report's own total it answers a question nothing else can: did we read
+   * everything? A row skipped for a status this reader does not know does not announce itself —
+   * the file simply loads, looks fine, and is quietly short. This is what makes that visible.
+   */
+  readGrossProfitCents: integer("read_gross_profit_cents"),
   createdBy: text("created_by").notNull(),
   createdAt: text("created_at").notNull().default(now()),
+});
+
+/**
+ * A month's takings, from the System Sales Summary — the only report that carries the whole till.
+ *
+ * One row per month, replaced when a later copy of the same month arrives, because these are
+ * restatements rather than additions: a month re-run after a correction is the same month, and
+ * keeping both would double the pharmacy's revenue.
+ *
+ * Kept apart from claims on purpose. Claims are dispensings, drawn by the day a claim was
+ * transmitted; this is money, drawn by the calendar month, and it includes the front of shop that
+ * no claim will ever describe. Reconciling the two is worth doing; merging them is not.
+ */
+export const salesMonths = sqliteTable("sales_months", {
+  /** YYYY-MM. The primary key, so a re-sent month replaces rather than repeats. */
+  month: text("month").primaryKey(),
+  periodFrom: text("period_from").notNull(),
+  periodTo: text("period_to").notNull(),
+  /** Over the counter — the part of the business no prescription report can see. */
+  retailCents: integer("retail_cents"),
+  /** What patients paid at the till for prescriptions. */
+  rxPatientCents: integer("rx_patient_cents"),
+  /** What the plans remitted. */
+  rxRemitCents: integer("rx_remit_cents"),
+  rxCents: integer("rx_cents"),
+  /** Everything: the figure to reconcile against the bank. */
+  totalCents: integer("total_cents"),
+  /** Every line as printed, so a figure on screen can always be traced to the page it came from. */
+  rowsJson: text("rows_json").notNull().default("[]"),
+  fileName: text("file_name"),
+  printedOn: text("printed_on"),
+  documentId: text("document_id"),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull().default(now()),
+  updatedAt: text("updated_at").notNull().default(now()),
 });
 
 export const claims = sqliteTable(
@@ -1635,6 +1829,27 @@ export const claims = sqliteTable(
     awpCents: integer("awp_cents"),
     acquisitionCents: integer("acquisition_cents"),
     grossProfitCents: integer("gross_profit_cents"),
+    /*
+     * The facilitator payment the plan promised at adjudication, where the report carries one.
+     *
+     * PioneerRx knows a Part D fill has a manufacturer share coming because the plan's response
+     * says so; the money follows weeks later from the Medicare Transaction Facilitator. Held here,
+     * a fill that lost money on the day can say what it is still owed and by whom — and a promise
+     * that never turns into a payment becomes chaseable instead of invisible.
+     *
+     * Null means the report said nothing, which is not the same as a promise of zero.
+     */
+    expectedFacilitatorCents: integer("expected_facilitator_cents"),
+    /*
+     * The pharmacy's own cash programme rather than a third party.
+     *
+     * These fills were dropped on import for months, which quietly deleted the margin on the only
+     * business the pharmacy prices itself. They are kept now and counted in what the day made —
+     * and excluded from every question that presumes an insurer: there is no floor for the state
+     * to enforce on a price the pharmacy set, no contract to appeal under, and a low number is
+     * simply what it charged.
+     */
+    cashPlan: integer("cash_plan", { mode: "boolean" }).notNull().default(false),
     ingredientPaidCents: integer("ingredient_paid_cents"),
     dispensingFeePaidCents: integer("dispensing_fee_paid_cents"),
     daw: text("daw"),
@@ -1788,6 +2003,18 @@ export const claimPayments = sqliteTable(
     /** Who paid it, as the remittance names them. */
     payer: text("payer"),
     amountCents: integer("amount_cents").notNull(),
+    /*
+     * How much of this payment is money the claim did not already carry.
+     *
+     * Not every payment is new revenue. The RxRescue credit memo settles the copay assistance that
+     * the ACR claim was already adjudicated for — the same money, arriving — while its top-off is
+     * genuinely additional. Adding the whole credit would count the assistance twice: on one real
+     * fill that is $1,096.91 counted as though the pharmacy had been paid it twice over.
+     *
+     * A facilitator remittance is the opposite: the claim's Amount never contained it, so all of it
+     * is new. Defaults to the whole amount, which is right for every source but this one.
+     */
+    revenueCents: integer("revenue_cents"),
     /** When the money was received, not when the claim was filled. */
     receivedOn: text("received_on"),
     /** The remittance or file this came from, so it can be traced back. */

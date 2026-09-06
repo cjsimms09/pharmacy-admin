@@ -64,7 +64,7 @@ export { STANDING_MEANS, SB20_MIN_DISPENSING_FEE_CENTS, SB20_EFFECTIVE_FROM };
 export type AgainstNadac = {
   rows: NadacStanding[];
   /** Fills that could not be compared, and why — never silently dropped. */
-  notCompared: { reason: "no NADAC held for that date" | "no quantity on the claim" | "no NDC on the claim"; fills: number }[];
+  notCompared: { reason: "no NADAC held for that date" | "no quantity on the claim" | "no NDC on the claim" | "the pharmacy's own cash price, which no benchmark applies to"; fills: number }[];
   owedCents: number;
   argueCents: number;
   /** How many of the compared fills are paid at or above the benchmark. */
@@ -76,27 +76,66 @@ export async function againstNadac(fills: Fill[]): Promise<AgainstNadac> {
   const { getSettings } = await import("./settings");
   const { planKey, CLASS_INFO } = await import("./plans");
 
-  const [nadacRows, groups, s] = await Promise.all([
-    db.query.nadacPrices.findMany({ columns: { ndc11: true, unitMicros: true, effectiveOn: true, pricingUnit: true, fileAsOf: true } }),
-    db.query.planGroups.findMany(),
-    getSettings(),
-  ]);
-  const records: NadacRecord[] = nadacRows.map((r) => ({
-    ndc11: r.ndc11,
-    unitMicros: r.unitMicros,
-    effectiveOn: r.effectiveOn,
-    pricingUnit: r.pricingUnit as NadacRecord["pricingUnit"],
-    fileAsOf: r.fileAsOf,
-  }));
+  /*
+   * Only the prices for the drugs actually on these fills.
+   *
+   * This used to read the whole NADAC table — every NDC the federal file carries, at every date it
+   * has ever carried one — to price a couple of hundred dispensings. Hundreds of thousands of rows
+   * across the wire and into memory, on every single load of the claims screen, to use a few hundred
+   * of them. The screen took seconds to open and got slower every week as more NADAC files landed.
+   *
+   * The fills say which NDCs matter before anything is fetched, so ask for those.
+   */
+  const { inArray } = await import("drizzle-orm");
+  const { schema } = await import("@/db");
+  const wanted = [...new Set(fills.map((f) => f.ndc11).filter((n): n is string => n !== null))];
+
+  const nadacRows: { ndc11: string; unitMicros: number; effectiveOn: string; pricingUnit: NadacRecord["pricingUnit"]; fileAsOf: string }[] = [];
+  // Chunked, because a query with thousands of bound parameters is its own kind of slow.
+  for (let i = 0; i < wanted.length; i += 400) {
+    const got = await db.query.nadacPrices.findMany({
+      where: inArray(schema.nadacPrices.ndc11, wanted.slice(i, i + 400)),
+      columns: { ndc11: true, unitMicros: true, effectiveOn: true, pricingUnit: true, fileAsOf: true },
+    });
+    for (const r of got) {
+      nadacRows.push({
+        ndc11: r.ndc11,
+        unitMicros: r.unitMicros,
+        effectiveOn: r.effectiveOn,
+        pricingUnit: r.pricingUnit as NadacRecord["pricingUnit"],
+        fileAsOf: r.fileAsOf,
+      });
+    }
+  }
+
+  const [groups, s] = await Promise.all([db.query.planGroups.findMany(), getSettings()]);
+  const records: NadacRecord[] = nadacRows;
   const byKey = new Map(groups.map((g) => [planKey(g.bin, g.groupNumber), g.classification]));
 
   const feeRaw = Number((s.ks_medicaid_dispensing_fee_cents ?? "").trim());
   const ksFee = Number.isFinite(feeRaw) && feeRaw > 0 ? feeRaw : null;
 
   const rows: NadacStanding[] = [];
-  const missing = { "no NADAC held for that date": 0, "no quantity on the claim": 0, "no NDC on the claim": 0 };
+  const missing = {
+    "no NADAC held for that date": 0,
+    "no quantity on the claim": 0,
+    "no NDC on the claim": 0,
+    "the pharmacy's own cash price, which no benchmark applies to": 0,
+  };
 
   for (const f of fills) {
+    /*
+     * The pharmacy's own cash programme is not measured against the benchmark.
+     *
+     * NADAC plus the dispensing fee is a test of whether a *payer* paid enough. On a fill the
+     * pharmacy priced itself there is no payer, no floor for the state to enforce and nobody to
+     * argue with — the number is what it chose to charge. Measuring it produces a list of
+     * "shortfalls" against itself, which is noise on the one screen that has to stay actionable.
+     */
+    if (f.cashPlan) {
+      missing["the pharmacy's own cash price, which no benchmark applies to"]++;
+      continue;
+    }
     if (!f.ndc11) {
       missing["no NDC on the claim"]++;
       continue;

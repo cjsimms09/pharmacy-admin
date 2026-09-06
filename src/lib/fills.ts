@@ -63,9 +63,17 @@ export type ClaimRow = {
   acquisitionCents: number | null;
   /** The gross profit the report itself printed for this row. The check on our own arithmetic. */
   grossProfitCents?: number | null;
+  /**
+   * The facilitator payment the plan promised at adjudication, where the report carries one.
+   *
+   * Null means the report said nothing. A promise of zero is a different fact and is kept as zero.
+   */
+  expectedFacilitatorCents?: number | null;
   status: string;
   /** True where this is a reversal that matched no claim held. */
   unmatchedReversal?: boolean;
+  /** True where the pharmacy set this price itself: its cash programme, not a third party. */
+  cashPlan?: boolean;
 };
 
 export type FillPayer = {
@@ -89,6 +97,14 @@ export type Fill = {
   payers: FillPayer[];
   /** True where more than one plan paid: the case this exists for. */
   coordinated: boolean;
+  /**
+   * The pharmacy's own cash price rather than an insurer's.
+   *
+   * Its margin counts like any other — it is a bottle sold — but nothing here is owed by anybody.
+   * There is no floor for the state to enforce on a price the pharmacy set, no contract to appeal
+   * under, and a number below NADAC is what it charged rather than a shortfall to claim.
+   */
+  cashPlan: boolean;
   quantityThousandths: number | null;
   /** What every payer remitted, added. */
   remitCents: number;
@@ -100,6 +116,27 @@ export type Fill = {
    */
   laterPaymentsCents: number;
   laterPayments: { source: string; payer: string | null; amountCents: number }[];
+  /**
+   * Money promised at adjudication and not yet in the bank, on this fill.
+   *
+   * The report says what the facilitator will pay; the payment arrives weeks later. Held together,
+   * a fill can say it is owed $146.18 rather than reading as a $123.66 loss — and when the payment
+   * lands and is matched, what is left outstanding falls to nothing on its own.
+   *
+   * Null where no row on the fill carried a promise, which is not the same as being owed nothing.
+   */
+  expectedFacilitatorCents: number | null;
+  /** The promise less what has actually arrived, floored at nothing. What is still to come. */
+  facilitatorOutstandingCents: number | null;
+  /**
+   * True where this fill is on a programme that pays a top-off later and none has arrived.
+   *
+   * The RxRescue plan (BIN 024284) adjudicates for whatever the primary will pay and sends the rest
+   * weeks afterwards on a credit memo. Unlike a facilitator payment the claim does not say what the
+   * amount will be — so the amount cannot be shown, but the fact that one is coming can, and that
+   * alone is the difference between a rate to argue about and a bill not yet paid.
+   */
+  topOffExpected: boolean;
   /** Remit, plus what the patient paid, plus anything that arrived afterwards. */
   revenueCents: number;
   /**
@@ -142,11 +179,22 @@ export type Fill = {
    */
   unreconciledCents: number | null;
   /**
-   * False only where this site holds *more* than the report did and nothing arrived later to
-   * explain it — which cannot be a timing difference, so a column is not where this reader thinks.
+   * True where this fill satisfies the identity above, to the cent.
+   *
+   * The one check on this module that does not come from this module. Null only where the report
+   * carried no gross profit for a row, or no acquisition cost, so there is nothing to check against.
    */
   agreesWithReport: boolean | null;
 };
+
+/**
+ * Plans that pay part of the claim later, by credit memo rather than at adjudication.
+ *
+ * BIN 024284 is the Aytu / IPD RxRescue programme. A fill on it is priced at whatever the primary
+ * plan pays and topped up afterwards, so on the day it is dispensed it can look like a heavy loss
+ * and be nothing of the kind.
+ */
+export const TOP_OFF_BINS = new Set(["024284"]);
 
 /** The same dispensing, whichever plan was billed. */
 export function fillKey(c: { rxNumber: string; fillNumber: number | null; dateFilled: string; ndc11: string | null }): string {
@@ -160,7 +208,15 @@ export type LaterPayment = {
   ndc11: string | null;
   source: string;
   payer: string | null;
+  /**
+   * The part of the payment that is money the claim did not already carry — what a margin moves by.
+   *
+   * A facilitator remittance is new money in full. A credit memo that settles what the claim was
+   * already adjudicated for is not: counting it would book the same money twice.
+   */
   amountCents: number;
+  /** What actually arrived, for the record. Defaults to the same figure. */
+  receivedCents?: number;
 };
 
 export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): Fill[] {
@@ -214,20 +270,59 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
      * reporting as an eighty-two dollar loss. It is also how PioneerRx computes its own gross
      * profit per row, which is why our figure and the report's now agree instead of arguing.
      */
-    const priceEstablishedCents = Math.max(...payers.map((p) => p.remitCents + p.copayCents), 0);
-    const patientPaidCents = Math.max(0, priceEstablishedCents - remitCents);
     /*
-     * Flagged where the arithmetic cannot close.
+     * ── What the pharmacy took, and what the bottle cost ───────────────────────
      *
-     * If the payers between them remitted more than any row said the drug cost, these rows are not
-     * one chain — two primaries, or a rebill read as a coordination — and the patient's share above
-     * is a floor rather than a fact.
+     * Both are sums over the live rows, and that is not a simplification — it is what the report
+     * actually does, checked against every dispensing in a real week:
+     *
+     *   1,199 fills, 27 of them coordinated
+     *   fills where more than one live row carries an acquisition cost:  0
+     *   fills where more than one live row carries a patient total:      0
+     *   fills where this rule disagrees with the report's gross profit:  0
+     *
+     * That last line is the point. PioneerRx puts the cost of the bottle on the row that dispensed
+     * it and zero on every coordination row beside it, and it puts the patient's residual on the one
+     * row where it actually stays with the patient. Nothing is repeated, so nothing needs to be
+     * de-duplicated.
+     *
+     * This module was built on the opposite belief — that "both rows carry the same acquisition
+     * cost, because it is the same bottle" — and every complication in it followed from that: taking
+     * the largest cost, taking the largest quantity, and working the patient's share out backwards
+     * from a price no row states. That last one was wrong on Rx 336765, where OptumRx paid $461.89
+     * on the dispensing row and a second plan paid $100 and left the patient $733.52. Subtracting
+     * every remittance from $833.52 gave the patient $271.63 and the fill a $469.21 loss; the report
+     * said $7.32, and the report was right.
+     *
+     * The belief was never checked against the file. It is now, and the arithmetic is the plain one.
      */
-    const patientShareUncertain = payers.length > 1 && remitCents > priceEstablishedCents;
+    const patientPaidCents = payers.reduce((n, p) => n + p.copayCents, 0);
 
-    // The same bottle, priced once, whatever it was transmitted against.
-    const costs = rows.map((r) => r.acquisitionCents).filter((x): x is number => x !== null && x !== undefined);
-    const acquisitionCents = costs.length ? Math.max(...costs) : null;
+    /*
+     * Flagged where the one assumption above does not hold.
+     *
+     * If two live rows both leave the patient owing something, the residual may be the same money
+     * written twice — and adding it would invent revenue. It happens on none of the real fills, and
+     * it is said rather than assumed away, because the day it does happen nothing else would notice.
+     */
+    const patientShareUncertain = payers.filter((p) => p.copayCents !== 0).length > 1;
+
+    /*
+     * The bottle, from the row that dispensed it.
+     *
+     * Added rather than maxed, because the coordination rows carry zero — but guarded: two live rows
+     * carrying the *same* non-zero cost is the signature of the same bottle written twice, and that
+     * is counted once. On the real file this guard never fires; it is here so that if the report
+     * ever starts repeating the cost, the answer degrades to right rather than to double.
+     */
+    const costs = rows.map((r) => r.acquisitionCents).filter((x): x is number => x !== null && x !== undefined && x !== 0);
+    const duplicated = costs.length > 1 && costs.every((c) => c === costs[0]);
+    const acquisitionCents = rows.some((r) => r.acquisitionCents !== null && r.acquisitionCents !== undefined)
+      ? duplicated
+        ? costs[0]
+        : costs.reduce((n, c) => n + c, 0)
+      : null;
+    // Quantity likewise sits on the dispensing row; the coordination rows print zero.
     const quantities = rows.map((r) => r.quantityThousandths).filter((x): x is number => x !== null && x !== undefined);
     const quantityThousandths = quantities.length ? Math.max(...quantities) : null;
 
@@ -244,6 +339,19 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
     const revenueCents = remitCents + patientPaidCents + laterPaymentsCents;
 
     /*
+     * What was promised, taken once.
+     *
+     * A coordinated fill can carry the same promise on both of its rows — it is one manufacturer
+     * share on one bottle, not two — so the largest is taken, exactly as the acquisition cost is.
+     * Adding them would invent money in the direction that flatters the pharmacy, which is the
+     * worst direction for a figure somebody is going to chase a payer over.
+     */
+    const promised = rows.map((r) => r.expectedFacilitatorCents).filter((x): x is number => x !== null && x !== undefined);
+    const expectedFacilitatorCents = promised.length ? Math.max(...promised) : null;
+    const facilitatorOutstandingCents =
+      expectedFacilitatorCents === null ? null : Math.max(0, expectedFacilitatorCents - laterPaymentsCents);
+
+    /*
      * The report's own answer, for comparison — but only where it is comparable.
      *
      * A payment that arrived weeks later cannot be in a figure printed on the day, so a fill
@@ -257,10 +365,27 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
      * Where the report and this site differ, and by how much. Positive means the report counted
      * money the pharmacy has not got.
      */
+    /*
+     * ── The identity this whole module is now held to ──────────────────────────────
+     *
+     *     what we make on a fill  −  money that arrived after the day  =  what the report made of it
+     *
+     * PioneerRx prints, for every row, GrossProfit = Amount + Total − Acq. Inv. Cost. Add that up
+     * over the live rows of one dispensing and you have the report's answer for that bottle. Our
+     * answer is revenue less the cost taken once. The two must agree exactly, because they are the
+     * same arithmetic over the same numbers — the only legitimate difference is money the report
+     * could not have known about, which is what arrives later from a facilitator or a credit memo.
+     *
+     * Every error this file has had would have been caught the moment this was stated: the smallest
+     * copay, the patient's residual read from the wrong column, a reversal left unpaired so one
+     * bottle counted twice, a gap called a facilitator payment on a fill no facilitator would ever
+     * pay. Each was a rule inferred from one example, and each survived because nothing independent
+     * could contradict it. This can, on every fill, every day.
+     */
     const gapCents =
       reportedMarginCents === null || acquisitionCents === null
         ? null
-        : reportedMarginCents - (revenueCents - acquisitionCents);
+        : reportedMarginCents - (revenueCents - acquisitionCents - laterPaymentsCents);
 
     const first = rows[0];
     out.push({
@@ -272,11 +397,16 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
       itemName: rows.find((r) => r.itemName)?.itemName ?? null,
       payers,
       coordinated: payers.length > 1,
+      cashPlan: rows.some((r) => r.cashPlan === true),
       quantityThousandths,
       remitCents,
       patientPaidCents,
       laterPaymentsCents,
-      laterPayments: mine.map((p) => ({ source: p.source, payer: p.payer, amountCents: p.amountCents })),
+        laterPayments: mine.map((p) => ({ source: p.source, payer: p.payer, amountCents: p.receivedCents ?? p.amountCents })),
+      expectedFacilitatorCents,
+      facilitatorOutstandingCents,
+      topOffExpected:
+        payers.some((p) => p.bin !== null && TOP_OFF_BINS.has(p.bin)) && !mine.some((p) => p.source === "rxrescue"),
       revenueCents,
       patientShareUncertain,
       acquisitionCents,
@@ -290,8 +420,8 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
        * mis-read column. Neither deserves the red "the arithmetic is broken" banner that used to
        * cover both.
        */
-      unreconciledCents: gapCents !== null && gapCents > 2 ? gapCents : null,
-      agreesWithReport: gapCents === null ? null : gapCents >= -2 || laterPaymentsCents !== 0,
+      unreconciledCents: gapCents !== null && Math.abs(gapCents) > 2 ? gapCents : null,
+      agreesWithReport: gapCents === null ? null : Math.abs(gapCents) <= 2,
     });
   }
   return out.sort((a, b) => b.dateFilled.localeCompare(a.dateFilled) || a.rxNumber.localeCompare(b.rxNumber));

@@ -5,6 +5,8 @@ import { mapColumns } from "./claims";
 import { mapSupplierColumns } from "./suppliers";
 import { looksLikePioneerCatalog } from "./pioneer-catalog";
 import { looksLikeRxTransactions } from "./rx-transactions";
+import { looksLikeSystemSales } from "./system-sales";
+import { looksLikeRxRescueCredit } from "./rxrescue-credit";
 import { pdfText } from "./pdf-text";
 import { looksLikeRebateReport } from "./rebate-report";
 import { ALLOWED_MIME } from "./files";
@@ -24,7 +26,7 @@ import { ALLOWED_MIME } from "./files";
  * behaviour we already had and is never wrong, only unhelpful.
  */
 
-export type RouteKind = "claims" | "rx_transactions" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "return_policy" | "nadac" | "unrecognised";
+export type RouteKind = "claims" | "rx_transactions" | "accrual_sales" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "return_policy" | "nadac" | "unrecognised";
 
 export type Classification = {
   kind: RouteKind;
@@ -134,6 +136,36 @@ export function classify(fileName: string, buf: Buffer): Classification {
       kind: "rx_transactions",
       why: "Begins with PioneerRx's \"Rx Transaction Details By Submission Type\" title; one row per claim transaction.",
       headers: ["Rx Number", "Status", "Amount", "Group", "Ntw Reim. Id", "Copay", "Dispensing Fee", "Completed Date", "Date Filled", "BIN", "QTY", "Acq. Inv. Cost", "PCN", "NDC", "GrossProfit"],
+    };
+  }
+  /*
+   * PioneerRx's "Accrual System Sales", which the pharmacy sends monthly.
+   *
+   * Recognised before it can be read. Nothing about its columns is guessed at — guessing a layout
+   * is precisely the failure the transaction reader was rebuilt to prevent, and a sales figure
+   * invented from the wrong column would be worse than no figure at all. So it is identified,
+   * filed against the month it covers and named on the Inbox as understood but not yet read, which
+   * is what stops a report the pharmacy went to the trouble of sending from vanishing into the
+   * documents pile while everybody assumes it is being counted.
+   */
+  /*
+   * The Aytu / IPD credit memo, checked before anything that reads a header row generically.
+   *
+   * It is a CSV with a proper header, so the generic reader would happily map some of it and file
+   * it as a claims export — which would put top-off credits into the claims table as dispensings.
+   */
+  if (looksLikeRxRescueCredit(buf.subarray(0, 8192).toString("utf8"), fileName)) {
+    return {
+      kind: "rxrescue_credit",
+      why: "An Aytu / IPD credit memo: RxRescue top-off money for claims already dispensed. Applied to the fills it names.",
+      headers: ["Transaction ID", "Rx Number", "NDC", "Transaction Date", "RxRescue Top Off Amount/Credit", "Total Credit Payment to Pharmacy"],
+    };
+  }
+  if (looksLikeSystemSales(buf.subarray(0, 8192).toString("utf8"), fileName)) {
+    return {
+      kind: "accrual_sales",
+      why: "PioneerRx's System Sales Summary — the whole till for a month, retail alongside prescriptions. The only report that answers what the pharmacy took.",
+      headers: ["Sales", "Discounts", "Returns", "Subtotal", "Tax Calculated", "Total"],
     };
   }
   /*
