@@ -114,8 +114,10 @@ by what changes the owner's morning most. Each is small on its own; none needs a
       the flag (design-audit §6).
 - [ ] **Row actions everywhere** (§7.1). Done by the cloud session: `/expenses` bills (Edit
       reopens the form with the bill in it; Void keeps the row marked void and out of every month
-      and total; `expense.edit` and `expense.void` audited). Still to do: `/inventory/discrepancies`,
-      `/staff/rotations`, `/plans`, `/payers/[pbm]` contacts, rates and documents, `/deliveries`
+      and total; `expense.edit` and `expense.void` audited); `/inventory/discrepancies` ("correct it"
+      reopens the entry, `discrepancy.edit` audited; a wrong entry is closed with the reason, never
+      deleted). `/plans` already had classify per row. Still to do: `/staff/rotations` (the student's
+      record has Edit; a link per row would do), `/plans`, `/payers/[pbm]` contacts, rates and documents, `/deliveries`
       days and invoices, `/settings/backups` archives, and delete-or-retire on `/suppliers`.
       `/agreements` is the model: Edit and Delete on the row, a confirmation that names what
       goes with it. Records the law keeps (invoices, C2 records) retire with a reason.
