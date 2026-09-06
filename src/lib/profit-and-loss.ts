@@ -39,6 +39,8 @@
  * report a profit the pharmacy did not make, so the account says what is missing rather than
  * printing a confident total over a hole.
  */
+import { reconcileCogs, reconcileRevenue, type Check as ReconCheck } from "./reconcile";
+
 
 export type PLLine = { label: string; amountCents: number; note?: string };
 
@@ -71,6 +73,11 @@ export type MonthlyPL = {
    * one a pharmacy with a good month and an empty bank account needs answered.
    */
   stockMovementCents: number | null;
+  /** What each figure's independent source says, and where they disagree. */
+  reconciliation: {
+    cogs: { checks: ReconCheck[]; impliedCogsCents: number | null; stockMovementCents: number | null };
+    revenue: ReconCheck[];
+  };
 
   /**
    * What the account cannot see, named rather than left to be discovered.
@@ -91,10 +98,33 @@ export type PLInputs = {
   receipts: { kind: string; amountCents: number }[];
   /** Facilitator and top-off money that reached fills in the month. */
   laterMoneyCents: number;
+  /**
+   * Prescription revenue from the claims themselves: every plan's remittance plus what the patient
+   * paid, per dispensing, for fills dated in the month.
+   *
+   * A fallback for the accrual account, never an addition. The System Sales Summary is the
+   * authority because it is the only report carrying the front of shop as well — but when it has
+   * not been loaded, the claims know the prescription side exactly, and showing nothing while a
+   * month of claims sits in the database is the answer that makes the page look broken.
+   */
+  claimsRevenueCents?: number | null;
+  claimsCount?: number;
+  /** The value on the shelf at the first and last count of the month, for the independent check. */
+  openingStockCents?: number | null;
+  closingStockCents?: number | null;
   /** The acquisition cost of everything dispensed in the month, from the claims themselves. */
   dispensedCostCents: number | null;
   /** What the wholesalers were invoiced for in the month, for the stock comparison only. */
   purchasesCents: number | null;
+  /**
+   * What was actually paid to the wholesalers in the month, from the invoices marked paid.
+   *
+   * The cash account's cost of goods. Null where no invoice in the month carries a payment date,
+   * which is not the same as zero and must never be shown as it.
+   */
+  paidPurchasesCents: number | null;
+  /** How many invoices in the month have no payment date, so the gap can be named rather than hidden. */
+  purchasesUnpaidCount?: number;
   /**
    * Rebates the month's buying earned. Used on an accrual basis, where the discount belongs to the
    * month that earned it rather than the month the cheque cleared.
@@ -144,6 +174,23 @@ export function monthlyPL(i: PLInputs): MonthlyPL {
       if (i.sales.rxRemitCents) revenue.push({ label: "Third-party remittance", amountCents: i.sales.rxRemitCents });
       if (i.sales.rxPatientCents) revenue.push({ label: "Patient payments", amountCents: i.sales.rxPatientCents });
       if (i.sales.retailCents) revenue.push({ label: "Retail and over the counter", amountCents: i.sales.retailCents });
+    } else if (i.claimsRevenueCents) {
+      /*
+       * The claims, when the till report has not arrived. Never as well as it — that would count
+       * every prescription twice, since the summary already contains them.
+       *
+       * Retail is genuinely unknown here rather than zero, so it is named as missing. An account
+       * short of the front of shop understates revenue and profit, which is the safe direction to
+       * be wrong in and still needs saying out loud.
+       */
+      revenue.push({
+        label: "Prescriptions, from the claims",
+        amountCents: i.claimsRevenueCents,
+        note: `Every plan's remittance plus what the patient paid, across ${(i.claimsCount ?? 0).toLocaleString()} dispensings. The System Sales Summary has not been loaded for this month, so this stands in for the prescription side of it.`,
+      });
+      missing.push(
+        "The System Sales Summary for this month. Prescriptions are taken from the claims instead, but retail and over-the-counter sales are missing entirely — so revenue, gross profit and net profit are all understated by whatever the front of shop took.",
+      );
     } else {
       missing.push("The System Sales Summary for this month, which is the only report carrying retail sales as well as prescriptions.");
     }
@@ -194,15 +241,44 @@ export function monthlyPL(i: PLInputs): MonthlyPL {
    * invoices and are counted from those, and a wholesaler bill entered here as well would count the
    * same money twice — which is why the seeded category says so.
    */
+  /*
+   * The two accounts answer different questions here, and answering both with the same figure is
+   * wrong on at least one of them every month.
+   *
+   * Accrual matches cost to the revenue it produced: what the bottles that left the shelf cost,
+   * whenever they were bought or paid for. Cash records money as it leaves: what the wholesalers
+   * were actually paid this month, whenever those bottles are dispensed. In a month of building
+   * stock the cash account is the worse of the two and should be; in a month of running it down it
+   * is the better. Showing dispensed cost on both made the cash account quietly track the accrual
+   * one and say nothing about the bank.
+   */
   const costOfGoods: PLLine[] = [];
-  if (i.dispensedCostCents !== null) {
+  if (i.basis === "accrual") {
+    if (i.dispensedCostCents !== null) {
+      costOfGoods.push({
+        label: "Acquisition cost of what was dispensed",
+        amountCents: i.dispensedCostCents,
+        note: "Taken per bottle from the claims themselves, so it needs no stocktake and does not move with when the stock was bought or paid for.",
+      });
+    } else {
+      missing.push("The acquisition cost of what was dispensed — no claims are loaded for this month, so there is no cost of goods.");
+    }
+  } else if (i.paidPurchasesCents !== null) {
     costOfGoods.push({
-      label: "Acquisition cost of what was dispensed",
-      amountCents: i.dispensedCostCents,
-      note: "Taken per bottle from the claims themselves, so it needs no stocktake and does not move with when the stock was bought.",
+      label: "Paid to the wholesalers",
+      amountCents: i.paidPurchasesCents,
+      note: "Invoices marked paid in this month. On a cash account the goods are a cost when the money leaves, not when the bottle does.",
     });
+    if (i.purchasesUnpaidCount) {
+      missing.push(
+        `${i.purchasesUnpaidCount} wholesaler ${i.purchasesUnpaidCount === 1 ? "invoice has" : "invoices have"} no payment date, so ${i.purchasesUnpaidCount === 1 ? "it is" : "they are"} not in the cash cost of goods. Enter the date each was paid and this becomes exact.`,
+      );
+    }
   } else {
-    missing.push("The acquisition cost of what was dispensed — no claims are loaded for this month, so there is no cost of goods.");
+    missing.push(
+      "What was paid to the wholesalers this month. No invoice carries a payment date yet, so a cash account has no cost of goods — " +
+        "the dispensed cost is deliberately not substituted, because that is the accrual answer and would make the two accounts agree when they should not.",
+    );
   }
   /*
    * Rebates follow the basis, like everything else.
@@ -261,6 +337,34 @@ export function monthlyPL(i: PLInputs): MonthlyPL {
 
   const stockMovementCents = i.purchasesCents !== null && i.dispensedCostCents !== null ? i.purchasesCents - i.dispensedCostCents : null;
 
+  /*
+   * Where each figure came from, and what an independent record of the same month says.
+   *
+   * The account is only worth reading if a number that ought to be corroborated has been. Cost of
+   * goods has a genuinely independent second source — opening stock plus purchases less closing
+   * stock uses nothing from the claims — and revenue has one too, in the till report. Both are
+   * computed here so the page can show its working rather than only its verdict.
+   */
+  const reconciliation = {
+    cogs: reconcileCogs({
+      dispensed: { cents: i.dispensedCostCents, from: "the acquisition cost on each dispensing" },
+      purchases: { cents: i.purchasesCents, from: "the wholesaler invoices dated in the month" },
+      openingStock: { cents: i.openingStockCents ?? null, from: "the first inventory count of the month" },
+      closingStock: { cents: i.closingStockCents ?? null, from: "the last inventory count of the month" },
+    }),
+    revenue: reconcileRevenue({
+      claims: { cents: i.claimsRevenueCents ?? null, from: "every plan's remittance plus what the patient paid" },
+      tillRx: {
+        cents: i.sales ? (i.sales.rxRemitCents ?? 0) + (i.sales.rxPatientCents ?? 0) || null : null,
+        from: "the System Sales Summary's prescription lines",
+      },
+      banked: {
+        cents: i.receipts.filter((r) => r.kind !== "rebate").reduce((n, r) => n + r.amountCents, 0) || null,
+        from: "receipts recorded against the month",
+      },
+    }),
+  };
+
   return {
     month: i.month,
     basis: i.basis,
@@ -276,6 +380,7 @@ export function monthlyPL(i: PLInputs): MonthlyPL {
     operatingCents,
     netProfitCents,
     stockMovementCents,
+    reconciliation,
     missing,
     /* A bottom line is only worth printing when the biggest costs are actually in it. */
     usable: missing.length === 0,
@@ -323,6 +428,13 @@ export async function monthlyAccount(month: string, basis: "accrual" | "cash" = 
    * already in the revenue above, and the only thing still open is whether the money has arrived.
    */
   const monthFills = fills.filter((f) => f.dateFilled.startsWith(month));
+  /*
+   * What the month's dispensing actually brought in, per fill rather than per transmission, so a
+   * coordinated claim is one bottle's revenue and not two.
+   */
+  const claimsRevenueCents = monthFills.length
+    ? monthFills.reduce((n, f) => n + f.remitCents + f.patientPaidCents, 0)
+    : null;
   const onAccount = {
     receivableCents: monthFills.reduce((n, f) => n + f.receivableCents, 0),
     unbilledCostCents: monthFills.reduce((n, f) => n + (f.unbilledCostCents ?? 0), 0),
@@ -332,12 +444,42 @@ export async function monthlyAccount(month: string, basis: "accrual" | "cash" = 
     .filter((f) => f.dateFilled.startsWith(month))
     .reduce((n, f) => n + f.laterPaymentsCents, 0);
 
-  /* What the wholesalers billed in the month, for the stock comparison only — never as cost of goods. */
+  /* What the wholesalers billed in the month, for the stock comparison only — never as accrual cost of goods. */
   const lines = await db.query.invoiceLines.findMany({
     where: and(gte(schema.invoiceLines.invoiceDate, `${month}-01`), lte(schema.invoiceLines.invoiceDate, `${month}-31`)),
     columns: { extendedCents: true },
   });
   const purchasesCents = lines.length ? lines.reduce((n, l) => n + l.extendedCents, 0) : null;
+
+  /*
+   * What actually left the bank for goods this month: the invoices marked paid in it.
+   *
+   * The cash account's cost of goods. Counted on the invoice's own total where it has one, because
+   * that is what was paid; where a total was never read the invoice cannot contribute and is
+   * counted as unpaid-unknown instead of as zero.
+   */
+  const allInvoices = await db.query.supplierInvoices.findMany({
+    columns: { totalCents: true, paidOn: true, invoiceDate: true },
+  });
+  const paidThisMonth = allInvoices.filter((v) => v.paidOn?.startsWith(month) && v.totalCents !== null);
+  const paidPurchasesCents = paidThisMonth.length ? paidThisMonth.reduce((n, v) => n + (v.totalCents ?? 0), 0) : null;
+  const purchasesUnpaidCount = allInvoices.filter((v) => !v.paidOn && v.invoiceDate?.startsWith(month)).length;
+
+  /*
+   * The shelf at each end of the month, which is what makes the cost of goods checkable at all.
+   *
+   * The first count of the month stands for the opening position and the last for the closing one.
+   * They are the counts that exist, not the first and last day — a count taken on the 3rd is the
+   * best opening figure available and saying so is better than refusing to check anything until
+   * somebody counts on the 1st.
+   */
+  const counts = await db.query.onHandImports.findMany({
+    where: and(gte(schema.onHandImports.countedOn, `${month}-01`), lte(schema.onHandImports.countedOn, `${month}-31`)),
+    columns: { countedOn: true, valueCents: true },
+  });
+  const valued = counts.filter((c) => c.valueCents !== null).sort((a, b) => a.countedOn.localeCompare(b.countedOn));
+  const openingStockCents = valued.length > 1 ? valued[0].valueCents : null;
+  const closingStockCents = valued.length > 1 ? valued[valued.length - 1].valueCents : null;
 
   const earned = await Promise.all(suppliers.map((s) => earningSoFar(s.id, month)));
   const rebatesCents = earned.reduce((n, e) => n + (e?.estimatedRebateCents ?? 0), 0) || null;
@@ -349,8 +491,14 @@ export async function monthlyAccount(month: string, basis: "accrual" | "cash" = 
     sales: sales ? { retailCents: sales.retailCents, rxPatientCents: sales.rxPatientCents, rxRemitCents: sales.rxRemitCents, totalCents: sales.totalCents } : null,
     receipts: receipts.map((r) => ({ kind: r.kind, amountCents: r.amountCents })),
     laterMoneyCents,
+    claimsRevenueCents,
+    claimsCount: monthFills.length,
     dispensedCostCents,
     purchasesCents,
+    paidPurchasesCents,
+    purchasesUnpaidCount,
+    openingStockCents,
+    closingStockCents,
     rebatesCents,
     onAccount,
     expenses: bills.map((b) => {

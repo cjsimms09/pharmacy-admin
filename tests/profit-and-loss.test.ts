@@ -16,6 +16,7 @@ const base: PLInputs = {
   receipts: [],
   laterMoneyCents: 0,
   dispensedCostCents: 55_000_000,
+  paidPurchasesCents: null,
   purchasesCents: 58_000_000,
   rebatesCents: 1_200_000,
   expenses: [
@@ -169,5 +170,101 @@ describe("figures that arrive in a different month from the one that earned them
     const pl = monthlyPL({ ...base, expenses: base.expenses.filter((e) => e.kind !== "revenue_offset") });
     assert.ok(pl.missing.some((m) => /DIR/.test(m)));
     assert.equal(pl.usable, false);
+  });
+});
+
+/**
+ * The two bases must not agree, and the ways they were made to agree.
+ *
+ * An accrual account matches cost to the revenue it produced; a cash account records money as it
+ * moves. Answering both with the same figure is wrong on at least one of them every month, and it
+ * is wrong in the flattering direction in a month of building stock — which is the month a
+ * pharmacist is most likely to be looking.
+ */
+describe("cash and accrual are different accounts", () => {
+  test("accrual takes cost from what was dispensed", () => {
+    const r = monthlyPL(base);
+    const cogs = r.costOfGoods.find((l) => l.label.startsWith("Acquisition cost"));
+    assert.equal(cogs?.amountCents, 55_000_000);
+    assert.equal(r.costOfGoods.some((l) => l.label === "Paid to the wholesalers"), false);
+  });
+
+  test("cash takes cost from what was paid to the wholesalers, not from what was dispensed", () => {
+    const r = monthlyPL({
+      ...base,
+      basis: "cash",
+      receipts: [{ kind: "third_party", amountCents: 60_000_000 }],
+      paidPurchasesCents: 48_000_000,
+    });
+    const cogs = r.costOfGoods.find((l) => l.label === "Paid to the wholesalers");
+    assert.equal(cogs?.amountCents, 48_000_000);
+    assert.equal(r.costOfGoods.some((l) => l.label.startsWith("Acquisition cost")), false, "the accrual figure must not appear on a cash account");
+  });
+
+  test("a cash month with nothing marked paid says so rather than borrowing the accrual answer", () => {
+    /*
+     * The substitution that would make the two accounts agree. Silence here is correct and has to
+     * be loud, because a cost of goods of zero reads as an extremely good month.
+     */
+    const r = monthlyPL({ ...base, basis: "cash", receipts: [{ kind: "third_party", amountCents: 60_000_000 }], paidPurchasesCents: null });
+    assert.equal(r.costOfGoods.some((l) => l.label.startsWith("Acquisition cost")), false);
+    assert.match(r.missing.join(" "), /No invoice carries a payment date/);
+  });
+
+  test("unpaid invoices in the month are named, so the gap is visible rather than quiet", () => {
+    const r = monthlyPL({
+      ...base, basis: "cash", receipts: [{ kind: "third_party", amountCents: 60_000_000 }],
+      paidPurchasesCents: 48_000_000, purchasesUnpaidCount: 3,
+    });
+    assert.match(r.missing.join(" "), /3 wholesaler invoices have no payment date/);
+  });
+});
+
+describe("revenue when the till report has not arrived", () => {
+  test("the claims stand in for the prescription side", () => {
+    const r = monthlyPL({ ...base, sales: null, claimsRevenueCents: 60_000_000, claimsCount: 1199 });
+    const line = r.revenue.find((l) => l.label === "Prescriptions, from the claims");
+    assert.equal(line?.amountCents, 60_000_000);
+    assert.match(line?.note ?? "", /1,199 dispensings/);
+  });
+
+  test("and never as well as it, which would count every prescription twice", () => {
+    const r = monthlyPL({ ...base, claimsRevenueCents: 60_000_000, claimsCount: 1199 });
+    assert.equal(r.revenue.some((l) => l.label === "Prescriptions, from the claims"), false);
+    assert.equal(r.revenue.find((l) => l.label === "Third-party remittance")?.amountCents, 57_077_894);
+  });
+
+  test("retail is called missing, because understating revenue quietly is still understating it", () => {
+    const r = monthlyPL({ ...base, sales: null, claimsRevenueCents: 60_000_000, claimsCount: 1199 });
+    assert.match(r.missing.join(" "), /retail and over-the-counter sales are missing entirely/i);
+  });
+
+  test("no claims and no summary reports no revenue rather than inventing some", () => {
+    const r = monthlyPL({ ...base, sales: null, claimsRevenueCents: null });
+    assert.equal(r.revenue.length, 0);
+  });
+});
+
+describe("the shape of the account", () => {
+  test("gross profit is net revenue less cost of goods, and rebates reduce the cost", () => {
+    const r = monthlyPL(base);
+    // 669,497.38 revenue − 9,000.00 DIR = 660,497.38 net revenue.
+    assert.equal(r.netRevenueCents, 66_949_738 - 900_000);
+    // 550,000.00 dispensed − 12,000.00 rebates earned.
+    assert.equal(r.costOfGoodsCents, 55_000_000 - 1_200_000);
+    assert.equal(r.grossProfitCents, r.netRevenueCents - r.costOfGoodsCents);
+    assert.equal(r.netProfitCents, r.grossProfitCents - r.operatingCents);
+  });
+
+  test("a rebate never appears as revenue", () => {
+    const r = monthlyPL(base);
+    assert.equal(r.revenue.some((l) => /rebate/i.test(l.label)), false);
+    assert.ok(r.costOfGoods.some((l) => /rebate/i.test(l.label) && l.amountCents < 0));
+  });
+
+  test("DIR reduces revenue rather than sitting in overhead", () => {
+    const r = monthlyPL(base);
+    assert.equal(r.operating.some((l) => /DIR/i.test(l.label)), false);
+    assert.equal(r.revenueCents - r.netRevenueCents, 900_000);
   });
 });

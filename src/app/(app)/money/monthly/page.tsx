@@ -3,7 +3,7 @@ import { requireUser } from "@/lib/auth";
 import { monthlyAccount, accountMonths } from "@/lib/profit-and-loss";
 import { formatCents } from "@/lib/money";
 import { todayIso } from "@/lib/dates";
-import { PageHeader, Notice, Empty } from "@/components/ui";
+import { PageHeader, Notice, Empty, Card } from "@/components/ui";
 import { ExportData } from "@/components/export-data";
 
 export const dynamic = "force-dynamic";
@@ -126,6 +126,54 @@ export default async function MonthlyPLPage({
           different question and the one a good month with an empty bank account is asking.
         </Notice>
       )}
+
+      {/*
+        Every figure has a source, and the ones with two sources are checked against each other.
+
+        This is the principle the claims screen already runs on, applied to the account. Cost of
+        goods has a genuinely independent second source — opening stock plus purchases less closing
+        stock uses nothing from the claims — so agreement is corroboration rather than the same sum
+        restated. A check that cannot be inspected is one nobody believes the second time it
+        disagrees, so the working is shown alongside the verdict.
+      */}
+      <Card
+        className="my-4"
+        title="Does it tie out?"
+        subtitle="Where two records of the same month exist, they are compared. A difference that is expected is said to be expected; one that is not is a finding."
+        tone={
+          [...pl.reconciliation.cogs.checks, ...pl.reconciliation.revenue].some((c) => !c.expected && c.agrees === false)
+            ? "warn"
+            : undefined
+        }
+      >
+        <ul className="rows">
+          {[...pl.reconciliation.cogs.checks, ...pl.reconciliation.revenue].map((c) => (
+            <li key={c.what} className="row">
+              <div className="min-w-0">
+                <div className="row-title">
+                  {c.what}
+                  {c.agrees === true && <span className="badge badge-ok ml-2">ties</span>}
+                  {c.agrees === false && !c.expected && <span className="badge badge-warn ml-2">look at this</span>}
+                  {c.agrees === false && c.expected && <span className="badge badge-muted ml-2">expected</span>}
+                  {c.agrees === null && <span className="badge badge-muted ml-2">not enough held</span>}
+                </div>
+                <p className="row-why">{c.says}</p>
+              </div>
+              <div className="whitespace-nowrap text-right text-sm tabular-nums">
+                {c.differenceCents === null ? "—" : formatCents(c.differenceCents)}
+              </div>
+            </li>
+          ))}
+        </ul>
+        {pl.reconciliation.cogs.impliedCogsCents !== null && (
+          <p className="mt-3 text-xs text-ink-3">
+            The shelf&rsquo;s own answer for cost of goods this month is{" "}
+            <b className="text-ink-2">{formatCents(pl.reconciliation.cogs.impliedCogsCents)}</b> — opening stock plus what
+            the wholesalers billed, less closing stock. Not one figure in it comes from the claims, which is what makes
+            it worth comparing.
+          </p>
+        )}
+      </Card>
 
       <details className="my-4 rounded-lg border border-line bg-surface p-4">
         <summary className="cursor-pointer text-sm font-semibold">How each figure is arrived at</summary>
