@@ -1,19 +1,37 @@
 @import "tailwindcss";
 
 @theme {
-  --color-ground: #f5f7f6;
+  /*
+    The neutrals carry a trace of the accent's hue rather than a wash of it.
+
+    They were green enough to read as a colour scheme, which is what makes software look homemade:
+    every surface tinted, so nothing is quite white and the accent has nothing to stand against.
+    Near-neutral greys let the one green mean something.
+  */
+  --color-ground: #f6f7f8;
   --color-surface: #ffffff;
-  --color-line: #d8dfdb;
-  --color-ink: #1b2a2a;
-  --color-ink-2: #4b5b5a;
-  --color-ink-3: #74837f;
+  --color-line: #e3e6e8;
+  --color-line-strong: #cdd3d6;
+  --color-ink: #16201f;
+  --color-ink-2: #4a5553;
+  --color-ink-3: #7c8683;
   --color-accent: #0e6b5a;
-  --color-accent-soft: #dcefe9;
-  --color-warn: #9a6a0f;
-  --color-warn-soft: #f7ebcf;
+  --color-accent-soft: #e6f2ef;
+  --color-accent-line: #9dc9bf;
+  --color-warn: #8a5d0a;
+  --color-warn-soft: #fdf3de;
   --color-crit: #a5312a;
-  --color-crit-soft: #f8e0dd;
+  --color-crit-soft: #fceceb;
   --font-sans: "Segoe UI", system-ui, -apple-system, sans-serif;
+
+  /*
+    Two levels of lift and no more.
+
+    Something resting on the page, and something floating above it. A system with five shadows has
+    no hierarchy either, because nobody can tell the third from the fourth.
+  */
+  --shadow-rest: 0 1px 2px rgba(22, 32, 31, 0.05), 0 1px 1px rgba(22, 32, 31, 0.03);
+  --shadow-lift: 0 4px 16px -4px rgba(22, 32, 31, 0.12), 0 2px 4px -2px rgba(22, 32, 31, 0.06);
 }
 
 html { color-scheme: light; }
@@ -36,13 +54,25 @@ body { @apply bg-ground text-ink antialiased; }
 
 @layer components {
   /* ── controls ───────────────────────────────────────────────── */
-  .btn { @apply inline-flex items-center justify-center gap-2 rounded-md border border-line bg-surface px-3.5 py-2 text-sm font-medium text-ink transition-colors hover:border-ink-3 hover:bg-ground focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-40; }
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-md border border-line bg-surface px-3.5 py-2 text-sm font-medium text-ink transition-all hover:border-line-strong hover:bg-ground focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-40; box-shadow: var(--shadow-rest); }
   .btn-primary { @apply border-accent bg-accent text-white hover:border-[#0b5a4b] hover:bg-[#0b5a4b]; }
   .btn-danger { @apply border-crit text-crit hover:bg-crit-soft; }
   .btn-sm { @apply px-2.5 py-1 text-xs; }
 
   /* ── surfaces ───────────────────────────────────────────────── */
-  .card { @apply rounded-xl border border-line bg-surface p-5 shadow-[0_1px_2px_rgba(27,42,42,.04)]; }
+  .card { @apply rounded-xl border border-line bg-surface p-5; box-shadow: var(--shadow-rest); }
+
+  /*
+    A section of a page: the same shape as a card, used for the things pages were hand-rolling.
+    
+    Every screen had its own `rounded-lg border border-line bg-surface p-4`, which is how a design
+    system quietly stops being one — the tokens are all still there and nothing uses them, so a
+    change to the card never reaches half the site.
+  */
+  .section { @apply rounded-xl border border-line bg-surface; box-shadow: var(--shadow-rest); }
+  .section-head { @apply flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-3.5; }
+  .section-title { @apply text-sm font-semibold text-ink; }
+  .section-body { @apply px-5 py-4; }
   /*
     A card's header. Title on the left, actions on the right, a hairline under it — so a section
     reads as a section at a glance rather than as more text in the same column.
@@ -52,6 +82,21 @@ body { @apply bg-ground text-ink antialiased; }
 
   /* ── form ───────────────────────────────────────────────────── */
   .field { @apply block w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-3 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent; }
+
+  /*
+    Every input, not only the ones somebody remembered to label.
+
+    Half the forms on this site use bare `<input>` and `<select>`, which the browser then styles
+    itself — different heights, different borders, different focus rings on every screen. One rule
+    reaching all of them is worth more than a class nobody applies consistently.
+  */
+  input[type="text"], input[type="date"], input[type="email"], input[type="number"], input[type="search"],
+  input[type="password"], input:not([type]), select, textarea {
+    @apply rounded-md border border-line bg-surface px-2.5 py-1.5 text-sm text-ink placeholder:text-ink-3;
+  }
+  input:focus, select:focus, textarea:focus {
+    @apply border-accent outline-none ring-1 ring-accent;
+  }
   .label { @apply mb-1 block text-xs font-semibold uppercase tracking-wide text-ink-2; }
   .hint { @apply mt-1 text-xs text-ink-3; }
 

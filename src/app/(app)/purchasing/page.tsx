@@ -30,6 +30,30 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
     purchasingOpportunities(), supplierSummary(), catalogSchedule(), getSettings(), hasMailPassword(), productLedger(),
   ]);
   const ledgerRows = opportunities(ledger.rows);
+
+  /*
+   * The buy list: every NDC offered under what the benchmark says the drug costs, after the rebate.
+   *
+   * The table below answers "what did we pay against what everyone else charges". This answers the
+   * one the owner actually asks — what should we be buying — by ranking the gap under NADAC and
+   * then, per product, naming the NDC that beats the one being dispensed today. NDCs are grouped
+   * into products on NADAC's own description, so a switch is between genuine equivalents.
+   */
+  const { underNadac, switchNdc, notYetBought } = await import("@/lib/under-nadac");
+  const { groupKey } = await import("@/lib/product-groups");
+  const { db, schema } = await import("@/db");
+  const nadacForGroups = await db.query.nadacPrices.findMany({
+    columns: { ndc11: true, description: true, classification: true, pricingUnit: true },
+  });
+  void schema;
+  const groupByNdc = new Map<string, string | null>();
+  for (const r of nadacForGroups) {
+    if (groupByNdc.has(r.ndc11)) continue;
+    groupByNdc.set(r.ndc11, groupKey({ ndc11: r.ndc11, description: r.description, classification: r.classification, pricingUnit: r.pricingUnit }));
+  }
+  const buys = underNadac(ledger.rows, (ndc) => groupByNdc.get(ndc) ?? null);
+  const switches = switchNdc(buys);
+  const unstocked = notYetBought(buys);
   /*
    * What each drug earns, which is a different question from what it costs.
    *
@@ -193,6 +217,90 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
         of the door. Each on its own is a page somebody has to reconcile in their head. Together
         they say which drugs to move, where to, and what it is worth.
       */}
+      {/*
+        The switches worth making, above the table that explains them.
+        
+        A table of every drug is a reference; this is the list of things to actually do this week,
+        ranked by what each is worth on the quantities this pharmacy dispenses — because a large
+        percentage off something bought twice a year is not worth an afternoon.
+      */}
+      {(switches.length > 0 || unstocked.length > 0) && (
+        <section className="my-4 rounded-lg border border-line bg-surface p-4">
+          <h2 className="text-sm font-semibold">Buy these instead</h2>
+          <p className="mt-1 text-xs text-ink-2">
+            Every NDC offered under what the federal benchmark says the drug costs, after the rebate this pharmacy
+            actually earns. Grouped into products on NADAC&rsquo;s own description, so a switch is between genuine
+            equivalents rather than between things that merely sound alike.
+          </p>
+
+          {switches.length > 0 && (
+            <div className="mt-3 overflow-x-auto rounded-lg border border-line">
+              <table className="w-full text-sm">
+                <thead className="bg-ground text-left text-xs uppercase tracking-wide text-ink-3">
+                  <tr>
+                    <th className="px-3 py-2">Product</th>
+                    <th className="px-3 py-2">Buying now</th>
+                    <th className="px-3 py-2">Better</th>
+                    <th className="px-3 py-2 text-right">Worth</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {switches.slice(0, 25).map((p) => (
+                    <tr key={p.groupKey} className="border-t border-line align-top">
+                      <td className="px-3 py-2">
+                        {p.name ?? p.pick.ndc11}
+                        <span className="block text-[11px] text-ink-3">{p.units.toLocaleString()} units dispensed</span>
+                      </td>
+                      <td className="px-3 py-2 font-mono text-[11px]">{p.current?.ndc11 ?? "—"}</td>
+                      <td className="px-3 py-2">
+                        <span className="font-mono text-[11px]">{p.pick.ndc11}</span>
+                        <span className="block text-[11px] text-ink-3">{p.pick.buy.supplier}</span>
+                      </td>
+                      <td className="px-3 py-2 text-right font-medium tabular-nums text-accent">{formatCents(p.gainCents)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {switches.length > 0 && (
+            <ul className="mt-2 space-y-0.5 text-xs text-ink-2">
+              {switches.slice(0, 5).map((p) => (
+                <li key={`says-${p.groupKey}`}>{p.says}</li>
+              ))}
+            </ul>
+          )}
+
+          {unstocked.length > 0 && (
+            <details className="mt-3">
+              <summary className="cursor-pointer text-xs text-ink-3">
+                {unstocked.length} NDCs offered well under the benchmark that this pharmacy neither buys nor dispenses
+              </summary>
+              <p className="mt-1 text-xs text-ink-3">
+                Not a recommendation on its own — a drug nobody here dispenses is not worth stocking however cheap it
+                is. It is the shelf the pharmacy does not have, for the day somebody asks why a script went elsewhere.
+              </p>
+              <ul className="mt-2 grid gap-0.5 text-xs sm:grid-cols-2">
+                {unstocked.slice(0, 30).map((r) => (
+                  <li key={r.ndc11} className="flex justify-between gap-2">
+                    <span className="truncate">{r.name ?? r.ndc11}</span>
+                    <span className="shrink-0 tabular-nums text-ink-3">{r.underNadacPercent.toFixed(0)}% under</span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+
+          {buys.excluded.length > 0 && (
+            <p className="mt-2 text-[11px] text-ink-3">
+              {buys.excluded.length} rows could not be measured and are named rather than dropped — a shorter list reads
+              as good news.
+            </p>
+          )}
+        </section>
+      )}
+
       <section className="my-4 rounded-lg border border-line bg-surface p-4">
         <h2 className="text-sm font-semibold">What to do about it</h2>
         <p className="mt-1 text-sm text-ink-2">
