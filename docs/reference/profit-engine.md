@@ -100,7 +100,8 @@ what has been dismissed. This is the difference between a report and something t
 2. `plan_pay_basis` written nightly from `pay-basis.ts`, so the NDC choice reads a table, not a
    recomputation, and the trend is kept.
 3. `supplier_price_history`, then price-move alerts: a catalogue price up on a daily product, a
-   NADAC down under the pharmacy's cost.
+   NADAC down under the pharmacy's cost. (`price-moves.ts` is the pure side, tested; the table
+   and the weekly call are the pharmacy session's.)
 4. Returns to stock as a number, by product and plan, from the reversals the feed now keeps.
 5. MAC appeal packets: `against-nadac.ts` "argue" rows joined to the invoice line that proves
    acquisition cost and the PBM's appeal window.

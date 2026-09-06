@@ -85,6 +85,9 @@ gives units.
 | Confidence | word | How sure, from the scrub or the rate on file. | shown | scaling the amount |
 | Overlaps with | keys | Rows describing the same problem. | counting a problem once in the total | — |
 | Outcome | cents | What the claims showed after the advice. | the scorecard | inventing when "too early" |
+| Price move | micros per unit, two dates | The cheapest effective source's last two prices (`price-moves.ts`). | a rise costed on units a day × 30 | a standing gap (that is the buy list) |
+| Under cost | cents a month | NADAC newly below the cheapest cost, on the units paid at NADAC. | switch, stop or appeal | every unit once the plans are classified |
+| Receivable on account | cents | Patient total billed to an account on AR rows. | "earned, not money yet" beside the P&L | the plan remit on another leg (that is the remittance reconciliation) |
 
 ## 8. The double-application traps, named
 
@@ -107,3 +110,7 @@ gives units.
 9. **A blank rebate column as "no".** IPD and IPC print the column empty: unknown, not not-rebated.
 10. **Reversals that match nothing.** Stored as reversed and unmatched; excluded from fills; never
     a loss.
+11. **One dollar in two "not yet money" buckets.** A coordinated fill's plan remit is awaited under
+    the remittance reconciliation; only the AR leg's patient total is on account. Never both.
+12. **A standing position as a move.** The buy list says where a product stands; a price-move row
+    is a transition between two dated points. The same NDC on both is marked `overlapsWith`.

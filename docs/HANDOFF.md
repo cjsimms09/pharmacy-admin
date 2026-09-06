@@ -77,6 +77,32 @@ the shelf and order-minimum pieces on the same night; the cloud session's `lean-
 - [ ] **One row per period for the rebate statement and the drill-down position**
       (`data-audit.md` §3.2, §3.3), instead of settings JSON and `rebate_statement_json`.
 
+**From the daily audit of 6 September** (base commits `75fc165` and `c5012fe` read; typecheck
+clean; 1,468 tests; the real 5 Sept report reads as before, 135 rows, no AR rows in that day).
+
+- [ ] **`receivableCents` counts plan money as uncollected.** `fills.ts` sets
+      `receivableCents = revenueCents` on any fill with an AR leg, and `revenueCents` includes the
+      other legs' remits. On the shape in your own commit message (Rx 333932-0: an AR leg with
+      cost and no revenue, a paid leg on another BIN with $491.67) the fill reports $491.67 owed
+      on account when it is the plan's remit, already tracked by the remittance reconciliation.
+      That is one dollar in two "not money yet" buckets (`data-dictionary.md` §8). Fix: sum the
+      patient total of the AR rows only (`rows.filter(onAccount).reduce(patientTotalCents)`);
+      `unbilledCostCents` is right as it is. The test "one leg on account puts the whole fill on
+      account" should then expect a receivable of $600.00, not $608.00.
+- [ ] **Supplies: an empty shelf with an order pending reads "ok".** `supplies.ts` `position()`
+      folds `onOrder` into `available` before deciding the state, so `projected <= 0` with a
+      delivery due in five days is "ok" for five days. Decide "out" on `projected`, keep
+      `daysRemaining` on `available`, and say "out; N on order, due about <date>". Also
+      `RATE_WINDOW_DAYS` is 180 and its comment says ninety.
+- [ ] **Price moves, ready to wire once `supplier_price_history` exists.** `priceAlerts()` in
+      `src/lib/price-moves.ts` takes the history rows, the NADAC weeks, usage per NDC (units a
+      day from `velocity()`, the floor share from `pay-basis.ts`) and the alternatives per
+      product, and returns money-list rows: `price-up:<ndc>` (the cheapest source rose; cost on
+      this pharmacy's units a month; the cheaper NDC to buy instead) and `under-cost:<ndc>`
+      (NADAC now under cost where it was not; on the units paid at NADAC; switch, stop or
+      appeal). Transitions only, so the standing buy list is not counted twice; `overlapsWith`
+      set. This is `profit-engine.md` §6.3 done on the pure side.
+
 **From the design audit** (`docs/reference/design-audit.md`; the page inventory is §7). Ordered
 by what changes the owner's morning most. Each is small on its own; none needs a migration.
 
@@ -288,7 +314,8 @@ daily figure should not select the band — see `docs/reference/buying-logic.md`
 unknown), `under-nadac.ts` (the buy list: every NDC ranked by its gap under NADAC after the
 rebate, the pick per product and the gain over what is dispensed today), `ndc-choice.ts` (which NDC of a product pays the most on this pharmacy's plan mix,
 or "cannot say" with the reason), `ratio-effect.ts` (what an order does to the ratio and the
-band, in money). None of them touches the database or a page. Wiring them to the product ledger
+band, in money), `price-moves.ts` (what changed this week: a rise in what the pharmacy
+would pay, or NADAC falling under cost, each on this pharmacy's own units). None of them touches the database or a page. Wiring them to the product ledger
 and an order screen is the next step, and is the pharmacy session's call on where.
 
 ### Data audit
@@ -300,7 +327,7 @@ id only), and twelve further uses of the data ranked by value against readiness.
 now delegates to `product-key.ts`, which it had duplicated.
 
 ### Files this branch touched
-`src/db/schema.ts`, `drizzle/0048_*`, `drizzle/0049_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down,recommendations,recommendation-log,recommendation-store,reimbursement-fit,band-strategy,month-plan}.ts` (new), `drizzle/0066_*`,
+`src/db/schema.ts`, `drizzle/0048_*`, `drizzle/0049_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down,recommendations,recommendation-log,recommendation-store,reimbursement-fit,band-strategy,month-plan,price-moves}.ts` (new), `drizzle/0066_*`,
 `src/lib/{claims,rx-transactions,suppliers,suppliers-registry,pioneer-catalog,invoices,nadac-fetch,settings}.ts`,
 `src/app/(app)/suppliers/page.tsx`, `src/app/(app)/suppliers/[id]/terms/page.tsx` (new),
 `src/app/(app)/inventory/invoices/page.tsx`, `src/app/(app)/nadac/page.tsx`, `src/app/(app)/claims/page.tsx`,
