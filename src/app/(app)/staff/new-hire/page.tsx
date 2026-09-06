@@ -77,6 +77,16 @@ export default async function NewHirePage({
         <PageHeader
           title="New employee"
           subtitle="Everything a new starter has to complete, worked out from their role, and tracked until it is done."
+          actions={
+            /*
+              The reading, as one thing to hand somebody.
+              
+              The courses can each be opened on screen by a person who has been sent a link and
+              remembers to follow it, which is fine for an annual refresher and useless on a first
+              morning. This is the same material, in order, with a cover and a contents page.
+            */
+            <Link href="/staff/new-hire/pack" className="btn">Print the training pack</Link>
+          }
         />
         {error && <Notice kind="crit">{error}</Notice>}
 

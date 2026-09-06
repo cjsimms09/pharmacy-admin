@@ -126,7 +126,7 @@ const CREDENTIAL_COLUMNS: {
   { key: "imm_protocol", type: "immunization_protocol", short: "Protocol", label: "Signed immunization protocol", immunizersOnly: true },
 ];
 
-const TRAINING_COLUMNS: { key: string; type: TrainingType; short: string }[] = [
+const TRAINING_COLUMNS: { key: string; type: TrainingType; short: string; techniciansOnly?: boolean }[] = [
   { key: "hipaa", type: "hipaa_privacy_security", short: TRAINING_SHORT.hipaa_privacy_security },
   { key: "fwa", type: "fwa_general_compliance", short: TRAINING_SHORT.fwa_general_compliance },
   { key: "bbp", type: "osha_bloodborne", short: TRAINING_SHORT.osha_bloodborne },
@@ -134,6 +134,16 @@ const TRAINING_COLUMNS: { key: string; type: TrainingType; short: string }[] = [
   { key: "diversion", type: "controlled_substance_diversion", short: TRAINING_SHORT.controlled_substance_diversion },
   { key: "cqi", type: "cqi_program_review", short: TRAINING_SHORT.cqi_program_review },
   { key: "manual", type: "policy_manual_acknowledgement", short: TRAINING_SHORT.policy_manual_acknowledgement },
+  /*
+   * The technician course, which is the pharmacist-in-charge's own obligation under K.A.R. 68-5-15.
+   *
+   * It was a training type, it had a course written for it and it was on the due list — and it was
+   * missing from this table, which is the one the PIC actually reads. So the single training with a
+   * hard legal deadline attached to it, a hundred and eighty days from hire, was the one thing the
+   * compliance matrix could not show. Technicians only: the regulation says nothing about
+   * pharmacists or interns, and chasing them for it would be noise.
+   */
+  { key: "tech_training", type: "technician_initial_training", short: TRAINING_SHORT.technician_initial_training, techniciansOnly: true },
 ];
 
 export function matrixColumns(): MatrixColumn[] {
@@ -232,6 +242,10 @@ export async function staffMatrix(): Promise<StaffMatrix> {
     }
 
     for (const col of TRAINING_COLUMNS) {
+      if (col.techniciansOnly && p.role !== "technician") {
+        cells[col.key] = { state: "na", label: "—", title: `${col.short} applies to technicians only.` };
+        continue;
+      }
       const cadence = TRAINING_CADENCE[col.type];
       const last = trainings
         .filter((t) => t.personId === p.id && t.type === col.type)
