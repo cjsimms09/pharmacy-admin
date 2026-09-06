@@ -4,7 +4,7 @@ import path from "node:path";
 import { eq, and, isNull } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId, sha256 } from "./crypto";
-import { contractsDir } from "./reference";
+import { contractsDir, pbmResolver } from "./reference";
 import { parseTerms, estimateCost, pdfPageCount, PDF_PAGE_LIMIT } from "./contract-extract";
 import { rates as aiRates } from "./ai-spend";
 import { proposeFromContract, type Proposals, type Existing, type PlanForMatch } from "./contract-apply";
@@ -216,13 +216,72 @@ export async function existingFor(pbmName: string, exceptDocId: string): Promise
   };
 }
 
+/** The counterparty as the payer pages name it: the crosswalk's canonical name where one resolves, else as written. */
+export async function canonicalCounterparty(name: string): Promise<string> {
+  const r = (await pbmResolver()).resolve(name);
+  return r.via === "unresolved" ? name.trim() : r.name;
+}
+
 export async function proposalsFor(docId: string): Promise<{ doc: typeof schema.contractDocs.$inferSelect; proposals: Proposals } | null> {
   const doc = await db.query.contractDocs.findFirst({ where: eq(schema.contractDocs.id, docId) });
   if (!doc) return null;
   const terms = parseTerms(doc.extractionJson);
   if (!terms) return null;
-  const [plans, existing] = await Promise.all([plansForMatching(), existingFor(terms.counterparty, doc.id)]);
-  return { doc, proposals: proposeFromContract(terms, doc.documentName, plans, existing) };
+  const pbmName = await canonicalCounterparty(doc.pbmName !== "Unnamed" ? doc.pbmName : terms.counterparty);
+  const [plans, existing] = await Promise.all([plansForMatching(), existingFor(pbmName, doc.id)]);
+  return { doc, proposals: proposeFromContract(terms, doc.documentName, plans, existing, { pbmName }) };
+}
+
+export type ApplyAllResult = {
+  documents: number;
+  named: number;
+  rates: number;
+  appeals: number;
+  contacts: number;
+  routing: number;
+  links: number;
+  claims: number;
+  /** Documents with plan links a person still has to decide, because another document prints the same BIN. */
+  decisions: { docId: string; documentName: string; contested: number }[];
+};
+
+/**
+ * Everything certain from every read document, applied in one pass.
+ *
+ * Certain means: a rate with the contract's sentence behind it; the appeal terms, contacts and
+ * payment path as read; a plan link the document alone can claim (a BIN and PCN, a network id, or
+ * a BIN no other document prints). A BIN printed in two documents is the one decision left to a
+ * person, and it is listed rather than guessed. An unnamed document is named from what it read,
+ * in the payer pages' own spelling.
+ */
+export async function applyAllReads(user: { name: string }): Promise<ApplyAllResult> {
+  const out: ApplyAllResult = { documents: 0, named: 0, rates: 0, appeals: 0, contacts: 0, routing: 0, links: 0, claims: 0, decisions: [] };
+  const docs = await db.query.contractDocs.findMany({ where: eq(schema.contractDocs.extractionState, "done") });
+  for (const doc of docs) {
+    const terms = parseTerms(doc.extractionJson);
+    if (!terms) continue;
+    const readName = terms.counterparty.trim();
+    if (doc.pbmName === "Unnamed" && readName && !/^unnamed$/i.test(readName)) {
+      await nameDocument(doc.id, await canonicalCounterparty(readName));
+      out.named++;
+    }
+    const got = await proposalsFor(doc.id);
+    if (!got) continue;
+    const p = got.proposals;
+    const certainPlans = p.plans.map((m, i) => (m.contested.length === 0 ? i : -1)).filter((i) => i >= 0);
+    const r = await acceptProposals(doc.id, {
+      rates: p.rates.map((_, i) => i),
+      appeal: Boolean(p.appeal),
+      contacts: p.contacts.map((_, i) => i),
+      routing: Boolean(p.routing),
+      plans: certainPlans,
+    }, user);
+    out.documents++;
+    out.rates += r.rates; out.appeals += r.appeal ? 1 : 0; out.contacts += r.contacts; out.routing += r.routing ? 1 : 0; out.links += r.links; out.claims += r.claims;
+    const contested = p.plans.length - certainPlans.length;
+    if (contested > 0) out.decisions.push({ docId: doc.id, documentName: doc.documentName, contested });
+  }
+  return out;
 }
 
 export type Picks = { rates: number[]; appeal: boolean; contacts: number[]; routing: boolean; plans: number[] };

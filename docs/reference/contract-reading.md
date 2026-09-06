@@ -135,6 +135,16 @@ address the site owns, or an SFTP folder the site watches; each PBM's ERA enroll
 it, and the remittances then reconcile against the claims without anybody downloading anything.
 The checklist per PBM (enrolled, delivery confirmed, first 835 received) is a page to build.
 
+## 6a. The pharmacy's own payer list
+
+The reconciliation service exports a two-column list, payer name and BIN, one row per BIN the
+pharmacy has been paid by, with "(HMA)" on the payers contracted through the PSAO. Saved as
+`data/reference/payer_listing.csv` it is read by the reference import after the published
+crosswalk (`payer-listing.ts`): BINs the crosswalk lacks are named from it, with the PSAO on the
+row; agreeing BINs keep the list's spelling as an alias; disagreeing BINs are named for a person.
+Every claim already held on a newly named BIN gains its payer. On the real list: 80 BINs, 63
+through the PSAO, 17 direct.
+
 ## 7. One run, kept for good
 
 The library is read once. Three things make that true:
@@ -164,11 +174,13 @@ run. Scans with no text are read as images and cost the same.
    named by hand before reading, because the counterparty is the first axis.
 3. **Read** with the cost on screen first (`estimateCost`): the Batch API, one request per
    document, the schema and prompt cached across the run.
-4. **Review** each draft as a checklist of proposals (`proposeFromContract`): every rate with its
-   quote, new/same/changed against the tables; the appeal terms; the contacts; the payment path;
-   the plans it governs with contested BINs marked; the caveats the document raised.
-5. **Accept** what is right; it writes `network_rates`, `mac_appeal_terms`, `pbm_contacts`,
-   `payment_routing`, `payer_links`, each row carrying the document and the quote.
+4. **Apply everything certain** (`applyAllReads`): one press writes every rate that carries its
+   sentence, the appeal terms, contacts and payment paths, and every plan link no other document
+   disputes (a BIN and PCN, a network id, or a BIN printed nowhere else), then attributes the
+   claims. Unnamed documents are named from what they read, in the payer pages' canonical
+   spelling (`pbmResolver`). Each row carries the document and the quote.
+5. **Decide what is left**: a BIN printed in two documents. Review on that document shows both
+   (`proposeFromContract`), with the PCNs and the claim counts; ticking one writes the link.
 6. **Group** the third parties by counterparty (`groupByCounterparty`): one page per payer with
    its chain of documents, its rates, its people, its payment path, its appeal terms.
 7. **Price and appeal**: with links applied, every claim is priced on its contract; the shortfalls

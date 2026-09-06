@@ -123,13 +123,14 @@ function standingOf(existing: Record<string, string | number | null> | undefined
 }
 
 /** The PBM a rate belongs to: the vendor named on the line, else the document's counterparty. */
-function pbmOf(t: ContractTermsT, vendor: string | null): string {
-  return (vendor ?? "").trim() || t.counterparty;
+function pbmOf(t: ContractTermsT, vendor: string | null, fallback: string): string {
+  return (vendor ?? "").trim() || fallback;
 }
 
-export function proposeFromContract(t: ContractTermsT, documentName: string, plans: PlanForMatch[], existing: Existing = {}): Proposals {
+export function proposeFromContract(t: ContractTermsT, documentName: string, plans: PlanForMatch[], existing: Existing = {}, opts: { pbmName?: string } = {}): Proposals {
   const sourceLabel = documentName;
-  const pbmName = t.counterparty;
+  // The payer pages are keyed on one canonical name per PBM; the document's own spelling is kept in the rows' notes.
+  const pbmName = opts.pbmName?.trim() || t.counterparty;
 
   // ── Rates: one row per line of the schedule, priced only where the sentence reads ──
   const rates: RateProposal[] = [];
@@ -141,7 +142,7 @@ export function proposeFromContract(t: ContractTermsT, documentName: string, pla
     const genericRate = r.genericBasis ? `${r.genericBasis}${/\$/.test(r.genericBasis) ? "" : fee(r.genericDispensingFee)}` : null;
     const daysSupply = r.daysSupplyMin != null || r.daysSupplyMax != null ? `${r.daysSupplyMin ?? 1}-${r.daysSupplyMax ?? ""}`.replace(/-$/, "+") : null;
     const row = {
-      pbmName: pbmOf(t, r.pbmVendor),
+      pbmName: pbmOf(t, r.pbmVendor, pbmName),
       sourceLabel,
       lineOfBusiness: t.linesOfBusiness[0] ?? "unknown",
       network: [r.network, r.costSharingTier !== "unknown" && r.costSharingTier !== "both" ? r.costSharingTier : null].filter(Boolean).join(" · ") || "all",

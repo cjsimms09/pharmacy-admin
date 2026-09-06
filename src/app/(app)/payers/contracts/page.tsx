@@ -7,7 +7,7 @@ import { audit } from "@/lib/audit";
 import { indexContracts } from "@/lib/contract-search";
 import { scanContracts } from "@/lib/reference";
 import { queueExtraction, collectExtraction } from "@/lib/contract-extract";
-import { contractLibrary, adoptUnattached, nameDocument, resetDocument, resetAll } from "@/lib/contract-docs";
+import { contractLibrary, adoptUnattached, nameDocument, resetDocument, resetAll, applyAllReads } from "@/lib/contract-docs";
 import { PageHeader, Card, Notice, Empty, Figure, BackLink } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import { ConfirmButton } from "@/components/confirm-button";
@@ -112,6 +112,29 @@ export default async function ContractsPage({ searchParams }: { searchParams: Pr
     }
   }
 
+  /** Everything certain from every read document, onto the payer pages and the plans, in one pass. */
+  async function applyAll() {
+    "use server";
+    const u = await requireManager();
+    try {
+      const r = await applyAllReads(u);
+      await audit({ action: "contracts.apply.all", userId: u.id, userName: u.name, details: `${r.documents} documents: ${r.rates} rates, ${r.appeals} appeal terms, ${r.contacts} contacts, ${r.routing} payment paths, ${r.links} plan links, ${r.claims} claims attributed; ${r.decisions.length} with decisions left` });
+      revalidatePath("/payers");
+      revalidatePath("/payers/contracts");
+      revalidatePath("/claims");
+      redirect(
+        "/payers/contracts?ok=" +
+          encodeURIComponent(
+            `${r.documents} document${r.documents === 1 ? "" : "s"} applied: ${r.rates} rate${r.rates === 1 ? "" : "s"}, ${r.appeals} appeal term${r.appeals === 1 ? "" : "s"}, ${r.contacts} contact${r.contacts === 1 ? "" : "s"}, ${r.routing} payment path${r.routing === 1 ? "" : "s"}, ${r.links} plan link${r.links === 1 ? "" : "s"} (${r.claims} claim${r.claims === 1 ? "" : "s"} now attributed)${r.named ? `; ${r.named} named from what was read` : ""}.` +
+              (r.decisions.length ? ` Left for you, a BIN printed in more than one document: ${r.decisions.map((d) => `${d.documentName} (${d.contested})`).join(", ")} — open Review on each.` : " Nothing left to decide."),
+          ),
+      );
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/payers/contracts?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not apply."));
+    }
+  }
+
   /** One document on its own: the way to prove the run on a few cents before the library goes. */
   async function readOne(fd: FormData) {
     "use server";
@@ -182,6 +205,16 @@ export default async function ContractsPage({ searchParams }: { searchParams: Pr
                 </form>
               )}
               {queued.length > 0 && <form action={collect}><SubmitButton className="btn btn-primary" pendingLabel="Collecting…">Collect the results</SubmitButton></form>}
+              {read_.length > 0 && queued.length === 0 && (
+                <form action={applyAll}>
+                  <ConfirmButton
+                    className="btn btn-primary"
+                    message={`Apply everything certain from ${read_.length} read document${read_.length === 1 ? "" : "s"} to the payer pages and the plans? Rates with their sentence, appeal terms, contacts, payment paths, and plan links no other document disputes. A BIN printed in two documents is left for you.`}
+                  >
+                    Apply everything certain
+                  </ConfirmButton>
+                </form>
+              )}
             </>
           ) : undefined
         }
@@ -212,7 +245,8 @@ export default async function ContractsPage({ searchParams }: { searchParams: Pr
           <li><b>Name what is unnamed.</b> The counterparty is the first axis; a document the read cannot name is still yours to name.</li>
           <li><b>Read one first.</b> “Read this one” on the most important exhibit costs a few cents and proves the whole path: the read, the collect, the review, the accept. Then read the library.</li>
           <li><b>Read with Claude.</b> One request per document through the Batch API, the cost shown first and refused if it would carry the month past the ceiling. A document over {100} pages is not sent and is named; split it. It runs while the pharmacy is closed; collect the results within a month.</li>
-          <li><b>Review and accept.</b> Each draft opens as a checklist: rates, appeal terms, contacts, the payment path, and the plans it governs, each with the contract's own sentence. What you accept is written; what you do not is not.</li>
+          <li><b>Apply everything certain.</b> One press writes every rate that carries its sentence, the appeal terms, contacts and payment paths, and every plan link no other document disputes, then attributes the claims. Unnamed documents are named from what they read, in the payer pages' own spelling.</li>
+          <li><b>Decide what is left.</b> A BIN printed in two documents is the one thing not decided for you. Review on that document shows both, with the PCNs and the claims on each.</li>
         </ol>
       </Card>
 

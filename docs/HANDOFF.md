@@ -126,6 +126,13 @@ was everything after the draft. Pure and tested now:
       as a checklist; accept writes `network_rates`, `mac_appeal_terms`, `pbm_contacts`,
       `payment_routing`, `payer_links`, then `applyLinksToClaims`). `contract-docs.ts` is the
       server side. Driven end to end with `AI_MOCK=1` on a scratch database. Linked from Payers.
+      Since then: "Apply everything certain" (`applyAllReads`) writes every certain row from every
+      read document in one press and names unnamed documents canonically; counterparties resolve
+      through `pbmResolver()`; the run respects the API's page, size and batch limits, checks the
+      ceiling first, records its tokens for the spend page, and names a truncated answer; "Read
+      this one" proves the path on one document. The pharmacy's own payer list
+      (`data/reference/payer_listing.csv`, `payer-listing.ts`) names 80 BINs and attributes the
+      claims held.
 - [ ] **`appeal-packet.ts`**: `buildPacket()` assembles a MAC appeal from the claim, the contract
       figure, the invoice line, the PBM's terms and the deadline, or refuses with every reason.
       **Page to build:** an appeals queue under `/claims`: claims paid under the contract figure
