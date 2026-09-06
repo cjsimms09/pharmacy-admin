@@ -439,9 +439,17 @@ export default async function InvoicesPage({
       redirect(
         "/inventory/invoices?ok=" +
           encodeURIComponent(
-            r.moved === 0
-              ? `${r.checked} invoice${r.checked === 1 ? "" : "s"} read again; every one of them is an invoice.${r.unreadable ? ` ${r.unreadable} could not be read as text — those were left alone.` : ""}`
-              : `${r.moved} taken out of the invoice file: ${r.found.map((f) => `${f.supplier ?? "a supplier"} ${f.kind === "rebate_report" ? "rebate breakdown" : f.kind === "credit_memo" ? "credit memo" : "statement of account"}`).join(", ")}. They are filed under supplier statements, and everything read off them as purchases is gone.`,
+            [
+              r.moved === 0
+                ? `${r.checked} invoice${r.checked === 1 ? "" : "s"} read again; every one of them is an invoice.${r.unreadable ? ` ${r.unreadable} could not be read as text — those were left alone.` : ""}`
+                : `${r.moved} taken out of the invoice file: ${r.found.map((f) => `${f.supplier ?? "a supplier"} ${f.kind === "rebate_report" ? "rebate breakdown" : f.kind === "credit_memo" ? "credit memo" : "statement of account"}`).join(", ")}. They are filed under supplier statements, and everything read off them as purchases is gone.`,
+              // Said plainly, because this is the row that nothing on the page could reach.
+              r.removedOrphans > 0
+                ? `${r.removedOrphans} invoice record${r.removedOrphans === 1 ? " whose document had" : "s whose documents had"} already been deleted ${r.removedOrphans === 1 ? "was" : "were"} removed — ${r.removedOrphans === 1 ? "it was" : "they were"} still counting as purchases with nothing behind ${r.removedOrphans === 1 ? "it" : "them"}.`
+                : "",
+            ]
+              .filter(Boolean)
+              .join(" "),
           ),
       );
     } catch (e) {

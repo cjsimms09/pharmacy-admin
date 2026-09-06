@@ -10,6 +10,7 @@ import { looksLikeOnHand } from "./on-hand";
 import { looksLikeRxRescueCredit } from "./rxrescue-credit";
 import { pdfText } from "./pdf-text";
 import { looksLikeRebateReport } from "./rebate-report";
+import { isDrillDownText } from "./drill-down-read";
 import { ALLOWED_MIME } from "./files";
 
 /**
@@ -47,8 +48,7 @@ const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
  * the pharmacy receives.
  */
 export function looksLikeDrillDown(text: string, fileName = ""): boolean {
-  if (/purchase[_\s-]*drill[_\s-]*down/i.test(fileName)) return true;
-  return /GCR/.test(text) && /OS\/Rx/.test(text);
+  return isDrillDownText(text, fileName);
 }
 
 /** Reads just the header row, whatever the format. Returns [] for anything unreadable. */

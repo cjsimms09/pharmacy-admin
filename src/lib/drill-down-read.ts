@@ -139,6 +139,19 @@ function columns(items: PdfItem[]): number[] {
  * first, the ratio columns second — so the two are read separately and zipped by position. Row
  * order is document order within a column, which is the only ordering this page offers.
  */
+/**
+ * Whether some text is a Purchase Drill Down.
+ *
+ * It lives here rather than in the mailbox router because two other places need it: the router,
+ * to file an incoming one, and the invoice backlog, which had been offering the pharmacy its own
+ * daily purchase report as an invoice waiting to be filed — with a Delete button beside it that
+ * would have taken the month's GCR readings with it.
+ */
+export function isDrillDownText(text: string, fileName = ""): boolean {
+  if (/purchase[_\s-]*drill[_\s-]*down/i.test(fileName)) return true;
+  return /GCR/.test(text) && /OS\/Rx/.test(text);
+}
+
 export function readDrillDown(buf: Buffer): DrillRead {
   return parseDrillDown(pdfItems(buf), pdfText(buf));
 }

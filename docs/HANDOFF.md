@@ -16,7 +16,7 @@ it and said so on the pull request. The owner reads this too.
 Done by the pharmacy session at `3c2c18c`: the statement selects the band (the daily figure is
 shown as a position, with the gap to the scrubbed figure carried live); invoices de-duplicate on
 the supplier's number and date; the database-backed tests use a migrated scratch file; gitleaks
-has `pull-requests: read`. Migrations `0062` and `0063` are theirs; the recommendation log and the plan PCN are `0069` (their `0064`–`0068` came first). Both sessions built
+has `pull-requests: read`. Migrations `0062` and `0063` are theirs; the recommendation log and the plan PCN are `0069` (their `0064`–`0068` came first), merged in PR #3; the search column on `contract_text` is `0070`, on the follow-up pull request. Both sessions built
 the shelf and order-minimum pieces on the same night; the cloud session's `lean-stock.ts` and
 `order-basket.ts` were withdrawn for the pharmacy session's `usage.ts`, `on-hand.ts`,
 `order-plan.ts` and `lean-shelf.ts`, which are wired and have a real on-hand reader.
