@@ -1,7 +1,26 @@
-import { test, describe } from "node:test";
+import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { SOON_DAYS, DELIVERY_GRACE_DAYS } from "../src/lib/alerts";
-import { findAnything } from "../src/lib/find";
+/*
+ * Nothing here is imported at the top.
+ *
+ * Both of these modules reach the database, and the connection is opened the moment either is first
+ * imported — reading whatever `DATABASE_PATH` said at that instant. A static import therefore fixes
+ * the database before any hook can point it somewhere safe, which is why these tests passed for
+ * whoever had run the migrator and failed for everybody else, continuous integration included.
+ */
+let findAnything: typeof import("../src/lib/find").findAnything;
+let SOON_DAYS: number;
+let DELIVERY_GRACE_DAYS: number;
+let cleanUpDb: (() => void) | null = null;
+
+before(async () => {
+  const { useScratchDb } = await import("./support/scratch-db");
+  cleanUpDb = await useScratchDb();
+  ({ findAnything } = await import("../src/lib/find"));
+  ({ SOON_DAYS, DELIVERY_GRACE_DAYS } = await import("../src/lib/alerts"));
+});
+
+after(() => cleanUpDb?.());
 
 /**
  * The thresholds that decide what is allowed to interrupt somebody.

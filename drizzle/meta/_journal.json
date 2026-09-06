@@ -439,8 +439,15 @@
     {
       "idx": 62,
       "version": "6",
-      "when": 1788671000344,
-      "tag": "0062_perpetual_black_tom",
+      "when": 1788671165129,
+      "tag": "0062_fair_loki",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "6",
+      "when": 1788672142729,
+      "tag": "0063_faithful_vulcan",
       "breakpoints": true
     }
   ]

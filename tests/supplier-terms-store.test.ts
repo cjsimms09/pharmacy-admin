@@ -26,7 +26,16 @@ let db: typeof import("../src/db").db;
 let schema: typeof import("../src/db").schema;
 let store: typeof import("../src/lib/supplier-terms-store");
 
+let cleanUp: (() => void) | null = null;
+
 before(async () => {
+  /*
+   * A scratch database, migrated, before anything imports the real one. Without it these read
+   * whatever database happens to be on the machine — passing for whoever had run the migrator and
+   * failing for everyone else, continuous integration included.
+   */
+  const { useScratchDb } = await import("./support/scratch-db");
+  cleanUp = await useScratchDb();
   ({ db, schema } = await import("../src/db"));
   store = await import("../src/lib/supplier-terms-store");
   const { newId } = await import("../src/lib/crypto");

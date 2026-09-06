@@ -13,6 +13,11 @@ it and said so on the pull request. The owner reads this too.
 
 ### For the pharmacy session (from the cloud session, PR #3)
 
+Done by the pharmacy session at `3c2c18c`: the statement selects the band (the daily figure is
+shown as a position, with the gap to the scrubbed figure carried live); invoices de-duplicate on
+the supplier's number and date; the database-backed tests use a migrated scratch file; gitleaks
+has `pull-requests: read`. Migration `0062` is theirs; the recommendation log is `0063`.
+
 - [ ] **Hold every new figure to `docs/reference/data-dictionary.md`** before it is used: unit,
       source, "use for", "never for". §8 names the ten double-application traps; a module that
       trips one is wrong even when its arithmetic is right.
@@ -21,7 +26,7 @@ it and said so on the pull request. The owner reads this too.
       `/purchasing`, `/claims`, `/payers` are behind the "extra sections" flag and absent from
       `nav.ts`; Today's "needs you" is compliance only. The profit side must be one page and the
       first thing seen (`docs/reference/profit-engine.md` §4).
-- [ ] **Remember and score the advice.** Migration `0062` adds `recommendation_log`. Call
+- [ ] **Remember and score the advice.** Migration `0063` adds `recommendation_log`. Call
       `rememberRecommendations(rows)` from `recommendation-store.ts` where `moneyFound()` is
       built; show each row's age from `ages`; add "acted" / "not doing this" buttons calling
       `markRecommendation`; `measureSwitch` scores a switch-NDC entry on the claims since. The
@@ -47,9 +52,6 @@ it and said so on the pull request. The owner reads this too.
       `dispensed-at-a-loss` sum over every claim held and are labelled "a month"; after ninety
       days of feed they will say three times the truth. `perMonthCents(amount, spanDays(from, to))`
       in `recommendations.ts` does it; the claims' first and last `dateFilled` give the span.
-- [ ] **Let the statement select the band, not the drill-down**, until the scheduled drill-down
-      carries McKesson's own exclusions (`rebate-rates.ts`; `buying-logic.md` Rule 3). Today's
-      precedence puts the pharmacy in the bottom band when McKesson pays the top one.
 - [ ] **Extend `ReadPurchaseDrillDown`** to the fields in `drill-down.ts` `FIELDS_WANTED` and run
       `checkMonth` after the read; the prompt's "Purchase Summary by Month" is titled "Purchase
       Drill by Month" on the report.
@@ -62,9 +64,7 @@ it and said so on the pull request. The owner reads this too.
       `supplier_price_history` table; `supplier_items` stays "current".
 - [ ] **One row per period for the rebate statement and the drill-down position**
       (`data-audit.md` §3.2, §3.3), instead of settings JSON and `rebate_statement_json`.
-- [ ] **Invoice de-duplication** on (supplier_id, invoice number, invoice date) (`data-audit.md` §3.8).
-- [ ] **CI**: `secret-scan.yml` needs `pull-requests: read`; the database-backed tests need a
-      migrated scratch database in their `before` hook.
+
 
 ### For the cloud session (from the pharmacy session)
 
@@ -241,7 +241,7 @@ id only), and twelve further uses of the data ranked by value against readiness.
 now delegates to `product-key.ts`, which it had duplicated.
 
 ### Files this branch touched
-`src/db/schema.ts`, `drizzle/0048_*`, `drizzle/0049_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down,recommendations,recommendation-log,recommendation-store,reimbursement-fit,band-strategy}.ts` (new), `drizzle/0062_*`,
+`src/db/schema.ts`, `drizzle/0048_*`, `drizzle/0049_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down,recommendations,recommendation-log,recommendation-store,reimbursement-fit,band-strategy}.ts` (new), `drizzle/0063_*`,
 `src/lib/{claims,rx-transactions,suppliers,suppliers-registry,pioneer-catalog,invoices,nadac-fetch,settings}.ts`,
 `src/app/(app)/suppliers/page.tsx`, `src/app/(app)/suppliers/[id]/terms/page.tsx` (new),
 `src/app/(app)/inventory/invoices/page.tsx`, `src/app/(app)/nadac/page.tsx`, `src/app/(app)/claims/page.tsx`,

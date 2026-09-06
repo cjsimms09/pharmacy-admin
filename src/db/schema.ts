@@ -1386,6 +1386,15 @@ export const nadacPrices = sqliteTable(
     // no set of every key in memory, no lookup per row, and a file loaded twice adds nothing.
     uniqueIndex("nadac_ndc_eff_idx").on(t.ndc11, t.effectiveOn),
     index("nadac_file_idx").on(t.fileAsOf),
+    /*
+     * The index every price lookup actually needs.
+     *
+     * NADAC is the largest table here — every NDC the federal file carries, at every date it has
+     * ever carried one, growing by a file a week. It was indexed only by the file it came from,
+     * which is the one thing nothing queries by; asking for a drug's price meant reading all of it.
+     * Keyed by NDC and date, "what did this cost on the day it was dispensed" is a seek.
+     */
+    index("nadac_ndc_idx").on(t.ndc11, t.effectiveOn),
   ],
 );
 
