@@ -25,10 +25,12 @@ the shelf and order-minimum pieces on the same night; the cloud session's `lean-
       source, "use for", "never for". §8 names the ten double-application traps; a module that
       trips one is wrong even when its arithmetic is right.
 
-- [ ] **A Money group in the navigation, and the top three money lines on Today.** `/money`,
-      `/purchasing`, `/claims`, `/payers` are behind the "extra sections" flag and absent from
-      `nav.ts`; Today's "needs you" is compliance only. The profit side must be one page and the
-      first thing seen (`docs/reference/profit-engine.md` §4).
+- [ ] **The top three money lines on Today, and the sidebar filtered on the flag.** The Money
+      group is in (thank you). Two things remain: `nav.ts` lists `/claims`, `/payers/performance`
+      and `/purchasing` whatever the flag, and each calls `requireReimbursement()`, so with the
+      flag off three sidebar links silently land on Today; and Today's "needs you" is still
+      compliance only. The profit side must be the first thing seen
+      (`docs/reference/profit-engine.md` §4; `design-audit.md` §3.3).
 - [ ] **Remember and score the advice.** Migration `0064` adds `recommendation_log`. Call
       `rememberRecommendations(rows)` from `recommendation-store.ts` where `moneyFound()` is
       built; show each row's age from `ages`; add "acted" / "not doing this" buttons calling
@@ -74,6 +76,46 @@ the shelf and order-minimum pieces on the same night; the cloud session's `lean-
       `supplier_price_history` table; `supplier_items` stays "current".
 - [ ] **One row per period for the rebate statement and the drill-down position**
       (`data-audit.md` §3.2, §3.3), instead of settings JSON and `rebate_statement_json`.
+
+**From the design audit** (`docs/reference/design-audit.md`; the page inventory is §7). Ordered
+by what changes the owner's morning most. Each is small on its own; none needs a migration.
+
+- [ ] **The sidebar bug above**, first: filter `NAV` items on the flag in `nav.tsx`, or drop
+      the flag (design-audit §6).
+- [ ] **Row actions everywhere** (§7.1): `/expenses` bills, `/inventory/discrepancies`,
+      `/staff/rotations`, `/plans`, `/payers/[pbm]` contacts, rates and documents, `/deliveries`
+      days and invoices, `/settings/backups` archives, and delete-or-retire on `/suppliers`.
+      `/agreements` is the model: Edit and Delete on the row, a confirmation that names what
+      goes with it. Records the law keeps (invoices, C2 records) retire with a reason.
+- [ ] **One feedback helper and one key** (§7.2): `?ok=` everywhere, and a success notice on
+      the nine error-only forms (`/cqi/*/new`, `/cqi/import*`, `/intake/[id]`, `/reports`,
+      `/settings/updates`, `/money/monthly`, `/staff/new-hire/pack`).
+- [ ] **One button system** (§7.3): replace the forty-odd hand-rolled `bg-ink` and bare-link
+      buttons with `btn`, `btn-primary`, `btn-danger`; give `ConfirmButton` a default class.
+      `/nadac`, `/remits/mtf`, `/plans`, `/payers` have no `btn` at all.
+- [ ] **One page shape** (§3.1, §3.2): `PageHeader` on the six real screens without one; `Card`
+      in place of the raw `<h2>` on `/settings`, `/nadac`, `/remits/mtf`, `/purchasing`, `/cqi`;
+      explanatory prose behind a "How this works" disclosure, one line left in place. Delete the
+      unused `.section*` classes or use them.
+- [ ] **Tables get tools** (§3.4): a `DataTable` component (sort, filter box, sticky head,
+      "show 50 more", right-aligned money with `tabular-nums`, trailing row menu) and use it on
+      `/purchasing`, `/payers/performance`, `/claims`, `/inventory/invoices`; wrap the fourteen
+      unwrapped tables in the meantime.
+- [ ] **Forms out of the flow** (§3.5): "Add a supplier", "Load a price file", "Add an invoice
+      by hand", "Create login" become a header button opening a drawer or its own page.
+- [ ] **Today leads with money** (§3.3): scoreboard, then the top three rows of `moneyFound()`
+      with amount and action, then "Needs you", then compliance folded into one card with a count.
+- [ ] **Settings as tabs** (§4): Pharmacy, Identifiers, Logo, Claude, Logins, Network, Backups;
+      `/nadac` reduced to one status line, one Fetch button, coverage figures and the weeks table,
+      the rest behind "Advanced".
+- [ ] **Colour semantics and identity** (§3.8, §3.10): green is the accent and "ok", amber
+      "worth checking", red "money the wrong way" or "late"; add an `info` tone; a mark and the
+      pharmacy's logo in the sidebar; `font-variant-numeric: tabular-nums` on `.num`.
+- [ ] **Link the orphans** (§7.4): `/intake` has no inbound link; `/nadac`, `/plans`,
+      `/payers`, `/claims/floor`, `/purchasing/shelf`, `/cqi/import`, `/compliance/register`,
+      `/manual/decisions` need a place in a group or a link from their parent page.
+- [ ] **Accessibility and width** (§6): helper grey `#7c8683` on white fails AA at 12 px; focus
+      rings; `th scope`; a collapsible sidebar under 1,100 px.
 
 
 ### For the cloud session (from the pharmacy session)

@@ -19,7 +19,8 @@ Rules that hold on both sides:
 - **Nothing is inferred where a document could say it**, and every reader that decides money is
   checked by arithmetic before anything is stored. Every figure has one meaning, one unit and a
   list of what it must never be used for: `docs/reference/data-dictionary.md`. The reasoning is
-  in `docs/reference/buying-logic.md`, `data-audit.md` and `profit-engine.md`.
+  in `docs/reference/buying-logic.md`, `data-audit.md` and `profit-engine.md`; the site's design
+  rules and page inventory are in `docs/reference/design-audit.md`.
 - Migrations are additive and numbered; the second session to merge renumbers its own.
 - Files the other session has changed on an open branch are listed in `docs/HANDOFF.md`; say so
   on the pull request before editing one.
