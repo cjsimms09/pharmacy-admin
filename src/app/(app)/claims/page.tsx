@@ -264,99 +264,96 @@ export default async function ClaimsPage({
         daily report said on the day, a fill sits on the loss list because of a payment that has
         since arrived — and the plan that underpaid is judged on money it never sent.
       */}
-      {laterMoney.length > 0 && (
-        <Notice kind="ok">
-          <b>
-            {formatCents(laterMoney.reduce((n, x) => n + x.amountCents, 0))} has reached these claims since they were
-            transmitted
-          </b>{" "}
-          — {laterMoney.map((x) => `${x.payments} from ${x.source.toUpperCase()}`).join(", ")}. It is added to the fill it
-          belongs to and kept apart from what the plan itself paid.
-          {laterMoney.some((x) => x.unmatched > 0) && (
-            <>
-              {" "}
-              {laterMoney.reduce((n, x) => n + x.unmatched, 0)} of them name a prescription this site has not loaded yet;
-              they attach themselves when it arrives.
-            </>
-          )}
-        </Notice>
-      )}
-
       {/*
-        Money a plan has already promised and not yet sent.
+        One line per thing, with the amount and the way to it.
 
-        This is not inferred from a gap — the report now carries the figure in its own column,
-        because the plan's adjudication response says what the manufacturer share will be. Until the
-        facilitator pays it the fill reads as a loss for the whole amount, and the loss list gives
-        no way to tell a rate worth arguing about from a bill nobody has paid yet.
+        This was five paragraphs of prose stacked above the first number — each one written when it
+        was the only one on the screen, and together a wall nobody could read. The explanations are
+        still worth having and are still here; they are just folded away, because "what do I do
+        today" and "why does this work like that" are different questions and only one of them gets
+        asked every morning.
       */}
-      {flags.awaitingFacilitator.length > 0 && (
-        <Notice kind="warn">
-          <b>{formatCents(flags.awaitingFacilitatorCents)} is promised on these claims and has not been paid.</b>{" "}
-          {flags.awaitingFacilitator.length} fill{flags.awaitingFacilitator.length === 1 ? "" : "s"} where the plan named
-          a facilitator payment at adjudication — biggest is Rx {flags.awaitingFacilitator[0].rxNumber}
-          {flags.awaitingFacilitator[0].fillNumber !== null ? `-${flags.awaitingFacilitator[0].fillNumber}` : ""}
-          {flags.awaitingFacilitator[0].itemName ? ` (${flags.awaitingFacilitator[0].itemName})` : ""} at{" "}
-          {formatCents(flags.awaitingFacilitator[0].facilitatorOutstandingCents ?? 0)}. Every one of them shows as a loss
-          below until the money lands, and none of them is a rate to argue about. They post themselves against the fill
-          when <Link href="/remits/mtf" className="underline">the facilitator feed</Link> brings the payment in.
-        </Notice>
-      )}
-
-      {/*
-        Revenue the report booked that this site did not find in the row.
-
-        PioneerRx computes its gross profit from the same row we read, so a gap means it counted
-        money we did not — and the amount is the only part of that this site actually knows. On one
-        Jardiance fill the gap was $146.18 of facilitator money the plan promised at adjudication.
-        On a Losartan fill it was $5.56, which no facilitator was ever going to pay and is far more
-        likely to be a patient total sitting in a column this reader is not picking up.
-
-        So the gap is stated and the cause is not. Calling every one of them a facilitator payment
-        built a queue of receivables that were never coming, which is the same mistake as the red
-        "the arithmetic is broken" banner it replaced, made in the opposite direction.
-      */}
-      {/*
-        The standing tripwire, said in one line whether it is good news or bad.
-
-        Every arithmetic error this site has had was found by the pharmacist reading a printout and
-        knowing the real answer. That is the wrong way round. This states the identity the report
-        itself guarantees and reports whether it holds — so a mistake announces itself here on the
-        day it happens, instead of being discovered in a PDF a fortnight later.
-      */}
-      <Notice kind={flags.balance.balances ? "ok" : "crit"}>
-        {flags.balance.balances ? (
-          <>
-            <b>The books balance.</b> This site makes these dispensings{" "}
-            {formatCents(flags.balance.ourMarginCents)}, and PioneerRx&rsquo;s own gross profit over the same rows comes
-            to {formatCents(flags.balance.reportMarginCents)}
-            {flags.balance.laterCents !== 0 ? ` once the ${formatCents(flags.balance.laterCents)} that arrived after the day is taken out` : ""}
-            . Two answers worked out independently, agreeing to the cent.
-            {flags.balance.unchecked > 0 && ` ${flags.balance.unchecked} fills carried nothing to check against.`}
-          </>
-        ) : (
-          <>
-            <b>
-              The books do not balance: {formatCents(Math.abs(flags.balance.differenceCents))}{" "}
-              {flags.balance.differenceCents > 0 ? "more" : "less"} than the report, across{" "}
-              {flags.balance.fillsOff} fill{flags.balance.fillsOff === 1 ? "" : "s"}.
-            </b>{" "}
-            This site makes them {formatCents(flags.balance.ourMarginCents)} and PioneerRx makes them{" "}
-            {formatCents(flags.balance.reportMarginCents)}. Both are computed from the same rows, so a column is not
-            where this reader thinks it is — and every figure on this page drawn from those rows is wrong the same way.
-            {flags.unreconciled.length > 0 && (
-              <>
-                {" "}
-                Worst is Rx {flags.unreconciled[0].rxNumber}
-                {flags.unreconciled[0].fillNumber !== null ? `-${flags.unreconciled[0].fillNumber}` : ""}
-                {flags.unreconciled[0].itemName ? ` (${flags.unreconciled[0].itemName})` : ""}, out by{" "}
-                {formatCents(Math.abs(flags.unreconciled[0].unreconciledCents ?? 0))}. Open <b>Why is this a loss?</b> on
-                it below and send me the box.
-              </>
-            )}
-          </>
-        )}
-      </Notice>
+      <Todo
+        items={[
+          flags.awaitingFacilitator.length > 0
+            ? {
+                key: "promised",
+                tone: "warn" as const,
+                amount: formatCents(flags.awaitingFacilitatorCents),
+                title: `promised by a plan and not yet paid — ${flags.awaitingFacilitator.length} fills`,
+                href: "/remits/mtf",
+                action: "Facilitator feed",
+                why: `The plan named the payment when it adjudicated the claim; the money comes weeks later. Every one of these shows as a loss below until it lands, and none of them is a rate to argue about. Biggest is Rx ${flags.awaitingFacilitator[0].rxNumber}${flags.awaitingFacilitator[0].fillNumber !== null ? `-${flags.awaitingFacilitator[0].fillNumber}` : ""}${flags.awaitingFacilitator[0].itemName ? ` (${flags.awaitingFacilitator[0].itemName})` : ""} at ${formatCents(flags.awaitingFacilitator[0].facilitatorOutstandingCents ?? 0)}.`,
+              }
+            : null,
+          !flags.balance.balances
+            ? {
+                key: "balance",
+                tone: "crit" as const,
+                amount: formatCents(Math.abs(flags.balance.differenceCents)),
+                title: `the books do not balance — ${flags.balance.fillsOff} fill${flags.balance.fillsOff === 1 ? "" : "s"} disagree with the report`,
+                href: "#loss",
+                action: "See them",
+                why: `This site makes these dispensings ${formatCents(flags.balance.ourMarginCents)} and PioneerRx makes them ${formatCents(flags.balance.reportMarginCents)}. Both are computed from the same rows, so a column is not where this reader thinks it is.${flags.unreconciled.length > 0 ? ` Worst is Rx ${flags.unreconciled[0].rxNumber}${flags.unreconciled[0].fillNumber !== null ? `-${flags.unreconciled[0].fillNumber}` : ""}${flags.unreconciled[0].itemName ? ` (${flags.unreconciled[0].itemName})` : ""}, out by ${formatCents(Math.abs(flags.unreconciled[0].unreconciledCents ?? 0))} — open "Why is this a loss?" on it and send me the box.` : ""}`,
+              }
+            : {
+                key: "balance",
+                tone: "ok" as const,
+                amount: "",
+                title: "The books balance — this site and the report agree to the cent",
+                why: `This site makes these dispensings ${formatCents(flags.balance.ourMarginCents)} and PioneerRx's own gross profit over the same rows comes to ${formatCents(flags.balance.reportMarginCents)}. Two answers worked out independently, agreeing exactly.`,
+              },
+          flags.undetermined > 0
+            ? {
+                key: "plans",
+                tone: "warn" as const,
+                amount: formatCents(flags.underFeeUndeterminedShortfallCents),
+                title: `may or may not be owed — ${flags.undetermined} claims on plans nobody has classified`,
+                href: "/plans",
+                action: "Classify",
+                why: "A low payment is only a shortfall on a plan the Kansas floor reaches; on a cash discount programme it is simply the price. Until each plan is told apart, nothing here can be claimed or dismissed.",
+              }
+            : null,
+          flags.unlistedBins.length > 0
+            ? {
+                key: "bins",
+                tone: "warn" as const,
+                amount: "",
+                title: `${flags.unlistedClaims} claims on ${flags.unlistedBins.length} BINs with no contract on file`,
+                href: "/payers",
+                action: "Payers",
+                why: `Health Mart Atlas does not publish these at all, so nothing they pay can be checked against a rate: ${flags.unlistedBins.join(", ")}.`,
+              }
+            : null,
+          laterMoney.length > 0
+            ? {
+                key: "later",
+                tone: "ok" as const,
+                amount: formatCents(laterMoney.reduce((n, x) => n + x.amountCents, 0)),
+                title: `has reached these claims since they were transmitted${laterMoney.some((x) => x.unmatched > 0) ? ` — ${laterMoney.reduce((n, x) => n + x.unmatched, 0)} not yet matched to a claim` : ""}`,
+                why: `From ${laterMoney.map((x) => `${x.payments} ${x.source.toUpperCase()}`).join(", ")}. Added to the fill it belongs to and kept apart from what the plan itself paid. Anything naming a prescription this site has not loaded attaches itself when it arrives.`,
+              }
+            : null,
+          flags.unpriceable > 0
+            ? {
+                key: "noqty",
+                tone: "warn" as const,
+                amount: "",
+                title: `${flags.unpriceable} claims carry no dispensed quantity, so they cannot be priced`,
+                why: "That column comes through blank on the current PioneerRx export. Nothing can be measured against a contract or against NADAC without it.",
+              }
+            : null,
+          flags.ambiguousPayer > 0
+            ? {
+                key: "ambiguous",
+                tone: "warn" as const,
+                amount: "",
+                title: `${flags.ambiguousPayer} claims sit on a BIN shared by more than one PBM`,
+                why: "The payer name did not settle which. Read the PCN or network ID off the claim to decide — they are not attached to a guess.",
+              }
+            : null,
+        ].filter((x): x is NonNullable<typeof x> => x !== null)}
+      />
 
       {/*
         What is on screen, and how to ask for something else.
@@ -500,8 +497,13 @@ export default async function ClaimsPage({
             </Notice>
           )}
 
-          <h2 className="mt-8 text-sm font-semibold">By payer</h2>
-          <p className="mb-2 text-xs text-ink-3">
+          {/*
+            Folded shut. It is a reference table, not a morning read — nobody opens this screen to
+            find out how Blue Cross did across 261 fills; they open it to find out what needs doing.
+          */}
+          <details className="mt-8">
+          <summary className="cursor-pointer text-sm font-semibold">By payer — {byPayer.length} payers on these fills</summary>
+          <p className="mb-2 mt-1 text-xs text-ink-3">
             Per dispensing, on the same arithmetic as everything else on this page — one bottle counted once, the
             patient counted once. A fill two plans coordinated on cannot be split between them honestly, so it is held
             out of the profit column and shown on its own, with each plan credited only with the money it sent.{" "}
@@ -552,9 +554,14 @@ export default async function ClaimsPage({
               </tbody>
             </table>
           </div>
+          </details>
 
-          {/* ── Against the benchmark ─────────────────────────────────── */}
-          <h2 className="mt-8 text-sm font-semibold">Against NADAC + the dispensing fee</h2>
+          {/* ── Against the benchmark, also folded: it is a study, not a task ── */}
+          <details className="mt-6">
+          <summary className="cursor-pointer text-sm font-semibold">
+            Against NADAC + the dispensing fee — {nadacStanding.rows.length} dispensings measured
+            {actionable.length > 0 ? `, ${actionable.length} worth acting on` : ", none needing action"}
+          </summary>
           <p className="mt-1 text-xs text-ink-2">
             Every dispensing measured against what the federal benchmark says the drug cost, plus the greater of $10.50
             and the Kansas Medicaid dispensing fee. What is <b>true</b> of a claim and what can be <b>done</b> about it
@@ -647,7 +654,9 @@ export default async function ClaimsPage({
             </>
           )}
 
-          <h2 className="mt-8 text-sm font-semibold">Dispensed at a loss</h2>
+          </details>
+
+          <h2 id="loss" className="mt-8 text-sm font-semibold">Dispensed at a loss</h2>
           {/*
             Per dispensing, not per transmission.
 
@@ -889,13 +898,18 @@ export default async function ClaimsPage({
       {/*
         Where these claims come from, and how to feed it by hand.
 
+        Folded shut as well. "Did last night's file come in" is worth one glance, and it is one
+        glance — not the four paragraphs of plumbing it used to take to answer.
+
         It belongs on this page — the morning after, "did last night's file come in" is one glance
         here. It does not belong above the money. Anyone opening this screen is asking what the
         pharmacy made and what it is owed, and four paragraphs of plumbing before the first figure
         is how a working screen turns into a wall.
       */}
-      <section className="my-4 rounded-lg border border-line bg-surface p-4">
-        <h2 className="text-sm font-semibold">Daily claims feed</h2>
+      <details className="my-4 rounded-lg border border-line bg-surface p-4">
+        <summary className="cursor-pointer text-sm font-semibold">
+          Daily claims feed{lastImport ? ` — last file ${lastImport.fileName}` : " — nothing received yet"}
+        </summary>
         <p className="mt-1 text-xs text-ink-3">
           PioneerRx emails the <b>Rx Transaction Details By Submission Type</b> report at 6:30 each evening, named{" "}
           <span className="font-mono">Daily (date)</span>. The site recognises it by its title line, not its name. A paid
@@ -935,10 +949,10 @@ export default async function ClaimsPage({
             <><span className="badge badge-muted">waiting</span> No daily report has arrived yet. The first is due at 6:30 this evening.</>
           )}
         </div>
-      </section>
+      </details>
 
-      <section className="my-4 rounded-lg border border-line bg-surface p-4">
-        <h2 className="text-sm font-semibold">Load a file by hand</h2>
+      <details className="my-4 rounded-lg border border-line bg-surface p-4">
+        <summary className="cursor-pointer text-sm font-semibold">Load a file by hand</summary>
         <p className="mt-1 text-xs text-ink-3">
           The daily transaction report (.txt) or the Completed Prescriptions export (.xlsx or .csv). Loading the same
           file again is safe — every row is identified, so anything already held is counted rather than added twice.
@@ -947,9 +961,47 @@ export default async function ClaimsPage({
           <input type="file" name="file" accept=".xlsx,.csv,.txt" className="text-sm" />
           <button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Load</button>
         </form>
-      </section>
+      </details>
 
     </>
+  );
+}
+
+/**
+ * The day's work, one line each.
+ *
+ * The rule this screen broke: an explanation is worth writing once and reading once, and a screen
+ * that reprints it every morning stops being read at all. So each line says the amount, what it is,
+ * and where to go — and the reasoning sits behind a disclosure for the day somebody wants it.
+ */
+function Todo({
+  items,
+}: {
+  items: { key: string; tone: "ok" | "warn" | "crit"; amount: string; title: string; href?: string; action?: string; why: string }[];
+}) {
+  if (items.length === 0) return null;
+  const dot = { ok: "bg-accent", warn: "bg-warn", crit: "bg-crit" };
+  return (
+    <ul className="my-4 divide-y divide-line overflow-hidden rounded-lg border border-line bg-surface">
+      {items.map((i) => (
+        <li key={i.key} className="px-3 py-2.5">
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dot[i.tone]}`} aria-hidden />
+            {i.amount && <b className="tabular-nums">{i.amount}</b>}
+            <span className="min-w-0 flex-1 text-sm">{i.title}</span>
+            {i.href && (
+              <Link href={i.href} className="btn btn-sm shrink-0">
+                {i.action ?? "Open"}
+              </Link>
+            )}
+          </div>
+          <details className="mt-1">
+            <summary className="cursor-pointer text-[11px] text-ink-3 hover:text-accent">Why</summary>
+            <p className="mt-1 pr-8 text-xs leading-snug text-ink-2">{i.why}</p>
+          </details>
+        </li>
+      ))}
+    </ul>
   );
 }
 
