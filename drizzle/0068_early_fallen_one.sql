@@ -1,0 +1,1 @@
+ALTER TABLE `supplier_items` ADD `awp_cents` integer;

@@ -334,3 +334,76 @@ describe("the filename the pharmacy chose", () => {
     assert.equal(dateFromFileName("invoice_1004797.pdf"), null);
   });
 });
+
+// ── The export after AWP was added ──────────────────────────────────────────────────────────────
+//
+// Copied from the real file. The pharmacy added an AWP column to the report; it appears in every
+// data row and in none of the header, which is what broke reading by header position. NDC came out
+// of the money cell and the pack cell held an NDC, so 46,618 of 53,320 items were dropped and the
+// import said only that the cells were "not in a readable form".
+
+const withAwp = [
+  "﻿Supplier Catalog Item Search Results",
+  "McKesson",
+  "Supplier: McKesson",
+  "Supplier Item Number,Name,NDC,Package Size,Cost Per Unit",
+  "Rebate Pck Cost",
+  " (1) 100.00 EA,3.7706",
+  "3925302,.15ML MD MINI PMP BL MED 100DS,,38779-6254-02,",
+  " (12) 500.00 ML,8.3916",
+  '1241959,10% LMD 0.9% SOD CHL BG PFIZ12,"$5,958.61",00409-7419-03,',
+  " (1) 50.00 EA,0.0830",
+  "2552545,ACETAMOPHEN CAPL 500MG  MMP50@,$1.81,00904-6720-51,2.4900",
+  "1558907,ACETIC ACID SOL 2% TRU 15ML@,$48.00,52817-0816-15, (1) 15.00 ML,1.9993",
+  "Printed On: 9/6/2026 2:34 PM,Page 1 of 1728",
+].join("\r\n");
+
+describe("the export after AWP was added", () => {
+  test("the block is McKesson, not the label above it", () => {
+    const p = parsePioneerCatalog(withAwp);
+    assert.deepEqual(p.sections.map((s) => s.supplier), ["McKesson"]);
+  });
+
+  test("the NDC is read from the NDC, not from the column the header points at", () => {
+    const p = parsePioneerCatalog(withAwp);
+    const rows = p.sections[0].rows;
+    assert.equal(rows.length, 4, "every item is read, not dropped as unreadable");
+    const lmd = rows.find((r) => r.itemNumber === "1241959");
+    assert.equal(lmd?.ndc11, "00409741903");
+    assert.equal(lmd?.packQty, 500);
+    assert.equal(lmd?.unit, "ML");
+    assert.equal(lmd?.orderMultiple, 12);
+    assert.equal(lmd?.unitCostMicros, 8_391_600);
+  });
+
+  test("AWP is kept, quoted thousands and all, and is never taken for a cost", () => {
+    const p = parsePioneerCatalog(withAwp);
+    const rows = p.sections[0].rows;
+    assert.equal(rows.find((r) => r.itemNumber === "1241959")?.awpCents, 595_861);
+    assert.equal(rows.find((r) => r.itemNumber === "2552545")?.awpCents, 181);
+    assert.equal(rows.find((r) => r.itemNumber === "1558907")?.awpCents, 4_800);
+    // No AWP printed is null, not zero: nothing may read a missing list price as free.
+    assert.equal(rows.find((r) => r.itemNumber === "3925302")?.awpCents, null);
+  });
+
+  test("the rebated pack cost marks the item, wherever the report put it", () => {
+    const p = parsePioneerCatalog(withAwp);
+    const rows = p.sections[0].rows;
+    // On the item's own line, for an item whose pack size was pushed to a line of its own.
+    assert.equal(rows.find((r) => r.itemNumber === "2552545")?.rebated, true);
+    // An item that fitted on one line has no room left for the figure, so the report puts it on a
+    // line of its own — none is quoted here, and none is claimed.
+    assert.equal(rows.find((r) => r.itemNumber === "1558907")?.rebated, false);
+    assert.equal(rows.find((r) => r.itemNumber === "1241959")?.rebated, false);
+  });
+
+  test("split items still pair with their price line by order", () => {
+    const p = parsePioneerCatalog(withAwp);
+    const rows = p.sections[0].rows;
+    assert.equal(rows.find((r) => r.itemNumber === "3925302")?.packQty, 100);
+    assert.equal(rows.find((r) => r.itemNumber === "3925302")?.unitCostMicros, 3_770_600);
+    assert.equal(rows.find((r) => r.itemNumber === "2552545")?.packQty, 50);
+    assert.equal(rows.find((r) => r.itemNumber === "2552545")?.unitCostMicros, 83_000);
+    assert.equal(p.problems.length, 0, p.problems.join(" / "));
+  });
+});

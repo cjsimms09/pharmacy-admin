@@ -46,6 +46,14 @@ export type CatalogRow = {
   unit: "EA" | "ML" | "GM" | null;
   /** Cost per unit, as printed, in micro-dollars. Does not include rebates. */
   unitCostMicros: number | null;
+  /**
+   * Average Wholesale Price for the package, in cents, where the export carries it.
+   *
+   * Added to the report by the pharmacy. It is not what anything is bought or sold at — it is the
+   * published list figure a good many contracts still quote against — so it is stored and shown,
+   * never used as a cost.
+   */
+  awpCents: number | null;
   /** "07/26" where the description marks the lot as expiring — a short-dated deal, not a price. */
   shortDated: string | null;
   /**
@@ -174,6 +182,68 @@ const TITLE = "Supplier Catalog Item Search Results";
  */
 const SIGNATURE = "Supplier Item Number";
 
+/**
+ * What the cells after the name are, read by their shape rather than by the header.
+ *
+ * The header stopped describing the data the day the pharmacy added AWP to the report: the column
+ * appeared in every row and in none of the header, so NDC was read out of the money cell, the pack
+ * cell held an NDC, and 46,618 of 53,320 items were dropped as unreadable while the reader said
+ * only that the cells were "not in a readable form".
+ *
+ * These four shapes cannot be confused with one another, which is why they are what identify the
+ * columns now:
+ *
+ *     $84.00              money, and money in this report is only ever AWP
+ *     39328-0032-50       an NDC, and only an NDC has two hyphens between digits
+ *      (50) 10.15 ML      a package size
+ *     7.8808              a bare number: the cost when it follows a package size, else the
+ *                         rebated pack cost, which is the only other bare figure the report prints
+ *
+ * A column added anywhere in the row now costs nothing, and a column that moves is followed.
+ */
+type ItemCells = {
+  awpCents: number | null;
+  ndcRaw: string;
+  packCell: string;
+  costCell: string;
+  /** The rebated pack cost, where it landed on this line rather than one of its own. */
+  rebateCell: string;
+};
+
+function readItemCells(parts: string[], from: number): ItemCells {
+  const out: ItemCells = { awpCents: null, ndcRaw: "", packCell: "", costCell: "", rebateCell: "" };
+  for (let i = from; i < parts.length; i++) {
+    const cell = (parts[i] ?? "").trim();
+    if (!cell) continue;
+    if (MONEY.test(cell)) {
+      if (out.awpCents === null) out.awpCents = moneyCents(cell);
+      continue;
+    }
+    if (NDC.test(cell)) {
+      if (!out.ndcRaw) out.ndcRaw = cell;
+      continue;
+    }
+    if (PACK.test(cell)) {
+      if (!out.packCell) {
+        out.packCell = cell;
+        // The cost is the figure the package size is priced at, so it is the cell straight after
+        // it. Any other bare number on the line is the rebated pack cost.
+        const next = (parts[i + 1] ?? "").trim();
+        if (BARE_NUMBER.test(next)) { out.costCell = next; i++; }
+      }
+      continue;
+    }
+    if (BARE_NUMBER.test(cell) && !out.rebateCell) out.rebateCell = cell;
+  }
+  return out;
+}
+
+/** "$5,958.61" to 595861. Null where it is not money. */
+function moneyCents(cell: string): number | null {
+  const n = Number(cell.replace(/[$,\s]/g, ""));
+  return Number.isFinite(n) ? Math.round(n * 100) : null;
+}
+
 type Columns = {
   itemNumber: number;
   name: number;
@@ -205,6 +275,8 @@ const SHORT_DATED = /\((\d{2}\/\d{2})\s*EXP\)/i;
 const NDC = /^(\d{4,5})-(\d{3,4})-(\d{1,2})$/;
 const ITEM_NUMBER = /^[A-Za-z0-9][A-Za-z0-9.-]*$/;
 const BARE_NUMBER = /^\d+(\.\d+)?$/;
+/** A printed dollar figure. In this report only AWP is ever printed with a currency sign. */
+const MONEY = /^\$[\d,]+(\.\d+)?$/;
 
 /** A hyphenated NDC to the eleven-digit billing form. Unambiguous, because the hyphens are present. */
 export function ndc11FromHyphenated(s: string): string | null {
@@ -267,7 +339,9 @@ type Pending = {
   ndc11: string | null;
   /** The reason to count if ndc11 is null. */
   noNdc: string;
-  /** True where the item line carried a rebate figure in the pack column (see the comment in the loop). */
+  /** Read from the item's own line, where the export carries it. */
+  awpCents: number | null;
+  /** True where the item line carried a rebate figure of its own. */
   rebated: boolean | null;
 };
 type Price = { orderMultiple: number; packQty: number; unit: CatalogRow["unit"]; unitCostMicros: number; rebated: boolean | null };
@@ -413,9 +487,15 @@ export function parsePioneerCatalog(text: string): CatalogParse {
       continue;
     }
 
-    // A line with no separators is a supplier's name standing above its block.
+    /*
+     * A line with no separators is a supplier's name standing above its block.
+     *
+     * The report prints it twice — bare, then again as "Supplier: McKesson" — and the second form
+     * used to open a second block called "Supplier: McKesson", which matched no supplier in the
+     * register and left the first block empty. The prefix is a label, not part of the name.
+     */
     if (parts.length === 1) {
-      const supplier = canonicalSupplier(line);
+      const supplier = canonicalSupplier(line.replace(/^Supplier:\s*/i, ""));
       current = blocks.find((b) => b.supplier === supplier) ?? null;
       if (!current) {
         current = { supplier, complete: [], pending: [], prices: [] };
@@ -427,7 +507,10 @@ export function parsePioneerCatalog(text: string): CatalogParse {
 
     const at = (n: number) => (parts[n] ?? "").trim();
     const itemNumber = at(columns.itemNumber);
-    const ndcRaw = at(columns.ndc);
+    // Everything after the name is identified by shape; see readItemCells for why the header is
+    // no longer trusted to say where the NDC is.
+    const cells = readItemCells(parts, Math.max(columns.itemNumber, columns.name) + 1);
+    const ndcRaw = cells.ndcRaw;
     const ndc11 = ndc11FromHyphenated(ndcRaw);
     const noNdc = ndcRaw ? "NDC not in 5-4-2 hyphenated form" : "no NDC (supplies and other non-drug items)";
     // The hand export left the item number blank on some five thousand rows that still carried an
@@ -437,15 +520,15 @@ export function parsePioneerCatalog(text: string): CatalogParse {
     const name = at(columns.name);
     const description = name && !/^[-`.1]$/.test(name) ? name : null;
 
-    const packCell = at(columns.orderBy);
-    const costCell = at(columns.cost);
+    const packCell = cells.packCell;
+    const costCell = cells.costCell;
 
-    // Complete on one line: the pack and cost are present in their columns.
+    // Complete on one line: the pack and its cost are both here.
     if (PACK.test(packCell) && costCell) {
-      const price = readPrice(packCell, costCell, columns.rebate === null ? null : at(columns.rebate), hasRebate);
+      const price = readPrice(packCell, costCell, hasRebate ? cells.rebateCell : null, hasRebate);
       if (!price) { skip("zero or negative cost"); continue; }
       if (!ndc11) { skip(noNdc); continue; }
-      const row = toRow(current.supplier, { itemNumber, description, ndc11 }, price);
+      const row = toRow(current.supplier, { itemNumber, description, ndc11, awpCents: cells.awpCents }, price);
       if (rebateForNextLine === i) {
         row.rebated = true;
         lastCompleteHasLoneRebate = true;
@@ -462,10 +545,13 @@ export function parsePioneerCatalog(text: string): CatalogParse {
     // order. Its pack column is empty — or holds the rebate figure, which is how a rebated split
     // item is recognised. Anything else in those cells is a shape this has not seen, and is skipped
     // rather than paired with a price that may not be its own.
-    const rebateInPackColumn = hasRebate && BARE_NUMBER.test(packCell);
+    // Split across lines: this is the item half, its package size and cost arriving on their own
+    // line, by order. A bare figure left on this line is its rebated pack cost, which is how a
+    // rebated split item is recognised.
+    const rebateOnItemLine = hasRebate && cells.rebateCell !== "";
     if (!costCell && PACK.test(packCell)) { skip("item listed without a price"); continue; }
-    if (costCell || (packCell && !rebateInPackColumn)) { skip("pack or cost cell not in a readable form"); continue; }
-    current.pending.push({ itemNumber, description, ndc11, noNdc, rebated: hasRebate ? rebateInPackColumn : null });
+    if (costCell || packCell) { skip("pack or cost cell not in a readable form"); continue; }
+    current.pending.push({ itemNumber, description, ndc11, noNdc, awpCents: cells.awpCents, rebated: hasRebate ? rebateOnItemLine : null });
   }
   if (rebateForNextLine >= 0) orphanRebates++;
 
@@ -515,7 +601,7 @@ export function parsePioneerCatalog(text: string): CatalogParse {
   return { sections, printedOn, hasRebateColumn: hasRebate, skipped, reasons, problems };
 }
 
-function toRow(supplier: string, p: { itemNumber: string; description: string | null; ndc11: string }, price: Price): CatalogRow {
+function toRow(supplier: string, p: { itemNumber: string; description: string | null; ndc11: string; awpCents?: number | null }, price: Price): CatalogRow {
   const sd = p.description ? SHORT_DATED.exec(p.description) : null;
   return {
     supplier,
@@ -526,6 +612,7 @@ function toRow(supplier: string, p: { itemNumber: string; description: string | 
     packQty: price.packQty,
     unit: price.unit,
     unitCostMicros: price.unitCostMicros,
+    awpCents: p.awpCents ?? null,
     shortDated: sd ? sd[1] : null,
     rebated: price.rebated,
     productKey: p.description ? productKey(p.description).key || null : null,
