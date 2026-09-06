@@ -74,6 +74,7 @@ export type ClaimRow = {
   unmatchedReversal?: boolean;
   /** True where the pharmacy set this price itself: its cash programme, not a third party. */
   cashPlan?: boolean;
+  onAccount?: boolean;
 };
 
 export type FillPayer = {
@@ -105,6 +106,30 @@ export type Fill = {
    * under, and a number below NADAC is what it charged rather than a shortfall to claim.
    */
   cashPlan: boolean;
+  /**
+   * Billed to an account rather than collected: PioneerRx's "AR".
+   *
+   * The dispensing is ordinary — the drug left the shelf and cost what it cost — so every figure
+   * on this fill is computed exactly as any other. Only the question "has this money arrived" has
+   * a different answer, and that is what the two figures below are for.
+   */
+  onAccount: boolean;
+  /**
+   * Revenue recognised on this fill that nobody has collected yet. Zero unless it is on account.
+   *
+   * The whole of the fill's revenue, because an account sale is not part-collected: it was billed
+   * to the account instead of taken at the counter.
+   */
+  receivableCents: number;
+  /**
+   * Cost that left the shelf with nothing billed against it at all.
+   *
+   * The sharpest version of the question, and the one worth acting on this week. An account sale
+   * showing revenue is money owed and chaseable; an account sale showing *no* revenue against a
+   * real acquisition cost is a dispensing nobody has raised a charge for, and it does not appear
+   * as a debt anywhere because no debt was ever created. Null where the cost is not known.
+   */
+  unbilledCostCents: number | null;
   quantityThousandths: number | null;
   /** What every payer remitted, added. */
   remitCents: number;
@@ -337,6 +362,14 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
     const laterPaymentsCents = mine.reduce((n, p) => n + p.amountCents, 0);
 
     const revenueCents = remitCents + patientPaidCents + laterPaymentsCents;
+    /*
+     * One row on account puts the fill on account.
+     *
+     * A fill coordinated across two payers where one leg went to an account is still a fill whose
+     * money is not all in hand, and treating it as collected because the other leg was is the
+     * error that hides the balance.
+     */
+    const onAccount = rows.some((r) => r.onAccount === true);
 
     /*
      * What was promised, taken once.
@@ -398,6 +431,9 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
       payers,
       coordinated: payers.length > 1,
       cashPlan: rows.some((r) => r.cashPlan === true),
+      onAccount,
+      receivableCents: onAccount ? revenueCents : 0,
+      unbilledCostCents: onAccount && revenueCents === 0 ? acquisitionCents : null,
       quantityThousandths,
       remitCents,
       patientPaidCents,

@@ -102,6 +102,15 @@ export type PLInputs = {
   rebatesCents: number | null;
   /** Every confirmed bill in the month, already placed on the right side of the account. */
   expenses: { categoryId: string | null; categoryName: string; kind: string; amountCents: number }[];
+  /**
+   * Revenue the month earned on account and has not collected, and cost that went out unbilled.
+   *
+   * Neither changes the profit — an accrual account counts a sale when it is made, and the cash
+   * account below draws only from what was actually banked, so neither figure can leak into the
+   * wrong basis. They are here because "the month made this, and this much of it is not money yet"
+   * is the sentence that stops a good month being spent before it arrives.
+   */
+  onAccount?: { receivableCents: number; unbilledCostCents: number } | null;
 };
 
 const sum = (xs: { amountCents: number }[]) => xs.reduce((n, x) => n + x.amountCents, 0);
@@ -143,6 +152,20 @@ export function monthlyPL(i: PLInputs): MonthlyPL {
         label: "Facilitator and top-off payments",
         amountCents: i.laterMoneyCents,
         note: "Earned on claims already dispensed and paid weeks later. Counted here because the month earned it.",
+      });
+    }
+    /*
+     * Not a line, a note against the revenue above.
+     *
+     * On an accrual basis an account sale is revenue the moment it is made, which is right and is
+     * also how a profitable month runs out of money. Adding it again as a line would double the
+     * sale; leaving it unsaid lets the profit be read as cash.
+     */
+    if (i.onAccount && i.onAccount.receivableCents > 0) {
+      revenue.push({
+        label: "— of which on account, not yet collected",
+        amountCents: 0,
+        note: `$${(i.onAccount.receivableCents / 100).toFixed(2)} of the revenue above was billed to an account rather than taken at the counter. It is earned and it is not money yet.`,
       });
     }
   } else {
@@ -295,6 +318,15 @@ export async function monthlyAccount(month: string, basis: "accrual" | "cash" = 
    * A fill with no acquisition cost on it is left out of both sides rather than counted as free.
    */
   const mine = fills.filter((f) => f.dateFilled.startsWith(month) && f.acquisitionCents !== null);
+  /*
+   * What the month sold on account. Reported beside the profit, never added to it: the sale is
+   * already in the revenue above, and the only thing still open is whether the money has arrived.
+   */
+  const monthFills = fills.filter((f) => f.dateFilled.startsWith(month));
+  const onAccount = {
+    receivableCents: monthFills.reduce((n, f) => n + f.receivableCents, 0),
+    unbilledCostCents: monthFills.reduce((n, f) => n + (f.unbilledCostCents ?? 0), 0),
+  };
   const dispensedCostCents = mine.length ? mine.reduce((n, f) => n + (f.acquisitionCents ?? 0), 0) : null;
   const laterMoneyCents = fills
     .filter((f) => f.dateFilled.startsWith(month))
@@ -320,6 +352,7 @@ export async function monthlyAccount(month: string, basis: "accrual" | "cash" = 
     dispensedCostCents,
     purchasesCents,
     rebatesCents,
+    onAccount,
     expenses: bills.map((b) => {
       const c = b.categoryId ? byId.get(b.categoryId) : undefined;
       return {

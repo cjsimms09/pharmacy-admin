@@ -342,6 +342,7 @@ export async function productLedger(): Promise<{ rows: LedgerRow[]; rate: number
       patientTotalCents: c.patientTotalCents,
       acquisitionCents: c.acquisitionCents,
       status: c.status,
+      onAccount: c.onAccount,
       unmatchedReversal: (c.remitCents ?? 0) < 0 && !c.reversalKey,
     })),
     later,

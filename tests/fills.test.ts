@@ -414,3 +414,74 @@ describe("money a plan promised and has not sent", () => {
     assert.equal(f.facilitatorOutstandingCents, 0);
   });
 });
+
+/**
+ * Accounts receivable: sold, counted, and not collected.
+ *
+ * The pharmacy's own report carries five of these in its first six days, and setting them aside is
+ * exactly why this site's gross profit came to $2,849.76 more than PioneerRx's. The dispensing is
+ * ordinary — the drug left the shelf and the acquisition cost is real — so every figure is
+ * computed as normal. Only "has the money arrived" differs.
+ */
+describe("on account", () => {
+  test("an account sale is an ordinary dispensing, with its margin computed the usual way", () => {
+    // Rx 309233-2 off the live report: nothing from the plan, $1,492.61 on the account, cost
+    // $1,152.94. PioneerRx's own gross profit column says $339.67.
+    const [f] = groupIntoFills([
+      claim({ rxNumber: "309233", fillNumber: 2, onAccount: true, remitCents: 0, copayCents: 149_261, patientTotalCents: 149_261, acquisitionCents: 115_294, grossProfitCents: 33_967 }),
+    ]);
+    assert.equal(f.marginCents, 33_967, "the margin is revenue less cost, exactly as for any other fill");
+    assert.equal(f.agreesWithReport, true);
+    assert.equal(f.onAccount, true);
+  });
+
+  test("the whole of an account sale's revenue is outstanding, not part of it", () => {
+    const [f] = groupIntoFills([
+      claim({ onAccount: true, remitCents: 0, copayCents: 149_261, patientTotalCents: 149_261, acquisitionCents: 115_294 }),
+    ]);
+    assert.equal(f.receivableCents, f.revenueCents);
+    assert.equal(f.receivableCents, 149_261);
+  });
+
+  test("cost out of the door with nothing billed is reported separately from a debt", () => {
+    /*
+     * The quieter and worse case. A charge raised and uncollected is a debt somebody can chase; a
+     * dispensing with no charge at all is not owed by anyone, appears as a debt nowhere, and reads
+     * as a fill that lost its whole acquisition cost — which is what it will keep looking like.
+     */
+    const [f] = groupIntoFills([
+      claim({ rxNumber: "336264", fillNumber: 0, onAccount: true, remitCents: 0, copayCents: 0, patientTotalCents: 0, acquisitionCents: 98_400, grossProfitCents: -98_400 }),
+    ]);
+    assert.equal(f.unbilledCostCents, 98_400);
+    assert.equal(f.receivableCents, 0);
+    assert.equal(f.marginCents, -98_400, "still a loss on the day, because it is one until it is billed");
+  });
+
+  test("a fill that was collected owes nothing and has nothing unbilled", () => {
+    const [f] = groupIntoFills([claim()]);
+    assert.equal(f.onAccount, false);
+    assert.equal(f.receivableCents, 0);
+    assert.equal(f.unbilledCostCents, null);
+  });
+
+  test("one leg on account puts the whole fill on account", () => {
+    /*
+     * A fill coordinated across two payers where one leg went to an account is still a fill whose
+     * money is not all in hand. Treating it as collected because the other leg was is the error
+     * that hides the balance.
+     */
+    const [f] = groupIntoFills([
+      claim({ bin: "004336", remitCents: 800, copayCents: 0, acquisitionCents: 57_676 }),
+      claim({ bin: "024368", remitCents: 0, copayCents: 60_000, patientTotalCents: 60_000, onAccount: true, acquisitionCents: 0 }),
+    ]);
+    assert.equal(f.coordinated, true);
+    assert.equal(f.onAccount, true);
+  });
+
+  test("a zero-cost account row is unbilled-unknown, never a confident zero", () => {
+    const [f] = groupIntoFills([
+      claim({ onAccount: true, remitCents: 0, copayCents: 0, patientTotalCents: 0, acquisitionCents: null }),
+    ]);
+    assert.equal(f.unbilledCostCents, null, "no cost known means no claim about how much went out unbilled");
+  });
+});

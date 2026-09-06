@@ -485,3 +485,101 @@ describe("the report's own bottom line", () => {
     assert.equal(readTotalsLine([100, 50]), null);
   });
 });
+
+/**
+ * "AR" is accounts receivable: the drug went out and the money is owed rather than taken.
+ *
+ * Not a claim status. The reader set these aside as an unknown code for a while, which was the
+ * honest thing to do while nobody knew what it meant — and was also exactly why this site's gross
+ * profit came to $2,849.76 more than PioneerRx's over the same six days. The report counts them in
+ * its grand total, so anything that drops them reports the pharmacy as having made more than it did.
+ *
+ * Every row below is transcribed from the pharmacy's own 09/01–09/06 file, in the seventeen-column
+ * shape that report now has — the extra "Est" column beside the BIN.
+ */
+describe("account sales", () => {
+  const HEAD_EST = [
+    "Rx Transaction Details By Submission Type (BETA)",
+    "West Wichita Family Pharmacy",
+    " Uses invoice cost based on cost for profit settings. Includes columns for estimated rebates and estimated dir fees.Based on claims transmitted/processed from ",
+    "9/1/2026 12:00:00 AM, to ,9/6/2026 12:00:00 AM",
+    "Third Party,Script",
+    "Dispensing Fee,Completed Date",
+    "Rx Number,Status,Amount,Group,Ntw Reim. Id,Copay,Total,Date Filled,BIN,Est,QTY,Acq. Inv. Cost,PCN,NDC,GrossProfit",
+    "Transmitted",
+    "Third Party:,005377(A4) - 005377",
+  ];
+  // Real neighbours, so the layout is settled by the file rather than by one unusual row.
+  const NEIGHBOURS = [
+    "327578-2,P,$0.00,ABSR,,$6.73,$0.75,$6.73,9/1/2026 4:03:40 PM,09/01/26,005377,$0.00,30.0000,$4.26,10000019,16714025902,$2.47",
+    "330753-1,P,$0.00,ASCSH,,$6.80,$0.75,$6.80,9/1/2026 4:03:40 PM,09/01/26,005377,$0.00,24.0000,$3.13,10000019,00555057202,$3.67",
+    "336334-0,P,$0.00,TCG1009,,$6.58,$0.95,$6.58,9/5/2026 9:37:53 AM,09/01/26,005377,$0.00,30.0000,$2.02,10000019,23155050210,$4.56",
+  ];
+  const ar = (...rows: string[]) => parseRxTransactions([...HEAD_EST, ...NEIGHBOURS, ...rows, ...FOOT].join("\r\n"));
+  const EMPTY = { keys: new Set<string>(), paid: [] };
+
+  const OWED =
+    '309233-2,AR,$0.00,"$23,869.00",COMMERCIAL,"$1,492.61",$0.00,"$1,492.61",,09/01/26,024368,$0.00,60.0000,"$1,152.94",3207,81968004560,$339.67';
+  const NOTHING_BILLED =
+    "336264-0,AR,$0.00,KS2336,BIDBRODCBR,$0.00,$0.00,$0.00,9/1/2026 4:25:12 PM,09/01/26,610455,$0.00,60.0000,$984.00,KSPDP,00480331965,($984.00)";
+
+  test("an AR row is read, not set aside as a status nobody knows", () => {
+    const p = ar(OWED);
+    const r = p.rows.find((x) => x.status === "AR");
+    assert.ok(r, `no AR row read; reasons: ${JSON.stringify(p.reasons)}`);
+    assert.equal(r.onAccount, true);
+    assert.equal(r.remitCents, 0);
+    assert.equal(r.patientTotalCents, 149_261);
+    assert.equal(r.acquisitionCents, 115_294);
+    assert.equal(r.grossProfitCents, 33_967);
+  });
+
+  test("the report's own identity holds on it: amount + total − cost = gross profit", () => {
+    const r = ar(OWED).rows.find((x) => x.status === "AR")!;
+    assert.equal((r.remitCents ?? 0) + (r.patientTotalCents ?? 0) - (r.acquisitionCents ?? 0), r.grossProfitCents);
+  });
+
+  test("an account sale with nothing billed carries its whole cost as the loss the report shows", () => {
+    const r = ar(NOTHING_BILLED).rows.find((x) => x.status === "AR")!;
+    assert.equal(r.remitCents, 0);
+    assert.equal(r.patientTotalCents, 0);
+    assert.equal(r.acquisitionCents, 98_400);
+    assert.equal(r.grossProfitCents, -98_400);
+  });
+
+  test("an account sale is planned as a dispensing, never as a reversal or a rejection", () => {
+    const plan = planTransactions(ar(OWED).rows, EMPTY);
+    const on = plan.insertPaid.filter((t) => t.onAccount === true);
+    assert.equal(on.length, 1);
+    assert.equal(on[0].rxNumber, "309233");
+    assert.equal(plan.skipped.filter((s) => s.txn.status === "AR").length, 0, "it is a sale that happened");
+  });
+
+  test("a rejection and an account sale on the same prescription stay apart", () => {
+    /*
+     * Rx 333932-0 in the live file: billed, rejected by the plan, then put on the account. The
+     * rejection is nothing and the account sale is $484.03 of stock out of the door, and reading
+     * either as the other loses the money.
+     */
+    const p = ar(
+      "333932-0,R,$0.00,\"$28,558.00\",,$0.00,$0.00,$0.00,9/1/2026 1:36:19 PM,09/01/26,005377,$0.00,0.0000,$0.00,10000019,00002355511,$0.00",
+      "333932-0,AR,$0.00,\"$28,558.00\",,$0.00,$0.00,$0.00,9/1/2026 1:36:19 PM,09/01/26,005377,$0.00,2.4000,$484.03,10000019,00002355511,($484.03)",
+    );
+    const plan = planTransactions(p.rows, EMPTY);
+    assert.equal(plan.skipped.filter((s) => s.txn.status === "R").length, 1, "the rejection is nothing");
+    const on = plan.insertPaid.filter((t) => t.onAccount === true);
+    assert.equal(on.length, 1);
+    assert.equal(on[0].acquisitionCents, 48_403);
+  });
+
+  test("a status still nobody knows is set aside by name rather than guessed at", () => {
+    const p = ar(
+      '309233-2,ZZ,$0.00,"$23,869.00",COMMERCIAL,"$1,492.61",$0.00,"$1,492.61",,09/01/26,024368,$0.00,60.0000,"$1,152.94",3207,81968004560,$339.67',
+    );
+    assert.equal(p.rows.filter((r) => r.rxNumber === "309233").length, 0);
+    assert.ok(
+      Object.keys(p.reasons ?? {}).some((k) => k.includes("ZZ")),
+      `reasons: ${JSON.stringify(p.reasons)}`,
+    );
+  });
+});
