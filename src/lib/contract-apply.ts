@@ -83,9 +83,9 @@ export type RoutingProposal = {
 
 export type PlanMatch = {
   /** The plan as the claims know it. */
-  plan: { id: string; bin: string | null; groupNumber: string | null; pcn?: string | null; payerLabel: string | null; claims: number };
-  /** Which identifiers in the document matched: the more, the surer. */
-  matchedOn: ("bin" | "pcn" | "group")[];
+  plan: { id: string; bin: string | null; groupNumber: string | null; pcn?: string | null; payerLabel: string | null; claims: number; networkIds?: string[] };
+  /** Which identifiers in the document matched: the more, the surer. A network id is the PBM's own name for the contract. */
+  matchedOn: ("bin" | "pcn" | "group" | "network")[];
   /** Other documents that also print this plan's BIN. The person picks. */
   contested: string[];
   proposedLink: { bin: string | null; pcn: string | null; groupNumber: string | null; contractId: string | null; pbmName: string; basis: string };
@@ -112,7 +112,7 @@ export type Existing = {
   otherDocuments?: { name: string; bins: string[] }[];
 };
 
-export type PlanForMatch = { id: string; bin: string | null; groupNumber: string | null; pcn?: string | null; payerLabel: string | null; claims: number };
+export type PlanForMatch = { id: string; bin: string | null; groupNumber: string | null; pcn?: string | null; payerLabel: string | null; claims: number; networkIds?: string[] };
 
 const norm = (s: string | null | undefined) => (s ?? "").trim().toUpperCase() || null;
 const same = (a: string | number | null | undefined, b: string | number | null | undefined) => (a ?? null) === (b ?? null);
@@ -234,19 +234,30 @@ export function proposeFromContract(t: ContractTermsT, documentName: string, pla
   const bins = new Set(t.bins.map((b) => norm(b)).filter(Boolean) as string[]);
   const pcns = new Set(t.pcns.map((b) => norm(b)).filter(Boolean) as string[]);
   const groups = new Set(t.groupIds.map((b) => norm(b)).filter(Boolean) as string[]);
+  const networks = new Set(t.networkReimbursementIds.map((b) => norm(b)).filter(Boolean) as string[]);
   const matches: PlanMatch[] = [];
   for (const p of plans) {
     const on: PlanMatch["matchedOn"] = [];
     if (norm(p.bin) && bins.has(norm(p.bin)!)) on.push("bin");
     if (norm(p.pcn) && pcns.has(norm(p.pcn)!)) on.push("pcn");
     if (norm(p.groupNumber) && groups.has(norm(p.groupNumber)!)) on.push("group");
-    // A group alone is not a match: group numbers repeat across PBMs. A BIN is.
-    if (!on.includes("bin") && !on.includes("pcn")) continue;
+    // The network reimbursement id the claims carry is the PBM's own name for the contract that priced them.
+    const netHit = (p.networkIds ?? []).map(norm).find((n) => n && networks.has(n)) ?? null;
+    if (netHit) on.push("network");
+    // A group alone is not a match: group numbers repeat across PBMs. A BIN, a PCN or a network id is.
+    if (!on.includes("bin") && !on.includes("pcn") && !on.includes("network")) continue;
     const contested = (existing.otherDocuments ?? []).filter((d) => d.name !== documentName && d.bins.some((b) => norm(b) === norm(p.bin))).map((d) => d.name);
-    const link = { bin: p.bin, pcn: on.includes("pcn") ? (p.pcn ?? null) : null, groupNumber: on.includes("group") ? p.groupNumber : null, contractId: null as string | null, pbmName, basis: `${documentName} prints ${on.map((x) => (x === "bin" ? `BIN ${p.bin}` : x === "pcn" ? `PCN ${p.pcn}` : `group ${p.groupNumber}`)).join(", ")}.` };
+    const link = {
+      bin: p.bin,
+      pcn: on.includes("pcn") ? (p.pcn ?? null) : null,
+      groupNumber: on.includes("group") ? p.groupNumber : null,
+      contractId: netHit,
+      pbmName,
+      basis: `${documentName} prints ${on.map((x) => (x === "bin" ? `BIN ${p.bin}` : x === "pcn" ? `PCN ${p.pcn}` : x === "group" ? `group ${p.groupNumber}` : `network id ${netHit}`)).join(", ")}.`,
+    };
     // The proposed link must actually match the plan, or the page would write a link that never fires.
-    if (matchScore(link, { bin: p.bin, pcn: p.pcn ?? null, groupNumber: p.groupNumber, contractId: null }) === null) continue;
-    matches.push({ plan: p, matchedOn: on, contested, proposedLink: link });
+    if (matchScore(link, { bin: p.bin, pcn: p.pcn ?? null, groupNumber: p.groupNumber, contractId: netHit }) === null) continue;
+    matches.push({ plan: p, matchedOn: on, contested: netHit ? [] : contested, proposedLink: link });
   }
   matches.sort((a, b) => b.matchedOn.length - a.matchedOn.length || b.plan.claims - a.plan.claims);
 

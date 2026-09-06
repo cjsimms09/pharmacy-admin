@@ -7,7 +7,7 @@ import { audit } from "@/lib/audit";
 import { indexContracts } from "@/lib/contract-search";
 import { scanContracts } from "@/lib/reference";
 import { queueExtraction, collectExtraction } from "@/lib/contract-extract";
-import { contractLibrary, adoptUnattached, nameDocument, resetDocument } from "@/lib/contract-docs";
+import { contractLibrary, adoptUnattached, nameDocument, resetDocument, resetAll } from "@/lib/contract-docs";
 import { PageHeader, Card, Notice, Empty, Figure, BackLink } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import { ConfirmButton } from "@/components/confirm-button";
@@ -63,6 +63,29 @@ export default async function ContractsPage({ searchParams }: { searchParams: Pr
             r.queued === 0
               ? r.skipped.join(" ")
               : `${r.queued} document${r.queued === 1 ? "" : "s"} sent to Claude as batch ${r.batchId}. About ${money(r.estimate.low)}–${money(r.estimate.high)}. It runs while the pharmacy is closed; press “Collect the results” later.${r.skipped.length ? ` Could not send: ${r.skipped.join(", ")}.` : ""}`,
+          ),
+      );
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/payers/contracts?error=" + encodeURIComponent(e instanceof Error ? e.message : "The read could not be started."));
+    }
+  }
+
+  /** The one big run: every document with a file, read or not, sent together. */
+  async function readAll() {
+    "use server";
+    const u = await requireManager();
+    try {
+      const n = await resetAll();
+      const r = await queueExtraction(u.id, u.name);
+      await audit({ action: "contracts.extract.all", userId: u.id, userName: u.name, details: `${n} reset, ${r.queued} queued` });
+      revalidatePath("/payers/contracts");
+      redirect(
+        "/payers/contracts?ok=" +
+          encodeURIComponent(
+            r.queued === 0
+              ? r.skipped.join(" ")
+              : `${r.queued} document${r.queued === 1 ? "" : "s"} sent to Claude as batch ${r.batchId}, the whole library. About ${money(r.estimate.low)}–${money(r.estimate.high)}. Press “Collect the results” when it is done.${r.skipped.length ? ` Could not send: ${r.skipped.join(", ")}.` : ""}`,
           ),
       );
     } catch (e) {
@@ -132,6 +155,16 @@ export default async function ContractsPage({ searchParams }: { searchParams: Pr
                     message={`Send ${lib.pending} document${lib.pending === 1 ? "" : "s"} (about ${lib.pendingPages} pages) to Claude? Roughly ${money(lib.estimate.low)} to ${money(lib.estimate.high)} at batch prices on ${lib.model}.`}
                   >
                     Read {lib.pending} with Claude · about {money(lib.estimate.low)}–{money(lib.estimate.high)}
+                  </ConfirmButton>
+                </form>
+              )}
+              {lib.withFile > lib.pending && queued.length === 0 && (
+                <form action={readAll}>
+                  <ConfirmButton
+                    className="btn"
+                    message={`Read the whole library again: ${lib.withFile} document${lib.withFile === 1 ? "" : "s"}, about ${lib.allPages} pages, roughly ${money(lib.estimateAll.low)} to ${money(lib.estimateAll.high)} at batch prices on ${lib.model}? Earlier drafts are replaced; what you already accepted onto the payer pages stays until you replace it.`}
+                  >
+                    Read everything again · about {money(lib.estimateAll.low)}–{money(lib.estimateAll.high)}
                   </ConfirmButton>
                 </form>
               )}

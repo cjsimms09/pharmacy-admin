@@ -21,12 +21,17 @@ const draft = (): ContractTermsT => ({
   groupIds: ["RX1234"],
   chainCodes: ["605"],
   networkNames: ["Preferred", "Standard"],
+  networkReimbursementIds: ["CNCKSNPN"],
+  pharmacyNcpdps: [],
+  pharmacyNpis: [],
   linesOfBusiness: ["Medicare Part D"],
   effectiveDate: "2026-01-01",
   endDate: null,
   autoRenews: true,
   terminationNoticeDays: 90,
   amendmentNoticeDays: 30,
+  claimSubmissionWindowDays: 90,
+  reversalWindowDays: 14,
   rates: [
     { pbmVendor: "CVS Caremark", network: "Preferred", costSharingTier: "preferred", daysSupplyMin: 1, daysSupplyMax: 34, brandFormula: "AWP-15%", brandDispensingFee: 1.0, genericBasis: "Lesser of (MAC or AWP-25%)", genericDispensingFee: 1.0, specialtyTerms: null, compoundTerms: null, vaccineTerms: null, effectiveFrom: "2026-01-01", effectiveTo: null, citation: cite("Brand: AWP-15% + $1.00. Generic: Lesser of (MAC or AWP-25%) + $1.00.") },
     { pbmVendor: "Express Scripts", network: "Preferred", costSharingTier: "preferred", daysSupplyMin: 1, daysSupplyMax: 34, brandFormula: "AWP-16%", brandDispensingFee: 0.75, genericBasis: "Per Schedule 2 of the Provider Manual", genericDispensingFee: 0.75, specialtyTerms: null, compoundTerms: null, vaccineTerms: null, effectiveFrom: null, effectiveTo: null, citation: cite("Express Scripts: AWP-16% + $0.75.") },
@@ -37,6 +42,8 @@ const draft = (): ContractTermsT => ({
   postPointOfSaleDiscounts: [],
   disputeWindows: [{ subject: "MAC pricing", days: 30, runsFrom: "date of adjudication", consequenceIfMissed: "deemed accepted", escalation: "Network Relations Director", citation: cite("Disputes not raised within 30 days are deemed accepted.") }],
   reportsOwed: [],
+  transactionFees: [],
+  keyDefinitions: [],
   incorporatesByReference: ["PBM Provider Manual"],
   definitionsDelegatedTo: "PBM Provider Manual §2",
   usualAndCustomaryDefinition: null,
@@ -61,6 +68,7 @@ const draft = (): ContractTermsT => ({
   gcrDefinition: { value: null, citation: null },
   primarySupplierRequirementPercent: null,
   rebatePaymentTerms: null,
+  sections: [{ title: "Exhibit B-11", pageFrom: 12, pageTo: 14, gist: "Rates by vendor and network." }],
   unclearOrMissing: ["Exhibit C (specialty) is referenced and not attached."],
   confidence: 0.9,
 });
@@ -123,6 +131,18 @@ describe("which plans it governs", () => {
     assert.equal(p.plans[0].proposedLink.pcn, "PDPPCN");
     assert.equal(p.plans[2].proposedLink.pcn, null);
     assert.match(p.plans[0].proposedLink.basis, /prints BIN 610455, PCN PDPPCN, group RX1234/);
+  });
+});
+
+describe("the network reimbursement id", () => {
+  test("a plan whose claims carry a network id the document prints is matched on it, the link carries it, and it is not contested", () => {
+    const withNet = [...plans, { id: "p5", bin: "777777", groupNumber: "G1", pcn: null, payerLabel: "Reached only by its network id", claims: 80, networkIds: ["CNCKSNPN", "OTHER"] }];
+    const p = proposeFromContract(draft(), "2026 Rate Exhibit.pdf", withNet, { otherDocuments: [{ name: "Old Exhibit.pdf", bins: ["777777"] }] });
+    const m = p.plans.find((x) => x.plan.id === "p5")!;
+    assert.deepEqual(m.matchedOn, ["network"]);
+    assert.equal(m.proposedLink.contractId, "CNCKSNPN");
+    assert.deepEqual(m.contested, []);
+    assert.match(m.proposedLink.basis, /network id CNCKSNPN/);
   });
 });
 

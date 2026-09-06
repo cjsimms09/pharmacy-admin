@@ -128,7 +128,29 @@ address the site owns, or an SFTP folder the site watches; each PBM's ERA enroll
 it, and the remittances then reconcile against the claims without anybody downloading anything.
 The checklist per PBM (enrolled, delivery confirmed, first 835 received) is a page to build.
 
-## 7. The run, in order
+## 7. One run, kept for good
+
+The library is read once. Three things make that true:
+
+- **The schema asks for everything now.** Beyond the terms in §2: the network reimbursement
+  ids printed in the exhibits (NCPDP 545-2F, the PBM's own name for the contract on a claim), the
+  pharmacy's NCPDP and NPI where named, claim submission and reversal windows, every
+  per-claim or per-transaction fee, each defined term (brand, generic, AWP, WAC, MAC, U&C,
+  specialty, compound) as the document defines it, and a **map of the document**: every
+  section and exhibit with its pages and one sentence on what it decides.
+- **The raw answer is kept whole**, beside the document, and the full text of every PDF is
+  indexed for search. A question nobody has asked yet is answered from the map and the text
+  without reading the document again.
+- **A field added later is one document's re-read, not the library's.** "Read again" on a row
+  sends that document only; the accepted rows on the payer pages stand until replaced.
+
+Before the run: every file in the folder; every portal download named in the manifest; the
+Anthropic key on file and the monthly cap above the estimate the page shows. The run sends
+every document with a file, read or not ("Read everything again"), through the Batch API at
+high effort on the Opus-class model, one request per document, the prompt cached across the
+run. Scans with no text are read as images and cost the same.
+
+## 8. The run, in order
 
 1. **Index** the folder (`indexContracts`): every PDF's text kept for search; scans flagged.
 2. **Name** each document from the portal's manifest or its filename (`matchedBy`); the rest are

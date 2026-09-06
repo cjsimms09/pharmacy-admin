@@ -51,7 +51,7 @@ function docRequest(id: string, pdf: Buffer, name: string, model: string): Anthr
     custom_id: id,
     params: {
       model,
-      max_tokens: 16000,
+      max_tokens: 32000,
       thinking: { type: "adaptive" },
       output_config: { effort: "high", format: zodOutputFormat(ContractTerms) },
       // Cached: identical on every document in the run, so it is billed once.
@@ -179,7 +179,12 @@ export function parseTerms(json: string | null): ContractTermsT | null {
     // Fields added to the schema after a document was read are absent from its draft; an old
     // draft is still a draft, not a failure, so the additions default to "not stated".
     const raw = JSON.parse(json) as Record<string, unknown>;
-    return ContractTerms.parse({ macAppealRequiredFields: [], macAppealInvoiceRequired: null, macAppealSubmissionTarget: null, contacts: [], remittance: null, ...raw });
+    return ContractTerms.parse({
+      macAppealRequiredFields: [], macAppealInvoiceRequired: null, macAppealSubmissionTarget: null, contacts: [], remittance: null,
+      networkReimbursementIds: [], pharmacyNcpdps: [], pharmacyNpis: [], claimSubmissionWindowDays: null, reversalWindowDays: null,
+      transactionFees: [], keyDefinitions: [], sections: [],
+      ...raw,
+    });
   } catch {
     return null;
   }
@@ -200,6 +205,9 @@ function mockTerms(name: string, pbm: string): ContractTermsT {
     groupIds: [],
     chainCodes: ["605", "630"],
     networkNames: ["Mock Commercial Broad"],
+    networkReimbursementIds: ["MOCKNET1"],
+    pharmacyNcpdps: [],
+    pharmacyNpis: [],
     linesOfBusiness: ["Commercial"],
     effectiveDate: "2025-01-01",
     endDate: null,
@@ -238,6 +246,11 @@ function mockTerms(name: string, pbm: string): ContractTermsT {
     macAppealWindowBasis: "date_of_adjudication",
     macAppealMethod: { value: "Provider portal", citation: cite },
     macAppealResponseDays: 7,
+    claimSubmissionWindowDays: 90,
+    reversalWindowDays: 14,
+    transactionFees: [{ name: "Claim processing fee", amount: "$0.10 per claim", appliesTo: "all claims", citation: cite }],
+    keyDefinitions: [{ term: "Generic", definition: "A drug product with a multi-source indicator of Y in the pricing compendium.", citation: cite }],
+    sections: [{ title: "Exhibit B — Reimbursement", pageFrom: 4, pageTo: 6, gist: "The rate schedule by network and days supply." }],
     macAppealRequiredFields: ["claim number", "NDC", "date of service", "invoice"],
     macAppealInvoiceRequired: true,
     macAppealSubmissionTarget: "https://portal.example.invalid/mac-appeals",

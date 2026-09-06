@@ -43,6 +43,10 @@ export type Library = {
   pending: number;
   pendingPages: number;
   estimate: { low: number; high: number };
+  /** Every document with a file, read or not, and what reading all of them again would cost. */
+  withFile: number;
+  allPages: number;
+  estimateAll: { low: number; high: number };
   model: string;
   keyPresent: boolean;
   folder: string;
@@ -65,11 +69,17 @@ export async function contractLibrary(): Promise<Library> {
   const attached = new Set(docs.map((d) => d.fileName).filter(Boolean) as string[]);
   const model = s.ai_model || MODEL_DEFAULT;
   let pendingPages = 0;
+  let allPages = 0;
+  let withFile = 0;
   const rows: LibraryDoc[] = [];
   for (const d of docs) {
     const terms = d.extractionState === "done" ? parseTerms(d.extractionJson) : null;
-    if (d.fileName && d.extractionState !== "done" && d.extractionState !== "queued") {
-      try { pendingPages += pageCount(await fs.readFile(path.join(contractsDir(), d.fileName))); } catch { /* counted as nothing */ }
+    if (d.fileName) {
+      withFile++;
+      let pages = 0;
+      try { pages = pageCount(await fs.readFile(path.join(contractsDir(), d.fileName))); } catch { /* counted as nothing */ }
+      allPages += pages;
+      if (d.extractionState !== "done" && d.extractionState !== "queued") pendingPages += pages;
     }
     rows.push({
       id: d.id, documentName: d.documentName, pbmName: d.pbmName, fileName: d.fileName, matchedBy: d.matchedBy,
@@ -86,6 +96,9 @@ export async function contractLibrary(): Promise<Library> {
     pending,
     pendingPages,
     estimate: estimateCost(pendingPages, model),
+    withFile,
+    allPages,
+    estimateAll: estimateCost(allPages, model),
     model,
     keyPresent: Boolean(s.anthropic_api_key_enc),
     folder: contractsDir(),
@@ -147,6 +160,22 @@ export async function nameDocument(id: string, pbmName: string, documentName?: s
   await db.update(schema.contractDocs).set(values).where(eq(schema.contractDocs.id, id));
 }
 
+/**
+ * Every document with a file back to unread: the one big run, on the whole library, after the
+ * schema has been widened. The earlier drafts are not kept — the new read carries everything the
+ * old one did and more — but the accepted rows on the payer pages stand until replaced.
+ */
+export async function resetAll(): Promise<number> {
+  const docs = await db.query.contractDocs.findMany({ columns: { id: true, fileName: true, extractionState: true } });
+  let n = 0;
+  for (const d of docs) {
+    if (!d.fileName || d.extractionState === "queued") continue;
+    await db.update(schema.contractDocs).set({ extractionState: "none", extractionError: null }).where(eq(schema.contractDocs.id, d.id));
+    n++;
+  }
+  return n;
+}
+
 /** Put a failed or done document back to unread, so the next run reads it again. */
 export async function resetDocument(id: string): Promise<void> {
   await db.update(schema.contractDocs).set({ extractionState: "none", extractionError: null }).where(eq(schema.contractDocs.id, id));
@@ -154,13 +183,14 @@ export async function resetDocument(id: string): Promise<void> {
 
 /** The pharmacy's plans as the claims know them, with the PCN, for matching a document's identifiers. */
 export async function plansForMatching(): Promise<PlanForMatch[]> {
-  const rows = await db.query.claims.findMany({ columns: { bin: true, pcn: true, groupNumber: true, payerLabel: true, status: true, cashPlan: true } });
-  const by = new Map<string, PlanForMatch>();
+  const rows = await db.query.claims.findMany({ columns: { bin: true, pcn: true, groupNumber: true, networkId: true, payerLabel: true, status: true, cashPlan: true } });
+  const by = new Map<string, PlanForMatch & { networkIds: string[] }>();
   for (const c of rows) {
     if (c.cashPlan || !c.bin) continue;
     const k = `${c.bin}|${c.pcn ?? ""}|${c.groupNumber ?? ""}`;
-    const p = by.get(k) ?? { id: k, bin: c.bin, pcn: c.pcn ?? null, groupNumber: c.groupNumber ?? null, payerLabel: c.payerLabel, claims: 0 };
+    const p = by.get(k) ?? { id: k, bin: c.bin, pcn: c.pcn ?? null, groupNumber: c.groupNumber ?? null, payerLabel: c.payerLabel, claims: 0, networkIds: [] };
     if (c.status !== "reversed") p.claims++;
+    if (c.networkId && !p.networkIds.includes(c.networkId)) p.networkIds.push(c.networkId);
     by.set(k, p);
   }
   return [...by.values()].sort((a, b) => b.claims - a.claims);

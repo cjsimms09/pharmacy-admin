@@ -5,6 +5,7 @@ import { requireUser, requireManager } from "@/lib/auth";
 import { requireReimbursement } from "@/lib/features";
 import { audit } from "@/lib/audit";
 import { proposalsFor, acceptProposals } from "@/lib/contract-docs";
+import { parseTerms } from "@/lib/contract-extract";
 import { PageHeader, Card, Notice, Empty, BackLink } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 
@@ -26,6 +27,7 @@ export default async function ContractReviewPage({ params, searchParams }: { par
   const got = await proposalsFor(id);
   if (!got) notFound();
   const { doc, proposals: p } = got;
+  const terms = parseTerms(doc.extractionJson);
   const canManage = user.role !== "staff";
 
   async function accept(fd: FormData) {
@@ -157,6 +159,34 @@ export default async function ContractReviewPage({ params, searchParams }: { par
             </ul>
           )}
         </Card>
+
+        {/*
+          Kept, not accepted: the document's own map, its definitions, its fees and its clocks.
+          These are facts about the document rather than rows for a payer page, and they are what
+          a question nobody has asked yet is answered from without reading the document again.
+        */}
+        {terms && (terms.sections.length > 0 || terms.keyDefinitions.length > 0 || terms.transactionFees.length > 0 || terms.networkReimbursementIds.length > 0) && (
+          <Card className="mt-4" title="Kept from this read" subtitle="The document's map, its definitions, its fees and its identifiers, held with the draft so nothing has to be read twice.">
+            {terms.networkReimbursementIds.length > 0 && <p className="text-sm"><b>Network reimbursement ids:</b> <span className="font-mono text-xs">{terms.networkReimbursementIds.join(", ")}</span></p>}
+            {(terms.claimSubmissionWindowDays !== null || terms.reversalWindowDays !== null) && (
+              <p className="mt-1 text-sm"><b>Clocks:</b> {[terms.claimSubmissionWindowDays !== null && `claims submitted within ${terms.claimSubmissionWindowDays} days`, terms.reversalWindowDays !== null && `reversed within ${terms.reversalWindowDays} days`].filter(Boolean).join("; ")}</p>
+            )}
+            {terms.transactionFees.length > 0 && (
+              <ul className="mt-2 text-sm"><li><b>Fees:</b></li>{terms.transactionFees.map((f, i) => <li key={i} className="ml-4">{f.name}: {f.amount ?? "—"}{f.appliesTo ? ` (${f.appliesTo})` : ""}</li>)}</ul>
+            )}
+            {terms.keyDefinitions.length > 0 && (
+              <ul className="mt-2 text-sm"><li><b>As this document defines them:</b></li>{terms.keyDefinitions.map((d, i) => <li key={i} className="ml-4"><b>{d.term}</b>: {d.definition}</li>)}</ul>
+            )}
+            {terms.sections.length > 0 && (
+              <div className="mt-2 overflow-x-auto">
+                <table className="table text-sm">
+                  <thead><tr><th>Section</th><th>Pages</th><th>What it decides</th></tr></thead>
+                  <tbody>{terms.sections.map((x, i) => <tr key={i}><td>{x.title}</td><td className="whitespace-nowrap text-xs">{x.pageFrom ?? "—"}{x.pageTo && x.pageTo !== x.pageFrom ? `–${x.pageTo}` : ""}</td><td className="text-ink-2">{x.gist}</td></tr>)}</tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+        )}
 
         {canManage && (
           <div className="mt-4 flex items-center gap-2">

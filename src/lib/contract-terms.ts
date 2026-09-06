@@ -135,6 +135,33 @@ export const RemittanceTerms = z.object({
   citation: Citation.nullable(),
 });
 
+/** A fee the counterparty charges the pharmacy per claim or per transaction, by whatever name. */
+export const TransactionFee = z.object({
+  name: z.string(),
+  amount: z.string().nullable().describe("As written: \"$0.10 per claim\", \"2% of ingredient cost\"."),
+  appliesTo: z.string().nullable(),
+  citation: Citation.nullable(),
+});
+
+/** A defined term, in the document's own words, because "generic" and "AWP" mean what the contract says they mean. */
+export const KeyDefinition = z.object({
+  term: z.string(),
+  definition: z.string(),
+  citation: Citation.nullable(),
+});
+
+/**
+ * The document's own map: every section or exhibit, where it is and what it covers, in a line.
+ * Kept so a question nobody has asked yet can be answered from the map and the indexed text
+ * without reading the document again.
+ */
+export const SectionEntry = z.object({
+  title: z.string(),
+  pageFrom: z.number().int().nullable(),
+  pageTo: z.number().int().nullable(),
+  gist: z.string().describe("One sentence: what this section decides."),
+});
+
 export const ContractTerms = z.object({
   // ── Identity ───────────────────────────────────────────────────────
   counterparty: z.string().describe("The PBM, payer or wholesaler, as named on the document."),
@@ -158,6 +185,11 @@ export const ContractTerms = z.object({
   groupIds: z.array(z.string()),
   chainCodes: z.array(z.string()).describe("e.g. 605, 630. An exhibit only governs a pharmacy whose chain code is listed."),
   networkNames: z.array(z.string()),
+  /** NCPDP field 545-2F values printed in the document: the PBM's own name for a network on a claim. */
+  networkReimbursementIds: z.array(z.string()),
+  /** The pharmacy's own NCPDP and NPI numbers where the document names them, so the right pharmacy's contract is known to be the right one. */
+  pharmacyNcpdps: z.array(z.string()),
+  pharmacyNpis: z.array(z.string()),
   linesOfBusiness: z.array(z.string()).describe("Commercial, Medicare Part D, Medicaid, FEHB, and so on."),
 
   // ── Dates with clocks on them ──────────────────────────────────────
@@ -166,6 +198,9 @@ export const ContractTerms = z.object({
   autoRenews: z.boolean().nullable(),
   terminationNoticeDays: z.number().int().nullable(),
   amendmentNoticeDays: z.number().int().nullable(),
+  /** How long after dispensing a claim may still be submitted, and reversed. */
+  claimSubmissionWindowDays: z.number().int().nullable(),
+  reversalWindowDays: z.number().int().nullable(),
 
   // ── Money ──────────────────────────────────────────────────────────
   rates: z.array(RateTerm),
@@ -173,6 +208,8 @@ export const ContractTerms = z.object({
   postPointOfSaleDiscounts: z.array(PostPointOfSaleDiscount),
   disputeWindows: z.array(DisputeWindow),
   reportsOwed: z.array(ReportOwed),
+  transactionFees: z.array(TransactionFee),
+  keyDefinitions: z.array(KeyDefinition).describe("Brand, generic, AWP, WAC, MAC, U&C, specialty, compound: each as this document defines it, where it does."),
   /**
    * Documents this one cannot be read without. A PSAO network agreement routinely delegates the
    * pricing formula, and the meaning of AWP, brand, generic and U&C, to a separate PBM contract.
@@ -213,6 +250,9 @@ export const ContractTerms = z.object({
   primarySupplierRequirementPercent: z.number().nullable(),
   rebatePaymentTerms: z.string().nullable(),
 
+  // ── The document's own map ─────────────────────────────────────────
+  sections: z.array(SectionEntry),
+
   // ── Honesty about the read ─────────────────────────────────────────
   unclearOrMissing: z.array(z.string()).describe("What could not be read, or was not stated. Be specific."),
   confidence: z.number().min(0).max(1),
@@ -250,7 +290,11 @@ RULES, in order of importance:
 
 12. **Capture the people and the payment path.** Every contact the document names — an appeals desk, provider relations, an EFT/ERA enrollment address, an audit contact, where notices go — with its purpose. And how the money travels: who pays, by what method, on what cycle, whether an 835 remittance is offered, and how enrollment is changed. An appeal cannot be sent and a remittance cannot be re-routed without these.
 
-13. **Be specific in unclearOrMissing.** "Generic rate for the Medicare Preferred network is referenced as Exhibit C but Exhibit C is not attached" is useful. "Some terms unclear" is not.
+13. **Map the document.** List every section, exhibit and schedule with its pages and one sentence on what it decides. This read happens once; the map is how a question nobody has asked yet is answered from the document without reading it again.
+
+14. **Capture the identifiers the claims will carry and the definitions the money rests on.** Network reimbursement ids (NCPDP 545-2F) printed in the exhibits; the pharmacy's own NCPDP and NPI where the document names them; every per-claim or per-transaction fee; and each defined term — brand, generic, AWP, WAC, MAC, U&C, specialty, compound — as this document defines it, with the sentence. Claim submission and reversal windows go with the other clocks.
+
+15. **Be specific in unclearOrMissing.** "Generic rate for the Medicare Preferred network is referenced as Exhibit C but Exhibit C is not attached" is useful. "Some terms unclear" is not.
 
 Set confidence honestly. A clean, complete rate exhibit is 0.9+. A scan where half the table is illegible is 0.4, and you say which half.`;
 
