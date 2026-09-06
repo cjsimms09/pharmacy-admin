@@ -203,7 +203,7 @@ export async function moneyFound(): Promise<MoneyFound> {
   // ── What the plans have underpaid ──
   try {
     const { claimFlags } = await import("./claims");
-    const f = await claimFlags();
+    const f = await claimFlags({ all: true });
     if (f.underFee.length > 0 && f.underFeeShortfallCents > 0) {
       rows.push({
         key: "kansas-floor",

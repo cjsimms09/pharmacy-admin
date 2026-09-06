@@ -515,7 +515,7 @@ export async function importRxTransactions(file: Buffer, fileName: string, userI
  * Run after every import, and safe to run at any time: it only ever matches a reversal to a claim
  * whose figures it exactly negates, and only where that leaves no ambiguity.
  */
-export async function repairReversals(): Promise<{ paired: number }> {
+export async function repairReversals(): Promise<{ paired: number; strays: number; stillStranded: { rxNumber: string; dateFilled: string; amountCents: number; why: string }[] }> {
   const rows = await db.query.claims.findMany({
     where: eq(schema.claims.source, "transaction_report"),
     columns: {
@@ -534,7 +534,7 @@ export async function repairReversals(): Promise<{ paired: number }> {
   const strays = rows.filter(
     (c) => (c.remitCents ?? 0) < 0 && c.status === "reversed" && c.reversalKey !== null && c.reversalKey === c.transactionKey,
   );
-  if (strays.length === 0) return { paired: 0 };
+  if (strays.length === 0) return { paired: 0, strays: 0, stillStranded: [] };
 
   const live = new Map<string, typeof rows>();
   for (const c of rows) {
@@ -544,16 +544,32 @@ export async function repairReversals(): Promise<{ paired: number }> {
   }
 
   const used = new Set<string>();
+  const stillStranded: { rxNumber: string; dateFilled: string; amountCents: number; why: string }[] = [];
   let paired = 0;
   for (const rev of strays) {
-    const candidates = (live.get(key(rev)) ?? []).filter(
-      (c) => !used.has(c.id) && c.remitCents === -(rev.remitCents ?? 0) && c.copayCents === -(rev.copayCents ?? 0),
-    );
+    const sameFill = (live.get(key(rev)) ?? []).filter((c) => !used.has(c.id));
+    const candidates = sameFill.filter((c) => c.remitCents === -(rev.remitCents ?? 0) && c.copayCents === -(rev.copayCents ?? 0));
     /*
      * Exactly one, or nothing. Two claims a reversal could equally well cancel is not an answer,
      * and cancelling the wrong run of a prescription deletes revenue that was really earned.
+     *
+     * Where it cannot pair, it says why. A repair that quietly does nothing is indistinguishable
+     * from one that had nothing to do, and the pharmacist is left pressing a button and hoping.
      */
-    if (candidates.length !== 1) continue;
+    if (candidates.length !== 1) {
+      stillStranded.push({
+        rxNumber: rev.rxNumber,
+        dateFilled: rev.dateFilled,
+        amountCents: rev.remitCents ?? 0,
+        why:
+          sameFill.length === 0
+            ? "no live claim is held for that prescription, fill, BIN and NDC — it reverses a dispensing from before this feed began"
+            : candidates.length === 0
+              ? `${sameFill.length} live claim${sameFill.length === 1 ? " is" : "s are"} held for that fill but none has figures this exactly cancels`
+              : `${candidates.length} live claims match it equally well, and cancelling the wrong one would delete revenue that was really earned`,
+      });
+      continue;
+    }
     const hit = candidates[0];
     used.add(hit.id);
     await db
@@ -562,7 +578,7 @@ export async function repairReversals(): Promise<{ paired: number }> {
       .where(eq(schema.claims.id, hit.id));
     paired++;
   }
-  return { paired };
+  return { paired, strays: strays.length, stillStranded: stillStranded.slice(0, 20) };
 }
 
 /**
@@ -584,11 +600,15 @@ export async function recheckHeldClaims(): Promise<{
   read: number;
   restated: number;
   reversalsPaired: number;
+  /** Reversals held that had never been matched to anything, before this ran. */
+  reversalsHeld: number;
+  /** The ones that still could not be paired, and why — so a repair that did nothing says so. */
+  stillStranded: { rxNumber: string; dateFilled: string; amountCents: number; why: string }[];
   paymentsMatched: number;
   before: { differenceCents: number; fillsOff: number };
   after: { differenceCents: number; fillsOff: number };
 }> {
-  const before = (await claimFlags()).balance;
+  const before = (await claimFlags({ all: true })).balance;
 
   const rows = await db.query.claims.findMany({
     where: eq(schema.claims.source, "transaction_report"),
@@ -642,15 +662,17 @@ export async function recheckHeldClaims(): Promise<{
     restated++;
   }
 
-  const { paired } = await repairReversals();
+  const reversals = await repairReversals();
   const { matchOrphanPayments } = await import("./claim-payments");
   const { matched } = await matchOrphanPayments();
 
-  const after = (await claimFlags()).balance;
+  const after = (await claimFlags({ all: true })).balance;
   return {
     read,
     restated,
-    reversalsPaired: paired,
+    reversalsPaired: reversals.paired,
+    reversalsHeld: reversals.strays,
+    stillStranded: reversals.stillStranded,
     paymentsMatched: matched,
     before: { differenceCents: before.differenceCents, fillsOff: before.fillsOff },
     after: { differenceCents: after.differenceCents, fillsOff: after.fillsOff },
@@ -758,8 +780,72 @@ export function resolvePayer(
  * before any ingredient cost — which is a floor no contract can argue its way under. Neither is
  * a filing; both are a reason to look.
  */
-export async function claimFlags() {
+/**
+ * Which claims a screen is asking about.
+ *
+ * The claims screen used to answer for every claim ever loaded, on every render — grouping thousands
+ * of fills, pricing each against the whole federal NADAC table, and parsing the raw text of every row
+ * — to show one day's work. It got slower every week, by design, because the answer grew with the
+ * archive rather than with the question.
+ *
+ * A fill never spans two dates, so narrowing by the day dispensed splits nothing: every row of a
+ * dispensing shares its date. That makes a day a safe unit to load.
+ */
+export type ClaimScope = {
+  /** Inclusive, as YYYY-MM-DD. Both absent means the most recent day that has any claims. */
+  from?: string | null;
+  to?: string | null;
+  /** A prescription number, with or without its fill suffix. */
+  rx?: string | null;
+  /** Any part of a payer's name or BIN. */
+  payer?: string | null;
+  /**
+   * Every claim held, whatever the date.
+   *
+   * Has to be asked for. A screen answering about one day and a reconciliation answering about the
+   * whole archive are different questions, and the difference between them is the sort of thing that
+   * is invisible until a total is quietly a day's worth instead of a year's.
+   */
+  all?: boolean;
+};
+
+/** The most recent day this pharmacy dispensed anything, which is where the screen opens. */
+export async function latestClaimDay(): Promise<string | null> {
   const rows = await db.query.claims.findMany({
+    columns: { dateFilled: true },
+    orderBy: (c, { desc }) => [desc(c.dateFilled)],
+    limit: 1,
+  });
+  return rows[0]?.dateFilled ?? null;
+}
+
+export async function claimFlags(scope: ClaimScope = {}) {
+  const { and, gte, lte, like, or } = await import("drizzle-orm");
+
+  /*
+   * Resolved once, here, so every figure on the screen is drawn from the same population — and so a
+   * screen that shows one day cannot quietly report a balance struck over all of history.
+   */
+  const day = scope.all || scope.from || scope.to ? null : await latestClaimDay();
+  const from = scope.from ?? day;
+  const to = scope.to ?? day;
+
+  const rx = (scope.rx ?? "").trim().replace(/-.*$/, "");
+  const payer = (scope.payer ?? "").trim();
+
+  const where = and(
+    ...[
+      from ? gte(schema.claims.dateFilled, from) : null,
+      to ? lte(schema.claims.dateFilled, to) : null,
+      rx ? like(schema.claims.rxNumber, `%${rx}%`) : null,
+      payer
+        ? or(like(schema.claims.pbmName, `%${payer}%`), like(schema.claims.payerLabel, `%${payer}%`), like(schema.claims.bin, `%${payer}%`))
+        : null,
+    ].filter((x): x is NonNullable<typeof x> => x !== null),
+  );
+
+  const rows = await db.query.claims.findMany({
+    where,
     orderBy: (c, { asc }) => [asc(c.dateFilled)],
   });
 
@@ -861,6 +947,10 @@ export async function claimFlags() {
     belowCostTotalCents: sum(belowCost),
     /** One row per dispensing, with every payer that priced it. */
     fills,
+    /** BIN and network for the rows in scope, so the payer table needs no query of its own. */
+    networks: rows.map((c) => ({ bin: c.bin, networkId: c.networkId })),
+    /** The day range these figures were drawn from, so the screen can say what it is showing. */
+    scope: { from, to, rx: rx || null, payer: payer || null },
     /*
      * The rows behind each fill, exactly as the report sent them.
      *
@@ -871,9 +961,18 @@ export async function claimFlags() {
      * any fill, what arrived, field by field, with the name this reader gave each one.
      */
     rawByFill: (() => {
+      /*
+       * Only for the fills whose rows are actually on screen.
+       *
+       * This parses the stored text of every claim row, and it was doing it for every claim held to
+       * render the fifty on the loss list. The other several thousand were parsed, turned into
+       * objects, and thrown away on every load.
+       */
+      const wanted = new Set(lossFills.slice(0, 50).map((f) => f.key));
       const by = new Map<string, { payer: string | null; fields: { name: string; value: string }[] }[]>();
       for (const c of rows) {
         if (!c.rawJson) continue;
+        if (!wanted.has([c.rxNumber.trim(), c.fillNumber ?? "", c.dateFilled, c.ndc11 ?? ""].join("|"))) continue;
         const key = [c.rxNumber.trim(), c.fillNumber ?? "", c.dateFilled, c.ndc11 ?? ""].join("|");
         let parsed: Record<string, unknown>;
         try {
@@ -1038,8 +1137,17 @@ export async function allFills() {
  * held out of the profit column entirely and shown separately, with each plan credited only with
  * the money it actually sent. Two figures that are true beat one that is tidy.
  */
-export async function claimsByPayer() {
-  const [rows, fills] = await Promise.all([db.query.claims.findMany(), allFills()]);
+export async function claimsByPayer(given?: { fills: Awaited<ReturnType<typeof allFills>>; networks: { bin: string | null; networkId: string | null }[] }) {
+  /*
+   * Given the fills the screen already grouped, rather than grouping them all over again.
+   *
+   * The claims page called this beside claimFlags, and between them they read every claim twice and
+   * grouped every dispensing twice — the same work, done again, to answer a question about the same
+   * rows. On a screen showing one day it was the difference between one query and thousands of rows.
+   */
+  const [rows, fills] = given
+    ? [given.networks, given.fills]
+    : await Promise.all([db.query.claims.findMany({ columns: { bin: true, networkId: true } }), allFills()]);
 
   type Row = {
     pbmName: string;

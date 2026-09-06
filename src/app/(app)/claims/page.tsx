@@ -16,13 +16,38 @@ import { SubmitButton } from "@/components/submit-button";
 export const metadata = { title: "Claims" };
 export const dynamic = "force-dynamic";
 
-export default async function ClaimsPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
-  const { laterPaymentSummary } = await import("@/lib/claim-payments");
-  const laterMoney = await laterPaymentSummary();
+export default async function ClaimsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ ok?: string; error?: string; from?: string; to?: string; rx?: string; payer?: string }>;
+}) {
   await requireReimbursement();
   await requireUser();
-  const { ok, error } = await searchParams;
-  const [flags, byPayer, imports, s, mailReady] = await Promise.all([claimFlags(), claimsByPayer(), claimImports(), getSettings(), hasMailPassword()]);
+  const { ok, error, from, to, rx, payer } = await searchParams;
+
+  /*
+   * One day, unless somebody asks for more.
+   *
+   * This screen used to answer for every claim ever loaded, on every render, to show one day's work
+   * — grouping every dispensing, pricing each against the whole federal NADAC table, and parsing the
+   * stored text of every row. It got slower every week by construction, because the work grew with
+   * the archive rather than with the question being asked.
+   *
+   * A fill never spans two dates, so a day is a safe unit: narrowing by it splits no dispensing.
+   */
+  const scope = { from: from ?? null, to: to ?? null, rx: rx ?? null, payer: payer ?? null };
+  const searching = Boolean(from || to || rx || payer);
+
+  const { laterPaymentSummary } = await import("@/lib/claim-payments");
+  const [flags, laterMoney, imports, s, mailReady] = await Promise.all([
+    claimFlags(scope),
+    laterPaymentSummary(),
+    claimImports(),
+    getSettings(),
+    hasMailPassword(),
+  ]);
+  /* From the fills already grouped, rather than reading every claim and grouping them a second time. */
+  const byPayer = await claimsByPayer({ fills: flags.fills, networks: flags.networks });
 
   /*
    * Every dispensing against NADAC plus the dispensing fee.
@@ -332,6 +357,58 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
           </>
         )}
       </Notice>
+
+      {/*
+        What is on screen, and how to ask for something else.
+
+        Named rather than assumed: every figure below is drawn from this range, and a balance struck
+        over one day must not be read as a balance over the year.
+      */}
+      <form method="get" className="my-4 rounded-lg border border-line bg-surface p-3">
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="text-xs">
+            <span className="block text-ink-3">From</span>
+            <input type="date" name="from" defaultValue={flags.scope.from ?? ""} className="mt-0.5 rounded-md border border-line px-2 py-1 text-sm" />
+          </label>
+          <label className="text-xs">
+            <span className="block text-ink-3">To</span>
+            <input type="date" name="to" defaultValue={flags.scope.to ?? ""} className="mt-0.5 rounded-md border border-line px-2 py-1 text-sm" />
+          </label>
+          <label className="text-xs">
+            <span className="block text-ink-3">Prescription</span>
+            <input name="rx" defaultValue={flags.scope.rx ?? ""} placeholder="331488" className="mt-0.5 w-32 rounded-md border border-line px-2 py-1 text-sm" />
+          </label>
+          <label className="text-xs">
+            <span className="block text-ink-3">Payer or BIN</span>
+            <input name="payer" defaultValue={flags.scope.payer ?? ""} placeholder="Caremark" className="mt-0.5 w-40 rounded-md border border-line px-2 py-1 text-sm" />
+          </label>
+          <button className="rounded-md bg-ink px-3 py-1.5 text-sm text-white">Search</button>
+          {searching && (
+            <Link href="/claims" className="btn btn-sm">Back to the last day</Link>
+          )}
+        </div>
+        <p className="mt-2 text-xs text-ink-3">
+          {flags.scope.rx || flags.scope.payer ? (
+            <>
+              Showing {flags.total.toLocaleString()} claim{flags.total === 1 ? "" : "s"} matching{" "}
+              {[flags.scope.rx ? `prescription ${flags.scope.rx}` : null, flags.scope.payer ? `payer ${flags.scope.payer}` : null]
+                .filter(Boolean)
+                .join(" and ")}
+              {flags.scope.from ? ` between ${flags.scope.from} and ${flags.scope.to}` : " across every day held"}.
+            </>
+          ) : flags.scope.from === flags.scope.to && flags.scope.from ? (
+            <>
+              Showing <b>{flags.scope.from}</b> — the last day dispensed. Every figure below is that day&rsquo;s.
+              Widen the dates to take in more; the screen loads what it shows and nothing else.
+            </>
+          ) : (
+            <>
+              Showing {flags.scope.from ?? "the beginning"} to {flags.scope.to ?? "today"}. Every figure below is drawn
+              from that range.
+            </>
+          )}
+        </p>
+      </form>
 
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
