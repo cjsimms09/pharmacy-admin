@@ -321,7 +321,8 @@ export async function productLedger(): Promise<{ rows: LedgerRow[]; rate: number
 
   const [lines, catalogue, nadac, rawClaims, s, shelf] = await Promise.all([
     db.query.invoiceLines.findMany(),
-    db.query.supplierItems.findMany(),
+    // Held between requests: forty-five thousand rows that change once a week. See catalogue-cache.
+    (await import("./catalogue-cache")).catalogueRows(),
     db.query.nadacPrices.findMany({ columns: { ndc11: true, unitMicros: true, effectiveOn: true, description: true } }),
     db.query.claims.findMany(),
     getSettings(),

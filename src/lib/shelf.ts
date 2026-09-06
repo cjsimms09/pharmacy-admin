@@ -502,17 +502,8 @@ export async function buyListNow(): Promise<BuyListView> {
   );
   const shortestLead = Math.min(...[...leadBy.values()], 1);
 
-  const items = await db.query.supplierItems.findMany({
-    columns: {
-      supplier: true,
-      ndc11: true,
-      description: true,
-      unitCostMicros: true,
-      packSize: true,
-      contractFlag: true,
-      availability: true,
-    },
-  });
+  // Held between requests rather than read again per page. See catalogue-cache.
+  const items = await (await import("./catalogue-cache")).catalogueRows();
   if (items.length === 0)
     missing.push(
       "No supplier catalogue has been imported, so there is nothing to price an order against.",
