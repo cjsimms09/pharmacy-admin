@@ -6,6 +6,57 @@ branch, where the app actually runs against real files) and one in the cloud (th
 cannot see each other's conversations. **The repository is the only thing they share**, so this
 file is how they talk.
 
+## Open items
+
+Kept current by whichever session last touched it. A line is removed when the other side has done
+it and said so on the pull request. The owner reads this too.
+
+### For the pharmacy session (from the cloud session, PR #3)
+
+- [ ] **Put the buy list on the purchasing page.** `underNadac(ledger.rows, groupOf)`,
+      `switchNdc(u)`, `notYetBought(u)` from `src/lib/under-nadac.ts`; `groupOf` from
+      `product-groups.ts` over the NADAC rows held. Each `ProductPick.says` is a sentence to print.
+- [ ] **Add the buying logic's rows to the money list.** `recommendations()` in
+      `src/lib/recommendations.ts` returns `MoneyRow[]`, `blocked[]` and `watch[]` from the buy
+      list, the band position and the plan bases; spread its rows into `moneyFound()`.
+- [ ] **Scale the money list's recurring rows to a month.** `switch-supplier` and
+      `dispensed-at-a-loss` sum over every claim held and are labelled "a month"; after ninety
+      days of feed they will say three times the truth. `perMonthCents(amount, spanDays(from, to))`
+      in `recommendations.ts` does it; the claims' first and last `dateFilled` give the span.
+- [ ] **Let the statement select the band, not the drill-down**, until the scheduled drill-down
+      carries McKesson's own exclusions (`rebate-rates.ts`; `buying-logic.md` Rule 3). Today's
+      precedence puts the pharmacy in the bottom band when McKesson pays the top one.
+- [ ] **Extend `ReadPurchaseDrillDown`** to the fields in `drill-down.ts` `FIELDS_WANTED` and run
+      `checkMonth` after the read; the prompt's "Purchase Summary by Month" is titled "Purchase
+      Drill by Month" on the report.
+- [ ] **Keep the printed gross profit apart from the arithmetic.** The report's GrossProfit
+      includes PioneerRx's *estimated* rebate and DIR ("Uses invoice cost … Includes columns for
+      estimated rebates and estimated dir fees"). On the real 5 Sept file four rows differ from
+      Amount + Total − Acq. Inv. Cost by 18¢ to $1.02, all on plan 003858. Store that difference
+      per row as `reportEstimateCents` so it is visible, and never use the printed figure as margin.
+- [ ] **Keep catalogue price history** (`data-audit.md` §3.1): append each import to a
+      `supplier_price_history` table; `supplier_items` stays "current".
+- [ ] **One row per period for the rebate statement and the drill-down position**
+      (`data-audit.md` §3.2, §3.3), instead of settings JSON and `rebate_statement_json`.
+- [ ] **Invoice de-duplication** on (supplier_id, invoice number, invoice date) (`data-audit.md` §3.8).
+- [ ] **CI**: `secret-scan.yml` needs `pull-requests: read`; the database-backed tests need a
+      migrated scratch database in their `before` hook.
+
+### For the cloud session (from the pharmacy session)
+
+- [ ] Nothing outstanding. Reports on PR #2 and #3 have been read and acted on.
+
+### For the owner, on the pharmacy computer
+
+- [ ] Schedule the PioneerRx transaction report to cover **yesterday**.
+- [ ] Set the Purchase Drill Down's exclusion filter to McKesson's rebate scrub, if the filter
+      offers it; otherwise say so on the pull request and the site estimates the scrub.
+- [ ] NADAC page: "Read the listing now", then "Fetch this week" on a gap. Neither session can
+      reach data.medicaid.gov.
+- [ ] Suppliers page: set the catalogue name on McKesson, IPD, IPC, ParMed.
+- [ ] Ask PioneerRx for an on-hand/expiry report, and for Basis of Reimbursement (522-FM) and
+      Other Coverage Code (308-C8) on the daily report.
+
 ## The rules that keep two sessions from colliding
 
 1. **The cloud session branches from `feature/compliance` and never pushes to it.** It pushes
@@ -163,12 +214,12 @@ id only), and twelve further uses of the data ranked by value against readiness.
 now delegates to `product-key.ts`, which it had duplicated.
 
 ### Files this branch touched
-`src/db/schema.ts`, `drizzle/0048_*`, `drizzle/0049_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down}.ts` (new),
+`src/db/schema.ts`, `drizzle/0048_*`, `drizzle/0049_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down,recommendations}.ts` (new),
 `src/lib/{claims,rx-transactions,suppliers,suppliers-registry,pioneer-catalog,invoices,nadac-fetch,settings}.ts`,
 `src/app/(app)/suppliers/page.tsx`, `src/app/(app)/suppliers/[id]/terms/page.tsx` (new),
 `src/app/(app)/inventory/invoices/page.tsx`, `src/app/(app)/nadac/page.tsx`, `src/app/(app)/claims/page.tsx`,
-`tests/{ndc,supplier-terms,invoice-lines,nadac-datasets,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down}.test.ts` (new), `tests/{claims,suppliers-registry,rx-transactions}.test.ts`,
-`docs/HANDOFF.md`, `docs/reference/nadac-api.md`, `docs/reference/buying-logic.md`, `docs/reference/data-audit.md` (new), `fixtures/README.md`, `fixtures/rx-transactions.txt` (new).
+`tests/{ndc,supplier-terms,invoice-lines,nadac-datasets,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down,recommendations}.test.ts` (new), `tests/{claims,suppliers-registry,rx-transactions}.test.ts`,
+`CLAUDE.md` (new), `docs/HANDOFF.md`, `docs/reference/nadac-api.md`, `docs/reference/buying-logic.md`, `docs/reference/data-audit.md` (new), `fixtures/README.md`, `fixtures/rx-transactions.txt` (new).
 
 ## Who owns what now
 
