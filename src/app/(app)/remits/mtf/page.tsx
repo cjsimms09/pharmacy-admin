@@ -44,6 +44,43 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
     redirect("/remits/mtf?" + q.toString());
   }
 
+  /**
+   * Reads what has been downloaded, and puts the money against the fills it belongs to.
+   *
+   * The step that was missing between a folder of 835 files and a claim that knows it was paid.
+   * Downloading them was already possible; nothing read them, so a fill a facilitator paid $146.18
+   * on sat on the loss list for ever and the plan that underpaid it was judged on money it never
+   * sent.
+   */
+  async function readThem() {
+    "use server";
+    const u = await requireManager();
+    const { sweepRemittances } = await import("@/lib/claim-payments");
+    const r = await sweepRemittances(u);
+    await audit({ action: "mtf.read", userId: u.id, userName: u.name, details: `${r.payments} payments, ${r.amountCents}c` });
+    revalidatePath("/remits/mtf");
+    revalidatePath("/claims");
+    revalidatePath("/payers/performance");
+    revalidatePath("/money");
+    redirect(
+      "/remits/mtf?" +
+        new URLSearchParams(
+          r.files === 0
+            ? { error: "No files are in the download folder yet. Download some above, or point the CLI's download directory at that folder." }
+            : {
+                ok:
+                  `${r.read} remittance${r.read === 1 ? "" : "s"} read: ` +
+                  `${r.payments} payment${r.payments === 1 ? "" : "s"} worth ` +
+                  `$${(r.amountCents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}. ` +
+                  `${r.matched} matched a claim we hold` +
+                  (r.unmatched ? `, ${r.unmatched} name a prescription not loaded yet and will attach themselves when it arrives` : "") +
+                  "." +
+                  (r.problems.length ? ` ${r.problems[0]}` : ""),
+              },
+        ).toString(),
+    );
+  }
+
   return (
     <>
       <BackLink href="/settings/connections">Connections</BackLink>
@@ -110,6 +147,23 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
           </form>
         </section>
       </div>
+
+      <section className="mb-4 rounded-lg border border-accent bg-surface p-4">
+        <h2 className="text-sm font-semibold">Put the money against the claims</h2>
+        <p className="mt-1 text-sm text-ink-2">
+          Reads every 835 in the folder below and records what each one paid against the prescription it names. The
+          money is added to that fill&rsquo;s revenue and kept apart from what the plan itself paid, so a facilitator
+          payment can never flatter the plan that underpaid.
+        </p>
+        <p className="mt-1 text-xs text-ink-3">
+          Safe to run again: a payment is identified by the remittance&rsquo;s trace number and the claim&rsquo;s own
+          reference, so re-reading a file changes nothing — which matters, because a scheduled download re-fetches the
+          same days. A payment for a prescription not yet loaded is kept and attaches itself when the claim arrives.
+        </p>
+        <form action={readThem} className="mt-3">
+          <button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Read the files and post the payments</button>
+        </form>
+      </section>
 
       <section className="rounded-lg border border-line bg-surface p-4">
         <h2 className="text-sm font-semibold">Files we hold</h2>

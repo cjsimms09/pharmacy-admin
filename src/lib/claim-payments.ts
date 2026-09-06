@@ -1,4 +1,5 @@
 import "server-only";
+import nodePath from "node:path";
 import { db, schema } from "@/db";
 import { eq, isNull } from "drizzle-orm";
 import { newId } from "./crypto";
@@ -162,4 +163,125 @@ export async function backfillPatientTotals(): Promise<{ read: number; filled: n
     }
   }
   return { read, filled };
+}
+
+/**
+ * Loads an 835 remittance and records what it paid against the fills it names.
+ *
+ * The whole point of the Medicare Transaction Facilitator CLI: it downloads these files on a
+ * schedule, and until they are read the money in them reaches the bank and nothing here knows.
+ *
+ * Loading the same file twice is safe. A payment is identified by the remittance's trace number
+ * and the claim's own reference, which is what makes a re-download of the same day harmless —
+ * and re-downloading is exactly what a scheduled task does.
+ */
+export async function importRemittance(
+  text: string,
+  fileName: string,
+  user: { name: string },
+): Promise<{ payments: number; alreadyHeld: number; matched: number; unmatched: number; amountCents: number; skipped: number; problems: string[] }> {
+  const { parse835, payableOnly } = await import("./x12-835");
+  const r = parse835(text);
+  const { keep, skipped } = payableOnly(r);
+  const out = { payments: 0, alreadyHeld: 0, matched: 0, unmatched: 0, amountCents: 0, skipped: skipped.length, problems: [...r.problems] };
+
+  const held = await db.query.claimPayments.findMany({ columns: { reference: true, rxNumber: true, amountCents: true } });
+  const seen = new Set(held.map((h) => `${h.reference ?? ""}|${h.rxNumber}|${h.amountCents}`));
+
+  for (const p of keep) {
+    const reference = [r.traceNumber, p.reference].filter(Boolean).join("/") || fileName;
+    if (seen.has(`${reference}|${p.rxNumber}|${p.paidCents}`)) {
+      out.alreadyHeld++;
+      continue;
+    }
+    const rec = await recordClaimPayment(
+      {
+        rxNumber: p.rxNumber,
+        fillNumber: p.fillNumber,
+        dateFilled: p.serviceDate,
+        ndc11: p.ndc11,
+        // Named for who sent it rather than assumed: this reader takes any 835, not only the MTF's.
+        source: /transaction facilitator|\bmtf\b/i.test(r.payer ?? "") ? "mtf" : "secondary",
+        payer: r.payer,
+        amountCents: p.paidCents!,
+        receivedOn: r.paidOn,
+        reference,
+        notes: `From ${fileName}${r.traceNumber ? `, trace ${r.traceNumber}` : ""}.`,
+      },
+      user,
+    );
+    out.payments++;
+    out.amountCents += p.paidCents!;
+    if (rec.matched) out.matched++;
+    else out.unmatched++;
+    seen.add(`${reference}|${p.rxNumber}|${p.paidCents}`);
+  }
+  return out;
+}
+
+/**
+ * Where the remittances are, which is wherever the CLI was told to put them.
+ *
+ * Asking the MTF settings rather than keeping a second folder of our own: the CLI is configured
+ * once with a download directory, a scheduled task fills it, and anything that reads somewhere else
+ * reads an empty folder for ever while the money piles up next door.
+ */
+export async function remittanceDir(): Promise<string> {
+  try {
+    const { mtfStatus } = await import("./mtf");
+    const s = await mtfStatus();
+    if (s.dir) return s.dir;
+  } catch {
+    // No MTF configuration yet — fall back to a folder beside the database.
+  }
+  const base = nodePath.dirname(nodePath.resolve(process.env.DATABASE_PATH ?? "./data/pharmacy-admin.db"));
+  return nodePath.join(base, "remittances");
+}
+
+/**
+ * Reads every remittance in the watched folder that has not been read before.
+ *
+ * A folder rather than an email, because that is what the CLI produces: it is given a download
+ * directory and it fills it on a schedule. Point it at this one and the money appears here without
+ * anybody carrying a file across.
+ */
+export async function sweepRemittances(user: { name: string }): Promise<{
+  files: number;
+  read: number;
+  payments: number;
+  amountCents: number;
+  matched: number;
+  unmatched: number;
+  problems: string[];
+}> {
+  const fs = await import("node:fs/promises");
+  const path = await import("node:path");
+  const dir = await remittanceDir();
+  const out = { files: 0, read: 0, payments: 0, amountCents: 0, matched: 0, unmatched: 0, problems: [] as string[] };
+  let entries: string[];
+  try {
+    entries = await fs.readdir(dir);
+  } catch {
+    // Not created yet. Said plainly by the caller rather than treated as an error here.
+    return out;
+  }
+  const wanted = entries.filter((e) => /\.(835|txt|rmt|edi|dat)$/i.test(e) || /^\d{8}/.test(e));
+  out.files = wanted.length;
+
+  for (const file of wanted) {
+    try {
+      const text = await fs.readFile(path.join(dir, file), "utf8");
+      if (!/\bCLP\b/.test(text)) continue; // Not a remittance; left where it is.
+      const r = await importRemittance(text, file, user);
+      out.read++;
+      out.payments += r.payments;
+      out.amountCents += r.amountCents;
+      out.matched += r.matched;
+      out.unmatched += r.unmatched;
+      out.problems.push(...r.problems);
+    } catch (e) {
+      out.problems.push(`${file}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  return out;
 }
