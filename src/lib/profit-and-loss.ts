@@ -258,3 +258,95 @@ export function monthlyPL(i: PLInputs): MonthlyPL {
     usable: missing.length === 0,
   };
 }
+
+/**
+ * Assembles a month from everything the site already holds.
+ *
+ * Nothing here computes; it gathers. The arithmetic and every decision about where a figure belongs
+ * is in `monthlyPL` above, kept pure so a month can be checked against the page it came from by
+ * hand — which is the only way anybody will ever trust a profit figure they did not add up
+ * themselves.
+ */
+export async function monthlyAccount(month: string, basis: "accrual" | "cash" = "accrual"): Promise<MonthlyPL> {
+  const { latestSalesMonth, salesMonths } = await import("./sales-store");
+  const { expensesIn, cashReceiptsIn, categories } = await import("./expenses");
+  const { allFills } = await import("./claims");
+  const { earningSoFar } = await import("./rebate-rates");
+  const { allSuppliers } = await import("./suppliers-registry");
+  const { db, schema } = await import("@/db");
+  const { and, gte, lte } = await import("drizzle-orm");
+
+  const [months, bills, receipts, cats, fills, suppliers] = await Promise.all([
+    salesMonths(),
+    expensesIn(month, basis),
+    cashReceiptsIn(month),
+    categories(true),
+    allFills(),
+    allSuppliers(true),
+  ]);
+  void latestSalesMonth;
+
+  const sales = months.find((m) => m.month === month) ?? null;
+
+  /*
+   * The cost of what was actually dispensed in the month, per bottle, from the claims themselves.
+   *
+   * This is the figure that makes a stocktake unnecessary — see the note at the top of this file.
+   * A fill with no acquisition cost on it is left out of both sides rather than counted as free.
+   */
+  const mine = fills.filter((f) => f.dateFilled.startsWith(month) && f.acquisitionCents !== null);
+  const dispensedCostCents = mine.length ? mine.reduce((n, f) => n + (f.acquisitionCents ?? 0), 0) : null;
+  const laterMoneyCents = fills
+    .filter((f) => f.dateFilled.startsWith(month))
+    .reduce((n, f) => n + f.laterPaymentsCents, 0);
+
+  /* What the wholesalers billed in the month, for the stock comparison only — never as cost of goods. */
+  const lines = await db.query.invoiceLines.findMany({
+    where: and(gte(schema.invoiceLines.invoiceDate, `${month}-01`), lte(schema.invoiceLines.invoiceDate, `${month}-31`)),
+    columns: { extendedCents: true },
+  });
+  const purchasesCents = lines.length ? lines.reduce((n, l) => n + l.extendedCents, 0) : null;
+
+  const earned = await Promise.all(suppliers.map((s) => earningSoFar(s.id, month)));
+  const rebatesCents = earned.reduce((n, e) => n + (e?.estimatedRebateCents ?? 0), 0) || null;
+
+  const byId = new Map(cats.map((c) => [c.id, c]));
+  return monthlyPL({
+    month,
+    basis,
+    sales: sales ? { retailCents: sales.retailCents, rxPatientCents: sales.rxPatientCents, rxRemitCents: sales.rxRemitCents, totalCents: sales.totalCents } : null,
+    receipts: receipts.map((r) => ({ kind: r.kind, amountCents: r.amountCents })),
+    laterMoneyCents,
+    dispensedCostCents,
+    purchasesCents,
+    rebatesCents,
+    expenses: bills.map((b) => {
+      const c = b.categoryId ? byId.get(b.categoryId) : undefined;
+      return {
+        categoryId: b.categoryId,
+        categoryName: c?.name ?? "Uncategorised",
+        // A bill nobody has filed is an overhead until somebody says otherwise: it is the reading
+        // that keeps it out of gross profit, where a wrong guess would move the margin.
+        kind: c?.kind ?? "operating",
+        amountCents: b.amountCents,
+      };
+    }),
+  });
+}
+
+/** Which months there is anything to report on, most recent first. */
+export async function accountMonths(): Promise<string[]> {
+  const { salesMonths } = await import("./sales-store");
+  const { db, schema } = await import("@/db");
+  const [sales, bills, claims] = await Promise.all([
+    salesMonths(),
+    db.query.expenses.findMany({ columns: { invoiceDate: true } }),
+    db.query.claims.findMany({ columns: { dateFilled: true } }),
+  ]);
+  void schema;
+  const set = new Set<string>();
+  for (const m of sales) set.add(m.month);
+  for (const b of bills) set.add(b.invoiceDate.slice(0, 7));
+  for (const c of claims) set.add(c.dateFilled.slice(0, 7));
+  return [...set].filter((m) => /^\d{4}-\d{2}$/.test(m)).sort().reverse();
+}

@@ -594,6 +594,12 @@ async function importRecognised(
    */
   filed?: { documentId?: string | null; supplierId?: string | null; supplierName?: string | null },
 ): Promise<{ routedAs: string; routeResult: string | null; imported: boolean }> {
+  /* Who, if anybody, has claimed this sender as their own. */
+  const vendorBill = async (addr: string) => {
+    const { vendors, vendorForSender } = await import("./expenses");
+    return vendorForSender(addr, await vendors());
+  };
+
   const cls = classify(fileName, buf);
   const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   let routeResult: string | null = null;
@@ -609,6 +615,34 @@ async function importRecognised(
       const r = await importRxTransactions(buf, fileName, ctx.userId ?? "mailbox-sweep");
       routeResult = describeTransactionImport(r);
       if (r.claimsAdded || r.reversed) imported = true;
+    } else if (await vendorBill(from)) {
+      /*
+       * A bill from somebody the pharmacy has told us about.
+       *
+       * Checked before the generic readers, because a Stamps.com PDF has a header row about as much
+       * as a wholesaler catalogue does and would otherwise land in "unrecognised". The rule is the
+       * vendor's own sender address, so the pharmacist says "bills from here are postage" once.
+       *
+       * Filed as a draft with no amount. Reading a total off an arbitrary vendor's PDF is a guess
+       * with a number attached, and a guess that walks straight into the month's profit is worse
+       * than no figure — so it waits for somebody to agree with it.
+       */
+      const v = (await vendorBill(from))!;
+      const { saveExpense } = await import("./expenses");
+      await saveExpense({
+        vendorId: v.id,
+        categoryId: v.categoryId,
+        // The day it arrived, until somebody reads the bill and says otherwise.
+        invoiceDate: new Date().toISOString().slice(0, 10),
+        amountCents: v.typicalCents ?? 1,
+        description: subject || fileName,
+        documentId: filed?.documentId ?? null,
+        status: "draft",
+        source: "email",
+        createdBy: ctx.userName ?? "mailbox-sweep",
+      });
+      routeResult = `A bill from ${v.name}, filed as a draft under ${v.categoryId ? "its usual category" : "no category yet"}. Nothing counts on the month until somebody confirms the amount — reading a total off a PDF is a guess with a number attached.`;
+      imported = true;
     } else if (cls.kind === "rxrescue_credit") {
       /*
        * Top-off money applied to the fills it names. Idempotent on the memo's own transaction ids,
