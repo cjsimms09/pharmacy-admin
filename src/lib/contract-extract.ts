@@ -34,7 +34,7 @@ async function client(): Promise<{ client: Anthropic; model: string }> {
   };
 }
 
-import { estimateCost, pdfPageCount, planBatches, PDF_PAGE_LIMIT, PDF_BYTES_LIMIT } from "./contract-run";
+import { estimateCost, pdfPageCount, planBatches, batchIdsIn, PDF_PAGE_LIMIT, PDF_BYTES_LIMIT } from "./contract-run";
 import { Triage, TRIAGE_SYSTEM, triageByText, shouldRead, estimateTriageCost, type TriageT } from "./contract-triage";
 import { pdfText } from "./pdf-text";
 export { estimateCost, pdfPageCount, planBatches, PDF_PAGE_LIMIT, PDF_BYTES_LIMIT, BATCH_BYTES_LIMIT, BATCH_REQUEST_LIMIT } from "./contract-run";
@@ -163,50 +163,144 @@ export async function collectExtraction(userId: string, userName: string): Promi
     for await (const entry of await c.messages.batches.results(batchId)) {
       const doc = queued.find((d) => d.id === entry.custom_id);
       if (!doc) continue;
-      if (entry.result.type !== "succeeded") {
-        await fail(doc.id, explainFailure(entry.result));
+      const a = await absorb(doc, entry);
+      tokensIn += a.tokensIn;
+      tokensOut += a.tokensOut;
+      if (a.outcome === "done") res.done++;
+      else {
         res.failed++;
-        continue;
+        if (a.outcome === "rejected") res.rejected.push({ doc: doc.documentName, why: a.why });
       }
-      const msg = entry.result.message;
-      tokensIn += msg.usage?.input_tokens ?? 0;
-      tokensOut += msg.usage?.output_tokens ?? 0;
-      // An answer cut off at the token limit is not a bad read; it is a document too long for one answer.
-      if (msg.stop_reason === "max_tokens") {
-        await fail(doc.id, "The answer ran past the length limit before it finished. Split the document into parts and read the parts.");
-        res.failed++;
-        continue;
-      }
-      const text = msg.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("");
-      let terms: ContractTermsT;
-      try {
-        terms = ContractTerms.parse(JSON.parse(text));
-      } catch {
-        await fail(doc.id, "The answer did not match the expected shape. Try this one again.");
-        res.failed++;
-        continue;
-      }
-      // A figure without the contract's words behind it does not get stored.
-      const missing = requireCitations(terms);
-      if (missing.length > 0) {
-        const why = `No supporting quote for ${missing.map((m) => m.field).join(", ")}`;
-        await fail(doc.id, `${why}. Nothing was saved — a rate that cannot be traced to a sentence is not usable in an appeal.`);
-        res.rejected.push({ doc: doc.documentName, why });
-        res.failed++;
-        continue;
-      }
-      await db
-        .update(schema.contractDocs)
-        .set({ extractionState: "done", extractionJson: JSON.stringify(terms), extractionError: null })
-        .where(eq(schema.contractDocs.id, doc.id));
-      // A scan has no words of its own to search; the read's cited lines become them.
-      if (doc.fileName) await (await import("./contract-search")).rememberReadText(doc.fileName, terms);
-      res.done++;
     }
   }
   // Written the way every other model call writes it, so the spend page counts this run.
   await audit({ action: "contracts.extract.collected", userId, userName, details: `${res.done} read, ${res.failed} failed, ${res.rejected.length} rejected for missing citations · tokens in=${tokensIn} out=${tokensOut}` });
   return res;
+}
+
+type Absorbed = { outcome: "done" | "failed" | "rejected"; why: string; tokensIn: number; tokensOut: number };
+
+/**
+ * One batch result, landed on its document.
+ *
+ * Kept as a draft when the answer parses and every money figure carries its sentence; otherwise
+ * refused with the reason written on the document, so the page can say it and a person can act.
+ * The collect step and the recovery step both come through here, so a result is judged the same
+ * way whether it was picked up on time or fetched back weeks later.
+ */
+async function absorb(doc: { id: string; documentName: string; fileName: string | null }, entry: Anthropic.Messages.Batches.MessageBatchIndividualResponse): Promise<Absorbed> {
+  if (entry.result.type !== "succeeded") {
+    const why = explainFailure(entry.result);
+    await fail(doc.id, why);
+    return { outcome: "failed", why, tokensIn: 0, tokensOut: 0 };
+  }
+  const msg = entry.result.message;
+  const tokensIn = msg.usage?.input_tokens ?? 0;
+  const tokensOut = msg.usage?.output_tokens ?? 0;
+  // An answer cut off at the token limit is not a bad read; it is a document too long for one answer.
+  if (msg.stop_reason === "max_tokens") {
+    const why = "The answer ran past the length limit before it finished. Split the document into parts and read the parts.";
+    await fail(doc.id, why);
+    return { outcome: "failed", why, tokensIn, tokensOut };
+  }
+  const text = msg.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("");
+  let terms: ContractTermsT;
+  try {
+    terms = ContractTerms.parse(JSON.parse(text));
+  } catch {
+    const why = "The answer did not match the expected shape. Try this one again.";
+    await fail(doc.id, why);
+    return { outcome: "failed", why, tokensIn, tokensOut };
+  }
+  // A figure without the contract's words behind it does not get stored.
+  const missing = requireCitations(terms);
+  if (missing.length > 0) {
+    const why = `No supporting quote for ${missing.map((m) => m.field).join(", ")}`;
+    await fail(doc.id, `${why}. Nothing was saved — a rate that cannot be traced to a sentence is not usable in an appeal.`);
+    return { outcome: "rejected", why, tokensIn, tokensOut };
+  }
+  await db
+    .update(schema.contractDocs)
+    .set({ extractionState: "done", extractionJson: JSON.stringify(terms), extractionError: null })
+    .where(eq(schema.contractDocs.id, doc.id));
+  // A scan has no words of its own to search; the read's cited lines become them.
+  if (doc.fileName) await (await import("./contract-search")).rememberReadText(doc.fileName, terms);
+  return { outcome: "done", why: "", tokensIn, tokensOut };
+}
+
+export type Recovery = { batches: number; gone: number; stillRunning: number; recovered: number; explained: { doc: string; reason: string }[]; note: string };
+
+/**
+ * The reason for every read that was refused before the reason was kept.
+ *
+ * The first live runs came back "errored" and the code of the day threw the API's message away and
+ * wrote that one word over the batch id. The audit line written when each run was queued still
+ * names its batches, and the API holds a batch's results for 29 days. So this reads those ids back,
+ * asks for the results, and lands each one on its document exactly as collect would have: a refusal
+ * gets its reason in words that say what to do; a read that succeeded but was never collected is
+ * kept as a draft. Nothing is sent to the model, so nothing is charged.
+ */
+export async function recoverFailures(userId: string, userName: string): Promise<Recovery> {
+  const out: Recovery = { batches: 0, gone: 0, stillRunning: 0, recovered: 0, explained: [], note: "" };
+  const events = await db.query.auditEvents.findMany({
+    where: eq(schema.auditEvents.action, "contracts.extract.queued"),
+    orderBy: (t, { desc }) => [desc(t.at)],
+    limit: 60,
+  });
+  const ids = batchIdsIn(events.map((e) => e.details));
+  if (ids.length === 0) {
+    out.note = "No read has been queued from this site, so there is no batch to ask about.";
+    return out;
+  }
+  if (MOCK) {
+    out.note = `Mock: ${ids.length} batch id(s) found, nothing asked.`;
+    return out;
+  }
+  const docs = await db.query.contractDocs.findMany({ columns: { id: true, documentName: true, fileName: true, extractionState: true } });
+  const byId = new Map(docs.map((d) => [d.id, d]));
+  const seen = new Set<string>();
+  const { client: c } = await client();
+  for (const batchId of ids) {
+    let batch: Anthropic.Messages.Batches.MessageBatch;
+    try {
+      batch = await c.messages.batches.retrieve(batchId);
+    } catch (e) {
+      if (e instanceof Anthropic.NotFoundError) {
+        out.gone++;
+        continue;
+      }
+      throw e;
+    }
+    out.batches++;
+    if (batch.processing_status !== "ended") {
+      out.stillRunning++;
+      continue;
+    }
+    let results: Awaited<ReturnType<typeof c.messages.batches.results>>;
+    try {
+      results = await c.messages.batches.results(batchId);
+    } catch {
+      // Ended, but its results are past the 29 days the API keeps them.
+      out.gone++;
+      continue;
+    }
+    for await (const entry of results) {
+      const doc = byId.get(entry.custom_id);
+      // The newest batch is asked first, so the first verdict seen for a document is its latest.
+      if (!doc || seen.has(doc.id) || doc.extractionState === "done" || doc.extractionState === "queued") continue;
+      seen.add(doc.id);
+      const a = await absorb(doc, entry);
+      if (a.outcome === "done") out.recovered++;
+      else out.explained.push({ doc: doc.documentName, reason: a.why });
+    }
+  }
+  await audit({
+    action: "contracts.extract.recovered",
+    userId,
+    userName,
+    details: `${out.batches} batch(es) asked, ${out.gone} no longer held, ${out.stillRunning} still running, ${out.recovered} read(s) recovered, ${out.explained.length} refusal(s) explained`,
+  });
+  return out;
 }
 
 /**

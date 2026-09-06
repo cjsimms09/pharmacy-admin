@@ -45,6 +45,11 @@ it and said so on the pull request. The owner reads this too.
   that is not a sidebar group (Records). No page of yours was edited except a link on `payers/page.tsx`
   and the `/money` links on Today and Tools.
 
+- **The two live refusals can be explained without paying again.** "Ask the API why" on
+  `/payers/sort` (`recoverFailures` in `contract-extract.ts`) reads the batch ids from the
+  `contracts.extract.queued` audit lines, fetches each batch's results (held 29 days) and writes the
+  API's own reason on each refused document; a read that finished but was never collected is kept.
+  Once this merges, the owner presses it first, then "Read … now" on the 3-page document.
 - **A design pass over pages of yours, class strings only.** Every hand-typed primary button is
   `btn btn-primary`; the four deletes (`/licenses`, `/staff/[id]`, `/cqi/incidents`, the stored key
   on `/settings/connections`) are `btn btn-sm btn-danger`; five tables gained an `overflow-x-auto`

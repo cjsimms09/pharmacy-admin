@@ -5,7 +5,7 @@ import { requireManager, requireUser } from "@/lib/auth";
 import { requireReimbursement } from "@/lib/features";
 import { audit } from "@/lib/audit";
 import { contractLibrary, type LibraryDoc } from "@/lib/contract-docs";
-import { queueTriage, collectTriage, setTriage, testReader, TRIAGE_MODEL } from "@/lib/contract-extract";
+import { queueTriage, collectTriage, setTriage, testReader, recoverFailures, TRIAGE_MODEL } from "@/lib/contract-extract";
 import { TRIAGE_KINDS, KIND_MEANS, estimateTriageCost, type TriageKind } from "@/lib/contract-triage";
 import { dollars } from "@/lib/ai-spend";
 import { PageHeader, Card, Notice, Figure, Empty } from "@/components/ui";
@@ -34,6 +34,7 @@ export default async function SortPage({ searchParams }: { searchParams: Promise
   const ruledOut = byKind("not_relevant");
   const scanPages = unsorted.reduce((n, d) => n + (d.pages ?? 0), 0);
   const canManage = user.role === "owner" || user.role === "pic";
+  const refused = withFile.filter((d) => d.state === "failed");
   const smallest = [...withFile].filter((d) => d.pages && !d.tooLong && d.state !== "queued").sort((a, b) => (a.pages ?? 0) - (b.pages ?? 0))[0] ?? null;
 
   async function sort() {
@@ -90,6 +91,35 @@ export default async function SortPage({ searchParams }: { searchParams: Promise
     redirect("/payers/sort?test=" + encodeURIComponent(JSON.stringify(r)));
   }
 
+  /*
+   * The reason for the reads that were refused before the reason was kept.
+   *
+   * Asks the API for the results of every batch this site ever queued (the audit line names them;
+   * the API holds them for 29 days) and writes each refusal on its document in plain words. Nothing
+   * is sent to the model, so nothing is charged.
+   */
+  async function why() {
+    "use server";
+    const u = await requireManager();
+    try {
+      const r = await recoverFailures(u.id, u.name);
+      revalidatePath("/payers/sort");
+      revalidatePath("/payers/contracts");
+      const said =
+        r.note ||
+        `${r.batches} batch${r.batches === 1 ? "" : "es"} asked` +
+          (r.gone ? `, ${r.gone} no longer held by the API` : "") +
+          (r.stillRunning ? `, ${r.stillRunning} still running` : "") +
+          `: ${r.explained.length} refusal${r.explained.length === 1 ? "" : "s"} explained below` +
+          (r.recovered ? `, ${r.recovered} finished read${r.recovered === 1 ? "" : "s"} recovered and kept` : "") +
+          ".";
+      redirect("/payers/sort?ok=" + encodeURIComponent(said));
+    } catch (e) {
+      if (e instanceof Error && e.message.includes("NEXT_REDIRECT")) throw e;
+      redirect("/payers/sort?error=" + encodeURIComponent(e instanceof Error ? e.message : String(e)));
+    }
+  }
+
   async function decide(fd: FormData) {
     "use server";
     const u = await requireManager();
@@ -138,6 +168,39 @@ export default async function SortPage({ searchParams }: { searchParams: Promise
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
       {test && <TestResult json={test} />}
+
+      {(refused.length > 0 || canManage) && (
+        <Card
+          className="mb-4"
+          title="Reads that were refused"
+          count={refused.length}
+          subtitle="What the API said about each, in words that say what to do. A read refused before the reason was kept shows only that it failed; ask the API and the reason is fetched back from the batch, which it holds for 29 days. Nothing is charged."
+          tone={refused.length ? "warn" : undefined}
+          actions={
+            canManage ? (
+              <form action={why}>
+                <SubmitButton pendingLabel="Asking…" className="btn btn-sm btn-primary">Ask the API why</SubmitButton>
+              </form>
+            ) : undefined
+          }
+        >
+          {refused.length === 0 ? (
+            <p className="text-sm text-ink-3">No read stands refused.</p>
+          ) : (
+            <ul className="rows">
+              {refused.map((d) => (
+                <li key={d.id} className="row">
+                  <div className="min-w-0">
+                    <div className="row-title">{d.documentName}</div>
+                    <p className="row-why">{d.pbmName} · {d.pages ?? "?"} page{d.pages === 1 ? "" : "s"}</p>
+                    <p className="mt-0.5 text-xs text-crit">{d.error ?? "Refused; the reason was not kept. Ask the API why."}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      )}
 
       {smallest && canManage && (
         <Card className="mb-4" title="Prove the reader before the run" subtitle="Reads the smallest unread document now, outside the batch, and prints either its terms or the exact refusal. A refused read costs nothing.">

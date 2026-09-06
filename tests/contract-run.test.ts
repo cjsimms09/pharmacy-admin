@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { planBatches, estimateCost, pdfPageCount, BATCH_BYTES_LIMIT, BATCH_REQUEST_LIMIT } from "../src/lib/contract-run";
+import { planBatches, estimateCost, pdfPageCount, batchIdsIn, BATCH_BYTES_LIMIT, BATCH_REQUEST_LIMIT } from "../src/lib/contract-run";
 
 /** The run's arithmetic: what fits in a batch, what a read costs, how long a document is. */
 describe("batches under the limits", () => {
@@ -81,5 +81,19 @@ describe("search text written back from a read", () => {
     assert.match(body, /Not read or not stated: Brand rate not stated/);
     // Empty lists print nothing, so a search for "Group" does not hit every read.
     assert.doesNotMatch(body, /^Group:/m);
+  });
+});
+
+describe("the batch ids a run left behind", () => {
+  test("found in the audit lines, newest first, each once, nothing else", () => {
+    const lines = [
+      "3 document(s), 40 pages, 2 batch(es): msgbatch_01Newest, msgbatch_01Second; estimate $0.10–$0.40",
+      null,
+      "1 document(s), 3 pages, 1 batch(es): msgbatch_01Older; estimate $0.01–$0.03",
+      "again: msgbatch_01Second",
+      "not one: msgbatch_ and msgbatch-01Bad",
+    ];
+    assert.deepEqual(batchIdsIn(lines), ["msgbatch_01Newest", "msgbatch_01Second", "msgbatch_01Older"]);
+    assert.deepEqual(batchIdsIn([]), []);
   });
 });

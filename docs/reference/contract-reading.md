@@ -224,6 +224,13 @@ read: split it; not a PDF: re-save it; key refused; busy, try again), and a refu
 nothing. The per-request page limit is 50, not 100: a scanned page is sent as an image and costs
 up to 3,000 tokens, so a hundred of them overflow a 200,000-token window.
 
+**The refusals that were thrown away can be fetched back (`recoverFailures`, "Ask the API why" on
+`/payers/sort`).** The audit line written when a run was queued names its batches, and the API
+holds a batch's results for 29 days. Recovery reads those ids back, newest first, and lands each
+result on its document exactly as Collect would have: a refusal gets the API's own reason in
+plain words; a read that succeeded but was never collected is kept as a draft. Nothing is sent to
+the model, so nothing is charged. Collect and recovery judge a result through the same code.
+
 **Steps 7 and 8 are now pages.** `/claims/appeals` (`appeal-queue.ts`, pure, tested; `appeals.ts`)
 prices every paid third-party claim of the last 120 days against the rate row on file for its
 PBM — the row for its network id where the claim names one, the PBM's single row otherwise, and no

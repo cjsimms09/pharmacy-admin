@@ -136,3 +136,24 @@ export function searchBodyFromTerms(t: {
   list("Not read or not stated", t.unclearOrMissing);
   return lines.join("\n");
 }
+
+/**
+ * The batch ids a run wrote into its audit line, newest first, each once.
+ *
+ * A refused read used to overwrite the batch id on the document with the word "errored", so the
+ * only place the id survived was the audit line written when the run was queued. The API keeps a
+ * batch's results for 29 days, so those ids are enough to go back and ask what the refusal was.
+ */
+export function batchIdsIn(details: (string | null | undefined)[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const d of details) {
+    for (const m of (d ?? "").matchAll(/\bmsgbatch_[A-Za-z0-9]+\b/g)) {
+      if (!seen.has(m[0])) {
+        seen.add(m[0]);
+        out.push(m[0]);
+      }
+    }
+  }
+  return out;
+}
