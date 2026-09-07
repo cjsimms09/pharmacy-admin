@@ -124,6 +124,55 @@ function startStatusServer() {
   };
 }
 
+/**
+ * The page shown when the site could not be started at all.
+ *
+ * Every path out of this launcher used to be process.exit(1) with the console window hidden, so a
+ * failed build, a failed migration or a missing .next all looked identical from the pharmacy: the
+ * browser said it could not connect, and there was nothing anywhere to say why. That is the worst
+ * failure this program has, because it is the one that cannot be diagnosed from where it happens.
+ *
+ * So nothing exits quietly any more. Whatever went wrong is written on the port the site normally
+ * answers on, the recovery keeps running behind it, and the page returns to the app by itself when
+ * the site is up.
+ */
+function problemPage(title, detail) {
+  const esc = (t) => String(t).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+  return `<!doctype html><html><head><meta charset=utf-8><title>${esc(title)}</title><meta http-equiv=refresh content=5>
+<style>body{font:14px system-ui,Segoe UI,sans-serif;margin:0;background:#f7f7f6;color:#1b1b1a;display:flex;min-height:100vh;align-items:center;justify-content:center}
+main{max-width:38rem;padding:2rem}h1{font-size:1.25rem;margin:0 0 .5rem}.s{color:#57564f;margin:.35rem 0}
+pre{background:#fff;border:1px solid #e2e1dc;border-radius:.5rem;padding:.75rem;font-size:11px;overflow:auto;max-height:18rem;white-space:pre-wrap}</style>
+</head><body><main><h1>${esc(title)}</h1>
+<p class=s>Nothing has been lost — the database and every document are untouched. This keeps trying on its own and returns to the app the moment it succeeds.</p>
+<pre>${esc(detail)}</pre>
+<p class=s>Leave this page open. If it is still here in ten minutes, send this text on.</p></main></body></html>`;
+}
+
+/** Holds the port while the site cannot, so there is always something to look at. */
+function startProblemServer() {
+  let title = "Starting the pharmacy site\u2026";
+  let detail = "";
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+    res.end(problemPage(title, detail));
+  });
+  server.on("error", () => {
+    /* the port may still be held by the process that just died; the browser retries anyway */
+  });
+  server.listen(PORT, "0.0.0.0");
+  return {
+    set: (t, d) => {
+      title = t;
+      detail = `${d}\n\n${tailLog(20)}`.trim();
+    },
+    stop: () =>
+      new Promise((resolve) => {
+        server.close(() => resolve());
+        server.closeAllConnections?.();
+      }),
+  };
+}
+
 function ensureEnv() {
   const envPath = path.join(root, ".env");
   if (fs.existsSync(envPath)) {
@@ -332,11 +381,86 @@ async function main() {
       }
     }
   }
-  if (!fs.existsSync(path.join(root, "node_modules")) || needsBuild()) build();
+  const buildId = path.join(root, ".next", "BUILD_ID");
+  /*
+   * One place that keeps the port answering while anything is wrong, and gets out of the way when
+   * it is not. It is started only when needed, because while the app is running the app owns the port.
+   */
+  let problem = null;
+  const showProblem = (title, detail) => {
+    if (!problem) problem = startProblemServer();
+    problem.set(title, String(detail ?? ""));
+  };
+  const clearProblem = async () => {
+    if (problem) await problem.stop();
+    problem = null;
+  };
+
+  /**
+   * Builds, and does not give up.
+   *
+   * A pharmacy computer with no site has one job: get one. Failing once is common — the machine ran
+   * out of room, GitHub was unreachable, a file was locked. Failing once and exiting is what turned
+   * those into a morning without the site, so this keeps trying, taking the latest code each time
+   * in case the fix for whatever broke has already been pushed.
+   */
+  const buildUntilItWorks = async (why) => {
+    let attempt = 0;
+    for (;;) {
+      attempt++;
+      showProblem("Building the pharmacy site\u2026", `${why}\n\nAttempt ${attempt}. This takes a minute or two each time.`);
+      try {
+        if (attempt > 1 && fs.existsSync(path.join(root, ".git"))) {
+          // The fix may already be pushed; take it before spending another build on the same code.
+          const branch = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8", shell: isWin }).stdout.trim() || "main";
+          for (const args of [["checkout", "--", "."], ["fetch", "origin", branch], ["merge", "--ff-only", `origin/${branch}`]]) {
+            spawnSync("git", args, { encoding: "utf8", shell: isWin, timeout: 5 * 60_000 });
+          }
+        }
+        build(true);
+        if (fs.existsSync(buildId)) return;
+        why = "The build finished without producing a site.";
+      } catch (e) {
+        why = String(e.message ?? e);
+        log(`Build failed: ${why.split("\n")[0]}`);
+      }
+      showProblem("The pharmacy site could not be built", `${why}\n\nTrying again in one minute.`);
+      await new Promise((r) => setTimeout(r, 60_000));
+    }
+  };
+
+  if (!fs.existsSync(path.join(root, "node_modules")) || needsBuild()) {
+    try {
+      build();
+    } catch (e) {
+      // A previous build still on disk is a working site; use it rather than leaving the pharmacy with none.
+      if (fs.existsSync(buildId)) log(`The rebuild failed (${String(e.message ?? e).split("\n")[0]}). Starting the previous version instead.`);
+      else await buildUntilItWorks(String(e.message ?? e));
+    }
+  }
   let first = true;
+  let consecutiveFailures = 0;
   for (;;) {
     if (fs.existsSync(flagFile)) fs.rmSync(flagFile);
-    run(npmCmd, ["run", "db:migrate"]);
+    /*
+     * The migration is not allowed to be fatal either.
+     *
+     * It refuses to run when the migration files are out of order, which is right — applying them
+     * anyway would silently skip one — but exiting on that refusal took the whole site down for a
+     * fault that stops nothing already working.
+     */
+    try {
+      run(npmCmd, ["run", "db:migrate"]);
+    } catch (e) {
+      if (!fs.existsSync(buildId)) {
+        showProblem("The database could not be brought up to date", String(e.message ?? e));
+        await new Promise((r) => setTimeout(r, 60_000));
+        continue;
+      }
+      log(`The database migration did not run (${String(e.message ?? e).split("\n")[0]}). Starting anyway.`);
+    }
+    if (!fs.existsSync(buildId)) await buildUntilItWorks("There is no built site — the last build did not finish.");
+    await clearProblem();
     log(`Starting on http://localhost:${PORT}`);
     const child = spawn(process.execPath, [path.join(root, "node_modules", "next", "dist", "bin", "next"), "start", "-p", PORT, "-H", "0.0.0.0"], {
       stdio: "inherit",
@@ -346,6 +470,10 @@ async function main() {
       first = false;
       waitForServer().then((ok) => ok && (process.env.NO_BROWSER ? null : openBrowser()));
     }
+    // A start that answers a request is a start that worked, whatever it does later.
+    void waitForServer(20).then((ok) => {
+      if (ok) consecutiveFailures = 0;
+    });
     const code = await new Promise((resolve) => child.on("exit", resolve));
     if (code === UPDATE_EXIT_CODE || fs.existsSync(flagFile)) {
       const status = startStatusServer();
@@ -362,12 +490,46 @@ async function main() {
       await status.stop();
       continue;
     }
-    log(`Server stopped (exit ${code}).`);
-    process.exit(code ?? 0);
+    /*
+     * A server that stops on its own is not a reason to leave the pharmacy with nothing.
+     *
+     * This is the exact way the site disappeared: an update cleared .next and did not replace it,
+     * `next start` found no build and exited at once, and the launcher exited with it — hidden
+     * window, dead port, no message anywhere. Now a failure rebuilds and comes back, and only a
+     * clean stop is treated as somebody meaning it.
+     */
+    if (code === 0 || code === null) {
+      log("Server stopped.");
+      process.exit(0);
+    }
+    consecutiveFailures++;
+    log(`Server stopped (exit ${code}). Attempt ${consecutiveFailures} to bring it back.`);
+    if (!fs.existsSync(buildId)) {
+      await buildUntilItWorks(`The site stopped straight away (exit ${code}) and there is no built site.`);
+    } else if (consecutiveFailures >= 2) {
+      // Twice in a row with a build present is not a passing thing; rebuild it from the latest code.
+      await buildUntilItWorks(`The site stopped straight away (exit ${code}), twice running.`);
+    }
+    showProblem("The pharmacy site is restarting\u2026", `It stopped with exit code ${code}.`);
+    await new Promise((r) => setTimeout(r, consecutiveFailures > 2 ? 30_000 : 3_000));
   }
 }
 
 main().catch((e) => {
-  console.error(e.message ?? e);
-  process.exit(1);
+  /*
+   * The last resort, and the whole point of it: something to look at.
+   *
+   * This used to print to a console window that is hidden by design and then exit, which from the
+   * pharmacy is indistinguishable from the computer being off. Holding the port with the reason
+   * costs nothing and turns "it will not come up" into a sentence that can be acted on.
+   */
+  const message = String(e?.message ?? e);
+  console.error(message);
+  try {
+    const server = startProblemServer();
+    server.set("The pharmacy site could not be started", message);
+    log(`Holding http://localhost:${PORT} with the reason above. Close this window to stop.`);
+  } catch {
+    process.exit(1);
+  }
 });

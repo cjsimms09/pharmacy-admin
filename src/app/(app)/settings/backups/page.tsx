@@ -8,6 +8,8 @@ import { runBackup, backupStatus, pruneBackups, encryptionKey, rehearseRestore }
 import { detectCloudFolders, backupFolderIn, isInside } from "@/lib/cloud-folders";
 import { PageHeader, Notice, BackLink, Empty, Field, Figure, Card } from "@/components/ui";
 import { fmtLong } from "@/lib/dates";
+import { AutoRefresh } from "@/components/auto-refresh";
+import { CopyPath } from "@/components/copy-path";
 
 export const metadata = { title: "Backups" };
 export const dynamic = "force-dynamic";
@@ -355,9 +357,10 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
             <p className={`mt-2 text-xs ${copy.state === "failed" ? "text-crit" : copying ? "text-ink-2" : "text-ink-3"}`}>
               <b>{copying ? "Working" : copy.state === "failed" ? "The last attempt failed" : "The last one finished"}:</b>{" "}
               {copy.step}
-              {copying ? " Refresh this page to see where it has got to." : ""}
             </p>
           )}
+          {/* While it runs the page moves by itself. Telling somebody to refresh is asking them to do the site's job. */}
+          {copying ? <AutoRefresh seconds={4} /> : null}
           <p className="mt-2 text-xs text-ink-3">
             It takes a few minutes and runs in the background — you can leave this page. It saves into{" "}
             <b>{s.destination || "the backup folder"}</b>, the same place the backups go, so you can attach it from
@@ -370,18 +373,26 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
             <p className="text-xs font-medium text-ink-2">Copies already made</p>
             <ul className="mt-1 space-y-1">
               {claudeCopies.slice(0, 5).map((c) => (
-                <li key={c.name} className="flex flex-wrap items-baseline gap-2 text-xs">
-                  <a href={`/api/export/copy-for-claude?file=${encodeURIComponent(c.name)}`} download className="text-accent underline">
-                    {c.name}
-                  </a>
-                  <span className="text-ink-3">
-                    {mb(c.bytes)} · {new Date(c.madeAt).toLocaleString()}
-                  </span>
+                <li key={c.name} className="text-xs">
+                  <div className="flex flex-wrap items-baseline gap-2">
+                    <a href={`/api/export/copy-for-claude?file=${encodeURIComponent(c.name)}`} download className="text-accent underline">
+                      Download {c.name}
+                    </a>
+                    <span className="text-ink-3">
+                      {mb(c.bytes)} · {new Date(c.madeAt).toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="mt-1">
+                    <CopyPath path={c.path} />
+                  </div>
                 </li>
               ))}
             </ul>
             <p className="mt-1 text-xs text-ink-3">
-              These download at once — the work is already done. They are also sitting in the folder above.
+              The download is the quick way and not the sure one: ten megabytes through a browser meets antivirus and
+              SmartScreen, and when one of those wins it says only that it could not download. The file itself is
+              already on this computer at the path shown — open that folder and attach it from there, which needs
+              nothing of the browser at all.
             </p>
           </div>
         )}

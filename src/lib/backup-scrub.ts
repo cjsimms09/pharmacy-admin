@@ -697,14 +697,16 @@ export async function writeClaudeCopy(destination: string, onStep: (s: string) =
 }
 
 /** The copies already made, newest first, so the page can offer one without building another. */
-export async function existingClaudeCopies(destination: string): Promise<{ name: string; bytes: number; madeAt: string }[]> {
+export async function existingClaudeCopies(destination: string): Promise<{ name: string; bytes: number; madeAt: string; path: string }[]> {
   try {
     const dir = path.resolve(destination);
     const names = (await fs.readdir(dir)).filter((n) => /^pharmacy-copy-for-claude-.*\.zip$/.test(n));
     const out = [];
     for (const name of names) {
-      const s = await fs.stat(path.join(dir, name));
-      out.push({ name, bytes: s.size, madeAt: s.mtime.toISOString() });
+      const full = path.join(dir, name);
+      const s = await fs.stat(full);
+      // The path as this computer writes it, separators and all, because it is going into an Explorer window.
+      out.push({ name, bytes: s.size, madeAt: s.mtime.toISOString(), path: full });
     }
     return out.sort((a, b) => b.madeAt.localeCompare(a.madeAt));
   } catch {
