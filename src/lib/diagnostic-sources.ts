@@ -173,7 +173,22 @@ export const SOURCES: Source[] = [
       }
 
       const claims = await db.query.claims.findMany({ limit: 400 });
-      const counts = { matched: 0, priced: 0, unmatched: 0, unpriceable: 0, shortCents: 0, overCents: 0 };
+      /*
+       * What each BIN actually carries, from the claims themselves.
+       *
+       * A contract naming only a BIN governs every line of business on it, and 67% of this
+       * pharmacy's claims sit on a BIN with more than one. Without this the match reads as settled
+       * when it is a candidate.
+       */
+      const shape = new Map<string, { pcns: Set<string>; groups: Set<string> }>();
+      for (const c of await db.query.claims.findMany({ columns: { bin: true, pcn: true, groupNumber: true } })) {
+        if (!c.bin) continue;
+        const e = shape.get(c.bin) ?? { pcns: new Set<string>(), groups: new Set<string>() };
+        e.pcns.add(c.pcn ?? "");
+        e.groups.add(c.groupNumber ?? "");
+        shape.set(c.bin, e);
+      }
+      const counts = { matched: 0, priced: 0, unmatched: 0, unpriceable: 0, needsConfirming: 0, shortCents: 0, overCents: 0 };
       const examples: unknown[] = [];
       for (const c of claims) {
         const r = checkClaim(
@@ -183,10 +198,12 @@ export const SOURCES: Source[] = [
             acquisitionCents: c.acquisitionCents, isBrand: null,
           },
           contracts,
+          c.bin ? { pcns: shape.get(c.bin)?.pcns.size ?? 1, groups: shape.get(c.bin)?.groups.size ?? 1 } : null,
         );
         if (!r.matched) counts.unmatched++;
         else {
           counts.matched++;
+          if (!r.matched.why.confident) counts.needsConfirming++;
           if (r.priced?.ok) counts.priced++;
           else counts.unpriceable++;
         }

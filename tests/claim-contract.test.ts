@@ -181,3 +181,47 @@ describe("the published price, built from the drug files", () => {
     assert.equal(own.awpSource, "claim", "a figure the report carried is the report's");
   });
 });
+
+describe("knowing when the match is a guess rather than a fact", () => {
+  test("a contract naming only the BIN, on a BIN that carries one book, is a fact", () => {
+    const w = governs(contract(), claim(), { pcns: 1, groups: 12 });
+    assert.equal(w?.confident, true);
+    assert.equal(w?.caution, null);
+  });
+
+  test("the same match on a BIN carrying several books is a candidate, and says so", () => {
+    // BIN 610455 carries KSPDP, BCBSKS and KSPARTD — a Part D book and a commercial book on one
+    // number, certainly on different schedules. 67% of this pharmacy's claims sit on such a BIN.
+    const w = governs(contract(), claim(), { pcns: 3, groups: 40 });
+    assert.equal(w?.confident, false);
+    assert.match(w?.caution ?? "", /carries 3 lines of business/);
+    assert.match(w?.caution ?? "", /confirm it before pricing/);
+  });
+
+  test("naming the PCN settles it, however many books the BIN carries", () => {
+    // The ambiguity is only ever about which book; saying which book removes it.
+    const w = governs(contract({ pcns: ["ADV"] }), claim(), { pcns: 3, groups: 40 });
+    assert.equal(w?.confident, true);
+    assert.equal(w?.caution, null);
+  });
+
+  test("naming the group settles it too", () => {
+    const w = governs(contract({ groupIds: ["RX1234"] }), claim(), { pcns: 3, groups: 40 });
+    assert.equal(w?.confident, true);
+  });
+
+  test("the caution survives being chosen as the best match", () => {
+    // It has to reach the screen: a rate applied to the wrong book produces a shortfall that looks
+    // real, and an appeal filed on it is withdrawn.
+    const r = checkClaim(claim(), [contract()], { pcns: 3, groups: 40 });
+    assert.equal(r.matched?.why.confident, false);
+    assert.match(r.matched?.why.caution ?? "", /only the BIN/);
+    assert.equal(r.differenceCents, -100, "it is still priced — flagged, not withheld");
+  });
+
+  test("with nothing known about the BIN, a BIN-only match is not called a guess", () => {
+    // Absence of evidence about the BIN is not evidence the match is wrong.
+    assert.equal(governs(contract(), claim())?.confident, true);
+    assert.equal(governs(contract(), claim(), null)?.confident, true);
+  });
+});

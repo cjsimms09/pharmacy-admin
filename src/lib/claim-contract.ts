@@ -106,7 +106,29 @@ const norm = (s: string | null | undefined): string | null => {
   return t === "" ? null : t;
 };
 
-export type MatchWhy = { on: ("bin" | "pcn" | "group")[]; specificity: number; says: string };
+export type MatchWhy = {
+  on: ("bin" | "pcn" | "group")[];
+  specificity: number;
+  says: string;
+  /**
+   * Whether this match is a fact or a guess.
+   *
+   * A contract that names only BINs governs every line of business on them — and a BIN routinely
+   * carries several. On this pharmacy's claims, 67% sit on a BIN with more than one PCN: 610455
+   * alone carries KSPDP, BCBSKS and KSPARTD, a Part D book and a commercial book on one number,
+   * certainly on different rate schedules.
+   *
+   * So a BIN-only match against a BIN like that is not a fact about which contract applies. It is
+   * the only candidate the file offers, which is a different thing, and it is said out loud rather
+   * than priced as though it were settled.
+   */
+  confident: boolean;
+  /** What makes it a guess, where it is one. */
+  caution: string | null;
+};
+
+/** What the claims themselves say a BIN carries, which is how a BIN-only match is judged. */
+export type BinShape = { pcns: number; groups: number };
 
 /**
  * Whether this contract governs this claim, and how squarely.
@@ -116,7 +138,7 @@ export type MatchWhy = { on: ("bin" | "pcn" | "group")[]; specificity: number; s
  * else's contract. Specificity counts how much of the triple was matched, so the plan-specific
  * agreement beats the network-wide one it sits under.
  */
-export function governs(contract: ContractForMatch, claim: ClaimForMatch): MatchWhy | null {
+export function governs(contract: ContractForMatch, claim: ClaimForMatch, binShape?: BinShape | null): MatchWhy | null {
   const bin = norm(claim.bin);
   const pcn = norm(claim.pcn);
   const group = norm(claim.groupNumber);
@@ -146,10 +168,22 @@ export function governs(contract: ContractForMatch, claim: ClaimForMatch): Match
   if (contract.effectiveDate && claim.dateFilled < contract.effectiveDate) return null;
   if (contract.endDate && claim.dateFilled > contract.endDate) return null;
 
+  /*
+   * A match on the BIN alone, where that BIN carries several lines of business, is a candidate
+   * rather than an answer. Naming it is the whole point: a rate applied to the wrong book produces
+   * a shortfall that looks real, and an appeal filed on it is withdrawn.
+   */
+  const binOnly = on.length === 1 && on[0] === "bin";
+  const shared = binOnly && (binShape?.pcns ?? 1) > 1;
   return {
     on,
     specificity: on.length,
     says: `matched on ${on.join(" and ")}`,
+    confident: !shared,
+    caution: shared
+      ? `This contract names only the BIN, and ${claim.bin} carries ${binShape?.pcns} lines of business on this pharmacy's claims. ` +
+        `Which of them this contract was written for is not something the file says — confirm it before pricing on it.`
+      : null,
   };
 }
 
@@ -157,9 +191,10 @@ export function governs(contract: ContractForMatch, claim: ClaimForMatch): Match
 export function contractFor(
   claim: ClaimForMatch,
   contracts: ContractForMatch[],
+  binShape?: BinShape | null,
 ): { contract: ContractForMatch; why: MatchWhy } | null {
   const hits = contracts
-    .map((c) => ({ contract: c, why: governs(c, claim) }))
+    .map((c) => ({ contract: c, why: governs(c, claim, binShape) }))
     .filter((h): h is { contract: ContractForMatch; why: MatchWhy } => h.why !== null)
     .sort(
       (a, b) =>
@@ -259,8 +294,8 @@ export type ClaimCheck = {
 };
 
 /** One claim, against the contracts on file: what governs it, what it should have paid, and the gap. */
-export function checkClaim(claim: ClaimForMatch, contracts: ContractForMatch[]): ClaimCheck {
-  const hit = contractFor(claim, contracts);
+export function checkClaim(claim: ClaimForMatch, contracts: ContractForMatch[], binShape?: BinShape | null): ClaimCheck {
+  const hit = contractFor(claim, contracts, binShape);
   if (!hit) return { matched: null, priced: null, differenceCents: null };
 
   const rate = rateFor(hit.contract, claim);

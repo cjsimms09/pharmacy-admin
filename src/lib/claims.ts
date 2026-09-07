@@ -413,6 +413,8 @@ export async function importRxTransactions(file: Buffer, fileName: string, userI
       bin: t.bin, pcn: t.pcn, groupNumber: t.groupNumber, networkId: t.networkId,
       payerLabel: t.payerLabel, pbmName: resolved.pbmName, matchMethod: resolved.method, payerAmbiguous: resolved.ambiguous,
       quantityThousandths: t.quantityThousandths, quantityUnit: null,
+      // The report now carries it; without it no contract rate written per days-supply band applies.
+      daysSupply: t.daysSupply,
       remitCents: t.remitCents, copayCents: t.copayCents, patientTotalCents: t.patientTotalCents,
       acquisitionCents: t.acquisitionCents, grossProfitCents: t.grossProfitCents,
       expectedFacilitatorCents: t.expectedFacilitatorCents ?? null,
