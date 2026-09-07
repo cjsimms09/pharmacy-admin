@@ -221,10 +221,22 @@ export function buildDirectory(products: DirectoryProduct[], packages: Directory
     const k = `${o.applType}${o.applNo}`;
     obByApp.set(k, [...(obByApp.get(k) ?? []), o]);
   }
+  /*
+   * One row per package NDC, because the FDA's file does not guarantee it.
+   *
+   * The real package.txt lists 72043-2500-1 — EltaMD UV Clear SPF46 — twice, identically. An NDC
+   * is this table's key, so the load failed on the constraint and every one of the 250,000 rows
+   * was refused for the sake of a handful of repeats. The first occurrence is kept: they are the
+   * same package, and a package that is stated twice is not a package about which anything is in
+   * doubt.
+   */
   const out: DrugDirectoryRow[] = [];
+  const seen = new Set<string>();
   for (const pk of packages) {
     const p = byProduct.get(pk.productNdc);
     if (!p) continue;
+    if (seen.has(pk.ndc11)) continue;
+    seen.add(pk.ndc11);
     let teCode: string | null = null;
     let teWhy: string | null = null;
     const app = applicationParts(p.application);
@@ -302,4 +314,86 @@ export function substitutable(a: Pick<DrugDirectoryRow, "equivalenceKey" | "teCo
   // The same rating, suffix and all: AB1 is not AB2, and neither is a bare AB.
   const ga = teGroup(a.teCode);
   return ga !== null && ga === teGroup(b.teCode);
+}
+
+/* ── What a package actually holds, from the FDA rather than from a wholesaler ── */
+
+/**
+ * Reads the FDA's own statement of what is in a package.
+ *
+ * This is the answer to the argument the site has been having with itself. Twenty-four wholesalers
+ * describe one box at whatever height their file happens to use — "1 EA", "168 EA", "(6) 28 EA" —
+ * and the site had no neutral party to settle it, so it could only report that they disagreed and
+ * ask the pharmacist to open the bottle. The NDC Directory's package file states it outright, per
+ * package NDC, and the FDA is not selling anything.
+ *
+ * The field is a nest, outermost first, joined by ">":
+ *
+ *   "6 BLISTER PACK in 1 CARTON (0555-9043-58) > 28 TABLET in 1 BLISTER PACK"
+ *   "25 VIAL in 1 CARTON (67457-0623-99) > 10 mL in 1 VIAL"
+ *   "1 VIAL, SINGLE-DOSE in 1 CARTON (0002-1484-80) > .5 mL in 1 VIAL, SINGLE-DOSE"
+ *
+ * So the package holds the product of every level's count, in whatever the innermost level counts:
+ * 6 × 28 = 168 tablets, 25 × 10 = 250 mL, 1 × 0.5 = 0.5 mL. A dispensing unit is a tablet, a
+ * millilitre or a gram, so a count of anything — tablets, patches, syringes — is EA, and only a
+ * volume or a mass carries its own measure.
+ *
+ * Returns null rather than a guess where the field is not this shape: an invented package is worse
+ * than an absent one, because the whole point of this is to be the party nobody argues with.
+ */
+export function packageUnits(packageDescription: string): { units: number; uom: "EA" | "ML" | "GM" } | null {
+  const text = packageDescription.trim();
+  if (!text) return null;
+  /*
+   * A kit is not one package of one thing.
+   *
+   * "*" separates a kit's components — fifty different remedies in one box, or a starter pack of
+   * two tablet strengths. There is no single dispensing unit to state, and inventing one would put
+   * a wrong number where the whole point is to be the party nobody argues with.
+   */
+  if (text.includes("*")) return null;
+
+  const levels = text.split("/").map((s) => s.trim()).filter(Boolean);
+  if (levels.length === 0) return null;
+
+  let product = 1;
+  let innermost: string | null = null;
+  for (const level of levels) {
+    // "6 BLISTER PACK in 1 CARTON (0555-9043-58)" → count 6, noun "BLISTER PACK".
+    const m = /^(\d*\.?\d+)\s+(.+?)\s+in\s+1\s+/i.exec(level);
+    if (!m) return null;
+    const n = Number(m[1]);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    product *= n;
+    innermost = m[2].trim();
+  }
+  if (innermost === null) return null;
+
+  const measure = unitOfMeasure(innermost);
+  if (measure === null) return null;
+  const units = product * measure.factor;
+  // Guard against a nest that multiplies out to something no package could be.
+  if (!Number.isFinite(units) || units <= 0 || units > 1_000_000) return null;
+  return { units: Math.round(units * 1000) / 1000, uom: measure.uom };
+}
+
+/**
+ * A dispensing unit from the FDA's noun for it.
+ *
+ * Anything counted is EA — the pharmacy dispenses tablets, patches and syringes one at a time and
+ * every file in this site counts them that way. Only a volume or a mass keeps its own measure, and
+ * litres and kilograms are converted rather than refused, because a package stated in litres is
+ * still a package.
+ */
+function unitOfMeasure(noun: string): { uom: "EA" | "ML" | "GM"; factor: number } | null {
+  const n = noun.trim().toLowerCase();
+  if (/^ml$|^milliliter|^millilitre/.test(n)) return { uom: "ML", factor: 1 };
+  if (/^l$|^liter|^litre/.test(n)) return { uom: "ML", factor: 1000 };
+  if (/^g$|^gm$|^gram/.test(n)) return { uom: "GM", factor: 1 };
+  if (/^kg$|^kilogram/.test(n)) return { uom: "GM", factor: 1000 };
+  if (/^mg$|^milligram/.test(n)) return { uom: "GM", factor: 0.001 };
+  if (/^u?g$|^mcg$|^microgram/.test(n)) return { uom: "GM", factor: 0.000001 };
+  // Everything the FDA counts rather than measures: TABLET, CAPSULE, PATCH, SYRINGE, VIAL…
+  if (/^[a-z][a-z ,()\-.]*$/.test(n)) return { uom: "EA", factor: 1 };
+  return null;
 }

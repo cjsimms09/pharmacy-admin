@@ -1,7 +1,7 @@
 import "server-only";
 import { db, schema } from "@/db";
 import { readZip } from "./zip-read";
-import { parseDirectoryProducts, parseDirectoryPackages, parseOrangeBook, buildDirectory, type DrugDirectoryRow } from "./drug-directory";
+import { parseDirectoryProducts, parseDirectoryPackages, parseOrangeBook, buildDirectory, packageUnits, type DrugDirectoryRow } from "./drug-directory";
 import { newId } from "./crypto";
 
 /**
@@ -134,6 +134,7 @@ const MAX_AGE_MS = 10 * 60_000;
 
 export function forgetDirectory(): void {
   held = null;
+  heldPacks = null;
 }
 
 /** Every NDC's equivalence key and rating, held for ten minutes. Empty until the files are loaded. */
@@ -167,4 +168,36 @@ export async function directoryStatus(): Promise<{ rows: number; rated: number; 
     rated: Number(r.rows[0]?.rated ?? 0),
     lastLoad: loads.map((l) => ({ source: l.source, origin: l.origin, rows: l.rows, loadedAt: l.loadedAt })),
   };
+}
+
+/* ── What a package holds, settled by the FDA ── */
+
+let heldPacks: { at: number; sizes: Map<string, string> } | null = null;
+
+export function forgetPackageSizes(): void {
+  heldPacks = null;
+}
+
+/**
+ * Every NDC whose package the FDA states, as the pack size the rest of the site writes.
+ *
+ * This is the neutral party the catalogue never had. Twenty-four wholesalers describe one box at
+ * whatever height their own file uses — "1 EA", "168 EA", "(6) 28 EA" — and until now the site
+ * could only report that they disagreed and ask the pharmacist to open the bottle. 998 NDCs were
+ * waiting on that. The FDA's package file states the contents per package NDC, and the FDA is not
+ * selling anything.
+ *
+ * Only packages it can state exactly: a kit, or a description in a shape the reader does not
+ * recognise, is left out rather than guessed at.
+ */
+export async function packageSizes(): Promise<Map<string, string>> {
+  if (heldPacks && Date.now() - heldPacks.at < MAX_AGE_MS) return heldPacks.sizes;
+  const rows = await db.query.drugDirectory.findMany({ columns: { ndc11: true, packageDescription: true } });
+  const sizes = new Map<string, string>();
+  for (const r of rows) {
+    const u = packageUnits(r.packageDescription ?? "");
+    if (u) sizes.set(r.ndc11, `${u.units} ${u.uom}`);
+  }
+  heldPacks = { at: Date.now(), sizes };
+  return sizes;
 }

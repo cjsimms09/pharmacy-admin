@@ -102,7 +102,7 @@ const MAX_AGE_MS = 10 * 60_000;
 /** What the catalogue looks like from outside: the newest import, and how many items it filed. */
 async function currentKey(): Promise<string> {
   const { db } = await import("@/db");
-  const [latest, newestFix, fixCount, packFixes] = await Promise.all([
+  const [latest, newestFix, fixCount, packFixes, directoryLoad] = await Promise.all([
     db.query.supplierImports.findFirst({
       orderBy: (i, { desc }) => [desc(i.createdAt)],
       columns: { id: true, itemsAdded: true, itemsUpdated: true },
@@ -112,10 +112,12 @@ async function currentKey(): Promise<string> {
     db.query.supplierItemFixes.findMany({ columns: { id: true } }),
     // A settled package changes what every supplier's row says, so it moves the key too.
     db.query.ndcPackFixes.findMany({ columns: { id: true, correctedAt: true } }),
+    // The FDA now settles most packages, so a fresh directory changes what every row reads.
+    db.query.drugDirectoryLoads.findFirst({ orderBy: (l, { desc }) => [desc(l.loadedAt)], columns: { id: true } }),
   ]);
   const imported = latest ? `${latest.id}:${latest.itemsAdded}:${latest.itemsUpdated}` : "empty";
   const newestPack = packFixes.map((f) => f.correctedAt).sort().pop() ?? "none";
-  return `${imported}|${newestFix?.correctedAt ?? "none"}:${fixCount.length}|${newestPack}:${packFixes.length}`;
+  return `${imported}|${newestFix?.correctedAt ?? "none"}:${fixCount.length}|${newestPack}:${packFixes.length}|${directoryLoad?.id ?? "-"}`;
 }
 
 export async function catalogueRows(): Promise<CatalogueRow[]> {
@@ -123,7 +125,8 @@ export async function catalogueRows(): Promise<CatalogueRow[]> {
   if (held && held.key === key && Date.now() - held.at < MAX_AGE_MS) return held.rows;
 
   const { db } = await import("@/db");
-  const [raw, fixes, packFixes] = await Promise.all([
+  const { packageSizes } = await import("./drug-directory-store");
+  const [raw, fixes, packFixes, fdaPacks] = await Promise.all([
     db.query.supplierItems.findMany({
       columns: {
         ndc11: true,
@@ -142,6 +145,7 @@ export async function catalogueRows(): Promise<CatalogueRow[]> {
     }),
     db.query.supplierItemFixes.findMany(),
     db.query.ndcPackFixes.findMany(),
+    packageSizes(),
   ]);
 
   const by = new Map(fixes.map((f) => [`${f.supplier.trim().toLowerCase()}|${f.ndc11}`, f]));
@@ -159,7 +163,16 @@ export async function catalogueRows(): Promise<CatalogueRow[]> {
   const packBy = new Map(packFixes.map((f) => [f.ndc11, f.packSize]));
   const rows: CatalogueRow[] = raw.map((r) => {
     const fix = by.get(`${r.supplier.trim().toLowerCase()}|${r.ndc11}`);
-    const settledPack = packBy.get(r.ndc11) ?? null;
+    /*
+     * The pharmacy's own answer first, then the FDA's, then the wholesaler's.
+     *
+     * An NDC names one package, and until now the only party who could say what was in it was the
+     * pharmacist with the bottle in his hand — 998 NDCs were waiting on that. The FDA's package
+     * file states it outright, per package NDC, and it is not selling anything: where it speaks,
+     * every wholesaler's row is put on the FDA's package and the arguing stops. It never overrides
+     * a pharmacist who has settled a package himself; he has the bottle and the file does not.
+     */
+    const settledPack = packBy.get(r.ndc11) ?? fdaPacks.get(r.ndc11) ?? null;
     if (!fix && !settledPack) return r;
     /*
      * A blank in a correction means "leave the supplier's", never "set it to nothing" — so fixing
