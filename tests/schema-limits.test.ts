@@ -2,6 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
+import { jsonIn } from "../src/lib/contract-extract";
 import * as ai from "../src/lib/ai";
 import * as supplierTerms from "../src/lib/supplier-terms";
 import * as contractTerms from "../src/lib/contract-terms";
@@ -56,7 +57,7 @@ function optionalParameters(node: unknown, path = "", out: string[] = []): strin
  * Exempting it by name rather than relaxing the check keeps the sweep meaning what it says: every
  * schema that can reach the API is within both caps.
  */
-const NEVER_SENT = new Set(["ContractTerms"]);
+const NEVER_SENT = new Set(["ContractTerms", "ContractTermsWire"]);
 
 /** Every Zod schema a module exports, by name. */
 function schemasIn(mod: Record<string, unknown>, file: string): { name: string; file: string; schema: unknown }[] {
@@ -96,13 +97,16 @@ describe("what the site is allowed to ask the API for", () => {
     assert.deepEqual(over, [], `over an API limit:\n  ${over.join("\n  ")}\nMake the field required and let a value carry "not stated".`);
   });
 
-  test("the contract schema actually sent carries neither", () => {
-    // It had 104 unions, then 111 optionals once the unions were traded away. It is the largest
-    // schema here and the one that will grow again, so it is named rather than left to the sweep.
-    const format = zodOutputFormat(contractTerms.ContractTermsWire as never) as unknown as Record<string, unknown>;
-    const json = format.schema ?? (format.json_schema as Record<string, unknown>)?.schema ?? format;
-    assert.deepEqual(unionParameters(json), []);
-    assert.deepEqual(optionalParameters(json), []);
+  test("the contract read sends no grammar at all, because its schema is too large for one", () => {
+    // It was refused three times, once for each way of being too much: 104 unions, then 111
+    // optionals, then the compiled grammar itself. The shape is described in the prompt instead and
+    // checked here on the way in, so this sweep is about every *other* schema.
+    const shape = contractTerms.shapeForPrompt();
+    assert.ok(shape.length > 1000, "the shape has to actually describe the schema");
+    // Both contract schemas are exempt from the sweep because neither is compiled into a grammar.
+    assert.ok(NEVER_SENT.has("ContractTerms") && NEVER_SENT.has("ContractTermsWire"));
+    // And the answer is still checked against the schema, which is the part that matters.
+    assert.equal(contractTerms.ContractTermsWire.safeParse({}).success, false, "a wrong shape is refused");
   });
 });
 
@@ -145,5 +149,31 @@ describe("carrying an unstated term without an optional field", () => {
       counterparty: "Caremark",
       confidence: 0.8,
     });
+  });
+});
+
+describe("taking the JSON out of an answer that dressed it up", () => {
+  test("a bare object is returned as it is", () => {
+    assert.equal(jsonIn('{"counterparty":"Caremark"}'), '{"counterparty":"Caremark"}');
+  });
+
+  test("a code fence is stripped, because refusing a paid read over punctuation is waste", () => {
+    assert.equal(jsonIn('```json\n{"a":1}\n```'), '{"a":1}');
+    assert.equal(jsonIn('```\n{"a":1}\n```'), '{"a":1}');
+  });
+
+  test("a line of preamble before the object does not lose the object", () => {
+    assert.equal(jsonIn('Here are the terms:\n{"a":1}'), '{"a":1}');
+    assert.equal(jsonIn('{"a":1}\nThat is everything I found.'), '{"a":1}');
+  });
+
+  test("a brace inside a quoted contract sentence does not truncate the answer", () => {
+    // Taken from the first brace to the last, so a quote containing one is carried whole.
+    const s = '{"quote":"the fee is {sic} one dollar","b":2}';
+    assert.equal(jsonIn(s), s);
+  });
+
+  test("text with no object at all is handed on unchanged, to fail as a bad shape rather than silently", () => {
+    assert.equal(jsonIn("I could not read this document."), "I could not read this document.");
   });
 });

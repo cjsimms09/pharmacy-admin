@@ -7,7 +7,7 @@ import { eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { audit } from "./audit";
 import { contractsDir } from "./reference";
-import { ContractTerms, ContractTermsWire, EXTRACT_SYSTEM, requireCitations, fillNulls, fromWire, type ContractTermsT } from "./contract-terms";
+import { ContractTerms, ContractTermsWire, EXTRACT_SYSTEM, shapeForPrompt, requireCitations, fillNulls, fromWire, type ContractTermsT } from "./contract-terms";
 
 /**
  * Reading the contract library.
@@ -46,10 +46,21 @@ function docRequest(id: string, pdf: Buffer, name: string, model: string): Anthr
       model,
       max_tokens: 32000,
       thinking: { type: "adaptive" },
-      // Nothing in the wire schema is optional or nullable; the API caps both. See contract-terms.
-      output_config: { effort: "high", format: zodOutputFormat(ContractTermsWire) },
+      /*
+       * No output grammar: this schema is too large to compile into one, and it is too large
+       * because a contract really does carry this many terms. The shape is in the system prompt
+       * and the answer is validated against the same schema on the way in. See contract-terms.
+       */
+      output_config: { effort: "high" },
       // Cached: identical on every document in the run, so it is billed once.
-      system: [{ type: "text", text: EXTRACT_SYSTEM, cache_control: { type: "ephemeral" } }],
+      system: [
+        {
+          type: "text",
+          text: `${EXTRACT_SYSTEM}\n\n## The shape of your answer\n\nReply with one JSON object and nothing else — no explanation before it, no code fence around it. Every field below is required; give "" where the document does not state something, and "not stated" where a field offers it. Numbers are written as text.\n\n${shapeForPrompt()}`,
+          // Identical on every document in the run, so the shape is billed once rather than per read.
+          cache_control: { type: "ephemeral" },
+        },
+      ],
       messages: [
         {
           role: "user",
@@ -209,7 +220,7 @@ async function absorb(doc: { id: string; documentName: string; fileName: string 
   const text = msg.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("");
   let terms: ContractTermsT;
   try {
-    terms = fillNulls(ContractTerms, fromWire(ContractTerms, ContractTermsWire.parse(JSON.parse(text)))) as ContractTermsT;
+    terms = fillNulls(ContractTerms, fromWire(ContractTerms, ContractTermsWire.parse(JSON.parse(jsonIn(text))))) as ContractTermsT;
   } catch {
     const why = "The answer did not match the expected shape. Try this one again.";
     await fail(doc.id, why);
@@ -331,6 +342,21 @@ export function explainFailure(result: { type: string; error?: { error?: { type?
   if (kind === "billing_error") return `Claude's billing refused the request (${msg}). Check the account's credit.`;
   if (kind === "rate_limit_error" || kind === "overloaded_error") return `Claude was busy (${msg}). Nothing was charged; press \"Read again\" later.`;
   return `Claude could not read this one (${kind}${msg ? `: ${msg}` : ""}). Nothing was charged for a refused request.`;
+}
+
+/**
+ * The JSON out of an answer that may have dressed it up.
+ *
+ * Without a grammar the model writes the object itself, and it occasionally arrives inside a code
+ * fence or after a line of preamble. Refusing a read over punctuation would waste a paid batch, so
+ * the object is taken from the first brace to the last.
+ */
+export function jsonIn(text: string): string {
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);
+  const body = (fenced ? fenced[1] : text).trim();
+  const start = body.indexOf("{");
+  const end = body.lastIndexOf("}");
+  return start >= 0 && end > start ? body.slice(start, end + 1) : body;
 }
 
 async function fail(id: string, why: string) {
@@ -675,7 +701,7 @@ export async function testReader(docId: string, userId: string, userName: string
     const text = msg.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("");
     let terms: ContractTermsT;
     try {
-      terms = fillNulls(ContractTerms, fromWire(ContractTerms, ContractTermsWire.parse(JSON.parse(text)))) as ContractTermsT;
+      terms = fillNulls(ContractTerms, fromWire(ContractTerms, ContractTermsWire.parse(JSON.parse(jsonIn(text))))) as ContractTermsT;
     } catch (e) {
       return { ok: false, documentName: doc.documentName, reason: "The answer did not match the expected shape", detail: `${e instanceof Error ? e.message.slice(0, 300) : String(e)} · first words: ${text.slice(0, 200)}` };
     }

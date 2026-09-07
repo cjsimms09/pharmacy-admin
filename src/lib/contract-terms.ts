@@ -381,8 +381,52 @@ export function fromWire(schema: z.ZodTypeAny, value: unknown): unknown {
   return value;
 }
 
-/** What is actually sent to the API. */
+/** The shape the answer must take. Described to the model rather than compiled into a grammar. */
 export const ContractTermsWire = toWire(ContractTerms);
+
+/**
+ * Why the shape is described in words instead of enforced as a grammar.
+ *
+ * Structured outputs compile the schema into a grammar the model must generate against, and this
+ * schema is too big for one: 61 top-level fields, 175 leaves, 24 arrays, 14KB of JSON Schema. The
+ * API refused it three times over, once for each way of being too much —
+ *
+ *   104 union-typed parameters (limit 16)
+ *   111 optional parameters    (limit 24)
+ *   the compiled grammar is too large
+ *
+ * — and the third has no restructuring that answers it. A contract genuinely has this many terms in
+ * it, and dropping half of them to fit would be losing the reason the read exists.
+ *
+ * So the schema goes in the prompt and the answer is validated here, strictly, against the very same
+ * schema. What is lost is the guarantee that the answer parses first time; what is kept is every
+ * term, one request per document, and a check that is if anything harsher than the grammar's —
+ * a wrong shape is refused outright and the document is left to be read again.
+ */
+export function shapeForPrompt(): string {
+  const described = (t: z.ZodTypeAny, indent: string): string => {
+    const d = defOf(t);
+    if (!d) return "string";
+    if (d.type === "object") {
+      const shape = shapeOf(d);
+      if (!shape) return "object";
+      const inner = Object.entries(shape)
+        .map(([k, v]) => `${indent}  "${k}": ${described(v, `${indent}  `)}`)
+        .join(",\n");
+      return `{\n${inner}\n${indent}}`;
+    }
+    if (d.type === "array") return `[ ${d.element ? described(d.element, indent) : "string"} ]`;
+    if (d.type === "enum") {
+      const values = (d as unknown as { entries?: Record<string, string>; options?: string[] }).options
+        ?? Object.values((d as unknown as { entries?: Record<string, string> }).entries ?? {});
+      return values.length ? values.map((v) => JSON.stringify(v)).join(" | ") : "string";
+    }
+    if (d.type === "number") return "number";
+    if (d.type === "boolean") return "true | false";
+    return "string";
+  };
+  return described(ContractTermsWire, "");
+}
 
 /**
  * A term the contract does not state, as the rest of the site sees it: null, never missing.
