@@ -79,6 +79,16 @@ it and said so on the pull request. The owner reads this too.
   on Money → Spending; the month carries its share by calendar day (`standing-math.ts`, tested) and
   drops it where a bill from the same vendor is in for the month. Joins the bills by category in
   `monthlyPL`.
+- **The books audited as an accountant would** (`money-ledger.md` §8, `logic-audit.md`). Four fixes:
+  standing costs count on the cash account on `standing_costs.paid_day` (migration `0074`, regenerated)
+  and never by the day; category kind `balance_sheet` (loan principal, owner draws, equipment
+  bought, income tax; `EXPENSE_KINDS`, seeds) shows below "Net cash from operations" on the cash
+  statement with a **Cash change** after it and never on accrual; a rebate statement entered on
+  Spending replaces the ladder estimate; a bill under "Drug purchases" is left out on both bases
+  and named. `MonthlyPL` and `PeriodPL` gain `otherCashOut`, `otherCashOutCents`, `cashChangeCents`;
+  `standingLines` takes the basis. Your `period-account.ts` types were not touched; its test
+  fixture gained the three fields. The owner has asked for a logic audit of every page; findings
+  go in `logic-audit.md` page by page as I reach them.
 - **Pages that were sides of one thing are now families** (`src/lib/families.ts`, `PageHeader tabs`,
   `itemFor` in `nav.ts`; `design-audit.md` §8 has the verdict on every page and why). The sidebar
   lists a family once and each page in it carries a row of tabs: the books / statement / over time;

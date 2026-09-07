@@ -15,7 +15,7 @@
  *   operating       everything it costs to keep the doors open
  */
 
-export type SeedCategory = { name: string; kind: "operating" | "cost_of_goods" | "revenue_offset"; sortOrder: number; notes: string };
+export type SeedCategory = { name: string; kind: "operating" | "cost_of_goods" | "revenue_offset" | "balance_sheet"; sortOrder: number; notes: string };
 
 export const SEED_CATEGORIES: SeedCategory[] = [
   // ── What the goods cost ──────────────────────────────────────────────────────
@@ -46,7 +46,7 @@ export const SEED_CATEGORIES: SeedCategory[] = [
     kind: "revenue_offset",
     sortOrder: 40,
     notes:
-      "Clawed back by a plan after the claim was paid. Not an operating cost: it is revenue the pharmacy was told it had and then did not. Kept apart so the dispensing margin is not quietly flattered by it.",
+      "Clawed back by a plan after the claim was paid. Not an operating cost: it is revenue the pharmacy was told it had and then did not. Kept apart so the dispensing margin is not quietly flattered by it. If the plan took it out of a remittance, leave the paid date blank: the cash account already sees it in the smaller deposit, and a paid date would count it twice there.",
   },
   {
     name: "Chargebacks and audit recoveries",
@@ -96,8 +96,34 @@ export const SEED_CATEGORIES: SeedCategory[] = [
   { name: "Marketing and advertising", kind: "operating", sortOrder: 250, notes: "Signage, print, digital, sponsorship." },
   { name: "Repairs and maintenance", kind: "operating", sortOrder: 260, notes: "Fridges, robots, counters, the building." },
   { name: "Continuing education", kind: "operating", sortOrder: 270, notes: "CE for the pharmacists; technician CE is not the pharmacy's to pay." },
-  { name: "Equipment and depreciation", kind: "operating", sortOrder: 280, notes: "Capital items written down over their life. Accrual only — no cash leaves in the month." },
+  { name: "Equipment and depreciation", kind: "operating", sortOrder: 280, notes: "Capital items written down over their life. Enter each month's depreciation with no paid date: no cash leaves, so the cash account must not see it. The purchase itself goes under Equipment and improvements bought." },
   { name: "Bad debt", kind: "operating", sortOrder: 290, notes: "Patient accounts written off." },
-  { name: "Interest and finance charges", kind: "operating", sortOrder: 300, notes: "Loans, lines of credit, late fees." },
+  { name: "Interest and finance charges", kind: "operating", sortOrder: 300, notes: "The interest on loans and lines of credit, and late fees. The principal is not a cost: it goes under Loan principal." },
+
+  // ── Money that leaves the bank and is not a cost ─────────────────────────────
+  {
+    name: "Loan principal",
+    kind: "balance_sheet",
+    sortOrder: 400,
+    notes: "The part of a loan payment that repays what was borrowed. It leaves the bank and it is not a cost — the cost was whatever the loan bought, and the interest. On the cash account it is below the line; on the accrual account it does not appear.",
+  },
+  {
+    name: "Owner draws and distributions",
+    kind: "balance_sheet",
+    sortOrder: 410,
+    notes: "Money taken out by the owner. Not a cost of running the pharmacy; it is what the profit was for. Cash account only, below the line.",
+  },
+  {
+    name: "Equipment and improvements bought",
+    kind: "balance_sheet",
+    sortOrder: 420,
+    notes: "A fridge, a robot, a counter, paid for in the month. The cash leaves now; the cost is spread over the years it serves as depreciation, under Equipment and depreciation. Cash account only.",
+  },
+  {
+    name: "Income tax payments",
+    kind: "balance_sheet",
+    sortOrder: 430,
+    notes: "Estimated and final income tax paid. The pharmacy's profit is before tax, so this is below the line on the cash account and absent from the accrual one.",
+  },
   { name: "Other", kind: "operating", sortOrder: 900, notes: "Where a bill goes while somebody decides. A month with much in here is a chart of accounts that needs a line adding." },
 ];

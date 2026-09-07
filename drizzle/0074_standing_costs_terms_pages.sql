@@ -4,6 +4,7 @@ CREATE TABLE `standing_costs` (
 	`category_id` text,
 	`vendor_id` text,
 	`amount_cents` integer NOT NULL,
+	`paid_day` integer,
 	`from_month` text NOT NULL,
 	`to_month` text,
 	`notes` text,

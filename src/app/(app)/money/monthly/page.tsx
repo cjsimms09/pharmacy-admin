@@ -148,7 +148,33 @@ export default async function MonthlyPLPage({
           />
 
           <Group title="What it cost to keep the doors open" lines={pl.operating.map((l) => ({ ...l, note: [l.note, `${pct(l.amountCents)} of net revenue`].filter(Boolean).join(" · ") }))} total={pl.operatingCents} href={books.sources.expenses} />
-          <Row label={pl.netProfitCents < 0 ? "Net loss" : "Net profit"} value={pl.netProfitCents} strong big tone={pl.netProfitCents < 0 ? "crit" : "ok"} />
+          <Row
+            label={basis === "cash" ? "Net cash from operations" : pl.netProfitCents < 0 ? "Net loss" : "Net profit"}
+            value={pl.netProfitCents}
+            strong
+            big={basis !== "cash"}
+            tone={pl.netProfitCents < 0 ? "crit" : "ok"}
+          />
+          {/*
+            Below the line, on the cash account only: money that left and is not a cost. The loan's
+            principal, the owner's draws, a fridge bought outright, the tax bill. Profit is stated
+            before them; the bank balance is not.
+          */}
+          {basis === "cash" && (
+            <>
+              {pl.otherCashOut.length > 0 && (
+                <Group title="Other money out, not a cost" lines={pl.otherCashOut} total={pl.otherCashOutCents} href={books.sources.expenses} />
+              )}
+              <Row
+                label="Cash change"
+                value={pl.cashChangeCents ?? pl.netProfitCents}
+                strong
+                big
+                tone={(pl.cashChangeCents ?? pl.netProfitCents) < 0 ? "crit" : "ok"}
+                note={pl.otherCashOut.length > 0 ? "after loan principal, draws, equipment and tax" : "nothing entered below the line: loan principal, draws, equipment and tax go under Spending in their own categories"}
+              />
+            </>
+          )}
         </div>
       )}
 

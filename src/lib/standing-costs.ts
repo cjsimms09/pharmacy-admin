@@ -2,7 +2,7 @@ import "server-only";
 import { eq, isNull, or, lte, and, gte } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "./crypto";
-export { shareOfMonth, accruedCents, standingLines, type StandingLine } from "./standing-math";
+export { shareOfMonth, accruedCents, paidCents, standingLines, type StandingLine } from "./standing-math";
 
 /**
  * A cost that is the same every month, known before its bill: payroll, rent, the loan.
@@ -26,13 +26,13 @@ export async function standingCostsIn(month: string): Promise<StandingCost[]> {
   });
 }
 
-export async function addStandingCost(input: { name: string; amountCents: number; categoryId: string | null; vendorId: string | null; fromMonth: string; toMonth: string | null; notes: string | null }, user: { id: string }): Promise<string> {
+export async function addStandingCost(input: { name: string; amountCents: number; categoryId: string | null; vendorId: string | null; fromMonth: string; toMonth: string | null; paidDay: number | null; notes: string | null }, user: { id: string }): Promise<string> {
   const id = newId();
   await db.insert(schema.standingCosts).values({ id, ...input, createdBy: user.id });
   return id;
 }
 
-export async function updateStandingCost(id: string, input: { name: string; amountCents: number; categoryId: string | null; vendorId: string | null; fromMonth: string; toMonth: string | null; notes: string | null }): Promise<void> {
+export async function updateStandingCost(id: string, input: { name: string; amountCents: number; categoryId: string | null; vendorId: string | null; fromMonth: string; toMonth: string | null; paidDay: number | null; notes: string | null }): Promise<void> {
   await db.update(schema.standingCosts).set({ ...input, updatedAt: new Date().toISOString() }).where(eq(schema.standingCosts.id, id));
 }
 

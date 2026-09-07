@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { shareOfMonth, accruedCents, standingLines } from "../src/lib/standing-math";
+import { shareOfMonth, accruedCents, paidCents, standingLines } from "../src/lib/standing-math";
 
 /** Payroll by the day: the owner's rule, in his own example. */
 describe("a standing cost's share of the month", () => {
@@ -28,5 +28,31 @@ describe("a standing cost's share of the month", () => {
     assert.equal(lines[0].accruedCents, 1_500_000);
     const june = standingLines(costs, "2026-06", "2026-09-15", []);
     assert.deepEqual(june.map((l) => [l.id, l.accruedCents, l.replacedByBill]), [["pay", 3_000_000, false], ["rent", 400_000, false]]);
+  });
+});
+
+/** The cash account asks a different question: has the money left. */
+describe("on the cash basis", () => {
+  const payroll = { id: "pay", name: "Payroll", categoryId: "wages", vendorId: null, amountCents: 3_000_000, fromMonth: "2026-01", toMonth: null, paidDay: 15 };
+  const rent = { id: "rent", name: "Rent", categoryId: "rent", vendorId: "v-landlord", amountCents: 400_000, fromMonth: "2026-01", toMonth: null, paidDay: null };
+  test("a cost counts in full on the day it is paid and not at all before it", () => {
+    assert.equal(standingLines([payroll], "2026-09", "2026-09-14", [], "cash")[0].accruedCents, 0);
+    assert.equal(standingLines([payroll], "2026-09", "2026-09-15", [], "cash")[0].accruedCents, 3_000_000);
+    assert.equal(standingLines([payroll], "2026-09", "2026-10-02", [], "cash")[0].accruedCents, 3_000_000);
+    assert.equal(paidCents(100, 31, "2026-02", "2026-02-28"), 100, "a paid day past the end of a short month is its last day");
+  });
+  test("a cost with no paid day is left out of the cash account and says so, and still accrues by the day on the accrual account", () => {
+    const cash = standingLines([rent], "2026-09", "2026-09-20", [], "cash")[0];
+    assert.equal(cash.accruedCents, 0);
+    assert.equal(cash.noPaidDay, true);
+    const accrual = standingLines([rent], "2026-09", "2026-09-15", [], "accrual")[0];
+    assert.equal(accrual.accruedCents, 200_000);
+    assert.equal(accrual.noPaidDay, false);
+  });
+  test("a cost with no vendor is replaced by a bill in its category, so payroll typed and payroll entered are not both counted", () => {
+    const lines = standingLines([payroll], "2026-09", "2026-09-30", [{ vendorId: null, categoryId: "wages" }]);
+    assert.equal(lines[0].replacedByBill, true);
+    const other = standingLines([payroll], "2026-09", "2026-09-30", [{ vendorId: null, categoryId: "rent" }]);
+    assert.equal(other[0].replacedByBill, false);
   });
 });

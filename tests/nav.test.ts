@@ -114,6 +114,9 @@ describe("a page listed only through its family", () => {
     assert.equal(itemFor("/intake")?.item.href, "/inbox");
     assert.equal(itemFor("/payers/sort")?.item.href, "/payers");
     assert.equal(itemFor("/claims/floor")?.tab, undefined);
+    assert.equal(itemFor("/money/monthly")?.item.href, "/money");
+    assert.equal(itemFor("/money/monthly")?.tab?.label, "Statement");
+    assert.equal(itemFor("/money/found")?.item.href, "/money/found");
     assert.equal(itemFor("/money"), undefined, "a group landing is the group, not an item under it");
   });
 });

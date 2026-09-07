@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7b8dad1c-0587-46ff-a4a7-4f838012ec08",
+  "id": "18eea257-5595-47f2-832a-cc7d0c6c2712",
   "prevId": "d872a140-6cdf-48e8-9c60-bc43110ea576",
   "tables": {
     "appeals": {
@@ -6470,6 +6470,13 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "paid_day": {
+          "name": "paid_day",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         },
         "from_month": {

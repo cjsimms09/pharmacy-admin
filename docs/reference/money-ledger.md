@@ -23,10 +23,11 @@ lines from the two.
 | Prescription revenue | System Sales Summary (`sales_months`) — the till, by calendar month. Falls back to the claims (Σ plan remit + patient total per fill) and says so. | `cash_receipts` entered from the bank, by the month the money arrived; facilitator money from `claim_payments.received_on` where the receipt list is empty | claims vs till (expected to differ by the front of shop only) | claims *added to* the till (every script twice); copay column as patient money |
 | Retail / OTC | System Sales Summary retail line | `cash_receipts` kind `retail` | none; named as missing when the summary is absent | inferred from anything |
 | Facilitator and top-off money | `claim_payments` by the fill's month (earned) | `claim_payments` by `received_on` (banked) | the fill it paid | counted under both revenue and the fill's remit |
-| DIR fees, chargebacks | `expenses` with category kind `revenue_offset`, by invoice date | same, by `paid_on` | none; empty is named as "not entered", never as "none" | filed as an overhead |
+| DIR fees, chargebacks | `expenses` with category kind `revenue_offset`, by invoice date | same, by `paid_on` — and a fee the plan took out of a remittance carries **no paid date**, because the smaller deposit already shows it | none; empty is named as "not entered", never as "none" | filed as an overhead; a netted fee with a paid date (twice on the cash account) |
 | Cost of goods | Σ `claims.acquisition_cents` once per fill, for fills dated in the period | Σ `supplier_invoices.total_cents` by the day the money left: `paid_on` where recorded; else the invoice date plus the supplier's `payment_terms_days`; else the invoice date. The statement says how many are on an assumed date. Never nought for want of a date. | opening stock + invoiced purchases − closing stock (`on_hand_imports`, Rx shelf) | the invoice total as accrual cost; NADAC as any cost; the report's printed gross profit |
-| Wholesaler rebates | `earningSoFar()`: the period's invoice lines × the ladder rate in force, per supplier | `cash_receipts` kind `rebate` | the wholesaler's statement, when it lands (`rebate_statements`, to add) | booked as revenue; applied to a line that already carries it |
-| Operating expenses | `expenses` by invoice date, by category, plus each `standing_costs` row's share of the month by calendar day (30,000 of payroll is 10,000 by the 10th; the whole figure once the month is over), dropped where a bill from the same vendor is in for the month | same | the vendor's typical amount and cadence (`vendors`) | wholesaler invoices entered here as well (double count); a standing cost and its bill in the same month |
+| Wholesaler rebates | `earningSoFar()`: the period's invoice lines × the ladder rate in force, per supplier — **until the wholesaler's statement is entered on Spending under "Wholesaler rebates", which replaces the estimate** | `cash_receipts` kind `rebate`; a statement entered as a bill with a paid date is dropped where a receipt is in | the wholesaler's statement | booked as revenue; the estimate and the statement together; the receipt and the bill together |
+| Operating expenses | `expenses` by invoice date, by category, plus each `standing_costs` row's share of the month by calendar day (30,000 of payroll is 10,000 by the 10th; the whole figure once the month is over), dropped where a bill from the same vendor — or, for a cost with no vendor, a bill in the same category — is in for the month | `expenses` by `paid_on`; a standing cost in full on its `paid_day` and not before, and **left out and named where no paid day is set** (an accrual is not cash) | the vendor's typical amount and cadence (`vendors`) | wholesaler invoices entered here as well (they are left out and named); a standing cost and its bill in the same month; a standing cost accrued by the day on the cash account |
+| Loan principal, owner draws, equipment bought, income tax | Nothing. Category kind `balance_sheet`: profit is stated before them, and the interest, the depreciation and the tax expense have lines of their own | `expenses` of kind `balance_sheet` by `paid_on`, below net cash from operations; **cash change** is the figure after them | the loan statement, the bank | counted as a cost on either basis; left out of the cash account |
 | Delivery round | Nothing, unless Settings says the pharmacy pays its own driver (`driver_paid_by`): the site raises the driver's invoice on his behalf and bills the clinic, which is administration, not trade. Where the pharmacy does pay, the month's issued driver invoices are an operating line (`driverCostFor`). | same | the statement's "known to the site, and not in this account" card names the round and its figure every month, so the omission is never mistaken for an oversight | counted while the clinic pays it |
 | Scripts | fills (one per bottle, `fills.ts`), dated in the period; cash fills counted apart | same | the claim import's own count | transmissions (a coordinated fill is one script) |
 | Stock movement | invoiced purchases − dispensed cost | — | the shelf counts | added to profit |
@@ -90,3 +91,32 @@ records, and a reading is corrected by correcting the record.
 3. A balance sheet: AR ageing from the fills on account and the remittances awaited; AP from
    invoices with no `paid_on`.
 4. Budgets and variance against the same lines.
+
+## 8. The accountant's audit of 7 September, and what it changed
+
+The owner asked whether accrual shows what was earned and cash shows what the bank did. Read
+through as an accountant would, four things were wrong and are fixed; the rest are rules the
+person entering figures has to keep, and the page now says them where the figure is typed.
+
+1. **Standing costs were accrued onto the cash account.** Payroll by the day is an accrual; on
+   the cash account nothing has left until pay day. Now: `standing_costs.paid_day`; the cash
+   account counts the whole figure on that day and not before, and a cost with no paid day is
+   left out and named, never estimated. A bill for it in the same category (or from its vendor)
+   replaces it on either basis, so payroll typed and payroll entered are one figure.
+2. **Money that leaves and is not a cost had nowhere to go.** A loan payment typed under Interest
+   made the principal an expense; left out, the cash account missed real money. Now: category
+   kind `balance_sheet` (Loan principal; Owner draws and distributions; Equipment and improvements
+   bought; Income tax payments). Absent from the accrual account, where profit is before them;
+   below "Net cash from operations" on the cash account, with **Cash change** after them.
+3. **The rebate estimate and the rebate statement could both count.** The statement entered on
+   Spending now replaces the estimate; on the cash basis a receipt of kind `rebate` wins over the
+   same statement entered as a bill.
+4. **A wholesaler invoice filed on Spending counted twice.** Bills under "Drug purchases" are left
+   out on both bases and named on the statement, with where they belong.
+
+Rules the figures depend on, now said on the category or the form: a DIR fee or card fee the
+payer netted out of a deposit is entered with no paid date; depreciation is entered with no paid
+date; payroll paid twice a month is two standing costs; a loan payment is interest (a cost) and
+principal (not) as two rows. Still not derived and worth building next: the receivable from the
+835s rather than typed receipts (§7.2), and a sales-tax line on the sales summary so retail is
+net of tax collected.

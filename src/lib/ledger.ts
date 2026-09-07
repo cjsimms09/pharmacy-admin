@@ -111,6 +111,10 @@ export type PeriodPL = {
   operating: PLLine[];
   operatingCents: number;
   netProfitCents: number;
+  /** Cash basis only: what left the bank and is not a cost, and the change after it. */
+  otherCashOut: PLLine[];
+  otherCashOutCents: number;
+  cashChangeCents: number | null;
   /** Null unless every month in the period could say. */
   stockMovementCents: number | null;
   /** Each month's account, so the period can be taken apart again. */
@@ -153,6 +157,8 @@ export function combineMonths(period: Period, months: MonthlyPL[]): PeriodPL {
   const costOfGoodsCents = sorted.reduce((n, m) => n + m.costOfGoodsCents, 0);
   const grossProfitCents = netRevenueCents - costOfGoodsCents;
   const operatingCents = sorted.reduce((n, m) => n + m.operatingCents, 0);
+  const otherCashOut = mergeLines(sorted.map((m) => m.otherCashOut ?? []));
+  const otherCashOutCents = sorted.reduce((n, m) => n + (m.otherCashOutCents ?? 0), 0);
   const stock = sorted.map((m) => m.stockMovementCents);
   return {
     period,
@@ -168,6 +174,9 @@ export function combineMonths(period: Period, months: MonthlyPL[]): PeriodPL {
     operating,
     operatingCents,
     netProfitCents: grossProfitCents - operatingCents,
+    otherCashOut,
+    otherCashOutCents,
+    cashChangeCents: basis === "cash" ? grossProfitCents - operatingCents - otherCashOutCents : null,
     stockMovementCents: stock.length > 0 && stock.every((s) => s !== null) ? stock.reduce((n, s) => n + (s ?? 0), 0) : null,
     months: sorted,
     missing: sorted.flatMap((m) => m.missing.map((s) => (sorted.length > 1 ? `${monthLabel(m.month)}: ${s}` : s))),
@@ -288,7 +297,12 @@ export function statementRows(pl: PeriodPL): { group: string; label: string; cen
   push("Cost of goods", pl.costOfGoods);
   rows.push({ group: "Gross profit", label: "Gross profit", cents: pl.grossProfitCents, note: pl.grossMarginPercent !== null ? `${pl.grossMarginPercent}% of net revenue` : "" });
   push("Operating", pl.operating);
-  rows.push({ group: "Net", label: pl.netProfitCents < 0 ? "Net loss" : "Net profit", cents: pl.netProfitCents, note: pl.usable ? "" : "Not a complete account: " + pl.missing.join(" | ") });
+  const bottom = pl.basis === "cash" ? "Net cash from operations" : pl.netProfitCents < 0 ? "Net loss" : "Net profit";
+  rows.push({ group: "Net", label: bottom, cents: pl.netProfitCents, note: pl.usable ? "" : "Not a complete account: " + pl.missing.join(" | ") });
+  if (pl.basis === "cash") {
+    push("Other cash out, not a cost", pl.otherCashOut);
+    rows.push({ group: "Cash change", label: "Cash change", cents: pl.cashChangeCents ?? pl.netProfitCents, note: "Net cash from operations less loan principal, draws, equipment and tax" });
+  }
   return rows;
 }
 

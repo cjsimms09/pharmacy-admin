@@ -279,3 +279,63 @@ describe("the shape of the account", () => {
     assert.equal(r.revenueCents - r.netRevenueCents, 900_000);
   });
 });
+
+/** The accountant's questions, asked of the engine on 7 September. */
+describe("what the cash account is allowed to carry", () => {
+  const cashBase: PLInputs = {
+    ...base,
+    basis: "cash",
+    sales: null,
+    receipts: [{ kind: "third_party", amountCents: 50_000_000 }, { kind: "patient", amountCents: 9_000_000 }],
+    paidPurchasesCents: 52_000_000,
+    expenses: [
+      { categoryId: "w", categoryName: "Wages and salaries", kind: "operating", amountCents: 4_500_000 },
+      { categoryId: "r", categoryName: "Rent and occupancy", kind: "operating", amountCents: 600_000 },
+      { categoryId: "c", categoryName: "Card processing and bank fees", kind: "operating", amountCents: 180_000 },
+      { categoryId: "d", categoryName: "DIR fees and price concessions", kind: "revenue_offset", amountCents: 900_000 },
+    ],
+  };
+  test("a standing cost with no paid day is not accrued onto the cash account; it is named", () => {
+    const pl = monthlyPL({ ...cashBase, standing: [{ name: "Payroll", categoryId: "w", categoryName: "Wages and salaries", kind: "operating", accruedCents: 0, amountCents: 3_000_000, days: 10, of: 30, noPaidDay: true }] });
+    assert.equal(pl.operatingCents, 5_280_000);
+    assert.ok(pl.missing.some((m) => m.includes("Payroll") && m.includes("no day of the month")));
+  });
+  test("loan principal, draws, equipment and tax are cash out and never a cost", () => {
+    const below = [
+      { categoryId: "lp", categoryName: "Loan principal", kind: "balance_sheet", amountCents: 800_000 },
+      { categoryId: "od", categoryName: "Owner draws and distributions", kind: "balance_sheet", amountCents: 1_000_000 },
+    ];
+    const cash = monthlyPL({ ...cashBase, expenses: [...cashBase.expenses, ...below] });
+    assert.equal(cash.operatingCents, 5_280_000, "not in operating");
+    assert.equal(cash.otherCashOutCents, 1_800_000);
+    assert.equal(cash.cashChangeCents, cash.netProfitCents - 1_800_000);
+    const accrual = monthlyPL({ ...base, expenses: [...base.expenses, ...below] });
+    assert.equal(accrual.operatingCents, 5_400_000, "profit is before them");
+    assert.deepEqual(accrual.otherCashOut, []);
+    assert.equal(accrual.cashChangeCents, null);
+  });
+});
+
+describe("the same money twice", () => {
+  test("the wholesaler's rebate statement replaces the estimate from the ladder", () => {
+    const stated = { categoryId: "wr", categoryName: "Wholesaler rebates", kind: "cost_of_goods", amountCents: -1_150_000 };
+    const pl = monthlyPL({ ...base, expenses: [...base.expenses, stated] });
+    const lines = pl.costOfGoods.filter((l) => l.label.startsWith("Wholesaler rebates"));
+    assert.equal(lines.length, 1, "one rebate line, not an estimate and a statement");
+    assert.equal(lines[0].amountCents, -1_150_000);
+    assert.equal(pl.costOfGoodsCents, 55_000_000 - 1_150_000);
+  });
+  test("on the cash basis a rebate banked as a receipt wins over the same statement entered as a bill", () => {
+    const stated = { categoryId: "wr", categoryName: "Wholesaler rebates", kind: "cost_of_goods", amountCents: -1_150_000 };
+    const pl = monthlyPL({ ...base, basis: "cash", sales: null, receipts: [{ kind: "third_party", amountCents: 1 }, { kind: "rebate", amountCents: 1_150_000 }], paidPurchasesCents: 10_000, expenses: [stated] });
+    assert.equal(pl.costOfGoodsCents, 10_000 - 1_150_000);
+  });
+  test("a wholesaler bill filed on Spending is left out on both bases and named", () => {
+    const bill = { categoryId: "dp", categoryName: "Drug purchases", kind: "cost_of_goods", amountCents: 2_000_000 };
+    const accrual = monthlyPL({ ...base, expenses: [...base.expenses, bill] });
+    assert.equal(accrual.costOfGoodsCents, 55_000_000 - 1_200_000);
+    assert.ok(accrual.missing.some((m) => m.includes("Drug purchases")));
+    const cash = monthlyPL({ ...base, basis: "cash", sales: null, receipts: [{ kind: "third_party", amountCents: 1 }], paidPurchasesCents: 3_000_000, expenses: [bill] });
+    assert.equal(cash.costOfGoodsCents, 3_000_000);
+  });
+});

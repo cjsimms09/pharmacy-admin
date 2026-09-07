@@ -127,7 +127,9 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
               <Line label="Cost of goods" a={accrual.costOfGoodsCents} c={cash.costOfGoodsCents} href={sources.purchases} note={cash.costOfGoods.length === 0 ? "no wholesaler invoice falls in the period by its payment date or its terms" : undefined} />
               <Line label="Gross profit" a={accrual.grossProfitCents} c={cash.grossProfitCents} strong />
               <Line label="Operating" a={accrual.operatingCents} c={cash.operatingCents} href={sources.expenses} />
-              <Line label="Net" a={accrual.netProfitCents} c={cash.netProfitCents} strong />
+              <Line label="Net" a={accrual.netProfitCents} c={cash.netProfitCents} strong note="accrual: profit before tax · cash: net cash from operations" />
+              {cash.otherCashOut.length > 0 && <Line label="Loan principal, draws, equipment, tax" a={0} c={cash.otherCashOutCents} note="not a cost; cash out all the same" />}
+              <Line label="Cash change" a={accrual.netProfitCents} c={cash.cashChangeCents ?? cash.netProfitCents} strong note="what the bank balance did, against what the period earned" />
             </tbody>
           </table>
         </div>

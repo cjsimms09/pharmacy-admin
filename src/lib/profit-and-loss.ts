@@ -77,6 +77,16 @@ export type MonthlyPL = {
   netProfitCents: number;
 
   /**
+   * Money that left the bank and is not a cost: loan principal, owner draws, equipment bought
+   * outright, income tax. Cash basis only — on the accrual account these lines are empty and the
+   * cash change is null, because profit is before them and the account says so.
+   */
+  otherCashOut: PLLine[];
+  otherCashOutCents: number;
+  /** Net cash from operations less the other cash out: what the bank balance actually did. */
+  cashChangeCents: number | null;
+
+  /**
    * Bought less dispensed: stock going onto the shelf or coming off it.
    *
    * Not profit and never counted as it. It is where the cash went, which is a different question and
@@ -144,7 +154,7 @@ export type PLInputs = {
    * The standing costs the month carries so far: payroll and rent by the day, each already reduced
    * to the month's share. Dropped where a real bill from the same vendor is entered for the month.
    */
-  standing?: { name: string; categoryId: string | null; categoryName: string; kind: string; accruedCents: number; amountCents: number; days: number; of: number }[];
+  standing?: { name: string; categoryId: string | null; categoryName: string; kind: string; accruedCents: number; amountCents: number; days: number; of: number; noPaidDay?: boolean }[];
   /**
    * Rebates the month's buying earned. Used on an accrual basis, where the discount belongs to the
    * month that earned it rather than the month the cheque cleared.
@@ -184,10 +194,36 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
    * anything is added up, so payroll accrued to the 15th sits on the same line as a payroll bill
    * would, and the account reads the same whether the bill has come or not.
    */
-  const i: PLInputs = given.standing?.length
-    ? { ...given, expenses: [...given.expenses, ...given.standing.map((st) => ({ categoryId: st.categoryId, categoryName: st.categoryName, kind: st.kind, amountCents: st.accruedCents }))] }
-    : given;
   const missing: string[] = [];
+  /*
+   * On the cash basis a standing cost counts on the day it is paid, and one with no paid day is
+   * not guessed at: it is left out and named, so the cash account never carries an accrual by
+   * mistake and never silently omits payroll either.
+   */
+  const placed = (given.standing ?? []).filter((st) => !(given.basis === "cash" && st.noPaidDay));
+  for (const st of (given.standing ?? []).filter((st) => given.basis === "cash" && st.noPaidDay)) {
+    missing.push(`${st.name}, a standing cost with no day of the month it is paid. The cash account cannot place it; say on Spending which day the money leaves.`);
+  }
+  /*
+   * A wholesaler bill filed on Spending is not counted on either basis. The wholesalers' money is
+   * counted from the supplier invoices — as dispensed cost on the accrual account, by payment
+   * date on the cash one — and a bill here as well is the same money twice. It is named rather
+   * than dropped in silence, because the person who filed it meant it to count somewhere.
+   */
+  const wholesalerBills = given.expenses.filter((e) => e.kind === "cost_of_goods" && e.categoryName === "Drug purchases");
+  if (wholesalerBills.length > 0) {
+    const cents = wholesalerBills.reduce((n, e) => n + e.amountCents, 0);
+    missing.push(
+      `${wholesalerBills.length} bill${wholesalerBills.length === 1 ? "" : "s"} worth $${(cents / 100).toFixed(2)} filed under Drug purchases on Spending, and left out: wholesaler invoices are counted from the invoices page, so this is the same money twice if it is one of those, and belongs in another category if it is not.`,
+    );
+  }
+  const i: PLInputs = {
+    ...given,
+    expenses: [
+      ...given.expenses.filter((e) => !wholesalerBills.includes(e)),
+      ...placed.map((st) => ({ categoryId: st.categoryId, categoryName: st.categoryName, kind: st.kind, amountCents: st.accruedCents })),
+    ],
+  };
 
   /*
    * Revenue, from whichever source actually answers the question being asked.
@@ -313,10 +349,16 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
    * that earned it; a cash account wants the month the money actually arrived. Using one figure for
    * both would put the same rebate in the wrong month on one of the two accounts, every month.
    */
-  const rebateCents =
-    i.basis === "cash"
-      ? i.receipts.filter((r) => r.kind === "rebate").reduce((n, r) => n + r.amountCents, 0)
-      : (i.rebatesCents ?? 0);
+  /*
+   * The wholesaler's own statement beats the estimate. A rebate entered on Spending under
+   * "Wholesaler rebates" is the figure the wholesaler settled, and the estimate from the ladder
+   * was only ever standing in for it; both on the account would take the discount twice. On the
+   * cash basis the same statement entered as a receipt of kind "rebate" is the fact, and a bill
+   * with a paid date says the same thing, so the receipts win and the bill is dropped.
+   */
+  const statedRebate = i.expenses.filter((e) => e.kind === "cost_of_goods" && e.categoryName === "Wholesaler rebates");
+  const rebateReceipts = i.receipts.filter((r) => r.kind === "rebate").reduce((n, r) => n + r.amountCents, 0);
+  const rebateCents = i.basis === "cash" ? rebateReceipts : statedRebate.length > 0 ? 0 : (i.rebatesCents ?? 0);
   if (rebateCents) {
     costOfGoods.push({
       label: i.basis === "cash" ? "Wholesaler rebates received" : "Wholesaler rebates earned",
@@ -324,10 +366,13 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
       note:
         i.basis === "cash"
           ? "Settled this month, on buying done a month or two ago. A discount arriving late, so it reduces cost rather than adding to revenue."
-          : "Earned by this month's buying, whenever the wholesaler settles it. A discount, so it reduces cost rather than adding to revenue.",
+          : "Estimated from this month's invoice lines at the ladder in force, until the wholesaler's statement is entered on Spending under Wholesaler rebates, which then takes its place. A discount, so it reduces cost rather than adding to revenue.",
     });
   }
-  for (const l of byCategory(i.expenses, "cost_of_goods")) costOfGoods.push(l);
+  const dropStatedRebate = i.basis === "cash" && rebateReceipts !== 0;
+  for (const l of byCategory(i.expenses.filter((e) => !(dropStatedRebate && statedRebate.includes(e))), "cost_of_goods")) {
+    costOfGoods.push(l.label === "Wholesaler rebates" ? { ...l, note: "The wholesaler's statement, entered on Spending. It replaces the estimate from the ladder." } : l);
+  }
   const costOfGoodsCents = sum(costOfGoods);
 
   const grossProfitCents = netRevenueCents - costOfGoodsCents;
@@ -336,6 +381,18 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
   const operating = byCategory(i.expenses, "operating");
   const operatingCents = sum(operating);
   const netProfitCents = grossProfitCents - operatingCents;
+
+  /*
+   * Below the line, on the cash account only: money that left and is not a cost.
+   *
+   * The loan's principal, the owner's draws, a fridge bought outright, the tax bill. On the accrual
+   * account none of it is an expense and profit is stated before it; on the cash account it is
+   * exactly what makes "the month made money and the balance went down" true, so it is shown and
+   * the cash change is the figure after it.
+   */
+  const otherCashOut = i.basis === "cash" ? byCategory(i.expenses, "balance_sheet") : [];
+  const otherCashOutCents = sum(otherCashOut);
+  const cashChangeCents = i.basis === "cash" ? netProfitCents - otherCashOutCents : null;
 
   /*
    * The lines whose absence would otherwise read as a better month.
@@ -405,6 +462,9 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
     operating,
     operatingCents,
     netProfitCents,
+    otherCashOut,
+    otherCashOutCents,
+    cashChangeCents,
     stockMovementCents,
     reconciliation,
     missing,
@@ -441,7 +501,7 @@ export type SharedInputs = {
   suppliers: Awaited<ReturnType<typeof import("./suppliers-registry").allSuppliers>>;
   invoices: { totalCents: number | null; paidOn: string | null; invoiceDate: string | null; supplierId: string | null; supplier: string | null }[];
   /** Every standing cost on file; which apply to a month is decided per month. */
-  standing: { id: string; name: string; categoryId: string | null; vendorId: string | null; amountCents: number; fromMonth: string; toMonth: string | null }[];
+  standing: { id: string; name: string; categoryId: string | null; vendorId: string | null; amountCents: number; fromMonth: string; toMonth: string | null; paidDay: number | null }[];
   /** The day the account is drawn, which decides how much of a standing cost a month in progress carries. */
   today: string;
   lines: { invoiceDate: string | null; extendedCents: number }[];
@@ -604,11 +664,11 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
   const byId = new Map(cats.map((c) => [c.id, c]));
 
   /* Payroll and rent by the day, dropped where the real bill for the month is already in. */
-  const standing = standingLines(shared.standing, month, shared.today, per.bills)
+  const standing = standingLines(shared.standing, month, shared.today, per.bills, basis)
     .filter((l) => !l.replacedByBill)
     .map((l) => {
       const c = l.categoryId ? byId.get(l.categoryId) : undefined;
-      return { name: l.name, categoryId: l.categoryId, categoryName: c?.name ?? "Uncategorised", kind: c?.kind ?? "operating", accruedCents: l.accruedCents, amountCents: l.amountCents, days: l.days, of: l.of };
+      return { name: l.name, categoryId: l.categoryId, categoryName: c?.name ?? "Uncategorised", kind: c?.kind ?? "operating", accruedCents: l.accruedCents, amountCents: l.amountCents, days: l.days, of: l.of, noPaidDay: l.noPaidDay };
     });
   return {
     month,

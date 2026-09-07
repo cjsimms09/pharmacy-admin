@@ -69,8 +69,11 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
     if (amountCents === null || amountCents <= 0) redirect("/expenses?error=" + encodeURIComponent("Put the month's figure in dollars."));
     if (!/^\d{4}-\d{2}$/.test(fromMonth)) redirect("/expenses?error=" + encodeURIComponent("Say which month it starts, as YYYY-MM."));
     if (toMonth && !/^\d{4}-\d{2}$/.test(toMonth)) redirect("/expenses?error=" + encodeURIComponent("The last month must be YYYY-MM, or blank while it runs."));
+    const paidDayText = String(form.get("paidDay") ?? "").trim();
+    const paidDay = paidDayText ? Number(paidDayText) : null;
+    if (paidDay !== null && (!Number.isInteger(paidDay) || paidDay < 1 || paidDay > 31)) redirect("/expenses?error=" + encodeURIComponent("The day it is paid is a day of the month, 1 to 31, or blank."));
     const id = await addStandingCost(
-      { name, amountCents, categoryId: String(form.get("categoryId") ?? "") || null, vendorId: String(form.get("vendorId") ?? "") || null, fromMonth, toMonth, notes: String(form.get("notes") ?? "").trim() || null },
+      { name, amountCents, categoryId: String(form.get("categoryId") ?? "") || null, vendorId: String(form.get("vendorId") ?? "") || null, fromMonth, toMonth, paidDay, notes: String(form.get("notes") ?? "").trim() || null },
       u,
     );
     await audit({ action: "standing_cost.add", userId: u.id, userName: u.name, entity: "standing_cost", entityId: id, details: `${name} ${formatCents(amountCents)} a month from ${fromMonth}` });
@@ -381,13 +384,13 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
         className="mt-4"
         title="Standing monthly costs"
         count={standingAll.length}
-        subtitle={`Payroll, rent, the loan: the same every month and known before the bill. The account carries each month's share by the day — ${formatCents(3_000_000)} a month is ${formatCents(1_000_000)} by the 10th — and drops it when the vendor's real bill for the month is entered.`}
+        subtitle={`Payroll, rent, the loan: the same every month and known before the bill. The accrual account carries each month's share by the day — ${formatCents(3_000_000)} a month is ${formatCents(1_000_000)} by the 10th; the cash account counts the whole figure on the day it is paid. Either drops it when the real bill for the month is entered (the vendor's, or one in the same category). Payroll paid twice a month is two standing costs, one per pay day; a loan payment is two as well, the interest under Interest and the principal under Loan principal.`}
       >
         {standingNow.length > 0 && (
           <div className="mb-4 overflow-x-auto">
             <table className="table">
               <thead>
-                <tr><th>Cost</th><th>Category</th><th className="num">A month</th><th className="num">So far this month</th><th>Runs</th><th></th></tr>
+                <tr><th>Cost</th><th>Category</th><th className="num">A month</th><th className="num">Accrued so far</th><th>Paid on</th><th>Runs</th><th></th></tr>
               </thead>
               <tbody>
                 {standingNow.map((l) => {
@@ -399,6 +402,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
                       <td className="text-xs text-ink-2">{cat?.name ?? "—"}</td>
                       <td className="num">{formatCents(l.amountCents)}</td>
                       <td className="num">{l.replacedByBill ? "—" : formatCents(l.accruedCents)} <span className="text-xs text-ink-3">day {l.days} of {l.of}</span></td>
+                      <td className="text-xs text-ink-2">{l.paidDay ? `the ${l.paidDay}${ordinal(l.paidDay)}` : <span className="text-warn">not said · left out of the cash account</span>}</td>
                       <td className="text-xs text-ink-2">{c.fromMonth} → {c.toMonth ?? "open"}</td>
                       <td className="whitespace-nowrap">
                         <form action={endStanding} className="inline-flex items-center gap-1">
@@ -443,8 +447,11 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
           <Field label="From month">
             <input type="month" name="fromMonth" defaultValue={month} required className="w-full" />
           </Field>
-          <Field label="Last month" hint="Blank while it runs." className="lg:col-span-2">
+          <Field label="Last month" hint="Blank while it runs.">
             <input type="month" name="toMonth" className="w-full" />
+          </Field>
+          <Field label="Paid on day" hint="Of the month, for the cash account.">
+            <input name="paidDay" inputMode="numeric" placeholder="15" className="w-full" />
           </Field>
           <Field label="Notes" className="sm:col-span-2 lg:col-span-3">
             <input name="notes" className="w-full" />
@@ -553,4 +560,10 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
       <ExportData page="expenses" className="mt-6" />
     </>
   );
+}
+
+function ordinal(n: number): string {
+  const r = n % 100;
+  if (r >= 11 && r <= 13) return "th";
+  return ["th", "st", "nd", "rd"][n % 10] ?? "th";
 }

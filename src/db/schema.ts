@@ -1664,7 +1664,13 @@ export const csDiscrepancies = sqliteTable(
  * that wrong moves money between gross profit and net profit without changing either total, which
  * is the kind of error that looks like a rounding difference and is not.
  */
-export const EXPENSE_KINDS = ["operating", "cost_of_goods", "revenue_offset"] as const;
+/**
+ * Where a category's money goes on the account. `balance_sheet` is money that leaves the bank and
+ * is not a cost: loan principal, owner draws, equipment bought outright, income tax. It shows on
+ * the cash account below the line, so the cash change is the real one, and never on the accrual
+ * account, where it would understate profit.
+ */
+export const EXPENSE_KINDS = ["operating", "cost_of_goods", "revenue_offset", "balance_sheet"] as const;
 
 export const expenseCategories = sqliteTable(
   "expense_categories",
@@ -2760,6 +2766,12 @@ export const standingCosts = sqliteTable(
     vendorId: text("vendor_id").references(() => vendors.id),
     /** The whole month's figure, in cents. */
     amountCents: integer("amount_cents").notNull(),
+    /**
+     * The day of the month the money leaves the bank (1-31), for the cash account: payroll on the
+     * 15th, rent on the 1st. Null where nobody has said, and then the cash account leaves the cost
+     * out and names it; the accrual account carries it by the day either way.
+     */
+    paidDay: integer("paid_day"),
     /** First month it applies to, YYYY-MM. */
     fromMonth: text("from_month").notNull(),
     /** Last month it applies to, YYYY-MM, or null while it runs. */
