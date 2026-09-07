@@ -221,6 +221,9 @@ export const ceEntries = sqliteTable(
 // ── Documents ────────────────────────────────────────────────────────
 export const DOCUMENT_CATEGORIES = [
   "license",
+  /** A MAC appeal or a Kansas floor complaint as sent, and the ERA enrollment request as sent. */
+  "appeal",
+  "era_enrollment",
   "cpr_card",
   "immunization_training",
   "immunization_protocol",
@@ -1356,9 +1359,15 @@ export const contractText = sqliteTable(
     /** The checklist row this file was matched to, where it was matched to one. */
     contractDocId: text("contract_doc_id"),
     sha256: text("sha256").notNull(),
-    /** How many characters came out. Zero means a scan with no text layer. */
+    /** How many characters came out of the PDF's own text layer. Zero means a scan. */
     chars: integer("chars").notNull().default(0),
     body: text("body").notNull().default(""),
+    /**
+     * Where the body came from: "pdf" is the file's own text layer; "read" is the AI read written
+     * back for a scan that has none, every line of it cited to a page. A search hit on a "read"
+     * body is the reader's summary of the page, not the page.
+     */
+    source: text("source").notNull().default("pdf"),
     indexedAt: text("indexed_at").notNull().default(now()),
   },
   (t) => [index("contract_text_file_idx").on(t.fileName)],
@@ -1383,6 +1392,17 @@ export const contractDocs = sqliteTable(
     extractionState: text("extraction_state", { enum: ["none", "queued", "done", "failed"] }).notNull().default("none"),
     extractionJson: text("extraction_json"),
     extractionError: text("extraction_error"),
+    /**
+     * What the cheap sort made of the document before the expensive read: contract, rate_sheet,
+     * notice, manual, not_relevant or unsure (`contract-triage.ts`). The full read skips only
+     * not_relevant. A person may overrule it; `triage_by` says who decided ("rule", "model", or
+     * the person's name).
+     */
+    triage: text("triage"),
+    triageWhy: text("triage_why"),
+    triageBy: text("triage_by"),
+    /** The batch the model sort is running in, until it is collected. */
+    triageBatch: text("triage_batch"),
     loadedAt: text("loaded_at").notNull().default(now()),
   },
   (t) => [index("contract_docs_pbm_idx").on(t.pbmName), index("contract_docs_priority_idx").on(t.priority)],
@@ -2597,4 +2617,75 @@ export const supplyOrderLines = sqliteTable(
     receivedQuantity: real("received_quantity"),
   },
   (t) => [index("supply_order_lines_order_idx").on(t.orderId), index("supply_order_lines_item_idx").on(t.itemId)],
+);
+
+
+// ── Appeals and complaints, as sent ──────────────────────────────────
+/**
+ * Every appeal or complaint the site prepared: what it asked for, where it went, when, and what
+ * came back. The packet is kept as it stood when it was sent (`packet_json`), and the PDF is a
+ * document, so what was claimed can be produced rather than described. An appeal is scored by the
+ * next remittance, like a recommendation: `outcome_cents` is what the reprocessed claim paid over
+ * the original.
+ */
+export const appeals = sqliteTable(
+  "appeals",
+  {
+    id: text("id").primaryKey(),
+    /** "mac_appeal" to the PBM, or "floor_complaint" to the Kansas Insurance Department. */
+    kind: text("kind", { enum: ["mac_appeal", "floor_complaint"] }).notNull(),
+    claimId: text("claim_id").references(() => claims.id, { onDelete: "set null" }),
+    rxNumber: text("rx_number"),
+    fillNumber: integer("fill_number"),
+    dateFilled: text("date_filled"),
+    ndc11: text("ndc11"),
+    pbmName: text("pbm_name").notNull(),
+    /** For a floor complaint: every claim it covers, as JSON ids. */
+    claimIds: text("claim_ids"),
+    shortfallCents: integer("shortfall_cents").notNull().default(0),
+    deadline: text("deadline"),
+    status: text("status", { enum: ["prepared", "sent", "answered", "won", "lost", "withdrawn"] }).notNull().default("prepared"),
+    /** "email", "portal", "fax", "mail" — how it went, or is to go. */
+    channel: text("channel"),
+    target: text("target"),
+    packetJson: text("packet_json").notNull(),
+    documentId: text("document_id"),
+    sentAt: text("sent_at"),
+    sentBy: text("sent_by"),
+    sendResult: text("send_result"),
+    responseDueOn: text("response_due_on"),
+    outcomeCents: integer("outcome_cents"),
+    outcomeNote: text("outcome_note"),
+    createdBy: text("created_by").notNull(),
+    createdAt: text("created_at").notNull().default(now()),
+    updatedAt: text("updated_at").notNull().default(now()),
+  },
+  (t) => [index("appeals_claim_idx").on(t.claimId), index("appeals_pbm_idx").on(t.pbmName), index("appeals_status_idx").on(t.status)],
+);
+
+/**
+ * Getting each PBM's 835 delivered to this site: the enrollment, per payer, with its state.
+ *
+ * The contract states the payment path; the change is an EFT/ERA enrollment on the PBM's portal
+ * or form. The site's part is to hold the request, the delivery point and the dates, so the
+ * checklist (requested, confirmed, first 835 received) is a record and not a memory.
+ */
+export const eraEnrollments = sqliteTable(
+  "era_enrollments",
+  {
+    id: text("id").primaryKey(),
+    pbmName: text("pbm_name").notNull(),
+    status: text("status", { enum: ["not_started", "requested", "confirmed", "receiving", "declined"] }).notNull().default("not_started"),
+    /** Where the 835 is to be delivered: the mailbox the site reads, or a clearinghouse/SFTP the site watches. */
+    deliveryTarget: text("delivery_target"),
+    requestedOn: text("requested_on"),
+    requestedTo: text("requested_to"),
+    confirmedOn: text("confirmed_on"),
+    firstRemitOn: text("first_remit_on"),
+    documentId: text("document_id"),
+    notes: text("notes"),
+    updatedBy: text("updated_by"),
+    updatedAt: text("updated_at").notNull().default(now()),
+  },
+  (t) => [index("era_enrollments_pbm_idx").on(t.pbmName)],
 );

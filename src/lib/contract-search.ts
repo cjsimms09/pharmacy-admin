@@ -6,6 +6,8 @@ import { eq } from "drizzle-orm";
 import { newId, sha256 } from "./crypto";
 import { pdfText } from "./pdf-text";
 import { contractsDir } from "./reference";
+import { searchBodyFromTerms } from "./contract-run";
+import { parseTerms } from "./contract-extract";
 
 /**
  * Searching the contracts already on file, so a BIN can be traced to the agreement that covers it.
@@ -51,8 +53,14 @@ export async function indexContracts(): Promise<{ files: number; indexed: number
 
   const held = await db.query.contractText.findMany({ columns: { id: true, fileName: true, sha256: true } });
   const bySha = new Set(held.map((h) => `${h.fileName}|${h.sha256}`));
-  const docs = await db.query.contractDocs.findMany({ columns: { id: true, fileName: true } });
+  const docs = await db.query.contractDocs.findMany({ columns: { id: true, fileName: true, extractionState: true, extractionJson: true } });
   const docByFile = new Map(docs.filter((d) => d.fileName).map((d) => [d.fileName!, d.id]));
+  const readBodies = new Map<string, string>();
+  for (const d of docs) {
+    if (!d.fileName || d.extractionState !== "done") continue;
+    const terms = parseTerms(d.extractionJson);
+    if (terms) readBodies.set(d.fileName, searchBodyFromTerms(terms));
+  }
 
   for (const file of entries) {
     try {
@@ -70,15 +78,25 @@ export async function indexContracts(): Promise<{ files: number; indexed: number
       } catch {
         body = "";
       }
-      if (!body.trim()) out.scans++;
+      let source: "pdf" | "read" = "pdf";
+      if (!body.trim()) {
+        out.scans++;
+        // A scan already read by the reader is searchable by what the read kept.
+        const fromRead = readBodies.get(file);
+        if (fromRead) {
+          body = fromRead;
+          source = "read";
+        }
+      }
       await db.delete(schema.contractText).where(eq(schema.contractText.fileName, file));
       await db.insert(schema.contractText).values({
         id: newId(),
         fileName: file,
         contractDocId: docByFile.get(file) ?? null,
         sha256: digest,
-        chars: body.length,
+        chars: source === "pdf" ? body.length : 0,
         body,
+        source,
       });
       out.indexed++;
     } catch (e) {
@@ -181,12 +199,28 @@ export async function contractsForUnknownBins(bins: string[]): Promise<Map<strin
   return out;
 }
 
+/**
+ * Writes a finished read back as the searchable text of a scan.
+ *
+ * Only for a file whose own text layer is empty: a PDF with real text is searched by its words,
+ * which are the document, and the read is never allowed to stand in for them. Called when a read
+ * lands, so the search box catches up the moment the reader does.
+ */
+export async function rememberReadText(fileName: string, terms: Parameters<typeof searchBodyFromTerms>[0]): Promise<boolean> {
+  const rows = await db.query.contractText.findMany({ where: eq(schema.contractText.fileName, fileName) });
+  const row = rows[0];
+  if (!row || row.chars > 0) return false;
+  await db.update(schema.contractText).set({ body: searchBodyFromTerms(terms), source: "read" }).where(eq(schema.contractText.id, row.id));
+  return true;
+}
+
 /** Whether anything has been indexed yet, for a page that has to say why it found nothing. */
-export async function contractIndexState(): Promise<{ files: number; withText: number; scans: number }> {
-  const rows = await db.query.contractText.findMany({ columns: { chars: true } });
+export async function contractIndexState(): Promise<{ files: number; withText: number; scans: number; fromRead: number }> {
+  const rows = await db.query.contractText.findMany({ columns: { chars: true, source: true } });
   return {
     files: rows.length,
     withText: rows.filter((r) => r.chars > 0).length,
     scans: rows.filter((r) => r.chars === 0).length,
+    fromRead: rows.filter((r) => r.chars === 0 && r.source === "read").length,
   };
 }

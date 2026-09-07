@@ -12,7 +12,8 @@ import Link from "next/link";
 import { looksLikePioneerCatalog } from "@/lib/pioneer-catalog";
 import { formatCents } from "@/lib/money";
 import { requireReimbursement } from "@/lib/features";
-import { PageHeader, Notice, Empty, Field, Card } from "@/components/ui";
+import { PageHeader, Notice, Empty, Field, Card, Figure } from "@/components/ui";
+import { Hub } from "@/components/hub";
 import { DataTable } from "@/components/data-table";
 import { ExportData } from "@/components/export-data";
 
@@ -131,6 +132,8 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
   }
 
   const totalSaving = opps.rows.reduce((s, r) => s + (r.savingCents ?? 0), 0);
+  const ordering = buyList.plan.baskets.filter((b) => b.verdict === "order" || b.verdict === "top_up_to_order");
+  const held = buyList.plan.baskets.filter((b) => b.verdict === "hold").length;
 
   return (
     <>
@@ -141,6 +144,53 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
 
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
+
+      {/*
+        The section at a glance, before any list. Each figure is a link to the part of the page
+        (or the page under Ordering) that explains it, so a number is never a dead end.
+      */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <Figure
+          size="sm"
+          value={money(ordering.reduce((n, b) => n + b.subtotalCents + b.freightCents, 0))}
+          label="Today's order"
+          sub={ordering.length === 0 ? (buyList.plan.baskets.length ? "every basket on hold" : "nothing to order") : `${ordering.length} supplier${ordering.length === 1 ? "" : "s"} · ${ordering.reduce((n, b) => n + b.lines.length, 0)} lines${held ? ` · ${held} on hold` : ""}`}
+          tone={held ? "warn" : "muted"}
+          href="#order"
+        />
+        <Figure
+          size="sm"
+          value={money(ordering.reduce((n, b) => n + b.savingCents, 0))}
+          label="Saved by buying it there"
+          sub="against the primary, after rebates"
+          tone="ok"
+          href="/purchasing/minimums"
+        />
+        <Figure
+          size="sm"
+          value={nextTier && nextTier.worthCents > 0 ? money(nextTier.worthCents) : "—"}
+          label="Next rebate band"
+          sub={nextTier && nextTier.worthCents > 0 ? `${nextTier.nextRatePercent}% at ${nextTier.supplier}${nextTier.daysLeft > 0 ? `, ${nextTier.daysLeft} day${nextTier.daysLeft === 1 ? "" : "s"} left` : ""}` : "no band within reach this month"}
+          tone={nextTier && nextTier.worthCents > 0 && nextTier.daysLeft <= 7 ? "warn" : "muted"}
+          href="/suppliers"
+        />
+        <Figure
+          size="sm"
+          value={switches.length}
+          label="Buy these instead"
+          sub={`${unstocked.length} more offered under the benchmark and not stocked`}
+          tone={switches.length ? "ok" : "muted"}
+          href="#instead"
+        />
+        <Figure
+          size="sm"
+          value={losing.length}
+          label="Dispensed at a loss"
+          sub={losing.length ? `${money(Math.abs(losing.reduce((n, m) => n + m.marginCents, 0)))} so far` : "every product held earns"}
+          tone={losing.length ? "crit" : "ok"}
+          href={earned.length ? "#earns" : undefined}
+        />
+      </div>
 
       {/*
         Today's order.
@@ -165,6 +215,7 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
       )}
 
       <Card
+        id="order"
         className="my-4"
         title="Today&rsquo;s order"
         tone={buyList.plan.baskets.some((b) => b.verdict === "hold") ? "warn" : undefined}
@@ -410,7 +461,7 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
         percentage off something bought twice a year is not worth an afternoon.
       */}
       {(switches.length > 0 || unstocked.length > 0) && (
-        <Card title="Buy these instead" className="my-4">          <p className="mt-1 text-xs text-ink-2">
+        <Card id="instead" title="Buy these instead" className="my-4">          <p className="mt-1 text-xs text-ink-2">
             Every NDC offered under what the federal benchmark says the drug costs, after the rebate this pharmacy
             actually earns. Grouped into products on NADAC&rsquo;s own description, so a switch is between genuine
             equivalents rather than between things that merely sound alike.
@@ -588,7 +639,7 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
         profitable drug into an apparent loss and get it dropped.
       */}
       {earned.length > 0 && (
-        <Card title="What each drug earns" className="my-4">          <p className="mt-1 text-sm text-ink-2">
+        <Card id="earns" title="What each drug earns" className="my-4">          <p className="mt-1 text-sm text-ink-2">
             What the plans and patients paid, against what the drug actually cost this pharmacy — the invoice price less
             the rebate that supplier really pays on the line. Across everything held, {money(totalMarginCents)} on{" "}
             {earned.length.toLocaleString()} product{earned.length === 1 ? "" : "s"}.
@@ -728,6 +779,9 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
           />
         </>
       )}
+
+      <h2 className="mb-3 mt-8">Elsewhere in Ordering</h2>
+      <Hub href="/purchasing" />
 
       <Card title="How this compares things, and what it will not do" className="mt-8  text-sm">        <ul className="mt-2 list-disc space-y-1 pl-5 text-ink-2">
           <li>

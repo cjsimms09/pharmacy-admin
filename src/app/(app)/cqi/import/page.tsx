@@ -32,6 +32,7 @@ export default async function ImportPage({ searchParams }: { searchParams: Promi
       {imports.length > 0 && (
         <section className="card max-w-2xl">
           <h2 className="mb-3 font-semibold">Previous imports</h2>
+          <div className="overflow-x-auto">
           <table className="table">
             <thead><tr><th>When</th><th>Status</th><th></th></tr></thead>
             <tbody>
@@ -44,6 +45,7 @@ export default async function ImportPage({ searchParams }: { searchParams: Promi
               ))}
             </tbody>
           </table>
+          </div>
         </section>
       )}
     </>

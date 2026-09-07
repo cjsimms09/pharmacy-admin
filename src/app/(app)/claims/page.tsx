@@ -410,7 +410,7 @@ export default async function ClaimsPage({
             <span className="block text-ink-3">Payer or BIN</span>
             <input name="payer" defaultValue={flags.scope.payer ?? ""} placeholder="Caremark" className="mt-0.5 w-40 rounded-md border border-line px-2 py-1 text-sm" />
           </label>
-          <button className="rounded-md bg-ink px-3 py-1.5 text-sm text-white">Search</button>
+          <button className="btn btn-sm btn-primary">Search</button>
           {searching && (
             <Link href="/claims" className="btn btn-sm">Back to the last day</Link>
           )}
@@ -1066,7 +1066,7 @@ export default async function ClaimsPage({
         </p>
         <form action={upload} className="mt-3 flex flex-wrap items-center gap-2">
           <input type="file" name="file" accept=".xlsx,.csv,.txt" className="text-sm" />
-          <button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Load</button>
+          <button className="btn btn-primary">Load</button>
         </form>
       </details>
 

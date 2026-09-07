@@ -405,7 +405,34 @@ export function monthlyPL(i: PLInputs): MonthlyPL {
  * themselves.
  */
 export async function monthlyAccount(month: string, basis: "accrual" | "cash" = "accrual"): Promise<MonthlyPL> {
-  const { latestSalesMonth, salesMonths } = await import("./sales-store");
+  const shared = await loadShared([month], basis);
+  return monthlyPL(monthInputs(month, basis, shared));
+}
+
+/**
+ * Everything a run of months needs, read once.
+ *
+ * A quarter is three months and a year twelve, and each month used to re-read every claim the site
+ * holds. The claims, the invoices and the suppliers do not change between one month's account and
+ * the next, so they are loaded once and sliced per month.
+ */
+export type SharedInputs = {
+  basis: "accrual" | "cash";
+  sales: Awaited<ReturnType<typeof import("./sales-store").salesMonths>>;
+  cats: Awaited<ReturnType<typeof import("./expenses").categories>>;
+  fills: Awaited<ReturnType<typeof import("./claims").allFills>>;
+  suppliers: Awaited<ReturnType<typeof import("./suppliers-registry").allSuppliers>>;
+  invoices: { totalCents: number | null; paidOn: string | null; invoiceDate: string | null }[];
+  lines: { invoiceDate: string | null; extendedCents: number }[];
+  counts: { countedOn: string; valueCents: number | null; rxValueCents: number | null }[];
+  /** Money received against fills, by the day it arrived, for the cash account. */
+  payments: { source: string; receivedOn: string | null; amountCents: number; revenueCents: number | null }[];
+  /** Per month: the bills on the basis asked for, the receipts entered, the rebate earned, and the driver's invoices where the pharmacy pays them. */
+  byMonth: Map<string, { bills: Awaited<ReturnType<typeof import("./expenses").expensesIn>>; receipts: { kind: string; amountCents: number }[]; rebatesCents: number | null; driverCents: number }>;
+};
+
+export async function loadShared(months: string[], basis: "accrual" | "cash"): Promise<SharedInputs> {
+  const { salesMonths } = await import("./sales-store");
   const { expensesIn, cashReceiptsIn, categories } = await import("./expenses");
   const { allFills } = await import("./claims");
   const { earningSoFar } = await import("./rebate-rates");
@@ -413,17 +440,43 @@ export async function monthlyAccount(month: string, basis: "accrual" | "cash" = 
   const { db, schema } = await import("@/db");
   const { and, gte, lte } = await import("drizzle-orm");
 
-  const [months, bills, receipts, cats, fills, suppliers, driverCents] = await Promise.all([
+  const sorted = [...months].sort();
+  const from = `${sorted[0]}-01`;
+  const to = `${sorted[sorted.length - 1]}-31`;
+
+  const [sales, cats, fills, suppliers, invoices, lines, counts, payments] = await Promise.all([
     salesMonths(),
-    expensesIn(month, basis),
-    cashReceiptsIn(month),
     categories(true),
     allFills(),
     allSuppliers(true),
-    driverCostFor(month),
+    db.query.supplierInvoices.findMany({ columns: { totalCents: true, paidOn: true, invoiceDate: true } }),
+    db.query.invoiceLines.findMany({ where: and(gte(schema.invoiceLines.invoiceDate, from), lte(schema.invoiceLines.invoiceDate, to)), columns: { invoiceDate: true, extendedCents: true } }),
+    db.query.onHandImports.findMany({ where: and(gte(schema.onHandImports.countedOn, from), lte(schema.onHandImports.countedOn, to)), columns: { countedOn: true, valueCents: true, rxValueCents: true } }),
+    db.query.claimPayments.findMany({ columns: { source: true, receivedOn: true, amountCents: true, revenueCents: true } }),
   ]);
-  void latestSalesMonth;
 
+  const byMonth: SharedInputs["byMonth"] = new Map();
+  for (const month of sorted) {
+    const [bills, receipts, earned, driverCents] = await Promise.all([
+      expensesIn(month, basis),
+      cashReceiptsIn(month),
+      Promise.all(suppliers.map((s) => earningSoFar(s.id, month))),
+      driverCostFor(month),
+    ]);
+    byMonth.set(month, {
+      bills,
+      receipts: receipts.map((r) => ({ kind: r.kind, amountCents: r.amountCents })),
+      rebatesCents: earned.reduce((n, e) => n + (e?.estimatedRebateCents ?? 0), 0) || null,
+      driverCents,
+    });
+  }
+  return { basis, sales, cats, fills, suppliers, invoices, lines, counts, payments, byMonth };
+}
+
+/** One month's inputs, sliced from what was loaded. Nothing here computes; `monthlyPL` does. */
+export function monthInputs(month: string, basis: "accrual" | "cash", shared: SharedInputs): PLInputs {
+  const { sales: months, cats, fills, invoices, lines, counts } = shared;
+  const per = shared.byMonth.get(month) ?? { bills: [], receipts: [], rebatesCents: null, driverCents: 0 };
   const sales = months.find((m) => m.month === month) ?? null;
 
   /*
@@ -432,34 +485,23 @@ export async function monthlyAccount(month: string, basis: "accrual" | "cash" = 
    * This is the figure that makes a stocktake unnecessary — see the note at the top of this file.
    * A fill with no acquisition cost on it is left out of both sides rather than counted as free.
    */
-  const mine = fills.filter((f) => f.dateFilled.startsWith(month) && f.acquisitionCents !== null);
-  /*
-   * What the month sold on account. Reported beside the profit, never added to it: the sale is
-   * already in the revenue above, and the only thing still open is whether the money has arrived.
-   */
   const monthFills = fills.filter((f) => f.dateFilled.startsWith(month));
+  const mine = monthFills.filter((f) => f.acquisitionCents !== null);
   /*
    * What the month's dispensing actually brought in, per fill rather than per transmission, so a
    * coordinated claim is one bottle's revenue and not two.
    */
-  const claimsRevenueCents = monthFills.length
-    ? monthFills.reduce((n, f) => n + f.remitCents + f.patientPaidCents, 0)
-    : null;
+  const claimsRevenueCents = monthFills.length ? monthFills.reduce((n, f) => n + f.remitCents + f.patientPaidCents, 0) : null;
   const onAccount = {
     receivableCents: monthFills.reduce((n, f) => n + f.receivableCents, 0),
     unbilledCostCents: monthFills.reduce((n, f) => n + (f.unbilledCostCents ?? 0), 0),
   };
   const dispensedCostCents = mine.length ? mine.reduce((n, f) => n + (f.acquisitionCents ?? 0), 0) : null;
-  const laterMoneyCents = fills
-    .filter((f) => f.dateFilled.startsWith(month))
-    .reduce((n, f) => n + f.laterPaymentsCents, 0);
+  const laterMoneyCents = monthFills.reduce((n, f) => n + f.laterPaymentsCents, 0);
 
   /* What the wholesalers billed in the month, for the stock comparison only — never as accrual cost of goods. */
-  const lines = await db.query.invoiceLines.findMany({
-    where: and(gte(schema.invoiceLines.invoiceDate, `${month}-01`), lte(schema.invoiceLines.invoiceDate, `${month}-31`)),
-    columns: { extendedCents: true },
-  });
-  const purchasesCents = lines.length ? lines.reduce((n, l) => n + l.extendedCents, 0) : null;
+  const monthLines = lines.filter((l) => l.invoiceDate?.startsWith(month));
+  const purchasesCents = monthLines.length ? monthLines.reduce((n, l) => n + l.extendedCents, 0) : null;
 
   /*
    * What actually left the bank for goods this month: the invoices marked paid in it.
@@ -468,50 +510,44 @@ export async function monthlyAccount(month: string, basis: "accrual" | "cash" = 
    * that is what was paid; where a total was never read the invoice cannot contribute and is
    * counted as unpaid-unknown instead of as zero.
    */
-  const allInvoices = await db.query.supplierInvoices.findMany({
-    columns: { totalCents: true, paidOn: true, invoiceDate: true },
-  });
-  const paidThisMonth = allInvoices.filter((v) => v.paidOn?.startsWith(month) && v.totalCents !== null);
+  const paidThisMonth = invoices.filter((v) => v.paidOn?.startsWith(month) && v.totalCents !== null);
   const paidPurchasesCents = paidThisMonth.length ? paidThisMonth.reduce((n, v) => n + (v.totalCents ?? 0), 0) : null;
-  const purchasesUnpaidCount = allInvoices.filter((v) => !v.paidOn && v.invoiceDate?.startsWith(month)).length;
+  const purchasesUnpaidCount = invoices.filter((v) => !v.paidOn && v.invoiceDate?.startsWith(month)).length;
 
   /*
    * The shelf at each end of the month, which is what makes the cost of goods checkable at all.
    *
    * The first count of the month stands for the opening position and the last for the closing one.
-   * They are the counts that exist, not the first and last day — a count taken on the 3rd is the
-   * best opening figure available and saying so is better than refusing to check anything until
-   * somebody counts on the 1st.
-   */
-  const counts = await db.query.onHandImports.findMany({
-    where: and(gte(schema.onHandImports.countedOn, `${month}-01`), lte(schema.onHandImports.countedOn, `${month}-31`)),
-    columns: { countedOn: true, valueCents: true, rxValueCents: true },
-  });
-  /*
-   * The dispensing shelf, not the whole building.
-   *
-   * This figure exists to check cost of goods: opening + purchases − closing should come out at
-   * what the claims say was dispensed. Both sides of that have to count the same shelf. Front-shop
-   * stock moves on retail sales that leave no claim behind them, so a month where the shop sold
-   * well would show as unexplained drug cost. Counts filed before the reader could tell the two
-   * apart carry no Rx figure and fall back to the whole value, which is what they meant then.
+   * They are the counts that exist, not the first and last day. The dispensing shelf, not the whole
+   * building: front-shop stock moves on retail sales that leave no claim behind them.
    */
   const valued = counts
+    .filter((c) => c.countedOn.startsWith(month))
     .map((c) => ({ countedOn: c.countedOn, valueCents: c.rxValueCents ?? c.valueCents }))
     .filter((c) => c.valueCents !== null)
     .sort((a, b) => a.countedOn.localeCompare(b.countedOn));
   const openingStockCents = valued.length > 1 ? valued[0].valueCents : null;
   const closingStockCents = valued.length > 1 ? valued[valued.length - 1].valueCents : null;
 
-  const earned = await Promise.all(suppliers.map((s) => earningSoFar(s.id, month)));
-  const rebatesCents = earned.reduce((n, e) => n + (e?.estimatedRebateCents ?? 0), 0) || null;
+  /*
+   * Facilitator money for the cash account, from the remittances themselves.
+   *
+   * The receipts list is typed in from the bank statement, and the one payer whose remittances the
+   * site reads directly is the facilitator. Where nobody has typed a facilitator receipt for the
+   * month, the payments the site holds with a received date in it stand in, and say so.
+   */
+  const receipts = [...per.receipts];
+  if (basis === "cash" && !receipts.some((r) => r.kind === "facilitator")) {
+    const banked = shared.payments.filter((p) => p.source === "mtf" && p.receivedOn?.startsWith(month)).reduce((n, p) => n + (p.revenueCents ?? p.amountCents), 0);
+    if (banked > 0) receipts.push({ kind: "facilitator", amountCents: banked });
+  }
 
   const byId = new Map(cats.map((c) => [c.id, c]));
-  return monthlyPL({
+  return {
     month,
     basis,
     sales: sales ? { retailCents: sales.retailCents, rxPatientCents: sales.rxPatientCents, rxRemitCents: sales.rxRemitCents, totalCents: sales.totalCents } : null,
-    receipts: receipts.map((r) => ({ kind: r.kind, amountCents: r.amountCents })),
+    receipts,
     laterMoneyCents,
     claimsRevenueCents,
     claimsCount: monthFills.length,
@@ -521,10 +557,10 @@ export async function monthlyAccount(month: string, basis: "accrual" | "cash" = 
     purchasesUnpaidCount,
     openingStockCents,
     closingStockCents,
-    rebatesCents,
+    rebatesCents: per.rebatesCents,
     onAccount,
     expenses: [
-      ...bills.map((b) => {
+      ...per.bills.map((b) => {
         const c = b.categoryId ? byId.get(b.categoryId) : undefined;
         return {
           categoryId: b.categoryId,
@@ -543,11 +579,11 @@ export async function monthlyAccount(month: string, basis: "accrual" | "cash" = 
        * leaving the omission to be noticed. One setting governs both, so the account and the note
        * about it can never disagree.
        */
-      ...(driverCents > 0
-        ? [{ categoryId: null, categoryName: "Delivery round", kind: "operating", amountCents: driverCents }]
+      ...(per.driverCents > 0
+        ? [{ categoryId: null, categoryName: "Delivery round", kind: "operating", amountCents: per.driverCents }]
         : []),
     ],
-  });
+  };
 }
 
 /** Which months there is anything to report on, most recent first. */

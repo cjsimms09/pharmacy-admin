@@ -223,7 +223,7 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
             <JobPanel step={`Fetching ${job!.what} — ${job!.step}`} done={0} total={0} startedAt={job!.startedAt} by={job!.by} />
           ) : (
             <form action={pullNow}>
-              <button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Fetch now</button>
+              <button className="btn btn-primary">Fetch now</button>
             </form>
           )}
           {!running && job && job.state !== "running" && (
@@ -362,7 +362,7 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
         </ol>
         <form action={upload} className="mt-3 flex flex-wrap items-center gap-2">
           <input type="file" name="files" accept=".csv,.txt" multiple className="text-sm" />
-          <button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Load</button>
+          <button className="btn btn-primary">Load</button>
         </form>
         <p className="mt-2 text-xs text-ink-3">
           A CMS weekly file is about thirty thousand rows and takes a couple of seconds. The page will not respond

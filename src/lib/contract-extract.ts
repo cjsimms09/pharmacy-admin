@@ -34,7 +34,9 @@ async function client(): Promise<{ client: Anthropic; model: string }> {
   };
 }
 
-import { estimateCost, pdfPageCount, planBatches, PDF_PAGE_LIMIT, PDF_BYTES_LIMIT } from "./contract-run";
+import { estimateCost, pdfPageCount, planBatches, batchIdsIn, PDF_PAGE_LIMIT, PDF_BYTES_LIMIT } from "./contract-run";
+import { Triage, TRIAGE_SYSTEM, triageByText, shouldRead, estimateTriageCost, type TriageT } from "./contract-triage";
+import { pdfText } from "./pdf-text";
 export { estimateCost, pdfPageCount, planBatches, PDF_PAGE_LIMIT, PDF_BYTES_LIMIT, BATCH_BYTES_LIMIT, BATCH_REQUEST_LIMIT } from "./contract-run";
 
 function docRequest(id: string, pdf: Buffer, name: string, model: string): Anthropic.Messages.Batches.BatchCreateParams.Request {
@@ -70,15 +72,18 @@ export type QueueResult = { queued: number; batchId: string | null; batches: str
  */
 export async function queueExtraction(userId: string, userName: string, onlyIds?: string[]): Promise<QueueResult> {
   const all = await db.query.contractDocs.findMany();
+  // A document the sort ruled out is not read unless it is asked for by name.
   const pending = all.filter(
-    (d) => d.fileName && d.extractionState !== "done" && d.extractionState !== "queued" && (!onlyIds || onlyIds.includes(d.id)),
+    (d) => d.fileName && d.extractionState !== "done" && d.extractionState !== "queued" && (onlyIds ? onlyIds.includes(d.id) : shouldRead(d.triage as never)),
   );
   const skipped: string[] = [];
   if (pending.length === 0) return { queued: 0, batchId: null, batches: [], skipped: ["nothing to do — every document with a file is already read"], estimate: { low: 0, high: 0 } };
 
   if (MOCK) {
     for (const d of pending) {
-      await db.update(schema.contractDocs).set({ extractionState: "done", extractionJson: JSON.stringify(mockTerms(d.documentName, d.pbmName)) }).where(eq(schema.contractDocs.id, d.id));
+      const terms = mockTerms(d.documentName, d.pbmName);
+      await db.update(schema.contractDocs).set({ extractionState: "done", extractionJson: JSON.stringify(terms) }).where(eq(schema.contractDocs.id, d.id));
+      if (d.fileName) await (await import("./contract-search")).rememberReadText(d.fileName, terms);
     }
     return { queued: pending.length, batchId: "mock", batches: ["mock"], skipped, estimate: { low: 0, high: 0 } };
   }
@@ -158,48 +163,170 @@ export async function collectExtraction(userId: string, userName: string): Promi
     for await (const entry of await c.messages.batches.results(batchId)) {
       const doc = queued.find((d) => d.id === entry.custom_id);
       if (!doc) continue;
-      if (entry.result.type !== "succeeded") {
-        await fail(doc.id, `Claude could not read this one (${entry.result.type}).`);
+      const a = await absorb(doc, entry);
+      tokensIn += a.tokensIn;
+      tokensOut += a.tokensOut;
+      if (a.outcome === "done") res.done++;
+      else {
         res.failed++;
-        continue;
+        if (a.outcome === "rejected") res.rejected.push({ doc: doc.documentName, why: a.why });
       }
-      const msg = entry.result.message;
-      tokensIn += msg.usage?.input_tokens ?? 0;
-      tokensOut += msg.usage?.output_tokens ?? 0;
-      // An answer cut off at the token limit is not a bad read; it is a document too long for one answer.
-      if (msg.stop_reason === "max_tokens") {
-        await fail(doc.id, "The answer ran past the length limit before it finished. Split the document into parts and read the parts.");
-        res.failed++;
-        continue;
-      }
-      const text = msg.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("");
-      let terms: ContractTermsT;
-      try {
-        terms = ContractTerms.parse(JSON.parse(text));
-      } catch {
-        await fail(doc.id, "The answer did not match the expected shape. Try this one again.");
-        res.failed++;
-        continue;
-      }
-      // A figure without the contract's words behind it does not get stored.
-      const missing = requireCitations(terms);
-      if (missing.length > 0) {
-        const why = `No supporting quote for ${missing.map((m) => m.field).join(", ")}`;
-        await fail(doc.id, `${why}. Nothing was saved — a rate that cannot be traced to a sentence is not usable in an appeal.`);
-        res.rejected.push({ doc: doc.documentName, why });
-        res.failed++;
-        continue;
-      }
-      await db
-        .update(schema.contractDocs)
-        .set({ extractionState: "done", extractionJson: JSON.stringify(terms), extractionError: null })
-        .where(eq(schema.contractDocs.id, doc.id));
-      res.done++;
     }
   }
   // Written the way every other model call writes it, so the spend page counts this run.
   await audit({ action: "contracts.extract.collected", userId, userName, details: `${res.done} read, ${res.failed} failed, ${res.rejected.length} rejected for missing citations · tokens in=${tokensIn} out=${tokensOut}` });
   return res;
+}
+
+type Absorbed = { outcome: "done" | "failed" | "rejected"; why: string; tokensIn: number; tokensOut: number };
+
+/**
+ * One batch result, landed on its document.
+ *
+ * Kept as a draft when the answer parses and every money figure carries its sentence; otherwise
+ * refused with the reason written on the document, so the page can say it and a person can act.
+ * The collect step and the recovery step both come through here, so a result is judged the same
+ * way whether it was picked up on time or fetched back weeks later.
+ */
+async function absorb(doc: { id: string; documentName: string; fileName: string | null }, entry: Anthropic.Messages.Batches.MessageBatchIndividualResponse): Promise<Absorbed> {
+  if (entry.result.type !== "succeeded") {
+    const why = explainFailure(entry.result);
+    await fail(doc.id, why);
+    return { outcome: "failed", why, tokensIn: 0, tokensOut: 0 };
+  }
+  const msg = entry.result.message;
+  const tokensIn = msg.usage?.input_tokens ?? 0;
+  const tokensOut = msg.usage?.output_tokens ?? 0;
+  // An answer cut off at the token limit is not a bad read; it is a document too long for one answer.
+  if (msg.stop_reason === "max_tokens") {
+    const why = "The answer ran past the length limit before it finished. Split the document into parts and read the parts.";
+    await fail(doc.id, why);
+    return { outcome: "failed", why, tokensIn, tokensOut };
+  }
+  const text = msg.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("");
+  let terms: ContractTermsT;
+  try {
+    terms = ContractTerms.parse(JSON.parse(text));
+  } catch {
+    const why = "The answer did not match the expected shape. Try this one again.";
+    await fail(doc.id, why);
+    return { outcome: "failed", why, tokensIn, tokensOut };
+  }
+  // A figure without the contract's words behind it does not get stored.
+  const missing = requireCitations(terms);
+  if (missing.length > 0) {
+    const why = `No supporting quote for ${missing.map((m) => m.field).join(", ")}`;
+    await fail(doc.id, `${why}. Nothing was saved — a rate that cannot be traced to a sentence is not usable in an appeal.`);
+    return { outcome: "rejected", why, tokensIn, tokensOut };
+  }
+  await db
+    .update(schema.contractDocs)
+    .set({ extractionState: "done", extractionJson: JSON.stringify(terms), extractionError: null })
+    .where(eq(schema.contractDocs.id, doc.id));
+  // A scan has no words of its own to search; the read's cited lines become them.
+  if (doc.fileName) await (await import("./contract-search")).rememberReadText(doc.fileName, terms);
+  return { outcome: "done", why: "", tokensIn, tokensOut };
+}
+
+export type Recovery = { batches: number; gone: number; stillRunning: number; recovered: number; explained: { doc: string; reason: string }[]; note: string };
+
+/**
+ * The reason for every read that was refused before the reason was kept.
+ *
+ * The first live runs came back "errored" and the code of the day threw the API's message away and
+ * wrote that one word over the batch id. The audit line written when each run was queued still
+ * names its batches, and the API holds a batch's results for 29 days. So this reads those ids back,
+ * asks for the results, and lands each one on its document exactly as collect would have: a refusal
+ * gets its reason in words that say what to do; a read that succeeded but was never collected is
+ * kept as a draft. Nothing is sent to the model, so nothing is charged.
+ */
+export async function recoverFailures(userId: string, userName: string): Promise<Recovery> {
+  const out: Recovery = { batches: 0, gone: 0, stillRunning: 0, recovered: 0, explained: [], note: "" };
+  const events = await db.query.auditEvents.findMany({
+    where: eq(schema.auditEvents.action, "contracts.extract.queued"),
+    orderBy: (t, { desc }) => [desc(t.at)],
+    limit: 60,
+  });
+  const ids = batchIdsIn(events.map((e) => e.details));
+  if (ids.length === 0) {
+    out.note = "No read has been queued from this site, so there is no batch to ask about.";
+    return out;
+  }
+  if (MOCK) {
+    out.note = `Mock: ${ids.length} batch id(s) found, nothing asked.`;
+    return out;
+  }
+  const docs = await db.query.contractDocs.findMany({ columns: { id: true, documentName: true, fileName: true, extractionState: true } });
+  const byId = new Map(docs.map((d) => [d.id, d]));
+  const seen = new Set<string>();
+  const { client: c } = await client();
+  for (const batchId of ids) {
+    let batch: Anthropic.Messages.Batches.MessageBatch;
+    try {
+      batch = await c.messages.batches.retrieve(batchId);
+    } catch (e) {
+      if (e instanceof Anthropic.NotFoundError) {
+        out.gone++;
+        continue;
+      }
+      throw e;
+    }
+    out.batches++;
+    if (batch.processing_status !== "ended") {
+      out.stillRunning++;
+      continue;
+    }
+    let results: Awaited<ReturnType<typeof c.messages.batches.results>>;
+    try {
+      results = await c.messages.batches.results(batchId);
+    } catch {
+      // Ended, but its results are past the 29 days the API keeps them.
+      out.gone++;
+      continue;
+    }
+    for await (const entry of results) {
+      const doc = byId.get(entry.custom_id);
+      // The newest batch is asked first, so the first verdict seen for a document is its latest.
+      if (!doc || seen.has(doc.id) || doc.extractionState === "done" || doc.extractionState === "queued") continue;
+      seen.add(doc.id);
+      const a = await absorb(doc, entry);
+      if (a.outcome === "done") out.recovered++;
+      else out.explained.push({ doc: doc.documentName, reason: a.why });
+    }
+  }
+  await audit({
+    action: "contracts.extract.recovered",
+    userId,
+    userName,
+    details: `${out.batches} batch(es) asked, ${out.gone} no longer held, ${out.stillRunning} still running, ${out.recovered} read(s) recovered, ${out.explained.length} refusal(s) explained`,
+  });
+  return out;
+}
+
+/**
+ * Why the API refused a document, in words that say what to do next.
+ *
+ * "errored" on its own sent the owner back to the page with nothing to act on. The API's own
+ * message names the cause almost every time — a document too long for the model's window, a file
+ * that is not a PDF at all, a key that no longer works — and each of those has one fix.
+ */
+export function explainFailure(result: { type: string; error?: { error?: { type?: string; message?: string } } }): string {
+  if (result.type === "expired") return "The batch expired before it was collected (results are kept for 24 hours). Press \"Read again\" on this one.";
+  if (result.type === "canceled") return "The batch was cancelled. Press \"Read again\" on this one.";
+  const err = result.error?.error;
+  const msg = (err?.message ?? "").trim();
+  const kind = err?.type ?? "unknown";
+  const low = msg.toLowerCase();
+  if (/too long|too many tokens|exceeds? .*context|maximum context|prompt is too long/.test(low)) {
+    return `Too long for one read: the model's window cannot hold every page as an image (${msg}). Split the PDF into parts of ${PDF_PAGE_LIMIT} pages or fewer and put the parts in the folder.`;
+  }
+  if (/could not process (the )?(pdf|document|image)|invalid.*(pdf|document)|not a valid|corrupt|unsupported/.test(low)) {
+    return `The file could not be read as a PDF (${msg}). Open it and re-save it as a PDF, or replace it.`;
+  }
+  if (kind === "authentication_error" || kind === "permission_error") return `The Claude key was refused (${msg}). Check it under Settings → Connections.`;
+  if (kind === "billing_error") return `Claude's billing refused the request (${msg}). Check the account's credit.`;
+  if (kind === "rate_limit_error" || kind === "overloaded_error") return `Claude was busy (${msg}). Nothing was charged; press \"Read again\" later.`;
+  return `Claude could not read this one (${kind}${msg ? `: ${msg}` : ""}). Nothing was charged for a refused request.`;
 }
 
 async function fail(id: string, why: string) {
@@ -309,4 +436,225 @@ function mockTerms(name: string, pbm: string): ContractTermsT {
     unclearOrMissing: ["Mock mode — no document was read."],
     confidence: 0.9,
   };
+}
+
+
+// ── The sort before the read ─────────────────────────────────────────────────
+
+/** The small model the sort runs on. Reads a PDF the same way; answers in a sentence. */
+export const TRIAGE_MODEL = "claude-haiku-4-5-20251001";
+
+export type TriageQueue = { sortedByText: number; sentToModel: number; batches: string[]; skipped: string[]; estimate: number; alreadySorted: number };
+
+/**
+ * Sorts every unsorted document: by its own text where it has one, by the small model where not.
+ *
+ * Nothing is paid for a document with a text layer. A scan is sent to the small model in a batch
+ * with the one-line question, and the whole folder of scans costs about what three full reads
+ * would. The ceiling is checked first, like every other model call.
+ */
+export async function queueTriage(userId: string, userName: string): Promise<TriageQueue> {
+  const all = await db.query.contractDocs.findMany();
+  const out: TriageQueue = { sortedByText: 0, sentToModel: 0, batches: [], skipped: [], estimate: 0, alreadySorted: 0 };
+  const toModel: { req: Anthropic.Messages.Batches.BatchCreateParams.Request; bytes: number; id: string }[] = [];
+  let pages = 0;
+  for (const d of all) {
+    if (!d.fileName || d.extractionState === "done") continue;
+    if (d.triage || d.triageBatch) {
+      out.alreadySorted++;
+      continue;
+    }
+    let buf: Buffer;
+    try {
+      buf = await fs.readFile(path.join(contractsDir(), d.fileName));
+    } catch {
+      out.skipped.push(`${d.documentName} (the file could not be read)`);
+      continue;
+    }
+    let text = "";
+    try {
+      text = pdfText(buf);
+    } catch {
+      text = "";
+    }
+    const byText = triageByText(text, d.fileName);
+    if (byText) {
+      await db.update(schema.contractDocs).set({ triage: byText.kind, triageWhy: byText.why, triageBy: "rule" }).where(eq(schema.contractDocs.id, d.id));
+      out.sortedByText++;
+      continue;
+    }
+    if (MOCK) {
+      const mock: TriageT = { kind: /w-?9|newsletter|statement/i.test(d.fileName) ? "not_relevant" : "contract", counterparty: d.pbmName, why: "Mock sort.", confidence: 0.9 };
+      await db.update(schema.contractDocs).set({ triage: mock.kind, triageWhy: mock.why, triageBy: "model" }).where(eq(schema.contractDocs.id, d.id));
+      out.sentToModel++;
+      continue;
+    }
+    const n = pdfPageCount(buf);
+    if (n > PDF_PAGE_LIMIT || buf.length > PDF_BYTES_LIMIT) {
+      // Too long to send at all; the read will say the same. Marked unsure so it is not forgotten.
+      await db.update(schema.contractDocs).set({ triage: "unsure", triageWhy: `Too long to sort by model (${n} pages); split it and sort the parts.`, triageBy: "rule" }).where(eq(schema.contractDocs.id, d.id));
+      out.skipped.push(`${d.documentName} (${n} pages; split it)`);
+      continue;
+    }
+    pages += n;
+    toModel.push({
+      id: d.id,
+      bytes: Math.ceil((buf.length * 4) / 3),
+      req: {
+        custom_id: d.id,
+        params: {
+          model: TRIAGE_MODEL,
+          max_tokens: 400,
+          output_config: { format: zodOutputFormat(Triage) },
+          system: [{ type: "text", text: TRIAGE_SYSTEM, cache_control: { type: "ephemeral" } }],
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "document", source: { type: "base64", media_type: "application/pdf", data: buf.toString("base64") } },
+                { type: "text", text: `File name: ${d.fileName}\n\nWhat kind of document is this?` },
+              ],
+            },
+          ],
+        },
+      },
+    });
+  }
+  if (toModel.length === 0) return out;
+
+  out.estimate = estimateTriageCost(pages);
+  const { monthlyCap, dollars } = await import("./ai-spend");
+  const cap = await monthlyCap();
+  if (cap.cap !== null && cap.spent + out.estimate > cap.cap) {
+    throw new Error(`Sorting the scans could cost up to ${dollars(out.estimate)}, and the month has ${dollars(cap.left)} left under the ceiling of ${dollars(cap.cap)}.`);
+  }
+  const { client: c } = await client();
+  for (const group of planBatches(toModel.map((x) => ({ item: x, bytes: x.bytes })))) {
+    const batch = await c.messages.batches.create({ requests: group.map((g) => g.req) });
+    out.batches.push(batch.id);
+    await db.update(schema.contractDocs).set({ triageBatch: batch.id }).where(inArray(schema.contractDocs.id, group.map((g) => g.id)));
+    out.sentToModel += group.length;
+  }
+  await audit({ action: "contracts.triage.queued", userId, userName, details: `${out.sortedByText} sorted by text, ${out.sentToModel} scan(s) sent to ${TRIAGE_MODEL} in ${out.batches.length} batch(es), ${pages} pages; estimate ${dollars(out.estimate)}` });
+  return out;
+}
+
+export type TriageCollect = { sorted: number; failed: number; stillRunning: number; notRelevant: number };
+
+/** Picks up the model's sorts. Safe to call repeatedly. */
+export async function collectTriage(userId: string, userName: string): Promise<TriageCollect> {
+  const res: TriageCollect = { sorted: 0, failed: 0, stillRunning: 0, notRelevant: 0 };
+  const waiting = await db.query.contractDocs.findMany();
+  const pending = waiting.filter((d) => d.triageBatch);
+  const batches = [...new Set(pending.map((d) => d.triageBatch!))];
+  if (batches.length === 0) return res;
+  const { client: c } = await client();
+  let tokensIn = 0;
+  let tokensOut = 0;
+  for (const batchId of batches) {
+    const batch = await c.messages.batches.retrieve(batchId);
+    if (batch.processing_status !== "ended") {
+      res.stillRunning += pending.filter((d) => d.triageBatch === batchId).length;
+      continue;
+    }
+    for await (const entry of await c.messages.batches.results(batchId)) {
+      const doc = pending.find((d) => d.id === entry.custom_id);
+      if (!doc) continue;
+      if (entry.result.type !== "succeeded") {
+        // A refused sort is not a refused read: the document goes to the full read as unsure.
+        await db.update(schema.contractDocs).set({ triage: "unsure", triageWhy: explainFailure(entry.result), triageBy: "model", triageBatch: null }).where(eq(schema.contractDocs.id, doc.id));
+        res.failed++;
+        continue;
+      }
+      const msg = entry.result.message;
+      tokensIn += msg.usage?.input_tokens ?? 0;
+      tokensOut += msg.usage?.output_tokens ?? 0;
+      const text = msg.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("");
+      let t: TriageT;
+      try {
+        t = Triage.parse(JSON.parse(text));
+      } catch {
+        await db.update(schema.contractDocs).set({ triage: "unsure", triageWhy: "The sort's answer did not match the expected shape.", triageBy: "model", triageBatch: null }).where(eq(schema.contractDocs.id, doc.id));
+        res.failed++;
+        continue;
+      }
+      // A confident "not relevant" is the only verdict that changes what is read; a hesitant one is read anyway.
+      const kind = t.kind === "not_relevant" && t.confidence < 0.7 ? "unsure" : t.kind;
+      await db
+        .update(schema.contractDocs)
+        .set({ triage: kind, triageWhy: t.why + (t.counterparty ? ` (${t.counterparty})` : ""), triageBy: "model", triageBatch: null, ...(doc.pbmName === "Unnamed" && t.counterparty ? { pbmName: t.counterparty } : {}) })
+        .where(eq(schema.contractDocs.id, doc.id));
+      res.sorted++;
+      if (kind === "not_relevant") res.notRelevant++;
+    }
+  }
+  await audit({ action: "contracts.triage.collected", userId, userName, details: `${res.sorted} sorted, ${res.failed} unsure after a refused sort, ${res.notRelevant} ruled out · tokens in=${tokensIn} out=${tokensOut}` });
+  return res;
+}
+
+/** A person's word on a document beats the sort's. */
+export async function setTriage(id: string, kind: TriageT["kind"], by: string): Promise<void> {
+  await db.update(schema.contractDocs).set({ triage: kind, triageWhy: `Decided by ${by}.`, triageBy: by, triageBatch: null }).where(eq(schema.contractDocs.id, id));
+}
+
+
+// ── Read one now, and say exactly why not ─────────────────────────────────────
+
+export type ReaderTest =
+  | { ok: true; documentName: string; seconds: number; tokensIn: number; tokensOut: number; counterparty: string; rates: number; stored: boolean; note: string }
+  | { ok: false; documentName: string; reason: string; detail: string };
+
+/**
+ * Reads one document straight away, outside the batch, and returns either its terms or the API's
+ * exact refusal.
+ *
+ * The batch takes minutes to hours and, when it refuses, the reason comes back late. This is the
+ * same request sent synchronously so a person watching the page gets the answer in a minute. A
+ * successful read is kept like any other; a refused one costs nothing and names its cause.
+ */
+export async function testReader(docId: string, userId: string, userName: string): Promise<ReaderTest> {
+  const doc = await db.query.contractDocs.findFirst({ where: eq(schema.contractDocs.id, docId) });
+  if (!doc || !doc.fileName) return { ok: false, documentName: doc?.documentName ?? docId, reason: "No file", detail: "This document has no PDF in the folder." };
+  if (MOCK) {
+    const terms = mockTerms(doc.documentName, doc.pbmName);
+    await db.update(schema.contractDocs).set({ extractionState: "done", extractionJson: JSON.stringify(terms), extractionError: null }).where(eq(schema.contractDocs.id, doc.id));
+    return { ok: true, documentName: doc.documentName, seconds: 0, tokensIn: 0, tokensOut: 0, counterparty: terms.counterparty, rates: terms.rates.length, stored: true, note: "Mock read." };
+  }
+  const buf = await fs.readFile(path.join(contractsDir(), doc.fileName));
+  const n = pdfPageCount(buf);
+  if (n > PDF_PAGE_LIMIT) return { ok: false, documentName: doc.documentName, reason: "Too long for one read", detail: `${n} pages; the limit is ${PDF_PAGE_LIMIT}. Split it.` };
+  const { client: c, model } = await client();
+  const req = docRequest(doc.id, buf, doc.documentName, model);
+  const t0 = Date.now();
+  try {
+    const msg = await c.messages.create(req.params);
+    const seconds = Math.round((Date.now() - t0) / 1000);
+    const tokensIn = msg.usage?.input_tokens ?? 0;
+    const tokensOut = msg.usage?.output_tokens ?? 0;
+    await audit({ action: "contracts.extract.test", userId, userName, entity: "contract_doc", entityId: doc.id, details: `${doc.documentName} read synchronously on ${model} · tokens in=${tokensIn} out=${tokensOut}` });
+    if (msg.stop_reason === "max_tokens") return { ok: false, documentName: doc.documentName, reason: "The answer ran past the length limit", detail: "Split the document into parts and read the parts." };
+    const text = msg.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("");
+    let terms: ContractTermsT;
+    try {
+      terms = ContractTerms.parse(JSON.parse(text));
+    } catch (e) {
+      return { ok: false, documentName: doc.documentName, reason: "The answer did not match the expected shape", detail: `${e instanceof Error ? e.message.slice(0, 300) : String(e)} · first words: ${text.slice(0, 200)}` };
+    }
+    const missing = requireCitations(terms);
+    if (missing.length > 0) {
+      await fail(doc.id, `No supporting quote for ${missing.map((m) => m.field).join(", ")}. Nothing was saved.`);
+      return { ok: true, documentName: doc.documentName, seconds, tokensIn, tokensOut, counterparty: terms.counterparty, rates: terms.rates.length, stored: false, note: `The read worked but ${missing.length} figure(s) came without the contract's words behind them, so nothing was saved. The request shape is fine; try "Read again".` };
+    }
+    await db.update(schema.contractDocs).set({ extractionState: "done", extractionJson: JSON.stringify(terms), extractionError: null }).where(eq(schema.contractDocs.id, doc.id));
+    await (await import("./contract-search")).rememberReadText(doc.fileName, terms);
+    return { ok: true, documentName: doc.documentName, seconds, tokensIn, tokensOut, counterparty: terms.counterparty, rates: terms.rates.length, stored: true, note: "Kept, like any batch read." };
+  } catch (e) {
+    const err = e as { status?: number; type?: string | null; message?: string; error?: { error?: { type?: string; message?: string } } };
+    const inner = err.error?.error;
+    const kind = inner?.type ?? err.type ?? "unknown";
+    const message = inner?.message ?? err.message ?? String(e);
+    const explained = explainFailure({ type: "errored", error: { error: { type: kind, message } } });
+    await audit({ action: "contracts.extract.test", userId, userName, entity: "contract_doc", entityId: doc.id, details: `${doc.documentName} refused on ${model}: ${kind}${err.status ? ` (${err.status})` : ""}: ${message.slice(0, 300)}` });
+    return { ok: false, documentName: doc.documentName, reason: explained, detail: `${model} · ${kind}${err.status ? ` · HTTP ${err.status}` : ""} · ${message}` };
+  }
 }

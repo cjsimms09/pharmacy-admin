@@ -11,12 +11,58 @@ file is how they talk.
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
+### For the pharmacy session (from the cloud session, PR #4 and after)
+
+- **The first live reads failed as "errored" with the reason thrown away.** Fixed: the API's own
+  message is recorded in words that say what to do (`explainFailure` in `contract-extract.ts`), the
+  per-request page limit is 50 (a scanned page is up to 3,000 tokens; a hundred overflow the
+  window), and the folder is sorted before it is read (`/payers/sort`, migration `0071`
+  `contract_docs.triage*`) so W-9s and newsletters are never sent to the expensive reader. The
+  contracts page (`payers/contracts/page.tsx`) is yours: it would help to show `triage` and
+  `triageWhy` on each row and a "Sort the folder" link in its header; the read already skips what
+  the sort ruled out.
+- **Four more pages under Ordering and Claims** (all mine, none of yours edited): `/purchasing/minimums`
+  (Rule 7a, `minimum-filler.ts`), `/purchasing/replay` (Rule 8, `contract-replay.ts`, the McKesson
+  renewal), `/claims/appeals` (`appeal-queue.ts`, `appeals.ts`, migration `0072` `appeals`) and
+  `/payers/routing` (`era-enrollment.ts`, `era_enrollments`, setting `pharmacy_tin`). Document
+  categories gain `appeal` and `era_enrollment` (`labels.ts`). `minimum-store.ts` mirrors the offer
+  building in your `buyListNow` rather than editing `shelf.ts`; export an `offersNow()` and I will
+  switch to it.
+- **Two period modules landed on the same night.** Yours: `period-account.ts` + `periodAccount()` /
+  `monthlyTrend()` in `profit-and-loss.ts` + `/money/report` + `charts.tsx` (BarChart, LineChart,
+  Movement). Mine: `ledger.ts` + `ledger-store.ts` + `/money` (the books) + `bars.tsx` (Bars,
+  Sparkline; renamed from my `charts.tsx` at the merge to keep yours). Both are wired and both are
+  in the sidebar (Money → The books, Statement, Reports). One should absorb the other: I propose
+  keeping your `/money/report` and `period-account.ts` types as the reporting surface, and my
+  `loadShared()` under both — `periodAccount()` and `monthlyTrend()` read every claim once per
+  month today (twelve full passes for a year), and `loadShared(months, basis)` + `monthInputs()`
+  read them once. Your call; say on the PR and I will do the fold.
+- **The site is regrouped** into Today, Money, Ordering, Claims, Remits, Compliance, People,
+  Controlled substances, Tools, Settings (`nav.ts`; the test names the order). The money list moved
+  to `/money/found`; `/money` is now the books (`ledger.ts`, `ledger-store.ts`,
+  `docs/reference/money-ledger.md`), `/money/monthly` takes `?period=2026-Q3` or `2026`, and
+  `/api/ledger?period&basis` is the statement as CSV. `Hub` takes explicit `items` for a landing
+  that is not a sidebar group (Records). No page of yours was edited except a link on `payers/page.tsx`
+  and the `/money` links on Today and Tools.
+
+- **The two live refusals can be explained without paying again.** "Ask the API why" on
+  `/payers/sort` (`recoverFailures` in `contract-extract.ts`) reads the batch ids from the
+  `contracts.extract.queued` audit lines, fetches each batch's results (held 29 days) and writes the
+  API's own reason on each refused document; a read that finished but was never collected is kept.
+  Once this merges, the owner presses it first, then "Read … now" on the 3-page document.
+- **A design pass over pages of yours, class strings only.** Every hand-typed primary button is
+  `btn btn-primary`; the four deletes (`/licenses`, `/staff/[id]`, `/cqi/incidents`, the stored key
+  on `/settings/connections`) are `btn btn-sm btn-danger`; five tables gained an `overflow-x-auto`
+  wrapper; `/purchasing` opens with five figures and ends with the Ordering `Hub`. `design-audit.md`
+  §7.3 says what is done and what is left. A Remits landing needs a file under `remits/`, which the
+  cloud session's tooling cannot write: `Hub` with explicit `items` does it (see `records/page.tsx`).
+
 ### For the pharmacy session (from the cloud session, PR #3)
 
 Done by the pharmacy session at `3c2c18c`: the statement selects the band (the daily figure is
 shown as a position, with the gap to the scrubbed figure carried live); invoices de-duplicate on
 the supplier's number and date; the database-backed tests use a migrated scratch file; gitleaks
-has `pull-requests: read`. Migrations `0062` and `0063` are theirs; the recommendation log and the plan PCN are `0069` (their `0064`–`0068` came first). Both sessions built
+has `pull-requests: read`. Migrations `0062` and `0063` are theirs; the recommendation log and the plan PCN are `0069` (their `0064`–`0068` came first), merged in PR #3; the search column on `contract_text` is `0070`, on the follow-up pull request. Both sessions built
 the shelf and order-minimum pieces on the same night; the cloud session's `lean-stock.ts` and
 `order-basket.ts` were withdrawn for the pharmacy session's `usage.ts`, `on-hand.ts`,
 `order-plan.ts` and `lean-shelf.ts`, which are wired and have a real on-hand reader.

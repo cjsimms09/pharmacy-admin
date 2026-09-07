@@ -296,7 +296,7 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
             />
           </Field>
           <div className="sm:col-span-2">
-            <button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Save and check it runs</button>
+            <button className="btn btn-primary">Save and check it runs</button>
             <span className="ml-2 text-xs text-ink-3">
               It is run once to prove it is really there, and the stored API key is written into it so a scheduled
               download uses the same key and the same folder.
@@ -326,7 +326,7 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
             issued any MFP refunds to us yet, not that anything is broken.
           </p>
           <form action={test} className="mt-3">
-            <button className="rounded-md bg-ink px-3 py-2 text-sm text-white" disabled={!s.hasKey}>
+            <button className="btn btn-primary" disabled={!s.hasKey}>
               Test connection
             </button>
           </form>
@@ -373,7 +373,7 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
           )}
         </p>
         <form action={runNow} className="mt-3">
-          <SubmitButton className="rounded-md bg-ink px-3 py-2 text-sm text-white" pendingLabel="Fetching and posting…">
+          <SubmitButton className="btn btn-primary" pendingLabel="Fetching and posting…">
             Do it now rather than waiting
           </SubmitButton>
         </form>
@@ -390,7 +390,7 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
           same days. A payment for a prescription not yet loaded is kept and attaches itself when the claim arrives.
         </p>
         <form action={readThem} className="mt-3">
-          <button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Read the files and post the payments</button>
+          <button className="btn btn-primary">Read the files and post the payments</button>
         </form>
       </Card>
 

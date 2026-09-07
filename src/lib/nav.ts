@@ -3,10 +3,10 @@
  *
  * Sixty pages under a flat list of twelve is not a menu, it is a memory test — the daily
  * pharmacist log lived three clicks inside "CS inventories" and nobody who had not built it
- * would ever have found it. So the site is grouped the way a pharmacist-in-charge actually
- * thinks: the people, the licences, the controlled substances, the quality programme, the
- * records, the manual, the inspection. Each group names its pages rather than hiding them, and
- * the group you are inside is the one that is open.
+ * would ever have found it. So the site is grouped the way the owner actually works: the money,
+ * the ordering, the claims, the remits, then compliance, the people, the controlled substances,
+ * the tools and the settings. Each group names its pages rather than hiding them, and the group
+ * you are inside is the one that is open.
  *
  * Plain data rather than markup, so the same structure drives the sidebar, the hub pages and
  * anywhere else that needs to know what belongs with what.
@@ -53,6 +53,78 @@ export const NAV: NavGroup[] = [
     items: [],
   },
   {
+    /*
+     * The money, first among the business groups because it is what the owner opens first.
+     *
+     * The books lead: what the period earned, what reached the bank, and the gap between them.
+     * Everything that decides or explains a figure on the books is one level down.
+     */
+    href: "/money",
+    label: "Money",
+    blurb: "The books: what the pharmacy earned, what reached the bank, what it cost, and what is left.",
+    items: [
+      { href: "/money", label: "The books", blurb: "The period on both bases, every figure linked to its rows" },
+      { href: "/money/monthly", label: "Statement", blurb: "Profit and loss for a month, a quarter or a year, printable and as a file" },
+      { href: "/money/report", label: "Reports", blurb: "The business over time: scripts, margin and profit per script, month by month" },
+      { href: "/expenses", label: "Spending", blurb: "Bills, the vendors who send them, and the rules that file them" },
+      { href: "/deliveries", label: "Driver invoices", blurb: "Deliveries per day, and the monthly invoice that sends itself" },
+      { href: "/money/found", label: "Money found", blurb: "Everything worth chasing, ranked, with what to do about each" },
+      { href: "/payers/performance", label: "Who pays best", blurb: "Every plan ranked by what it actually pays", gated: true },
+    ],
+  },
+  {
+    href: "/purchasing",
+    label: "Ordering",
+    blurb: "What to buy, from whom, at what it really costs after the rebate, and what is on the shelf.",
+    items: [
+      { href: "/purchasing", label: "What to buy", blurb: "Today's order by supplier, and which NDC pays most against what it costs", gated: true },
+      { href: "/purchasing/shelf", label: "The shelf", blurb: "Days of stock against the target, and what is surplus", gated: true },
+      { href: "/purchasing/minimums", label: "Order minimums", blurb: "What to add at each supplier to reach its minimum, chosen by use and price", gated: true },
+      { href: "/purchasing/replay", label: "Which contract", blurb: "A year of dispensing replayed through each wholesaler's catalogue and ladder", gated: true },
+      { href: "/suppliers", label: "Suppliers and rebates", blurb: "The ladders, the ratio, and what this month's buying is earning" },
+      { href: "/inventory/invoices", label: "Supplier invoices", blurb: "Filed by schedule, with the C2s kept apart" },
+      { href: "/inventory/returns", label: "What to send back", blurb: "Return deadlines counted from the invoice, and what each is worth" },
+      { href: "/purchasing/supplies", label: "Supplies", blurb: "Vials, bags and labels: what is low and what to order" },
+    ],
+  },
+  {
+    href: "/claims",
+    label: "Claims",
+    blurb: "Every dispensing, what it made, who priced it, and what it should have been paid.",
+    items: [
+      { href: "/claims", label: "Claims", blurb: "Every dispensing, what it made, and what is still owed on it", gated: true },
+      { href: "/claims/floor", label: "Kansas floor", blurb: "Claims paid under NADAC plus the fee, and what can be filed on", gated: true },
+      { href: "/payers", label: "Payers", blurb: "Every BIN we bill, its contract, appeal route and payment routing", gated: true },
+      { href: "/payers/contracts", label: "Contracts", blurb: "Every agreement, read once, with the contract's own words beside each figure", gated: true },
+      { href: "/plans", label: "Plans", blurb: "Which plans the Kansas floor can reach, one row per BIN, PCN and group", gated: true },
+      { href: "/claims/appeals", label: "Appeals", blurb: "MAC appeals and floor complaints: prepared from the claims, sent, and scored", gated: true },
+      { href: "/payers/routing", label: "835 routing", blurb: "Getting each PBM's remittance delivered here: the request, per payer, and where it stands", gated: true },
+    ],
+  },
+  {
+    href: "/remits/mtf",
+    label: "Remits",
+    blurb: "What was paid after the claim, by whom, and what is still awaited.",
+    items: [
+      { href: "/remits/mtf", label: "Facilitator payments", blurb: "What the Medicare Transaction Facilitator has brought in", gated: true },
+    ],
+  },
+  {
+    href: "/compliance",
+    label: "Compliance",
+    blurb: "Every standing duty, the licences, the inspection, the manual, and the records behind them.",
+    items: [
+      { href: "/compliance", label: "Register", blurb: "Every standing duty, its cadence and its evidence" },
+      { href: "/licenses", label: "Licences", blurb: "Registration, DEA, CSOS, KMAP, insurance, business licence" },
+      { href: "/inspection", label: "Inspection", blurb: "By inspector: Board, DEA, and what each would ask" },
+      { href: "/inspection/walk", label: "Walk the pharmacy", blurb: "The self-inspection, item by item, with findings closed" },
+      { href: "/manual", label: "P&P manual", blurb: "One document, read and edited by chapter, printed from the live copy" },
+      { href: "/cqi", label: "Quality (CQI)", blurb: "Every quality event, its review, and the bimonthly summary" },
+      { href: "/temps", label: "Temperatures", blurb: "Refrigerator and room readings, excursions explained, months signed off" },
+      { href: "/records", label: "Records", blurb: "Forms, agreements, attestations and documents, and where each lives" },
+    ],
+  },
+  {
     href: "/staff",
     label: "People",
     blurb: "Everyone who works here, what they are qualified to do, and what they still owe.",
@@ -67,15 +139,6 @@ export const NAV: NavGroup[] = [
     ],
   },
   {
-    href: "/licenses",
-    label: "Licences",
-    blurb: "Every registration with an expiry date, and the document behind it.",
-    items: [
-      { href: "/licenses", label: "Pharmacy & DEA", blurb: "Registration, DEA, CSOS, KMAP, insurance, business licence" },
-      { href: "/documents", label: "Pharmacy documents", blurb: "Protocols, policies and everything else on file" },
-    ],
-  },
-  {
     href: "/inventory",
     label: "Controlled substances",
     blurb: "The count, the log, the authority to order, and anything that did not add up.",
@@ -84,88 +147,19 @@ export const NAV: NavGroup[] = [
       { href: "/inventory/discrepancies", label: "Discrepancies", blurb: "Anything that did not reconcile, and what was done" },
       { href: "/inventory/pharmacist-log", label: "Daily pharmacist log", blurb: "The C-III/IV refill statement and signature sheet" },
       { href: "/inventory/power-of-attorney", label: "Power of attorney", blurb: "Who may execute a Form 222 or a CSOS order" },
-      { href: "/inventory/invoices", label: "Supplier invoices", blurb: "Filed by schedule, with the C2s kept apart" },
-      // Beside the invoices because that is what it counts from: the return clock starts on the
-      // invoice date, not at expiry.
-      { href: "/inventory/returns", label: "What to send back", blurb: "Return deadlines counted from the invoice, and what each is worth" },
-      // Next to the invoices because that is what it is for: an invoice files itself only if the
-      // address it came from is recognised, and this is where the addresses live.
     ],
   },
   {
-    /*
-     * The money, which had no group at all.
-     *
-     * Every screen that decides what this pharmacy earns — the claims, who pays best, what to buy,
-     * what the wholesalers owe in rebates, what it all costs — was reachable only by knowing the
-     * address. The toolbar was compliance from end to end, which is what the site was when it was
-     * built and is no longer what it mostly does.
-     */
-    href: "/money",
-    label: "Money",
-    blurb: "What the pharmacy earns, what it spends, and what the month came to.",
+    href: "/tools",
+    label: "Tools",
+    blurb: "The feeds and the reference data behind every figure, and the log of who did what.",
     items: [
-      { href: "/money/monthly", label: "Monthly profit and loss", blurb: "What the month took, what the goods cost, and what is left" },
-      { href: "/claims", label: "Claims", blurb: "Every dispensing, what it made, and what is still owed on it", gated: true },
-      { href: "/payers/performance", label: "Who pays best", blurb: "Every plan ranked by what it actually pays", gated: true },
-      { href: "/purchasing", label: "What to buy", blurb: "Which NDC of a product pays most against what it costs", gated: true },
-      { href: "/suppliers", label: "Suppliers and rebates", blurb: "The ladders, the ratio, and what this month's buying is earning" },
-      { href: "/expenses", label: "Spending", blurb: "Bills, the vendors who send them, and the rules that file them" },
-      { href: "/money", label: "Money found", blurb: "Everything worth chasing, ranked" },
-      { href: "/remits/mtf", label: "Facilitator payments", blurb: "What the Medicare Transaction Facilitator has brought in", gated: true },
-    ],
-  },
-  {
-    href: "/cqi",
-    label: "Quality (CQI)",
-    blurb: "Every quality-related event, its review, and the summary of each period.",
-    items: [
-      { href: "/cqi", label: "CQI programme", blurb: "The bimonthly cycle and Form C-550" },
-      { href: "/cqi/incidents", label: "Incidents", blurb: "Each event, its analysis and Form C-650" },
-    ],
-  },
-  {
-    href: "/temps",
-    label: "Temperatures",
-    blurb: "Refrigerator and room readings, excursions explained, months signed off.",
-    items: [],
-  },
-  {
-    href: "/records",
-    label: "Records",
-    blurb: "What the pharmacy can produce on request, and where each of it lives.",
-    items: [
-      { href: "/forms", label: "Forms", blurb: "Every form this pharmacy uses, and what each records" },
-      // The word people actually go looking for. Both kinds live where they belong — supplier
-      // invoices under controlled substances, the driver's here — and neither of those is where
-      // somebody hunting for "invoices" looks first. The question was asked twice, which is the
-      // answer.
-      { href: "/invoices", label: "Invoices", blurb: "Both kinds: what suppliers bill us, and what we bill for deliveries" },
-      { href: "/deliveries", label: "Driver invoices", blurb: "Deliveries per day, and the monthly invoice that sends itself" },
-      { href: "/agreements", label: "Agreements", blurb: "Business associates and everyone else with access" },
-      { href: "/compliance/attestations", label: "Attestations", blurb: "Every standing duty confirmed, in the wording used" },
       { href: "/inbox", label: "Inbox", blurb: "Reports that arrived by email and what was made of them" },
+      { href: "/intake", label: "Add documents", blurb: "Drop a file in and say where it belongs" },
+      { href: "/nadac", label: "NADAC", blurb: "The federal benchmark price, fetched weekly" },
+      { href: "/reports", label: "Report check", blurb: "What a PioneerRx report can and cannot support, field by field", gated: true },
+      { href: "/find", label: "Find anything", blurb: "Search the whole site" },
       { href: "/audit", label: "Activity log", blurb: "Who did what in this system, and when" },
-    ],
-  },
-  {
-    href: "/manual",
-    label: "P&P manual",
-    blurb: "One document. The Word file is an export of it, not the other way round.",
-    items: [
-      { href: "/manual", label: "The manual", blurb: "Read and edit it by chapter" },
-      { href: "/manual/print", label: "Print it", blurb: "Cover, contents and body, straight from the live copy" },
-      { href: "/documents/manual", label: "Appendix A on its own", blurb: "For slotting into a paper manual kept elsewhere" },
-    ],
-  },
-  {
-    href: "/inspection",
-    label: "Inspection",
-    blurb: "What you would be asked for, and whether you could produce it this morning.",
-    items: [
-      { href: "/inspection", label: "Readiness", blurb: "By inspector: Board, DEA, and what each would ask" },
-      { href: "/inspection/walk", label: "Walk the pharmacy", blurb: "The self-inspection, item by item, with findings closed" },
-      { href: "/compliance", label: "Compliance register", blurb: "Every standing duty, its cadence and its evidence" },
     ],
   },
   {

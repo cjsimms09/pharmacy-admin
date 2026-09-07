@@ -15,8 +15,9 @@
  * cited term, runs 4,000–8,000 tokens out per document.
  */
 export function estimateCost(pages: number, model: string, rates?: { in: number; out: number }): { low: number; high: number } {
-  const inPerM = rates?.in ?? (model.includes("sonnet") ? 3 : 15);
-  const outPerM = rates?.out ?? (model.includes("sonnet") ? 15 : 75);
+  // List prices per million tokens, by family: Haiku 4.5 $1/$5, Sonnet 5 $2/$10, Opus 5 $5/$25.
+  const inPerM = rates?.in ?? (model.includes("haiku") ? 1 : model.includes("sonnet") ? 2 : 5);
+  const outPerM = rates?.out ?? (model.includes("haiku") ? 5 : model.includes("sonnet") ? 10 : 25);
   const batch = 0.5;
   const docs = Math.max(1, pages / 12);
   const lo = ((pages * 1500) / 1e6) * inPerM * batch + ((docs * 4000) / 1e6) * outPerM * batch;
@@ -27,11 +28,19 @@ export function estimateCost(pages: number, model: string, rates?: { in: number;
 /**
  * The limits a request and a batch must respect, so a run never fails on size.
  *
- * A PDF in one request may carry at most 100 pages and 32 MB; a batch at most 256 MB of requests.
+ * A PDF in one request may carry at most 100 pages by the API's rule and 50 by this site's (see below), and 32 MB; a batch at most 256 MB of requests.
  * A document over the page limit is not sent and is named, because sending it would fail after
  * the batch was paid for and the failure would look like a bad read.
  */
-export const PDF_PAGE_LIMIT = 100;
+/*
+ * Fifty, not the API's hundred.
+ *
+ * A PDF page is sent as text and as an image and costs up to 3,000 tokens; a hundred scanned pages
+ * is 300,000, and a model with a 200,000-token window refuses the whole request. That refusal is
+ * free but it is also a read that never happens, and it was the first thing the live folder hit.
+ * Fifty pages at the worst case is 150,000 with room for the answer.
+ */
+export const PDF_PAGE_LIMIT = 50;
 export const PDF_BYTES_LIMIT = 32 * 1024 * 1024;
 export const BATCH_BYTES_LIMIT = 100 * 1024 * 1024;
 export const BATCH_REQUEST_LIMIT = 100;
@@ -62,3 +71,90 @@ export function planBatches<T>(items: { item: T; bytes: number }[], limits = { b
   return out;
 }
 
+
+/**
+ * What a scanned contract can be searched by, once it has been read.
+ *
+ * Ninety-nine of this pharmacy's hundred-odd contracts are scans with no text layer, so the
+ * search box on Payers could not see inside them: a BIN typed there found nothing, while the
+ * agreement naming it sat on the same disk. The reader does read scans, page by page as images,
+ * and everything it keeps is cited to a page. So the read is written back as the searchable text
+ * of the file: every identifier, name, contact, definition and section, each on its own line with
+ * its page where one was given. It is not the document — nothing quoted here is more than the
+ * reader kept — and a hit says so by naming the page to open.
+ */
+export function searchBodyFromTerms(t: {
+  counterparty: string;
+  documentTitle: string;
+  contractType: string;
+  documentRole: string;
+  parentAgreement: string | null;
+  amendmentNumber: string | null;
+  supersedes: string[];
+  bins: string[];
+  pcns: string[];
+  groupIds: string[];
+  chainCodes: string[];
+  networkNames: string[];
+  networkReimbursementIds: string[];
+  pharmacyNcpdps: string[];
+  pharmacyNpis?: string[];
+  contacts: { purpose: string; name: string | null; organisation: string | null; phone: string | null; fax: string | null; email: string | null; portalUrl: string | null; postalAddress: string | null; citation?: { page: number | null } | null }[];
+  macAppealSubmissionTarget: string | null;
+  keyDefinitions: { term: string; definition: string; citation?: { page?: number | null } | null }[];
+  sections: { title: string; pageFrom: number | null; pageTo: number | null; gist: string }[];
+  incorporatesByReference: string[];
+  unclearOrMissing: string[];
+}): string {
+  const lines: string[] = [];
+  const list = (label: string, xs: string[]) => {
+    const kept = xs.map((x) => x.trim()).filter(Boolean);
+    if (kept.length) lines.push(`${label}: ${kept.join(", ")}`);
+  };
+  lines.push(`[From the read, not the scan. Open the page it names.]`);
+  lines.push(`${t.documentTitle} — ${t.counterparty} (${t.contractType}, ${t.documentRole}${t.amendmentNumber ? `, amendment ${t.amendmentNumber}` : ""})`);
+  if (t.parentAgreement) lines.push(`Attaches to: ${t.parentAgreement}`);
+  list("Supersedes", t.supersedes);
+  list("BIN", t.bins);
+  list("PCN", t.pcns);
+  list("Group", t.groupIds);
+  list("Chain code", t.chainCodes);
+  list("Network", t.networkNames);
+  list("Network reimbursement id", t.networkReimbursementIds);
+  list("Pharmacy NCPDP", t.pharmacyNcpdps);
+  list("Pharmacy NPI", t.pharmacyNpis ?? []);
+  for (const c of t.contacts) {
+    const parts = [c.name, c.organisation, c.phone, c.fax ? `fax ${c.fax}` : null, c.email, c.portalUrl, c.postalAddress].filter((x): x is string => Boolean(x && x.trim()));
+    if (parts.length) lines.push(`Contact for ${c.purpose.replace(/_/g, " ")}${c.citation?.page ? ` (page ${c.citation.page})` : ""}: ${parts.join(", ")}`);
+  }
+  if (t.macAppealSubmissionTarget) lines.push(`MAC appeals go to: ${t.macAppealSubmissionTarget}`);
+  for (const d of t.keyDefinitions) lines.push(`Defines ${d.term}${d.citation?.page ? ` (page ${d.citation.page})` : ""}: ${d.definition}`);
+  list("Incorporates by reference", t.incorporatesByReference);
+  for (const s of t.sections) {
+    const pages = s.pageFrom ? (s.pageTo && s.pageTo !== s.pageFrom ? `pages ${s.pageFrom}–${s.pageTo}` : `page ${s.pageFrom}`) : "page not given";
+    lines.push(`Section ${s.title} (${pages}): ${s.gist}`);
+  }
+  list("Not read or not stated", t.unclearOrMissing);
+  return lines.join("\n");
+}
+
+/**
+ * The batch ids a run wrote into its audit line, newest first, each once.
+ *
+ * A refused read used to overwrite the batch id on the document with the word "errored", so the
+ * only place the id survived was the audit line written when the run was queued. The API keeps a
+ * batch's results for 29 days, so those ids are enough to go back and ask what the refusal was.
+ */
+export function batchIdsIn(details: (string | null | undefined)[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const d of details) {
+    for (const m of (d ?? "").matchAll(/\bmsgbatch_[A-Za-z0-9]+\b/g)) {
+      if (!seen.has(m[0])) {
+        seen.add(m[0]);
+        out.push(m[0]);
+      }
+    }
+  }
+  return out;
+}

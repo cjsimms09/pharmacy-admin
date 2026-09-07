@@ -173,7 +173,7 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
                       <form action={assignFromList}>
                         <input type="hidden" name="trainingType" value={p.trainingType} />
                         <input type="hidden" name="personIds" value={p.personIds.join(",")} />
-                        <button className="rounded-md bg-ink px-3 py-1.5 text-sm text-white">
+                        <button className="btn btn-sm btn-primary">
                           Send it to {p.personIds.length === 1 ? "them" : `all ${p.personIds.length}`}
                         </button>
                       </form>
@@ -192,14 +192,14 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
                             placeholder="Optional: how it was done — a staff meeting, one to one, the vendor's slides"
                             className="mt-2 w-full rounded-md border border-line px-2 py-1.5 text-sm"
                           />
-                          <button className="mt-2 rounded-md bg-ink px-3 py-1.5 text-sm text-white">
+                          <button className="btn btn-sm btn-primary mt-2">
                             Record it for {p.personIds.length === 1 ? "them" : `all ${p.personIds.length}`}
                           </button>
                         </form>
                       </details>
                     </>
                   ) : (
-                    <Link href={p.href} className="rounded-md bg-ink px-3 py-1.5 text-sm text-white">Open</Link>
+                    <Link href={p.href} className="btn btn-sm btn-primary">Open</Link>
                   )}
                 </div>
               </article>
@@ -304,7 +304,7 @@ function Item({
           <input type="hidden" name="obligationId" value={i.obligationId} />
           <input type="hidden" name="periodKey" value={i.periodKey} />
           <input type="file" name="file" className="text-sm" />
-          <button className="rounded-md bg-ink px-3 py-1.5 text-sm text-white">File it</button>
+          <button className="btn btn-sm btn-primary">File it</button>
           {i.detail && <span className="w-full text-xs text-ink-3">{i.detail}</span>}
         </form>
       )}
@@ -313,13 +313,13 @@ function Item({
       {i.kind === "witnessed" && (
         <div className="mt-3 flex flex-wrap items-center gap-3">
           {i.missing && <span className="text-sm text-ink-2">{i.missing}</span>}
-          {i.href && <Link href={i.href} className="rounded-md bg-ink px-3 py-1.5 text-sm text-white">Go and do it</Link>}
+          {i.href && <Link href={i.href} className="btn btn-sm btn-primary">Go and do it</Link>}
           <span className="text-xs text-ink-3">This closes itself once done — there is nothing here to tick.</span>
         </div>
       )}
 
       {i.kind === "renewal" && i.href && (
-        <Link href={i.href} className="mt-3 inline-block rounded-md bg-ink px-3 py-1.5 text-sm text-white">Open</Link>
+        <Link href={i.href} className="btn btn-sm btn-primary mt-3">Open</Link>
       )}
     </article>
   );

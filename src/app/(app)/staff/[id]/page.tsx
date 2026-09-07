@@ -340,7 +340,7 @@ export default async function PersonPage({
                 </p>
                 <CredentialForm action={updateCredential.bind(null, fixing.id)} redirectTo={here} cred={fixing} />
                 <form action={deleteCredential.bind(null, fixing.id, here)} className="mt-2">
-                  <button className="text-xs text-crit hover:underline">Delete this record entirely</button>
+                  <button className="btn btn-sm btn-danger">Delete this record entirely</button>
                 </form>
               </>
             ) : add ? (

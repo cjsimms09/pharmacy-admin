@@ -233,7 +233,7 @@ export default async function TempLogPage({
                 unreviewed month of numbers is what an inspection treats as no record at all.
               </p>
               <input name="note" placeholder="Anything worth adding (optional)" className="mt-2 w-full rounded-md border border-line px-3 py-2 text-sm" />
-              <button className="mt-2 rounded-md bg-ink px-3 py-2 text-sm text-white" disabled={!summary.allExplained}>
+              <button className="btn btn-primary mt-2" disabled={!summary.allExplained}>
                 Sign off {periodLabel(period)}
               </button>
               {!summary.allExplained && <p className="mt-1 text-xs text-ink-3">Explain the out-of-range readings first.</p>}

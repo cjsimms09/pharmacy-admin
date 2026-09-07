@@ -16,7 +16,11 @@ const PAGES = [
   "purchasing/page.tsx",
   "reports/page.tsx",
   "remits/mtf/page.tsx",
-  "tools/page.tsx",
+  "payers/sort/page.tsx",
+  "purchasing/minimums/page.tsx",
+  "purchasing/replay/page.tsx",
+  "claims/appeals/page.tsx",
+  "payers/routing/page.tsx",
 ];
 
 /*

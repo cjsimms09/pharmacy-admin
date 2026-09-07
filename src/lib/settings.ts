@@ -20,6 +20,7 @@ export const SETTING_KEYS = [
   "pharmacy_phone",
   "pharmacy_npi",
   "pharmacy_ncpdp", // NCPDP / NABP provider number
+  "pharmacy_tin", // Federal tax id, which an ERA/EFT enrollment asks for and nothing else on the site does
   "pharmacy_dea",
   "pharmacy_chain_code", // PSAO-assigned; gates which rate exhibit governs a claim
   "psao_name", // Pharmacy Services Administrative Organization — not the PSO below

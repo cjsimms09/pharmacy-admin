@@ -129,7 +129,7 @@ export default async function ConnectionsPage({ searchParams }: { searchParams: 
               ))}
 
               <div className="flex gap-2">
-                <button className="rounded-md bg-ink px-3 py-2 text-sm text-white">Save</button>
+                <button className="btn btn-primary">Save</button>
               </div>
             </form>
 
@@ -148,7 +148,7 @@ export default async function ConnectionsPage({ searchParams }: { searchParams: 
             {c.hint && (
               <form action={remove} className="mt-2">
                 <input type="hidden" name="id" value={c.id} />
-                <button className="text-xs text-ink-3 underline hover:text-ink">Remove the stored key</button>
+                <button className="btn btn-sm btn-danger">Remove the stored key</button>
               </form>
             )}
           </section>
