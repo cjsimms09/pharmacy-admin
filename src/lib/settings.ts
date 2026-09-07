@@ -244,6 +244,8 @@ export const SETTING_KEYS = [
   "nadac_job",
   // The FDA drug directory and Orange Book fetch. Two multi-megabyte zips, so the same shape again.
   "drug_directory_job",
+  // Making the scrubbed copy: minutes of work, so the press claims a job rather than blocking.
+  "claude_copy_job",
   "backup_last_result",
   "backup_last_failure",
   // The rehearsal: an archive already on disk, opened and restored to a scratch database, to prove

@@ -24,7 +24,14 @@ async function fixture(): Promise<string> {
   await db.execute("create table suppliers (id text primary key, name text, sender_emails text)");
   await db.execute("create table sessions (id text primary key, token text)");
   await db.execute("create table nadac_prices (id text primary key, ndc11 text, unit_micros integer, effective_on text)");
-  await db.execute("create table supplier_items (id text primary key, description text)");
+  await db.execute("create table supplier_items (id text primary key, ndc11 text, description text)");
+  await db.execute(
+    "create table drug_directory (ndc11 text primary key, product_ndc text not null, brand_name text, generic_name text not null, " +
+      "substances text not null, strength text not null, form text not null, route text not null, labeler text not null, " +
+      "application text, marketing_category text not null, package_description text not null, equivalence_key text not null, " +
+      "te_code text, te_why text, loaded_at text not null)",
+  );
+  await db.execute("create table on_hand (id text primary key, ndc11 text)");
 
   await db.execute("insert into claims values ('c1','7412589','00093005001',1234,'{\"patient\":\"a name\"}')");
   await db.execute("insert into claims values ('c2','7412589','00093005001',900,'{}')"); // the coordinated leg
@@ -43,8 +50,13 @@ async function fixture(): Promise<string> {
   await db.execute("insert into nadac_prices values ('n2','00093005001',510000,'2026-09-01')");
   await db.execute("insert into nadac_prices values ('n3','00093005002',700000,'2026-09-08')");
   // A drug description that an over-eager check called a telephone number and a DEA registration.
-  await db.execute("insert into supplier_items values ('i1','OYSCO 500+D TB 500-200 1000')");
-  await db.execute("insert into supplier_items values ('i2','BAXT FOIL SEAL TMPIN H93830020')");
+  await db.execute("insert into supplier_items values ('i1','00093005001','OYSCO 500+D TB 500-200 1000')");
+  await db.execute("insert into supplier_items values ('i2','00093005002','BAXT FOIL SEAL TMPIN H93830020')");
+  await db.execute("insert into on_hand values ('h1','00093005003')");
+  // Three the pharmacy touches, and one of the quarter-million it never will.
+  const dir = (ndc: string) =>
+    `insert into drug_directory values ('${ndc}','0093-0050','A Brand','a generic','A SUBSTANCE; ANOTHER','10 mg/1','TABLET','ORAL','A Labeler','ANDA000001','ANDA','100 TABLET in 1 BOTTLE (${ndc})','a generic|10 mg/1|tablet|oral','AB','some long sentence about why there is no rating','2026-09-07T02:00:00.000Z')`;
+  for (const n of ["00093005001", "00093005002", "00093005003", "99999999999"]) await db.execute(dir(n));
   db.close();
   return file;
 }
@@ -132,6 +144,35 @@ describe("the copy that leaves the building", () => {
     assert.equal(rows.find((r) => r.ndc11 === "00093005002")!.effective_on, "2026-09-08");
   });
 
+  test("the FDA directory is cut to the drugs this pharmacy touches", async () => {
+    /*
+     * A quarter of a million packages — every drug marketed in the country — and the largest thing
+     * in the copy by some way. An equivalent nobody sells is not an option and a package nobody
+     * stocks has no pack size to argue about, so what travels is what a supplier prices, the shelf
+     * holds, or a claim has dispensed.
+     */
+    const file = await fixture();
+    await scrubCopy(file);
+    const rows = await read(file, "select ndc11 from drug_directory order by ndc11");
+    assert.equal(rows.length, 3);
+    assert.deepEqual(rows.map((r) => r.ndc11), ["00093005001", "00093005002", "00093005003"]);
+
+    // What is kept is what the pack-size and equivalence work reads; the verbose columns go.
+    const kept = (await read(file, "select * from drug_directory where ndc11 = '00093005001'"))[0];
+    assert.match(String(kept.package_description), /100 TABLET in 1 BOTTLE/);
+    assert.equal(kept.equivalence_key, "a generic|10 mg/1|tablet|oral");
+    assert.equal(kept.te_code, "AB");
+    assert.equal(kept.generic_name, "a generic");
+    assert.equal(kept.strength, "10 mg/1");
+    assert.equal(kept.form, "TABLET");
+    assert.equal(kept.labeler, "A Labeler");
+    // And the long, repetitive ones do not.
+    assert.equal(kept.substances, "");
+    assert.equal(kept.te_why, null);
+    assert.equal(kept.brand_name, null);
+    assert.equal(kept.loaded_at, "2026-09-07", "a timestamp to the millisecond on a weekly file is 250,000 wasted characters");
+  });
+
   test("and then the copy proves itself", async () => {
     const file = await fixture();
     await scrubCopy(file);
@@ -193,4 +234,40 @@ test("the fixtures leave nothing behind", () => {
     fs.rmSync(path.join(os.tmpdir(), f), { force: true });
   }
   assert.ok(true);
+});
+
+/*
+ * The pharmacy's own crash, held so it cannot come back.
+ *
+ * The copy was built, proved and written, and then the tidy-up threw
+ * `EBUSY: resource busy or locked, unlink 'C:\Users\wwfprx\AppData\Local\Temp\pa-for-claude-...db'`
+ * and turned a finished job into a failed one. Windows will not unlink a file a process still
+ * holds, and SQLite does not always let go the moment close() returns.
+ */
+test("a working file the operating system will not release does not fail the copy", async () => {
+  const { removeWorkingFile } = await import("../src/lib/backup-scrub");
+  const tried: string[] = [];
+  const busy = async (f: string) => {
+    tried.push(f);
+    const e = new Error(`EBUSY: resource busy or locked, unlink '${f}'`);
+    throw e;
+  };
+  // It must not throw, whatever the operating system says.
+  await removeWorkingFile("/tmp/pa-for-claude-x.db", busy, async () => {});
+  // Five attempts each at the database and the three files SQLite keeps beside it.
+  assert.equal(tried.length, 20);
+  assert.ok(tried.includes("/tmp/pa-for-claude-x.db-wal"));
+  assert.ok(tried.includes("/tmp/pa-for-claude-x.db-shm"));
+});
+
+test("a working file that goes on the first attempt is not attacked four more times", async () => {
+  const { removeWorkingFile } = await import("../src/lib/backup-scrub");
+  const tried: string[] = [];
+  await removeWorkingFile("/tmp/pa-for-claude-y.db", async (f) => { tried.push(f); }, async () => {});
+  assert.deepEqual(tried, [
+    "/tmp/pa-for-claude-y.db",
+    "/tmp/pa-for-claude-y.db-wal",
+    "/tmp/pa-for-claude-y.db-shm",
+    "/tmp/pa-for-claude-y.db-journal",
+  ]);
 });

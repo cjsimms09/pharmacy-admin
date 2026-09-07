@@ -36,14 +36,14 @@ function dosStamp(d: Date): { time: number; date: number } {
   };
 }
 
-export function createZip(files: { name: string; data: Buffer }[], now = new Date()): Buffer {
+export function createZip(files: { name: string; data: Buffer }[], now = new Date(), level = 6): Buffer {
   const { time, date } = dosStamp(now);
   const entries: Entry[] = [];
   const chunks: Buffer[] = [];
   let offset = 0;
 
   for (const f of files) {
-    const compressed = zlib.deflateRawSync(f.data, { level: 6 });
+    const compressed = zlib.deflateRawSync(f.data, { level });
     // Deflate can exceed the original on already-compressed data; store it plainly if so.
     const useStore = compressed.length >= f.data.length;
     const payload = useStore ? f.data : compressed;
