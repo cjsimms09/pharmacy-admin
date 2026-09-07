@@ -108,7 +108,7 @@ what has been dismissed. This is the difference between a report and something t
    `contract-apply.ts` are the pure side, tested; the pages are on the handoff. The specification
    is `contract-reading.md`.)
 6. Brand steering: which brands to move to a secondary this month, and what the band is worth.
-7. Cash pricing against cost and NADAC + fee, now that cash fills are kept.
+7. ~~Cash pricing against cost and NADAC + fee, now that cash fills are kept.~~ Built: `cash-pricing.ts` (pure, tested) and `cash-pricing-store.ts`; a recurring row on Money found ("cash-pricing"), each product's median cash price against its median invoice cost and against NADAC plus the greater of $10.50 and the Medicaid fee, scaled to fills a month. A page listing every product is the pharmacy session's when wanted.
 
 ## 7. What is audited, and when
 

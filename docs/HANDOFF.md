@@ -88,6 +88,12 @@ it and said so on the pull request. The owner reads this too.
   time made the target window zero and nothing short), and the contract flag maps through
   `contractFlagOf`. The supplier terms field is now labelled "Lead time, in days" with what it
   does — the owner read "Days from order to shelf" as meaningless.
+- **Cash pricing (profit-engine §6 item 7) is built**, pure and tested: `cash-pricing.ts`,
+  `cash-pricing-store.ts`, and a recurring "cash-pricing" row on Money found — every product's
+  median cash price against its median invoice cost and against the Kansas floor (NADAC plus the
+  greater of $10.50 and the Medicaid fee), scaled to the product's typical quantity and to fills a
+  month; under cost is a loss on every bottle, under the floor is money a plan would have had to
+  pay. The row links to Claims; a page listing every cash product is yours when you want one.
 - **Second design and logic pass, page by page on the seeded scratch database.** Fixed (mine unless
   said): the books' "Cash change" row printed the accrual net in the accrual column — there is no
   accrual side to a cash change, so it is a dash now; "Net revenue" no longer repeats "Revenue" when

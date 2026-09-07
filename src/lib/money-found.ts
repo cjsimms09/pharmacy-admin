@@ -412,6 +412,31 @@ export async function moneyFound(): Promise<MoneyFound> {
   } catch {
     /* No claims or no NADAC held. */
   }
+  /*
+   * Cash prices under cost or under what a plan would have to pay. A cash fill is a price the
+   * pharmacy set, so this is not money owed — it is money given away on every bottle until the
+   * price moves, which is why it is recurring and not one-off.
+   */
+  try {
+    const { cashPricingNow } = await import("./cash-pricing-store");
+    const cp = await cashPricingNow();
+    if (cp.underPriced.length > 0 && cp.gainPerMonthCents > 0) {
+      const top = cp.underPriced[0];
+      const lossRows = cp.underPriced.filter((r) => r.reason === "under_cost");
+      rows.push({
+        key: "cash-pricing",
+        says: `${money(cp.gainPerMonthCents)} a month is cash prices set under cost or under the Kansas floor on ${cp.underPriced.length} product${cp.underPriced.length === 1 ? "" : "s"}${lossRows.length ? `, ${lossRows.length} of them sold at a loss` : ""}.`,
+        todo: `Raise each to the floor — NADAC plus the dispensing fee, what a plan would have to pay. ${top.name ?? top.ndc11}: ${money(top.chargedCents)} charged, ${money(top.targetCents ?? 0)} to move to, ${money(top.gainPerMonthCents)} a month.`,
+        amountCents: cp.gainPerMonthCents,
+        cadence: "recurring_monthly",
+        confidence: "likely",
+        basis: `Cash fills from the claims held over ${cp.months.toFixed(1)} months, each scaled to the product's typical quantity; the median price charged against the median invoice cost on the fill and against NADAC plus the greater of $10.50 and the Medicaid fee. ${cp.withCost} of ${cp.fills} cash fills carry a cost; ${cp.unjudged} product${cp.unjudged === 1 ? "" : "s"} had neither cost nor NADAC and are not counted.`,
+        href: "/claims",
+      });
+    }
+  } catch {
+    /* No claims held. */
+  }
   try {
     const { claimFlags } = await import("./claims");
     const f = await claimFlags({ all: true });
