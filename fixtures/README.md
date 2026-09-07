@@ -22,6 +22,8 @@ arrives rather than what somebody remembers arriving.
 | File | Source | Unlocks |
 |---|---|---|
 | `invoice-mckesson.txt` | text layer of a McKesson invoice PDF (`pdfText` output) | confirms the full-row reader; catches an extra column or flag |
+| `fda-ndc-product.txt`, `fda-ndc-package.txt` | the FDA NDC Directory (`ndctext.zip`: `product.txt`, `package.txt`, tab-separated) | **committed**, shape only, made-up rows in the real column order; `tests/drug-directory.test.ts` reads them |
+| `orange-book-products.txt` | the FDA Orange Book (`EOBZIP`: `products.txt`, tilde-separated) | **committed**, shape only; the AB rating that makes two NDCs substitutable |
 | `invoice-ipc.txt` | text layer of an IPC invoice | **committed** — 21 lines, all read, reconciling to the printed total; `tests/invoice-lines.test.ts` reads it |
 | `invoice-ipd.txt` | text layer of an IPD invoice | **committed** — and it shows why no rule can read this one: the columns do not survive extraction, so every NDC on a page arrives as one unbroken run of digits. The reader returns nothing from it, correctly; the site reads this layout by sending the document to the model and still requires the arithmetic to hold |
 | `catalog-mck.txt` | the scheduled `Mck9_6_2026` export, first supplier block | already covered by `tests/pioneer-catalog.test.ts`; a real header line is still worth having |

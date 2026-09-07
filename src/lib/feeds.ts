@@ -103,11 +103,12 @@ export async function feedsNow(opts: { probe?: boolean; now?: Date } = {}): Prom
     const [sups, imports, counts] = await Promise.all([
       db.query.suppliers.findMany({ columns: { name: true, catalogName: true, primarySupplier: true } }),
       c.execute("select supplier, max(created_at) as at, max(priced_on) as priced from supplier_imports group by supplier"),
-      c.execute("select supplier, count(*) as n, sum(case when item_number is null or item_number = '' then 0 else 1 end) as numbered from supplier_items group by supplier"),
+      c.execute("select supplier, count(*) as n, sum(case when item_number is null or item_number = '' then 0 else 1 end) as numbered, sum(case when awp_cents is null then 0 else 1 end) as with_awp from supplier_items group by supplier"),
     ]);
     const lastBy = new Map(imports.rows.map((r) => [String(r.supplier).trim().toLowerCase(), { at: String(r.at), priced: isoDate(r.priced) }]));
     const nBy = new Map(counts.rows.map((r) => [String(r.supplier).trim().toLowerCase(), num(r.n)]));
     const numberedBy = new Map(counts.rows.map((r) => [String(r.supplier).trim().toLowerCase(), num(r.numbered)]));
+    const awpBy = new Map(counts.rows.map((r) => [String(r.supplier).trim().toLowerCase(), num(r.with_awp)]));
     const names = sups.length ? sups.map((x) => ({ name: x.name, key: (x.catalogName ?? x.name).trim().toLowerCase(), primary: x.primarySupplier })) : [...lastBy.keys()].map((k) => ({ name: k, key: k, primary: false }));
     for (const sup of names) {
       const last = lastBy.get(sup.key) ?? null;
@@ -123,7 +124,7 @@ export async function feedsNow(opts: { probe?: boolean; now?: Date } = {}): Prom
         proof: last
           ? items < 100
             ? `Only ${items} items on file — a file this small is a partial export, not a catalogue.`
-            : `${pct(numberedBy.get(sup.key) ?? 0, items)} of items carry the supplier's item number, which is what an order line is keyed by.`
+            : `${pct(numberedBy.get(sup.key) ?? 0, items)} of items carry the supplier's item number, which is what an order line is keyed by; ${pct(awpBy.get(sup.key) ?? 0, items)} carry an AWP, which is what an AWP-paid claim is priced on.`
           : null,
         probe: null,
         href: "/purchasing",

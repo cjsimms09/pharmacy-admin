@@ -2886,3 +2886,48 @@ export const standingCosts = sqliteTable(
   },
   (t) => [index("standing_costs_from_idx").on(t.fromMonth)],
 );
+
+// The FDA NDC Directory joined to the Orange Book: one row per package NDC, with the equivalence
+// key (ingredients, strength, form, route) and the therapeutic equivalence code that together say
+// which NDCs may be dispensed in place of one another. Read from the two free federal files, never
+// inferred from a description; an NDC the directory does not cover has no row and is not grouped.
+export const drugDirectory = sqliteTable(
+  "drug_directory",
+  {
+    ndc11: text("ndc11").primaryKey(),
+    productNdc: text("product_ndc").notNull(),
+    brandName: text("brand_name"),
+    genericName: text("generic_name").notNull(),
+    substances: text("substances").notNull(),
+    strength: text("strength").notNull(),
+    form: text("form").notNull(),
+    route: text("route").notNull(),
+    labeler: text("labeler").notNull(),
+    application: text("application"),
+    marketingCategory: text("marketing_category").notNull(),
+    deaSchedule: text("dea_schedule"),
+    packageDescription: text("package_description").notNull(),
+    equivalenceKey: text("equivalence_key").notNull(),
+    teCode: text("te_code"),
+    teWhy: text("te_why"),
+    marketedTo: text("marketed_to"),
+    excluded: integer("excluded", { mode: "boolean" }).notNull().default(false),
+    loadedAt: text("loaded_at").notNull().default(now()),
+  },
+  (t) => [index("drug_directory_key_idx").on(t.equivalenceKey), index("drug_directory_product_idx").on(t.productNdc)],
+);
+
+// Each load of the two files: which, from where, how many rows, and the file's own date where it
+// prints one. The feeds page judges the directory's age from the newest of these.
+export const drugDirectoryLoads = sqliteTable("drug_directory_loads", {
+  id: text("id").primaryKey(),
+  /** "ndc_directory" or "orange_book". */
+  source: text("source").notNull(),
+  /** Where it came from: the FDA address, or the file name when loaded by hand. */
+  origin: text("origin").notNull(),
+  rows: integer("rows").notNull().default(0),
+  /** The date inside the file where it carries one, ISO; null where it does not. */
+  fileAsOf: text("file_as_of"),
+  loadedBy: text("loaded_by"),
+  loadedAt: text("loaded_at").notNull().default(now()),
+});
