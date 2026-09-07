@@ -880,7 +880,16 @@ export async function latestClaimDay(): Promise<string | null> {
   return rows[0]?.dateFilled ?? null;
 }
 
-export async function claimFlags(scope: ClaimScope = {}) {
+export async function claimFlags(scope: ClaimScope = {}): ReturnType<typeof loadClaimFlags> {
+  // The whole-history reading is asked for by the money list and the claims page alike; held.
+  if (scope.all && !scope.from && !scope.to && !scope.rx && !scope.payer) {
+    const { held } = await import("./held");
+    return held("claim-flags:all", () => loadClaimFlags(scope));
+  }
+  return loadClaimFlags(scope);
+}
+
+async function loadClaimFlags(scope: ClaimScope) {
   const { and, gte, lte, like, or } = await import("drizzle-orm");
 
   /*
@@ -1212,14 +1221,25 @@ export async function claimFlags(scope: ClaimScope = {}) {
  * made it four — and the whole point of the grouping is that the claims screen, the payer table
  * and the dashboard cannot be allowed to give different answers to the same question.
  */
-export async function allFills() {
+/**
+ * Every claim grouped into fills, over a range of fill dates.
+ *
+ * Thirteen months by default: what the books, the shelf, the buy list and the money list look at.
+ * A page that asks about an older period passes its own range. The claims table grows by a day's
+ * dispensing every day and never shrinks, so a reading that loads all of it gets slower for ever;
+ * one that loads a window does not. Held between requests (held.ts); read it, never write into it.
+ */
+export async function allFills(range?: { from?: string; to?: string }) {
   const { held } = await import("./held");
-  return held("fills", loadFills);
+  const { addDays, todayIso } = await import("./dates");
+  const from = range?.from ?? addDays(todayIso(), -400).slice(0, 7) + "-01";
+  const to = range?.to ?? "9999-12-31";
+  return held(`fills:${from}:${to}`, () => loadFills(from, to));
 }
 
-/** Every claim grouped into fills. Held between requests (held.ts); read it, never write into it. */
-async function loadFills() {
-  const rows = await db.query.claims.findMany();
+async function loadFills(from: string, to: string) {
+  const { and, gte, lte } = await import("drizzle-orm");
+  const rows = await db.query.claims.findMany({ where: and(gte(schema.claims.dateFilled, from), lte(schema.claims.dateFilled, to)) });
   const { groupIntoFills } = await import("./fills");
   const { laterPayments } = await import("./claim-payments");
   return groupIntoFills(

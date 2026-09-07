@@ -428,6 +428,11 @@ export type Opportunity = {
  * against an unknown current cost is not a saving, it is a guess with a dollar sign on it.
  */
 export async function purchasingOpportunities(): Promise<{ ready: boolean; reason?: string; rows: Opportunity[] }> {
+  const { held } = await import("./held");
+  return held("purchasing-opportunities", loadPurchasingOpportunities);
+}
+
+async function loadPurchasingOpportunities(): Promise<{ ready: boolean; reason?: string; rows: Opportunity[] }> {
   const claims = await db.query.claims.findMany({
     where: eq(schema.claims.status, "paid"),
     columns: { ndc11: true, itemName: true, acquisitionCents: true, quantityThousandths: true },

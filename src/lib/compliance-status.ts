@@ -402,7 +402,12 @@ export async function attest(
 }
 
 /** The one-line answer: is the pharmacy clean, and if not, by how much. */
-export async function complianceSummary() {
+export async function complianceSummary(): ReturnType<typeof loadComplianceSummary> {
+  const { held } = await import("./held");
+  return held("compliance-summary", loadComplianceSummary);
+}
+
+async function loadComplianceSummary() {
   const [items, unanswered] = await Promise.all([openItems(), unansweredObligations()]);
   const missed = items.filter((i) => i.state === "missed");
   const partial = items.filter((i) => i.state === "partial");

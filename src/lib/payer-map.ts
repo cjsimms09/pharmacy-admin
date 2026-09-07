@@ -129,7 +129,12 @@ const payerKey = (f: Fill): { key: string; bin: string | null } => {
   return { key: p.name ?? p.bin ?? "unnamed", bin: p.bin };
 };
 
-export async function payerMap(): Promise<{
+export async function payerMap(): ReturnType<typeof loadPayerMap> {
+  const { held } = await import("./held");
+  return held("payer-map", loadPayerMap);
+}
+
+async function loadPayerMap(): Promise<{
   links: PayerLink[];
   scores: PayerScore[];
   ndcs: NdcReimbursement[];
@@ -463,6 +468,11 @@ export type CompanyNode = {
 };
 
 export async function payerTree(): Promise<{ companies: CompanyNode[]; unnamedRevenueCents: number }> {
+  const { held } = await import("./held");
+  return held("payer-tree", loadPayerTree);
+}
+
+async function loadPayerTree(): Promise<{ companies: CompanyNode[]; unnamedRevenueCents: number }> {
   const [claims, bins, groups, confirmed] = await Promise.all([
     db.query.claims.findMany(),
     db.query.payerBins.findMany(),

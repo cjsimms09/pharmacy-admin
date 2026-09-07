@@ -140,6 +140,11 @@ export type PlanRow = {
 
 /** The register, with each plan's claim volume so the unresolved ones can be worked by size. */
 export async function planRegister(): Promise<PlanRow[]> {
+  const { held } = await import("./held");
+  return held("plan-register", loadPlanRegister);
+}
+
+async function loadPlanRegister(): Promise<PlanRow[]> {
   const [groups, claims] = await Promise.all([
     db.query.planGroups.findMany(),
     db.query.claims.findMany({

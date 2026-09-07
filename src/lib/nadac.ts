@@ -238,8 +238,33 @@ async function loadNadacFilesNow(opts: LoadOpts): Promise<LoadReport[]> {
     await fs.writeFile(path.join(dir, MANIFEST), JSON.stringify(manifest, null, 2));
   }
   // The screens hold the current benchmark between requests; a new file must be seen at once.
-  if (reports.length > 0) (await import("./nadac-latest")).forgetNadac();
+  if (reports.length > 0) {
+    (await import("./nadac-latest")).forgetNadac();
+    await pruneNadac().catch(() => undefined);
+  }
   return reports;
+}
+
+/**
+ * Keep the benchmark to the months the pharmacy can use.
+ *
+ * A weekly file is thirty thousand rows and the table kept every one for ever, so it grew by a
+ * million and a half rows a year and every reading over it grew with it. A fill needs the price
+ * in force on its own date, and the floor reaches nothing filled before July 2026; eighteen
+ * months behind today covers every fill a page can ask about. An NDC's newest row is never
+ * dropped, whatever its date, so the current benchmark for a drug the file stopped updating stays.
+ */
+export async function pruneNadac(today = new Date()): Promise<number> {
+  const { getSettings } = await import("./settings");
+  const s = await getSettings();
+  const months = Math.max(6, Number(s.nadac_keep_months ?? "") || 18);
+  const cutoff = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - months, today.getUTCDate())).toISOString().slice(0, 10);
+  const client = (db as unknown as { $client: { execute: (q: { sql: string; args: string[] }) => Promise<{ rowsAffected: number }> } }).$client;
+  const r = await client.execute({
+    sql: "delete from nadac_prices where effective_on < ? and exists (select 1 from nadac_prices n where n.ndc11 = nadac_prices.ndc11 and n.effective_on > nadac_prices.effective_on)",
+    args: [cutoff],
+  });
+  return r.rowsAffected;
 }
 
 const BATCH = 400;
@@ -384,7 +409,12 @@ async function loadOneFile(full: string, file: string, size: number, onProgress?
  * it misses the twelve we dispensed. This counts the claims we hold that have a NADAC in force
  * on their own fill date, which is the only figure that says whether the floor can be applied.
  */
-export async function nadacClaimCoverage() {
+export async function nadacClaimCoverage(): ReturnType<typeof loadNadacClaimCoverage> {
+  const { held } = await import("./held");
+  return held("nadac-claim-coverage", loadNadacClaimCoverage);
+}
+
+async function loadNadacClaimCoverage() {
   const claims = await db.query.claims.findMany({
     where: eq(schema.claims.status, "paid"),
     columns: { id: true, ndc11: true, dateFilled: true, itemName: true, planType: true },
@@ -447,9 +477,12 @@ export async function nadacClaimCoverage() {
  * Grouped by the week the claim was filled rather than by NDC, because that is the unit the fix
  * comes in. Downloading one file closes a whole row of this table.
  */
-export async function nadacWeekGaps(): Promise<
-  { weekStart: string; claims: number; distinctNdcs: number; examples: string[] }[]
-> {
+export async function nadacWeekGaps(): Promise<{ weekStart: string; claims: number; distinctNdcs: number; examples: string[] }[]> {
+  const { held } = await import("./held");
+  return held("nadac-week-gaps", loadNadacWeekGaps);
+}
+
+async function loadNadacWeekGaps(): Promise<{ weekStart: string; claims: number; distinctNdcs: number; examples: string[] }[]> {
   const claims = await db.query.claims.findMany({
     where: eq(schema.claims.status, "paid"),
     columns: { ndc11: true, dateFilled: true, itemName: true },
@@ -498,7 +531,12 @@ export function weekStart(iso: string): string {
 }
 
 /** What is loaded, and whether it actually covers the period we need to price. */
-export async function nadacCoverage() {
+export async function nadacCoverage(): ReturnType<typeof loadNadacCoverage> {
+  const { held } = await import("./held");
+  return held("nadac-coverage", loadNadacCoverage);
+}
+
+async function loadNadacCoverage() {
   const [agg] = await db
     .select({
       prices: sql<number>`count(*)`,
@@ -548,6 +586,11 @@ export type NadacHealth = {
 };
 
 export async function nadacHealth(today = new Date()): Promise<NadacHealth> {
+  const { held } = await import("./held");
+  return held(`nadac-health:${today.toISOString().slice(0, 10)}`, () => loadNadacHealth(today));
+}
+
+async function loadNadacHealth(today: Date): Promise<NadacHealth> {
   const [agg] = await db
     .select({
       prices: sql<number>`count(*)`,

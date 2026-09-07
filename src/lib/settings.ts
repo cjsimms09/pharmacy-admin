@@ -95,6 +95,8 @@ export const SETTING_KEYS = [
    * silently is worse than one somebody had to type.
    */
   "ks_medicaid_dispensing_fee_cents",
+  /** How many months of weekly NADAC files to keep behind today. The claims need the price in force on their fill date; a year and a half covers every fill the floor can reach. Default 18. */
+  "nadac_keep_months",
   /*
    * The smallest shortfall worth putting in front of the Insurance Department, in cents.
    *

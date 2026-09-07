@@ -280,7 +280,19 @@ function safeJson<T>(raw: string, fallback: T): T {
 export async function movement(
   lookbackDays = SHELF_POLICY.lookbackDays,
 ): Promise<{ rows: Velocity[]; from: string; to: string; fills: Fill[] } | null> {
-  const claims = await db.query.claims.findMany();
+  const { held } = await import("./held");
+  return held(`movement:${lookbackDays}`, () => loadMovement(lookbackDays));
+}
+
+async function loadMovement(lookbackDays: number): Promise<{ rows: Velocity[]; from: string; to: string; fills: Fill[] } | null> {
+  /*
+   * Only the claims the window can use. Movement is a rate over the last ninety days; the claims
+   * before it were loaded, grouped and thrown away, on every open, for every year the pharmacy
+   * had been dispensing.
+   */
+  const { addDays, todayIso } = await import("./dates");
+  const { gte } = await import("drizzle-orm");
+  const claims = await db.query.claims.findMany({ where: gte(schema.claims.dateFilled, addDays(todayIso(), -(lookbackDays + 7))) });
   if (claims.length === 0) return null;
 
   /*
@@ -424,6 +436,11 @@ export type LeanShelfView = {
 
 /** What to send back, and by when. */
 export async function leanShelfNow(): Promise<LeanShelfView> {
+  const { held } = await import("./held");
+  return held("lean-shelf", loadLeanShelf);
+}
+
+async function loadLeanShelf(): Promise<LeanShelfView> {
   const { movement: move, velocity: vel, snapshot } = await shelfMovement();
   const missing: string[] = [];
   if (!snapshot)

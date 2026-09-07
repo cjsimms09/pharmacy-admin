@@ -36,38 +36,6 @@ export async function register() {
     }
   })();
 
-  /*
-   * Warm the held readings once the server is up, so the first page of the morning is not the one
-   * that pays for the year's claims. Each is held by held.ts until the data changes.
-   */
-  setTimeout(() => {
-    void (async () => {
-      try {
-        const { allFills } = await import("./lib/claims");
-        await allFills();
-        const { productLedger } = await import("./lib/product-ledger");
-        await productLedger();
-        const { booksFor } = await import("./lib/ledger-store");
-        const { parsePeriod } = await import("./lib/ledger");
-        const { todayIso } = await import("./lib/dates");
-        const period = parsePeriod(todayIso().slice(0, 7));
-        if (period) await booksFor(period);
-        const { moneyFound } = await import("./lib/money-found");
-        await moneyFound();
-        const { buyListNow } = await import("./lib/shelf");
-        await buyListNow();
-        const { drugProfitNow } = await import("./lib/drug-profit-store");
-        await drugProfitNow();
-        const { minimumsNow } = await import("./lib/minimum-store");
-        await minimumsNow();
-        const { overNadacNow } = await import("./lib/over-nadac-store");
-        await overNadacNow(28);
-      } catch {
-        // A warm-up that fails costs nothing; the page computes it on demand.
-      }
-    })();
-  }, 15_000);
-
   let busy = false;
   const whenIdle = async (name: string, job: () => Promise<void>) => {
     if (busy) return;
@@ -90,6 +58,8 @@ export async function register() {
       if (s.mail_enabled !== "yes" || !s.mail_user || !s.mail_password_enc) return;
       const { sweepMailbox } = await import("./lib/mailbox");
       await sweepMailbox({ userId: null, userName: "Automatic check" });
+      // A report that just loaded changed the readings; compute them now rather than on the next page.
+      await warmTick();
     } catch {
       // Never let a mail problem take the app down; the result is recorded in settings and the audit log.
     }
@@ -192,6 +162,7 @@ export async function register() {
       const started = await startNadacFetch(who, "this week's NADAC file");
       if (!started.started) return;
       await runNadacFetch(who, started.runId!, "this week's NADAC file", []);
+      await warmTick();
     } catch {
       // The outcome is recorded in settings and shown on the NADAC page.
     }
@@ -203,7 +174,27 @@ export async function register() {
    * Sequential rather than together: four jobs starting at once on one connection is the same
    * stall as one long job, and there is no hurry about any of them.
    */
+  /*
+   * The held readings (held.ts), computed while nobody is waiting.
+   *
+   * Everything a page needs that takes more than a moment is held between requests and keyed on
+   * the data. Computing it on the first page of the morning made that page pay for the night's
+   * imports; computing it at boot made the first page wait behind the warm-up. So it is done here,
+   * in the gaps: first the readings Today and Buying open with, then whatever is stale.
+   */
+  const warmTick = async () => {
+    try {
+      const { warmHeld } = await import("./lib/warm");
+      const { isIdle } = await import("./lib/activity");
+      // Each step checks that nobody has asked for a page in the last few seconds before it starts.
+      await warmHeld(() => isIdle(5));
+    } catch {
+      // A reading that fails to warm is computed by its next reader.
+    }
+  };
+
   const runAll = async () => {
+    await whenIdle("warm", warmTick);
     await whenIdle("mail", tick);
     await whenIdle("backup", backupTick);
     await whenIdle("reminders", reminderTick);
@@ -418,4 +409,10 @@ export async function register() {
     void runAll();
     setInterval(() => void runAll(), EVERY_MS).unref?.();
   }, START_DELAY_MS).unref?.();
+
+  // The readings, more often than the half-hourly beat: a fresh one is the difference between a page and a wait.
+  setTimeout(() => {
+    void whenIdle("warm", warmTick);
+    setInterval(() => void whenIdle("warm", warmTick), 5 * 60 * 1000).unref?.();
+  }, 20 * 1000).unref?.();
 }

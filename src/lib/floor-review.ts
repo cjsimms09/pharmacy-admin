@@ -339,6 +339,11 @@ export function reviewClaims(
 
 /** Loads what the review needs and hands it to the pure reviewer above. */
 export async function floorReview(): Promise<FloorReview> {
+  const { held } = await import("./held");
+  return held("floor-review", loadFloorReview);
+}
+
+async function loadFloorReview(): Promise<FloorReview> {
   const { db, schema } = await import("@/db");
   const { eq } = await import("drizzle-orm");
   const { getSettings } = await import("./settings");
@@ -351,30 +356,11 @@ export async function floorReview(): Promise<FloorReview> {
   ]);
 
   /*
-   * The prices for the drugs on these claims, and no others.
-   *
-   * This read the entire federal NADAC file — every NDC it has ever carried, at every date, with
-   * every column — to price the pharmacy's own dispensings. Hundreds of thousands of rows fetched to
-   * use a few thousand, on every load, growing with each weekly file rather than with the pharmacy.
+   * The price in force for each claim, asked of the database: one index seek per distinct
+   * (NDC, fill date) pair, rather than every date ever held for every NDC dispensed.
    */
-  const { inArray } = await import("drizzle-orm");
-  const wanted = [...new Set(claims.map((c) => c.ndc11).filter((n): n is string => n !== null))];
-  const records: NadacRecord[] = [];
-  for (let i = 0; i < wanted.length; i += 400) {
-    const got = await db.query.nadacPrices.findMany({
-      where: inArray(schema.nadacPrices.ndc11, wanted.slice(i, i + 400)),
-      columns: { ndc11: true, unitMicros: true, pricingUnit: true, effectiveOn: true, fileAsOf: true },
-    });
-    for (const p of got) {
-      records.push({
-        ndc11: p.ndc11,
-        unitMicros: p.unitMicros,
-        pricingUnit: p.pricingUnit as NadacRecord["pricingUnit"],
-        effectiveOn: p.effectiveOn,
-        fileAsOf: p.fileAsOf,
-      });
-    }
-  }
+  const { nadacRecordsForClaims } = await import("./nadac-in-force");
+  const records: NadacRecord[] = await nadacRecordsForClaims({ status: "paid" });
 
   return reviewClaims(claims, plans, records, {
     ksMedicaidDispensingFeeCents: intOrNull(s.ks_medicaid_dispensing_fee_cents),

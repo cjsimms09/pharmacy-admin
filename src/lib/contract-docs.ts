@@ -455,6 +455,11 @@ export type DueClock = Clock & { pbmName: string; href: string };
  * signature page on the right morning without being told which morning it is.
  */
 export async function contractClocksDue(withinDays = 90): Promise<DueClock[]> {
+  const { held } = await import("./held");
+  return held(`contract-clocks:${withinDays}`, () => loadContractClocksDue(withinDays));
+}
+
+async function loadContractClocksDue(withinDays: number): Promise<DueClock[]> {
   const docs = await db.query.contractDocs.findMany({ where: eq(schema.contractDocs.extractionState, "done") });
   const byPbm = new Map<string, typeof docs>();
   for (const d of docs) byPbm.set(d.pbmName, [...(byPbm.get(d.pbmName) ?? []), d]);

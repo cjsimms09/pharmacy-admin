@@ -166,6 +166,43 @@ it and said so on the pull request. The owner reads this too.
   `src/instrumentation.ts` are next on my side unless you want them; a "Drug directory" row on
   `/settings/feeds` too. Until a load runs, every grouping falls back to NADAC's description and
   the products page says "0 of N dispensed" are on the directory.
+- **The efficiency pass, 7 September evening** (the owner: "site is so painfully slow; make it
+  as efficient as possible and keep it that way, it will get lots of data every day"). Measured
+  on a scratch database at a year's scale — 30,000 claims, 1.5 million NADAC rows, 4,000
+  invoice lines, the three real catalogues — every page timed cold and warm. What was wrong and
+  is fixed, and **the rules that keep it fixed**:
+  1. *Nothing loads the whole NADAC table.* `appeals.ts` (the appeal queue: 20 s), `replay-store.ts`
+     (18 s), `minimum-store.ts` (9 s) and `money-found.ts` (the pay-basis section) each loaded
+     every row ever held to find one row per NDC or the row in force on a fill date. The row in
+     force is now one SQL statement, `nadacRecordsForClaims()` in **`nadac-in-force.ts`**: one
+     index seek per distinct (NDC, fill date) among the claims, returning exactly the rows
+     `nadacInForce()` picks from. The newest row per NDC is `nadacNow()`, held until a new file
+     loads (its ten-minute clock is gone). `floor-review.ts` uses the same query.
+  2. *NADAC is pruned.* `pruneNadac()` runs after every load: rows older than
+     `nadac_keep_months` (new setting, default 18) go, never an NDC's newest row. A year and a
+     half covers every fill the floor can reach; the table stops growing without bound.
+  3. *Claims are read over a window.* `allFills(range?)` defaults to the last thirteen months and
+     is held per range; the books pass their period. `movement()` in `shelf.ts` reads only the
+     lookback window. `productLedger()` reads the held fills rather than scanning and grouping
+     the claims itself. `claimFlags({ all: true })` is held.
+  4. *Every reading that takes more than a moment is held* (`held.ts`, keyed on the data): fills,
+     ledger, buy list, minimums, drug profit, over-NADAC, money found, money position, cash
+     pricing, books, month accounts (so a period is twelve held months), floor review, appeal
+     queue, replay, movement, lean shelf, payer map and tree, plan register, NADAC coverage,
+     health, claim coverage and week gaps, drug-file health, purchasing opportunities, the
+     products page's comparisons (`products-store.ts`), feeds, compliance summary, contract
+     clocks. A held value is shared by reference: **read it, never sort or write into it.**
+  5. *Warming happens only when nobody is waiting.* `warm.ts` → `warmHeld()` runs from
+     `instrumentation.ts` under `whenIdle`, twenty seconds after boot and every five minutes,
+     computing the readings Today and Buying open with and then `refreshStale()` for the rest.
+     The boot-time warm that competed with the first page is gone.
+  6. *Two read indexes*, migration **`0080_read_indexes`**: `claims (status, ndc11, date_filled)`
+     for the in-force query and every "paid claims since" read; `claim_payments (received_on)`.
+  Results on the scratch database (cold → warm, ms): Today 13,700 → 760 / 630; the books
+  14,200 → 1,280 / 98; Buying 18,000 → 172 warm; appeals 20,500 → 614 / 67; Which contract
+  18,200 → 522 / 43; the shelf 3,700 → 425 / 68; Who pays best 3,500 → 2,100 / 313; NADAC
+  2,300 → held. **For anything new: load a window, not a table; ask SQL for the row you need;
+  hold what takes more than a moment; never load `nadac_prices` whole.**
 - **Speed: the heavy readings are held between requests** (`held.ts`). On a year of claims Today
   took 13 s, the books 14 s and Buying 11 s, most of it the same claims scan repeated through
   different helpers. `held(key, compute)` keeps a reading keyed on a fingerprint of the tables

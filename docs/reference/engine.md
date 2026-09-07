@@ -137,3 +137,25 @@ they would close a balance or replace typing, with what each one unlocks.
 | **The contracts** — already in the folder; the first full read is the step | — | rates, appeal routes, 835 routing facts for every payer |
 | **Leases, loan schedules, insurance policies** | the files | standing costs with their paid day and end date typed once; the balance-sheet lines below the cash account |
 | **A year of history**: last year's claims exports, sales summaries, invoices and bank statements | PioneerRx and the bank's archives | the trend pages mean something, the replay ranks contracts on a real year, the pace has a last year to compare against |
+
+## Efficiency rules
+
+The site runs on one pharmacy computer, on one SQLite file that grows by a day's dispensing every
+day and a federal file every week. Measured at a year's scale on 7 September 2026, and the rules
+that came out of it (`docs/HANDOFF.md` has the figures):
+
+1. **Load a window, not a table.** Claims are read over the months a page shows (`allFills(range)`,
+   thirteen months by default); movement over its lookback; nothing reads `nadac_prices` whole.
+2. **Ask SQL for the row you need.** The NADAC in force on a fill date is `nadacRecordsForClaims()`
+   (`nadac-in-force.ts`): one index seek per distinct (NDC, date). The newest row per NDC is
+   `nadacNow()`. Counts are `count(*)`, never a load and a `.length`.
+3. **Hold what takes more than a moment** (`held.ts`): keyed on a fingerprint of the tables that
+   feed it, served at once while stale and refreshed behind, computed now when the data changed,
+   shared between concurrent callers. Read a held value; never sort or write into it.
+4. **Warm when idle** (`warm.ts`): the scheduler computes the readings Today and Buying open with
+   while nobody is waiting, and refreshes whatever is stale, so a person's page is a read.
+5. **Prune what nobody can use.** NADAC keeps `nadac_keep_months` behind today (default 18) and
+   an NDC's newest row always.
+6. **Index what the reads seek on.** Migration 0080 added `claims (status, ndc11, date_filled)`
+   and `claim_payments (received_on)`; a new read that filters on a column no index covers gets one.
+

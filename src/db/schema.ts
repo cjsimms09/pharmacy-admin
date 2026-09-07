@@ -2066,6 +2066,8 @@ export const claims = sqliteTable(
     index("claims_bin_idx").on(t.bin),
     index("claims_date_idx").on(t.dateFilled),
     index("claims_rx_idx").on(t.rxNumber),
+    /** The in-force NADAC query and every "paid claims since" read: status, then NDC, then date. */
+    index("claims_paid_ndc_date_idx").on(t.status, t.ndc11, t.dateFilled),
   ],
 );
 
@@ -2230,7 +2232,7 @@ export const claimPayments = sqliteTable(
     recordedBy: text("recorded_by").notNull(),
     createdAt: text("created_at").notNull().default(now()),
   },
-  (t) => [index("claim_payments_claim_idx").on(t.claimId), index("claim_payments_rx_idx").on(t.rxNumber)],
+  (t) => [index("claim_payments_claim_idx").on(t.claimId), index("claim_payments_rx_idx").on(t.rxNumber), index("claim_payments_received_idx").on(t.receivedOn)],
 );
 
 export const planGroups = sqliteTable(

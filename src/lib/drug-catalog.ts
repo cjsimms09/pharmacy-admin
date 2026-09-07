@@ -177,6 +177,19 @@ export async function drugFileHealth(): Promise<{
   problems: number;
   reimbursedCents: number;
 }> {
+  const { held } = await import("./held");
+  return held("drug-file-health", loadDrugFileHealth);
+}
+
+async function loadDrugFileHealth(): Promise<{
+  total: number;
+  suppliers: { supplier: string; items: number }[];
+  mismatches: number;
+  settled: number;
+  dispensed: number;
+  problems: number;
+  reimbursedCents: number;
+}> {
   const all = await drugFile();
   const bySupplier = new Map<string, number>();
   let mismatches = 0, settled = 0, dispensed = 0, problems = 0, reimbursedCents = 0;

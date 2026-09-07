@@ -19,7 +19,7 @@ import { db } from "@/db";
  * callers arriving together share one computation. A held value is shared by reference, so a
  * reader never sorts or writes into what it is given.
  */
-type Entry = { at: number; fp: string; value: unknown; has: boolean; pending: Promise<unknown> | null };
+type Entry = { at: number; fp: string; value: unknown; has: boolean; pending: Promise<unknown> | null; compute: () => Promise<unknown> };
 
 const holds = new Map<string, Entry>();
 const FRESH_MS = 10 * 60_000;
@@ -72,7 +72,7 @@ function run<T>(key: string, fp: string, compute: () => Promise<T>): Promise<T> 
   const prev = holds.get(key);
   const p = compute()
     .then((value) => {
-      holds.set(key, { at: Date.now(), fp, value, has: true, pending: null });
+      holds.set(key, { at: Date.now(), fp, value, has: true, pending: null, compute });
       return value;
     })
     .catch((err) => {
@@ -80,8 +80,31 @@ function run<T>(key: string, fp: string, compute: () => Promise<T>): Promise<T> 
       else holds.delete(key);
       throw err;
     });
-  holds.set(key, { at: prev?.at ?? 0, fp: prev?.fp ?? fp, value: prev?.value, has: prev?.has ?? false, pending: p });
+  holds.set(key, { at: prev?.at ?? 0, fp: prev?.fp ?? fp, value: prev?.value, has: prev?.has ?? false, pending: p, compute });
   return p;
+}
+
+/**
+ * Recompute whatever is held and stale or behind the data, one at a time, for the idle minutes.
+ *
+ * Called by the scheduler when nobody has used the site for a while, so the morning's first page
+ * finds everything fresh rather than paying for the night's imports itself. Returns how many were
+ * refreshed.
+ */
+export async function refreshStale(maxAgeMs = FRESH_MS): Promise<number> {
+  const fp = await fingerprint();
+  let n = 0;
+  for (const [key, e] of [...holds.entries()]) {
+    if (!e.has || e.pending) continue;
+    if (e.fp === fp && Date.now() - e.at < maxAgeMs) continue;
+    try {
+      await run(key, fp, e.compute);
+      n++;
+    } catch {
+      // Its next reader computes it; nothing to do here.
+    }
+  }
+  return n;
 }
 
 /** Drop what is held, all of it or by key prefix, for the import that knows it changed the world. */

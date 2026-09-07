@@ -325,14 +325,15 @@ async function loadProductLedger(): Promise<{ rows: LedgerRow[]; rate: number | 
   const { getSettings } = await import("./settings");
   const { eq } = await import("drizzle-orm");
 
-  const [lines, catalogue, nadac, rawClaims, s, shelf] = await Promise.all([
+  const [lines, catalogue, nadac, fills, s, shelf] = await Promise.all([
     db.query.invoiceLines.findMany(),
     // Held between requests: forty-five thousand rows that change once a week. See catalogue-cache.
     (await import("./catalogue-cache")).catalogueRows(),
     // The newest price per drug, asked for in SQL and held between requests. Loading every NADAC
     // row ever published to keep one per NDC is what made this page unusable. See nadac-latest.
     (await import("./nadac-latest")).nadacNow(),
-    db.query.claims.findMany(),
+    // The fills, already grouped and held (claims.ts): the same rows this used to scan and group itself.
+    (await import("./claims")).allFills(),
     getSettings(),
     // The latest count, for the pack sizes it carries against everything actually on the shelf.
     (async () => {
@@ -355,33 +356,6 @@ async function loadProductLedger(): Promise<{ rows: LedgerRow[]; rate: number | 
    * quantities was overstated by the same factor. The same question was getting two answers
    * depending on which screen it was asked from, which is worse than either answer being wrong.
    */
-  const { groupIntoFills } = await import("./fills");
-  const { laterPayments } = await import("./claim-payments");
-  const later = await laterPayments();
-  const fills = groupIntoFills(
-    rawClaims.map((c) => ({
-      id: c.id,
-      rxNumber: c.rxNumber,
-      fillNumber: c.fillNumber,
-      dateFilled: c.dateFilled,
-      ndc11: c.ndc11,
-      itemName: c.itemName,
-      bin: c.bin,
-      pcn: c.pcn,
-      groupNumber: c.groupNumber,
-      pbmName: c.pbmName,
-      payerLabel: c.payerLabel,
-      quantityThousandths: c.quantityThousandths,
-      remitCents: c.remitCents,
-      copayCents: c.copayCents,
-      patientTotalCents: c.patientTotalCents,
-      acquisitionCents: c.acquisitionCents,
-      status: c.status,
-      onAccount: c.onAccount,
-      unmatchedReversal: (c.remitCents ?? 0) < 0 && !c.reversalKey,
-    })),
-    later,
-  );
   const claims = fills.map((f) => ({
     ndc11: f.ndc11,
     itemName: f.itemName,

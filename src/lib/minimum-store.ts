@@ -79,18 +79,14 @@ async function loadMinimums(): Promise<MinimumsView> {
   }
   for (const v of move.velocity) if (v.name && !names.get(v.ndc11)) names.set(v.ndc11, v.name);
 
-  /* CMS's own brand/generic flag, latest row per NDC. Nothing is inferred from a name. */
-  const nadac = await db.query.nadacPrices.findMany({ columns: { ndc11: true, classification: true, effectiveOn: true } });
+  /*
+   * CMS's own brand/generic flag, from the newest row per NDC. Nothing is inferred from a name.
+   * The newest rows are held (nadac-latest.ts); every row ever held was a million and a half, and
+   * loading them to keep the newest of each was nine seconds of this page.
+   */
+  const { nadacNow } = await import("./nadac-latest");
   const generic = new Map<string, "B" | "G">();
-  const seenOn = new Map<string, string>();
-  for (const n of nadac) {
-    if (n.classification !== "B" && n.classification !== "G") continue;
-    const prev = seenOn.get(n.ndc11);
-    if (!prev || n.effectiveOn > prev) {
-      seenOn.set(n.ndc11, n.effectiveOn);
-      generic.set(n.ndc11, n.classification);
-    }
-  }
+  for (const n of await nadacNow()) if (n.classification === "B" || n.classification === "G") generic.set(n.ndc11, n.classification);
   const controlled = await controlledNdcs(names);
   const eligibility: Eligibility = { generic, controlled };
 

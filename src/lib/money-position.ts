@@ -177,6 +177,11 @@ export function summariseEarnings(
 }
 
 export async function moneyPosition(today = new Date()): Promise<MoneyPosition> {
+  const { held } = await import("./held");
+  return held(`money-position:${today.toISOString().slice(0, 10)}`, () => loadMoneyPosition(today));
+}
+
+async function loadMoneyPosition(today: Date): Promise<MoneyPosition> {
   const month = todayIso().slice(0, 7);
   const suppliers = await allSuppliers(true);
 

@@ -92,18 +92,31 @@ async function invoicesFor(claims: { claimId: string; ndc11: string; dateFilled:
 }
 
 export async function appealQueue(today = todayIso()): Promise<Queue & { since: string }> {
+  const { held } = await import("./held");
+  return held(`appeal-queue:${today}`, () => loadAppealQueue(today));
+}
+
+async function loadAppealQueue(today: string): Promise<Queue & { since: string }> {
   const since = addDays(today, -120);
-  const [claims, rates, terms, nadacRows, existing, pharmacy] = await Promise.all([
-    db.query.claims.findMany({ where: eq(schema.claims.status, "paid") }),
+  const { and, gte } = await import("drizzle-orm");
+  const { nadacRecordsForClaims } = await import("./nadac-in-force");
+  const { nadacNow } = await import("./nadac-latest");
+  /*
+   * The claims of the appeal window and, for each, the NADAC in force on its fill date — asked of
+   * the database rather than by loading every NADAC row ever held (a year of weekly files is a
+   * million and a half rows, and this page took twenty seconds to open on them).
+   */
+  const [claims, rates, terms, records, latest, existing, pharmacy] = await Promise.all([
+    db.query.claims.findMany({ where: and(eq(schema.claims.status, "paid"), gte(schema.claims.dateFilled, since)) }),
     db.query.networkRates.findMany(),
     termsByPbm(),
-    db.query.nadacPrices.findMany({ columns: { ndc11: true, unitMicros: true, pricingUnit: true, effectiveOn: true, fileAsOf: true, classification: true } }),
+    nadacRecordsForClaims({ status: "paid", since }),
+    nadacNow(),
     db.query.appeals.findMany({ columns: { claimId: true } }),
     pharmacyIdentity(),
   ]);
-  const records: NadacRecord[] = nadacRows.map((n) => ({ ndc11: n.ndc11, unitMicros: n.unitMicros, pricingUnit: n.pricingUnit as NadacRecord["pricingUnit"], effectiveOn: n.effectiveOn, fileAsOf: n.fileAsOf }));
   const classOf = new Map<string, "B" | "G">();
-  for (const n of nadacRows) if ((n.classification === "B" || n.classification === "G") && !classOf.has(n.ndc11)) classOf.set(n.ndc11, n.classification);
+  for (const n of latest) if (n.classification === "B" || n.classification === "G") classOf.set(n.ndc11, n.classification);
 
   const queueClaims: QueueClaim[] = claims
     .filter((c) => c.ndc11 && c.pbmName && !c.cashPlan && c.dateFilled >= since)

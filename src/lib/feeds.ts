@@ -65,6 +65,15 @@ async function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T
 }
 
 export async function feedsNow(opts: { probe?: boolean; now?: Date } = {}): Promise<{ feeds: Feed[]; late: Feed[] }> {
+  // The plain reading is held (held.ts): Today asks for it on every open. A probe is never held.
+  if (!opts.probe && !opts.now) {
+    const { held } = await import("./held");
+    return held("feeds", () => loadFeeds(opts));
+  }
+  return loadFeeds(opts);
+}
+
+async function loadFeeds(opts: { probe?: boolean; now?: Date }): Promise<{ feeds: Feed[]; late: Feed[] }> {
   const now = opts.now ?? new Date();
   const today = now.toISOString().slice(0, 10);
   const s = await getSettings();

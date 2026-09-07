@@ -2,7 +2,8 @@ import { familyTabs } from "@/lib/families";
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { purchasingOpportunities } from "@/lib/suppliers";
-import { productLedger, opportunities, margins, losers, type Flag } from "@/lib/product-ledger";
+import { productLedger, type Flag } from "@/lib/product-ledger";
+import { productsExtrasNow } from "@/lib/products-store";
 import { formatCents } from "@/lib/money";
 import { requireReimbursement } from "@/lib/features";
 import { PageHeader, Notice, Empty, Card, Figure } from "@/components/ui";
@@ -29,6 +30,7 @@ export default async function ProductsPage() {
   await requireReimbursement();
   await requireUser();
   const [opps, ledger, profit] = await Promise.all([purchasingOpportunities(), productLedger(), drugProfitNow()]);
+  void ledger.rows;
   // Worth acting on: a better NDC or source worth at least five dollars a month on this pharmacy's fills.
   const better = profit.rows.filter((r) => (r.gainPerMonthCents ?? 0) >= 500);
   const unplaced = profit.rows.filter((r) => r.gainPerMonthCents === null && r.fills >= 2);
@@ -38,20 +40,8 @@ export default async function ProductsPage() {
   for (const r of profit.rows) byModel.set(r.model, (byModel.get(r.model) ?? 0) + r.fills);
   const modelMix = [...byModel.entries()].sort((a, b) => b[1] - a[1]).map(([m, n]) => `${MODEL_WORDS[m]} ${Math.round((100 * n) / Math.max(1, profit.rows.reduce((t, r) => t + r.fills, 0)))}%`).join(" · ");
   const sum = profit.summary;
-  const ledgerRows = opportunities(ledger.rows);
-  const { underNadac, switchNdc, notYetBought } = await import("@/lib/under-nadac");
-  const { groupKey } = await import("@/lib/product-groups");
-  const nadacForGroups = await (await import("@/lib/nadac-latest")).nadacNow();
-  const groupByNdc = new Map<string, string | null>();
-  for (const r of nadacForGroups) {
-    if (groupByNdc.has(r.ndc11)) continue;
-    groupByNdc.set(r.ndc11, groupKey({ ndc11: r.ndc11, description: r.description, classification: r.classification, pricingUnit: r.pricingUnit }));
-  }
-  const buys = underNadac(ledger.rows, (ndc) => groupByNdc.get(ndc) ?? null);
-  const switches = switchNdc(buys);
-  const unstocked = notYetBought(buys);
-  const earned = margins(ledger.rows);
-  const losing = losers(earned);
+  const extras = await productsExtrasNow();
+  const { ledgerRows, buys, switches, unstocked, earned, losing } = extras;
   const bestEarners = earned.filter((m) => m.marginCents > 0).slice(0, 15);
   const totalMarginCents = earned.reduce((n, m) => n + m.marginCents, 0);
   const totalSaving = opps.rows.reduce((s, r) => s + (r.savingCents ?? 0), 0);

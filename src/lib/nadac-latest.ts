@@ -31,11 +31,11 @@ export type NadacNow = {
   pricingUnit: string | null;
   /** Brand or generic, as CMS classifies it. */
   classification: string | null;
+  /** Over the counter, as the file flags it. */
+  otc: boolean | null;
 };
 
 let held: { key: string; at: number; rows: NadacNow[] } | null = null;
-
-const MAX_AGE_MS = 10 * 60_000;
 
 /** The newest file loaded, and how many rows are held with it: one indexed row, not a scan. */
 async function currentKey(): Promise<string> {
@@ -49,13 +49,15 @@ async function currentKey(): Promise<string> {
 
 export async function nadacNow(): Promise<NadacNow[]> {
   const key = await currentKey();
-  if (held && held.key === key && Date.now() - held.at < MAX_AGE_MS) return held.rows;
+  // Held until a new file loads: a weekly benchmark does not change between two page loads, and
+  // the grouped pass over a year of files is a second and a half that must not repeat on a clock.
+  if (held && held.key === key) return held.rows;
 
   const { db } = await import("@/db");
   const client = (db as unknown as { $client: { execute: (sql: string) => Promise<{ rows: Record<string, unknown>[] }> } }).$client;
   const r = await client.execute(
     // The bare columns come from the row holding max(effective_on); see the note above.
-    "select ndc11, max(effective_on) as effective_on, unit_micros, description, pricing_unit, classification from nadac_prices group by ndc11",
+    "select ndc11, max(effective_on) as effective_on, unit_micros, description, pricing_unit, classification, otc from nadac_prices group by ndc11",
   );
   const rows: NadacNow[] = [];
   for (const row of r.rows) {
@@ -64,7 +66,7 @@ export async function nadacNow(): Promise<NadacNow[]> {
     const effectiveOn = String(row.effective_on ?? "");
     if (!ndc11 || !Number.isFinite(unitMicros)) continue;
     const text = (v: unknown) => (v === null || v === undefined ? null : String(v));
-    rows.push({ ndc11, unitMicros, effectiveOn, description: text(row.description), pricingUnit: text(row.pricing_unit), classification: text(row.classification) });
+    rows.push({ ndc11, unitMicros, effectiveOn, description: text(row.description), pricingUnit: text(row.pricing_unit), classification: text(row.classification), otc: row.otc === null || row.otc === undefined ? null : Number(row.otc) === 1 });
   }
   held = { key, at: Date.now(), rows };
   return rows;

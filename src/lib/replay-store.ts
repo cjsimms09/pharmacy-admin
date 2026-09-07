@@ -20,10 +20,18 @@ import { todayIso } from "./dates";
 export type ReplayView = { replay: Replay; months: number; missing: string[]; asOf: string };
 
 export async function replayNow(monthsBack = 12): Promise<ReplayView> {
+  const { held } = await import("./held");
+  return held(`replay:${monthsBack}:${todayIso()}`, () => loadReplay(monthsBack));
+}
+
+async function loadReplay(monthsBack: number): Promise<ReplayView> {
   const today = todayIso();
+  const { nadacNow } = await import("./nadac-latest");
   const [fills, nadac, items, suppliers] = await Promise.all([
     allFills(),
-    db.query.nadacPrices.findMany({ columns: { ndc11: true, description: true, classification: true, pricingUnit: true, otc: true, effectiveOn: true } }),
+    // The newest row per NDC: a product key needs the description, the class and the unit, and
+    // those do not change between files. Every row ever held was a million and a half.
+    nadacNow(),
     // The levelled catalogue: every supplier's row on the same footing (one whole package, the unit
     // derived from its total) with the pharmacy's corrections applied. Read raw, McKesson's "(3) 28 EA"
     // priced per inner pack against IPD's "84 EA" per tablet showed a twenty-three-fold gap that was

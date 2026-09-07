@@ -482,8 +482,11 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
  * themselves.
  */
 export async function monthlyAccount(month: string, basis: "accrual" | "cash" = "accrual"): Promise<MonthlyPL> {
-  const shared = await loadShared([month], basis);
-  return monthlyPL(monthInputs(month, basis, shared));
+  const { held } = await import("./held");
+  return held(`month-account:${month}:${basis}`, async () => {
+    const shared = await loadShared([month], basis);
+    return monthlyPL(monthInputs(month, basis, shared));
+  });
 }
 
 /**
@@ -529,7 +532,7 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
   const [sales, cats, fills, suppliers, invoices, lines, counts, payments, standing] = await Promise.all([
     salesMonths(),
     categories(true),
-    allFills(),
+    allFills({ from, to }),
     allSuppliers(true),
     db.query.supplierInvoices.findMany({ columns: { totalCents: true, paidOn: true, invoiceDate: true, supplierId: true, supplier: true } }),
     db.query.invoiceLines.findMany({ where: and(gte(schema.invoiceLines.invoiceDate, from), lte(schema.invoiceLines.invoiceDate, to)), columns: { invoiceDate: true, extendedCents: true } }),
