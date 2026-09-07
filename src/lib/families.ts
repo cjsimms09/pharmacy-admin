@@ -22,7 +22,7 @@ export const FAMILIES = {
   order: [
     { href: "/purchasing", label: "Today's order" },
     { href: "/purchasing/shelf", label: "The shelf" },
-    { href: "/purchasing/minimums", label: "Order minimums" },
+    { href: "/purchasing/products", label: "Which NDC pays" },
   ],
   floor: [
     { href: "/claims/floor", label: "Paid under the floor" },

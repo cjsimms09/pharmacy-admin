@@ -70,6 +70,8 @@ export type Need = {
 export type Offer = {
   ndc11: string;
   supplier: string;
+  /** The supplier's item number, carried onto the line so the order can be placed from it. */
+  itemNumber?: string | null;
   /** Printed, per unit, in micros. */
   unitCostMicros: number;
   /** After the rebate where the line earns it. Equal to the gross where it does not. */
@@ -97,6 +99,7 @@ export type PlannedLine = {
   ndc11: string;
   name: string | null;
   supplier: string;
+  itemNumber?: string | null;
   packs: number;
   packQty: number;
   unitsThousandths: number;
@@ -248,6 +251,7 @@ export function planOrder(input: PlanInput): Plan {
       ndc11,
       name,
       supplier: offer.supplier,
+      itemNumber: offer.itemNumber ?? null,
       packs,
       packQty,
       unitsThousandths,

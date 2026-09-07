@@ -66,9 +66,31 @@ it and said so on the pull request. The owner reads this too.
   (your null-dropping and defaults moved into them from the extract file), the answer is found
   between its first and last brace so the proving read parses too, and `RateTerm.lineOfBusiness`
   is `.optional()` like its neighbours.
-- **Migration renumbered twice: mine is `0077_standing_costs_terms_pages_tax`** (`standing_costs`
-  with `paid_day`, `contract_docs.pages`, `network_rates.effective_to`, `suppliers.payment_terms_days`,
-  `sales_months.retail_tax_cents`), after your `0074`–`0076`. Regenerated from the schema, applied
+- **What to buy is the secondaries only, and it no longer invents a basket.** The owner's brief:
+  list what to order from each secondary to reach its minimum, McKesson off the list, the
+  supplier's item number on every row, and "it doesn't know what's in our cart". So `/purchasing`
+  is one card per non-primary wholesaler: "Order these" (short and cheapest there) and then "Next
+  best to add, soonest needed first" — every qualifying generic one pack at a time, fewest days on
+  hand first, with a running total that starts from what the pharmacist types as the cart (a GET
+  field per card, `cart-<supplier>`) or from the order lines when nothing is typed. The greedy
+  filler still exists (`fillMinimums().picks`) but the page shows `candidates` instead;
+  `minimum-store.ts` counts only the planner's `need` lines as spoken for, so the planner's own
+  top-ups appear in the ranked list rather than as a decision already made. `/purchasing/minimums`
+  redirects here and is off the family tabs. The comparison cards ("Buy these instead", "What each
+  drug earns", opps) moved to `/purchasing/products` ("Which NDC pays"), a tab in the same family.
+  **The item number is new plumbing through your files**: `supplier_items.item_number` (in my
+  migration `0077`), read by both catalogue importers in `suppliers.ts` (`COLUMNS.itemNumber`
+  aliases; the PioneerRx path already had it in `pick`), carried by `catalogue-cache.ts`
+  (`CatalogueRow.itemNumber?`), `shelf.ts` offers, `order-plan.ts` (`Offer` and `PlannedLine`),
+  and `minimum-filler.ts`. It fills in on the next catalogue import; until then every row shows a
+  dash with a title saying why. Also `shelf.ts`: `shortestLead` is at least one day (a zero lead
+  time made the target window zero and nothing short), and the contract flag maps through
+  `contractFlagOf`. The supplier terms field is now labelled "Lead time, in days" with what it
+  does — the owner read "Days from order to shelf" as meaningless.
+- **Migration renumbered twice: mine is `0077_standing_costs_terms_pages_tax_bank_items`**
+  (`standing_costs` with `paid_day`, `contract_docs.pages`, `network_rates.effective_to`,
+  `suppliers.payment_terms_days`, `sales_months.retail_tax_cents`, `bank_lines`,
+  `supplier_items.item_number`), after your `0074`–`0076`. Regenerated from the schema, applied
   to a fresh database. The reader is yours as merged at `32803b1` (the shape in the prompt,
   `toWire`/`fromWire`); `termsFromAnswer` reads the wire shape first and the readable shape as a
   fallback, so the proving read and older drafts still parse.

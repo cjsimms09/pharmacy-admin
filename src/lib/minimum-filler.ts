@@ -26,10 +26,19 @@
  *
  * ── Ranking ──
  *
- * By saving per dollar committed, then by velocity, greedily until the shortfall is met. Whole
- * packs only, so the last pick may overshoot the minimum by less than one pack, and the page says
- * by how much. Where the eligible list cannot reach the minimum, the fill says so and by how much,
- * rather than inventing a basket.
+ * Two lists come out for each supplier with a minimum.
+ *
+ * `candidates` is the one the page shows: every generic that qualifies, one pack each, ranked by
+ * how soon the shelf will need it — fewest days on hand first, and between two equally close the
+ * one that saves more per dollar. It is built whether or not the planner's own lines reach the
+ * minimum, because what the site thinks is going to a wholesaler and what is actually in the cart
+ * at their website are two different things, and the pharmacist choosing from a ranked list can
+ * reconcile them where a fixed basket cannot.
+ *
+ * `picks` is the greedy fill: by saving per dollar committed, then by velocity, until the
+ * shortfall is met. Whole packs only, so the last pick may overshoot the minimum by less than one
+ * pack, and it says by how much. Where the eligible list cannot reach the minimum, it says so and
+ * by how much, rather than inventing a basket.
  *
  * Pure.
  */
@@ -46,6 +55,8 @@ export type Eligibility = {
 export type FillPick = {
   ndc11: string;
   name: string | null;
+  /** The supplier's item number, off their catalogue, so the pick can be ordered as printed. */
+  itemNumber: string | null;
   packs: number;
   packQty: number;
   unitsThousandths: number;
@@ -60,13 +71,40 @@ export type FillPick = {
   why: string;
 };
 
+/**
+ * One generic this supplier is the best place to buy, priced by the pack, so a person can add
+ * packs of it to an order until the minimum is met.
+ */
+export type FillCandidate = {
+  ndc11: string;
+  name: string | null;
+  /** The supplier's own item number, so it can be ordered as printed. */
+  itemNumber: string | null;
+  packQty: number;
+  /** One pack, at this supplier's price after its rebate. */
+  packCostCents: number;
+  /** What one pack saves against the next-best supplier for the same units. Never negative. */
+  savingPerPackCents: number;
+  /** Whole packs that fit inside the horizon after what is on the shelf and on order. At least one. */
+  maxPacks: number;
+  perDayThousandths: number;
+  /** Days the shelf holds today, counting what is on order. */
+  daysOnHand: number;
+  /** Days it would hold after one more pack. */
+  daysAfterOnePack: number;
+  unitMicros: number;
+  alternative: { supplier: string; unitMicros: number } | null;
+};
+
 export type SupplierFill = {
   supplier: string;
   supplierId: string | null;
   minimumCents: number | null;
-  /** What is already going to this supplier today: the planned basket. */
+  /** What is already going to this supplier today: the lines the shelf is short of and it is cheapest on. */
   basketCents: number;
   shortfallCents: number;
+  /** Everything that qualifies, one pack each, soonest needed first. Empty where there is no minimum. */
+  candidates: FillCandidate[];
   picks: FillPick[];
   addedCents: number;
   /** Cents over the minimum after the last whole pack, or short of it where it could not be met. */
@@ -132,7 +170,7 @@ export function fillMinimums(input: FillInput): SupplierFill[] {
     const basketCents = input.basketCentsBySupplier.get(s.supplier) ?? 0;
     const minimumCents = s.minimumCents ?? null;
     const shortfallCents = minimumCents === null ? 0 : Math.max(0, minimumCents - basketCents);
-    const base: Omit<SupplierFill, "picks" | "addedCents" | "overshootCents" | "meets" | "refused" | "says"> = {
+    const base: Omit<SupplierFill, "candidates" | "picks" | "addedCents" | "overshootCents" | "meets" | "refused" | "says"> = {
       supplier: s.supplier,
       supplierId: s.supplierId ?? null,
       minimumCents,
@@ -141,11 +179,7 @@ export function fillMinimums(input: FillInput): SupplierFill[] {
       leftOut,
     };
     if (minimumCents === null) {
-      out.push({ ...base, picks: [], addedCents: 0, overshootCents: 0, meets: true, refused: [], says: `${s.supplier} has no order minimum on file.` });
-      continue;
-    }
-    if (shortfallCents === 0) {
-      out.push({ ...base, picks: [], addedCents: 0, overshootCents: basketCents - minimumCents, meets: true, refused: [], says: `Today's basket of ${dollars(basketCents)} already meets the ${dollars(minimumCents)} minimum.` });
+      out.push({ ...base, candidates: [], picks: [], addedCents: 0, overshootCents: 0, meets: true, refused: [], says: `${s.supplier} has no order minimum on file.` });
       continue;
     }
 
@@ -158,12 +192,22 @@ export function fillMinimums(input: FillInput): SupplierFill[] {
       maxDaysOfStock: horizon,
       materialityCents: materiality,
     });
+    const rate = new Map(withCover.map((m) => [m.ndc11, m.perDayThousandths]));
+    const held = new Map(withCover.map((m) => [m.ndc11, m.onHandThousandths]));
+    // Soonest needed first: the shelf that runs out on Thursday is the one to top up today.
+    const candidates = ranked
+      .map((c) => candidateOf(c, rate.get(c.ndc11) ?? 0, held.get(c.ndc11) ?? 0))
+      .sort((a, b) => a.daysOnHand - b.daysOnHand || b.savingPerPackCents / Math.max(1, b.packCostCents) - a.savingPerPackCents / Math.max(1, a.packCostCents));
+
+    if (shortfallCents === 0) {
+      out.push({ ...base, candidates, picks: [], addedCents: 0, overshootCents: basketCents - minimumCents, meets: true, refused, says: `Today's lines of ${dollars(basketCents)} already meet the ${dollars(minimumCents)} minimum.` });
+      continue;
+    }
     /*
      * Saving per dollar first, then velocity: two items that save the same per dollar are told
      * apart by which one the pharmacy will dispense sooner, because that is the one whose cash
      * comes back first.
      */
-    const rate = new Map(withCover.map((m) => [m.ndc11, m.perDayThousandths]));
     const order = [...ranked].sort((a, b) => b.savingPerDollar - a.savingPerDollar || (rate.get(b.ndc11) ?? 0) - (rate.get(a.ndc11) ?? 0));
 
     const picks: FillPick[] = [];
@@ -182,9 +226,31 @@ export function fillMinimums(input: FillInput): SupplierFill[] {
       : picks.length === 0
         ? `Nothing qualifies: no generic this supplier is cheapest on moves steadily enough to buy ${horizon} days of. ${dollars(shortfallCents)} short of the minimum; buy the basket at the primary or wait.`
         : `${picks.length} generic${picks.length === 1 ? "" : "s"} for ${dollars(added)} still leave the order ${dollars(-overshoot)} short of the ${dollars(minimumCents)} minimum. Buy the basket at the primary or wait for more need.`;
-    out.push({ ...base, picks, addedCents: added, overshootCents: overshoot, meets, refused: refused.slice(0, 40), says });
+    out.push({ ...base, candidates, picks, addedCents: added, overshootCents: overshoot, meets, refused: refused.slice(0, 40), says });
   }
   return out;
+}
+
+/** One candidate priced by the pack, with where the shelf stands on it today. */
+function candidateOf(c: Candidate, perDay: number, onHand: number): FillCandidate {
+  const packQty = c.offer.packQty as number;
+  const packUnits = packQty * 1000;
+  const packCost = packCostCents(c.offer, 1);
+  const alt = c.alternative ? Math.round((packQty * c.alternative.effectiveUnitMicros) / 10_000) : null;
+  return {
+    ndc11: c.ndc11,
+    name: c.name,
+    itemNumber: c.offer.itemNumber ?? null,
+    packQty,
+    packCostCents: packCost,
+    savingPerPackCents: alt !== null ? Math.max(0, alt - packCost) : 0,
+    maxPacks: Math.max(1, Math.floor(c.capThousandths / packUnits)),
+    perDayThousandths: perDay,
+    daysOnHand: daysOfStock(onHand, perDay),
+    daysAfterOnePack: daysOfStock(onHand + packUnits, perDay),
+    unitMicros: c.offer.effectiveUnitMicros,
+    alternative: c.alternative ? { supplier: c.alternative.supplier, unitMicros: c.alternative.effectiveUnitMicros } : null,
+  };
 }
 
 /**
@@ -209,6 +275,7 @@ function pickFrom(c: Candidate, remainingCents: number, perDay: number, onHand: 
   return {
     ndc11: c.ndc11,
     name: c.name,
+    itemNumber: c.offer.itemNumber ?? null,
     packs,
     packQty,
     unitsThousandths: units,

@@ -37,4 +37,5 @@ CREATE INDEX `standing_costs_from_idx` ON `standing_costs` (`from_month`);--> st
 ALTER TABLE `contract_docs` ADD `pages` integer;--> statement-breakpoint
 ALTER TABLE `network_rates` ADD `effective_to` text;--> statement-breakpoint
 ALTER TABLE `sales_months` ADD `retail_tax_cents` integer;--> statement-breakpoint
+ALTER TABLE `supplier_items` ADD `item_number` text;--> statement-breakpoint
 ALTER TABLE `suppliers` ADD `payment_terms_days` integer;

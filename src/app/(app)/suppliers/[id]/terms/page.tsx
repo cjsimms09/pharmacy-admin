@@ -504,7 +504,7 @@ export default async function SupplierTermsPage({
           <Field label="Freight charged below that">
             <input name="freightCents" defaultValue={supplier.freightCents === null ? "" : formatCents(supplier.freightCents)} placeholder="15.00" inputMode="decimal" />
           </Field>
-          <Field label="Days from order to shelf" hint="Part of how much cover an order has to buy, not a footnote.">
+          <Field label="Lead time, in days" hint="Days between placing an order and it being on the shelf. Every order buys cover for these days on top of the two-day target, so a wrong figure here orders too little or too much everywhere.">
             <input name="leadTimeDays" type="number" min={0} step={1} defaultValue={supplier.leadTimeDays ?? ""} placeholder="1" />
           </Field>
           <Field label="Paid how many days after the invoice" hint="From the supply agreement. The cash account counts an invoice with no recorded payment date on its date plus this.">

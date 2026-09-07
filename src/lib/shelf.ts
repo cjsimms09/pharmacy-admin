@@ -585,6 +585,7 @@ export async function buyListNow(): Promise<BuyListView> {
     offers.push({
       ndc11: it.ndc11,
       supplier: it.supplier,
+      itemNumber: it.itemNumber ?? null,
       description: it.description,
       unitCostMicros: it.unitCostMicros,
       effectiveUnitMicros: effective,

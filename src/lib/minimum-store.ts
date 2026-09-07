@@ -46,17 +46,19 @@ export async function minimumsNow(): Promise<MinimumsView> {
   const [view, move, rates] = await Promise.all([buyListNow(), shelfMovement(), contractRatesBySupplier()]);
   const missing = [...view.missing];
 
-  const items = await db.query.supplierItems.findMany({ columns: { supplier: true, ndc11: true, description: true, unitCostMicros: true, packSize: true, contractFlag: true, availability: true } });
+  const items = await db.query.supplierItems.findMany({ columns: { supplier: true, ndc11: true, itemNumber: true, description: true, unitCostMicros: true, packSize: true, contractFlag: true, availability: true } });
   const offers: Offer[] = [];
   const names = new Map<string, string | null>();
   for (const it of items) {
     if (it.unitCostMicros === null) continue;
     const packQty = packQtyOf(it.packSize);
-    const rebated = it.contractFlag ? true : null;
+    // The same reading the buy list gives the flag: "not rebated" is not rebated, and only "rebated" is.
+    const rebated = it.contractFlag === "rebated" ? true : it.contractFlag === "not rebated" ? false : null;
     const rate = rates[it.supplier.trim().toLowerCase()] ?? null;
     offers.push({
       ndc11: it.ndc11,
       supplier: it.supplier,
+      itemNumber: it.itemNumber ?? null,
       description: it.description,
       unitCostMicros: it.unitCostMicros,
       effectiveUnitMicros: rebated === true && rate !== null ? Math.round(it.unitCostMicros * (1 - rate)) : it.unitCostMicros,
@@ -86,8 +88,13 @@ export async function minimumsNow(): Promise<MinimumsView> {
   const onOrder = new Map<string, number>();
   for (const r of move.snapshot?.rxRows ?? []) if ((r.onOrderThousandths ?? 0) > 0) onOrder.set(r.ndc11, r.onOrderThousandths as number);
 
-  const basketCentsBySupplier = new Map(view.plan.baskets.map((b) => [b.supplier, b.subtotalCents]));
-  const orderedBySupplier = new Map(view.plan.baskets.map((b) => [b.supplier, new Set(b.lines.map((l) => l.ndc11))]));
+  /*
+   * Only the lines the shelf is actually short of count as "already going" to a supplier. The
+   * planner's own top-ups are the same kind of thing the filler ranks, so they are left to the
+   * ranked list rather than counted as spoken for — the pharmacist chooses them there or not.
+   */
+  const basketCentsBySupplier = new Map(view.plan.baskets.map((b) => [b.supplier, b.lines.filter((l) => l.reason === "need").reduce((n, l) => n + l.costCents, 0)]));
+  const orderedBySupplier = new Map(view.plan.baskets.map((b) => [b.supplier, new Set(b.lines.filter((l) => l.reason === "need").map((l) => l.ndc11))]));
 
   if (generic.size === 0) missing.push("No NADAC file is loaded, so nothing is known to be a generic and nothing can be added.");
 

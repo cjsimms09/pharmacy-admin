@@ -118,6 +118,24 @@ describe("filling a minimum with the right generics", () => {
     assert.ok(!already.picks.some((p) => p.ndc11 === "00000000001"));
   });
 
+  test("every qualifying generic is ranked soonest-needed first, whether or not the lines already meet the minimum", () => {
+    // A holds 20 days (100 on hand at 5 a day); B holds 2 days (20 at 10 a day). B is needed sooner, so it leads.
+    const ipc = fillMinimums(input({ movement: [move("00000000001", 5, 100), move("00000000002", 10, 20), move("00000000003", 5)] }))[1];
+    assert.deepEqual(ipc.candidates.map((c) => c.ndc11), ["00000000002", "00000000001"]);
+    const b = ipc.candidates[0];
+    assert.equal(b.packQty, 500);
+    assert.equal(b.packCostCents, 10_000);
+    assert.equal(b.savingPerPackCents, 2_500);
+    assert.equal(Math.round(b.daysOnHand), 2);
+    assert.equal(Math.round(b.daysAfterOnePack), 52);
+    assert.equal(b.maxPacks, 1);
+    // Met already: the greedy fill stands down, the ranked list does not — the cart may not match the plan.
+    const met = fillMinimums(input({ basketCentsBySupplier: new Map([["IPC", 60_000]]) }))[1];
+    assert.equal(met.picks.length, 0);
+    assert.ok(met.candidates.length >= 2);
+    assert.equal(fillMinimums(input())[0].candidates.length, 0, "no minimum, no list");
+  });
+
   test("when nothing qualifies it says so and prices the alternative rather than inventing a basket", () => {
     const none = fillMinimums(input({ movement: [move("00000000003", 5)] }))[1];
     assert.equal(none.picks.length, 0);

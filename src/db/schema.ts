@@ -2283,6 +2283,8 @@ export const supplierItems = sqliteTable(
     /** The register row this supplier name matched at import time. Null when nothing matched. */
     supplierId: text("supplier_id"),
     ndc11: text("ndc11").notNull(),
+    /** The supplier's own item number for this line, as printed on their file: what an order is placed by. */
+    itemNumber: text("item_number"),
     description: text("description"),
     /** Derived from the description so items can be compared across suppliers and against claims. */
     productKey: text("product_key"),

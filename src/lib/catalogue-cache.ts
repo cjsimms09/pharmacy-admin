@@ -28,6 +28,8 @@ import "server-only";
 export type CatalogueRow = {
   ndc11: string;
   supplier: string;
+  /** The supplier's own item number, what an order line is placed by. Null where the file carried none. */
+  itemNumber?: string | null;
   description: string | null;
   productKey: string | null;
   packSize: string | null;
@@ -124,6 +126,7 @@ export async function catalogueRows(): Promise<CatalogueRow[]> {
       columns: {
         ndc11: true,
         supplier: true,
+        itemNumber: true,
         description: true,
         productKey: true,
         packSize: true,

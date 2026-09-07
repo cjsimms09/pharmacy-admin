@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "6107d49e-6c2c-4c57-9056-9ffab34c49ce",
+  "id": "361b2aea-6577-42d2-8936-b1dc3fd682b6",
   "prevId": "ba31ee2d-8f41-4ae9-b0f9-9c054c173c84",
   "tables": {
     "appeals": {
@@ -7163,6 +7163,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "item_number": {
+          "name": "item_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         },
         "description": {
