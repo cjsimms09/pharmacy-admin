@@ -50,6 +50,9 @@ type Row = {
   daysAfter: number;
   /** For a next-best line: whole packs the horizon allows. */
   maxPacks: number | null;
+  /** For a short line: why this quantity, and the ceiling it breaks, from the planner. */
+  why: string | null;
+  overCap: { days: number; cap: number; smallerPack: { supplier: string; packQty: number; days: number; costCents: number } | null } | null;
   alternative: { supplier: string; unitMicros: number } | null;
   runningCents: number;
   /** The line at which the running total first reaches the minimum. */
@@ -157,6 +160,8 @@ export default async function WhatToBuyPage({ searchParams }: { searchParams: Pr
           perDayThousandths: shelf?.perDayThousandths ?? 0,
           daysAfter: l.daysOfStockAfter,
           maxPacks: null,
+          why: l.why,
+          overCap: l.overCap,
           alternative: null,
           runningCents: run,
           reaches: reach(before, run),
@@ -183,6 +188,8 @@ export default async function WhatToBuyPage({ searchParams }: { searchParams: Pr
           perDayThousandths: c.perDayThousandths,
           daysAfter: c.daysAfterOnePack,
           maxPacks: c.maxPacks,
+          why: null,
+          overCap: null,
           alternative: c.alternative,
           runningCents: run,
           reaches: reach(before, run),
@@ -342,6 +349,16 @@ export default async function WhatToBuyPage({ searchParams }: { searchParams: Pr
                             <td className="num whitespace-nowrap">
                               {r.packs} × {r.packQty.toLocaleString()} <span className="text-xs text-ink-3">= {r.units.toLocaleString()}</span>
                               {r.maxPacks !== null && r.maxPacks > 1 && <span className="block text-[11px] text-ink-3" title={`Whole packs that fit inside ${minimums.horizonDays} days of use after what is on hand and on order`}>up to {r.maxPacks} packs</span>}
+                              {/* Why this quantity, not why the drug is listed: the pack decides it, and the pack is what a person needs to see. */}
+                              {r.why && <span className="block max-w-[16rem] whitespace-normal text-left text-[11px] text-ink-3">{r.why}</span>}
+                              {r.overCap && (
+                                <span className="block max-w-[16rem] whitespace-normal text-left text-[11px] text-warn">
+                                  {Math.round(r.overCap.days)} days of stock, past the {r.overCap.cap}-day shelf.
+                                  {r.overCap.smallerPack
+                                    ? ` ${r.overCap.smallerPack.supplier} ships packs of ${r.overCap.smallerPack.packQty} — ${Math.round(r.overCap.smallerPack.days)} days for ${money(r.overCap.smallerPack.costCents)}.`
+                                    : " No supplier ships it smaller."}
+                                </span>
+                              )}
                             </td>
                             <td className="num font-medium">{money(r.costCents)}</td>
                             <td className={`num ${r.savingCents > 0 ? "text-accent" : "text-ink-3"}`}>{r.savingCents > 0 ? money(r.savingCents) : "—"}</td>

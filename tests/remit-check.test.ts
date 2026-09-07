@@ -24,6 +24,22 @@ describe("remits against claims", () => {
     assert.equal(r.awaiting, 1, "adjudicated to a plan, and the plan has not paid yet");
     assert.equal(r.awaitingCents, 15_025);
   });
+  test("a fill coordinated across two plans is settled leg by leg, so the primary's 835 alone is not a short-pay", () => {
+    const co = (later: { source: string; payer: string | null; amountCents: number }[]) => ({ ...fill("a", 18_000, later), payers: [{ name: "CVS Caremark", remitCents: 15_000 }, { name: "Kansas Medicaid", remitCents: 3_000 }] });
+    const primaryOnly = remitCheck([co([{ source: "plan", payer: "Caremark", amountCents: 15_000 }])]);
+    assert.equal(primaryOnly.short.length, 0, "the secondary has not paid yet; that is awaiting, not short");
+    assert.equal(primaryOnly.agrees, 1);
+    assert.equal(primaryOnly.awaiting, 1);
+    assert.equal(primaryOnly.awaitingCents, 3_000);
+    const unnamed = remitCheck([co([{ source: "plan", payer: null, amountCents: 15_000 }])]);
+    assert.equal(unnamed.short.length, 0, "a payment naming nobody goes to the first unpaid leg, the primary");
+    assert.equal(unnamed.awaitingCents, 3_000);
+    const both = remitCheck([co([{ source: "plan", payer: "Caremark", amountCents: 15_000 }, { source: "plan", payer: "Medicaid", amountCents: 2_500 }])]);
+    assert.equal(both.checked, 2);
+    assert.deepEqual(both.short.map((l) => [l.payer, l.differenceCents]), [["Kansas Medicaid", -500]], "the short line names the leg that is short");
+    assert.equal(both.awaiting, 0);
+  });
+
   test("a fill the plan paid nothing on at adjudication is not awaiting anything", () => {
     const r = remitCheck([fill("a", 0, [])]);
     assert.equal(r.awaiting, 0);

@@ -115,6 +115,27 @@ export type PlannedLine = {
   reason: "need" | "top_up";
   /** Days of stock this line leaves on the shelf, counting what is already there. */
   daysOfStockAfter: number;
+  /**
+   * Why this line is for this quantity — not why the drug is on the list.
+   *
+   * Every row used to read "Short of the target", which explains why phentermine is listed and says
+   * nothing about why the quantity is a thousand. It is a thousand because the smallest pack is a
+   * thousand, and that is the fact a person needs to decide anything.
+   */
+  why: string;
+  /**
+   * A need whose smallest pack carries the shelf past the days-of-stock ceiling, and the way out.
+   *
+   * A need cannot be refused the way a top-up can — the drug is short and the pack is the pack. But
+   * it can be said out loud, because 144 days of one drug is a decision somebody should make on
+   * purpose, and where another supplier ships a smaller pack that is the decision to make.
+   */
+  overCap: {
+    days: number;
+    cap: number;
+    /** A supplier whose smaller pack lands nearer the ceiling, where one exists. */
+    smallerPack: { supplier: string; packQty: number; days: number; costCents: number } | null;
+  } | null;
 };
 
 export type Refusal = { ndc11: string; name: string | null; supplier: string; why: string };
@@ -247,6 +268,39 @@ export function planOrder(input: PlanInput): Plan {
         : null;
     const m = moveBy.get(ndc11);
     const onHand = m?.onHandThousandths ?? 0;
+    const perDay = m?.perDayThousandths ?? 0;
+    const daysOfStockAfter = daysOfStock(onHand + unitsThousandths, perDay);
+    const overage = Math.max(0, unitsThousandths - neededThousandths);
+
+    /*
+     * A need over the ceiling, and whether anybody ships a smaller pack.
+     *
+     * Only needs: a top-up is already refused above the cap where it would breach it, and the
+     * refusal says so. Cheapest first among the packs small enough to help, because the point is to
+     * buy less, not to buy dearer.
+     */
+    let overCap: PlannedLine["overCap"] = null;
+    if (reason === "need" && perDay > 0 && daysOfStockAfter > input.maxDaysOfStock) {
+      const smaller = offersFor(input.offers, ndc11)
+        .filter((o) => (o.packQty ?? 0) > 0 && (o.packQty as number) < packQty && !o.shortDated)
+        .map((o) => {
+          const q = o.packQty as number;
+          const units = packsFor(neededThousandths, q) * q * 1000;
+          return { supplier: o.supplier, packQty: q, days: daysOfStock(onHand + units, perDay), costCents: packCostCents(o, packsFor(neededThousandths, q)) };
+        })
+        .filter((o) => o.days < daysOfStockAfter)
+        .sort((a, b) => a.days - b.days || a.costCents - b.costCents);
+      overCap = { days: daysOfStockAfter, cap: input.maxDaysOfStock, smallerPack: smaller[0] ?? null };
+    }
+
+    const round = (t: number) => Math.round(t / 1000);
+    const why =
+      reason === "top_up"
+        ? `Added to reach ${offer.supplier}'s minimum: it is cheaper here and it moves.`
+        : overage <= 0
+          ? `Short ${round(neededThousandths)} and the pack is ${packQty}, so this is exactly the need.`
+          : `Short ${round(neededThousandths)}; the smallest pack here is ${packQty}, so ${packs} pack${packs === 1 ? "" : "s"} is ${round(unitsThousandths)} — ${round(overage)} more than the need.`;
+
     return {
       ndc11,
       name,
@@ -256,13 +310,15 @@ export function planOrder(input: PlanInput): Plan {
       packQty,
       unitsThousandths,
       neededThousandths,
-      packOverageThousandths: Math.max(0, unitsThousandths - neededThousandths),
+      packOverageThousandths: overage,
       effectiveUnitMicros: offer.effectiveUnitMicros,
       costCents,
       alternativeCostCents,
       savingCents: alternativeCostCents === null ? 0 : alternativeCostCents - costCents,
       reason,
-      daysOfStockAfter: daysOfStock(onHand + unitsThousandths, m?.perDayThousandths ?? 0),
+      daysOfStockAfter,
+      why,
+      overCap,
     };
   };
 

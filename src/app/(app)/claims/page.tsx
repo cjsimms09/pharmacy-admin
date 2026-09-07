@@ -347,7 +347,7 @@ export default async function ClaimsPage({
                 key: "remit-ok",
                 tone: "ok" as const,
                 amount: "",
-                title: `the plans paid exactly what they adjudicated on ${flags.remits.checked} fill${flags.remits.checked === 1 ? "" : "s"}`,
+                title: `the plans paid exactly what they adjudicated on ${flags.remits.checked} payment${flags.remits.checked === 1 ? "" : "s"}`,
                 why: "Every plan remittance read in agrees with its claim to the cent. The remits balance to the claims.",
               }
             : null,
