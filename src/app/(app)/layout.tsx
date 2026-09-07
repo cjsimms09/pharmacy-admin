@@ -5,6 +5,7 @@ import { reimbursementEnabled } from "@/lib/features";
 import { noteRequest } from "@/lib/activity";
 import { TopNav, SubNav } from "@/components/nav";
 import { SendToClaude } from "@/components/send-to-claude";
+import { AddAnything } from "@/components/add-anything";
 import { Crumbs } from "@/components/crumbs";
 import { logo } from "@/lib/branding";
 import { getSettings } from "@/lib/settings";
@@ -51,7 +52,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <form action="/find">
               <input name="q" type="search" placeholder="Find anything…" aria-label="Find anything in the site" className="field h-9 w-44 rounded-full" />
             </form>
-            {/* The inbox on every page: what arrived is looked at several times a day, from anywhere. */}
+            {/* Add and Inbox on every page: what comes in is the whole of the day's paperwork. */}
+            <AddAnything />
             <Link href="/inbox" className="btn btn-sm">Inbox</Link>
             <SendToClaude />
             <div className="hidden text-right text-xs leading-tight text-ink-2 lg:block">
