@@ -1,5 +1,6 @@
 import "server-only";
 import { packUnits, problemsWith, type Problem } from "./catalogue-check";
+import { substitutable, isARated } from "./drug-directory";
 
 /**
  * Everything the site knows about one drug, gathered under its NDC.
@@ -23,10 +24,32 @@ import { packUnits, problemsWith, type Problem } from "./catalogue-check";
 
 export type SupplierOffer = {
   supplier: string;
+  /**
+   * The supplier's own number for this item.
+   *
+   * An NDC identifies the drug; this is what the order has to carry. Nobody can place an order,
+   * ring a wholesaler about a line, or check a confirmation without it, and it was being read out
+   * of the price file and dropped before it reached any screen.
+   */
+  itemNumber: string | null;
   packSize: string | null;
   /** Units the pack size gives, or null where it gives none. */
   packUnits: number | null;
+  /** As printed in the price file, before any rebate. */
   unitCostMicros: number | null;
+  /**
+   * What the unit really costs after the rebate this line earns — the only figure two suppliers
+   * can honestly be compared on.
+   *
+   * A wholesaler that pays a tier rebate on contract items is cheaper than its printed price by
+   * exactly that rate, and comparing its printed price against a wholesaler who pays none sends
+   * the order to the wrong place. Equal to the printed price where the line earns no rebate, or
+   * where the line is marked as earning one but no rate is on file — which understates the
+   * saving, and is the safe direction to be wrong in.
+   */
+  netUnitMicros: number | null;
+  /** True where a rebate was actually applied above, so a screen can say the figure is net. */
+  rebateApplied: boolean;
   packCostCents: number | null;
   awpCents: number | null;
   contractFlag: string | null;
@@ -34,6 +57,14 @@ export type SupplierOffer = {
   availability: string | null;
   /** True where the pharmacy has corrected this supplier's row. */
   corrected: boolean;
+  /**
+   * Why this supplier's price is withheld from every comparison, or null where it is not.
+   *
+   * The row stays — the supplier does carry the item, and the item number is still what an order
+   * has to say — but its price does not decide anything until somebody settles the package. Said
+   * out loud here because a price that simply vanished would be the same failure one level up.
+   */
+  withheld: string | null;
   /** What is wrong with this supplier's row on its own terms. */
   problems: Problem[];
 };
@@ -63,6 +94,62 @@ export type PackDisagreement = {
   text: string;
 };
 
+/** One other NDC of the same drug, with what it would cost to buy instead. */
+export type Equivalent = {
+  ndc11: string;
+  name: string | null;
+  /** Who makes it, from the FDA's directory rather than a wholesaler's description. */
+  labeler: string | null;
+  /** The cheapest net unit price anyone offers it at, and who offers it. */
+  netUnitMicros: number | null;
+  supplier: string | null;
+  /** The supplier's own number for it, so the switch can actually be ordered. */
+  itemNumber: string | null;
+  packSize: string | null;
+  /** True where the pharmacy already has this one on the shelf. */
+  onShelf: boolean;
+};
+
+/**
+ * What else is the same drug, and whether one of them is cheaper.
+ *
+ * The pharmacy stocks one labeller's amlodipine because that is what the wholesaler shipped the
+ * first time. Six other labellers make the same tablet, the FDA rates them interchangeable, and
+ * they are not the same price — the spread between labellers on one generic is routinely larger
+ * than the margin on the fill. Nothing in the site said so, because grouping was done on the words
+ * in a wholesaler's description, which carry the labeller and so put every labeller in its own
+ * group.
+ *
+ * `others` is only ever NDCs the Orange Book actually rates interchangeable with this one: the
+ * same ingredients, strength, form and route, and the same A-rating including its subgroup. An
+ * AB1 is not offered in place of an AB2. Where the directory does not cover an NDC, or rates it
+ * nothing, `why` says that and `others` is empty — a guess here is a substitution error.
+ */
+export type Equivalence = {
+  /** Ingredients, strength, form and route, as the FDA normalises them. */
+  key: string;
+  teCode: string | null;
+  genericName: string | null;
+  strength: string | null;
+  form: string | null;
+  labeler: string | null;
+  /** Every interchangeable NDC the site holds a price for, cheapest first. */
+  others: Equivalent[];
+  /** The cheapest of those that actually beats what this NDC costs. Null where none does. */
+  cheaper: Equivalent | null;
+  /** What a unit saves by switching to it. */
+  savesPerUnitMicros: number | null;
+  /**
+   * What the fills already on file would have cost less at that price.
+   *
+   * Stated as what has happened rather than as a year, because the claim archive is not a year and
+   * calling it one would be a number nobody could check.
+   */
+  savesOnFilledCents: number | null;
+  /** Why there is nothing to show, where there is nothing. */
+  why: string | null;
+};
+
 export type DrugRow = {
   ndc11: string;
   name: string | null;
@@ -80,6 +167,11 @@ export type DrugRow = {
   problems: Problem[];
   /** The cheapest pack cost offered, for ranking and for the buy decision. */
   bestPackCostCents: number | null;
+  /**
+   * The same drug from other labellers, and the cheapest of them. Null until the FDA directory is
+   * loaded, which is the one thing that can say two NDCs are the same drug.
+   */
+  equivalence: Equivalence | null;
 };
 
 export type DrugSearch = {
@@ -94,6 +186,8 @@ export type DrugSearch = {
   dispensedOnly?: boolean;
   /** Only NDCs the pharmacy has settled. */
   fixedOnly?: boolean;
+  /** Only NDCs an interchangeable NDC is cheaper than. */
+  switchableOnly?: boolean;
   limit?: number;
 };
 
@@ -275,6 +369,8 @@ export function buildDrugRow(a: {
     packDisagreement: disagreement,
     problems,
     bestPackCostCents,
+    // Filled by withEquivalents once every row is built: it is a fact about the set, not about one row.
+    equivalence: null,
   };
 }
 
@@ -298,3 +394,148 @@ export function marginOf(row: DrugRow): { perUnitCents: number; percent: number 
 }
 
 export { money as formatMoney };
+
+/* ── The same drug from someone else ── */
+
+/** What the directory says about one NDC, as `directoryKeys()` holds it. */
+export type DirectoryFact = { key: string; teCode: string | null; genericName: string; strength: string; form: string; labeler: string };
+
+/**
+ * The cheapest a row can actually be bought for, and from whom.
+ *
+ * Net of the rebate, because that is the only figure two wholesalers can honestly be compared on,
+ * and paired with the supplier's own item number, because a switch nobody can order is not an
+ * answer.
+ */
+function bestBuy(r: DrugRow): { netUnitMicros: number; supplier: string; itemNumber: string | null; packSize: string | null } | null {
+  let best: { netUnitMicros: number; supplier: string; itemNumber: string | null; packSize: string | null } | null = null;
+  for (const o of r.offers) {
+    if (o.netUnitMicros === null || o.netUnitMicros <= 0) continue;
+    if (best === null || o.netUnitMicros < best.netUnitMicros)
+      best = { netUnitMicros: o.netUnitMicros, supplier: o.supplier, itemNumber: o.itemNumber, packSize: o.packSize };
+  }
+  return best;
+}
+
+/** A price the site itself says is wrong is not a price to switch on. */
+const priceIsTrusted = (r: DrugRow): boolean => !(r.packDisagreement && !r.packFix);
+
+/**
+ * Fills in every row's equivalents, once every row exists.
+ *
+ * Two NDCs are put beside each other only where `substitutable` says the FDA does: the same
+ * ingredients, strength, form and route, and the same A-rating down to its subgroup. That is a
+ * deliberately narrow test. The looser ones — same generic name, same words in the description —
+ * are what produce a screen that offers a 24-hour tablet in place of a 12-hour one.
+ *
+ * The comparison is per unit and needs no conversion: an equivalence key fixes the strength and
+ * the form, so one unit of either is the same amount of the same drug. It is drawn from the net
+ * price, so a rebate that makes a dearer printed price the cheaper buy is not lost, and it skips
+ * any NDC whose sources still disagree about the package — a saving computed from a pack size the
+ * site has already flagged as wrong is exactly the false comparison this page exists to remove.
+ */
+export function withEquivalents(rows: DrugRow[], directory: Map<string, DirectoryFact>): DrugRow[] {
+  if (directory.size === 0) {
+    return rows.map((r) => ({
+      ...r,
+      equivalence: null,
+    }));
+  }
+
+  const byKey = new Map<string, DrugRow[]>();
+  for (const r of rows) {
+    const d = directory.get(r.ndc11);
+    if (!d) continue;
+    byKey.set(d.key, [...(byKey.get(d.key) ?? []), r]);
+  }
+
+  return rows.map((r) => {
+    const mine = directory.get(r.ndc11);
+    if (!mine) {
+      return {
+        ...r,
+        equivalence: {
+          key: "", teCode: null, genericName: null, strength: null, form: null, labeler: null,
+          others: [], cheaper: null, savesPerUnitMicros: null, savesOnFilledCents: null,
+          why: "The FDA's directory does not list this NDC, so nothing can be rated interchangeable with it.",
+        },
+      };
+    }
+
+    const others: Equivalent[] = [];
+    let untrusted = 0;
+    for (const other of byKey.get(mine.key) ?? []) {
+      if (other.ndc11 === r.ndc11) continue;
+      const theirs = directory.get(other.ndc11);
+      // The grouping already shares the key; this is the rating test, subgroup and all.
+      if (!theirs || !substitutable({ equivalenceKey: mine.key, teCode: mine.teCode }, { equivalenceKey: theirs.key, teCode: theirs.teCode })) continue;
+      if (!priceIsTrusted(other)) {
+        untrusted++;
+        continue;
+      }
+      const buy = bestBuy(other);
+      others.push({
+        ndc11: other.ndc11,
+        name: other.name,
+        labeler: theirs.labeler || null,
+        netUnitMicros: buy?.netUnitMicros ?? null,
+        supplier: buy?.supplier ?? null,
+        itemNumber: buy?.itemNumber ?? null,
+        packSize: buy?.packSize ?? null,
+        onShelf: other.shelf !== null,
+      });
+    }
+    others.sort((a, b) => (a.netUnitMicros ?? Infinity) - (b.netUnitMicros ?? Infinity));
+
+    const myBuy = bestBuy(r);
+    let cheaper: Equivalent | null = null;
+    let savesPerUnitMicros: number | null = null;
+    let savesOnFilledCents: number | null = null;
+    let why: string | null = null;
+
+    if (!isARated(mine.teCode)) {
+      why =
+        mine.teCode === null
+          ? "The Orange Book gives this NDC no therapeutic equivalence rating, so nothing here is offered in its place."
+          : `The Orange Book rates this ${mine.teCode}, which is not a rating that says another product may be dispensed for it.`;
+    } else if (others.length === 0) {
+      why = `Nothing else on file is rated ${mine.teCode} against the same ingredient, strength and form.`;
+    } else if (myBuy === null) {
+      why = "No supplier on file prices this NDC, so there is nothing to compare a switch against.";
+    } else if (!priceIsTrusted(r)) {
+      why = "The sources still disagree about what a package of this holds, so its unit price is not a figure to switch on. Settle the package below first.";
+    } else {
+      const priced = others.filter((o) => o.netUnitMicros !== null && o.netUnitMicros < myBuy.netUnitMicros);
+      if (priced.length > 0) {
+        cheaper = priced[0];
+        savesPerUnitMicros = myBuy.netUnitMicros - (cheaper.netUnitMicros as number);
+        const units = r.reimbursement?.unitsThousandths ?? 0;
+        // Micros are millionths of a dollar and quantity is in thousandths, so the pair divides to cents.
+        savesOnFilledCents = units > 0 ? Math.round((savesPerUnitMicros * units) / 10_000_000) : null;
+      } else {
+        why = `Nothing rated ${mine.teCode} against it is cheaper. This is already the buy.`;
+      }
+    }
+    if (untrusted > 0) {
+      const note = `${untrusted} other NDC${untrusted === 1 ? " is" : "s are"} the same drug but ${untrusted === 1 ? "its" : "their"} package is still in dispute, so ${untrusted === 1 ? "it is" : "they are"} left out.`;
+      why = why ? `${why} ${note}` : note;
+    }
+
+    return {
+      ...r,
+      equivalence: {
+        key: mine.key,
+        teCode: mine.teCode,
+        genericName: mine.genericName || null,
+        strength: mine.strength || null,
+        form: mine.form || null,
+        labeler: mine.labeler || null,
+        others,
+        cheaper,
+        savesPerUnitMicros,
+        savesOnFilledCents,
+        why,
+      },
+    };
+  });
+}

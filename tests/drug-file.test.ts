@@ -1,9 +1,8 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { packReadings, packDisagreement, reimbursementFrom, marginOf, buildDrugRow, type SupplierOffer } from "../src/lib/drug-file";
+import { packReadings, packDisagreement, reimbursementFrom, marginOf, buildDrugRow, withEquivalents, type SupplierOffer, type DirectoryFact, type DrugRow } from "../src/lib/drug-file";
 
-const offer = (supplier: string, packSize: string | null, a: Partial<SupplierOffer> = {}): SupplierOffer => ({
-  supplier, packSize, packUnits: null, unitCostMicros: null, packCostCents: null, awpCents: null,
+const offer = (supplier: string, packSize: string | null, a: Partial<SupplierOffer> = {}): SupplierOffer => ({ itemNumber: null, netUnitMicros: null, rebateApplied: false, withheld: null, supplier, packSize, packUnits: null, unitCostMicros: null, packCostCents: null, awpCents: null,
   contractFlag: null, pricedOn: null, availability: null, corrected: false, problems: [], ...a,
 });
 
@@ -172,5 +171,164 @@ describe("a package described from two heights", () => {
     );
     assert.ok(d);
     assert.match(d.text, /ABC \(Cencora\) says 1 EA/);
+  });
+});
+
+describe("what a supplier's line has to carry to be ordered from", () => {
+  /*
+   * An NDC says which drug. It does not say what to type on an order, and it does not say what the
+   * drug actually costs — a wholesaler that pays a rebate on contract items is cheaper than its
+   * printed price by exactly that rate. Comparing a rebated supplier's printed price against one
+   * who pays no rebate sends the order to the wrong place, which is the fault the net column
+   * exists to close.
+   */
+  test("the item number rides on the offer, because an order cannot name a line without it", () => {
+    const o = offer("McKesson", "100 EA", { itemNumber: "4800611" });
+    assert.equal(o.itemNumber, "4800611");
+  });
+
+  test("a line that earns no rebate has a net price equal to its printed one", () => {
+    const o = offer("IPC", "100 EA", { unitCostMicros: 500_000, netUnitMicros: 500_000, rebateApplied: false });
+    assert.equal(o.netUnitMicros, o.unitCostMicros);
+    assert.equal(o.rebateApplied, false);
+  });
+
+  test("a rebated line is cheaper than it prints, and says the figure is net", () => {
+    // Ten per cent back on a contract item: 50 cents printed is 45 net.
+    const o = offer("McKesson", "100 EA", { unitCostMicros: 500_000, netUnitMicros: 450_000, rebateApplied: true, contractFlag: "rebated" });
+    assert.ok((o.netUnitMicros as number) < (o.unitCostMicros as number));
+    assert.equal(o.rebateApplied, true);
+  });
+
+  test("the cheaper printed price is not always the cheaper buy", () => {
+    const dearer = offer("McKesson", "100 EA", { unitCostMicros: 520_000, netUnitMicros: 468_000, rebateApplied: true });
+    const cheaper = offer("IPC", "100 EA", { unitCostMicros: 500_000, netUnitMicros: 500_000, rebateApplied: false });
+    assert.ok((cheaper.unitCostMicros as number) < (dearer.unitCostMicros as number), "IPC prints cheaper");
+    assert.ok((dearer.netUnitMicros as number) < (cheaper.netUnitMicros as number), "and McKesson is the cheaper buy");
+  });
+});
+
+describe("the same drug from another labeller", () => {
+  const AMLODIPINE = "amlodipine besylate|5 mg/1|tablet|oral";
+  const fact = (labeler: string, teCode: string | null, key = AMLODIPINE): DirectoryFact => ({
+    key, teCode, genericName: "amlodipine besylate", strength: "5 mg/1", form: "TABLET", labeler,
+  });
+  const row = (ndc11: string, offers: SupplierOffer[], extra: Partial<Parameters<typeof buildDrugRow>[0]> = {}): DrugRow =>
+    buildDrugRow({ ndc11, name: `Amlodipine ${ndc11}`, offers, shelf: null, nadacUnitMicros: null, nadacPricingUnit: null, reimbursement: null, packFix: null, ...extra });
+
+  const priced = (supplier: string, netUnitMicros: number, itemNumber: string | null = null) =>
+    offer(supplier, "90 EA", { unitCostMicros: netUnitMicros, netUnitMicros, itemNumber });
+
+  test("a cheaper NDC rated the same is named, with what it saves and how to order it", () => {
+    const rows = withEquivalents(
+      [
+        row("00093051701", [priced("McKesson", 400_000)], {
+          reimbursement: { fills: 10, unitsThousandths: 900_000, remitCents: 5_000, revenueCents: 5_000, perUnitCents: 5, perFillCents: 500, lastFilledOn: "2026-08-01", cashFills: 0, cashRevenueCents: 0 },
+        }),
+        row("65862010290", [priced("ANDA", 100_000, "A-7781")]),
+      ],
+      new Map([
+        ["00093051701", fact("Teva", "AB")],
+        ["65862010290", fact("Aurobindo", "AB")],
+      ]),
+    );
+    const mine = rows.find((r) => r.ndc11 === "00093051701")!;
+    assert.equal(mine.equivalence?.cheaper?.ndc11, "65862010290");
+    assert.equal(mine.equivalence?.cheaper?.labeler, "Aurobindo");
+    // An order has to name the line, so the item number rides along with the recommendation.
+    assert.equal(mine.equivalence?.cheaper?.itemNumber, "A-7781");
+    assert.equal(mine.equivalence?.savesPerUnitMicros, 300_000);
+    // 300,000 micros a unit over 900 units = $270.00.
+    assert.equal(mine.equivalence?.savesOnFilledCents, 27_000);
+    // And the cheap one is told it is already the buy.
+    const theirs = rows.find((r) => r.ndc11 === "65862010290")!;
+    assert.equal(theirs.equivalence?.cheaper, null);
+    assert.match(theirs.equivalence?.why ?? "", /already the buy/);
+  });
+
+  test("an AB1 is never offered in place of an AB2, however identical the key", () => {
+    const rows = withEquivalents(
+      [row("11111111111", [priced("McKesson", 400_000)]), row("22222222222", [priced("ANDA", 100_000)])],
+      new Map([
+        ["11111111111", fact("Teva", "AB1")],
+        ["22222222222", fact("Aurobindo", "AB2")],
+      ]),
+    );
+    const mine = rows.find((r) => r.ndc11 === "11111111111")!;
+    assert.equal(mine.equivalence?.cheaper, null);
+    assert.equal(mine.equivalence?.others.length, 0);
+  });
+
+  test("an unrated NDC is never substituted, and says why", () => {
+    const rows = withEquivalents(
+      [row("11111111111", [priced("McKesson", 400_000)]), row("22222222222", [priced("ANDA", 100_000)])],
+      new Map([
+        ["11111111111", fact("Teva", null)],
+        ["22222222222", fact("Aurobindo", "AB")],
+      ]),
+    );
+    const mine = rows.find((r) => r.ndc11 === "11111111111")!;
+    assert.equal(mine.equivalence?.cheaper, null);
+    assert.match(mine.equivalence?.why ?? "", /no therapeutic equivalence rating/);
+  });
+
+  test("a different strength is a different drug, whatever it is called", () => {
+    const rows = withEquivalents(
+      [row("11111111111", [priced("McKesson", 400_000)]), row("22222222222", [priced("ANDA", 100_000)])],
+      new Map([
+        ["11111111111", fact("Teva", "AB")],
+        ["22222222222", fact("Aurobindo", "AB", "amlodipine besylate|10 mg/1|tablet|oral")],
+      ]),
+    );
+    assert.equal(rows.find((r) => r.ndc11 === "11111111111")!.equivalence?.others.length, 0);
+  });
+
+  test("a rebate can make the dearer printed price the equivalent to switch to", () => {
+    const rows = withEquivalents(
+      [
+        row("11111111111", [offer("IPC", "90 EA", { unitCostMicros: 300_000, netUnitMicros: 300_000 })]),
+        row("22222222222", [offer("McKesson", "90 EA", { unitCostMicros: 320_000, netUnitMicros: 240_000, rebateApplied: true })]),
+      ],
+      new Map([
+        ["11111111111", fact("Teva", "AB")],
+        ["22222222222", fact("Aurobindo", "AB")],
+      ]),
+    );
+    // On the printed price McKesson is dearer; on what it actually costs it is the switch.
+    assert.equal(rows.find((r) => r.ndc11 === "11111111111")!.equivalence?.cheaper?.ndc11, "22222222222");
+  });
+
+  test("a package still in dispute is never the basis of a switch, in either direction", () => {
+    const disputed = row("22222222222", [
+      offer("McKesson", "6.7 GM", { unitCostMicros: 100_000, netUnitMicros: 100_000 }),
+      offer("ABC", "6 GM", { unitCostMicros: 100_000, netUnitMicros: 100_000 }),
+    ]);
+    assert.ok(disputed.packDisagreement, "the fixture really is in dispute");
+    const rows = withEquivalents(
+      [row("11111111111", [priced("McKesson", 400_000)]), disputed],
+      new Map([
+        ["11111111111", fact("Teva", "AB")],
+        ["22222222222", fact("Aurobindo", "AB")],
+      ]),
+    );
+    const mine = rows.find((r) => r.ndc11 === "11111111111")!;
+    assert.equal(mine.equivalence?.cheaper, null);
+    assert.equal(mine.equivalence?.others.length, 0);
+    assert.match(mine.equivalence?.why ?? "", /still in dispute/);
+  });
+
+  test("with no directory loaded nothing is claimed at all", () => {
+    const rows = withEquivalents([row("11111111111", [priced("McKesson", 400_000)])], new Map());
+    assert.equal(rows[0].equivalence, null);
+  });
+
+  test("an NDC the directory does not list says so rather than being grouped by its name", () => {
+    const rows = withEquivalents(
+      [row("11111111111", [priced("McKesson", 400_000)]), row("22222222222", [priced("ANDA", 100_000)])],
+      new Map([["22222222222", fact("Aurobindo", "AB")]]),
+    );
+    const mine = rows.find((r) => r.ndc11 === "11111111111")!;
+    assert.equal(mine.equivalence?.others.length, 0);
+    assert.match(mine.equivalence?.why ?? "", /does not list this NDC/);
   });
 });

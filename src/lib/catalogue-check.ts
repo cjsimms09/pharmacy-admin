@@ -176,3 +176,93 @@ export function worstLevel(problems: Problem[]): "wrong" | "check" | null {
   if (problems.some((p) => p.level === "wrong")) return "wrong";
   return problems.length > 0 ? "check" : null;
 }
+
+/* ── A price the arithmetic says is wrong must not win a comparison ── */
+
+/** The shape the quarantine needs: one supplier's row for one NDC. */
+export type ComparableRow = {
+  ndc11: string;
+  supplier: string;
+  packSize: string | null;
+  unitCostMicros: number | null;
+  packCostCents: number | null;
+  /** True where the pharmacy has corrected this row by hand; a correction is never second-guessed. */
+  corrected?: boolean;
+};
+
+/** Why a row was taken out of the comparison, in the words the screen shows. */
+export type Quarantine = { supplier: string; says: string; majorityUnits: number; majorityUnitMicros: number };
+
+/**
+ * Takes out of every comparison the supplier rows whose pack size *and* price are both wrong.
+ *
+ * A comparison is only as good as its worst row, and the catalogue has rows that are not wrong by
+ * a little. ABC lists Apri — a six-card box of 28 — as "1 EA" at $15.39 a unit where four other
+ * wholesalers list 168 EA at $0.1302: the same box, priced a hundred and eighteen times too dear.
+ * The other direction is the expensive one. ABC lists fondaparinux as "4 ML" at $12.50 where the
+ * rest say 1.2 ML at $57.12, so it looks five times cheaper than anyone and wins the order — and
+ * the invoice arrives at five times the price the site promised.
+ *
+ * These are not judgements about who is right. They are arithmetic: a row is taken out only when
+ * all four of these hold, which on the pharmacy's 147,730 catalogue rows is 245 of them.
+ *
+ *   1. Three or more suppliers price this NDC, so there is something to be a majority of.
+ *   2. Two or more of them read the package the same way.
+ *   3. This row reads it differently.
+ *   4. And its unit price is off that majority's by threefold or more — so the disagreement has
+ *      reached the money, rather than being the two-notations-for-one-box case that is not a fault.
+ *
+ * A row the pharmacy has corrected by hand is never quarantined: the pharmacy has the bottle and
+ * the site does not. The row keeps its pack size, its item number and its place on the drug file
+ * screen — only its prices are withheld, which is exactly what every comparison already handles,
+ * because a supplier who does not carry an item has no price either.
+ */
+export function quarantineWrongPrices<T extends ComparableRow>(rows: T[]): { rows: T[]; taken: Map<string, Quarantine> } {
+  const byNdc = new Map<string, T[]>();
+  for (const r of rows) byNdc.set(r.ndc11, [...(byNdc.get(r.ndc11) ?? []), r]);
+
+  const taken = new Map<string, Quarantine>();
+  for (const [ndc11, group] of byNdc) {
+    const priced = group
+      .map((r) => ({ r, units: packUnits(r.packSize), unit: r.unitCostMicros }))
+      .filter((x) => x.units !== null && x.units > 0 && x.unit !== null && x.unit > 0) as {
+      r: T; units: number; unit: number;
+    }[];
+    if (priced.length < 3) continue;
+
+    const counts = new Map<number, number>();
+    for (const x of priced) counts.set(x.units, (counts.get(x.units) ?? 0) + 1);
+    const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0]);
+    const [majorityUnits, agreeing] = ranked[0];
+    // No majority, or everybody agrees: nothing to be an outlier against.
+    if (agreeing < 2 || agreeing === priced.length) continue;
+    // A tie for the majority is not a majority.
+    if (ranked.length > 1 && ranked[1][1] === agreeing) continue;
+
+    const peers = priced.filter((x) => x.units === majorityUnits).map((x) => x.unit).sort((a, b) => a - b);
+    const median = peers[Math.floor(peers.length / 2)];
+
+    for (const x of priced) {
+      if (x.units === majorityUnits || x.r.corrected) continue;
+      const ratio = x.unit / median;
+      if (ratio < 3 && ratio > 1 / 3) continue;
+      const times = ratio > 1 ? ratio : 1 / ratio;
+      taken.set(`${ndc11}|${x.r.supplier}`, {
+        supplier: x.r.supplier,
+        majorityUnits,
+        majorityUnitMicros: median,
+        says:
+          `${x.r.supplier} lists this as ${x.r.packSize ?? "no package"} at $${(x.unit / 1_000_000).toFixed(4)} a unit, ` +
+          `where ${agreeing} other${agreeing === 1 ? "" : "s"} list ${majorityUnits} at $${(median / 1_000_000).toFixed(4)} — ` +
+          `${Math.round(times)} times ${ratio > 1 ? "dearer" : "cheaper"}. The package and the price are both out by the ` +
+          `same factor, so it is one error rather than a bargain, and this row is left out of every comparison until it is settled.`,
+      });
+    }
+  }
+
+  if (taken.size === 0) return { rows, taken };
+  return {
+    rows: rows.map((r) => (taken.has(`${r.ndc11}|${r.supplier}`) ? { ...r, unitCostMicros: null, packCostCents: null } : r)),
+    taken,
+  };
+}

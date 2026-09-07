@@ -1,11 +1,15 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import { requireUser, requireManager } from "@/lib/auth";
 import { searchDrugs, drugFileHealth, settlePackSize, clearPackSize, marginOf } from "@/lib/drug-catalog";
 import { correctItem } from "@/lib/catalogue";
 import { formatCents } from "@/lib/money";
 import { fmt } from "@/lib/dates";
+import { directoryStatus, loadDrugDirectory } from "@/lib/drug-directory-store";
+import { directoryJob, directoryJobRunning, startDirectoryFetch, runDirectoryFetch } from "@/lib/drug-directory-job";
+import { familyTabs } from "@/lib/families";
 import { PageHeader, Card, Notice, Empty, Figure, Field } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -35,11 +39,54 @@ export const metadata = { title: "The drug file" };
  * to every supplier including ones the pharmacy has never bought from, and next week's files do not
  * undo it.
  */
+/*
+ * The FDA fetch, at module level rather than inside the component.
+ *
+ * An inline server action's closed-over variables are serialised into the form and a function
+ * cannot be, so an action defined beside the others in the component renders as "Functions cannot
+ * be passed directly to Client Components" in production. The NADAC page learned this the same way.
+ */
+async function fetchDirectory(): Promise<never> {
+  "use server";
+  const u = await requireManager();
+  const r = await startDirectoryFetch(u);
+  if (r.started) after(() => runDirectoryFetch(u, r.runId!));
+  revalidatePath("/purchasing/catalog");
+  redirect(`/purchasing/catalog?${r.started ? "ok" : "error"}=` + encodeURIComponent(r.message));
+}
+
+/** The same two zips, uploaded by hand, for a day the FDA cannot be reached from the pharmacy. */
+async function uploadDirectory(fd: FormData): Promise<never> {
+  "use server";
+  const u = await requireManager();
+  const read = async (name: string): Promise<Buffer | undefined> => {
+    const f = fd.get(name);
+    if (!(f instanceof File) || f.size === 0) return undefined;
+    return Buffer.from(await f.arrayBuffer());
+  };
+  const ndcDirectoryZip = await read("ndcZip");
+  const orangeBookZip = await read("orangeBookZip");
+  if (!ndcDirectoryZip && !orangeBookZip) {
+    redirect("/purchasing/catalog?error=" + encodeURIComponent("No file was chosen, so nothing was loaded."));
+  }
+  const r = await loadDrugDirectory({ ndcDirectoryZip, orangeBookZip }, { userId: u.id, origin: "uploaded" });
+  if (r.ok) (await import("@/lib/drug-catalog")).forgetDrugFile();
+  revalidatePath("/purchasing/catalog");
+  redirect(
+    `/purchasing/catalog?${r.ok ? "ok" : "error"}=` +
+      encodeURIComponent(
+        r.ok
+          ? `Loaded ${r.rows.toLocaleString()} packages, ${r.rated.toLocaleString()} of them with an Orange Book rating.`
+          : r.why,
+      ),
+  );
+}
+
 export default async function DrugFilePage({
   searchParams,
 }: {
   searchParams: Promise<{
-    q?: string; supplier?: string; mismatch?: string; problems?: string; dispensed?: string; fixed?: string; ok?: string; error?: string;
+    q?: string; supplier?: string; mismatch?: string; problems?: string; dispensed?: string; fixed?: string; switchable?: string; ok?: string; error?: string;
   }>;
 }) {
   const user = await requireUser();
@@ -50,12 +97,16 @@ export default async function DrugFilePage({
     problemsOnly: sp.problems === "1",
     dispensedOnly: sp.dispensed === "1",
     fixedOnly: sp.fixed === "1",
+    switchableOnly: sp.switchable === "1",
   };
 
-  const [health, found] = await Promise.all([
+  const [health, found, directory, job] = await Promise.all([
     drugFileHealth(),
     searchDrugs({ text: sp.q, supplier: sp.supplier, ...flags, limit: 150 }),
+    directoryStatus(),
+    directoryJob(),
   ]);
+  const fetching = directoryJobRunning(job);
 
   const search = new URLSearchParams({
     ...(sp.q ? { q: sp.q } : {}),
@@ -64,6 +115,7 @@ export default async function DrugFilePage({
     ...(flags.problemsOnly ? { problems: "1" } : {}),
     ...(flags.dispensedOnly ? { dispensed: "1" } : {}),
     ...(flags.fixedOnly ? { fixed: "1" } : {}),
+    ...(flags.switchableOnly ? { switchable: "1" } : {}),
   }).toString();
   const keep = (extra: Record<string, string>) =>
     `/purchasing/catalog?${new URLSearchParams({ ...Object.fromEntries(new URLSearchParams(search)), ...extra }).toString()}`;
@@ -149,6 +201,7 @@ export default async function DrugFilePage({
   return (
     <>
       <PageHeader
+        tabs={familyTabs("order", "/purchasing/catalog")}
         title="The drug file"
         subtitle="Every drug any file mentions, under its NDC: who sells it and at what package, what the shelf holds, what it reimburses, and where two sources disagree about the bottle."
         actions={<Link href="/purchasing" className="btn btn-sm">Buying</Link>}
@@ -163,7 +216,7 @@ export default async function DrugFilePage({
         </Empty>
       ) : (
         <>
-          <div className="mb-4 grid gap-3 sm:grid-cols-4">
+          <div className="mb-4 grid gap-3 sm:grid-cols-5">
             <Figure
               value={health.total.toLocaleString()}
               label="drugs on file"
@@ -191,7 +244,103 @@ export default async function DrugFilePage({
               href={keep({ fixed: "1" })}
               tone="muted"
             />
+            {/* The money on this page: the same drug, rated interchangeable by the FDA, from a labeller who charges less. */}
+            <Figure
+              value={health.switchable.toLocaleString()}
+              label="a cheaper equivalent exists"
+              sub={
+                health.inDirectory === 0
+                  ? "Load the FDA directory below to answer this"
+                  : `${formatCents(health.switchableSavingsCents)} on the fills already on file`
+              }
+              href={health.inDirectory === 0 ? undefined : keep({ switchable: "1" })}
+              tone={health.switchable > 0 ? "warn" : "muted"}
+            />
           </div>
+
+          {/*
+            * What says two NDCs are the same drug.
+            *
+            * Without it the site groups on the words in a wholesaler's description — which carry the
+            * labeller and the pack count, so every labeller lands in its own group and the one
+            * question worth asking on this page, "is somebody else's version of this cheaper", cannot
+            * be asked at all. The two files are free, public and weekly.
+            */}
+          {canManage && (
+            <Card
+              className="mb-4"
+              title="What says two NDCs are the same drug"
+              subtitle="The FDA's NDC Directory and the Orange Book. Free, public, and the only thing that can rate one labeller's tablet interchangeable with another's."
+              tone={directory.rows === 0 ? "warn" : undefined}
+            >
+              {directory.rows === 0 ? (
+                <p className="text-sm text-ink-2">
+                  Neither file is loaded, so nothing on this page can say what else is the same drug. Until it is,
+                  every labeller sits in a group of its own and a cheaper equivalent cannot be found.
+                </p>
+              ) : (
+                <p className="text-sm text-ink-2">
+                  <b>{directory.rows.toLocaleString()}</b> packages held, <b>{directory.rated.toLocaleString()}</b> of
+                  them with a therapeutic equivalence rating.{" "}
+                  {directory.lastLoad.length > 0 && (
+                    <span className="text-ink-3">
+                      Last loaded {directory.lastLoad.map((l) => `${l.source === "orange_book" ? "the Orange Book" : "the NDC Directory"} on ${fmt(l.loadedAt)} from ${l.origin}`).join("; ")}.
+                    </span>
+                  )}
+                </p>
+              )}
+
+              {job && (
+                <p className={`mt-2 text-xs ${job.state === "failed" ? "text-crit" : fetching ? "text-ink-2" : "text-ink-3"}`}>
+                  <b>{fetching ? "Fetching" : job.state === "failed" ? "The last fetch failed" : "The last fetch finished"}:</b>{" "}
+                  {job.step}
+                  {fetching ? " Refresh this page to see where it has got to." : ""}
+                </p>
+              )}
+
+              <div className="mt-3 flex flex-wrap items-end gap-4">
+                <form action={fetchDirectory}>
+                  <button className="btn btn-primary" disabled={fetching}>
+                    {fetching ? "Fetching…" : directory.rows === 0 ? "Fetch both files from the FDA" : "Refresh from the FDA"}
+                  </button>
+                </form>
+                <details className="text-xs text-ink-3">
+                  <summary className="cursor-pointer hover:text-accent">Or load the zips by hand</summary>
+                  <form action={uploadDirectory} className="mt-2 flex flex-wrap items-end gap-2">
+                    <label className="text-[11px] text-ink-2">
+                      ndctext.zip
+                      <input type="file" name="ndcZip" accept=".zip" className="field mt-0.5 py-1 text-xs" />
+                    </label>
+                    <label className="text-[11px] text-ink-2">
+                      The Orange Book zip
+                      <input type="file" name="orangeBookZip" accept=".zip" className="field mt-0.5 py-1 text-xs" />
+                    </label>
+                    <button className="btn btn-sm text-xs">Load</button>
+                  </form>
+                  <p className="mt-1 max-w-prose">
+                    ndctext.zip is at accessdata.fda.gov/cder/ndctext.zip; the Orange Book is the
+                    &ldquo;EOBZIP&rdquo; download on fda.gov. Either may be left blank to keep what is held for it.
+                  </p>
+                </details>
+              </div>
+            </Card>
+          )}
+
+          {/*
+            * Item numbers arrive with the catalogue; they cannot be typed in one at a time.
+            *
+            * Said once here rather than as "not given" on every line of every drug, which reads as
+            * twenty-four wholesalers withholding it rather than as one import that predates the
+            * column. Monday's files fill it in without anybody doing anything.
+            */}
+          {health.total > 0 && health.withItemNumber === 0 && (
+            <Notice kind="warn">
+              No supplier line on file carries the wholesaler&rsquo;s own item number, so no order here can name a
+              line yet. The catalogues held were imported before the site read that column. It fills in by itself
+              with the next catalogue — they arrive weekly by email — or at once by re-uploading them on the{" "}
+              <Link href="/purchasing" className="text-accent underline">purchasing page</Link>.
+            </Notice>
+          )}
 
           <Card className="mb-4" title="Find a drug" subtitle="By NDC, or by any part of the name.">
             <form className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
@@ -216,6 +365,7 @@ export default async function DrugFilePage({
                 { on: flags.dispensedOnly, to: keep({ dispensed: flags.dispensedOnly ? "" : "1" }), label: "Only what we dispense" },
                 { on: flags.problemsOnly, to: keep({ problems: flags.problemsOnly ? "" : "1" }), label: "Anything wrong" },
                 { on: flags.fixedOnly, to: keep({ fixed: flags.fixedOnly ? "" : "1" }), label: "Settled by you" },
+                { on: flags.switchableOnly, to: keep({ switchable: flags.switchableOnly ? "" : "1" }), label: "A cheaper equivalent exists" },
               ].map((f) => (
                 <Link key={f.label} href={f.to} className={`badge ${f.on ? "badge-ok" : "badge-muted"}`}>{f.label}</Link>
               ))}
@@ -271,6 +421,13 @@ export default async function DrugFilePage({
                         </span>
                       </div>
 
+                      {r.offers.filter((o) => o.withheld).map((o) => (
+                        <p key={`withheld-${o.supplier}`} className="mt-1 text-xs text-crit">
+                          <b>{o.withheld}</b>{" "}
+                          <span className="text-ink-2">Settle the package below, or correct their price, and it counts again.</span>
+                        </p>
+                      ))}
+
                       {r.packDisagreement && (
                         <p className={`mt-1 text-xs ${r.packFix ? "text-ink-3" : "text-crit"}`}>
                           <b>{r.packDisagreement.text}.</b>{" "}
@@ -281,6 +438,35 @@ export default async function DrugFilePage({
                           ) : (
                             <span className="text-ink-2">An NDC names one package, so one of these is wrong.</span>
                           )}
+                        </p>
+                      )}
+
+                      {/*
+                        * The same drug from another labeller, and what switching is worth.
+                        *
+                        * Rated by the Orange Book, not guessed from a name: the same ingredients,
+                        * strength, form and route, and the same A-rating down to its subgroup. The
+                        * saving is drawn from the net price so a rebate that makes a dearer printed
+                        * price the cheaper buy is not lost, and it carries the supplier's own item
+                        * number, because a switch nobody can order is not an answer.
+                        */}
+                      {r.equivalence?.cheaper && (
+                        <p className="mt-1 text-xs text-warn">
+                          <b>
+                            {r.equivalence.cheaper.name ?? r.equivalence.cheaper.ndc11} is the same drug at{" "}
+                            {perUnit(r.equivalence.cheaper.netUnitMicros)} a unit
+                          </b>{" "}
+                          <span className="text-ink-2">
+                            — {perUnit(r.equivalence.savesPerUnitMicros)} a unit less
+                            {r.equivalence.savesOnFilledCents
+                              ? `, which is ${formatCents(r.equivalence.savesOnFilledCents)} across the fills already on file`
+                              : ""}
+                            . {r.equivalence.cheaper.supplier ?? "A supplier"}
+                            {r.equivalence.cheaper.itemNumber ? ` item ${r.equivalence.cheaper.itemNumber}` : ""}
+                            {r.equivalence.cheaper.labeler ? `, made by ${r.equivalence.cheaper.labeler}` : ""}
+                            {r.equivalence.teCode ? `. Both are rated ${r.equivalence.teCode}` : ""}
+                            {r.equivalence.cheaper.onShelf ? ", and it is already on the shelf" : ""}.
+                          </span>
                         </p>
                       )}
 
@@ -303,8 +489,10 @@ export default async function DrugFilePage({
                             <thead className="text-ink-3">
                               <tr>
                                 <th className="pb-1 text-left font-medium">Supplier</th>
+                                <th className="pb-1 text-left font-medium">Their number</th>
                                 <th className="pb-1 text-left font-medium">Package</th>
                                 <th className="pb-1 text-right font-medium">A unit</th>
+                                <th className="pb-1 text-right font-medium">Net a unit</th>
                                 <th className="pb-1 text-right font-medium">A pack</th>
                                 <th className="pb-1 text-right font-medium">AWP</th>
                                 <th className="pb-1 text-left font-medium">Priced</th>
@@ -317,9 +505,18 @@ export default async function DrugFilePage({
                                     {o.supplier}
                                     {o.contractFlag === "rebated" && <span className="badge badge-ok ml-1">rebated</span>}
                                     {o.corrected && <span className="badge badge-muted ml-1">corrected</span>}
+                                    {/* Withheld, not missing: a price the arithmetic says is wrong decides nothing. */}
+                                    {o.withheld && <span className="badge badge-crit ml-1" title={o.withheld}>price withheld</span>}
                                   </td>
+                                  {/* An NDC says which drug; this is what an order has to carry. */}
+                                  <td className="py-1 font-mono text-[11px]">{o.itemNumber ?? <span className="text-warn" title="Their price file did not carry an item number for this line, so an order cannot name it.">not given</span>}</td>
                                   <td className="py-1">{o.packSize ?? "—"}</td>
-                                  <td className="py-1 text-right tabular-nums">{perUnit(o.unitCostMicros)}</td>
+                                  <td className="py-1 text-right tabular-nums text-ink-3">{perUnit(o.unitCostMicros)}</td>
+                                  {/* What it really costs: the printed price less the rebate this line earns. This is the column to compare on. */}
+                                  <td className="py-1 text-right font-medium tabular-nums">
+                                    {perUnit(o.netUnitMicros)}
+                                    {o.rebateApplied && <span className="ml-1 text-[10px] text-ok">net</span>}
+                                  </td>
                                   <td className="py-1 text-right tabular-nums">{o.packCostCents === null ? "—" : formatCents(o.packCostCents)}</td>
                                   <td className="py-1 text-right tabular-nums">{o.awpCents === null ? "—" : formatCents(o.awpCents)}</td>
                                   <td className="py-1">{o.pricedOn ? fmt(o.pricedOn) : "—"}</td>
@@ -347,6 +544,72 @@ export default async function DrugFilePage({
                             </tbody>
                           </table>
                         </div>
+
+                        {/*
+                          * A contract item with no ladder on file: the net column is the printed price.
+                          *
+                          * Silence here would be the expensive kind. McKesson marks seven thousand lines as
+                          * OneStop; until their ladder is recorded the site takes nothing off any of them, so
+                          * every comparison against a wholesaler who pays no rebate is decided on the wrong
+                          * figure — and it looks right, because the column is filled in.
+                          */}
+                        {r.offers.some((o) => o.contractFlag === "rebated" && !o.rebateApplied) && (
+                          <p className="mt-2 text-[11px] text-warn">
+                            {r.offers.filter((o) => o.contractFlag === "rebated" && !o.rebateApplied).map((o) => o.supplier).join(" and ")}{" "}
+                            {r.offers.filter((o) => o.contractFlag === "rebated" && !o.rebateApplied).length === 1 ? "marks this" : "mark this"} a
+                            contract item, but no rebate ladder is on file for{" "}
+                            {r.offers.filter((o) => o.contractFlag === "rebated" && !o.rebateApplied).length === 1 ? "them" : "them"}, so the net
+                            price above is the printed one and the comparison understates them.{" "}
+                            <Link href="/suppliers" className="text-accent underline">Record the ladder</Link> and every
+                            figure here follows.
+                          </p>
+                        )}
+
+                        {/* Every interchangeable NDC, so the choice is visible rather than only its winner. */}
+                        {r.equivalence && (r.equivalence.others.length > 0 || r.equivalence.why) && (
+                          <div className="mt-3">
+                            <p className="text-[11px] font-medium text-ink-2">
+                              The same drug from other labellers
+                              {r.equivalence.genericName ? (
+                                <span className="font-normal text-ink-3">
+                                  {" "}
+                                  — {r.equivalence.genericName}
+                                  {r.equivalence.strength ? ` ${r.equivalence.strength}` : ""}
+                                  {r.equivalence.form ? `, ${r.equivalence.form.toLowerCase()}` : ""}
+                                  {r.equivalence.teCode ? `, rated ${r.equivalence.teCode}` : ""}
+                                </span>
+                              ) : null}
+                            </p>
+                            {r.equivalence.others.length > 0 ? (
+                              <table className="mt-1 w-full text-xs">
+                                <thead className="text-ink-3">
+                                  <tr>
+                                    <th className="pb-1 text-left font-medium">NDC</th>
+                                    <th className="pb-1 text-left font-medium">Made by</th>
+                                    <th className="pb-1 text-left font-medium">Cheapest from</th>
+                                    <th className="pb-1 text-left font-medium">Their number</th>
+                                    <th className="pb-1 text-right font-medium">Net a unit</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {r.equivalence.others.slice(0, 12).map((o) => (
+                                    <tr key={o.ndc11} className="border-t border-line">
+                                      <td className="py-1 font-mono text-[11px]">
+                                        <Link href={keep({ q: o.ndc11 })} className="hover:text-accent hover:underline">{o.ndc11}</Link>
+                                        {o.onShelf && <span className="badge badge-muted ml-1">on the shelf</span>}
+                                      </td>
+                                      <td className="py-1">{o.labeler ?? "—"}</td>
+                                      <td className="py-1">{o.supplier ?? <span className="text-ink-3">nobody prices it</span>}</td>
+                                      <td className="py-1 font-mono text-[11px]">{o.itemNumber ?? "—"}</td>
+                                      <td className="py-1 text-right tabular-nums">{perUnit(o.netUnitMicros)}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            ) : null}
+                            {r.equivalence.why && <p className="mt-1 text-[11px] text-ink-3">{r.equivalence.why}</p>}
+                          </div>
+                        )}
 
                         {r.reimbursement && (
                           <p className="mt-2 text-[11px] text-ink-3">

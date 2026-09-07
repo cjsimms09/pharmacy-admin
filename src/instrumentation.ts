@@ -31,6 +31,8 @@ export async function register() {
     try {
       const { failOrphanedNadacJob } = await import("./lib/nadac-job");
       await failOrphanedNadacJob();
+      const { failOrphanedDirectoryJob } = await import("./lib/drug-directory-job");
+      await failOrphanedDirectoryJob();
     } catch {
       // Nothing here is worth failing a boot over.
     }

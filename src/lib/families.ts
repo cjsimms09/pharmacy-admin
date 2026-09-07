@@ -28,6 +28,16 @@ export const FAMILIES = {
     { href: "/purchasing/shelf", label: "The shelf" },
     { href: "/purchasing/products", label: "Which NDC pays" },
     { href: "/purchasing/over-nadac", label: "Bought over NADAC" },
+    /*
+     * The reference table the other four are opinions about.
+     *
+     * It was reachable only from a supplier's card and from the diagnostics list, so the owner
+     * could not find the thing every buying decision is drawn from: "I don't see anyway to view
+     * our drug catalog?". It belongs in this family rather than in the menu because it is the
+     * same subject seen from another side — every drug under its NDC, rather than one question
+     * asked of them.
+     */
+    { href: "/purchasing/catalog", label: "The drug file" },
   ],
   floor: [
     { href: "/claims/floor", label: "Paid under the floor" },

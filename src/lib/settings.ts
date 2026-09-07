@@ -242,6 +242,8 @@ export const SETTING_KEYS = [
   "manual_job",
   // The NADAC fetch as a background job, for the same reason the manual audit is one.
   "nadac_job",
+  // The FDA drug directory and Orange Book fetch. Two multi-megabyte zips, so the same shape again.
+  "drug_directory_job",
   "backup_last_result",
   "backup_last_failure",
   // The rehearsal: an archive already on disk, opened and restored to a scratch database, to prove
