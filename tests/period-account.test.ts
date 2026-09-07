@@ -34,6 +34,7 @@ function pl(month: string, a: Partial<MonthlyPL> = {}): MonthlyPL {
     stockMovementCents: null,
     reconciliation: { cogs: { checks: [], impliedCogsCents: null, stockMovementCents: null }, revenue: [] },
     missing: [],
+    caveats: [],
     usable: true,
     ...a,
   };

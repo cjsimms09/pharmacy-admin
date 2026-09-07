@@ -121,6 +121,13 @@ export type PeriodPL = {
   months: MonthlyPL[];
   /** What is missing, named with the month it is missing from. */
   missing: string[];
+  /**
+   * What was computed and is known to lean, named with its month. Separate from `missing` because
+   * the two call for different things: a missing line means the bottom line cannot be read, a
+   * caveat means it can be read and is too high. A screen that shouts equally about both teaches
+   * the reader to ignore it.
+   */
+  caveats: string[];
   usable: boolean;
 };
 
@@ -180,6 +187,7 @@ export function combineMonths(period: Period, months: MonthlyPL[]): PeriodPL {
     stockMovementCents: stock.length > 0 && stock.every((s) => s !== null) ? stock.reduce((n, s) => n + (s ?? 0), 0) : null,
     months: sorted,
     missing: sorted.flatMap((m) => m.missing.map((s) => (sorted.length > 1 ? `${monthLabel(m.month)}: ${s}` : s))),
+    caveats: sorted.flatMap((m) => (m.caveats ?? []).map((s) => (sorted.length > 1 ? `${monthLabel(m.month)}: ${s}` : s))),
     usable: sorted.length > 0 && sorted.every((m) => m.usable),
   };
 }

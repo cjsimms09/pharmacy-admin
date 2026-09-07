@@ -118,3 +118,43 @@ describe("the zip reader", () => {
     assert.throws(() => readZip(Buffer.from("PK is not enough")), /Not a zip archive/);
   });
 });
+
+describe("the A-rating subgroup", () => {
+  /*
+   * AB1 and AB2 exist because the FDA could not say the products under one code are all
+   * interchangeable. Substituting across that line is the mistake this module exists to prevent,
+   * and doing it while showing an FDA rating as the reason would be worse than having no rating.
+   */
+  const k = "amlodipine besylate|2.5mg|tablet|oral";
+  const c = (teCode: string | null) => ({ equivalenceKey: k, teCode });
+
+  test("the same subgroup is substitutable", () => {
+    assert.equal(substitutable(c("AB1"), c("AB1")), true);
+    assert.equal(substitutable(c("AB"), c("AB")), true);
+    assert.equal(substitutable(c("AP"), c("AP")), true);
+  });
+
+  test("a different subgroup is not, however alike the codes look", () => {
+    assert.equal(substitutable(c("AB1"), c("AB2")), false);
+    assert.equal(substitutable(c("AB2"), c("AB3")), false);
+  });
+
+  test("a bare AB is its own group, not a wildcard over the numbered ones", () => {
+    assert.equal(substitutable(c("AB"), c("AB1")), false);
+    assert.equal(substitutable(c("AB1"), c("AB")), false);
+  });
+
+  test("different ratings of the same letter are still different ratings", () => {
+    assert.equal(substitutable(c("AB"), c("AP")), false);
+  });
+
+  test("unrated is never substitutable, and neither is a B rating", () => {
+    assert.equal(substitutable(c(null), c(null)), false);
+    assert.equal(substitutable(c("BX"), c("BX")), false);
+    assert.equal(substitutable(c("AB"), c("BX")), false);
+  });
+
+  test("a different drug is never substitutable whatever the rating", () => {
+    assert.equal(substitutable({ equivalenceKey: "a", teCode: "AB1" }, { equivalenceKey: "b", teCode: "AB1" }), false);
+  });
+});

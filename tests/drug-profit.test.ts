@@ -190,3 +190,44 @@ describe("what the law settles, and the mix of ways a drug is paid", () => {
     assert.equal(r2.candidates.length, 0);
   });
 });
+
+describe("an inferred AWP model has to earn it", () => {
+  /*
+   * Calling a drug AWP-priced makes every candidate NDC valued off its own AWP, so a labeller with
+   * a ten-times-higher AWP looks like it pays ten times more. On this pharmacy's claims not one
+   * fill carries a basis code, so that call is always an inference — and one payment landing at
+   * some fraction of AWP is not evidence of an AWP contract. A real one repeats its discount.
+   */
+  const leg = (i: number, ing: number, awp: number): ClaimLeg => ({
+    fillKey: `f${i}`, ndc11: "N1", dateFilled: "2026-08-0" + ((i % 9) + 1), payer: "Plan",
+    basisCode: null, quantityThousandths: 30_000, remitCents: ing + 100,
+    ingredientPaidCents: ing, feePaidCents: 100, awpCents: awp, cashPlan: false,
+  });
+  const run = (legs: ClaimLeg[]) =>
+    drugProfit({
+      legs,
+      prices: [{ ndc11: "N1", supplier: "McKesson", effectiveUnitMicros: 10_000, source: "catalogue" }],
+      bench: [{ ndc11: "N1", description: "Thing", nadacMicros: null, awpMicros: 100_000 }],
+      groupOf: () => "g1",
+      ndcsByGroup: new Map([["g1", ["N1"]]]),
+      nameOf: () => "Thing",
+      months: 1,
+    } as never);
+
+  test("a discount that repeats is taken as an AWP contract", () => {
+    // Every fill at half of AWP: that is a formula.
+    const p = run([1, 2, 3, 4].map((i) => leg(i, 500, 1000)));
+    assert.ok(p[0].mix.some((m) => m.model === "AWP"), JSON.stringify(p[0].mix));
+  });
+
+  test("scattered discounts are not a formula, and are priced flat instead", () => {
+    // 50%, 62%, 30%, 75% off: no contract looks like this.
+    const p = run([leg(1, 500, 1000), leg(2, 380, 1000), leg(3, 700, 1000), leg(4, 250, 1000)]);
+    assert.ok(!p[0].mix.some((m) => m.model === "AWP"), JSON.stringify(p[0].mix));
+  });
+
+  test("two fills are never enough to call it a formula", () => {
+    const p = run([leg(1, 500, 1000), leg(2, 500, 1000)]);
+    assert.ok(!p[0].mix.some((m) => m.model === "AWP"), JSON.stringify(p[0].mix));
+  });
+});

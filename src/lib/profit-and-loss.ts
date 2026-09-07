@@ -107,6 +107,16 @@ export type MonthlyPL = {
   missing: string[];
   /** Whether enough is present for the bottom line to mean anything. */
   usable: boolean;
+  /**
+   * Figures the account computed and knows are wrong in a stated direction.
+   *
+   * Distinct from `missing`, which means a line could not be worked out at all and the bottom line
+   * is meaningless without it — a month with no payroll is not a slightly optimistic month, it is
+   * a fiction. A caveat is different: the number is readable and useful and leans, and saying which
+   * way it leans is what lets it be trusted. Lumping the two would make `usable` trip on everything
+   * and stop meaning anything at all.
+   */
+  caveats: string[];
 };
 
 export type PLInputs = {
@@ -195,6 +205,7 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
    * would, and the account reads the same whether the bill has come or not.
    */
   const missing: string[] = [];
+  const caveats: string[] = [];
   /*
    * On the cash basis a standing cost counts on the day it is paid, and one with no paid day is
    * not guessed at: it is left out and named, so the cash account never carries an accrual by
@@ -326,6 +337,32 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
       });
     } else {
       missing.push("The acquisition cost of what was dispensed — no claims are loaded for this month, so there is no cost of goods.");
+    }
+
+    /*
+     * The front of shop, counted on one side only.
+     *
+     * Retail and over-the-counter revenue comes off the till summary and goes into this account in
+     * full. The cost of goods on the accrual basis comes from one place — the acquisition cost
+     * printed on each dispensing — and a dispensing is a prescription. An OTC sale never becomes a
+     * claim, so nothing on the cost side of this account has ever known what the front of shop cost
+     * to buy.
+     *
+     * That is not a rounding difference. On this pharmacy's August the retail line was $5,078 and
+     * every cent of it fell to profit. At any ordinary front-of-shop margin the month reads two and
+     * a half to three thousand dollars better than it was, and it errs in the direction that
+     * flatters — which is the direction an account must never quietly err in.
+     *
+     * The site has nowhere yet to get the figure: the Purchase Drill Down knows what OTC was bought
+     * for, but that is purchases rather than cost of sales and it is not stored. Until it is, the
+     * honest thing is to refuse to let the number pass unremarked.
+     */
+    if (i.sales?.retailCents) {
+      caveats.push(
+        `What the retail and over-the-counter goods cost to buy. $${(i.sales.retailCents / 100).toFixed(2)} of front-of-shop sales is ` +
+          "counted as revenue and nothing is counted against it, because cost of goods here is the acquisition cost on each " +
+          "dispensing and an OTC sale is not a dispensing. Profit below is overstated by whatever that stock cost.",
+      );
     }
   } else if (i.paidPurchasesCents !== null) {
     costOfGoods.push({
@@ -470,6 +507,7 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
     missing,
     /* A bottom line is only worth printing when the biggest costs are actually in it. */
     usable: missing.length === 0,
+    caveats,
   };
 }
 

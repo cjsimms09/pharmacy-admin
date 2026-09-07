@@ -299,3 +299,75 @@ export async function sortInboxItem(itemId: string) {
   revalidatePath("/intake");
   redirect(`/intake/${intakeId}`);
 }
+
+/**
+ * Say who a file came from, from the line it arrived on, and never be asked again.
+ *
+ * A catalogue that arrives from an address the register does not know is refused for naming a
+ * supplier the site has never heard of — which is right, because loading ParMed's prices under
+ * McKesson would send orders to the wrong place. What was wrong is what happened next: the only
+ * way out was to leave the inbox, find the Suppliers page, add the supplier, remember to type the
+ * address it sends from, come back, and press "read it again". Three steps across two screens,
+ * with nothing on the screen that had the problem saying any of it.
+ *
+ * So it is one press here. Pick the supplier, or type a new one; the address the file came from is
+ * recorded against them, so every future file from it places itself; and the file is read again at
+ * once, so the answer is on screen rather than promised. That is the whole of "I should only have
+ * to do this once".
+ */
+export async function attributeInboxItem(fd: FormData) {
+  const user = await requireManager();
+  const itemId = String(fd.get("itemId") ?? "");
+  const chosen = String(fd.get("supplierId") ?? "").trim();
+  const newName = String(fd.get("newSupplier") ?? "").trim();
+
+  const item = await db.query.inboxItems.findFirst({ where: eq(schema.inboxItems.id, itemId) });
+  if (!item) fail("/inbox", "That line is no longer here.");
+  const from = (item.fromAddress ?? "").trim().toLowerCase();
+  if (!from) fail("/inbox", "That line carries no sending address, so there is nothing to remember it by.");
+  if (!chosen && !newName) fail("/inbox", "Pick a supplier, or type the name of a new one.");
+
+  const { allSuppliers, addSupplier, updateSupplier, addressesOf, normaliseAddresses } = await import("@/lib/suppliers-registry");
+  const all = await allSuppliers(true);
+
+  let supplierId = chosen;
+  let supplierName = all.find((s) => s.id === chosen)?.name ?? newName;
+  if (!supplierId) {
+    // Typing a name that already exists is a correction, not a duplicate: the register keeps one row per supplier.
+    const already = all.find((s) => s.name.trim().toLowerCase() === newName.toLowerCase());
+    if (already) {
+      supplierId = already.id;
+      supplierName = already.name;
+    } else {
+      supplierId = await addSupplier({ name: newName, catalogName: newName, addresses: from, active: true } as never);
+      supplierName = newName;
+      await audit({ action: "supplier.add", userId: user.id, userName: user.name, entity: "supplier", entityId: supplierId, details: `${newName}, from the inbox` });
+    }
+  }
+
+  // Whether it was picked or just made, the address it sends from goes on the register.
+  const supplier = (await allSuppliers(true)).find((s) => s.id === supplierId);
+  if (supplier) {
+    const held = addressesOf(supplier);
+    if (!held.map((a) => a.toLowerCase()).includes(from)) {
+      await updateSupplier(supplierId, {
+        ...(supplier as unknown as Record<string, unknown>),
+        addresses: normaliseAddresses([...held, from].join(", ")),
+      } as never);
+      await audit({ action: "supplier.address.add", userId: user.id, userName: user.name, entity: "supplier", entityId: supplierId, details: `${from} is ${supplierName}` });
+    }
+  }
+
+  // And read it again now, with the rule that was just made.
+  try {
+    const text = await rereadInboxItem(itemId, { userId: user.id, userName: user.name });
+    revalidatePath("/inbox");
+    revalidatePath("/suppliers");
+    redirect(`/inbox?ok=${encodeURIComponent(`${from} is ${supplierName} from now on. ${text}`)}`);
+  } catch (e) {
+    if (e && typeof e === "object" && "digest" in e) throw e;
+    revalidatePath("/inbox");
+    revalidatePath("/suppliers");
+    fail("/inbox", `${from} is recorded as ${supplierName}, but the file still would not read: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}

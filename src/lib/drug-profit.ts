@@ -208,9 +208,26 @@ function readLeg(l: ClaimLeg, bench: Map<string, Bench>, floorFee: number): Read
   let by: Read["by"] = "code";
   if (model === null) {
     by = "inferred";
-    // Within three per cent of the NDC's own NADAC is NADAC; a stable fraction of AWP is AWP; else flat.
-    if (nadacCents !== null && nadacCents > 0 && Math.abs(paid - nadacCents) <= Math.max(2, nadacCents * 0.03)) model = "NADAC";
-    else if (awpTotal !== null && awpTotal > 0 && paid / awpTotal >= 0.05 && paid / awpTotal <= 0.95) model = "AWP";
+    /*
+     * Being far under AWP is evidence against AWP pricing, not for it.
+     *
+     * This pharmacy's export carries no basis-of-reimbursement code on any of its fifteen hundred
+     * claims, so this branch decides every fill — and calling one "AWP" makes `revenueFor` price
+     * every candidate NDC off its own AWP, so a labeller with a ten-times-higher AWP looks like it
+     * pays ten times more and the page says to buy it. On a drug actually paid at a flat MAC that
+     * is a confident, expensive, wrong answer.
+     *
+     * The old band called anything from five to ninety-five per cent of AWP an AWP fill. Measured
+     * against this pharmacy's own claims that is 613 of 984 — sixty-two per cent — and almost none
+     * of them are: generic payments sit eighty-eight to ninety-seven per cent *below* AWP because
+     * they are priced on a MAC that has nothing to do with AWP. So the band now starts where a real
+     * brand discount could plausibly stop. Anything below it is flat, and flat is the safe answer,
+     * because under it every NDC earns the same and the cheapest wins.
+     */
+    const nearNadac = nadacCents !== null && nadacCents > 0 && Math.abs(paid - nadacCents) <= Math.max(2, nadacCents * 0.03);
+    const awpRatio = awpTotal !== null && awpTotal > 0 ? paid / awpTotal : null;
+    if (nearNadac) model = "NADAC";
+    else if (awpRatio !== null && awpRatio >= 0.40 && awpRatio <= 0.98) model = "AWP";
     else model = ing === null && l.feePaidCents === null ? "unknown" : "flat";
   }
   return { model, fee, ratio, discount, unitPaidMicros, qty, payer, by, floorBound };
@@ -318,6 +335,30 @@ export function drugProfitReport(input: ProfitInput): { rows: DrugProfit[]; summ
     const fills = g.legs.length;
     const tally = new Map<Model, Read[]>();
     for (const { read } of g.legs) tally.set(read.model, [...(tally.get(read.model) ?? []), read]);
+
+    /*
+     * An inferred AWP model has to earn it across the drug's fills, not on one ratio.
+     *
+     * A single payment sitting at some fraction of AWP is not evidence of an AWP formula — a flat
+     * rate, a usual-and-customary price, or a MAC on an unusual drug all land somewhere. What marks
+     * a real "AWP less a discount" contract is that the *same* discount comes back fill after fill.
+     * So where nothing on the claim stated the basis, the discounts must actually cluster; if they
+     * are scattered the drug is not paid off AWP and calling it so would have this page recommend
+     * the highest-AWP labeller on the shelf.
+     *
+     * Demoted to flat rather than dropped: under a flat model every NDC earns the same, so the
+     * cheapest wins, which is the safe answer and usually the right one. A basis code, when the
+     * export ever carries one, is believed without this test — it is the plan's own word.
+     */
+    const awpOn = tally.get("AWP");
+    if (awpOn && awpOn.length > 0 && awpOn.every((r) => r.by === "inferred")) {
+      const ds = awpOn.map((r) => r.discount).filter((d): d is number => d !== null).sort((a, b) => a - b);
+      const spread = ds.length >= 3 ? ds[Math.floor((3 * ds.length) / 4)] - ds[Math.floor(ds.length / 4)] : Infinity;
+      if (ds.length < 3 || spread > 0.12) {
+        tally.delete("AWP");
+        for (const r of awpOn) tally.set("flat", [...(tally.get("flat") ?? []), { ...r, model: "flat" }]);
+      }
+    }
     const buckets = [...tally.entries()]
       .sort((a, b) => b[1].length - a[1].length)
       .map(([m, on]) => ({ model: m, share: on.length / fills, params: paramsOf(on), fills: on.length }));

@@ -1,5 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { NAV, groupFor, itemFor } from "../src/lib/nav";
 
 /**
@@ -124,5 +125,36 @@ describe("a page listed only through its family", () => {
     assert.equal(itemFor("/money/monthly")?.tab?.label, "Statement");
     assert.equal(itemFor("/money/found")?.item.href, "/money/found");
     assert.equal(itemFor("/money"), undefined, "a group landing is the group, not an item under it");
+  });
+});
+
+describe("the more menu is not inside the thing that scrolls", () => {
+  /*
+   * The bug this guards against left every group's "more" menu dead, and neither the typechecker
+   * nor any test could see it: the markup was valid, the component rendered, the arrow turned.
+   * The panel is absolutely positioned below the row, and the row carried overflow-x-auto for
+   * narrow screens — which clips on both axes, not only the one named — so the panel opened
+   * inside a forty-four pixel box and was cut off entirely.
+   *
+   * Nothing about that is visible from the outside, so this reads the source: whatever scrolls
+   * must be closed before the menu begins.
+   */
+  const src = readFileSync(new URL("../src/components/nav.tsx", import.meta.url), "utf8");
+
+  test("the menu is not nested inside the scrolling element", () => {
+    const scroll = src.lastIndexOf("overflow-x-auto");
+    const menu = src.indexOf("nav-more");
+    assert.ok(scroll >= 0, "the pills still scroll");
+    assert.ok(menu >= 0, "the more menu is still there");
+
+    // Walk from the tag that scrolls to the menu, counting divs in and out. Still open means nested.
+    const from = src.lastIndexOf("<div", scroll);
+    let depth = 0;
+    for (const m of src.slice(from, menu).matchAll(/<div\b|<\/div>/g)) depth += m[0] === "</div>" ? -1 : 1;
+    assert.equal(
+      depth,
+      0,
+      "the more menu is inside the element that scrolls, so its panel will be clipped and the menu will look dead",
+    );
   });
 });
