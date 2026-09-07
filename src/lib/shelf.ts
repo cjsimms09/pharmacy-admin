@@ -3,6 +3,7 @@ import { db, schema } from "@/db";
 import { desc, eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { readOnHand, onHandTotals } from "./on-hand";
+import type { Fill } from "./fills";
 import { velocity, toOrderThousandths, type Velocity } from "./usage";
 import { leanShelf, shelfTotals, type ShelfRow } from "./lean-shelf";
 import {
@@ -278,7 +279,7 @@ function safeJson<T>(raw: string, fallback: T): T {
  */
 export async function movement(
   lookbackDays = SHELF_POLICY.lookbackDays,
-): Promise<{ rows: Velocity[]; from: string; to: string } | null> {
+): Promise<{ rows: Velocity[]; from: string; to: string; fills: Fill[] } | null> {
   const claims = await db.query.claims.findMany();
   if (claims.length === 0) return null;
 
@@ -372,6 +373,15 @@ export async function movement(
       events.filter((e) => e.dateFilled >= from),
       { from, to },
     ),
+    /*
+     * The fills themselves, for the drug file's reimbursement figures.
+     *
+     * Returned rather than regrouped there, because grouping claims into fills is the expensive
+     * part and, more to the point, doing it twice invites two definitions of a fill. Every fill is
+     * carried, not only those inside the velocity window: what a drug reimburses is a rate to
+     * negotiate on and wants the whole archive, where velocity is about what moves now.
+     */
+    fills,
     from,
     to,
   };

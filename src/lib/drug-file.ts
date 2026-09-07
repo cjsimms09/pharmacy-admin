@@ -68,7 +68,7 @@ export type DrugRow = {
   name: string | null;
   offers: SupplierOffer[];
   /** The dispensing shelf, where this drug is stocked. */
-  shelf: { packQty: number | null; unit: string | null; onHandThousandths: number; unitCostMicros: number | null } | null;
+  shelf: { packQty: number | null; onHandThousandths: number; valueCents: number | null } | null;
   nadacUnitMicros: number | null;
   nadacPricingUnit: string | null;
   reimbursement: Reimbursement | null;
@@ -100,27 +100,82 @@ export type DrugSearch = {
 const money = (cents: number) => `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 /**
- * Which sources disagree about what a package of this NDC holds.
+ * The two numbers a pack size can mean, because wholesalers write the same package both ways.
  *
- * An NDC names one package, so two readings of it are one error, not two products. Both cases this
- * catches are real: two wholesalers listing the same NDC at different pack sizes, and a wholesaler
- * disagreeing with what PioneerRx counted off the shelf.
+ * McKesson writes a carton of three 30 mL bottles as "(3) 30 ML". ABC writes the same NDC as
+ * "90 ML". Smith Drug writes a six-pack of 28 tablets as "168 EA" where McKesson writes "(6) 28 EA".
+ * Neither is wrong and neither is a fault to report — they are two notations for one package.
  *
- * A source that gives no readable pack size says nothing here — that is a different fault, caught
- * as `pack_size_unreadable` — and one source alone can never disagree with anything.
+ * So a pack size gives an inner figure (what one bottle or card holds) and a whole figure (what the
+ * package holds altogether). Two suppliers agree when any one number satisfies both of them.
+ */
+export function packReadings(packSize: string | null): { inner: number | null; whole: number | null } {
+  if (!packSize) return { inner: null, whole: null };
+  const m = /(?:\((\d+)\)\s*)?([\d.]+)\s*(EA|ML|GM)\b/i.exec(packSize);
+  if (!m) return { inner: null, whole: null };
+  const inner = Number(m[2]);
+  if (!Number.isFinite(inner) || inner <= 0) return { inner: null, whole: null };
+  const cartons = m[1] ? Number(m[1]) : 1;
+  return { inner, whole: inner * cartons };
+}
+
+/**
+ * Which sources disagree about what a package of this NDC holds, and whether it is a real fault.
+ *
+ * An NDC names one package, so two different readings of it are one error rather than two products.
+ * Across the pharmacy's twenty-four supplier catalogues, 41,528 NDCs are carried by more than one
+ * of them and 1,195 read differently — but 539 of those are only the bracket notation above, and
+ * reporting them would bury the 656 that are real under noise nobody can act on.
+ *
+ * A disagreement is therefore only reported when no single number satisfies every source. Where one
+ * does, the sources agree and that number is the package.
+ *
+ * The shelf count is included as a source but treated as what it is: PioneerRx counts in dispensing
+ * units, so it will often report the inner figure where a wholesaler reports the whole carton. That
+ * is the same notation difference and is resolved the same way.
  */
 export function packDisagreement(
-  offers: { supplier: string; packUnits: number | null }[],
-  shelfPackQty: number | null,
+  offers: { supplier: string; packSize: string | null }[],
+  shelf: { packQty: number | null } | null,
 ): PackDisagreement | null {
-  const says: { units: number; from: string }[] = [];
-  for (const o of offers) if (o.packUnits !== null) says.push({ units: o.packUnits, from: o.supplier });
-  if (shelfPackQty !== null && shelfPackQty > 0) says.push({ units: shelfPackQty, from: "the shelf count" });
-  const distinct = new Set(says.map((s) => s.units));
-  if (says.length < 2 || distinct.size < 2) return null;
+  const sources: { from: string; inner: number; whole: number; text: string }[] = [];
+  for (const o of offers) {
+    const r = packReadings(o.packSize);
+    if (r.inner !== null && r.whole !== null) sources.push({ from: o.supplier, inner: r.inner, whole: r.whole, text: o.packSize ?? "" });
+  }
+  if (shelf?.packQty !== null && shelf?.packQty !== undefined && shelf.packQty > 0) {
+    sources.push({ from: "the shelf count", inner: shelf.packQty, whole: shelf.packQty, text: String(shelf.packQty) });
+  }
+  if (sources.length < 2) return null;
+
+  /*
+   * A package has two levels, and different files quote different ones.
+   *
+   * McKesson writes a 25-vial carton of 3 mL as "(25) 3 ML", API writes the same NDC as "75 ML",
+   * and PioneerRx counts the shelf in single 3 mL vials. All three are describing one package from
+   * a different height, and none of them is wrong. So agreement is not one number every source
+   * shares — it is one *pair*, an inner and a whole, that every source's reading lands on.
+   *
+   * A genuine fault cannot be covered by any pair: three wholesalers saying 6.7 GM, 6 GM and 7 GM
+   * are three different answers to one question, and ABC calling a 168-tablet pack "1 EA" is not a
+   * level of anything.
+   */
+  /*
+   * The pair has to be one a source actually asserts, not one assembled to paper over a difference.
+   *
+   * Any two numbers can be called an inner and a whole after the fact, which would make every pair
+   * of sources agree by construction and report nothing ever. A file that writes "(25) 3 ML" is
+   * asserting that this package is 3 to a vial and 75 altogether; that assertion is what the other
+   * sources are then tested against.
+   */
+  for (const claim of sources) {
+    if (sources.every((s) => s.inner === claim.inner || s.inner === claim.whole || s.whole === claim.inner || s.whole === claim.whole))
+      return null;
+  }
+
   return {
-    says,
-    text: says.map((s) => `${s.from} says ${s.units}`).join(", "),
+    says: sources.map((s) => ({ units: s.whole, from: s.from })),
+    text: sources.map((s) => `${s.from} says ${s.text}`).join(", "),
   };
 }
 
@@ -186,7 +241,7 @@ export function buildDrugRow(a: {
   reimbursement: Reimbursement | null;
   packFix: DrugRow["packFix"];
 }): DrugRow {
-  const disagreement = packDisagreement(a.offers, a.shelf?.packQty ?? null);
+  const disagreement = packDisagreement(a.offers, a.shelf);
   const costs = a.offers.map((o) => o.packCostCents).filter((c): c is number => c !== null);
   const bestPackCostCents = costs.length > 0 ? Math.min(...costs) : null;
 
