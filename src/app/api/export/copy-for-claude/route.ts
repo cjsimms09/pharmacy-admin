@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { backupStatus } from "@/lib/backup";
@@ -43,12 +43,23 @@ export async function GET(req: NextRequest) {
 
   const full = path.join(dir, name);
   const data = await fs.readFile(full);
-  await audit({
-    action: "backup.copy_for_claude_downloaded",
-    userId: user.id,
-    userName: user.name,
-    details: `${name}, ${(data.length / 1_048_576).toFixed(1)} MB`,
-  });
+
+  /*
+   * The record of the download is written after it, not before it.
+   *
+   * Writing it first put a database write in front of ten megabytes of file, on a connection this
+   * site serializes — so a copy still being made, or any other write holding the lock, delayed the
+   * first byte until the browser gave up and said it could not download. The audit line is worth
+   * having and worth nothing at all if it costs the file.
+   */
+  after(() =>
+    audit({
+      action: "backup.copy_for_claude_downloaded",
+      userId: user.id,
+      userName: user.name,
+      details: `${name}, ${(data.length / 1_048_576).toFixed(1)} MB`,
+    }),
+  );
 
   return new NextResponse(new Uint8Array(data), {
     headers: {
