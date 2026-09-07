@@ -93,8 +93,9 @@ export const NAV: NavGroup[] = [
     items: [
       { href: "/money", label: "The books", blurb: "The period on both bases, the statement, and how the months are moving" },
       { href: "/expenses", label: "Spending", blurb: "Bills, standing costs, the vendors who send them, and the rules that file them" },
+      // Listed, not under "more": the owner enters the day's deliveries every day.
+      { href: "/deliveries", label: "Driver invoices", blurb: "Today's deliveries, entered daily, and the monthly invoice that sends itself" },
       { href: "/money/found", label: "Money found", blurb: "Everything worth chasing, ranked, with what to do about each", hidden: true },
-      { href: "/deliveries", label: "Driver invoices", blurb: "Deliveries per day, and the monthly invoice that sends itself", hidden: true },
     ],
   },
   {
