@@ -66,7 +66,7 @@ State: **in** = arrives and is used; **partial** = arrives, something is not rea
 
 | Feed | Arrives by | Fills | Ties to | State |
 |---|---|---|---|---|
-| Deposits and payments (the bank statement or feed) | — | `cash_receipts` (revenue banked), and the `paid_on` of invoices and bills | every cash-basis figure; the receivable | **missing.** `cash_receipts` has a table and a function (`addCashReceipt`) and **no screen calls it**, so nothing can be banked. A statement import (CSV/OFX from the bank) would derive deposits by payer and mark bills and invoices paid on the day the money left. This is what makes the cash account real. |
+| Deposits and payments (the bank statement or feed) | typed on the books page ("What reached the bank"), by the month the money arrived | `cash_receipts` (revenue banked), and the `paid_on` of invoices and bills | every cash-basis figure; the receivable | **partial** as of 7 Sept: receipts can be typed, so the cash account has revenue. A statement import (CSV/OFX from the bank) would derive deposits by payer and mark bills and invoices paid on the day the money left; that is what makes the cash account exact rather than typed. |
 
 ### 2.5 Compliance and people
 
@@ -79,9 +79,9 @@ State: **in** = arrives and is used; **partial** = arrives, something is not rea
 
 ## 3. What to build next, in the order the balances need it
 
-1. **Bank in** — a way to record what was banked and what was paid, first typed on the books page
-   (receipts by kind, per month), then imported from the bank's statement file. Until this exists
-   the cash account has no revenue and "cash change" cannot be right.
+1. **Bank in** — receipts are typed on the books page as of 7 Sept; next, imported from the
+   bank's statement file so deposits are derived and bills and invoices are marked paid on the
+   day the money left.
 2. **Commercial 835s** — enrol each PBM (the routing page), receive the files (email or portal
    download), post each payment to its fill and the batch to the bank. This is "remits balance to
    claims".

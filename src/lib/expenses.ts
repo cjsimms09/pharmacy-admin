@@ -234,3 +234,15 @@ export async function addCashReceipt(input: {
   });
   return id;
 }
+
+/** A receipt entered by mistake is removed; the bank statement is the record, not this row. */
+export async function deleteCashReceipt(id: string): Promise<void> {
+  await db.delete(schema.cashReceipts).where(eq(schema.cashReceipts.id, id));
+}
+
+/** What was banked across a run of months, newest first, for the books page. */
+export async function cashReceiptsFor(months: string[]) {
+  const rows = await db.query.cashReceipts.findMany({ orderBy: [desc(schema.cashReceipts.month), desc(schema.cashReceipts.createdAt)] });
+  const set = new Set(months);
+  return rows.filter((r) => set.has(r.month));
+}

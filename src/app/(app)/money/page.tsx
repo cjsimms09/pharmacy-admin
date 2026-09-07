@@ -1,7 +1,12 @@
 import { familyTabs } from "@/lib/families";
 import Link from "next/link";
-import { requireUser } from "@/lib/auth";
-import { formatCents } from "@/lib/money";
+import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
+import { requireUser, requireManager } from "@/lib/auth";
+import { audit } from "@/lib/audit";
+import { addCashReceipt, deleteCashReceipt, cashReceiptsFor } from "@/lib/expenses";
+import { Field } from "@/components/ui";
+import { formatCents, parseCents } from "@/lib/money";
 import { todayIso } from "@/lib/dates";
 import { parsePeriod, periodOf, neighbours, type PeriodKind } from "@/lib/ledger";
 import { booksFor, recentMonths } from "@/lib/ledger-store";
@@ -28,8 +33,53 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
   const { period: periodParam, ok, error } = await searchParams;
   const today = todayIso();
   const period = (periodParam && parsePeriod(periodParam)) || periodOf("month", today.slice(0, 7));
-  const [books, recent, found] = await Promise.all([booksFor(period, today), recentMonths(6, today), moneyFound().catch(() => null)]);
+  const [books, recent, found, banked] = await Promise.all([booksFor(period, today), recentMonths(6, today), moneyFound().catch(() => null), cashReceiptsFor(period.months)]);
   const { accrual, cash, scripts, gap, pace, sources } = books;
+  const KINDS: { key: "third_party" | "patient" | "retail" | "facilitator" | "rebate" | "other"; label: string }[] = [
+    { key: "third_party", label: "Plan remittances" },
+    { key: "patient", label: "Patient payments" },
+    { key: "retail", label: "Retail takings" },
+    { key: "facilitator", label: "Facilitator payments" },
+    { key: "rebate", label: "Wholesaler rebate" },
+    { key: "other", label: "Other" },
+  ];
+
+  /*
+   * Banking it.
+   *
+   * The cash account had a table for receipts and nothing that wrote to it, so its revenue was
+   * missing on every month. Until the bank's own statement is imported, what reached the bank is
+   * typed here: one line per deposit or per payer per month, by the month the money arrived —
+   * never the month it was earned, which is the accrual account's business.
+   */
+  async function bankIt(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const month = String(fd.get("month") ?? "").trim();
+    const kind = String(fd.get("kind") ?? "") as (typeof KINDS)[number]["key"];
+    const amountCents = parseCents(String(fd.get("amount") ?? ""));
+    const back = `/money?period=${encodeURIComponent(String(fd.get("period") ?? month))}`;
+    if (!/^\d{4}-\d{2}$/.test(month)) redirect(`${back}&error=${encodeURIComponent("Say which month the money arrived, as YYYY-MM.")}`);
+    if (!KINDS.some((k) => k.key === kind)) redirect(`${back}&error=${encodeURIComponent("Say what kind of money it was.")}`);
+    if (amountCents === null || amountCents === 0) redirect(`${back}&error=${encodeURIComponent("Put the amount in dollars.")}`);
+    const id = await addCashReceipt({ month, kind, amountCents, payer: String(fd.get("payer") ?? "").trim() || null, notes: String(fd.get("notes") ?? "").trim() || null, createdBy: u.id });
+    await audit({ action: "cash_receipt.add", userId: u.id, userName: u.name, entity: "cash_receipt", entityId: id, details: `${month} ${kind} ${formatCents(amountCents)}` });
+    revalidatePath("/money");
+    revalidatePath("/money/monthly");
+    redirect(`${back}&ok=${encodeURIComponent(`${formatCents(amountCents)} banked against ${month}.`)}`);
+  }
+  async function unbank(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const id = String(fd.get("id") ?? "");
+    const back = `/money?period=${encodeURIComponent(String(fd.get("period") ?? ""))}`;
+    if (!id) redirect(back);
+    await deleteCashReceipt(id);
+    await audit({ action: "cash_receipt.delete", userId: u.id, userName: u.name, entity: "cash_receipt", entityId: id });
+    revalidatePath("/money");
+    revalidatePath("/money/monthly");
+    redirect(`${back}&ok=${encodeURIComponent("Receipt removed.")}`);
+  }
   const { before, after } = neighbours(period);
   const isCurrent = period.kind === "month" && period.key === today.slice(0, 7);
   const link = (kind: PeriodKind) => `/money?period=${periodOf(kind, period.months[period.months.length - 1]).key}`;
@@ -139,6 +189,64 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
             {formatCents(Math.abs(accrual.stockMovementCents))} {accrual.stockMovementCents > 0 ? "went onto the shelf" : "came off the shelf"} in the period: bought less dispensed. Not profit; where the cash went.
           </p>
         )}
+      </Card>
+
+      {/* What reached the bank, typed until the bank's statement is read; the cash account's revenue. */}
+      <Card
+        className="mt-4"
+        title="What reached the bank"
+        count={banked.length}
+        subtitle="The cash account's revenue: each deposit by the month it arrived, never the month it was earned. A plan's remittance, the card and cash takings, a facilitator payment, a rebate cheque. Enter it net as it landed; a fee the payer took out of a deposit is already out of it."
+      >
+        {banked.length > 0 && (
+          <div className="mb-3 overflow-x-auto">
+            <table className="table text-sm">
+              <thead><tr><th>Month</th><th>Kind</th><th>Payer</th><th className="num">Amount</th><th>Notes</th><th></th></tr></thead>
+              <tbody>
+                {banked.map((r) => (
+                  <tr key={r.id}>
+                    <td>{r.month}</td>
+                    <td>{KINDS.find((k) => k.key === r.kind)?.label ?? r.kind}</td>
+                    <td className="text-ink-2">{r.payer ?? "—"}</td>
+                    <td className="num">{formatCents(r.amountCents)}</td>
+                    <td className="text-xs text-ink-3">{r.notes ?? ""}</td>
+                    <td>
+                      <form action={unbank}>
+                        <input type="hidden" name="id" value={r.id} />
+                        <input type="hidden" name="period" value={period.key} />
+                        <button className="btn btn-sm btn-danger">Remove</button>
+                      </form>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <form action={bankIt} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+          <input type="hidden" name="period" value={period.key} />
+          <Field label="Month it arrived">
+            <input type="month" name="month" defaultValue={period.months[period.months.length - 1]} required className="w-full" />
+          </Field>
+          <Field label="Kind">
+            <select name="kind" className="w-full" defaultValue="third_party">
+              {KINDS.map((k) => <option key={k.key} value={k.key}>{k.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Amount, in dollars">
+            <input name="amount" inputMode="decimal" placeholder="12345.67" required className="w-full" />
+          </Field>
+          <Field label="Payer" hint="The PBM, the card processor, the wholesaler.">
+            <input name="payer" placeholder="Caremark" className="w-full" />
+          </Field>
+          <Field label="Notes">
+            <input name="notes" className="w-full" />
+          </Field>
+          <div className="flex items-end"><button className="btn btn-primary">Bank it</button></div>
+        </form>
+        <p className="mt-2 text-xs text-ink-3">
+          The bank&rsquo;s own statement will replace this typing once it can be read in (engine.md §3.1); until then these lines are the cash account.
+        </p>
       </Card>
 
       {/* The trend, because the trend is the point here. Each bar opens its month. */}

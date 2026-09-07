@@ -65,5 +65,5 @@ side), `standing-math.ts`, `reconcile.ts`. The statement and the books read the 
 | Figure | Source | Finding |
 |---|---|---|
 | Retail revenue | System Sales Summary, "Retail Sales" totals row | **Fixed:** read from the Total column, which is after sales tax; on the real August that counted $380.87 of tax collected for Kansas as revenue. Now the Subtotal column, with the tax kept on the month as a liability (`sales_months.retail_tax_cents`). |
-| Cash revenue | `cash_receipts` | **Open, and large:** nothing on the site can enter a receipt — the table and `addCashReceipt` exist and no page calls them — so the cash account's revenue is always "missing". First fix: receipts typed on the books page; the real fix is the bank statement imported (`engine.md` §3.1). |
+| Cash revenue | `cash_receipts` | **Fixed, first step:** nothing on the site could enter a receipt — the table and `addCashReceipt` existed and no page called them — so the cash account's revenue was always "missing". Receipts are now typed on the books page ("What reached the bank"), by the month the money arrived; the bank statement imported is the real fix (`engine.md` §3.1). |
 | Remittances against claims | `claim_payments` | **Open:** only the Medicare facilitator's 835s are read. A commercial 835 has a parser and no path to the fills or the bank (`engine.md` §3.2). |
