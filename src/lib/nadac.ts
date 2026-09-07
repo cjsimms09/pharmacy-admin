@@ -237,6 +237,8 @@ async function loadNadacFilesNow(opts: LoadOpts): Promise<LoadReport[]> {
     manifest[file] = { size: stat.size, mtimeMs: stat.mtimeMs, sha256, loadedAt: new Date().toISOString(), added: report.added, rows: report.rows };
     await fs.writeFile(path.join(dir, MANIFEST), JSON.stringify(manifest, null, 2));
   }
+  // The screens hold the current benchmark between requests; a new file must be seen at once.
+  if (reports.length > 0) (await import("./nadac-latest")).forgetNadac();
   return reports;
 }
 

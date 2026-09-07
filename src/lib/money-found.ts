@@ -122,7 +122,9 @@ export async function moneyFound(): Promise<MoneyFound> {
   try {
     const { db } = await import("@/db");
     const { groupKey } = await import("./product-groups");
-    const nadacRows = await db.query.nadacPrices.findMany({ columns: { ndc11: true, description: true, classification: true, pricingUnit: true } });
+    // One row per drug, newest first, rather than every price ever published to keep the first of
+    // each. On a year of weekly files that was over a million rows read to build this map.
+    const nadacRows = await (await import("./nadac-latest")).nadacNow();
     const groupByNdc = new Map<string, string | null>();
     for (const r of nadacRows) {
       if (groupByNdc.has(r.ndc11)) continue;
@@ -248,10 +250,30 @@ export async function moneyFound(): Promise<MoneyFound> {
     const { db } = await import("@/db");
     const { payBasisByPlan } = await import("./pay-basis");
     const { planKey } = await import("./plans");
-    const [claims, nadac] = await Promise.all([
-      db.query.claims.findMany({ columns: { bin: true, pcn: true, groupNumber: true, ndc11: true, dateFilled: true, quantityThousandths: true, ingredientPaidCents: true, status: true, cashPlan: true } }),
-      db.query.nadacPrices.findMany({ columns: { ndc11: true, unitMicros: true, pricingUnit: true, effectiveOn: true, fileAsOf: true } }),
-    ]);
+    const claims = await db.query.claims.findMany({
+      columns: { bin: true, pcn: true, groupNumber: true, ndc11: true, dateFilled: true, quantityThousandths: true, ingredientPaidCents: true, status: true, cashPlan: true },
+    });
+    /*
+     * The benchmark for the drugs actually dispensed, at every date it has held — and no others.
+     *
+     * This one does need the history: a plan's formula is read by pricing each fill against the
+     * NADAC in force on the day it was filled. What it does not need is every NDC in the federal
+     * file, which is thirty thousand drugs this pharmacy has never touched, at every weekly date
+     * since the first import. Restricted to the NDCs on the claims, the same answer comes back
+     * from a fraction of the rows.
+     */
+    const { inArray } = await import("drizzle-orm");
+    const { schema } = await import("@/db");
+    const dispensed = [...new Set(claims.map((c) => c.ndc11).filter((x): x is string => Boolean(x)))];
+    const nadac: { ndc11: string; unitMicros: number; pricingUnit: string | null; effectiveOn: string; fileAsOf: string }[] = [];
+    for (let i = 0; i < dispensed.length; i += 400) {
+      nadac.push(
+        ...(await db.query.nadacPrices.findMany({
+          where: inArray(schema.nadacPrices.ndc11, dispensed.slice(i, i + 400)),
+          columns: { ndc11: true, unitMicros: true, pricingUnit: true, effectiveOn: true, fileAsOf: true },
+        })),
+      );
+    }
     // A cash fill is priced by the pharmacy, not by a plan, and says nothing about how a plan pays.
     const paid = claims.filter((c) => !c.cashPlan).map((c) => ({ planKey: planKey(c.bin, c.pcn, c.groupNumber), ndc11: c.ndc11, dateFilled: c.dateFilled, quantityThousandths: c.quantityThousandths, ingredientPaidCents: c.ingredientPaidCents, status: c.status }));
     if (paid.length > 0 && nadac.length > 0) {
