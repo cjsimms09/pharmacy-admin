@@ -67,3 +67,22 @@ side), `standing-math.ts`, `reconcile.ts`. The statement and the books read the 
 | Retail revenue | System Sales Summary, "Retail Sales" totals row | **Fixed:** read from the Total column, which is after sales tax; on the real August that counted $380.87 of tax collected for Kansas as revenue. Now the Subtotal column, with the tax kept on the month as a liability (`sales_months.retail_tax_cents`). |
 | Cash revenue | `cash_receipts` | **Fixed, first step:** nothing on the site could enter a receipt — the table and `addCashReceipt` existed and no page called them — so the cash account's revenue was always "missing". Receipts are now typed on the books page ("What reached the bank"), by the month the money arrived; the bank statement imported is the real fix (`engine.md` §3.1). |
 | Remittances against claims | `claim_payments` | **Open:** only the Medicare facilitator's 835s are read. A commercial 835 has a parser and no path to the fills or the bank (`engine.md` §3.2). |
+
+## Claims, payers and appeals
+
+| Figure | Source | Finding |
+|---|---|---|
+| A fill's revenue, cost and margin | `fills.ts`: one bottle per fill; revenue = the largest price any row established + later money; cost from the row that dispensed it; held to PioneerRx's own gross profit per row, to the cent | Sound, and checked against the report on every fill. |
+| Under the fee | `claimFlags` | **Fixed:** judged per fill (see Money found). |
+| The floor | `reimbursement-rules.ts` + `floor-review.ts`: NADAC in force on the fill date, quantity in the same unit, plan in scope, paid and not adjusted, over the materiality | Sound. |
+| Appeals | `appeal-queue.ts`: the contract's rate in force on the fill date against what was paid | Sound after the date-aware `rateFor`. |
+| Who pays best | `payer-map.ts`: per payer and per drug on fill margins, a coordinated fill credited to the primary, cards counted but never ranked | Sound. |
+| Facilitator money | `claim-payments.ts` by fill and by received date | Sound. Commercial 835s now post with revenue nought (they settle the adjudicated remit) — the per-fill match of paid against adjudicated is the next figure to show. |
+
+## Compliance, people, controlled substances
+
+Dates, not money: `due.ts` (overdue below nought days, due soon inside each kind's horizon, no date named as such), `compliance-status.ts` (missed / partial / open / satisfied per period against each duty's deadline), `alerts.ts` (30 days). Read through for sign errors and off-by-one at period ends; none found. These pages are the pharmacy session's and carry their own tests.
+
+## Where the audit stands
+
+Every page that decides or reports money has been traced to its source and the faults found are fixed above. What remains open is data the site does not yet receive, listed in `engine.md` §3, not arithmetic it gets wrong.
