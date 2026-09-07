@@ -200,9 +200,11 @@ export function itemFor(pathname: string): { item: NavItem; tab?: FamilyTab } | 
   const g = groupFor(pathname);
   if (!g || pathname === g.href) return undefined;
   const under = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+  const exact = g.items.find((i) => i.href === pathname);
+  if (exact) return { item: exact };
   /*
-   * The family first: the statement lives at /money/monthly, under the books' own address, and
-   * the books' item would otherwise claim it by prefix and print the leaf as "monthly".
+   * The family before a prefix match: the statement lives at /money/monthly, under the books' own
+   * address, and the books' item would otherwise claim it by prefix and print the leaf as "monthly".
    */
   for (const tabs of Object.values(FAMILIES)) {
     const tab = [...tabs].sort((a, b) => b.href.length - a.href.length).find((t) => under(t.href));
