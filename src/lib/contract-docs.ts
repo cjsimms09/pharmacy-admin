@@ -33,6 +33,8 @@ export type LibraryDoc = {
   matchedBy: string | null;
   state: "none" | "queued" | "done" | "failed";
   error: string | null;
+  /** When that error was recorded, so a stored failure never reads as a live one. */
+  failedAt: string | null;
   pages: number | null;
   /** Over the one-request page limit: must be split before it can be read. */
   tooLong: boolean;
@@ -99,7 +101,7 @@ export async function contractLibrary(): Promise<Library> {
     }
     rows.push({
       id: d.id, documentName: d.documentName, pbmName: d.pbmName, fileName: d.fileName, matchedBy: d.matchedBy,
-      state: d.extractionState, error: d.extractionError,
+      state: d.extractionState, error: d.extractionError, failedAt: d.extractionFailedAt,
       // Judged against the model that would read it, not against the sort's smaller limit.
       pages, tooLong: (pages ?? 0) > pdfPageLimit(model),
       triage: d.triage, triageWhy: d.triageWhy, triageBy: d.triageBy, sorting: Boolean(d.triageBatch),

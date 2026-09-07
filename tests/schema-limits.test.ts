@@ -1,6 +1,8 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import { z } from "zod";
+import { jsonIn } from "../src/lib/contract-extract";
 import * as ai from "../src/lib/ai";
 import * as supplierTerms from "../src/lib/supplier-terms";
 import * as contractTerms from "../src/lib/contract-terms";
@@ -16,7 +18,16 @@ import * as contractTriage from "../src/lib/contract-triage";
  *
  * This walks every schema the site can send and fails before it reaches the API.
  */
-const LIMIT = 16;
+const UNION_LIMIT = 16;
+/**
+ * The second cap, and the one that was missed.
+ *
+ * Trading every `.nullable()` for `.optional()` took the contract schema from 104 unions to none —
+ * and to 111 optional parameters, which is its own refusal with its own number. Both exist because
+ * either shape makes the response grammar expensive to compile, so a schema large enough to hit one
+ * will hit the other the moment it is rewritten to dodge the first.
+ */
+const OPTIONAL_LIMIT = 24;
 
 function unionParameters(node: unknown, path = "", out: string[] = []): string[] {
   if (!node || typeof node !== "object") return out;
@@ -25,6 +36,28 @@ function unionParameters(node: unknown, path = "", out: string[] = []): string[]
   for (const [k, v] of Object.entries(n)) if (v && typeof v === "object") unionParameters(v, `${path}/${k}`, out);
   return out;
 }
+
+/** Every property its object does not require. */
+function optionalParameters(node: unknown, path = "", out: string[] = []): string[] {
+  if (!node || typeof node !== "object") return out;
+  const n = node as Record<string, unknown>;
+  if (n.type === "object" && n.properties && typeof n.properties === "object") {
+    const required = new Set((n.required as string[] | undefined) ?? []);
+    for (const k of Object.keys(n.properties as Record<string, unknown>)) if (!required.has(k)) out.push(`${path}/${k}`);
+  }
+  for (const [k, v] of Object.entries(n)) if (v && typeof v === "object") optionalParameters(v, `${path}/${k}`, out);
+  return out;
+}
+
+/**
+ * Schemas that exist to describe the site's own shape and are never sent to the API.
+ *
+ * `ContractTerms` is the readable one, with optional fields, that the rest of the site is written
+ * against; `ContractTermsWire` is derived from it with nothing optional and is what actually goes.
+ * Exempting it by name rather than relaxing the check keeps the sweep meaning what it says: every
+ * schema that can reach the API is within both caps.
+ */
+const NEVER_SENT = new Set(["ContractTerms", "ContractTermsWire"]);
 
 /** Every Zod schema a module exports, by name. */
 function schemasIn(mod: Record<string, unknown>, file: string): { name: string; file: string; schema: unknown }[] {
@@ -45,9 +78,10 @@ describe("what the site is allowed to ask the API for", () => {
     assert.ok(all.length >= 20, `expected the site's schemas; found ${all.length}`);
   });
 
-  test("no schema carries more union-typed parameters than the API accepts", () => {
+  test("no schema carries more union-typed or optional parameters than the API accepts", () => {
     const over: string[] = [];
     for (const { name, file, schema } of all) {
+      if (NEVER_SENT.has(name)) continue;
       let json: unknown;
       try {
         const format = zodOutputFormat(schema as never) as unknown as Record<string, unknown>;
@@ -55,17 +89,91 @@ describe("what the site is allowed to ask the API for", () => {
       } catch {
         continue; // Not usable as an output format; it is never sent as one.
       }
-      const n = unionParameters(json).length;
-      if (n > LIMIT) over.push(`${file} · ${name}: ${n} unions`);
+      const u = unionParameters(json).length;
+      const o = optionalParameters(json).length;
+      if (u > UNION_LIMIT) over.push(`${file} · ${name}: ${u} unions (limit ${UNION_LIMIT})`);
+      if (o > OPTIONAL_LIMIT) over.push(`${file} · ${name}: ${o} optionals (limit ${OPTIONAL_LIMIT})`);
     }
-    assert.deepEqual(over, [], `over the limit of ${LIMIT}:\n  ${over.join("\n  ")}\nUse .optional() rather than .nullable().`);
+    assert.deepEqual(over, [], `over an API limit:\n  ${over.join("\n  ")}\nMake the field required and let a value carry "not stated".`);
   });
 
-  test("the contract schema in particular sends none at all", () => {
-    // It had 104 and every read was refused. It is the largest schema here and the one that will
-    // grow again, so it is named rather than left to the sweep above.
-    const format = zodOutputFormat(contractTerms.ContractTerms as never) as unknown as Record<string, unknown>;
-    const json = format.schema ?? (format.json_schema as Record<string, unknown>)?.schema ?? format;
-    assert.deepEqual(unionParameters(json), []);
+  test("the contract read sends no grammar at all, because its schema is too large for one", () => {
+    // It was refused three times, once for each way of being too much: 104 unions, then 111
+    // optionals, then the compiled grammar itself. The shape is described in the prompt instead and
+    // checked here on the way in, so this sweep is about every *other* schema.
+    const shape = contractTerms.shapeForPrompt();
+    assert.ok(shape.length > 1000, "the shape has to actually describe the schema");
+    // Both contract schemas are exempt from the sweep because neither is compiled into a grammar.
+    assert.ok(NEVER_SENT.has("ContractTerms") && NEVER_SENT.has("ContractTermsWire"));
+    // And the answer is still checked against the schema, which is the part that matters.
+    assert.equal(contractTerms.ContractTermsWire.safeParse({}).success, false, "a wrong shape is refused");
+  });
+});
+
+describe("carrying an unstated term without an optional field", () => {
+  test("a number the contract does not give travels as an empty string and comes back null", () => {
+    const domain = z.object({ days: z.number().int().optional(), name: z.string().optional() });
+    const wire = contractTerms.toWire(domain);
+    assert.equal((wire as never as z.ZodObject<never>).safeParse({ days: "", name: "" }).success, true);
+    assert.deepEqual(contractTerms.fromWire(domain, { days: "", name: "" }), { days: null, name: null });
+    assert.deepEqual(contractTerms.fromWire(domain, { days: "30", name: "Caremark" }), { days: 30, name: "Caremark" });
+  });
+
+  test("a figure written with a dollar sign or a comma is still a figure", () => {
+    const domain = z.object({ fee: z.number().optional() });
+    assert.deepEqual(contractTerms.fromWire(domain, { fee: "$1,250" }), { fee: 1250 });
+    assert.deepEqual(contractTerms.fromWire(domain, { fee: "about a dollar" }), { fee: null });
+  });
+
+  test("a yes/no that may be absent gets a third answer rather than being left out", () => {
+    const domain = z.object({ autoRenews: z.boolean().optional() });
+    assert.deepEqual(contractTerms.fromWire(domain, { autoRenews: "yes" }), { autoRenews: true });
+    assert.deepEqual(contractTerms.fromWire(domain, { autoRenews: "no" }), { autoRenews: false });
+    assert.deepEqual(contractTerms.fromWire(domain, { autoRenews: "not stated" }), { autoRenews: null });
+  });
+
+  test("it reaches through arrays and nested objects", () => {
+    const domain = z.object({
+      rates: z.array(z.object({ fee: z.number().optional(), basis: z.string().optional() })),
+      citation: z.object({ quote: z.string(), page: z.number().int().optional() }).optional(),
+    });
+    assert.deepEqual(contractTerms.fromWire(domain, { rates: [{ fee: "1.5", basis: "" }], citation: { quote: "q", page: "" } }), {
+      rates: [{ fee: 1.5, basis: null }],
+      citation: { quote: "q", page: null },
+    });
+  });
+
+  test("a required field is left exactly as it is", () => {
+    const domain = z.object({ counterparty: z.string(), confidence: z.number() });
+    assert.deepEqual(contractTerms.fromWire(domain, { counterparty: "Caremark", confidence: 0.8 }), {
+      counterparty: "Caremark",
+      confidence: 0.8,
+    });
+  });
+});
+
+describe("taking the JSON out of an answer that dressed it up", () => {
+  test("a bare object is returned as it is", () => {
+    assert.equal(jsonIn('{"counterparty":"Caremark"}'), '{"counterparty":"Caremark"}');
+  });
+
+  test("a code fence is stripped, because refusing a paid read over punctuation is waste", () => {
+    assert.equal(jsonIn('```json\n{"a":1}\n```'), '{"a":1}');
+    assert.equal(jsonIn('```\n{"a":1}\n```'), '{"a":1}');
+  });
+
+  test("a line of preamble before the object does not lose the object", () => {
+    assert.equal(jsonIn('Here are the terms:\n{"a":1}'), '{"a":1}');
+    assert.equal(jsonIn('{"a":1}\nThat is everything I found.'), '{"a":1}');
+  });
+
+  test("a brace inside a quoted contract sentence does not truncate the answer", () => {
+    // Taken from the first brace to the last, so a quote containing one is carried whole.
+    const s = '{"quote":"the fee is {sic} one dollar","b":2}';
+    assert.equal(jsonIn(s), s);
+  });
+
+  test("text with no object at all is handed on unchanged, to fail as a bad shape rather than silently", () => {
+    assert.equal(jsonIn("I could not read this document."), "I could not read this document.");
   });
 });

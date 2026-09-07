@@ -304,6 +304,138 @@ export const ContractTerms = z.object({
 });
 
 /**
+ * The same schema, rewritten so nothing in it is optional.
+ *
+ * The API caps a schema at 16 union-typed parameters *and* at 24 optional ones. `.nullable()` broke
+ * the first — a nullable field is a union — so every one of them became `.optional()`, which broke
+ * the second: 0 unions, 111 optionals. Both caps exist for the same reason, that either shape makes
+ * the response grammar expensive to compile, and this schema is large enough to hit whichever one
+ * it is allowed to.
+ *
+ * So the wire schema has neither. Every field is required, and "the contract does not state this"
+ * is carried by a value the type can hold:
+ *
+ *   a text field that may be absent   ->  "" for absent
+ *   a number that may be absent       ->  the number written as text, "" for absent
+ *   a yes/no that may be absent       ->  "yes" | "no" | "not stated"
+ *   an object that may be absent      ->  the object, with its own fields empty
+ *
+ * It is derived from the schema above rather than written out, because a hundred and eleven fields
+ * transcribed by hand is a hundred and eleven chances to describe a field one way on the wire and
+ * read it another. `fromWire` walks the same original schema to turn the answer back into the nulls,
+ * numbers and booleans the rest of the site is written against.
+ */
+
+const NOT_STATED = "not stated";
+
+type Def = { type?: string; innerType?: z.ZodTypeAny; element?: z.ZodTypeAny; shape?: unknown };
+const defOf = (t: z.ZodTypeAny): Def | undefined => (t as unknown as { _zod?: { def?: Def } })._zod?.def;
+const shapeOf = (d: Def): Record<string, z.ZodTypeAny> | undefined =>
+  (typeof d.shape === "function" ? (d.shape as () => Record<string, z.ZodTypeAny>)() : d.shape) as
+    | Record<string, z.ZodTypeAny>
+    | undefined;
+
+/** The schema with every field required, absence carried by a value. */
+export function toWire(schema: z.ZodTypeAny): z.ZodTypeAny {
+  const d = defOf(schema);
+  if (!d) return schema;
+
+  if (d.type === "optional" || d.type === "nullable") {
+    const inner = d.innerType ? toWire(d.innerType) : z.string();
+    const id = defOf(d.innerType ?? z.string());
+    // A number or a yes/no cannot carry "absent" in its own type, so each gets one that can.
+    if (id?.type === "number") return z.string();
+    if (id?.type === "boolean") return z.enum(["yes", "no", NOT_STATED]);
+    return inner;
+  }
+  if (d.type === "object") {
+    const shape = shapeOf(d);
+    if (!shape) return schema;
+    return z.object(Object.fromEntries(Object.entries(shape).map(([k, v]) => [k, toWire(v)])));
+  }
+  if (d.type === "array") return d.element ? z.array(toWire(d.element)) : schema;
+  return schema;
+}
+
+/** The answer turned back into what the rest of the site reads: nulls, numbers and booleans. */
+export function fromWire(schema: z.ZodTypeAny, value: unknown): unknown {
+  const d = defOf(schema);
+  if (!d) return value;
+
+  if (d.type === "optional" || d.type === "nullable") {
+    const id = defOf(d.innerType ?? z.string());
+    if (value === undefined || value === null || value === "" || value === NOT_STATED) return null;
+    if (id?.type === "number") {
+      const n = Number(String(value).replace(/[$,\s]/g, ""));
+      return Number.isFinite(n) ? n : null;
+    }
+    if (id?.type === "boolean") return value === "yes" ? true : value === "no" ? false : null;
+    return d.innerType ? fromWire(d.innerType, value) : value;
+  }
+  if (d.type === "object") {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
+    const shape = shapeOf(d);
+    if (!shape) return value;
+    const src = value as Record<string, unknown>;
+    const out: Record<string, unknown> = { ...src };
+    for (const [k, child] of Object.entries(shape)) out[k] = fromWire(child, src[k]);
+    return out;
+  }
+  if (d.type === "array") {
+    if (!Array.isArray(value)) return value;
+    return d.element ? value.map((v) => fromWire(d.element as z.ZodTypeAny, v)) : value;
+  }
+  return value;
+}
+
+/** The shape the answer must take. Described to the model rather than compiled into a grammar. */
+export const ContractTermsWire = toWire(ContractTerms);
+
+/**
+ * Why the shape is described in words instead of enforced as a grammar.
+ *
+ * Structured outputs compile the schema into a grammar the model must generate against, and this
+ * schema is too big for one: 61 top-level fields, 175 leaves, 24 arrays, 14KB of JSON Schema. The
+ * API refused it three times over, once for each way of being too much —
+ *
+ *   104 union-typed parameters (limit 16)
+ *   111 optional parameters    (limit 24)
+ *   the compiled grammar is too large
+ *
+ * — and the third has no restructuring that answers it. A contract genuinely has this many terms in
+ * it, and dropping half of them to fit would be losing the reason the read exists.
+ *
+ * So the schema goes in the prompt and the answer is validated here, strictly, against the very same
+ * schema. What is lost is the guarantee that the answer parses first time; what is kept is every
+ * term, one request per document, and a check that is if anything harsher than the grammar's —
+ * a wrong shape is refused outright and the document is left to be read again.
+ */
+export function shapeForPrompt(): string {
+  const described = (t: z.ZodTypeAny, indent: string): string => {
+    const d = defOf(t);
+    if (!d) return "string";
+    if (d.type === "object") {
+      const shape = shapeOf(d);
+      if (!shape) return "object";
+      const inner = Object.entries(shape)
+        .map(([k, v]) => `${indent}  "${k}": ${described(v, `${indent}  `)}`)
+        .join(",\n");
+      return `{\n${inner}\n${indent}}`;
+    }
+    if (d.type === "array") return `[ ${d.element ? described(d.element, indent) : "string"} ]`;
+    if (d.type === "enum") {
+      const values = (d as unknown as { entries?: Record<string, string>; options?: string[] }).options
+        ?? Object.values((d as unknown as { entries?: Record<string, string> }).entries ?? {});
+      return values.length ? values.map((v) => JSON.stringify(v)).join(" | ") : "string";
+    }
+    if (d.type === "number") return "number";
+    if (d.type === "boolean") return "true | false";
+    return "string";
+  };
+  return described(ContractTermsWire, "");
+}
+
+/**
  * A term the contract does not state, as the rest of the site sees it: null, never missing.
  *
  * The schema sent to the API uses `.optional()` rather than `.nullable()` because a nullable field
@@ -361,7 +493,7 @@ What this is used for, so you understand the stakes: the pharmacy will compute w
 
 RULES, in order of importance:
 
-1. **Never infer a number.** If a rate, fee, window or date is not stated in this document, leave the field out entirely. Do not fill it from what is typical, from another PBM, or from an earlier version. A missing field is useful; a guess is dangerous.
+1. **Never infer a number.** If a rate, fee, window or date is not stated in this document, give the empty string "" for it — and "not stated" where the field offers that. Every field is required, so answer every one; "" is the answer meaning the document does not say. Numbers are written as text: "180", or "" where there is none. Do not fill a figure from what is typical, from another PBM, or from an earlier version. An empty answer is useful; a guess is dangerous.
 
 2. **Cite every figure that decides money.** Rates, dispensing fees, GCR tiers, appeal windows, DIR terms — each carries the contract's own words in its quote field, copied exactly, with the page and section where you found them. Copy the sentence, not your summary of it.
 
@@ -456,13 +588,18 @@ export function termsFromObject(raw: Record<string, unknown>): ContractTermsT {
 /**
  * The model's answer as terms, or a thrown reason.
  *
- * The API's grammar guarantees the shape when the request carries the schema; the answer is still
- * held to the same schema here, and an object wrapped in a fence or a sentence is found between
- * the first brace and the last, so a read made without the grammar parses too.
+ * The answer is asked for in the wire shape (`ContractTermsWire`: every field required, "" and
+ * "not stated" for what the document does not say) and read back through `fromWire`; an answer
+ * in the readable shape — an older batch, the proving read, a draft — parses through
+ * `termsFromObject` instead. The object is found between the first brace and the last, so a
+ * fence or a line of preamble does not fail a paid read.
  */
 export function termsFromAnswer(text: string): ContractTermsT {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start < 0 || end <= start) throw new Error("no JSON object in the answer");
-  return termsFromObject(JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>);
+  const raw = JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
+  const wire = ContractTermsWire.safeParse(raw);
+  if (wire.success) return fillNulls(ContractTerms, fromWire(ContractTerms, wire.data)) as ContractTermsT;
+  return termsFromObject(raw);
 }

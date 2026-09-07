@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "642dae73-5819-44e5-9d9c-b74c9a2d89a7",
-  "prevId": "d872a140-6cdf-48e8-9c60-bc43110ea576",
+  "id": "f0475b6e-463a-4236-99d8-baa3298a778b",
+  "prevId": "ba31ee2d-8f41-4ae9-b0f9-9c054c173c84",
   "tables": {
     "appeals": {
       "name": "appeals",
@@ -1389,6 +1389,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "extraction_failed_at": {
+          "name": "extraction_failed_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "triage": {
           "name": "triage",
           "type": "text",
@@ -1413,6 +1420,13 @@
         "triage_batch": {
           "name": "triage_batch",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pages": {
+          "name": "pages",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -4460,6 +4474,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "effective_to": {
+          "name": "effective_to",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "status": {
           "name": "status",
           "type": "text",
@@ -6154,6 +6175,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "retail_tax_cents": {
+          "name": "retail_tax_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "rx_patient_cents": {
           "name": "rx_patient_cents",
           "type": "integer",
@@ -6477,6 +6505,137 @@
       },
       "indexes": {},
       "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "standing_costs": {
+      "name": "standing_costs",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "category_id": {
+          "name": "category_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "vendor_id": {
+          "name": "vendor_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "amount_cents": {
+          "name": "amount_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "paid_day": {
+          "name": "paid_day",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "from_month": {
+          "name": "from_month",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "to_month": {
+          "name": "to_month",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
+        }
+      },
+      "indexes": {
+        "standing_costs_from_idx": {
+          "name": "standing_costs_from_idx",
+          "columns": [
+            "from_month"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "standing_costs_category_id_expense_categories_id_fk": {
+          "name": "standing_costs_category_id_expense_categories_id_fk",
+          "tableFrom": "standing_costs",
+          "tableTo": "expense_categories",
+          "columnsFrom": [
+            "category_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "standing_costs_vendor_id_vendors_id_fk": {
+          "name": "standing_costs_vendor_id_vendors_id_fk",
+          "tableFrom": "standing_costs",
+          "tableTo": "vendors",
+          "columnsFrom": [
+            "vendor_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
@@ -7313,6 +7472,28 @@
           "notNull": false,
           "autoincrement": false
         },
+        "no_rebates": {
+          "name": "no_rebates",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "no_rebates_by": {
+          "name": "no_rebates_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "no_rebates_at": {
+          "name": "no_rebates_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "minimum_order_cents": {
           "name": "minimum_order_cents",
           "type": "integer",
@@ -7336,6 +7517,13 @@
         },
         "lead_time_days": {
           "name": "lead_time_days",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "payment_terms_days": {
+          "name": "payment_terms_days",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,

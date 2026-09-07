@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "642dae73-5819-44e5-9d9c-b74c9a2d89a7",
-  "prevId": "d872a140-6cdf-48e8-9c60-bc43110ea576",
+  "id": "b5c0d0e4-3f98-4aaf-9ac2-266c239e3969",
+  "prevId": "642dae73-5819-44e5-9d9c-b74c9a2d89a7",
   "tables": {
     "appeals": {
       "name": "appeals",
@@ -1384,6 +1384,13 @@
         },
         "extraction_error": {
           "name": "extraction_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "extraction_failed_at": {
+          "name": "extraction_failed_at",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

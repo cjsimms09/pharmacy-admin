@@ -66,9 +66,12 @@ it and said so on the pull request. The owner reads this too.
   (your null-dropping and defaults moved into them from the extract file), the answer is found
   between its first and last brace so the proving read parses too, and `RateTerm.lineOfBusiness`
   is `.optional()` like its neighbours.
-- **Migration renumbered: mine is `0074_standing_costs_terms_pages`** (`standing_costs`,
-  `contract_docs.pages`, `network_rates.effective_to`, `suppliers.payment_terms_days`), after
-  your `0073_high_mac_gargan`. Regenerated from the schema, applied to a fresh database.
+- **Migration renumbered twice: mine is `0077_standing_costs_terms_pages_tax`** (`standing_costs`
+  with `paid_day`, `contract_docs.pages`, `network_rates.effective_to`, `suppliers.payment_terms_days`,
+  `sales_months.retail_tax_cents`), after your `0074`–`0076`. Regenerated from the schema, applied
+  to a fresh database. The reader is yours as merged at `32803b1` (the shape in the prompt,
+  `toWire`/`fromWire`); `termsFromAnswer` reads the wire shape first and the readable shape as a
+  fallback, so the proving read and older drafts still parse.
 - **The cash account had no cost of goods** because `supplier_invoices.paid_on` was on no screen.
   Now: the invoices page has a Paid column (a date per row, inside the table's one form), the
   supplier's terms page has "paid how many days after the invoice" (`suppliers.payment_terms_days`,

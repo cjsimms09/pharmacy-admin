@@ -1,7 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
-import { ContractTerms, fillNulls } from "../src/lib/contract-terms";
+import { ContractTerms, fillNulls, shapeForPrompt, fromWire } from "../src/lib/contract-terms";
 import { z } from "zod";
 
 /** Every place the generated JSON Schema gives a parameter more than one type. */
@@ -82,5 +82,30 @@ describe("turning an absent term back into a null", () => {
     // An older draft carrying a since-renamed field is still the pharmacy's read of its contract.
     const S = z.object({ a: z.string().optional() });
     assert.deepEqual(fillNulls(S, { a: "x", retired: "keep me" }), { a: "x", retired: "keep me" });
+  });
+});
+
+describe("the shape the model is asked for, now that it is words and not a grammar", () => {
+  test("it names every top-level term the schema carries", () => {
+    // Described rather than compiled: 61 fields, 175 leaves and 24 arrays is too large a grammar,
+    // and dropping half the terms to fit would lose the reason the read exists.
+    const shape = shapeForPrompt();
+    for (const field of ["counterparty", "rates", "gcrTiers", "disputeWindows", "macAppealWindowDays", "remittance", "confidence"])
+      assert.match(shape, new RegExp(`"${field}"`), `${field} must be described`);
+  });
+
+  test("an enum is offered as its actual choices, so the answer can only be one of them", () => {
+    const shape = shapeForPrompt();
+    assert.match(shape, /"contractType": "payer_network" \| "wholesaler" \| "psao" \| "unknown"/);
+    assert.match(shape, /"autoRenews": "yes" \| "no" \| "not stated"/);
+  });
+
+  test("a number that may be absent is asked for as text, matching what fromWire reads", () => {
+    // The two have to agree: asking for a number and parsing a string is how a read silently loses
+    // every figure it was run for.
+    assert.match(shapeForPrompt(), /"terminationNoticeDays": string/);
+    assert.deepEqual(fromWire(z.object({ terminationNoticeDays: z.number().int().optional() }), { terminationNoticeDays: "30" }), {
+      terminationNoticeDays: 30,
+    });
   });
 });

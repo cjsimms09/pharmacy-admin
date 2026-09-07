@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "642dae73-5819-44e5-9d9c-b74c9a2d89a7",
-  "prevId": "d872a140-6cdf-48e8-9c60-bc43110ea576",
+  "id": "ba31ee2d-8f41-4ae9-b0f9-9c054c173c84",
+  "prevId": "b5c0d0e4-3f98-4aaf-9ac2-266c239e3969",
   "tables": {
     "appeals": {
       "name": "appeals",
@@ -1384,6 +1384,13 @@
         },
         "extraction_error": {
           "name": "extraction_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "extraction_failed_at": {
+          "name": "extraction_failed_at",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -7308,6 +7315,28 @@
         },
         "rebate_statement_json": {
           "name": "rebate_statement_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "no_rebates": {
+          "name": "no_rebates",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "no_rebates_by": {
+          "name": "no_rebates_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "no_rebates_at": {
+          "name": "no_rebates_at",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

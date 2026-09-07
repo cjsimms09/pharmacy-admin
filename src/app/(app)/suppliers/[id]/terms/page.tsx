@@ -101,7 +101,7 @@ export default async function SupplierTermsPage({
    * ratio is in now, so that is the one this page shows — and it says which it used.
    */
   const rates = await ratesFor(id);
-  const view = rates?.view ?? rebateView([], null);
+  const view = rates?.view ?? rebateView([], null, supplier.noRebates ? { by: supplier.noRebatesBy, at: supplier.noRebatesAt } : null);
   const ratio = await ratioForSupplier(id);
 
   const superseded = allRebates.filter((r) => !inForce.some((p) => p.row.id === r.id));
@@ -191,6 +191,16 @@ export default async function SupplierTermsPage({
    * cover a duplicate created by a filing bug, and leaving one with no way out means this page
    * shows six ladders where there are three and none of the arithmetic on it can be trusted.
    */
+  async function setRebatesNone(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const { setNoRebates } = await import("@/lib/supplier-terms-store");
+    const message = await setNoRebates(id, String(fd.get("none") ?? "") === "1", u);
+    revalidatePath(`/suppliers/${id}/terms`);
+    revalidatePath("/suppliers");
+    redirect(`/suppliers/${id}/terms?ok=` + encodeURIComponent(message));
+  }
+
   async function removeProgram(fd: FormData) {
     "use server";
     const u = await requireManager();
@@ -584,11 +594,48 @@ export default async function SupplierTermsPage({
 
       {/* ── 2. Each ladder, with the band you are in ──────────────────── */}
       {view.programmes.length === 0 ? (
-        <Card className="mt-4" title="Rebate programmes" subtitle="Nothing on file, so a comparison uses this supplier's gross prices.">
-          <p className="text-sm text-ink-2">
-            If they send a monthly rebate report, upload it below and every ladder on it is filed with the arithmetic that
-            checks it. Otherwise enter the ladder by hand.
-          </p>
+        <Card
+          className="mt-4"
+          title="Rebate programmes"
+          subtitle={
+            supplier.noRebates
+              ? "This supplier pays none, so their prices are compared as they stand."
+              : "Nothing on file, so a comparison uses this supplier's gross prices."
+          }
+        >
+          {supplier.noRebates ? (
+            <>
+              <p className="text-sm text-ink-2">
+                Recorded as paying no rebates{supplier.noRebatesBy ? ` by ${supplier.noRebatesBy}` : ""}
+                {supplier.noRebatesAt ? ` on ${fmt(supplier.noRebatesAt)}` : ""}. Nothing here is outstanding.
+              </p>
+              {canManage && (
+                <form action={setRebatesNone} className="mt-3">
+                  <input type="hidden" name="none" value="0" />
+                  <button className="btn btn-sm">They do pay rebates after all</button>
+                </form>
+              )}
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-ink-2">
+                If they send a monthly rebate report, upload it below and every ladder on it is filed with the arithmetic
+                that checks it. Otherwise enter the ladder by hand.
+              </p>
+              {canManage && (
+                <>
+                  <form action={setRebatesNone} className="mt-3">
+                    <input type="hidden" name="none" value="1" />
+                    <button className="btn btn-sm">They pay no rebates</button>
+                  </form>
+                  <p className="mt-1 text-xs text-ink-3">
+                    Says so once and for all, rather than leaving it looking like something nobody has got to yet. It
+                    changes no figure — a supplier with no ladder is already compared at their gross prices.
+                  </p>
+                </>
+              )}
+            </>
+          )}
         </Card>
       ) : (
         <div className="mt-4 space-y-4">
