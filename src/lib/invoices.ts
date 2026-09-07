@@ -2,6 +2,7 @@ import "server-only";
 import { and, eq, gte, lte, isNull, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "./crypto";
+import { FROM_SUMMARY } from "./invoice-summary-store";
 import { todayIso, daysBetween } from "./dates";
 import { storeFile, readFile as readStoredFile } from "./files";
 import { readInvoice } from "./ai";
@@ -581,7 +582,25 @@ export async function fileInvoice(
         eq(schema.supplierInvoices.supplier, supplier),
       ),
     });
-    if (already) {
+    /*
+     * A placeholder from the Invoice Summary is replaced, not treated as the invoice already being
+     * here.
+     *
+     * The summary carries a number and a total and nothing else — no lines, no controlled
+     * substances, no schedule. The real document knows all of that, so when it arrives it takes the
+     * placeholder's place. Refusing it as a duplicate would leave the pharmacy holding the weaker
+     * record permanently; keeping both would count the same purchase twice, which is invisible in
+     * every figure it touches.
+     */
+    if (already && (already.basis ?? "").startsWith(FROM_SUMMARY)) {
+      await db.delete(schema.supplierInvoices).where(eq(schema.supplierInvoices.id, already.id));
+      await audit({
+        action: "invoice.replaced_summary",
+        userId: ctx.userId,
+        userName: ctx.userName,
+        details: `${supplier} invoice ${invoiceNumber} of ${invoiceDate} had been recorded from the Invoice Summary as a total only; the invoice itself has replaced it.`,
+      });
+    } else if (already) {
       await audit({
         action: "invoice.duplicate",
         userId: ctx.userId,

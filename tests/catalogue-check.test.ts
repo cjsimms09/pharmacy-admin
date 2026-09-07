@@ -1,6 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { problemsWith, packUnits, worstLevel, quarantineWrongPrices, type CatalogueItem } from "../src/lib/catalogue-check";
+import { packReadings } from "../src/lib/drug-file";
 
 /** A row as the McKesson import stores one, sound unless a test says otherwise. */
 function item(a: Partial<CatalogueItem> = {}): CatalogueItem {
@@ -199,5 +200,51 @@ describe("a price the arithmetic says is wrong never wins a comparison", () => {
     ]);
     assert.equal(taken.size, 0, "the pharmacy has the bottle and the site does not");
     assert.equal(rows.find((r) => r.supplier === "ABC (Cencora)")!.unitCostMicros, 15_390_000);
+  });
+});
+
+describe("the FDA settles an argument, it does not overrule everybody", () => {
+  /*
+   * Every case here is a real row from the pharmacy's catalogue after the first FDA load, when the
+   * directory's figure was applied without asking whether anybody recognised it. 69 rows moved and
+   * several moved badly: a $124.99 buprenorphine patch read as $0.74.
+   *
+   * The rule the code now applies: use the FDA's package only where some supplier already reads it
+   * that way — same measure, and its own inner or whole figure equal to the FDA's.
+   */
+  const agrees = (supplierPacks: string[], fda: string): boolean => {
+    const seen = new Set<string>();
+    for (const p of supplierPacks) {
+      const r = packReadings(p);
+      if (r.uom === null) continue;
+      if (r.inner !== null) seen.add(`${r.inner} ${r.uom}`);
+      if (r.whole !== null) seen.add(`${r.whole} ${r.uom}`);
+    }
+    return seen.has(fda);
+  };
+
+  test("a box of four patches is not six hundred and seventy-two", () => {
+    // The FDA states a seven-day patch as 168 hours in a pouch; multiplied through it is 672.
+    assert.equal(agrees(["4 EA"], "672 EA"), false);
+    assert.equal(agrees(["4 EA"], "96 EA"), false, "and a daily clonidine patch is not 96 either");
+  });
+
+  test("actuations are not grams, however confidently either is stated", () => {
+    // Breyna: the wholesalers price the 10.3 g canister, the FDA counts 120 doses out of it.
+    assert.equal(agrees(["10.3 GM"], "120 EA"), false);
+    assert.equal(agrees(["(2) 33.4 GM"], "2 EA"), false);
+  });
+
+  test("but a carton written out is exactly what this is for", () => {
+    // Atovaquone: McKesson writes 42 bottles of 5 mL, the FDA writes 210 mL. One package.
+    assert.equal(agrees(["(42) 5 ML"], "210 ML"), true);
+    // Apri: one wholesaler writes the box out, another writes the cards, the FDA agrees with one.
+    assert.equal(agrees(["1 EA", "168 EA", "(6) 28 EA"], "168 EA"), true);
+  });
+
+  test("a reading nobody in the trade recognises is refused", () => {
+    // Asenapine: every file says 60 or 100 and the directory says 600 or 1000.
+    assert.equal(agrees(["60 EA", "60 EA", "1 EA"], "600 EA"), false);
+    assert.equal(agrees(["100 EA"], "1000 EA"), false);
   });
 });

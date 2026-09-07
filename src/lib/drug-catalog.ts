@@ -41,7 +41,7 @@ export async function drugFile(): Promise<DrugRow[]> {
   const { drugNames } = await import("./drug-names");
   const { latestShelf, movement } = await import("./shelf");
 
-  const { contractRatesBySupplier } = await import("./rebate-rates");
+  const { contractRatesBySupplier, contractRateDiagnosis } = await import("./rebate-rates");
   const { directoryKeys } = await import("./drug-directory-store");
   const [items, nadac, names, shelf, move, itemFixes, packFixes, rebateRates, directory] = await Promise.all([
     catalogueRows(),
@@ -54,6 +54,8 @@ export async function drugFile(): Promise<DrugRow[]> {
     contractRatesBySupplier(),
     directoryKeys(),
   ]);
+  // Why a rebated line is still being compared on its printed price, said precisely rather than guessed.
+  const rebateWhyBy = await contractRateDiagnosis();
 
   /*
    * The rate a supplier's rebate pays, by whatever the catalogue calls them.
@@ -116,9 +118,16 @@ export async function drugFile(): Promise<DrugRow[]> {
           const rebated = it.contractFlag === "rebated" ? true : it.contractFlag === "not rebated" ? false : null;
           const rate = rateFor(it.supplier);
           const apply = rebated === true && rate !== null && it.unitCostMicros !== null;
+          const supplierKey = it.supplier.trim().toLowerCase();
           return {
             netUnitMicros: apply ? Math.round((it.unitCostMicros as number) * (1 - (rate as number))) : it.unitCostMicros,
             rebateApplied: apply,
+            rebateWhy:
+              rebated === true && !apply
+                ? rebateWhyBy[supplierKey] ??
+                  Object.entries(rebateWhyBy).find(([n]) => supplierKey.includes(n) || n.includes(supplierKey))?.[1] ??
+                  `${it.supplier} is not on the supplier list, so the site holds no agreement for them and cannot take anything off their price. Add them on the Suppliers page.`
+                : null,
           };
         })(),
         packCostCents: it.packCostCents,

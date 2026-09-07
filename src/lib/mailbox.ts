@@ -739,6 +739,34 @@ async function importRecognised(
       } else {
         routeResult = `Recognised as an inventory count but nothing was filed: ${r.why}`;
       }
+    } else if (cls.kind === "payer_payments") {
+      /*
+       * Banked in the month it was deposited, once per payment.
+       *
+       * The report is a date range and a date range gets re-run — the same week with a day added,
+       * or last month forwarded again — so each payment is keyed on the payer's own payment number
+       * and a payment already held adds nothing. Without that this file would inflate revenue every
+       * time it landed, which on the cash account is the error that matters most.
+       */
+      const { importPayerPayments } = await import("./payer-payments-store");
+      const r = await importPayerPayments(buf.toString("utf8"), {
+        userId: ctx.userId ?? null,
+        userName: "mailbox sweep",
+        fileName,
+        documentId: filed?.documentId ?? null,
+      });
+      if (r.ok) {
+        routeResult =
+          r.banked === 0
+            ? `No new payments: ${r.alreadyHeld > 0 ? `all ${r.alreadyHeld} were already banked` : "the report covered a period with no deposits"}.`
+            : `${money(r.bankedCents)} banked across ${r.banked} payment${r.banked === 1 ? "" : "s"}` +
+              `${r.from ? `, ${r.from} to ${r.to}` : ""}` +
+              `${r.alreadyHeld ? `; ${r.alreadyHeld} already held` : ""}` +
+              `${r.skipped.length ? `; ${r.skipped.length} row${r.skipped.length === 1 ? "" : "s"} not read` : ""}.`;
+        imported = r.banked > 0;
+      } else {
+        routeResult = `Recognised as a payer payment report but nothing was banked: ${r.why}`;
+      }
     } else if (cls.kind === "accrual_sales") {
       /*
        * Recognised, kept, and honestly described as not yet counted.

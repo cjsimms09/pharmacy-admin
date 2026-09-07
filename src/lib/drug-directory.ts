@@ -387,6 +387,15 @@ export function packageUnits(packageDescription: string): { units: number; uom: 
  */
 function unitOfMeasure(noun: string): { uom: "EA" | "ML" | "GM"; factor: number } | null {
   const n = noun.trim().toLowerCase();
+  /*
+   * Hours are not a dispensing unit, and reading them as one is how a box of four patches became
+   * six hundred and seventy-two.
+   *
+   * The FDA states a transdermal system's contents by how long it is worn — "4 POUCH in 1 CARTON /
+   * 168 h in 1 POUCH" for four seven-day patches. Multiplied through as though hours were things,
+   * that is 672, and a $124.99 patch reads as $0.74. A duration is refused outright.
+   */
+  if (/^h$|^hr$|^hour|^d$|^day|^wk$|^week|^min|^sec/.test(n)) return null;
   if (/^ml$|^milliliter|^millilitre/.test(n)) return { uom: "ML", factor: 1 };
   if (/^l$|^liter|^litre/.test(n)) return { uom: "ML", factor: 1000 };
   if (/^g$|^gm$|^gram/.test(n)) return { uom: "GM", factor: 1 };

@@ -8,6 +8,7 @@ import { looksLikeRxTransactions } from "./rx-transactions";
 import { looksLikeSystemSales } from "./system-sales";
 import { looksLikeOnHand } from "./on-hand";
 import { looksLikeRxRescueCredit } from "./rxrescue-credit";
+import { looksLikePayerPayments } from "./payer-payments";
 import { pdfText } from "./pdf-text";
 import { looksLikeRebateReport } from "./rebate-report";
 import { isDrillDownText } from "./drill-down-read";
@@ -28,7 +29,7 @@ import { ALLOWED_MIME } from "./files";
  * behaviour we already had and is never wrong, only unhelpful.
  */
 
-export type RouteKind = "claims" | "rx_transactions" | "accrual_sales" | "on_hand" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "return_policy" | "nadac" | "unrecognised";
+export type RouteKind = "claims" | "rx_transactions" | "payer_payments" | "accrual_sales" | "on_hand" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "return_policy" | "nadac" | "unrecognised";
 
 export type Classification = {
   kind: RouteKind;
@@ -160,6 +161,21 @@ export function classify(fileName: string, buf: Buffer): Classification {
       kind: "rxrescue_credit",
       why: "An Aytu / IPD credit memo: RxRescue top-off money for claims already dispensed. Applied to the fills it names.",
       headers: ["Transaction ID", "Rx Number", "NDC", "Transaction Date", "RxRescue Top Off Amount/Credit", "Total Credit Payment to Pharmacy"],
+    };
+  }
+  /*
+   * The payer payment report: what the plans actually put in the bank.
+   *
+   * Checked before the generic header reader because it is an ordinary CSV with a proper header
+   * and would otherwise map plausibly onto something else. It is known by four columns together —
+   * a payment number, a payer, a deposit date and an amount — which no other report the pharmacy
+   * receives carries as a set.
+   */
+  if (looksLikePayerPayments(buf.subarray(0, 4096).toString("utf8"))) {
+    return {
+      kind: "payer_payments",
+      why: "A payer payment report: what each plan deposited, by payment. Banked as cash received in the month it was deposited, once per payment number.",
+      headers: ["Payment number", "Payer name", "Deposit date", "Payment amt", "Payment type"],
     };
   }
   if (looksLikeSystemSales(buf.subarray(0, 8192).toString("utf8"), fileName)) {

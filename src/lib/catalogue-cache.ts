@@ -126,6 +126,7 @@ export async function catalogueRows(): Promise<CatalogueRow[]> {
 
   const { db } = await import("@/db");
   const { packageSizes } = await import("./drug-directory-store");
+  const { packReadings } = await import("./drug-file");
   const [raw, fixes, packFixes, fdaPacks] = await Promise.all([
     db.query.supplierItems.findMany({
       columns: {
@@ -161,6 +162,37 @@ export async function catalogueRows(): Promise<CatalogueRow[]> {
    * pharmacy records that one wholesaler genuinely ships a different configuration.
    */
   const packBy = new Map(packFixes.map((f) => [f.ndc11, f.packSize]));
+
+  /*
+   * The FDA settles an argument; it does not overrule everybody.
+   *
+   * Its package field is stated for a regulator, not for a buyer, and the two do not always mean
+   * the same thing by a unit. It describes a box of four buprenorphine patches as four pouches of
+   * 168 hours, which multiplies out to 672; it counts a Breyna inhaler in 120 actuations where
+   * every wholesaler prices it by the 10.3 grams in the canister. Applied blind, both turn a
+   * $124.99 patch into a $0.74 one — and the site did exactly that to 69 rows.
+   *
+   * So the FDA's figure is used only where some supplier already reads the package that way: same
+   * unit of measure, and its own inner or whole figure equal to the FDA's. That is precisely the
+   * case the 998 disputes were — two wholesalers describing one box, one of them agreeing with the
+   * FDA — and it is never the case above, where no wholesaler recognises the number at all. When
+   * twenty-four files say four and the directory says six hundred and seventy-two, the directory
+   * is being read wrong, not the trade.
+   */
+  const fdaAgreed = new Map<string, string>();
+  {
+    const readings = new Map<string, Set<string>>();
+    for (const r of raw) {
+      const p = packReadings(r.packSize);
+      if (p.uom === null) continue;
+      const set = readings.get(r.ndc11) ?? new Set<string>();
+      if (p.inner !== null) set.add(`${p.inner} ${p.uom}`);
+      if (p.whole !== null) set.add(`${p.whole} ${p.uom}`);
+      readings.set(r.ndc11, set);
+    }
+    for (const [ndc11, size] of fdaPacks) if (readings.get(ndc11)?.has(size)) fdaAgreed.set(ndc11, size);
+  }
+
   const rows: CatalogueRow[] = raw.map((r) => {
     const fix = by.get(`${r.supplier.trim().toLowerCase()}|${r.ndc11}`);
     /*
@@ -172,7 +204,7 @@ export async function catalogueRows(): Promise<CatalogueRow[]> {
      * every wholesaler's row is put on the FDA's package and the arguing stops. It never overrides
      * a pharmacist who has settled a package himself; he has the bottle and the file does not.
      */
-    const settledPack = packBy.get(r.ndc11) ?? fdaPacks.get(r.ndc11) ?? null;
+    const settledPack = packBy.get(r.ndc11) ?? fdaAgreed.get(r.ndc11) ?? null;
     if (!fix && !settledPack) return r;
     /*
      * A blank in a correction means "leave the supplier's", never "set it to nothing" — so fixing
