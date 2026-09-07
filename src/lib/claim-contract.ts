@@ -92,6 +92,17 @@ export type ContractForMatch = {
 
 export type RateForMatch = {
   network: string | null;
+  /**
+   * The routing this rate line was printed against, where the schedule printed one.
+   *
+   * Empty means the line carries no routing of its own and the contract's lists stand for it. A
+   * line that does carry routing is only about a claim that matches it — which is the whole reason
+   * to keep it, since a document with a Commercial table and a Part D table is otherwise two
+   * rates and no way to choose.
+   */
+  bins: string[];
+  pcns: string[];
+  groupIds: string[];
   daysSupplyMin: number | null;
   daysSupplyMax: number | null;
   brandFormula: string | null;
@@ -214,7 +225,20 @@ export function contractFor(
  */
 export function rateFor(contract: ContractForMatch, claim: ClaimForMatch): RateForMatch | null {
   const days = claim.daysSupply;
-  const fits = contract.rates.filter((r) => {
+
+  /*
+   * Routing first, days supply second.
+   *
+   * One document routinely carries two rate tables for two books — a Commercial schedule and a
+   * Part D schedule — printed with their own BINs and PCNs. Choosing between them on days supply
+   * alone picks whichever the reader happened to list first, which is a coin toss on two-thirds of
+   * this pharmacy's claims. Where a line names routing, it is about this claim only if the claim
+   * matches it; where no line names routing, nothing is excluded and the old behaviour stands.
+   */
+  const routed = contract.rates.filter((r) => routes(r, claim) === true);
+  const unrouted = contract.rates.filter((r) => routes(r, claim) === null);
+  const pool = routed.length > 0 ? routed : unrouted.length > 0 ? unrouted : [];
+  const fits = pool.filter((r) => {
     if (days === null) return r.daysSupplyMin === null && r.daysSupplyMax === null;
     if (r.daysSupplyMin !== null && days < r.daysSupplyMin) return false;
     if (r.daysSupplyMax !== null && days > r.daysSupplyMax) return false;
@@ -222,7 +246,26 @@ export function rateFor(contract: ContractForMatch, claim: ClaimForMatch): RateF
   });
   const width = (r: RateForMatch) =>
     r.daysSupplyMin === null && r.daysSupplyMax === null ? Infinity : (r.daysSupplyMax ?? 999) - (r.daysSupplyMin ?? 0);
-  return fits.sort((a, b) => width(a) - width(b))[0] ?? contract.rates.find((r) => r.daysSupplyMin === null && r.daysSupplyMax === null) ?? null;
+  return fits.sort((a, b) => width(a) - width(b))[0] ?? pool.find((r) => r.daysSupplyMin === null && r.daysSupplyMax === null) ?? null;
+}
+
+/**
+ * Whether a rate line's own routing is about this claim.
+ *
+ * Three answers, not two: true where the line names routing the claim matches, false where it
+ * names routing the claim does not, and null where it names none — which is not a mismatch, it is
+ * a line that inherits the document's routing and applies to everything the document does.
+ */
+export function routes(rate: Pick<RateForMatch, "bins" | "pcns" | "groupIds">, claim: ClaimForMatch): boolean | null {
+  const has = (xs: string[]) => xs.map(norm).filter((x): x is string => x !== null);
+  const bins = has(rate.bins);
+  const pcns = has(rate.pcns);
+  const groups = has(rate.groupIds);
+  if (bins.length === 0 && pcns.length === 0 && groups.length === 0) return null;
+  if (bins.length > 0 && !(claim.bin && bins.includes(norm(claim.bin)!))) return false;
+  if (pcns.length > 0 && !(claim.pcn && pcns.includes(norm(claim.pcn)!))) return false;
+  if (groups.length > 0 && !(claim.groupNumber && groups.includes(norm(claim.groupNumber)!))) return false;
+  return true;
 }
 
 export type Priced =

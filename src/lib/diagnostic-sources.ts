@@ -161,6 +161,9 @@ export const SOURCES: Source[] = [
           endDate: terms.endDate,
           rates: (terms.rates ?? []).map((r) => ({
             network: r.network,
+            bins: r.bins ?? [],
+            pcns: r.pcns ?? [],
+            groupIds: r.groupIds ?? [],
             daysSupplyMin: r.daysSupplyMin,
             daysSupplyMax: r.daysSupplyMax,
             brandFormula: r.brandFormula,

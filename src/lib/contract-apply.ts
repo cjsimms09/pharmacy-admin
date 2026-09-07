@@ -33,6 +33,10 @@ export type RateProposal = {
     sourceLabel: string;
     lineOfBusiness: string;
     network: string;
+    /** The routing printed against this line, comma separated. Null where the line carries none. */
+    bins: string | null;
+    pcns: string | null;
+    groupIds: string | null;
     effectiveDate: string | null;
     daysSupply: string | null;
     brandRate: string | null;
@@ -104,7 +108,7 @@ export type Proposals = {
 };
 
 export type Existing = {
-  rates?: { pbmName: string; lineOfBusiness: string; network: string; daysSupply: string | null; brandRate: string | null; genericRate: string | null }[];
+  rates?: { pbmName: string; lineOfBusiness: string; network: string; bins?: string | null; daysSupply: string | null; brandRate: string | null; genericRate: string | null }[];
   appeal?: { pbmName: string; submissionChannel: string | null; submissionTarget: string | null; appealWindowDays: number | null; windowBasis: string | null } | null;
   contacts?: { pbmName: string; contactType: string; phone: string | null; email: string | null; portalUrl: string | null }[];
   routing?: { pbmName: string; paysVia: string | null; paymentMethod: string | null; remittanceSource: string | null; paymentCycle: string | null } | null;
@@ -141,18 +145,41 @@ export function proposeFromContract(t: ContractTermsT, documentName: string, pla
     const brandRate = r.brandFormula ? `${r.brandFormula}${/\$/.test(r.brandFormula) ? "" : fee(r.brandDispensingFee)}` : null;
     const genericRate = r.genericBasis ? `${r.genericBasis}${/\$/.test(r.genericBasis) ? "" : fee(r.genericDispensingFee)}` : null;
     const daysSupply = r.daysSupplyMin != null || r.daysSupplyMax != null ? `${r.daysSupplyMin ?? 1}-${r.daysSupplyMax ?? ""}`.replace(/-$/, "+") : null;
+    /*
+     * The book this line prices, and the routing it prices for.
+     *
+     * `linesOfBusiness[0]` used to stamp every rate in a document with whichever book was listed
+     * first, so a document carrying a Commercial schedule and a Part D schedule filed both as
+     * Commercial. The line's own book is used where the schedule states it; the document's is used
+     * only where it states exactly one, and "unknown" is the honest answer to the rest.
+     */
+    const lineOfBusiness = r.lineOfBusiness?.trim() || (t.linesOfBusiness.length === 1 ? t.linesOfBusiness[0] : "unknown");
+    const csv = (xs: string[]) => {
+      const kept = [...new Set(xs.map((x) => x.trim().toUpperCase()).filter(Boolean))];
+      return kept.length ? kept.join(", ") : null;
+    };
     const row = {
       pbmName: pbmOf(t, r.pbmVendor, pbmName),
       sourceLabel,
-      lineOfBusiness: t.linesOfBusiness[0] ?? "unknown",
+      lineOfBusiness,
       network: [r.network, r.costSharingTier !== "unknown" && r.costSharingTier !== "both" ? r.costSharingTier : null].filter(Boolean).join(" · ") || "all",
+      bins: csv(r.bins),
+      pcns: csv(r.pcns),
+      groupIds: csv(r.groupIds),
       effectiveDate: r.effectiveFrom ?? t.effectiveDate ?? null,
       daysSupply,
       brandRate,
       genericRate,
       notes: [r.specialtyTerms && `Specialty: ${r.specialtyTerms}`, r.compoundTerms && `Compounds: ${r.compoundTerms}`, r.vaccineTerms && `Vaccines: ${r.vaccineTerms}`].filter(Boolean).join(" ") || null,
     };
-    const prior = existing.rates?.find((e) => norm(e.pbmName) === norm(row.pbmName) && norm(e.network) === norm(row.network) && norm(e.lineOfBusiness) === norm(row.lineOfBusiness) && same(e.daysSupply, row.daysSupply));
+    const prior = existing.rates?.find(
+      (e) =>
+        norm(e.pbmName) === norm(row.pbmName) &&
+        norm(e.network) === norm(row.network) &&
+        norm(e.lineOfBusiness) === norm(row.lineOfBusiness) &&
+        same(e.daysSupply, row.daysSupply) &&
+        same(e.bins ?? null, row.bins),
+    );
     rates.push({
       kind: "rate",
       standing: standingOf(prior as Record<string, string | null> | undefined, row, ["brandRate", "genericRate"]),

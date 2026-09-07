@@ -6,6 +6,7 @@ import { requireReimbursement } from "@/lib/features";
 import { audit } from "@/lib/audit";
 import { proposalsFor, acceptProposals } from "@/lib/contract-docs";
 import { parseTerms } from "@/lib/contract-extract";
+import { digest } from "@/lib/contract-digest";
 import { PageHeader, Card, Notice, Empty, BackLink } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 
@@ -28,6 +29,7 @@ export default async function ContractReviewPage({ params, searchParams }: { par
   if (!got) notFound();
   const { doc, proposals: p } = got;
   const terms = parseTerms(doc.extractionJson);
+  const rest = terms ? digest(terms) : [];
   const canManage = user.role !== "staff";
 
   async function accept(fd: FormData) {
@@ -81,6 +83,11 @@ export default async function ContractReviewPage({ params, searchParams }: { par
                     {canManage && <input type="checkbox" name="rate" value={i} defaultChecked={r.standing !== "same"} className="mt-1" />}
                     <span className="flex-1">
                       <span className="text-sm font-medium">{r.row.pbmName} · {r.row.lineOfBusiness} · {r.row.network}{r.row.daysSupply ? ` · ${r.row.daysSupply} days` : ""}</span> {standing(r.standing)}
+                      {(r.row.bins || r.row.pcns || r.row.groupIds) && (
+                        <span className="mt-0.5 block font-mono text-xs text-ink-2">
+                          Prices {[r.row.bins && `BIN ${r.row.bins}`, r.row.pcns && `PCN ${r.row.pcns}`, r.row.groupIds && `group ${r.row.groupIds}`].filter(Boolean).join(" · ")}
+                        </span>
+                      )}
                       <span className="mt-0.5 block text-sm">Brand: {r.row.brandRate ?? "—"}{!r.readable.brand && <span className="badge badge-warn ml-1">cannot price</span>} · Generic: {r.row.genericRate ?? "—"}{!r.readable.generic && <span className="badge badge-warn ml-1">cannot price</span>}</span>
                       {r.existing && <span className="block text-xs text-ink-3">On file: brand {r.existing.brandRate ?? "—"} · generic {r.existing.genericRate ?? "—"}</span>}
                       <Quote q={r.quote} />
@@ -161,30 +168,44 @@ export default async function ContractReviewPage({ params, searchParams }: { par
         </Card>
 
         {/*
-          Kept, not accepted: the document's own map, its definitions, its fees and its clocks.
-          These are facts about the document rather than rows for a payer page, and they are what
-          a question nobody has asked yet is answered from without reading the document again.
+          Kept, not accepted: everything else the document says.
+
+          Rates, appeal terms, contacts, the payment path and the plan links become rows on a payer
+          page, because something acts on them. Everything else used to be read out of the document,
+          stored, and shown nowhere — DIR, the effective rate guarantees, the performance measures,
+          the prompt-pay clock, the recoupment rights, the compendium the formula is measured
+          against. Paying to read a contract and then not showing what it said is the worst of both,
+          so the rest of the read is here, grouped the way somebody would ask for it.
         */}
-        {terms && (terms.sections.length > 0 || terms.keyDefinitions.length > 0 || terms.transactionFees.length > 0 || terms.networkReimbursementIds.length > 0) && (
-          <Card className="mt-4" title="Kept from this read" subtitle="The document's map, its definitions, its fees and its identifiers, held with the draft so nothing has to be read twice.">
-            {terms.networkReimbursementIds.length > 0 && <p className="text-sm"><b>Network reimbursement ids:</b> <span className="font-mono text-xs">{terms.networkReimbursementIds.join(", ")}</span></p>}
-            {(terms.claimSubmissionWindowDays !== null || terms.reversalWindowDays !== null) && (
-              <p className="mt-1 text-sm"><b>Clocks:</b> {[terms.claimSubmissionWindowDays !== null && `claims submitted within ${terms.claimSubmissionWindowDays} days`, terms.reversalWindowDays !== null && `reversed within ${terms.reversalWindowDays} days`].filter(Boolean).join("; ")}</p>
-            )}
-            {terms.transactionFees.length > 0 && (
-              <ul className="mt-2 text-sm"><li><b>Fees:</b></li>{terms.transactionFees.map((f, i) => <li key={i} className="ml-4">{f.name}: {f.amount ?? "—"}{f.appliesTo ? ` (${f.appliesTo})` : ""}</li>)}</ul>
-            )}
-            {terms.keyDefinitions.length > 0 && (
-              <ul className="mt-2 text-sm"><li><b>As this document defines them:</b></li>{terms.keyDefinitions.map((d, i) => <li key={i} className="ml-4"><b>{d.term}</b>: {d.definition}</li>)}</ul>
-            )}
-            {terms.sections.length > 0 && (
-              <div className="mt-2 overflow-x-auto">
-                <table className="table text-sm">
-                  <thead><tr><th>Section</th><th>Pages</th><th>What it decides</th></tr></thead>
-                  <tbody>{terms.sections.map((x, i) => <tr key={i}><td>{x.title}</td><td className="whitespace-nowrap text-xs">{x.pageFrom ?? "—"}{x.pageTo && x.pageTo !== x.pageFrom ? `–${x.pageTo}` : ""}</td><td className="text-ink-2">{x.gist}</td></tr>)}</tbody>
-                </table>
-              </div>
-            )}
+        {rest.length > 0 && (
+          <Card className="mt-4" title="The rest of what this document says" count={rest.reduce((n, g) => n + g.lines.length, 0)} subtitle="Not rows for a payer page — facts about this contract, held with the read so nothing has to be looked up twice.">
+            <div className="space-y-4">
+              {rest.map((g) => (
+                <div key={g.title}>
+                  <p className="text-sm font-semibold">{g.title}</p>
+                  <p className="mb-1 text-xs text-ink-3">{g.why}</p>
+                  <ul className="rows">
+                    {g.lines.map((l, i) => (
+                      <li key={i} className="py-1.5 text-sm">
+                        <b>{l.label}:</b> {l.value}
+                        {l.quote && <p className="mt-0.5 border-l-2 border-line pl-2 text-xs italic text-ink-2">&ldquo;{l.quote}&rdquo;</p>}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+
+        {terms && terms.sections.length > 0 && (
+          <Card className="mt-4" title="The document's own map" count={terms.sections.length} subtitle="Every section and exhibit, where it is and what it decides — so a question nobody has asked yet is answered without reading the document again.">
+            <div className="overflow-x-auto">
+              <table className="table text-sm">
+                <thead><tr><th>Section</th><th>Pages</th><th>What it decides</th></tr></thead>
+                <tbody>{terms.sections.map((x, i) => <tr key={i}><td>{x.title}</td><td className="whitespace-nowrap text-xs">{x.pageFrom ?? "—"}{x.pageTo && x.pageTo !== x.pageFrom ? `–${x.pageTo}` : ""}</td><td className="text-ink-2">{x.gist}</td></tr>)}</tbody>
+              </table>
+            </div>
           </Card>
         )}
 

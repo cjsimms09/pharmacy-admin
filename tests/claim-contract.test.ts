@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { governs, contractFor, rateFor, priceFromRate, checkClaim, awpForQuantity, type ClaimForMatch, type ContractForMatch, type RateForMatch } from "../src/lib/claim-contract";
 
 const rate = (a: Partial<RateForMatch> = {}): RateForMatch => ({
-  network: null, daysSupplyMin: null, daysSupplyMax: null,
+  network: null, bins: [], pcns: [], groupIds: [], daysSupplyMin: null, daysSupplyMax: null,
   brandFormula: "AWP - 15.0%", brandDispensingFee: 1, genericBasis: "MAC", genericDispensingFee: 1,
   citationQuote: "AWP less 15% plus $1.00", ...a,
 });
@@ -223,5 +223,38 @@ describe("knowing when the match is a guess rather than a fact", () => {
     // Absence of evidence about the BIN is not evidence the match is wrong.
     assert.equal(governs(contract(), claim())?.confident, true);
     assert.equal(governs(contract(), claim(), null)?.confident, true);
+  });
+});
+
+describe("a rate line that names its own routing", () => {
+  const commercial = rate({ bins: ["610455"], pcns: ["BCBSKS"], groupIds: [], brandFormula: "AWP - 15.0%", citationQuote: "Commercial: AWP less 15%." });
+  const partD = rate({ bins: ["610455"], pcns: ["KSPARTD"], groupIds: [], brandFormula: "AWP - 22.0%", citationQuote: "Part D: AWP less 22%." });
+  const both = contract({ bins: ["610455"], pcns: ["BCBSKS", "KSPARTD"], rates: [commercial, partD] });
+
+  test("prices the claim on the line printed for its PCN, not the first one listed", () => {
+    assert.equal(rateFor(both, claim({ bin: "610455", pcn: "KSPARTD" }))?.brandFormula, "AWP - 22.0%");
+    assert.equal(rateFor(both, claim({ bin: "610455", pcn: "BCBSKS" }))?.brandFormula, "AWP - 15.0%");
+  });
+
+  test("a claim matching no routed line falls back to the lines that name none", () => {
+    const general = rate({ brandFormula: "AWP - 18.0%" });
+    const mixed = contract({ bins: ["610455"], pcns: [], rates: [commercial, partD, general] });
+    assert.equal(rateFor(mixed, claim({ bin: "610455", pcn: "KSPDP" }))?.brandFormula, "AWP - 18.0%");
+  });
+
+  test("with no routed line at all, nothing changes: the days-supply band still decides", () => {
+    const short = rate({ daysSupplyMin: 1, daysSupplyMax: 34, brandFormula: "AWP - 15.0%" });
+    const long = rate({ daysSupplyMin: 35, daysSupplyMax: null, brandFormula: "AWP - 20.0%" });
+    const c = contract({ rates: [short, long] });
+    assert.equal(rateFor(c, claim({ daysSupply: 90 }))?.brandFormula, "AWP - 20.0%");
+    assert.equal(rateFor(c, claim({ daysSupply: 30 }))?.brandFormula, "AWP - 15.0%");
+  });
+
+  test("routing narrows before days supply, so the wrong book's band cannot win", () => {
+    const commercial90 = rate({ bins: ["610455"], pcns: ["BCBSKS"], daysSupplyMin: 1, daysSupplyMax: 34, brandFormula: "AWP - 15.0%" });
+    const partDAny = rate({ bins: ["610455"], pcns: ["KSPARTD"], brandFormula: "AWP - 22.0%" });
+    const c = contract({ bins: ["610455"], pcns: [], rates: [commercial90, partDAny] });
+    // A 30-day Part D fill fits the Commercial band exactly, and must still be priced as Part D.
+    assert.equal(rateFor(c, claim({ bin: "610455", pcn: "KSPARTD", daysSupply: 30 }))?.brandFormula, "AWP - 22.0%");
   });
 });

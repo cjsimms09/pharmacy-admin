@@ -1512,6 +1512,17 @@ export const networkRates = sqliteTable(
     sourceLabel: text("source_label").notNull(),
     lineOfBusiness: text("line_of_business").notNull(),
     network: text("network").notNull(),
+    /**
+     * The routing this rate line was printed against, comma separated, where the schedule printed
+     * one against the line rather than once for the whole document.
+     *
+     * Without it, a document carrying a Commercial table and a Part D table leaves two rates and no
+     * way to choose between them on a live claim — and two-thirds of this pharmacy's claims sit on
+     * a BIN that carries more than one book. Empty means the line inherits the contract's routing.
+     */
+    bins: text("bins"),
+    pcns: text("pcns"),
+    groupIds: text("group_ids"),
     effectiveDate: text("effective_date"),
     status: text("status"),
     daysSupply: text("days_supply"),

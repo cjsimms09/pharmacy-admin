@@ -219,7 +219,7 @@ export async function existingFor(pbmName: string, exceptDocId: string): Promise
     db.query.contractDocs.findMany({ where: and(eq(schema.contractDocs.extractionState, "done")) }),
   ]);
   return {
-    rates: rates.map((r) => ({ pbmName: r.pbmName, lineOfBusiness: r.lineOfBusiness, network: r.network, daysSupply: r.daysSupply, brandRate: r.brandRate, genericRate: r.genericRate })),
+    rates: rates.map((r) => ({ pbmName: r.pbmName, lineOfBusiness: r.lineOfBusiness, network: r.network, bins: r.bins, daysSupply: r.daysSupply, brandRate: r.brandRate, genericRate: r.genericRate })),
     appeal: appeal ? { pbmName: appeal.pbmName, submissionChannel: appeal.submissionChannel, submissionTarget: appeal.submissionTarget, appealWindowDays: appeal.appealWindowDays, windowBasis: appeal.windowBasis } : null,
     contacts: contacts.map((c) => ({ pbmName: c.pbmName, contactType: c.contactType, phone: c.phone, email: c.email, portalUrl: c.portalUrl })),
     routing: routing ? { pbmName: routing.pbmName, paysVia: routing.paysVia, paymentMethod: routing.paymentMethod, remittanceSource: routing.remittanceSource, paymentCycle: routing.paymentCycle } : null,
@@ -314,7 +314,14 @@ export async function acceptProposals(docId: string, picks: Picks, user: { name:
     const r = p.rates[i];
     if (!r) continue;
     const prior = await db.query.networkRates.findFirst({
-      where: and(eq(schema.networkRates.pbmName, r.row.pbmName), eq(schema.networkRates.network, r.row.network), eq(schema.networkRates.lineOfBusiness, r.row.lineOfBusiness), r.row.daysSupply === null ? isNull(schema.networkRates.daysSupply) : eq(schema.networkRates.daysSupply, r.row.daysSupply)),
+      where: and(
+        eq(schema.networkRates.pbmName, r.row.pbmName),
+        eq(schema.networkRates.network, r.row.network),
+        eq(schema.networkRates.lineOfBusiness, r.row.lineOfBusiness),
+        r.row.daysSupply === null ? isNull(schema.networkRates.daysSupply) : eq(schema.networkRates.daysSupply, r.row.daysSupply),
+        // Two lines of one schedule that differ only in the BINs they price must not overwrite each other.
+        r.row.bins === null ? isNull(schema.networkRates.bins) : eq(schema.networkRates.bins, r.row.bins),
+      ),
     });
     const values = { ...r.row, sourceLabel: source, notes: [r.row.notes, r.quote && `“${r.quote}”`].filter(Boolean).join(" ") || null, sourceUrl: null };
     if (prior) await db.update(schema.networkRates).set(values).where(eq(schema.networkRates.id, prior.id));
