@@ -39,6 +39,8 @@ export type CatalogueRow = {
   contractFlag: string | null;
   availability: string | null;
   pricedOn: string | null;
+  /** True where the pharmacy has corrected this supplier's row by hand. */
+  corrected?: boolean;
   /**
    * What the supplier's own file said, where the pharmacy has corrected the row.
    *
@@ -205,9 +207,34 @@ export async function catalogueRows(): Promise<CatalogueRow[]> {
   });
 
   // Every row on the same footing before anything compares two of them; see wholePackage.
-  const levelled = rows.map(wholePackage);
-  held = { key, at: Date.now(), rows: levelled };
-  return levelled;
+  const levelled = rows.map(wholePackage).map((r) => ({ ...r, corrected: by.has(`${r.supplier.trim().toLowerCase()}|${r.ndc11}`) }));
+
+  /*
+   * And a row whose package and price are both out by the same factor is withheld from all of them.
+   *
+   * Levelling puts two notations for one box on the same footing. It cannot do anything about a
+   * row that is simply wrong — ABC listing a six-card box of Apri as "1 EA" at $15.39 where four
+   * wholesalers list 168 EA at $0.1302. That row does not need levelling, it needs leaving out,
+   * and it has to be left out here rather than on each screen: this is the one place every
+   * comparison in the site draws its prices from, and a screen that filtered it would leave the
+   * next screen buying on it. See quarantineWrongPrices for the four tests it has to fail.
+   */
+  const { quarantineWrongPrices } = await import("./catalogue-check");
+  const { rows: sound, taken } = quarantineWrongPrices(levelled);
+  quarantined = taken;
+  held = { key, at: Date.now(), rows: sound };
+  return sound;
+}
+
+/**
+ * The rows left out of comparisons by the last read, keyed "ndc11|supplier".
+ *
+ * Kept so the drug file screen can say what was withheld and why, rather than a price silently
+ * going missing — which is the failure this exists to prevent, one level up.
+ */
+let quarantined = new Map<string, import("./catalogue-check").Quarantine>();
+export function withheldPrices(): Map<string, import("./catalogue-check").Quarantine> {
+  return quarantined;
 }
 
 /**
@@ -219,4 +246,5 @@ export async function catalogueRows(): Promise<CatalogueRow[]> {
  */
 export function forgetCatalogue(): void {
   held = null;
+  quarantined = new Map();
 }

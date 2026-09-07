@@ -2,7 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { packReadings, packDisagreement, reimbursementFrom, marginOf, buildDrugRow, withEquivalents, type SupplierOffer, type DirectoryFact, type DrugRow } from "../src/lib/drug-file";
 
-const offer = (supplier: string, packSize: string | null, a: Partial<SupplierOffer> = {}): SupplierOffer => ({ itemNumber: null, netUnitMicros: null, rebateApplied: false, supplier, packSize, packUnits: null, unitCostMicros: null, packCostCents: null, awpCents: null,
+const offer = (supplier: string, packSize: string | null, a: Partial<SupplierOffer> = {}): SupplierOffer => ({ itemNumber: null, netUnitMicros: null, rebateApplied: false, withheld: null, supplier, packSize, packUnits: null, unitCostMicros: null, packCostCents: null, awpCents: null,
   contractFlag: null, pricedOn: null, availability: null, corrected: false, problems: [], ...a,
 });
 

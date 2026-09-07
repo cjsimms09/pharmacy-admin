@@ -72,6 +72,9 @@ export async function drugFile(): Promise<DrugRow[]> {
     return null;
   };
 
+  // What the catalogue withheld from every comparison, so this screen can say so rather than show a gap.
+  const withheldBy = (await import("./catalogue-cache")).withheldPrices();
+
   const benchmark = new Map(nadac.map((n) => [n.ndc11, n]));
   const correctedItems = new Set(itemFixes.map((f) => `${f.supplier.trim().toLowerCase()}|${f.ndc11}`));
   const packFixBy = new Map(packFixes.map((f) => [f.ndc11, f]));
@@ -124,6 +127,7 @@ export async function drugFile(): Promise<DrugRow[]> {
         pricedOn: it.pricedOn,
         availability: it.availability,
         corrected: correctedItems.has(`${it.supplier.trim().toLowerCase()}|${it.ndc11}`),
+        withheld: withheldBy.get(`${it.ndc11}|${it.supplier}`)?.says ?? null,
         problems: problemsWith(
           {
             ndc11: it.ndc11, supplier: it.supplier, description: it.description, packSize: it.packSize,

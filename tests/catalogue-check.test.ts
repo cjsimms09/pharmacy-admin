@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { problemsWith, packUnits, worstLevel, type CatalogueItem } from "../src/lib/catalogue-check";
+import { problemsWith, packUnits, worstLevel, quarantineWrongPrices, type CatalogueItem } from "../src/lib/catalogue-check";
 
 /** A row as the McKesson import stores one, sound unless a test says otherwise. */
 function item(a: Partial<CatalogueItem> = {}): CatalogueItem {
@@ -116,5 +116,88 @@ describe("what is wrong with a catalogue row", () => {
     assert.equal(worstLevel(problemsWith(item({ packSize: "Package", packCostCents: null }))), "wrong");
     assert.equal(worstLevel(problemsWith(item({ awpCents: 9_000 }), 600_000)), "check");
     assert.equal(worstLevel([]), null);
+  });
+});
+
+describe("a price the arithmetic says is wrong never wins a comparison", () => {
+  const row = (supplier: string, packSize: string | null, unitCostMicros: number | null, corrected = false) => ({
+    ndc11: "00555904358", supplier, packSize, unitCostMicros,
+    packCostCents: unitCostMicros !== null && packUnits(packSize) ? Math.round((unitCostMicros * packUnits(packSize)!) / 10_000) : null,
+    corrected,
+  });
+
+  test("the real Apri row: one wholesaler calls a six-card box 1 EA and prices it 118x dear", () => {
+    const { rows, taken } = quarantineWrongPrices([
+      row("Smith Drug", "168 EA", 130_200),
+      row("TopRx", "168 EA", 130_200),
+      row("McKesson", "168 EA", 130_200),
+      row("ABC (Cencora)", "1 EA", 15_390_000),
+    ]);
+    const abc = rows.find((r) => r.supplier === "ABC (Cencora)")!;
+    assert.equal(abc.unitCostMicros, null, "its price is withheld");
+    assert.equal(abc.packCostCents, null);
+    assert.equal(abc.packSize, "1 EA", "the row itself stays, so the supplier is still known to carry it");
+    assert.equal(rows.filter((r) => r.unitCostMicros !== null).length, 3, "the three that agree are untouched");
+    assert.match(taken.get("00555904358|ABC (Cencora)")!.says, /118 times dearer/);
+  });
+
+  test("the expensive direction: a row that looks cheapest and would take the order", () => {
+    // Fondaparinux. ABC reads 4 ML at $12.50 where the rest read 1.2 ML at $57.12 — five times
+    // cheaper than anybody, so it wins, and the invoice arrives at five times the promise.
+    const { rows } = quarantineWrongPrices([
+      row("ParMed", "1.2 ML", 57_116_700),
+      row("McKesson", "1.2 ML", 57_116_700),
+      row("Smith Drug", "1.2 ML", 57_000_000),
+      row("ABC (Cencora)", "4 ML", 12_497_500),
+    ]);
+    const cheapest = rows.filter((r) => r.unitCostMicros !== null).sort((a, b) => a.unitCostMicros! - b.unitCostMicros!)[0];
+    assert.notEqual(cheapest.supplier, "ABC (Cencora)", "the wrong row can no longer win the order");
+  });
+
+  test("two notations for one box are not touched: the price agrees, so nothing is wrong", () => {
+    // McKesson's "(25) 3 ML" and API's "75 ML" level to the same unit price; only the wording differs.
+    const { rows, taken } = quarantineWrongPrices([
+      row("McKesson", "(25) 3 ML", 253_200),
+      row("API", "75 ML", 253_200),
+      row("ABC (Cencora)", "75 ML", 250_000),
+    ]);
+    assert.equal(taken.size, 0);
+    assert.equal(rows.filter((r) => r.unitCostMicros === null).length, 0);
+  });
+
+  test("a real price difference is left alone, however large, while the package agrees", () => {
+    // A short-dated lot or a genuinely better contract is not an error. Same package, so it stands.
+    const { taken } = quarantineWrongPrices([
+      row("McKesson", "100 EA", 500_000),
+      row("ABC (Cencora)", "100 EA", 500_000),
+      row("ANDA", "100 EA", 40_000),
+    ]);
+    assert.equal(taken.size, 0);
+  });
+
+  test("two suppliers are never enough to make one of them a majority", () => {
+    const { taken } = quarantineWrongPrices([row("McKesson", "168 EA", 130_200), row("ABC (Cencora)", "1 EA", 15_390_000)]);
+    assert.equal(taken.size, 0, "with nobody to break the tie the site does not get to pick a winner");
+  });
+
+  test("an even split is not a majority either", () => {
+    const { taken } = quarantineWrongPrices([
+      row("McKesson", "168 EA", 130_200),
+      row("Smith Drug", "168 EA", 130_200),
+      row("ABC (Cencora)", "1 EA", 15_390_000),
+      row("ANDA", "1 EA", 15_390_000),
+    ]);
+    assert.equal(taken.size, 0);
+  });
+
+  test("a row the pharmacy corrected by hand is never second-guessed", () => {
+    const { rows, taken } = quarantineWrongPrices([
+      row("Smith Drug", "168 EA", 130_200),
+      row("TopRx", "168 EA", 130_200),
+      row("McKesson", "168 EA", 130_200),
+      row("ABC (Cencora)", "1 EA", 15_390_000, true),
+    ]);
+    assert.equal(taken.size, 0, "the pharmacy has the bottle and the site does not");
+    assert.equal(rows.find((r) => r.supplier === "ABC (Cencora)")!.unitCostMicros, 15_390_000);
   });
 });

@@ -57,6 +57,14 @@ export type SupplierOffer = {
   availability: string | null;
   /** True where the pharmacy has corrected this supplier's row. */
   corrected: boolean;
+  /**
+   * Why this supplier's price is withheld from every comparison, or null where it is not.
+   *
+   * The row stays — the supplier does carry the item, and the item number is still what an order
+   * has to say — but its price does not decide anything until somebody settles the package. Said
+   * out loud here because a price that simply vanished would be the same failure one level up.
+   */
+  withheld: string | null;
   /** What is wrong with this supplier's row on its own terms. */
   problems: Problem[];
 };

@@ -9,6 +9,7 @@ import { formatCents } from "@/lib/money";
 import { fmt } from "@/lib/dates";
 import { directoryStatus, loadDrugDirectory } from "@/lib/drug-directory-store";
 import { directoryJob, directoryJobRunning, startDirectoryFetch, runDirectoryFetch } from "@/lib/drug-directory-job";
+import { familyTabs } from "@/lib/families";
 import { PageHeader, Card, Notice, Empty, Figure, Field } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -200,6 +201,7 @@ export default async function DrugFilePage({
   return (
     <>
       <PageHeader
+        tabs={familyTabs("order", "/purchasing/catalog")}
         title="The drug file"
         subtitle="Every drug any file mentions, under its NDC: who sells it and at what package, what the shelf holds, what it reimburses, and where two sources disagree about the bottle."
         actions={<Link href="/purchasing" className="btn btn-sm">Buying</Link>}
@@ -419,6 +421,13 @@ export default async function DrugFilePage({
                         </span>
                       </div>
 
+                      {r.offers.filter((o) => o.withheld).map((o) => (
+                        <p key={`withheld-${o.supplier}`} className="mt-1 text-xs text-crit">
+                          <b>{o.withheld}</b>{" "}
+                          <span className="text-ink-2">Settle the package below, or correct their price, and it counts again.</span>
+                        </p>
+                      ))}
+
                       {r.packDisagreement && (
                         <p className={`mt-1 text-xs ${r.packFix ? "text-ink-3" : "text-crit"}`}>
                           <b>{r.packDisagreement.text}.</b>{" "}
@@ -496,6 +505,8 @@ export default async function DrugFilePage({
                                     {o.supplier}
                                     {o.contractFlag === "rebated" && <span className="badge badge-ok ml-1">rebated</span>}
                                     {o.corrected && <span className="badge badge-muted ml-1">corrected</span>}
+                                    {/* Withheld, not missing: a price the arithmetic says is wrong decides nothing. */}
+                                    {o.withheld && <span className="badge badge-crit ml-1" title={o.withheld}>price withheld</span>}
                                   </td>
                                   {/* An NDC says which drug; this is what an order has to carry. */}
                                   <td className="py-1 font-mono text-[11px]">{o.itemNumber ?? <span className="text-warn" title="Their price file did not carry an item number for this line, so an order cannot name it.">not given</span>}</td>
