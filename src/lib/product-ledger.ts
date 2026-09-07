@@ -1,4 +1,5 @@
 import "server-only";
+import { rateForSupplier } from "./supplier-match";
 
 /**
  * One row per drug, with everything the pharmacy knows about it in the same place.
@@ -109,18 +110,12 @@ export type Contract = {
 
 /** The rate that applies to a line, by who sold it. */
 function rateFor(contract: Contract, supplier: string | null): number | null {
-  if (supplier) {
-    const hit = contract.bySupplier?.[supplier.trim().toLowerCase()];
-    if (typeof hit === "number") return hit;
-    // A catalogue may spell a supplier differently from the register; a contained match settles it.
-    for (const [name, r] of Object.entries(contract.bySupplier ?? {})) {
-      const a = supplier.trim().toLowerCase();
-      if (a.includes(name) || name.includes(a)) return r;
-    }
-    // A named supplier with no rate on file earns nothing here, rather than borrowing another's.
-    return contract.bySupplier && Object.keys(contract.bySupplier).length > 0 ? null : contract.genericRebateRate;
-  }
-  return contract.genericRebateRate;
+  if (!supplier) return contract.genericRebateRate;
+  // One matcher for the whole site; see supplier-match.ts for why the first hit is the wrong answer.
+  const hit = rateForSupplier(contract.bySupplier ?? {}, supplier);
+  if (hit !== null) return hit;
+  // A named supplier with no rate on file earns nothing here, rather than borrowing another's.
+  return contract.bySupplier && Object.keys(contract.bySupplier).length > 0 ? null : contract.genericRebateRate;
 }
 
 const MICROS = 1_000_000;

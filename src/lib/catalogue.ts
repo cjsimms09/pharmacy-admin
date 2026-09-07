@@ -61,7 +61,7 @@ export async function searchCatalogue(q: CatalogueSearch = {}): Promise<{ rows: 
   const { catalogueRows } = await import("./catalogue-cache");
   const { nadacNow } = await import("./nadac-latest");
   const [items, nadac, fixes] = await Promise.all([catalogueRows(), nadacNow(), fixesByKey()]);
-  const benchmark = new Map(nadac.map((n) => [n.ndc11, n.unitMicros]));
+  const benchmark = new Map(nadac.map((n) => [n.ndc11, { unitMicros: n.unitMicros, pricingUnit: n.pricingUnit }]));
 
   const needle = (q.text ?? "").trim().toLowerCase();
   const digits = needle.replace(/[^\d]/g, "");
@@ -96,14 +96,14 @@ export async function searchCatalogue(q: CatalogueSearch = {}): Promise<{ rows: 
       pricedOn: it.pricedOn,
       availability: it.availability,
       packUnits: packUnits(it.packSize),
-      nadacUnitMicros: benchmark.get(it.ndc11) ?? null,
+      nadacUnitMicros: benchmark.get(it.ndc11)?.unitMicros ?? null,
       problems: [],
       fix: fix
         ? { packSize: fix.packSize, unitCostMicros: fix.unitCostMicros, note: fix.note, correctedBy: fix.correctedBy, correctedAt: fix.correctedAt }
         : null,
       asImported: it.asImported ? { packSize: it.asImported.packSize, unitCostMicros: it.asImported.unitCostMicros } : null,
     };
-    row.problems = problemsWith(row, row.nadacUnitMicros);
+    row.problems = problemsWith(row, row.nadacUnitMicros, benchmark.get(it.ndc11)?.pricingUnit ?? null);
 
     if (q.problemsOnly && row.problems.length === 0) continue;
     if (q.fixedOnly && !row.fix) continue;
@@ -138,7 +138,7 @@ export async function catalogueHealth(): Promise<{
   const { catalogueRows } = await import("./catalogue-cache");
   const { nadacNow } = await import("./nadac-latest");
   const [items, nadac, fixes] = await Promise.all([catalogueRows(), nadacNow(), fixesByKey()]);
-  const benchmark = new Map(nadac.map((n) => [n.ndc11, n.unitMicros]));
+  const benchmark = new Map(nadac.map((n) => [n.ndc11, { unitMicros: n.unitMicros, pricingUnit: n.pricingUnit }]));
 
   let wrong = 0;
   let worthChecking = 0;
@@ -156,7 +156,8 @@ export async function catalogueHealth(): Promise<{
         awpCents: it.awpCents,
         contractFlag: it.contractFlag,
       },
-      benchmark.get(it.ndc11) ?? null,
+      benchmark.get(it.ndc11)?.unitMicros ?? null,
+      benchmark.get(it.ndc11)?.pricingUnit ?? null,
     );
     const level = worstLevel(problems);
     if (level === "wrong") wrong++;

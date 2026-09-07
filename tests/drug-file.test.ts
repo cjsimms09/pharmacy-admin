@@ -98,7 +98,7 @@ describe("what a drug actually reimburses", () => {
 });
 
 describe("what a drug earns against what it costs", () => {
-  test("margin is the reimbursement less the cheapest unit cost anyone offers", () => {
+  test("margin is the reimbursement less what the drug actually costs to buy", () => {
     const row = buildDrugRow({
       ndc11: "68462043518", name: "Acamprosate", nadacUnitMicros: null, nadacPricingUnit: null, packFix: null, shelf: null,
       offers: [offer("McKesson", "180 EA", { unitCostMicros: 620_000 }), offer("ABC", "180 EA", { unitCostMicros: 500_000 })],

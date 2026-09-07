@@ -115,6 +115,18 @@ function readNadacRow(r: Record<string, string>, ctx: RowCtx): ParsedNadacRow | 
   const effectiveOn = parseNadacDate(pick(r, "effective date"));
   const asOf = parseNadacDate(pick(r, "as of date"));
 
+  /*
+   * CMS's own placeholders are not prices.
+   *
+   * The weekly file carries a handful of rows described "TBD DO NOT DELETE OR RELEASE" against
+   * reserved NDCs like 00000001235, at made-up figures — $104.7375 a unit in this week's file.
+   * They are scaffolding inside CMS's publishing system and they say so. Stored as prices they
+   * inflate every count of what the benchmark covers, and any catalogue row that ever collided
+   * with one of those NDCs would be measured against a number nobody meant.
+   */
+  const described = (pick(r, "ndc description") ?? "").trim();
+  if (/do not delete or release/i.test(described)) return skip("CMS placeholder row, not a price");
+
   if (!ndc11) return skip("NDC missing or not 11 digits");
   if (unitMicros === null) return skip("no readable NADAC per unit");
   if (!isPricingUnit(unit)) return skip(`unrecognised pricing unit (${unit || "blank"})`);
@@ -127,7 +139,7 @@ function readNadacRow(r: Record<string, string>, ctx: RowCtx): ParsedNadacRow | 
   }
   return {
     ndc11,
-    description: (pick(r, "ndc description") ?? "").trim() || null,
+    description: described || null,
     unitMicros,
     pricingUnit: unit,
     effectiveOn,
