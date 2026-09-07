@@ -341,9 +341,26 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
                             <td className="py-1 text-right">{l.savingCents > 0 ? money(l.savingCents) : "—"}</td>
                             <td className="py-1 text-right">
                               {Number.isFinite(l.daysOfStockAfter) ? Math.round(l.daysOfStockAfter) : "—"}
+                              {l.overCap && (
+                                <div className="text-warn">over the {l.overCap.cap}-day shelf</div>
+                              )}
                             </td>
+                            {/*
+                              Why this quantity, not why the drug is listed. Every row here used to
+                              read "Short of the target", which is true of every row and explains
+                              none of them: the quantity is decided by the pack, and the pack is
+                              what somebody needs to see to decide anything about it.
+                            */}
                             <td className="py-1">
-                              {l.reason === "need" ? "Short of the target" : "Added to reach the minimum"}
+                              {l.why}
+                              {l.overCap && (
+                                <div className="mt-0.5 text-warn">
+                                  That is {Math.round(l.overCap.days)} days of stock, past the {l.overCap.cap}-day shelf.
+                                  {l.overCap.smallerPack
+                                    ? ` ${l.overCap.smallerPack.supplier} ships packs of ${l.overCap.smallerPack.packQty} — ${Math.round(l.overCap.smallerPack.days)} days for ${money(l.overCap.smallerPack.costCents)}.`
+                                    : " No supplier ships it smaller, so it is this or nothing."}
+                                </div>
+                              )}
                             </td>
                           </tr>
                         ))}

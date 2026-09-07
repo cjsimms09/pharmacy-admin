@@ -305,3 +305,67 @@ describe("freight", () => {
     assert.equal(b.savingCents, 2_000 - 1_500);
   });
 });
+
+describe("why a line is for the quantity it is", () => {
+  /*
+   * The phentermine case. Thirty units short, the smallest pack is a thousand, and the shelf runs
+   * on fourteen days. Every row on the buy list read "Short of the target", which is true of every
+   * row and explains none of them — the quantity is decided by the pack, not by the shortfall.
+   */
+  const plan = (packQty: number, extra: Offer[] = []) =>
+    planOrder({
+      needs: [{ ndc11: "PHEN", name: "Phentermine 37.5mg", needThousandths: 30_000 }],
+      offers: [offer({ ndc11: "PHEN", supplier: "McKesson", effectiveUnitMicros: 20_000, packQty }), ...extra],
+      terms: [MCK, IPC],
+      movement: [moves("PHEN", 7_000, 0)],
+      maxDaysOfStock: 14,
+      materialityCents: 500,
+    });
+
+  test("the reason names the pack, not the shortfall", () => {
+    const line = plan(1000).baskets[0].lines[0];
+    assert.equal(line.packs, 1);
+    assert.match(line.why, /Short 30/);
+    assert.match(line.why, /smallest pack here is 1000/);
+    assert.match(line.why, /970 more than the need/);
+  });
+
+  test("a need over the shelf ceiling says so, with the days", () => {
+    const line = plan(1000).baskets[0].lines[0];
+    // 1,000 units at 7 a day is about 143 days.
+    assert.ok(line.overCap, "a need that carries the shelf past the cap must say so");
+    assert.equal(line.overCap!.cap, 14);
+    assert.ok(line.overCap!.days > 140, String(line.overCap!.days));
+  });
+
+  test("where another supplier ships it smaller, that is the way out and it is named", () => {
+    const line = plan(1000, [offer({ ndc11: "PHEN", supplier: "IPC", effectiveUnitMicros: 30_000, packQty: 100 })]).baskets[0].lines[0];
+    assert.equal(line.overCap?.smallerPack?.supplier, "IPC");
+    assert.equal(line.overCap?.smallerPack?.packQty, 100);
+    // 100 units at 7 a day is about 14 days, and 100 units at 3 cents is $3.00.
+    assert.equal(line.overCap?.smallerPack?.costCents, 300);
+  });
+
+  test("where nobody ships it smaller, it says that instead of implying a choice", () => {
+    const line = plan(1000).baskets[0].lines[0];
+    assert.equal(line.overCap?.smallerPack, null);
+  });
+
+  test("a need the pack covers exactly is not flagged, and says so plainly", () => {
+    const line = plan(30).baskets[0].lines[0];
+    assert.equal(line.overCap, null);
+    assert.match(line.why, /exactly the need/);
+  });
+
+  test("a drug that does not move is never over the ceiling, because there is no ceiling to be over", () => {
+    const line = planOrder({
+      needs: [{ ndc11: "PHEN", name: "Phentermine", needThousandths: 30_000 }],
+      offers: [offer({ ndc11: "PHEN", supplier: "McKesson", effectiveUnitMicros: 20_000, packQty: 1000 })],
+      terms: [MCK],
+      movement: [moves("PHEN", 0, 0)],
+      maxDaysOfStock: 14,
+      materialityCents: 500,
+    }).baskets[0].lines[0];
+    assert.equal(line.overCap, null);
+  });
+});
