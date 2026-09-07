@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "d872a140-6cdf-48e8-9c60-bc43110ea576",
-  "prevId": "bd1642e9-48cd-4b47-aa1f-0b2f136a6862",
+  "id": "7b8dad1c-0587-46ff-a4a7-4f838012ec08",
+  "prevId": "d872a140-6cdf-48e8-9c60-bc43110ea576",
   "tables": {
     "appeals": {
       "name": "appeals",
@@ -1413,6 +1413,13 @@
         "triage_batch": {
           "name": "triage_batch",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pages": {
+          "name": "pages",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -4399,6 +4406,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "effective_to": {
+          "name": "effective_to",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "status": {
           "name": "status",
           "type": "text",
@@ -6420,6 +6434,130 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "standing_costs": {
+      "name": "standing_costs",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "category_id": {
+          "name": "category_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "vendor_id": {
+          "name": "vendor_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "amount_cents": {
+          "name": "amount_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "from_month": {
+          "name": "from_month",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "to_month": {
+          "name": "to_month",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
+        }
+      },
+      "indexes": {
+        "standing_costs_from_idx": {
+          "name": "standing_costs_from_idx",
+          "columns": [
+            "from_month"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "standing_costs_category_id_expense_categories_id_fk": {
+          "name": "standing_costs_category_id_expense_categories_id_fk",
+          "tableFrom": "standing_costs",
+          "tableTo": "expense_categories",
+          "columnsFrom": [
+            "category_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "standing_costs_vendor_id_vendors_id_fk": {
+          "name": "standing_costs_vendor_id_vendors_id_fk",
+          "tableFrom": "standing_costs",
+          "tableTo": "vendors",
+          "columnsFrom": [
+            "vendor_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "supplier_imports": {
       "name": "supplier_imports",
       "columns": {
@@ -7275,6 +7413,13 @@
         },
         "lead_time_days": {
           "name": "lead_time_days",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "payment_terms_days": {
+          "name": "payment_terms_days",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,

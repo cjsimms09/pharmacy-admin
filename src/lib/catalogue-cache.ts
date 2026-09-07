@@ -33,23 +33,47 @@ export type CatalogueRow = {
   packSize: string | null;
   unitCostMicros: number | null;
   packCostCents: number | null;
+  awpCents: number | null;
   contractFlag: string | null;
   availability: string | null;
   pricedOn: string | null;
+  /**
+   * What the supplier's own file said, where the pharmacy has corrected the row.
+   *
+   * The correction is applied here rather than on the screen that made it, so that the buy list,
+   * the ledger and the money list all work from the corrected figures — a pack size fixed on one
+   * page and ignored by the page that spends money would be worse than not fixing it. The
+   * supplier's own figures are carried alongside, because the first question about a corrected row
+   * is always what the file actually said.
+   */
+  asImported?: { packSize: string | null; unitCostMicros: number | null; packCostCents: number | null };
 };
 
 let held: { key: string; at: number; rows: CatalogueRow[] } | null = null;
+
+/** Units in a pack size — "180 EA" is 180. The bracket is the order multiple, not the pack. */
+function unitsIn(packSize: string): number | null {
+  const m = /(?:\(\d+\)\s*)?([\d.]+)\s*(EA|ML|GM)\b/i.exec(packSize);
+  const n = m ? Number(m[1]) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
 
 const MAX_AGE_MS = 10 * 60_000;
 
 /** What the catalogue looks like from outside: the newest import, and how many items it filed. */
 async function currentKey(): Promise<string> {
   const { db } = await import("@/db");
-  const latest = await db.query.supplierImports.findFirst({
-    orderBy: (i, { desc }) => [desc(i.createdAt)],
-    columns: { id: true, itemsAdded: true, itemsUpdated: true },
-  });
-  return latest ? `${latest.id}:${latest.itemsAdded}:${latest.itemsUpdated}` : "empty";
+  const [latest, newestFix, fixCount] = await Promise.all([
+    db.query.supplierImports.findFirst({
+      orderBy: (i, { desc }) => [desc(i.createdAt)],
+      columns: { id: true, itemsAdded: true, itemsUpdated: true },
+    }),
+    // A correction changes what every screen should see, so it moves the key exactly as an import does.
+    db.query.supplierItemFixes.findFirst({ orderBy: (f, { desc }) => [desc(f.correctedAt)], columns: { correctedAt: true } }),
+    db.query.supplierItemFixes.findMany({ columns: { id: true } }),
+  ]);
+  const imported = latest ? `${latest.id}:${latest.itemsAdded}:${latest.itemsUpdated}` : "empty";
+  return `${imported}|${newestFix?.correctedAt ?? "none"}:${fixCount.length}`;
 }
 
 export async function catalogueRows(): Promise<CatalogueRow[]> {
@@ -57,20 +81,48 @@ export async function catalogueRows(): Promise<CatalogueRow[]> {
   if (held && held.key === key && Date.now() - held.at < MAX_AGE_MS) return held.rows;
 
   const { db } = await import("@/db");
-  const rows = await db.query.supplierItems.findMany({
-    columns: {
-      ndc11: true,
-      supplier: true,
-      description: true,
-      productKey: true,
-      packSize: true,
-      unitCostMicros: true,
-      packCostCents: true,
-      contractFlag: true,
-      availability: true,
-      pricedOn: true,
-    },
+  const [raw, fixes] = await Promise.all([
+    db.query.supplierItems.findMany({
+      columns: {
+        ndc11: true,
+        supplier: true,
+        description: true,
+        productKey: true,
+        packSize: true,
+        unitCostMicros: true,
+        packCostCents: true,
+        awpCents: true,
+        contractFlag: true,
+        availability: true,
+        pricedOn: true,
+      },
+    }),
+    db.query.supplierItemFixes.findMany(),
+  ]);
+
+  const by = new Map(fixes.map((f) => [`${f.supplier.trim().toLowerCase()}|${f.ndc11}`, f]));
+  const rows: CatalogueRow[] = raw.map((r) => {
+    const fix = by.get(`${r.supplier.trim().toLowerCase()}|${r.ndc11}`);
+    if (!fix) return r;
+    /*
+     * A blank in a correction means "leave the supplier's", never "set it to nothing" — so fixing
+     * a pack size does not silently wipe a price that was right.
+     */
+    const packSize = fix.packSize ?? r.packSize;
+    const unitCostMicros = fix.unitCostMicros ?? r.unitCostMicros;
+    // The pack cost follows from the two figures above; keeping the file's would leave the row
+    // disagreeing with itself, which is one of the faults the correction exists to remove.
+    const units = packSize ? unitsIn(packSize) : null;
+    const packCostCents = unitCostMicros !== null && units !== null ? Math.round((unitCostMicros * units) / 10_000) : r.packCostCents;
+    return {
+      ...r,
+      packSize,
+      unitCostMicros,
+      packCostCents,
+      asImported: { packSize: r.packSize, unitCostMicros: r.unitCostMicros, packCostCents: r.packCostCents },
+    };
   });
+
   held = { key, at: Date.now(), rows };
   return rows;
 }

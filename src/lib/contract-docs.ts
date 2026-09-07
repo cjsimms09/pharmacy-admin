@@ -5,7 +5,7 @@ import { eq, and, isNull } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId, sha256 } from "./crypto";
 import { contractsDir, pbmResolver } from "./reference";
-import { parseTerms, estimateCost, pdfPageCount, PDF_PAGE_LIMIT } from "./contract-extract";
+import { parseTerms, estimateCost, pdfPageCount, pdfPageLimit } from "./contract-extract";
 import { shouldRead } from "./contract-triage";
 import { rates as aiRates } from "./ai-spend";
 import { proposeFromContract, type Proposals, type Existing, type PlanForMatch } from "./contract-apply";
@@ -100,7 +100,8 @@ export async function contractLibrary(): Promise<Library> {
     rows.push({
       id: d.id, documentName: d.documentName, pbmName: d.pbmName, fileName: d.fileName, matchedBy: d.matchedBy,
       state: d.extractionState, error: d.extractionError,
-      pages, tooLong: (pages ?? 0) > PDF_PAGE_LIMIT,
+      // Judged against the model that would read it, not against the sort's smaller limit.
+      pages, tooLong: (pages ?? 0) > pdfPageLimit(model),
       triage: d.triage, triageWhy: d.triageWhy, triageBy: d.triageBy, sorting: Boolean(d.triageBatch),
       counterparty: terms?.counterparty ?? null, role: terms?.documentRole ?? null, rates: terms?.rates.length ?? 0,
       confidence: terms?.confidence ?? null, caveats: terms?.unclearOrMissing.length ?? 0,

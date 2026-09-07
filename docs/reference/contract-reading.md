@@ -254,9 +254,13 @@ The owner asked, before paying to read 357 documents, that the process be sound 
 was found and what was done, in order of what would have gone wrong first:
 
 1. **Every read was refused.** The structured-output grammar allows sixteen union-typed fields
-   and the schema has a hundred and eleven, because a contract's terms are almost all "a figure
-   or null". The schema now goes into the cached system prompt as words and the answer is held
-   to the same zod schema on this side (`termsFromAnswer`). Same prompt, same effort, same cost.
+   and the schema had a hundred and four, because a contract's terms are almost all "a figure
+   or null" and `.nullable()` is a union. Fixed at the schema: an unstated term is `.optional()`
+   on the wire (no union, the grammar kept) and `fillNulls` makes it null on this side, so the
+   hundred call sites written against nulls are still right; `schema-limits.test.ts` fails the
+   build before the API can. A draft or an answer becomes terms in one place (`termsFromObject`,
+   `termsFromAnswer`), which also drops the explicit nulls older drafts carry. Same prompt, same
+   effort, same cost.
 2. **The run would have held the whole folder in memory.** Every PDF was read and base64-encoded
    before the first batch was created. Now the files are sized from disk, the batches planned on
    the sizes, and each batch's files are opened when that batch is built and let go; batches are

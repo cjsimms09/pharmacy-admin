@@ -6,6 +6,9 @@ import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { fileOnHand, leanShelfNow, latestShelf, movement, SHELF_POLICY } from "@/lib/shelf";
 import { units } from "@/lib/usage";
+import { countAge } from "@/lib/count-age";
+import { retentionRule } from "@/lib/count-retention";
+import { fmt, todayIso } from "@/lib/dates";
 import { PageHeader, Card, Notice, Empty, Figure, Field } from "@/components/ui";
 import { ExportData } from "@/components/export-data";
 import { requireReimbursement } from "@/lib/features";
@@ -71,6 +74,9 @@ export default async function ShelfPage({ searchParams }: { searchParams: Promis
       "/purchasing/shelf?ok=" +
         encodeURIComponent(
           `${r.items.toLocaleString()} items counted on ${r.countedOn}${r.replaced ? ", replacing the earlier upload for that day" : ""}.` +
+            (r.pruned.removed > 0
+              ? ` ${r.pruned.removed} older count${r.pruned.removed === 1 ? "" : "s"} removed, ${r.pruned.kept} kept.`
+              : "") +
             (r.unmappedColumns.length ? ` Columns not used: ${r.unmappedColumns.join(", ")}.` : ""),
         ),
     );
@@ -78,6 +84,11 @@ export default async function ShelfPage({ searchParams }: { searchParams: Promis
 
   const t = view.totals;
   const urgent = view.rows.filter((r) => r.urgency === "today" || r.urgency === "this week");
+  /*
+   * How old the count is. Everything on this page is the shelf as it stood when the report ran, and
+   * a fortnight-old count looks exactly like this morning's unless it is said out loud.
+   */
+  const age = snapshot ? countAge(snapshot.countedOn, todayIso()) : null;
 
   return (
     <>
@@ -100,8 +111,8 @@ export default async function ShelfPage({ searchParams }: { searchParams: Promis
         <Figure
           value={snapshot ? snapshot.items.toLocaleString() : "—"}
           label="items counted"
-          sub={snapshot ? `Counted ${snapshot.countedOn}` : "No count uploaded yet"}
-          tone={snapshot ? "ok" : "warn"}
+          sub={snapshot ? `${fmt(snapshot.countedOn)} — ${age!.says}` : "No count uploaded yet"}
+          tone={!snapshot || age!.state === "stale" ? "warn" : "ok"}
         />
         <Figure
           value={snapshot?.rxValueCents !== null && snapshot?.rxValueCents !== undefined ? money(snapshot.rxValueCents) : "—"}
@@ -137,7 +148,7 @@ export default async function ShelfPage({ searchParams }: { searchParams: Promis
 
       <Card
         title="Upload today's count"
-        subtitle="PioneerRx's Inventory Search Results, or any on-hand export in text or CSV. One snapshot per day — uploading the same day twice replaces it rather than doubling the shelf."
+        subtitle={`PioneerRx's Inventory Search Results, or any on-hand export in text or CSV. One snapshot per day — uploading the same day twice replaces it rather than doubling the shelf. ${retentionRule()}`}
       >
         <form action={upload} className="grid gap-3 sm:grid-cols-[1fr_auto_auto] sm:items-end">
           <Field label="The file" hint="The Inventory Search Results report as it comes, or any export with an NDC column beside a quantity-on-hand column.">

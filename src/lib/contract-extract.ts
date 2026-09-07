@@ -8,7 +8,6 @@ import { db, schema } from "@/db";
 import { audit } from "./audit";
 import { contractsDir } from "./reference";
 import { ContractTerms, EXTRACT_SYSTEM, requireCitations, termsFromAnswer, termsFromObject, type ContractTermsT } from "./contract-terms";
-export { termsFromAnswer } from "./contract-terms";
 
 /**
  * Reading the contract library.
@@ -35,27 +34,22 @@ async function client(): Promise<{ client: Anthropic; model: string }> {
   };
 }
 
-import { estimateCost, pdfPageCount, planBatches, batchIdsIn, PDF_PAGE_LIMIT, PDF_BYTES_LIMIT, UPLOAD_BYTES_LIMIT, BATCH_REQUEST_LIMIT } from "./contract-run";
+import { estimateCost, pdfPageCount, planBatches, batchIdsIn, pdfPageLimit, PDF_PAGE_LIMIT, PDF_BYTES_LIMIT, UPLOAD_BYTES_LIMIT, BATCH_REQUEST_LIMIT } from "./contract-run";
 import { Triage, TRIAGE_SYSTEM, triageByText, shouldRead, estimateTriageCost, type TriageT } from "./contract-triage";
 import { pdfText } from "./pdf-text";
 import { checkProving, PROVING_TITLE, type ProvingCheck } from "./contract-proving";
 import { quoteInText } from "./contract-apply";
-export { estimateCost, pdfPageCount, planBatches, PDF_PAGE_LIMIT, PDF_BYTES_LIMIT, BATCH_BYTES_LIMIT, BATCH_REQUEST_LIMIT } from "./contract-run";
+export { estimateCost, pdfPageCount, planBatches, pdfPageLimit, PDF_PAGE_LIMIT, PDF_PAGE_LIMIT_LONG, PDF_PAGE_LIMIT_SHORT, PDF_BYTES_LIMIT, BATCH_BYTES_LIMIT, BATCH_REQUEST_LIMIT } from "./contract-run";
 
 /*
- * The answer's shape is asked for in words, not enforced as a grammar.
- *
- * The first live run was refused on every document: "Schemas contains too many parameters with
- * union types (104 parameters with type arrays or anyOf) … limit: 16". Structured outputs compile
- * the schema into a grammar, and a contract's terms are almost all "a figure or null", which is a
- * union each. Sixteen is not enough to say "not stated" honestly, and saying "not stated" honestly
- * is the whole point (null over a guess, contract-reading.md §2). So the schema is printed into
- * the cached system prompt and the model is told to answer with that JSON and nothing else; the
- * answer is then held to the same zod schema on this side, which is the check the grammar was.
+ * The answer is held to a grammar built from the schema (structured outputs). That was refused
+ * for a night — "too many parameters with union types (104 …, limit: 16)" — because every term a
+ * contract might not state was `.nullable()`, a union each. The base branch's fix is the one in
+ * force: those fields are `.optional()` on the wire (no union) and `fillNulls` makes them null on
+ * this side, so the grammar is back and the shape is guaranteed. The answer is still parsed through
+ * `termsFromAnswer`, which also accepts an object wrapped in a fence, so a read made without the
+ * grammar (the proving read, an older batch) parses the same way.
  */
-const SCHEMA_TEXT = JSON.stringify(zodOutputFormat(ContractTerms).schema);
-const SYSTEM_TEXT = `${EXTRACT_SYSTEM}\n\n## The answer\n\nReply with exactly one JSON object and nothing else: no prose before or after it, no code fence. It must match this JSON schema. Use null for anything the document does not state; never invent a value.\n\n${SCHEMA_TEXT}`;
-
 function docRequest(id: string, pdf: Buffer, name: string, model: string): Anthropic.Messages.Batches.BatchCreateParams.Request {
   return {
     custom_id: id,
@@ -63,15 +57,15 @@ function docRequest(id: string, pdf: Buffer, name: string, model: string): Anthr
       model,
       max_tokens: 32000,
       thinking: { type: "adaptive" },
-      output_config: { effort: "high" },
+      output_config: { effort: "high", format: zodOutputFormat(ContractTerms) },
       // Cached: identical on every document in the run, so it is billed once.
-      system: [{ type: "text", text: SYSTEM_TEXT, cache_control: { type: "ephemeral" } }],
+      system: [{ type: "text", text: EXTRACT_SYSTEM, cache_control: { type: "ephemeral" } }],
       messages: [
         {
           role: "user",
           content: [
             { type: "document", source: { type: "base64", media_type: "application/pdf", data: pdf.toString("base64") } },
-            { type: "text", text: `File name: ${name}\n\nExtract this contract's terms as the one JSON object described in your instructions.` },
+            { type: "text", text: `File name: ${name}\n\nExtract this contract's terms.` },
           ],
         },
       ],
@@ -132,8 +126,10 @@ export async function queueExtraction(userId: string, userName: string, onlyIds?
         n = pdfPageCount(await fs.readFile(file));
         await db.update(schema.contractDocs).set({ pages: n }).where(eq(schema.contractDocs.id, d.id));
       }
-      if (n > PDF_PAGE_LIMIT) {
-        skipped.push(`${d.documentName} (${n} pages; the limit is ${PDF_PAGE_LIMIT} a document — split it into parts and put the parts in the folder)`);
+      // The limit belongs to the model this is going to, not to the site; see pdfPageLimit.
+      const limit = pdfPageLimit(model);
+      if (n > limit) {
+        skipped.push(`${d.documentName} (${n} pages; the limit is ${limit} a document on ${model} — split it into parts and put the parts in the folder)`);
         continue;
       }
       if (size > PDF_BYTES_LIMIT) {
@@ -363,6 +359,7 @@ export function explainFailure(result: { type: string; error?: { error?: { type?
   const kind = err?.type ?? "unknown";
   const low = msg.toLowerCase();
   if (/too long|too many tokens|exceeds? .*context|maximum context|prompt is too long/.test(low)) {
+    // No model is named at this point, so the cautious figure is quoted; see pdfPageLimit.
     return `Too long for one read: the model's window cannot hold every page as an image (${msg}). Split the PDF into parts of ${PDF_PAGE_LIMIT} pages or fewer and put the parts in the folder.`;
   }
   if (/could not process (the )?(pdf|document|image)|invalid.*(pdf|document)|not a valid|corrupt|unsupported/.test(low)) {
@@ -380,6 +377,15 @@ export function explainFailure(result: { type: string; error?: { error?: { type?
 async function fail(id: string, why: string) {
   await db.update(schema.contractDocs).set({ extractionState: "failed", extractionError: why }).where(eq(schema.contractDocs.id, id));
 }
+
+/**
+ * Drops every null, at any depth, so a draft read before the schema stopped using them still opens.
+ *
+ * An optional field and a null field say the same thing — the contract does not state it — but
+ * `.optional()` rejects an explicit null, and every draft already stored is full of them. Throwing
+ * those reads away to satisfy a schema change would be the site losing work the pharmacy paid for.
+ * An empty array is not a null and is left alone: "no transaction fees" is an answer.
+ */
 
 export function parseTerms(json: string | null): ContractTermsT | null {
   if (!json) return null;
@@ -544,10 +550,17 @@ export async function queueTriage(userId: string, userName: string): Promise<Tri
       n = pdfPageCount(buf);
       await db.update(schema.contractDocs).set({ pages: n }).where(eq(schema.contractDocs.id, d.id));
     }
-    if (n > PDF_PAGE_LIMIT || buf.length > PDF_BYTES_LIMIT) {
-      // Too long to send at all; the read will say the same. Marked unsure so it is not forgotten.
-      await db.update(schema.contractDocs).set({ triage: "unsure", triageWhy: `Too long to sort by model (${n} pages); split it and sort the parts.`, triageBy: "rule" }).where(eq(schema.contractDocs.id, d.id));
-      out.skipped.push(`${d.documentName} (${n} pages; split it)`);
+    /*
+     * The sort runs on Haiku 4.5, whose window is two hundred thousand tokens — not the million the
+     * reader has. Its limit is therefore the smaller one, and it must not follow the reader's: a
+     * 150-page agreement sent here would be refused by the API at 100 pages and by the model again
+     * at 450,000 tokens, inside a batch already created and paid for.
+     */
+    const triageLimit = pdfPageLimit(TRIAGE_MODEL);
+    if (n > triageLimit || buf.length > PDF_BYTES_LIMIT) {
+      // Too long to sort; marked unsure so it is not forgotten, and the read judges it on its own limit.
+      await db.update(schema.contractDocs).set({ triage: "unsure", triageWhy: `Too long to sort by model (${n} pages, and the sort takes ${triageLimit}); it can still be read.`, triageBy: "rule" }).where(eq(schema.contractDocs.id, d.id));
+      out.skipped.push(`${d.documentName} (${n} pages; too long to sort, but it can still be read)`);
       continue;
     }
     if (toModel.length >= SCANS_A_PRESS) {
@@ -689,8 +702,9 @@ export async function testReader(docId: string, userId: string, userName: string
   }
   const buf = await fs.readFile(path.join(contractsDir(), doc.fileName));
   const n = pdfPageCount(buf);
-  if (n > PDF_PAGE_LIMIT) return { ok: false, documentName: doc.documentName, reason: "Too long for one read", detail: `${n} pages; the limit is ${PDF_PAGE_LIMIT}. Split it.` };
   const { client: c, model } = await client();
+  const limit = pdfPageLimit(model);
+  if (n > limit) return { ok: false, documentName: doc.documentName, reason: "Too long for one read", detail: `${n} pages; the limit is ${limit} on ${model}. Split it.` };
   const req = docRequest(doc.id, buf, doc.documentName, model);
   const t0 = Date.now();
   try {

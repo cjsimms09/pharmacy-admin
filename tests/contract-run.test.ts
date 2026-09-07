@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { planBatches, estimateCost, pdfPageCount, batchIdsIn, BATCH_BYTES_LIMIT, BATCH_REQUEST_LIMIT } from "../src/lib/contract-run";
+import { planBatches, estimateCost, pdfPageCount, batchIdsIn, pdfPageLimit, PDF_PAGE_LIMIT, PDF_PAGE_LIMIT_LONG, PDF_PAGE_LIMIT_SHORT, BATCH_BYTES_LIMIT, BATCH_REQUEST_LIMIT } from "../src/lib/contract-run";
 
 /** The run's arithmetic: what fits in a batch, what a read costs, how long a document is. */
 describe("batches under the limits", () => {
@@ -97,5 +97,35 @@ describe("the batch ids a run left behind", () => {
     ];
     assert.deepEqual(batchIdsIn(lines), ["msgbatch_01Newest", "msgbatch_01Second", "msgbatch_01Older"]);
     assert.deepEqual(batchIdsIn([]), []);
+  });
+});
+
+describe("how many PDF pages may go to a model", () => {
+  test("a million-token model reads a 150-page agreement whole", () => {
+    // The reason the limit was raised at all: splitting a 150-page contract by hand is not a job
+    // to hand the owner.
+    assert.equal(pdfPageLimit("claude-opus-5"), 300);
+    assert.ok(150 <= pdfPageLimit("claude-opus-5"));
+    assert.equal(pdfPageLimit("claude-sonnet-5"), 300);
+    assert.equal(pdfPageLimit("claude-fable-5-1"), 300);
+  });
+
+  test("the sort's model gets the smaller limit, because its window is two hundred thousand", () => {
+    // Haiku 4.5 holds 200,000 tokens. At 3,000 a page, 150 pages is 450,000 — refused by the API
+    // at 100 pages and by the model again, inside a batch already paid for.
+    assert.equal(pdfPageLimit("claude-haiku-4-5-20251001"), 50);
+    assert.ok(150 > pdfPageLimit("claude-haiku-4-5-20251001"), "a 150-page scan never reaches the sort");
+  });
+
+  test("a model nobody recognises gets the cautious limit", () => {
+    // The model is free text in Settings. Being asked to split a long PDF is an annoyance; paying
+    // for a batch that cannot succeed is not.
+    assert.equal(pdfPageLimit("gpt-whatever"), PDF_PAGE_LIMIT_SHORT);
+    assert.equal(pdfPageLimit(""), PDF_PAGE_LIMIT_SHORT);
+    assert.equal(pdfPageLimit("  CLAUDE-OPUS-5  "), PDF_PAGE_LIMIT_LONG, "case and spacing are not a reason to refuse");
+  });
+
+  test("the unnamed-model default is the cautious one, never the generous one", () => {
+    assert.equal(PDF_PAGE_LIMIT, PDF_PAGE_LIMIT_SHORT);
   });
 });

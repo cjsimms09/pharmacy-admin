@@ -2251,6 +2251,36 @@ export const supplierItems = sqliteTable(
 );
 
 
+/**
+ * A correction to one catalogue row, kept apart from the catalogue itself.
+ *
+ * The catalogue is replaced every week by whatever the supplier sends. A pack size fixed by hand
+ * on Monday would be gone by the following Monday, and the pharmacy would fix it again, and again,
+ * and eventually stop trusting the screen. So the correction lives in its own table and is applied
+ * over the top of each import: the supplier's file stays exactly as it arrived, and what the site
+ * uses is the file with the pharmacy's own corrections on it.
+ *
+ * Keyed on supplier and NDC, because the same drug can be wrong at one wholesaler and right at
+ * another, and correcting it everywhere on one supplier's mistake would be a second mistake.
+ */
+export const supplierItemFixes = sqliteTable(
+  "supplier_item_fixes",
+  {
+    id: text("id").primaryKey(),
+    supplier: text("supplier").notNull(),
+    ndc11: text("ndc11").notNull(),
+    /** The pack size as it should read — "180 EA". Null leaves the supplier's own. */
+    packSize: text("pack_size"),
+    /** Cost per dispensing unit in millionths, where the supplier's is wrong. Null leaves theirs. */
+    unitCostMicros: integer("unit_cost_micros"),
+    /** Why, in the pharmacy's words. It is the only record of what was checked against what. */
+    note: text("note"),
+    correctedBy: text("corrected_by").notNull(),
+    correctedAt: text("corrected_at").notNull().default(now()),
+  },
+  (t) => [uniqueIndex("supplier_item_fixes_key_idx").on(t.supplier, t.ndc11)],
+);
+
 // ── Training assignments ─────────────────────────────────────────────
 // The loop that turns "I should get everyone through FWA training" into evidence.
 //

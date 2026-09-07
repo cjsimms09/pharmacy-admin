@@ -48,7 +48,7 @@ it and said so on the pull request. The owner reads this too.
 - **The contract pipeline was audited before the first full run** (`contract-reading.md` §9 has
   the list). What changed under you: `contract_docs.pages` (counted once; the library no longer
   opens every PDF to draw a list), `network_rates.effective_to` and `status` ("active" /
-  "superseded"), both in migration `0073`; the read and the sort open files a batch at a time and
+  "superseded"), both in migration `0074`; the read and the sort open files a batch at a time and
   keep a batch under 40 MB; the sort sends at most 40 scans a press. `proposeFromContract` now
   takes the pharmacy's identifiers and the document's text: `governs` (chain code / NCPDP) and
   `quoteFound` per rate; "Apply everything certain" skips a document that is not ours and a rate
@@ -57,17 +57,22 @@ it and said so on the pull request. The owner reads this too.
   tested). **Your review page `payers/contracts/[id]` should show `quoteFound` and `governs`** on
   each proposal; I cannot read it. The proving document (`fixtures/contracts/proving-agreement.pdf`)
   and "Prove the reader" on the Sort page mark a live read against a known answer.
-- **The live refusal was the reader's own request, and it is fixed.** "Ask the API why" printed it:
-  `invalid_request_error: Schemas contains too many parameters with union types (104 …, limit: 16)`.
-  Structured outputs compile the answer schema into a grammar and a contract's terms are almost all
-  "a figure or null". The schema now goes into the cached system prompt as words and the answer is
-  held to the same zod schema on this side (`termsFromAnswer`, tested). Your own readers are under
-  the limit (`ExtractedPacket` 12, `ClassifiedDoc` 9); the others are not exported, so count them if
-  a read ever refuses with that message.
+- **The live refusal was the reader's own request, and we both fixed it the same night.** "Ask the
+  API why" printed it: `invalid_request_error: Schemas contains too many parameters with union
+  types (104 …, limit: 16)`. Your fix (`.optional()` on the wire, `fillNulls` on this side, the
+  grammar kept, `schema-limits.test.ts`) is the one in force after the merge; mine (the schema in
+  the prompt as words) is folded away. What survives of mine: `termsFromObject` /
+  `termsFromAnswer` in `contract-terms.ts` are the one place a draft or an answer becomes terms
+  (your null-dropping and defaults moved into them from the extract file), the answer is found
+  between its first and last brace so the proving read parses too, and `RateTerm.lineOfBusiness`
+  is `.optional()` like its neighbours.
+- **Migration renumbered: mine is `0074_standing_costs_terms_pages`** (`standing_costs`,
+  `contract_docs.pages`, `network_rates.effective_to`, `suppliers.payment_terms_days`), after
+  your `0073_high_mac_gargan`. Regenerated from the schema, applied to a fresh database.
 - **The cash account had no cost of goods** because `supplier_invoices.paid_on` was on no screen.
   Now: the invoices page has a Paid column (a date per row, inside the table's one form), the
   supplier's terms page has "paid how many days after the invoice" (`suppliers.payment_terms_days`,
-  migration `0073`), and the cash cost of goods counts an invoice by its recorded payment date, else
+  migration `0074`), and the cash cost of goods counts an invoice by its recorded payment date, else
   its date plus the terms, else its date, and says on the line how many are on an assumed date. It
   is never nought for want of a date. Rule in `money-ledger.md` §2.
 - **Standing monthly costs** (`standing_costs`, same migration): payroll, rent, the loan, typed once

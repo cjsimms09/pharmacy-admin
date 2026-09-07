@@ -1,6 +1,6 @@
 import "server-only";
 import { db, schema } from "@/db";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { readOnHand, onHandTotals } from "./on-hand";
 import { velocity, toOrderThousandths, type Velocity } from "./usage";
@@ -101,6 +101,8 @@ export async function fileOnHand(
       countedOn: string;
       items: number;
       replaced: boolean;
+      /** How many older counts the retention rule removed, and how many remain. */
+      pruned: { removed: number; kept: number };
       unmappedColumns: string[];
       skipped: Record<string, number>;
     }
@@ -181,6 +183,11 @@ export async function fileOnHand(
   for (let i = 0; i < values.length; i += 300)
     await db.insert(schema.onHand).values(values.slice(i, i + 300));
 
+  // Today's count carries the best drug names the site has; see drug-names.
+  (await import("./drug-names")).forgetDrugNames();
+
+  const pruned = await pruneCounts(countedOn);
+
   return {
     ok: true,
     countedOn,
@@ -188,7 +195,29 @@ export async function fileOnHand(
     replaced: Boolean(existing),
     unmappedColumns: parsed.unmappedColumns,
     skipped: parsed.skipped,
+    pruned,
   };
+}
+
+/**
+ * Removes the daily counts that have done their job, and says how many.
+ *
+ * Run on every import rather than on a schedule, because the pharmacy has no scheduler and a
+ * cleanup nobody remembers to run is a table that grows forever. The rule is in count-retention:
+ * the last week, and the last count of every month. Deleting the import takes its rows with it —
+ * `on_hand.import_id` cascades, and the foreign-key pragma is on.
+ */
+export async function pruneCounts(today: string): Promise<{ removed: number; kept: number }> {
+  const { countsToKeep } = await import("./count-retention");
+  const all = await db.query.onHandImports.findMany({ columns: { id: true, countedOn: true } });
+  const { keep, drop } = countsToKeep(all.map((i) => i.countedOn), today);
+  if (drop.length === 0) return { removed: 0, kept: keep.length };
+
+  const going = new Set(drop);
+  const ids = all.filter((i) => going.has(i.countedOn)).map((i) => i.id);
+  for (let i = 0; i < ids.length; i += 100)
+    await db.delete(schema.onHandImports).where(inArray(schema.onHandImports.id, ids.slice(i, i + 100)));
+  return { removed: drop.length, kept: keep.length };
 }
 
 /** The most recent count held, or null where none has been uploaded. */
@@ -264,7 +293,8 @@ export async function movement(
    */
   const { groupIntoFills } = await import("./fills");
   const { laterPayments } = await import("./claim-payments");
-  const later = await laterPayments();
+  const { drugNames } = await import("./drug-names");
+  const [later, names] = await Promise.all([laterPayments(), drugNames()]);
   const fills = groupIntoFills(
     claims.map((c) => ({
       id: c.id,
@@ -272,7 +302,15 @@ export async function movement(
       fillNumber: c.fillNumber,
       dateFilled: c.dateFilled,
       ndc11: c.ndc11,
-      itemName: c.itemName,
+      /*
+       * Named from what the site holds now, not from what it held the day the claim was imported.
+       *
+       * Every claim in the archive was filed with no name — the transaction report carries none and
+       * the catalogue had not been imported yet — so the buy list, which is a page meant to be acted
+       * on, listed bare eleven-digit numbers. The name is a lookup, not a fact about the claim, so
+       * it is resolved here where everything downstream reads it.
+       */
+      itemName: (c.ndc11 ? names.get(c.ndc11) : null) ?? c.itemName,
       bin: c.bin,
       pcn: c.pcn,
       groupNumber: c.groupNumber,

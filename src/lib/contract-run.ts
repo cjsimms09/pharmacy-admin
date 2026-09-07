@@ -28,22 +28,54 @@ export function estimateCost(pages: number, model: string, rates?: { in: number;
 /**
  * The limits a request and a batch must respect, so a run never fails on size.
  *
- * A PDF in one request may carry at most 600 pages by the API's rule and 300 by this site's (see
- * below), and 32 MB; a batch at most 256 MB of requests. A document over the page limit is not
- * sent and is named, because sending it would fail after the batch was paid for and the failure
- * would look like a bad read.
+ * A PDF in one request may carry at most 32 MB, and a number of pages that depends on the model it
+ * is going to — see `pdfPageLimit`. A batch may carry 100 MB of requests. A document over the page
+ * limit is not sent and is named, because sending it would fail after the batch was paid for and
+ * the failure would look like a bad read.
  */
-/*
- * Three hundred, not the API's six hundred.
+
+/**
+ * How many PDF pages may go to a given model in one request.
  *
- * A PDF page is sent as text and as an image and costs up to 3,000 tokens. The models this site
- * runs (Opus 5 and its family) take a million tokens in one request at the ordinary price, so
- * three hundred scanned pages at the worst case is 900,000 with room for the answer. The earlier
- * limit of fifty was set for a 200,000-token window this model does not have, and it made a
- * 150-page agreement look like something the owner had to split by hand. A document past three
- * hundred pages is still named rather than sent; none has appeared yet.
+ * The API's cap is 600 pages, but only for a request whose context window is a million tokens;
+ * under that it is 100. Both numbers matter here, because this site sends PDFs to two different
+ * models: a contract is read by Opus 5, which has a million-token window, and every scan is first
+ * sorted by Haiku 4.5, which has two hundred thousand.
+ *
+ * A single shared limit therefore cannot be right. Raised to 300 for the reader, it also let a
+ * 150-page agreement through to the sorter, where the API would refuse it at 100 pages and the
+ * model would refuse it again at 450,000 tokens into a 200,000-token window — inside a batch that
+ * had already been created and paid for, which is the exact failure this guard exists to prevent.
+ *
+ * ── The two numbers ──
+ *
+ * A PDF page is sent as text and as an image and costs up to 3,000 tokens. On a million-token
+ * model, 300 pages is 900,000 at the worst case with room for the answer, and it is what lets a
+ * 150-page agreement be read whole instead of split by hand. On a 200,000-token model, 50 pages is
+ * 150,000 with the same room — and the API's own 100-page cap for that case sits above it, so the
+ * window is what binds.
+ *
+ * ── Anything else ──
+ *
+ * The model is a free-text setting: the owner can type any name into Settings. An unrecognised one
+ * gets the smaller limit, because being asked to split a long PDF is a minor annoyance and paying
+ * for a batch that cannot succeed is not.
  */
-export const PDF_PAGE_LIMIT = 300;
+const LONG_WINDOW_MODELS = /^claude-(opus-5|sonnet-5|fable-5|fable-5-1|opus-4-[678]|sonnet-4-6)/;
+export const PDF_PAGE_LIMIT_LONG = 300;
+export const PDF_PAGE_LIMIT_SHORT = 50;
+
+export function pdfPageLimit(model: string): number {
+  return LONG_WINDOW_MODELS.test(model.trim().toLowerCase()) ? PDF_PAGE_LIMIT_LONG : PDF_PAGE_LIMIT_SHORT;
+}
+
+/**
+ * The limit where no model is named.
+ *
+ * Kept at the cautious figure: every caller that knows which model it is sending to should ask
+ * `pdfPageLimit`, and one that does not should not be guessing upward.
+ */
+export const PDF_PAGE_LIMIT = PDF_PAGE_LIMIT_SHORT;
 export const PDF_BYTES_LIMIT = 32 * 1024 * 1024;
 export const BATCH_BYTES_LIMIT = 100 * 1024 * 1024;
 /**

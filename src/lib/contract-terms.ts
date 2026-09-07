@@ -10,18 +10,35 @@ import { z } from "zod";
  *     A rate without a quote is rejected rather than stored — see requireCitations below. An appeal
  *     filed on a number nobody can trace back to a sentence is not defensible.
  *
- *  2. Nothing is inferred. A term that is not stated comes back null. "Typical for this PBM" is
- *     how you end up arguing with Caremark about a rate that is in someone else's contract.
+ *  2. Nothing is inferred. A term that is not stated is left out. "Typical for this PBM" is how you
+ *     end up arguing with Caremark about a rate that is in someone else's contract.
+ *
+ * ── Why every optional field is omitted rather than null ──
+ *
+ * A field that may have no value was written `.nullable()`, which compiles to a JSON Schema type of
+ * `["string", "null"]` — a union. The API allows sixteen union-typed parameters in one schema and
+ * this one had a hundred and four, so every contract read was refused outright before it began:
+ *
+ *   Schemas contains too many parameters with union types (104 parameters with type arrays or
+ *   anyOf). This causes exponential compilation cost.
+ *
+ * `.optional()` says the same thing without a union: the field simply leaves the `required` list
+ * and its type stays a single type. Nothing downstream changes, because a term that is missing and
+ * a term that is null are the same fact, and every reader of these fields already asks with `?.`,
+ * `??` or `!= null`, all three of which treat the two alike.
+ *
+ * Drafts read before this change carry explicit nulls, and `.optional()` rejects a null. They are
+ * still drafts, so `parseTerms` drops nulls on the way in rather than throwing the read away.
  */
 
 export const Citation = z.object({
   quote: z.string().describe("The contract's own words, copied exactly. Never paraphrased."),
-  page: z.number().int().nullable().describe("Page number if visible, else null."),
-  section: z.string().nullable().describe("Section or exhibit reference, e.g. 'Exhibit B-11' or '4.2(a)'."),
+  page: z.number().int().optional().describe("Page number if visible. Leave it out if not."),
+  section: z.string().optional().describe("Section or exhibit reference, e.g. 'Exhibit B-11' or '4.2(a)'."),
 });
 
 const cited = <T extends z.ZodTypeAny>(value: T) =>
-  z.object({ value, citation: Citation.nullable() });
+  z.object({ value, citation: Citation.optional() });
 
 export const RateTerm = z.object({
   /**
@@ -29,32 +46,33 @@ export const RateTerm = z.object({
    * vendor — the Aetna Part D agreement pays AWP-15% + $1.00 on CVS/Caremark and AWP-16% + $0.75
    * on Express Scripts, in the same schedule. A rate without its vendor cannot price a claim.
    */
-  pbmVendor: z.string().nullable(),
+  pbmVendor: z.string().optional(),
   /** Which network or plan this rate applies to, as the document names it. */
-  network: z.string().nullable(),
+  network: z.string().optional(),
   /**
    * The line of business this line prices — Commercial, Medicare Part D, Medicaid, FEHB — as the
    * exhibit heading names it. One agreement carries several, and a Part D rate applied to a
-   * commercial claim is a wrong appeal. Null where the document prices one line only.
+   * commercial claim is a wrong appeal. Left out where the document prices one line only (null
+   * on this side, like every other unstated term).
    */
-  lineOfBusiness: z.string().nullable().default(null),
+  lineOfBusiness: z.string().optional(),
   /** Preferred or standard cost sharing, where the schedule splits on it. */
   costSharingTier: z.enum(["preferred", "standard", "both", "unknown"]),
   /** Rates split by days supply — "Monthly (1-34 days)" against "Extended Day Supply (35+)". */
-  daysSupplyMin: z.number().int().nullable(),
-  daysSupplyMax: z.number().int().nullable(),
+  daysSupplyMin: z.number().int().optional(),
+  daysSupplyMax: z.number().int().optional(),
   /** Copy the formula as written: "AWP-15% + $1.00". */
-  brandFormula: z.string().nullable(),
-  brandDispensingFee: z.number().nullable(),
+  brandFormula: z.string().optional(),
+  brandDispensingFee: z.number().optional(),
   /** Often a lesser-of inside the ingredient cost: "Lesser of (MAC or AWP-25%) + $1.00". */
-  genericBasis: z.string().nullable(),
-  genericDispensingFee: z.number().nullable(),
-  specialtyTerms: z.string().nullable(),
-  compoundTerms: z.string().nullable(),
-  vaccineTerms: z.string().nullable(),
-  effectiveFrom: z.string().nullable(),
-  effectiveTo: z.string().nullable(),
-  citation: Citation.nullable(),
+  genericBasis: z.string().optional(),
+  genericDispensingFee: z.number().optional(),
+  specialtyTerms: z.string().optional(),
+  compoundTerms: z.string().optional(),
+  vaccineTerms: z.string().optional(),
+  effectiveFrom: z.string().optional(),
+  effectiveTo: z.string().optional(),
+  citation: Citation.optional(),
 });
 
 /**
@@ -70,60 +88,60 @@ export const RateTerm = z.object({
  * so the annual reconciliation can be checked for arrival, not so a claim can be priced.
  */
 export const EffectiveRateGuarantee = z.object({
-  pbmVendor: z.string().nullable(),
-  network: z.string().nullable(),
+  pbmVendor: z.string().optional(),
+  network: z.string().optional(),
   costSharingTier: z.enum(["preferred", "standard", "both", "unknown"]),
-  daysSupplyMin: z.number().int().nullable(),
-  daysSupplyMax: z.number().int().nullable(),
-  brandEffectiveRate: z.string().nullable(),
-  genericEffectiveRate: z.string().nullable(),
-  measurementBasis: z.string().nullable().describe("What it is aggregated across, and over what period."),
-  reconciledBy: z.string().nullable().describe("Who calculates it, and by when."),
-  citation: Citation.nullable(),
+  daysSupplyMin: z.number().int().optional(),
+  daysSupplyMax: z.number().int().optional(),
+  brandEffectiveRate: z.string().optional(),
+  genericEffectiveRate: z.string().optional(),
+  measurementBasis: z.string().optional().describe("What it is aggregated across, and over what period."),
+  reconciledBy: z.string().optional().describe("Who calculates it, and by when."),
+  citation: Citation.optional(),
 });
 
 /** Money taken back after the claim paid — DIR by whatever name the contract gives it. */
 export const PostPointOfSaleDiscount = z.object({
-  name: z.string().nullable(),
-  trigger: z.string().nullable().describe("What has to happen for it to apply, e.g. a generic dispensing rate threshold."),
-  calculation: z.string().nullable(),
-  collectionMethod: z.string().nullable().describe("How it is taken — offset against future payments, invoiced, or otherwise."),
-  frequency: z.string().nullable(),
-  appliesToPbmVendor: z.string().nullable(),
-  citation: Citation.nullable(),
+  name: z.string().optional(),
+  trigger: z.string().optional().describe("What has to happen for it to apply, e.g. a generic dispensing rate threshold."),
+  calculation: z.string().optional(),
+  collectionMethod: z.string().optional().describe("How it is taken — offset against future payments, invoiced, or otherwise."),
+  frequency: z.string().optional(),
+  appliesToPbmVendor: z.string().optional(),
+  citation: Citation.optional(),
 });
 
 /** A clock the pharmacy or its PSAO is running against, and what happens when it expires. */
 export const DisputeWindow = z.object({
   subject: z.string().describe("What can be disputed."),
-  days: z.number().int().nullable(),
-  runsFrom: z.string().nullable(),
-  consequenceIfMissed: z.string().nullable().describe("Usually: deemed accepted."),
-  escalation: z.string().nullable(),
-  citation: Citation.nullable(),
+  days: z.number().int().optional(),
+  runsFrom: z.string().optional(),
+  consequenceIfMissed: z.string().optional().describe("Usually: deemed accepted."),
+  escalation: z.string().optional(),
+  citation: Citation.optional(),
 });
 
 /** A report the counterparty owes, and when. If one is not arriving, that is itself a finding. */
 export const ReportOwed = z.object({
   name: z.string(),
-  owedBy: z.string().nullable(),
-  dueBy: z.string().nullable(),
-  format: z.string().nullable(),
-  granularity: z.string().nullable().describe("e.g. by NCPDP, by claim, aggregate only."),
-  citation: Citation.nullable(),
+  owedBy: z.string().optional(),
+  dueBy: z.string().optional(),
+  format: z.string().optional(),
+  granularity: z.string().optional().describe("e.g. by NCPDP, by claim, aggregate only."),
+  citation: Citation.optional(),
 });
 
 /** A person or desk the contract names, and what they are for. */
 export const ContractContact = z.object({
   purpose: z.enum(["mac_appeals", "provider_relations", "payment_or_eft", "audit", "notices", "credentialing", "other"]),
-  name: z.string().nullable(),
-  organisation: z.string().nullable(),
-  phone: z.string().nullable(),
-  fax: z.string().nullable(),
-  email: z.string().nullable(),
-  portalUrl: z.string().nullable(),
-  postalAddress: z.string().nullable(),
-  citation: Citation.nullable(),
+  name: z.string().optional(),
+  organisation: z.string().optional(),
+  phone: z.string().optional(),
+  fax: z.string().optional(),
+  email: z.string().optional(),
+  portalUrl: z.string().optional(),
+  postalAddress: z.string().optional(),
+  citation: Citation.optional(),
 });
 
 /**
@@ -132,28 +150,28 @@ export const ContractContact = z.object({
  * 835 is offered, and whom to ask, which is what a pharmacy needs to start the change.
  */
 export const RemittanceTerms = z.object({
-  paidBy: z.string().nullable().describe("Who actually pays: the PBM, the plan sponsor, a PSAO, a facilitator."),
-  paymentMethod: z.string().nullable().describe("EFT, check, or as stated."),
-  paymentCycle: z.string().nullable().describe("e.g. twice monthly, within 30 days of adjudication."),
-  eraOffered: z.boolean().nullable().describe("Whether an electronic remittance (835) is provided."),
-  enrollmentMethod: z.string().nullable().describe("How EFT/ERA is set up or changed: a form, a portal, a clearinghouse."),
-  remittanceContact: z.string().nullable(),
-  citation: Citation.nullable(),
+  paidBy: z.string().optional().describe("Who actually pays: the PBM, the plan sponsor, a PSAO, a facilitator."),
+  paymentMethod: z.string().optional().describe("EFT, check, or as stated."),
+  paymentCycle: z.string().optional().describe("e.g. twice monthly, within 30 days of adjudication."),
+  eraOffered: z.boolean().optional().describe("Whether an electronic remittance (835) is provided."),
+  enrollmentMethod: z.string().optional().describe("How EFT/ERA is set up or changed: a form, a portal, a clearinghouse."),
+  remittanceContact: z.string().optional(),
+  citation: Citation.optional(),
 });
 
 /** A fee the counterparty charges the pharmacy per claim or per transaction, by whatever name. */
 export const TransactionFee = z.object({
   name: z.string(),
-  amount: z.string().nullable().describe("As written: \"$0.10 per claim\", \"2% of ingredient cost\"."),
-  appliesTo: z.string().nullable(),
-  citation: Citation.nullable(),
+  amount: z.string().optional().describe("As written: \"$0.10 per claim\", \"2% of ingredient cost\"."),
+  appliesTo: z.string().optional(),
+  citation: Citation.optional(),
 });
 
 /** A defined term, in the document's own words, because "generic" and "AWP" mean what the contract says they mean. */
 export const KeyDefinition = z.object({
   term: z.string(),
   definition: z.string(),
-  citation: Citation.nullable(),
+  citation: Citation.optional(),
 });
 
 /**
@@ -163,18 +181,18 @@ export const KeyDefinition = z.object({
  */
 export const SectionEntry = z.object({
   title: z.string(),
-  pageFrom: z.number().int().nullable(),
-  pageTo: z.number().int().nullable(),
+  pageFrom: z.number().int().optional(),
+  pageTo: z.number().int().optional(),
   gist: z.string().describe("One sentence: what this section decides."),
 });
 
 /** A performance measure that moves money: what is measured, the threshold, and what it does to the payment. */
 export const PerformanceMeasure = z.object({
   measure: z.string().describe("e.g. generic dispensing rate, adherence (PDC), formulary compliance."),
-  threshold: z.string().nullable(),
-  effect: z.string().nullable().describe("What meeting or missing it does: a DIR tier, a bonus, a penalty, as written."),
-  period: z.string().nullable(),
-  citation: Citation.nullable(),
+  threshold: z.string().optional(),
+  effect: z.string().optional().describe("What meeting or missing it does: a DIR tier, a bonus, a penalty, as written."),
+  period: z.string().optional(),
+  citation: Citation.optional(),
 });
 
 export const ContractTerms = z.object({
@@ -188,8 +206,8 @@ export const ContractTerms = z.object({
    * year's claim.
    */
   documentRole: z.enum(["base", "amendment", "exhibit", "rate_sheet", "addendum", "manual", "notice", "unknown"]),
-  parentAgreement: z.string().nullable().describe("Name of the agreement this attaches to, if it is not itself the base."),
-  amendmentNumber: z.string().nullable(),
+  parentAgreement: z.string().optional().describe("Name of the agreement this attaches to, if it is not itself the base."),
+  amendmentNumber: z.string().optional(),
   supersedes: z.array(z.string()).describe("Documents or exhibits this one replaces, as named in it."),
 
   // ── Which claims it governs ────────────────────────────────────────
@@ -208,14 +226,14 @@ export const ContractTerms = z.object({
   linesOfBusiness: z.array(z.string()).describe("Commercial, Medicare Part D, Medicaid, FEHB, and so on."),
 
   // ── Dates with clocks on them ──────────────────────────────────────
-  effectiveDate: z.string().nullable(),
-  endDate: z.string().nullable(),
-  autoRenews: z.boolean().nullable(),
-  terminationNoticeDays: z.number().int().nullable(),
-  amendmentNoticeDays: z.number().int().nullable(),
+  effectiveDate: z.string().optional(),
+  endDate: z.string().optional(),
+  autoRenews: z.boolean().optional(),
+  terminationNoticeDays: z.number().int().optional(),
+  amendmentNoticeDays: z.number().int().optional(),
   /** How long after dispensing a claim may still be submitted, and reversed. */
-  claimSubmissionWindowDays: z.number().int().nullable(),
-  reversalWindowDays: z.number().int().nullable(),
+  claimSubmissionWindowDays: z.number().int().optional(),
+  reversalWindowDays: z.number().int().optional(),
 
   // ── Money ──────────────────────────────────────────────────────────
   rates: z.array(RateTerm),
@@ -225,17 +243,17 @@ export const ContractTerms = z.object({
   reportsOwed: z.array(ReportOwed),
   transactionFees: z.array(TransactionFee),
   /** Which AWP or WAC compendium prices the formula, and as of which date. Two "AWP-15%" contracts pay differently on this alone. */
-  pricingCompendium: cited(z.string().nullable()).describe("e.g. Medi-Span, First Databank, and the date basis: date of service, date of adjudication."),
+  pricingCompendium: cited(z.string().optional()).describe("e.g. Medi-Span, First Databank, and the date basis: date of service, date of adjudication."),
   /** Where the MAC list is published, how often it changes, and whether it is available on request. */
-  macListAccess: cited(z.string().nullable()),
+  macListAccess: cited(z.string().optional()),
   performanceMeasures: z.array(PerformanceMeasure),
   /** Penalties for dispensing brand where a generic exists, and which DAW codes are honoured. */
-  dawRules: cited(z.string().nullable()),
+  dawRules: cited(z.string().optional()),
   /** Days to pay a clean claim, and interest owed when late. */
-  promptPayDays: z.number().int().nullable(),
-  latePaymentInterest: z.string().nullable(),
+  promptPayDays: z.number().int().optional(),
+  latePaymentInterest: z.string().optional(),
   /** Whether money may be offset against future payments, and the notice owed first. */
-  recoupmentTerms: cited(z.string().nullable()),
+  recoupmentTerms: cited(z.string().optional()),
   keyDefinitions: z.array(KeyDefinition).describe("Brand, generic, AWP, WAC, MAC, U&C, specialty, compound: each as this document defines it, where it does."),
   /**
    * Documents this one cannot be read without. A PSAO network agreement routinely delegates the
@@ -243,39 +261,39 @@ export const ContractTerms = z.object({
    * Extracting the rate without knowing that is extracting half an answer.
    */
   incorporatesByReference: z.array(z.string()),
-  definitionsDelegatedTo: z.string().nullable(),
-  usualAndCustomaryDefinition: z.string().nullable(),
-  dirFeeBasis: cited(z.string().nullable()),
-  dirMeasurementPeriod: z.string().nullable(),
+  definitionsDelegatedTo: z.string().optional(),
+  usualAndCustomaryDefinition: z.string().optional(),
+  dirFeeBasis: cited(z.string().optional()),
+  dirMeasurementPeriod: z.string().optional(),
 
   // ── Appeals and audit — the operational half ───────────────────────
-  macAppealWindowDays: cited(z.number().int().nullable()),
-  macAppealWindowBasis: z.enum(["date_of_fill", "date_of_adjudication", "date_of_remittance", "unknown"]).nullable(),
-  macAppealMethod: cited(z.string().nullable()),
-  macAppealResponseDays: z.number().int().nullable(),
-  macAppealRetroactive: z.boolean().nullable(),
+  macAppealWindowDays: cited(z.number().int().optional()),
+  macAppealWindowBasis: z.enum(["date_of_fill", "date_of_adjudication", "date_of_remittance", "unknown"]).optional(),
+  macAppealMethod: cited(z.string().optional()),
+  macAppealResponseDays: z.number().int().optional(),
+  macAppealRetroactive: z.boolean().optional(),
   macAppealRequiredFields: z.array(z.string()).describe("What an appeal must carry: claim number, NDC, invoice, date of service, and so on, as listed."),
-  macAppealInvoiceRequired: z.boolean().nullable(),
-  macAppealSubmissionTarget: z.string().nullable().describe("The address, portal or fax the appeal goes to, as written."),
+  macAppealInvoiceRequired: z.boolean().optional(),
+  macAppealSubmissionTarget: z.string().optional().describe("The address, portal or fax the appeal goes to, as written."),
 
   // ── People and payment ─────────────────────────────────────────────
   contacts: z.array(ContractContact),
-  remittance: RemittanceTerms.nullable(),
-  auditLookbackYears: z.number().int().nullable(),
-  auditExtrapolationAllowed: z.boolean().nullable(),
+  remittance: RemittanceTerms.optional(),
+  auditLookbackYears: z.number().int().optional(),
+  auditExtrapolationAllowed: z.boolean().optional(),
 
   // ── Wholesaler only ────────────────────────────────────────────────
   gcrTiers: z.array(
     z.object({
-      minPercent: z.number().nullable(),
-      maxPercent: z.number().nullable(),
-      rebatePercent: z.number().nullable(),
-      citation: Citation.nullable(),
+      minPercent: z.number().optional(),
+      maxPercent: z.number().optional(),
+      rebatePercent: z.number().optional(),
+      citation: Citation.optional(),
     }),
   ),
-  gcrDefinition: cited(z.string().nullable()).describe("What counts in the numerator and denominator, and what is excluded."),
-  primarySupplierRequirementPercent: z.number().nullable(),
-  rebatePaymentTerms: z.string().nullable(),
+  gcrDefinition: cited(z.string().optional()).describe("What counts in the numerator and denominator, and what is excluded."),
+  primarySupplierRequirementPercent: z.number().optional(),
+  rebatePaymentTerms: z.string().optional(),
 
   // ── The document's own map ─────────────────────────────────────────
   sections: z.array(SectionEntry),
@@ -285,7 +303,57 @@ export const ContractTerms = z.object({
   confidence: z.number().min(0).max(1),
 });
 
-export type ContractTermsT = z.infer<typeof ContractTerms>;
+/**
+ * A term the contract does not state, as the rest of the site sees it: null, never missing.
+ *
+ * The schema sent to the API uses `.optional()` rather than `.nullable()` because a nullable field
+ * is a union in JSON Schema and the API allows sixteen of those (see the note at the top). But
+ * "absent" is an awkward thing for a hundred call sites to read, and every one of them was written
+ * against nulls. So the wire says absent and the site says null, and `fillNulls` is the one place
+ * that turns one into the other.
+ */
+type Nulled<T> = T extends (infer U)[]
+  ? Nulled<U>[]
+  : T extends object
+    ? { [K in keyof T]-?: Nulled<Exclude<T[K], undefined>> | (undefined extends T[K] ? null : never) }
+    : T;
+
+export type ContractTermsT = Nulled<z.infer<typeof ContractTerms>>;
+
+/**
+ * Puts a null in every optional field the model left out, at any depth.
+ *
+ * Driven by the schema rather than by the value, so a field the document never mentioned is present
+ * and null rather than simply missing — which is what makes `Nulled` above a description of the
+ * object and not a hopeful cast. A key the schema does not know about is left as it is: an older
+ * draft carrying a field since renamed is still the pharmacy's read of its own contract.
+ */
+export function fillNulls<T extends z.ZodTypeAny>(schema: T, value: unknown): unknown {
+  const def = (schema as unknown as { _zod?: { def?: Record<string, unknown> } })._zod?.def as
+    | { type?: string; shape?: unknown; innerType?: z.ZodTypeAny; element?: z.ZodTypeAny }
+    | undefined;
+  if (!def) return value;
+
+  if (def.type === "optional" || def.type === "nullable") {
+    if (value === undefined || value === null) return null;
+    return def.innerType ? fillNulls(def.innerType, value) : value;
+  }
+  if (def.type === "array") {
+    if (!Array.isArray(value)) return value;
+    return def.element ? value.map((v) => fillNulls(def.element as z.ZodTypeAny, v)) : value;
+  }
+  if (def.type === "object") {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
+    const shape = (typeof def.shape === "function" ? (def.shape as () => Record<string, z.ZodTypeAny>)() : def.shape) as
+      | Record<string, z.ZodTypeAny>
+      | undefined;
+    if (!shape) return value;
+    const out: Record<string, unknown> = { ...(value as Record<string, unknown>) };
+    for (const [k, child] of Object.entries(shape)) out[k] = fillNulls(child, out[k]);
+    return out;
+  }
+  return value;
+}
 
 export const EXTRACT_SYSTEM = `You read pharmacy contracts — PBM and payer network agreements, rate exhibits, amendments, and wholesaler supply agreements — and pull out the terms an independent pharmacy needs to check whether it was paid correctly.
 
@@ -293,7 +361,7 @@ What this is used for, so you understand the stakes: the pharmacy will compute w
 
 RULES, in order of importance:
 
-1. **Never infer a number.** If a rate, fee, window or date is not stated in this document, return null. Do not fill it from what is typical, from another PBM, or from an earlier version. A null is useful; a guess is dangerous.
+1. **Never infer a number.** If a rate, fee, window or date is not stated in this document, leave the field out entirely. Do not fill it from what is typical, from another PBM, or from an earlier version. A missing field is useful; a guess is dangerous.
 
 2. **Cite every figure that decides money.** Rates, dispensing fees, GCR tiers, appeal windows, DIR terms — each carries the contract's own words in its quote field, copied exactly, with the page and section where you found them. Copy the sentence, not your summary of it.
 
@@ -352,32 +420,49 @@ export function requireCitations(t: ContractTermsT): CitationFailure[] {
   return missing;
 }
 
-export function termsFromObject(raw: Record<string, unknown>): ContractTermsT {
-  // Fields added to the schema after a document was read are absent from its draft; an old
-  // draft is still a draft, not a failure, so the additions default to "not stated".
-  return ContractTerms.parse({
-    macAppealRequiredFields: [], macAppealInvoiceRequired: null, macAppealSubmissionTarget: null, contacts: [], remittance: null,
-    networkReimbursementIds: [], pharmacyNcpdps: [], pharmacyNpis: [], claimSubmissionWindowDays: null, reversalWindowDays: null,
-    transactionFees: [], keyDefinitions: [], sections: [],
-    pricingCompendium: { value: null, citation: null }, macListAccess: { value: null, citation: null }, performanceMeasures: [],
-    dawRules: { value: null, citation: null }, promptPayDays: null, latePaymentInterest: null,
-    recoupmentTerms: { value: null, citation: null },
-    ...raw,
-  });
+/** Explicit nulls dropped at every depth: `.optional()` rejects a null, and old drafts are full of them. */
+function withoutNulls(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutNulls);
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) if (v !== null) out[k] = withoutNulls(v);
+    return out;
+  }
+  return value;
 }
 
+/**
+ * A stored draft, or a fresh answer, as terms.
+ *
+ * Fields added to the schema after a document was read are absent from its draft; an old draft
+ * is still a draft, not a failure, so the additions default to "not stated". Nulls are dropped on
+ * the way in (drafts read before `.optional()` carry them) and put back by `fillNulls` on the way
+ * out, so the site never sees a missing key.
+ */
+export function termsFromObject(raw: Record<string, unknown>): ContractTermsT {
+  const clean = withoutNulls(raw) as Record<string, unknown>;
+  const parsed = ContractTerms.parse({
+    macAppealRequiredFields: [], contacts: [],
+    networkReimbursementIds: [], pharmacyNcpdps: [], pharmacyNpis: [],
+    transactionFees: [], keyDefinitions: [], sections: [],
+    pricingCompendium: {}, macListAccess: {}, performanceMeasures: [],
+    dawRules: {},
+    recoupmentTerms: {},
+    ...clean,
+  });
+  return fillNulls(ContractTerms, parsed) as ContractTermsT;
+}
 
 /**
  * The model's answer as terms, or a thrown reason.
  *
- * Without a grammar the answer can arrive wrapped in a code fence or with a sentence in front of
- * it; the object is found between the first brace and the last and held to the schema. Fields the
- * schema gained after a prompt was written default to "not stated", as they do for old drafts.
+ * The API's grammar guarantees the shape when the request carries the schema; the answer is still
+ * held to the same schema here, and an object wrapped in a fence or a sentence is found between
+ * the first brace and the last, so a read made without the grammar parses too.
  */
 export function termsFromAnswer(text: string): ContractTermsT {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start < 0 || end <= start) throw new Error("no JSON object in the answer");
-  const raw = JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
-  return termsFromObject(raw);
+  return termsFromObject(JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>);
 }
