@@ -126,7 +126,7 @@ export default async function SuppliesPage({ searchParams }: { searchParams: Pro
   return (
     <>
       <PageHeader
-        back={{ href: "/purchasing", label: "What to buy" }}
+        back={{ href: "/purchasing", label: "Buying" }}
         title="Supplies"
         subtitle="Count now and then; the site works out how fast each goes and which day the order has to be sent."
       />

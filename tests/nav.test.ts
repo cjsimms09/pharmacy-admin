@@ -42,12 +42,10 @@ describe("navigation", () => {
     assert.ok(NAV.length <= 12, `${NAV.length} top-level groups — a new area of the business earns one, a page does not`);
   });
 
-  test("no group has grown into two groups", () => {
+  test("no group lists more than eight pages; the rest are hidden behind \"more\"", () => {
     for (const g of NAV) {
-      assert.ok(
-        g.items.length <= 8,
-        `${g.label} has ${g.items.length} items — it is either two groups now, or some of these belong one level down`,
-      );
+      const listed = g.items.filter((i) => !i.hidden);
+      assert.ok(listed.length <= 8, `${g.label} lists ${listed.length} pages — the list is what somebody opens on a normal day`);
     }
   });
 
@@ -65,40 +63,47 @@ describe("navigation", () => {
   });
 
   test("a sub-page opens its own group, not its prefix's", () => {
-    assert.equal(groupFor("/compliance/training")?.label, "People");
-    assert.equal(groupFor("/compliance/training/records")?.label, "People");
+    assert.equal(groupFor("/compliance/training")?.label, "Compliance");
+    assert.equal(groupFor("/compliance/training/records")?.label, "Compliance");
     assert.equal(groupFor("/compliance")?.label, "Compliance");
     assert.equal(groupFor("/compliance/attestations")?.label, "Compliance");
-    // Supplier invoices are an ordering page even though they live under /inventory.
-    assert.equal(groupFor("/inventory/invoices")?.label, "Ordering");
-    assert.equal(groupFor("/inventory/returns")?.label, "Ordering");
-    // Who pays best is a money question; the payer register is a claims one.
-    assert.equal(groupFor("/payers/performance")?.label, "Claims");
-    assert.equal(groupFor("/remits/mtf")?.label, "Claims");
-    assert.equal(groupFor("/purchasing/minimums")?.label, "Ordering");
-    assert.equal(groupFor("/plans")?.label, "Claims");
-    assert.equal(groupFor("/payers/contracts/abc")?.label, "Claims");
+    // Supplier invoices and returns are buying pages even though they live under /inventory.
+    assert.equal(groupFor("/inventory/invoices")?.label, "Buying");
+    assert.equal(groupFor("/inventory/returns")?.label, "Buying");
+    assert.equal(groupFor("/inventory")?.label, "Compliance");
+    assert.equal(groupFor("/payers/performance")?.label, "Getting paid");
+    assert.equal(groupFor("/remits/mtf")?.label, "Getting paid");
+    assert.equal(groupFor("/purchasing/minimums")?.label, "Buying");
+    assert.equal(groupFor("/plans")?.label, "Getting paid");
+    assert.equal(groupFor("/payers/contracts/abc")?.label, "Getting paid");
   });
 
   test("a page reached from a list still opens its section", () => {
-    assert.equal(groupFor("/staff/abc123")?.label, "People");
-    assert.equal(groupFor("/inventory/abc/print")?.label, "Controlled substances");
+    assert.equal(groupFor("/staff/abc123")?.label, "Compliance");
+    assert.equal(groupFor("/inventory/abc/print")?.label, "Compliance");
     assert.equal(groupFor("/cqi/incidents/xyz")?.label, "Compliance");
     assert.equal(groupFor("/manual/print")?.label, "Compliance");
     assert.equal(groupFor("/settings/backups")?.label, "Settings");
     assert.equal(groupFor("/money/found")?.label, "Money");
     assert.equal(groupFor("/money/monthly")?.label, "Money");
-    assert.equal(groupFor("/purchasing/shelf")?.label, "Ordering");
-    assert.equal(groupFor("/intake")?.label, "Tools");
+    assert.equal(groupFor("/purchasing/shelf")?.label, "Buying");
+    assert.equal(groupFor("/purchasing/over-nadac")?.label, "Buying");
+    assert.equal(groupFor("/intake")?.label, "Settings");
     assert.equal(groupFor("/inspection/walk")?.label, "Compliance");
-    assert.equal(groupFor("/inbox")?.label, "Tools");
+    assert.equal(groupFor("/inbox")?.label, "Settings");
+    assert.equal(groupFor("/nadac")?.label, "Settings");
   });
 
-  test("the sections are the ones the owner named, in the order the day runs", () => {
-    assert.deepEqual(
-      NAV.map((g) => g.label),
-      ["Today", "Money", "Ordering", "Claims", "Compliance", "People", "Controlled substances", "Tools", "Settings"],
-    );
+  test("the sections are the three questions, with Today in front and the books and settings beside", () => {
+    assert.deepEqual(NAV.map((g) => g.label), ["Today", "Buying", "Getting paid", "Money", "Compliance", "Settings"]);
+  });
+
+  test("a hidden page is still placed, so its highlight and breadcrumb are right", () => {
+    assert.equal(itemFor("/cqi/incidents/xyz")?.item.label, "Quality (CQI)");
+    assert.equal(itemFor("/staff/new-hire")?.item.label, "New employee");
+    assert.equal(itemFor("/staff/abc123")?.item.label, "Staff");
+    assert.equal(itemFor("/inventory/pharmacist-log")?.item.label, "Daily pharmacist log");
+    assert.equal(itemFor("/audit")?.item.label, "Activity log");
   });
 
   test("a path nobody has claimed does not guess", () => {
@@ -113,6 +118,7 @@ describe("a page listed only through its family", () => {
     assert.equal(itemFor("/purchasing/minimums")?.item.href, "/purchasing");
     assert.equal(itemFor("/intake")?.item.href, "/inbox");
     assert.equal(itemFor("/payers/sort")?.item.href, "/payers");
+    assert.equal(itemFor("/settings/feeds")?.item.href, "/settings/connections");
     assert.equal(itemFor("/claims/floor")?.tab, undefined);
     assert.equal(itemFor("/money/monthly")?.item.href, "/money");
     assert.equal(itemFor("/money/monthly")?.tab?.label, "Statement");

@@ -166,6 +166,21 @@ it and said so on the pull request. The owner reads this too.
   `src/instrumentation.ts` are next on my side unless you want them; a "Drug directory" row on
   `/settings/feeds` too. Until a load runs, every grouping falls back to NADAC's description and
   the products page says "0 of N dispensed" are on the directory.
+- **The menu is six entries** (`nav.ts`, `components/nav.tsx`, `tests/nav.test.ts`; `/tools`
+  redirects to Settings). The owner: "this site has too many tools; I don't understand anything."
+  Today, Buying, Getting paid, Money, Compliance, Settings. **Your pages are all still reachable
+  and none is edited:** People and Controlled substances are under Compliance (Staff, Training
+  and Controlled substances listed; New employee, Technician list, Rotations, Discrepancies,
+  Pharmacist log, Power of attorney, CQI and Temperatures under the group's folded "more" line);
+  Driver invoices is under Money's "more"; NADAC, Report check, Activity log, Backups, Training
+  settings, Extra sections, Network and Updates under Settings' "more"; What arrived is listed
+  under Settings. `NavItem.hidden` is the mechanism; `groupFor` / `itemFor` and the breadcrumb
+  treat hidden items as listed. If a page of yours should be in the list rather than under
+  "more", it is one word in `nav.ts`.
+- **`/purchasing` is "What to add, what to watch"**: alerts (a different NDC earns more; a needed
+  line cheaper at a secondary; the primary over NADAC where a secondary is under) and one ranked
+  card per secondary. No cart box, no running total: the owner was clear the site cannot know
+  the cart, so it ranks and he adds from the top until the wholesaler's screen shows the minimum.
 - **Still needed from PioneerRx for the fills the law does not settle:** Basis of Reimbursement
   (NCPDP 522-FM), Dispensed AWP, Usual and Customary submitted, and DAW on the daily transaction
   report. The catalogue exports now carry AWP (the feeds page prints the share per file).

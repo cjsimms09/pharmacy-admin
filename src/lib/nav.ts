@@ -1,45 +1,37 @@
 /**
  * The shape of the site.
  *
- * Sixty pages under a flat list of twelve is not a menu, it is a memory test — the daily
- * pharmacist log lived three clicks inside "CS inventories" and nobody who had not built it
- * would ever have found it. So the site is grouped the way the owner actually works: the money,
- * the ordering, the claims, then compliance, the people, the controlled substances,
- * the tools and the settings. Each group names its pages rather than hiding them, and the group
- * you are inside is the one that is open.
+ * Three questions run the business: am I buying right, am I getting paid right, am I staying
+ * compliant. The owner's verdict on 7 September, after the menu had grown to nine groups and
+ * fifty pages: "this site has too many tools; I don't understand anything." So the sidebar is
+ * the three questions, with Today in front, the books beside, and Settings behind: six entries.
+ * Everything else still exists, one click further — under the group's "more" line, on its hub,
+ * or linked from the page that needs it — but the menu no longer presents the plumbing as the
+ * product.
  *
  * Plain data rather than markup, so the same structure drives the sidebar, the hub pages and
  * anywhere else that needs to know what belongs with what.
  *
  * ── The rules this has to keep obeying as the site grows ──
  *
- * Everything built so far is compliance. What is coming is not — the schedule, the money side,
- * purchasing, the patient-facing work — and a menu grows badly by accident rather than by
- * decision. Adding a thirteenth group and a ninth item to four of them is never a choice anybody
- * makes; it is what happens when nobody wrote the rule down. So:
+ *   1. Six groups. A new area of the business earns a group; a new page never does. The test
+ *      names them in order.
  *
- *   1. Nine groups, and a hard ceiling of twelve. A sidebar somebody has to scan rather than
- *      recognise has stopped being navigation. A new area of the business earns a group; a new
- *      page almost never does.
+ *   2. Eight listed items per group, and the list is the pages somebody opens on a normal day. A
+ *      page that is opened monthly, or only after something else, is `hidden`: still in the group
+ *      for the highlight and the breadcrumb, still on the hub, not in the list.
  *
- *   2. Eight items per group. Past that, the group is really two groups, or some of its pages
- *      belong one level down inside a page that already exists. The test enforces both numbers,
- *      so exceeding them is a decision somebody has to make deliberately.
+ *   3. Group by what somebody came to do, not by what the thing is made of. Supplier invoices are
+ *      under Buying because that is where the person reading one is, even though they are really
+ *      a controlled substance record.
  *
- *   3. Group by what somebody came to do, not by what the thing is made of. "Invoices" is in
- *      Records because that is the word people go looking for, even though supplier invoices are
- *      really a controlled substance record. The word wins.
- *
- *   4. A page belongs to exactly one group. Cross-link from anywhere; list it once. Two homes
- *      means neither is the home, and the sidebar highlight goes wrong.
+ *   4. A page belongs to exactly one group. Cross-link from anywhere; list it once.
  *
  *   5. If a page is only ever reached from another page — a person's record, one month's
- *      temperatures, one incident — it is not in the menu at all. The menu lists starting points.
+ *      temperatures, one incident — it is not in the menu at all.
  *
- *   6. Pages that are one thing seen from several sides — the books, the statement and the
- *      trend; the buy list, the shelf and the minimums — are a family (`families.ts`): listed once
+ *   6. Pages that are one thing seen from several sides are a family (`families.ts`): listed once
  *      here, by the page somebody opens first, and joined by a row of tabs on every page in it.
- *      A one-page group is not a group; it is a page that belongs somewhere.
  */
 import { FAMILIES, type FamilyTab } from "./families";
 
@@ -49,6 +41,11 @@ export type NavItem = {
   blurb?: string;
   /** Behind the "extra sections" flag: the page redirects to Today while it is off, so the link is not shown. */
   gated?: boolean;
+  /**
+   * In the group but not in the sidebar's list: reached from the group's "more" line, the hub and
+   * the pages that need it. The sidebar highlight and the breadcrumb still know where it lives.
+   */
+  hidden?: boolean;
 };
 export type NavGroup = { href: string; label: string; blurb: string; items: NavItem[] };
 
@@ -56,113 +53,95 @@ export const NAV: NavGroup[] = [
   {
     href: "/",
     label: "Today",
-    blurb: "What is due, what is late, and what happened while you were not looking.",
+    blurb: "What is due, what is late, what the money list says, and what happened while you were not looking.",
     items: [],
   },
   {
     /*
-     * The money, first among the business groups because it is what the owner opens first.
-     *
-     * The books lead: what the period earned, what reached the bank, and the gap between them.
-     * Everything that decides or explains a figure on the books is one level down.
+     * Am I buying right? The page the owner opens with the McKesson cart open in the other window:
+     * what the primary's order would get wrong, and what to add to a secondary to reach its minimum.
      */
+    href: "/purchasing",
+    label: "Buying",
+    blurb: "What the primary's order would get wrong today, and what to add to each secondary to reach its minimum.",
+    items: [
+      { href: "/purchasing", label: "What to add, what to watch", blurb: "Add-ons per secondary, ranked; which NDC pays; what was bought over NADAC", gated: true },
+      { href: "/suppliers", label: "Suppliers and rebates", blurb: "Each wholesaler's minimum, ladder and ratio, and what this month's buying is earning" },
+      { href: "/inventory/invoices", label: "Supplier invoices", blurb: "Filed by schedule, with the C2s kept apart" },
+      { href: "/purchasing/replay", label: "Which contract", blurb: "A year of dispensing replayed through each wholesaler's catalogue and ladder", gated: true, hidden: true },
+      { href: "/inventory/returns", label: "What to send back", blurb: "Return deadlines counted from the invoice, and what each is worth", hidden: true },
+      { href: "/purchasing/supplies", label: "Supplies", blurb: "Vials, bags and labels: what is low and what to order", hidden: true },
+    ],
+  },
+  {
+    /* Am I getting paid right? The claims, the floor, and the contracts that decide the rest. */
+    href: "/claims",
+    label: "Getting paid",
+    blurb: "Every dispensing and what it made; claims paid under the Kansas floor; the payers and their contracts.",
+    items: [
+      { href: "/claims", label: "Claims", blurb: "Every dispensing, what it made, and what is still owed on it", gated: true },
+      { href: "/claims/floor", label: "Kansas floor", blurb: "Claims paid under NADAC plus the fee, the plans the floor reaches, and the appeals filed", gated: true },
+      { href: "/payers", label: "Payers and contracts", blurb: "Every BIN we bill, its contract read once, its appeal route and its 835 routing", gated: true },
+      { href: "/payers/performance", label: "Who pays best", blurb: "Every plan ranked by what it actually pays", gated: true, hidden: true },
+      { href: "/remits/mtf", label: "Facilitator payments", blurb: "What the Medicare Transaction Facilitator has paid after the claim, and what is still awaited", gated: true, hidden: true },
+    ],
+  },
+  {
     href: "/money",
     label: "Money",
     blurb: "The books: what the pharmacy earned, what reached the bank, what it cost, and what is left.",
     items: [
       { href: "/money", label: "The books", blurb: "The period on both bases, the statement, and how the months are moving" },
-      { href: "/money/found", label: "Money found", blurb: "Everything worth chasing, ranked, with what to do about each" },
       { href: "/expenses", label: "Spending", blurb: "Bills, standing costs, the vendors who send them, and the rules that file them" },
-      { href: "/deliveries", label: "Driver invoices", blurb: "Deliveries per day, and the monthly invoice that sends itself" },
+      { href: "/money/found", label: "Money found", blurb: "Everything worth chasing, ranked, with what to do about each", hidden: true },
+      { href: "/deliveries", label: "Driver invoices", blurb: "Deliveries per day, and the monthly invoice that sends itself", hidden: true },
     ],
   },
   {
-    href: "/purchasing",
-    label: "Ordering",
-    blurb: "What to buy, from whom, at what it really costs after the rebate, and what is on the shelf.",
-    items: [
-      { href: "/purchasing", label: "Add to a secondary", blurb: "What to add to a secondary's order to reach its minimum, and what the primary's order would get wrong", gated: true },
-      { href: "/purchasing/replay", label: "Which contract", blurb: "A year of dispensing replayed through each wholesaler's catalogue and ladder", gated: true },
-      { href: "/suppliers", label: "Suppliers and rebates", blurb: "The ladders, the ratio, and what this month's buying is earning" },
-      { href: "/inventory/invoices", label: "Supplier invoices", blurb: "Filed by schedule, with the C2s kept apart" },
-      { href: "/inventory/returns", label: "What to send back", blurb: "Return deadlines counted from the invoice, and what each is worth" },
-      { href: "/purchasing/supplies", label: "Supplies", blurb: "Vials, bags and labels: what is low and what to order" },
-    ],
-  },
-  {
-    href: "/claims",
-    label: "Claims",
-    blurb: "Every dispensing, what it made, who priced it, and what it should have been paid.",
-    items: [
-      { href: "/claims", label: "Claims", blurb: "Every dispensing, what it made, and what is still owed on it", gated: true },
-      { href: "/claims/floor", label: "Kansas floor", blurb: "Claims paid under NADAC plus the fee, the plans the floor reaches, and the appeals filed", gated: true },
-      { href: "/payers", label: "Payers", blurb: "Every BIN we bill, its contract, its appeal route and its payment routing", gated: true },
-      { href: "/payers/contracts", label: "Contracts", blurb: "Every agreement, read once, with the contract's own words beside each figure", gated: true },
-      { href: "/payers/performance", label: "Who pays best", blurb: "Every plan ranked by what it actually pays", gated: true },
-      { href: "/remits/mtf", label: "Facilitator payments", blurb: "What the Medicare Transaction Facilitator has paid after the claim, and what is still awaited", gated: true },
-    ],
-  },
-  {
+    /*
+     * Am I staying compliant? The pharmacy session's pages, under one entry: the duties, the
+     * licences, the people, the controlled substances, the inspection and the manual. The rest is
+     * a click further, under "more".
+     */
     href: "/compliance",
     label: "Compliance",
-    blurb: "Every standing duty, the licences, the inspection, the manual, and the records behind them.",
+    blurb: "Every standing duty, the licences, the people, the controlled substances, the inspection, the manual, and the records behind them.",
     items: [
       { href: "/compliance", label: "Register", blurb: "Every standing duty, its cadence and its evidence" },
       { href: "/licenses", label: "Licences", blurb: "Registration, DEA, CSOS, KMAP, insurance, business licence" },
+      { href: "/staff", label: "Staff", blurb: "Licences, certifications and documents, per person" },
+      { href: "/compliance/training", label: "Training", blurb: "Send it, chase it, record the attestation; the file and the material behind it" },
+      { href: "/inventory", label: "Controlled substances", blurb: "The annual count and Form C-250, with the log, the discrepancies and the power of attorney under it" },
       { href: "/inspection", label: "Inspection", blurb: "By inspector: Board, DEA, what each would ask, and the walk round with findings closed" },
       { href: "/manual", label: "P&P manual", blurb: "One document, read and edited by chapter, printed from the live copy" },
-      { href: "/cqi", label: "Quality (CQI)", blurb: "Every quality event, its review, and the bimonthly summary" },
-      { href: "/temps", label: "Temperatures", blurb: "Refrigerator and room readings, excursions explained, months signed off" },
       { href: "/records", label: "Records", blurb: "Forms, agreements, attestations and documents, and where each lives" },
-    ],
-  },
-  {
-    href: "/staff",
-    label: "People",
-    blurb: "Everyone who works here, what they are qualified to do, and what they still owe.",
-    items: [
-      { href: "/staff", label: "Staff", blurb: "Licences, certifications and documents, per person" },
-      { href: "/staff/new-hire", label: "New employee", blurb: "Everything a new starter has to complete, in one place" },
-      { href: "/compliance/training", label: "Training", blurb: "Send it, chase it, record the attestation; the file and the material behind it" },
-      { href: "/staff/technician-list", label: "Technician list", blurb: "Form C-900, filed automatically every month" },
-      { href: "/staff/rotations", label: "Students on rotation", blurb: "Present for a fixed spell, not staff and not former staff" },
-    ],
-  },
-  {
-    href: "/inventory",
-    label: "Controlled substances",
-    blurb: "The count, the log, the authority to order, and anything that did not add up.",
-    items: [
-      { href: "/inventory", label: "Inventories", blurb: "The annual count and Form C-250" },
-      { href: "/inventory/discrepancies", label: "Discrepancies", blurb: "Anything that did not reconcile, and what was done" },
-      { href: "/inventory/pharmacist-log", label: "Daily pharmacist log", blurb: "The C-III/IV refill statement and signature sheet" },
-      { href: "/inventory/power-of-attorney", label: "Power of attorney", blurb: "Who may execute a Form 222 or a CSOS order" },
-    ],
-  },
-  {
-    href: "/tools",
-    label: "Tools",
-    blurb: "The feeds and the reference data behind every figure, and the log of who did what.",
-    items: [
-      { href: "/inbox", label: "What arrived", blurb: "Reports that came by email, documents dropped in by hand, and what was made of each" },
-      { href: "/nadac", label: "NADAC", blurb: "The federal benchmark price, fetched weekly" },
-      { href: "/reports", label: "Report check", blurb: "What a PioneerRx report can and cannot support, field by field", gated: true },
-      { href: "/audit", label: "Activity log", blurb: "Who did what in this system, and when" },
+      { href: "/cqi", label: "Quality (CQI)", blurb: "Every quality event, its review, and the bimonthly summary", hidden: true },
+      { href: "/temps", label: "Temperatures", blurb: "Refrigerator and room readings, excursions explained, months signed off", hidden: true },
+      { href: "/staff/new-hire", label: "New employee", blurb: "Everything a new starter has to complete, in one place", hidden: true },
+      { href: "/staff/technician-list", label: "Technician list", blurb: "Form C-900, filed automatically every month", hidden: true },
+      { href: "/staff/rotations", label: "Students on rotation", blurb: "Present for a fixed spell, not staff and not former staff", hidden: true },
+      { href: "/inventory/discrepancies", label: "Discrepancies", blurb: "Anything that did not reconcile, and what was done", hidden: true },
+      { href: "/inventory/pharmacist-log", label: "Daily pharmacist log", blurb: "The C-III/IV refill statement and signature sheet", hidden: true },
+      { href: "/inventory/power-of-attorney", label: "Power of attorney", blurb: "Who may execute a Form 222 or a CSOS order", hidden: true },
     ],
   },
   {
     href: "/settings",
     label: "Settings",
-    blurb: "The pharmacy's own details, the connections, and the backups.",
+    blurb: "The pharmacy's own details, every connection and whether each feed is arriving, and the reference data behind the figures.",
     items: [
       { href: "/settings", label: "Pharmacy details", blurb: "Name, registration numbers, address" },
-      { href: "/settings/backups", label: "Backups", blurb: "Daily, verified, in two places, proved monthly" },
-      { href: "/settings/email", label: "Email", blurb: "Reading reports in and sending training out" },
       { href: "/settings/connections", label: "Connections", blurb: "Keys for Claude, iMonnit and the rest, and whether every report is arriving" },
-      { href: "/settings/training", label: "Training settings", blurb: "Materials and cadence" },
-      { href: "/settings/features", label: "Extra sections", blurb: "Parts of the site that are still being built" },
-      { href: "/settings/network", label: "Network", blurb: "How to reach this from another computer" },
-      { href: "/settings/updates", label: "Updates", blurb: "What version this is running" },
+      { href: "/settings/email", label: "Email", blurb: "Reading reports in and sending training out" },
+      { href: "/inbox", label: "What arrived", blurb: "Reports that came by email, documents dropped in by hand, and what was made of each" },
+      { href: "/nadac", label: "NADAC", blurb: "The federal benchmark price, fetched weekly", hidden: true },
+      { href: "/reports", label: "Report check", blurb: "What a PioneerRx report can and cannot support, field by field", gated: true, hidden: true },
+      { href: "/audit", label: "Activity log", blurb: "Who did what in this system, and when", hidden: true },
+      { href: "/settings/backups", label: "Backups", blurb: "Daily, verified, in two places, proved monthly", hidden: true },
+      { href: "/settings/training", label: "Training settings", blurb: "Materials and cadence", hidden: true },
+      { href: "/settings/features", label: "Extra sections", blurb: "Parts of the site that are still being built", hidden: true },
+      { href: "/settings/network", label: "Network", blurb: "How to reach this from another computer", hidden: true },
+      { href: "/settings/updates", label: "Updates", blurb: "What version this is running", hidden: true },
     ],
   },
 ];

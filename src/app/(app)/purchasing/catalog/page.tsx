@@ -151,7 +151,7 @@ export default async function DrugFilePage({
       <PageHeader
         title="The drug file"
         subtitle="Every drug any file mentions, under its NDC: who sells it and at what package, what the shelf holds, what it reimburses, and where two sources disagree about the bottle."
-        actions={<Link href="/purchasing" className="btn btn-sm">What to buy</Link>}
+        actions={<Link href="/purchasing" className="btn btn-sm">Buying</Link>}
       />
       {sp.ok && <Notice kind="ok">{sp.ok}</Notice>}
       {sp.error && <Notice kind="crit">{sp.error}</Notice>}

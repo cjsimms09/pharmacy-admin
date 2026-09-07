@@ -37,7 +37,7 @@ export default async function ReplayPage({ searchParams }: { searchParams: Promi
       <PageHeader
         title="Which contract"
         subtitle="A year of dispensing replayed through each wholesaler's catalogue and rebate ladder, so the renewal is decided on this pharmacy's own claims."
-        back={{ href: "/purchasing", label: "What to buy" }}
+        back={{ href: "/purchasing", label: "Buying" }}
         help={
           <>
             <p><b>Every fill of the last twelve months</b> is priced at each supplier&rsquo;s cheapest product in the same group: drug, strength, form, brand-or-generic and pricing unit from NADAC&rsquo;s descriptions. A brand is never replayed as its generic.</p>

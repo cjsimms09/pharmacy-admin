@@ -332,6 +332,19 @@ retires a page whose address is still linked.
 | Tools `/tools` | keep, the hand-typed status board dropped | The section landing, like `/compliance` and `/staff`. Its second half was nine cards with a typed "ready / waiting / needs work" that was wrong within a month of being written; the pages say what they wait on, in figures. |
 | Settings and its eight pages | keep | Each a different connection or fact; eight is the ceiling and it is at it. |
 
+**Revised again, 7 September, on the owner's verdict ("this site has too many tools; I don't
+understand anything"): six groups.** Today; Buying (`/purchasing`: what the primary's order would
+get wrong and what to add to each secondary, with Which NDC pays and Bought over NADAC as its
+tabs; Suppliers and rebates; Supplier invoices); Getting paid (Claims, Kansas floor, Payers and
+contracts); Money (The books, Spending); Compliance (the pharmacy session's pages under one entry:
+Register, Licences, Staff, Training, Controlled substances, Inspection, P&P manual, Records);
+Settings (Pharmacy details, Connections, Email, What arrived). Every other page is `hidden` in
+`nav.ts`: still in its group for the highlight and the breadcrumb, on the group's hub, and in the
+sidebar under a folded "more" line that opens when you are on one of them. Tools is gone as a
+section (`/tools` redirects to Settings); People and Controlled substances are under Compliance.
+The rule in `nav.ts` is now six groups and eight *listed* pages each, the list being what
+somebody opens on a normal day.
+
 Nine groups, none over seven items, twelve fewer lines in the sidebar than on 6 September. Still
 open, for the page-by-page pass to settle when it reaches them: the `/documents` upload form and
 `/intake` do the same job for a pharmacy document (one should call the other); `/compliance`

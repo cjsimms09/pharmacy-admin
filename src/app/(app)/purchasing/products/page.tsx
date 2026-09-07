@@ -62,7 +62,7 @@ export default async function ProductsPage() {
         tabs={familyTabs("order", "/purchasing/products")}
         title="Which NDC pays"
         subtitle="For every drug this pharmacy dispenses: how its payers pay for it, and therefore which NDC to buy and from where to earn the most on it. Then what each drug earns, and which are dispensed at a loss."
-        actions={<Link href="/purchasing" className="btn">What to buy</Link>}
+        actions={<Link href="/purchasing" className="btn">Buying</Link>}
       />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

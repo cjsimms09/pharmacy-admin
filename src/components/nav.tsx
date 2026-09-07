@@ -26,6 +26,8 @@ export function Nav({ tools }: { tools: boolean }) {
    */
   const visible = tools ? NAV : NAV.map((g) => ({ ...g, items: g.items.filter((i) => !i.gated) }));
   const groups = visible.filter((g, i) => NAV[i].items.length === 0 || g.items.length > 0 || !NAV[i].items.every((it) => it.gated));
+  // The item the page lives under, by the same rule as the breadcrumb — never a prefix, so Staff is not lit on New employee.
+  const isOn = (href: string) => pathname === href || itemFor(pathname)?.item.href === href;
 
   return (
     <nav className="px-2 pb-4" aria-label="Sections">
@@ -40,16 +42,33 @@ export function Nav({ tools }: { tools: boolean }) {
             </Link>
             {open && g.items.length > 0 && (
               <ul className="mb-2 ml-[1.35rem] mt-0.5 space-y-px border-l border-[color:var(--color-side-line)] pl-2">
-                {g.items.map((i) => {
-                  const on = pathname === i.href || pathname.startsWith(`${i.href}/`) || itemFor(pathname)?.item.href === i.href;
-                  return (
-                    <li key={i.href}>
-                      <Link href={i.href} className={`side-item ${on ? "on" : ""}`} aria-current={on ? "page" : undefined}>
-                        {i.label}
-                      </Link>
-                    </li>
-                  );
-                })}
+                {g.items.filter((i) => !i.hidden).map((i) => (
+                  <li key={i.href}>
+                    <Link href={i.href} className={`side-item ${isOn(i.href) ? "on" : ""}`} aria-current={isOn(i.href) ? "page" : undefined}>
+                      {i.label}
+                    </Link>
+                  </li>
+                ))}
+                {/*
+                  The rest of the group, folded. Open when the page you are on is one of them, so
+                  the highlight is never on a link you cannot see.
+                */}
+                {g.items.some((i) => i.hidden) && (
+                  <li>
+                    <details open={g.items.some((i) => i.hidden && isOn(i.href))}>
+                      <summary className="side-item cursor-pointer text-[color:var(--color-side-ink-2)]">more</summary>
+                      <ul className="space-y-px">
+                        {g.items.filter((i) => i.hidden).map((i) => (
+                          <li key={i.href}>
+                            <Link href={i.href} className={`side-item ${isOn(i.href) ? "on" : ""}`} aria-current={isOn(i.href) ? "page" : undefined}>
+                              {i.label}
+                            </Link>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  </li>
+                )}
               </ul>
             )}
           </div>
