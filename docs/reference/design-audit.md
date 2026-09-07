@@ -326,7 +326,7 @@ retires a page whose address is still linked.
 | Add documents `/intake` | join the arrivals family as "By hand" | The same intake, dropped in rather than emailed. |
 | NADAC, Report check, Activity log | keep | Reference data and the log. |
 | Find anything `/find` | keep, **out of the sidebar** | The search box above the menu is the way in; a menu line for it was a second door to the same room. |
-| Tools `/tools` | keep | The section landing, like `/compliance` and `/staff`. |
+| Tools `/tools` | keep, the hand-typed status board dropped | The section landing, like `/compliance` and `/staff`. Its second half was nine cards with a typed "ready / waiting / needs work" that was wrong within a month of being written; the pages say what they wait on, in figures. |
 | Settings and its eight pages | keep | Each a different connection or fact; eight is the ceiling and it is at it. |
 
 Nine groups, none over seven items, twelve fewer lines in the sidebar than on 6 September. Still

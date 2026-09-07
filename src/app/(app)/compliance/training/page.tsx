@@ -318,7 +318,7 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
   if (people.length === 0) {
     return (
       <>
-        <PageHeader tabs={familyTabs("training", "/compliance/training")} back={{ href: "/compliance", label: "Compliance" }} title="Training" />
+        <PageHeader tabs={familyTabs("training", "/compliance/training")} title="Training" />
         <Empty>No active staff. <Link href="/staff/new" className="underline">Add someone first.</Link></Empty>
       </>
     );
@@ -328,7 +328,6 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
     <>
       <PageHeader
         tabs={familyTabs("training", "/compliance/training")}
-        back={{ href: "/compliance", label: "Compliance" }}
         title="Training"
         subtitle={
           owed === 0

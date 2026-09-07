@@ -867,11 +867,12 @@ export default async function ManualPage({
             <Field label="A .docx file"><input type="file" name="file" accept=".docx" className="field" /></Field>
             <button className="btn btn-primary">Import</button>
           </form>
-          <p className="mt-3 text-xs text-ink-3">
+          {/* A form cannot live inside a paragraph: the browser closes the paragraph first and React refuses to hydrate the page. */}
+          <div className="mt-3 text-xs text-ink-3">
             Or start from what this site already does — {policies(pharmacy).length} generated sections describing the
             procedures it performs.
             <form action={regenerate} className="mt-2"><button className="btn btn-sm">Generate those now</button></form>
-          </p>
+          </div>
         </Card>
       ) : (
         <>

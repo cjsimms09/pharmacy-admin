@@ -212,7 +212,7 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
 
       {summary.unanswered.length > 0 && (
         <Card title="Does this apply here?" className="mt-8">          <p className="mt-1 text-xs text-ink-3">
-            {summary.unanswered.length} duty{summary.unanswered.length === 1 ? "" : " duties"} shipped switched on because
+            {summary.unanswered.length} {summary.unanswered.length === 1 ? "duty" : "duties"} shipped switched on because
             leaving out a rule that does apply is the expensive mistake. Answer once and it is settled — a &ldquo;no&rdquo;
             is recorded with today&rsquo;s date and your name, so the register shows it was considered rather than missed.
             Nothing here is counting against you in the meantime.
