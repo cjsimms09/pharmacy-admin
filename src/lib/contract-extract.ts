@@ -34,10 +34,10 @@ async function client(): Promise<{ client: Anthropic; model: string }> {
   };
 }
 
-import { estimateCost, pdfPageCount, planBatches, batchIdsIn, PDF_PAGE_LIMIT, PDF_BYTES_LIMIT } from "./contract-run";
+import { estimateCost, pdfPageCount, planBatches, batchIdsIn, pdfPageLimit, PDF_PAGE_LIMIT, PDF_BYTES_LIMIT } from "./contract-run";
 import { Triage, TRIAGE_SYSTEM, triageByText, shouldRead, estimateTriageCost, type TriageT } from "./contract-triage";
 import { pdfText } from "./pdf-text";
-export { estimateCost, pdfPageCount, planBatches, PDF_PAGE_LIMIT, PDF_BYTES_LIMIT, BATCH_BYTES_LIMIT, BATCH_REQUEST_LIMIT } from "./contract-run";
+export { estimateCost, pdfPageCount, planBatches, pdfPageLimit, PDF_PAGE_LIMIT, PDF_PAGE_LIMIT_LONG, PDF_PAGE_LIMIT_SHORT, PDF_BYTES_LIMIT, BATCH_BYTES_LIMIT, BATCH_REQUEST_LIMIT } from "./contract-run";
 
 function docRequest(id: string, pdf: Buffer, name: string, model: string): Anthropic.Messages.Batches.BatchCreateParams.Request {
   return {
@@ -97,8 +97,10 @@ export async function queueExtraction(userId: string, userName: string, onlyIds?
     try {
       const buf = await fs.readFile(path.join(contractsDir(), d.fileName!));
       const n = pdfPageCount(buf);
-      if (n > PDF_PAGE_LIMIT) {
-        skipped.push(`${d.documentName} (${n} pages; the limit is ${PDF_PAGE_LIMIT} a document — split it into parts and put the parts in the folder)`);
+      // The limit belongs to the model this is going to, not to the site; see pdfPageLimit.
+      const limit = pdfPageLimit(model);
+      if (n > limit) {
+        skipped.push(`${d.documentName} (${n} pages; the limit is ${limit} a document on ${model} — split it into parts and put the parts in the folder)`);
         continue;
       }
       if (buf.length > PDF_BYTES_LIMIT) {
@@ -318,6 +320,7 @@ export function explainFailure(result: { type: string; error?: { error?: { type?
   const kind = err?.type ?? "unknown";
   const low = msg.toLowerCase();
   if (/too long|too many tokens|exceeds? .*context|maximum context|prompt is too long/.test(low)) {
+    // No model is named at this point, so the cautious figure is quoted; see pdfPageLimit.
     return `Too long for one read: the model's window cannot hold every page as an image (${msg}). Split the PDF into parts of ${PDF_PAGE_LIMIT} pages or fewer and put the parts in the folder.`;
   }
   if (/could not process (the )?(pdf|document|image)|invalid.*(pdf|document)|not a valid|corrupt|unsupported/.test(low)) {
@@ -490,10 +493,17 @@ export async function queueTriage(userId: string, userName: string): Promise<Tri
       continue;
     }
     const n = pdfPageCount(buf);
-    if (n > PDF_PAGE_LIMIT || buf.length > PDF_BYTES_LIMIT) {
-      // Too long to send at all; the read will say the same. Marked unsure so it is not forgotten.
-      await db.update(schema.contractDocs).set({ triage: "unsure", triageWhy: `Too long to sort by model (${n} pages); split it and sort the parts.`, triageBy: "rule" }).where(eq(schema.contractDocs.id, d.id));
-      out.skipped.push(`${d.documentName} (${n} pages; split it)`);
+    /*
+     * The sort runs on Haiku 4.5, whose window is two hundred thousand tokens — not the million the
+     * reader has. Its limit is therefore the smaller one, and it must not follow the reader's: a
+     * 150-page agreement sent here would be refused by the API at 100 pages and by the model again
+     * at 450,000 tokens, inside a batch already created and paid for.
+     */
+    const triageLimit = pdfPageLimit(TRIAGE_MODEL);
+    if (n > triageLimit || buf.length > PDF_BYTES_LIMIT) {
+      // Too long to sort; marked unsure so it is not forgotten, and the read judges it on its own limit.
+      await db.update(schema.contractDocs).set({ triage: "unsure", triageWhy: `Too long to sort by model (${n} pages, and the sort takes ${triageLimit}); it can still be read.`, triageBy: "rule" }).where(eq(schema.contractDocs.id, d.id));
+      out.skipped.push(`${d.documentName} (${n} pages; too long to sort, but it can still be read)`);
       continue;
     }
     pages += n;
@@ -622,8 +632,9 @@ export async function testReader(docId: string, userId: string, userName: string
   }
   const buf = await fs.readFile(path.join(contractsDir(), doc.fileName));
   const n = pdfPageCount(buf);
-  if (n > PDF_PAGE_LIMIT) return { ok: false, documentName: doc.documentName, reason: "Too long for one read", detail: `${n} pages; the limit is ${PDF_PAGE_LIMIT}. Split it.` };
   const { client: c, model } = await client();
+  const limit = pdfPageLimit(model);
+  if (n > limit) return { ok: false, documentName: doc.documentName, reason: "Too long for one read", detail: `${n} pages; the limit is ${limit} on ${model}. Split it.` };
   const req = docRequest(doc.id, buf, doc.documentName, model);
   const t0 = Date.now();
   try {
