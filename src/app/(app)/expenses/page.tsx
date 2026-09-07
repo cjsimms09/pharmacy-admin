@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireManager, requireUser } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { categories, vendors, recentExpenses, unpaid, missingThisMonth, seedCategories, addCategory, saveVendor, saveExpense, setExpenseStatus, expenseById, voidExpense } from "@/lib/expenses";
+import { categories, vendors, recentExpenses, unpaid, missingThisMonth, seedCategories, addCategory, saveVendor, saveExpense, setExpenseStatus, expenseById, voidExpense, expensesIn } from "@/lib/expenses";
 import { formatCents } from "@/lib/money";
 import { fmt, todayIso } from "@/lib/dates";
 import { PageHeader, Notice, Empty, Card, Figure, Field } from "@/components/ui";
@@ -195,7 +195,8 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
   const vendorById = new Map(vend.map((v) => [v.id, v]));
   const drafts = recent.filter((r) => r.status === "draft");
   const owedCents = owed.reduce((n, e) => n + e.amountCents, 0);
-  const thisMonth = recent.filter((e) => e.status === "confirmed" && e.invoiceDate.startsWith(todayIso().slice(0, 7)));
+  // The month's bills from the month, not from the last hundred rows: a busy quarter would have cut the figure short.
+  const thisMonth = await expensesIn(todayIso().slice(0, 7), "accrual");
 
   return (
     <>

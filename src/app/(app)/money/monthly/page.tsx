@@ -60,6 +60,15 @@ export default async function MonthlyPLPage({
         title={`Statement · ${period.label}`}
         subtitle="What the period took, what the goods cost, and what it cost to keep the doors open."
         back={{ href: `/money?period=${period.key}`, label: "The books" }}
+        help={
+          <>
+            <p><b>Cost of goods comes from what was dispensed, not what was bought.</b> A month with a big buy-in would look catastrophic and the month that sold the stock wonderful. PioneerRx prints the acquisition cost of every fill, so the cost of what actually sold is known per bottle and no stocktake is needed.</p>
+            <p><b>Rebates reduce cost; they are never revenue.</b> Booked as income they would overstate sales and cost of goods by the same amount and make every margin wrong. Earned against the month that earned them; received against the month they were banked.</p>
+            <p><b>DIR fees come out of revenue, not overheads,</b> so the dispensing margin, which decides what to stock and who to contract with, is not flattered.</p>
+            <p><b>Standing costs are carried by the day.</b> Payroll typed at thirty thousand a month is ten thousand by the tenth, and the real bill for the month replaces it when it is entered.</p>
+            <p><b>Cash and accrual are both true.</b> A prescription dispensed on the 30th is this month&rsquo;s earnings and next month&rsquo;s money. The gap is the receivable, worth watching on its own.</p>
+          </>
+        }
         actions={
           <>
             <Link href={`/api/ledger?period=${period.key}&basis=${basis}`} prefetch={false} className="btn" download>Download CSV</Link>
@@ -69,39 +78,36 @@ export default async function MonthlyPLPage({
         }
       />
 
-      <form method="get" className="my-4 flex flex-wrap items-end gap-2 rounded-lg border border-line bg-surface p-3 no-print">
-        <span className="inline-flex items-center gap-1 text-sm">
-          <Link href={`/money/monthly?period=${before.key}&basis=${basis}`} className="btn btn-sm" aria-label="Earlier">←</Link>
-          <span className="inline-flex overflow-hidden rounded-md border border-line text-xs">
-            {(["month", "quarter", "year"] as PeriodKind[]).map((k) => (
-              <Link key={k} href={kindLink(k)} className={`px-2.5 py-1 ${period.kind === k ? "bg-accent-soft font-semibold text-accent" : "text-ink-2 hover:bg-ground"}`}>{k}</Link>
-            ))}
-          </span>
-          <Link href={`/money/monthly?period=${after.key}&basis=${basis}`} className="btn btn-sm" aria-label="Later">→</Link>
+      <div className="my-4 flex flex-wrap items-center gap-2 no-print">
+        <Link href={`/money/monthly?period=${before.key}&basis=${basis}`} className="btn btn-sm" aria-label="Earlier">←</Link>
+        <span className="min-w-[9rem] text-sm font-semibold">{period.label}</span>
+        <Link href={`/money/monthly?period=${after.key}&basis=${basis}`} className="btn btn-sm" aria-label="Later">→</Link>
+        <span className="ml-1 inline-flex overflow-hidden rounded-md border border-line text-xs">
+          {(["month", "quarter", "year"] as PeriodKind[]).map((k) => (
+            <Link key={k} href={kindLink(k)} className={`px-2.5 py-1 ${period.kind === k ? "bg-accent font-semibold text-white" : "bg-surface text-ink-2 hover:bg-ground"}`}>{k}</Link>
+          ))}
         </span>
-        <label className="text-xs">
-          <span className="block text-ink-3">Month</span>
-          <select name="period" defaultValue={period.kind === "month" ? month : ""} className="mt-0.5 rounded-md border border-line px-2 py-1 text-sm">
-            {period.kind !== "month" && <option value={period.key}>{period.label}</option>}
-            {(months.length ? months : [month]).map((m) => (
-              <option key={m} value={m}>{m}</option>
-            ))}
-          </select>
-        </label>
-        <label className="text-xs">
-          <span className="block text-ink-3">Basis</span>
-          <select name="basis" defaultValue={basis} className="mt-0.5 rounded-md border border-line px-2 py-1 text-sm">
-            <option value="accrual">Accrual — what the month earned</option>
-            <option value="cash">Cash — what reached the bank</option>
-          </select>
-        </label>
-        <button className="btn btn-sm btn-primary">Show</button>
-        <p className="ml-auto max-w-md text-xs text-ink-3">
-          {basis === "accrual"
-            ? "A prescription dispensed on the 30th is this month's, whatever month the plan pays in."
-            : "Only money that actually arrived. A pharmacy is paid weeks in arrears, so this always lags what was earned — and the gap is the receivable."}
-        </p>
-      </form>
+        <span className="inline-flex overflow-hidden rounded-md border border-line text-xs">
+          {(["accrual", "cash"] as const).map((b) => (
+            <Link key={b} href={`/money/monthly?period=${period.key}&basis=${b}`} className={`px-2.5 py-1 ${basis === b ? "bg-accent font-semibold text-white" : "bg-surface text-ink-2 hover:bg-ground"}`}>{b === "accrual" ? "Accrual — what it earned" : "Cash — what reached the bank"}</Link>
+          ))}
+        </span>
+        {months.length > 1 && (
+          <form method="get" className="ml-auto flex items-center gap-1 text-xs">
+            <input type="hidden" name="basis" value={basis} />
+            <select name="period" defaultValue={period.kind === "month" ? month : ""} className="h-7 py-0 text-xs" aria-label="Jump to a month">
+              {period.kind !== "month" && <option value={period.key}>{period.label}</option>}
+              {months.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+            <button className="btn btn-sm">Go</button>
+          </form>
+        )}
+      </div>
+      <p className="-mt-2 mb-3 text-xs text-ink-3 no-print">
+        {basis === "accrual"
+          ? "A prescription dispensed on the 30th is this month's, whatever month the plan pays in."
+          : "Only money that actually arrived. A pharmacy is paid weeks in arrears, so this always lags what was earned; the gap is the receivable."}
+      </p>
 
       {/*
         What is absent, before what is present. A silently missing line does not read as missing;
@@ -126,13 +132,13 @@ export default async function MonthlyPLPage({
         <Empty>Nothing has been loaded for {period.label} yet.</Empty>
       ) : (
         <div className="my-4 overflow-hidden rounded-lg border border-line bg-surface">
-          <Group title="What the month took" lines={pl.revenue} total={pl.revenueCents} />
+          <Group title="What the month took" lines={pl.revenue} total={pl.revenueCents} href={books.sources.revenue} />
           {pl.offsets.length > 0 && (
             <Group title="Taken back out of it" lines={pl.offsets.map((l) => ({ ...l, amountCents: -l.amountCents }))} total={-pl.netRevenueCents + pl.revenueCents} negative />
           )}
           <Row label="Net revenue" value={pl.netRevenueCents} strong />
 
-          <Group title="What the goods cost" lines={pl.costOfGoods} total={pl.costOfGoodsCents} />
+          <Group title="What the goods cost" lines={pl.costOfGoods} total={pl.costOfGoodsCents} href={basis === "cash" ? books.sources.purchases : books.sources.costOfGoods} />
           <Row
             label="Gross profit"
             value={pl.grossProfitCents}
@@ -140,7 +146,7 @@ export default async function MonthlyPLPage({
             note={pl.grossMarginPercent !== null ? `${pl.grossMarginPercent}% of net revenue` : undefined}
           />
 
-          <Group title="What it cost to keep the doors open" lines={pl.operating.map((l) => ({ ...l, note: pct(l.amountCents) }))} total={pl.operatingCents} />
+          <Group title="What it cost to keep the doors open" lines={pl.operating.map((l) => ({ ...l, note: [l.note, `${pct(l.amountCents)} of net revenue`].filter(Boolean).join(" · ") }))} total={pl.operatingCents} href={books.sources.expenses} />
           <Row label={pl.netProfitCents < 0 ? "Net loss" : "Net profit"} value={pl.netProfitCents} strong big tone={pl.netProfitCents < 0 ? "crit" : "ok"} />
         </div>
       )}
@@ -234,33 +240,6 @@ export default async function MonthlyPLPage({
         </Card>
       )}
 
-      <details className="my-4 rounded-lg border border-line bg-surface p-4">
-        <summary className="cursor-pointer text-sm font-semibold">How each figure is arrived at</summary>
-        <div className="mt-2 space-y-2 text-xs leading-relaxed text-ink-2">
-          <p>
-            <b>Cost of goods comes from what was dispensed, not what was bought.</b> Purchases are not cost of goods: a
-            month with a big buy-in would look catastrophic and the month that sold the stock wonderful, and neither
-            figure would mean anything. The textbook fix needs the shelves counted every month. PioneerRx prints the
-            acquisition cost of every fill, so the cost of what actually sold is known per bottle and no stocktake is
-            needed.
-          </p>
-          <p>
-            <b>Rebates reduce cost; they are never revenue.</b> Booked as income they would overstate sales and cost of
-            goods by the same amount, leave the bottom line right, and make every margin percentage wrong. They follow
-            the basis too: earned against the month that earned them, received against the month they were banked.
-          </p>
-          <p>
-            <b>DIR fees come out of revenue, not overheads.</b> They are money a plan said the pharmacy had earned and
-            later took back. Filed as an overhead they flatter the dispensing margin — the figure used to decide what to
-            stock and who to contract with.
-          </p>
-          <p>
-            <b>Cash and accrual are both true.</b> A prescription dispensed on the 30th is this month&rsquo;s earnings
-            and next month&rsquo;s money. The gap between the two accounts is the receivable, which is real and worth
-            watching on its own.
-          </p>
-        </div>
-      </details>
 
       {period.kind === "month" && <ExportData page="monthly" params={{ month, basis }} className="mt-6" />}
     </>
@@ -272,20 +251,28 @@ function Group({
   lines,
   total,
   negative,
+  href,
 }: {
   title: string;
   lines: { label: string; amountCents: number; note?: string }[];
   total: number;
   negative?: boolean;
+  /** The rows the group was added from: a wrong figure is corrected there, never here. */
+  href?: string;
 }) {
   if (lines.length === 0) return null;
   return (
     <div className="border-b border-line">
-      <p className="bg-ground px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-ink-3">{title}</p>
+      <p className="flex items-center justify-between bg-ground px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-ink-3">
+        <span>{title}</span>
+        {href && <Link href={href} className="font-normal normal-case tracking-normal text-accent hover:underline no-print">the rows</Link>}
+      </p>
       {lines.map((l, i) => (
         <div key={i} className="flex items-baseline gap-3 px-4 py-1.5 text-sm">
-          <span className="flex-1">{l.label}</span>
-          {l.note && <span className="text-xs text-ink-3">{l.note}</span>}
+          <span className="flex-1">
+            {l.label}
+            {l.note && <span className="block max-w-3xl text-xs leading-snug text-ink-3">{l.note}</span>}
+          </span>
           <span className={`w-28 shrink-0 text-right tabular-nums ${negative || l.amountCents < 0 ? "text-ink-2" : ""}`}>
             {formatCents(l.amountCents)}
           </span>
