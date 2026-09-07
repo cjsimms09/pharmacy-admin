@@ -10,6 +10,8 @@ import { shouldRead } from "./contract-triage";
 import { rates as aiRates } from "./ai-spend";
 import { proposeFromContract, type Proposals, type Existing, type PlanForMatch } from "./contract-apply";
 import { savePayerLink, applyLinksToClaims } from "./payer-links";
+import { counterpartyFile, clocksDue, type Clock } from "./contract-file";
+import { todayIso } from "./dates";
 import { getSettings } from "./settings";
 
 /**
@@ -420,4 +422,26 @@ export async function acceptProposals(docId: string, picks: Picks, user: { name:
   }
   if (out.links > 0) out.claims = (await applyLinksToClaims()).claims;
   return out;
+}
+
+export type DueClock = Clock & { pbmName: string; href: string };
+
+/**
+ * Every dated contract clock that falls within a window of days from today, across every
+ * counterparty: the notice to terminate or not renew, computed from the end date and the notice
+ * period the document states. Today raises these with the licences and the duties, because a
+ * renewal window missed is a rate accepted for another year, and nobody reads a contract's
+ * signature page on the right morning without being told which morning it is.
+ */
+export async function contractClocksDue(withinDays = 90): Promise<DueClock[]> {
+  const docs = await db.query.contractDocs.findMany({ where: eq(schema.contractDocs.extractionState, "done") });
+  const byPbm = new Map<string, typeof docs>();
+  for (const d of docs) byPbm.set(d.pbmName, [...(byPbm.get(d.pbmName) ?? []), d]);
+  const today = todayIso();
+  const out: DueClock[] = [];
+  for (const [pbmName, rows] of byPbm) {
+    const file = counterpartyFile(pbmName, rows.map((d) => ({ id: d.id, name: d.documentName, terms: parseTerms(d.extractionJson), state: d.extractionState, fileName: d.fileName, pages: d.pages ?? null })));
+    for (const c of clocksDue(file, today, withinDays)) out.push({ ...c, pbmName, href: `/payers/${encodeURIComponent(pbmName)}#clocks` });
+  }
+  return out.sort((a, b) => (a.on ?? "").localeCompare(b.on ?? ""));
 }

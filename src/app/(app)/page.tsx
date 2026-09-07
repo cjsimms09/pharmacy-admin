@@ -15,6 +15,9 @@ import { mailHealth } from "@/lib/mail-health";
 import { pendingUpdates } from "@/lib/updates";
 import { moneyPosition } from "@/lib/money-position";
 import { moneyFound } from "@/lib/money-found";
+import { booksFor } from "@/lib/ledger-store";
+import { parsePeriod } from "@/lib/ledger";
+import { contractClocksDue } from "@/lib/contract-docs";
 import { formatCents } from "@/lib/money";
 import { requireUser } from "@/lib/auth";
 import { Notice, Card, Figure, PageHeader } from "@/components/ui";
@@ -86,7 +89,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const { ok, error } = await searchParams;
   // The signer's own name, to fill in the attestation form without asking them to remember it.
   const user = await requireUser();
-  const [compliance, dated, matrix, cqi, cs, jobs, selfFindings, settings, mail, updates, invoiceProblems, alertList, money, found] =
+  const [compliance, dated, matrix, cqi, cs, jobs, selfFindings, settings, mail, updates, invoiceProblems, alertList, money, found, books, clocks] =
     await Promise.all([
     complianceSummary(),
     dueList({ horizonDays: 60 }),
@@ -102,6 +105,14 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     alerts(),
     moneyPosition(),
     moneyFound().catch(() => null),
+    /*
+     * The month's bottom line so far, from the books: gross profit less the bills in and the
+     * standing costs accrued to today. The scoreboard's other figures are dispensing; this is the
+     * one that says whether the month is making money after the doors are kept open.
+     */
+    booksFor(parsePeriod(todayIso().slice(0, 7))!).catch(() => null),
+    // Contract deadlines with a date on them, so a renewal window is on the same list as a licence.
+    contractClocksDue(90).catch(() => [] as Awaited<ReturnType<typeof contractClocksDue>>),
   ]);
 
   /*
@@ -231,6 +242,20 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     });
   }
 
+  for (const c of clocks) {
+    const left = daysUntil(c.on!) ?? 0;
+    soon.push({
+      key: `clock-${c.pbmName}-${c.what}`,
+      title: `${c.what} — ${c.pbmName}`,
+      why: `${c.rule}.${c.consequence ? ` ${c.consequence}` : ""}`,
+      badge: `due ${fmt(c.on)}`,
+      tone: left <= 14 ? "warn" : "muted",
+      href: c.href,
+    });
+  }
+  const clocksNear = clocks.filter((c) => (daysUntil(c.on!) ?? 99) <= 14);
+  const net = books?.accrual ?? null;
+
   const stalled = jobs.filter((j) => j.state === "stale");
 
   return (
@@ -256,6 +281,62 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       {error && <Notice kind="crit">{error}</Notice>}
 
       {/*
+        An update nobody knows about is an update nobody installs. This used to be discoverable
+        only by opening a settings sub-page and pressing a button, so repairs sat on GitHub while
+        the pharmacy went on hitting the bug they repaired and reporting it again.
+      */}
+      {updates.behind > 0 && (
+        <Notice kind="warn">
+          <b>
+            {updates.behind} update{updates.behind === 1 ? "" : "s"} {updates.behind === 1 ? "is" : "are"} waiting to be
+            installed.
+          </b>{" "}
+          {updates.newest && <>The newest is &ldquo;{updates.newest}&rdquo;. </>}
+          Nothing on this computer changes until you install{" "}
+          {updates.behind === 1 ? "it" : "them"}, so a fix made for you is not in front of you yet.{" "}
+          <Link href="/settings/updates" className="underline">Install now</Link>.
+        </Notice>
+      )}
+
+      {/*
+        Every "Send" on this page goes through the mail server, so its state belongs on this page
+        rather than three clicks away under Settings. The distinction the old wording missed:
+        configured is not working. A Gmail address with the account password rather than an app
+        password is configured, cannot send anything, and looked fine everywhere.
+      */}
+      {mail.state !== "ok" && (
+        <Notice kind={mail.state === "unproven" ? "warn" : "crit"}>
+          <b>{mail.summary}</b>{" "}
+          {mail.failed.length > 0 && (
+            <>
+              The last error was: <i>{mail.failed[0].error}</i>{" "}
+            </>
+          )}
+          <Link href="/settings/email" className="underline">
+            {mail.configured ? "Check the mail settings and send yourself a test" : "Set up sending"}
+          </Link>
+          .
+        </Notice>
+      )}
+
+      {setup.length > 0 && (
+        <Notice kind="crit">
+          Every Board form this site prints carries the pharmacy&rsquo;s own details, and{" "}
+          {setup.length === 1 ? "one is" : `${setup.length} are`} missing: {setup.join(", ")}. A C-250 or a C-900
+          handed over with a blank where the registration number belongs is a finding.{" "}
+          <Link href="/settings" className="underline">Fill them in once</Link> and every form is right from then on.
+        </Notice>
+      )}
+
+      {clocksNear.length > 0 && (
+        <Notice kind="warn">
+          <b>A contract deadline falls within two weeks:</b>{" "}
+          {clocksNear.map((c) => `${c.what} with ${c.pbmName} by ${fmt(c.on)}`).join("; ")}.{" "}
+          <Link href={clocksNear[0].href} className="underline">See the clock</Link>.
+        </Notice>
+      )}
+
+      {/*
         Where the money stands, before anything else on the page.
 
         The rest of this screen protects revenue by keeping the pharmacy out of trouble. These three
@@ -275,7 +356,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
             Month to date · {fmtLong(today)} · <Link href="/money" className="text-accent underline">the books</Link>
           </span>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           {/*
             What was dispensed and what it made — prescriptions only.
 
@@ -300,6 +381,29 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                     money.dispensing.promisedCents > 0
                       ? `${formatCents(money.dispensing.promisedCents)} promised and unpaid`
                       : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")
+            }
+          />
+
+          {/*
+            The bottom line so far: gross profit less the bills in and the standing costs accrued to
+            today. The one figure here that includes keeping the doors open, and it says what it is
+            missing rather than looking finished.
+          */}
+          <Figure
+            value={net ? formatCents(net.netProfitCents) : "—"}
+            label={net && net.netProfitCents < 0 ? "Net loss so far" : "Net profit so far"}
+            tone={!net ? "muted" : !net.usable ? "warn" : net.netProfitCents < 0 ? "crit" : "ok"}
+            href="/money"
+            sub={
+              !net
+                ? "The books could not be drawn."
+                : [
+                    `${formatCents(net.operatingCents)} to keep the doors open so far`,
+                    net.missing.length > 0 ? `${net.missing.length} line${net.missing.length === 1 ? "" : "s"} not yet in` : "every line in",
+                    books?.pace?.netAfterBillsSoFarCents != null ? `${formatCents(books.pace.netAfterBillsSoFarCents)} at this pace` : null,
                   ]
                     .filter(Boolean)
                     .join(" · ")
@@ -460,7 +564,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                 <div className="flex items-baseline justify-between gap-2">
                   <span className="text-xs text-ink-3">{i + 1}.</span>
                   <span className="text-right">
-                    <span className="block text-lg font-bold tabular-nums text-accent">{formatCents(r.amountCents)}</span>
+                    <span className="block text-lg font-semibold tabular-nums text-ink">{formatCents(r.amountCents)}</span>
                     <span className="block text-[11px] text-ink-3">{r.cadence === "recurring_monthly" ? "a month" : "one-off"}</span>
                   </span>
                 </div>
@@ -490,6 +594,38 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         afternoon. Soon means it needs doing this month and takes weeks to do. Everything else
         stays on its own page, so that these two keep meaning something.
       */}
+      {/* ── The four numbers. Large, because this is the question asked from the doorway. ── */}
+      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Figure
+          value={lateCount}
+          label="Late"
+          sub={lateCount === 0 ? "Nothing has passed its date" : "Past a deadline now"}
+          tone={lateCount === 0 ? "ok" : "crit"}
+          href="#now"
+        />
+        <Figure
+          value={`${matrix.covered}/${matrix.rows.length}`}
+          label="Staff fully covered"
+          sub={matrix.gaps === 0 ? "No gaps anywhere" : `${matrix.gaps} gap${matrix.gaps === 1 ? "" : "s"} to close`}
+          tone={matrix.gaps === 0 ? "ok" : "warn"}
+          href="#staff"
+        />
+        <Figure
+          value={quick.length}
+          label="One-click closures"
+          sub={quick.length === 0 ? "Nothing waiting on a signature" : `${quickLate} late · about ${quickMinutes} min in all`}
+          tone={quick.length === 0 ? "ok" : quickLate > 0 ? "warn" : "ok"}
+          href="#quick"
+        />
+        <Figure
+          value={soon.length}
+          label="Coming up"
+          sub="Next 60 days · none of it late"
+          tone="ok"
+          href="#soon"
+        />
+      </div>
+
       {(() => {
         const now = alertList.filter((a) => a.level === "now");
         const soon = alertList.filter((a) => a.level === "soon");
@@ -556,86 +692,6 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           </>
         );
       })()}
-
-      {/*
-        An update nobody knows about is an update nobody installs. This used to be discoverable
-        only by opening a settings sub-page and pressing a button, so repairs sat on GitHub while
-        the pharmacy went on hitting the bug they repaired and reporting it again.
-      */}
-      {updates.behind > 0 && (
-        <Notice kind="warn">
-          <b>
-            {updates.behind} update{updates.behind === 1 ? "" : "s"} {updates.behind === 1 ? "is" : "are"} waiting to be
-            installed.
-          </b>{" "}
-          {updates.newest && <>The newest is &ldquo;{updates.newest}&rdquo;. </>}
-          Nothing on this computer changes until you install{" "}
-          {updates.behind === 1 ? "it" : "them"}, so a fix made for you is not in front of you yet.{" "}
-          <Link href="/settings/updates" className="underline">Install now</Link>.
-        </Notice>
-      )}
-
-      {/*
-        Every "Send" on this page goes through the mail server, so its state belongs on this page
-        rather than three clicks away under Settings. The distinction the old wording missed:
-        configured is not working. A Gmail address with the account password rather than an app
-        password is configured, cannot send anything, and looked fine everywhere.
-      */}
-      {mail.state !== "ok" && (
-        <Notice kind={mail.state === "unproven" ? "warn" : "crit"}>
-          <b>{mail.summary}</b>{" "}
-          {mail.failed.length > 0 && (
-            <>
-              The last error was: <i>{mail.failed[0].error}</i>{" "}
-            </>
-          )}
-          <Link href="/settings/email" className="underline">
-            {mail.configured ? "Check the mail settings and send yourself a test" : "Set up sending"}
-          </Link>
-          .
-        </Notice>
-      )}
-
-      {setup.length > 0 && (
-        <Notice kind="crit">
-          Every Board form this site prints carries the pharmacy&rsquo;s own details, and{" "}
-          {setup.length === 1 ? "one is" : `${setup.length} are`} missing: {setup.join(", ")}. A C-250 or a C-900
-          handed over with a blank where the registration number belongs is a finding.{" "}
-          <Link href="/settings" className="underline">Fill them in once</Link> and every form is right from then on.
-        </Notice>
-      )}
-
-      {/* ── The four numbers. Large, because this is the question asked from the doorway. ── */}
-      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Figure
-          value={lateCount}
-          label="Late"
-          sub={lateCount === 0 ? "Nothing has passed its date" : "Past a deadline now"}
-          tone={lateCount === 0 ? "ok" : "crit"}
-          href="#now"
-        />
-        <Figure
-          value={`${matrix.covered}/${matrix.rows.length}`}
-          label="Staff fully covered"
-          sub={matrix.gaps === 0 ? "No gaps anywhere" : `${matrix.gaps} gap${matrix.gaps === 1 ? "" : "s"} to close`}
-          tone={matrix.gaps === 0 ? "ok" : "warn"}
-          href="#staff"
-        />
-        <Figure
-          value={quick.length}
-          label="One-click closures"
-          sub={quick.length === 0 ? "Nothing waiting on a signature" : `${quickLate} late · about ${quickMinutes} min in all`}
-          tone={quick.length === 0 ? "ok" : quickLate > 0 ? "warn" : "ok"}
-          href="#quick"
-        />
-        <Figure
-          value={soon.length}
-          label="Coming up"
-          sub="Next 60 days · none of it late"
-          tone="ok"
-          href="#soon"
-        />
-      </div>
 
       {stalled.length > 0 && (
         <Card

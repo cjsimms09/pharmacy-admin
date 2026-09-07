@@ -78,7 +78,7 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
         <Link href={`/money?period=${after.key}`} className="btn btn-sm" aria-label="Later">→</Link>
         <span className="ml-2 inline-flex overflow-hidden rounded-md border border-line text-xs">
           {(["month", "quarter", "year"] as PeriodKind[]).map((k) => (
-            <Link key={k} href={link(k)} className={`px-2.5 py-1 ${period.kind === k ? "bg-accent-soft font-semibold text-accent" : "text-ink-2 hover:bg-ground"}`}>
+            <Link key={k} href={link(k)} className={`px-2.5 py-1 ${period.kind === k ? "bg-accent font-semibold text-white" : "bg-surface text-ink-2 hover:bg-ground"}`}>
               {k}
             </Link>
           ))}
@@ -123,7 +123,7 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
             <tbody>
               <Line label="Revenue" a={accrual.revenueCents} c={cash.revenueCents} href={sources.revenue} note={cash.revenue.length === 0 ? "no receipts entered for the period" : undefined} />
               <Line label="Net revenue" a={accrual.netRevenueCents} c={cash.netRevenueCents} />
-              <Line label="Cost of goods" a={accrual.costOfGoodsCents} c={cash.costOfGoodsCents} href={sources.purchases} note={cash.costOfGoods.length === 0 ? "no invoice marked paid in the period" : undefined} />
+              <Line label="Cost of goods" a={accrual.costOfGoodsCents} c={cash.costOfGoodsCents} href={sources.purchases} note={cash.costOfGoods.length === 0 ? "no wholesaler invoice falls in the period by its payment date or its terms" : undefined} />
               <Line label="Gross profit" a={accrual.grossProfitCents} c={cash.grossProfitCents} strong />
               <Line label="Operating" a={accrual.operatingCents} c={cash.operatingCents} href={sources.expenses} />
               <Line label="Net" a={accrual.netProfitCents} c={cash.netProfitCents} strong />
