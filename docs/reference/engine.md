@@ -105,3 +105,24 @@ State: **in** = arrives and is used; **partial** = arrives, something is not rea
 - Today carries the feeds that have gone quiet (a supplier that stopped sending, a mailbox that
   stopped reading).
 - This document is the whole map; `logic-audit.md` is what was checked and found.
+
+## 5. What the owner can send that would make the engine smarter
+
+Asked 7 September: "let me know things or reports I could get it that could help." In the order
+they would close a balance or replace typing, with what each one unlocks.
+
+| Get this | From | It unlocks |
+|---|---|---|
+| **835 remittance files for every PBM**, delivered automatically (ERA enrolment through each PBM's portal, or a clearinghouse that forwards them by email or SFTP) | each PBM / Health Mart's clearinghouse | the remits-to-claims balance on every fill, cash revenue derived rather than typed, DIR and takebacks read off the remittance rather than entered |
+| **The bank's CSV export**, monthly or weekly (and, if the bank offers one, a data feed) | the bank's online banking | the cash account exact; bills and invoices marked paid on the day the money left |
+| **The payroll register** per pay period (gross, employer taxes, benefits, net, pay date) | the payroll provider (Gusto, ADP, Paychex, QuickBooks) as CSV or PDF | wages as fact rather than a standing estimate, split into wages and payroll taxes, on the day paid |
+| **The card processor's monthly statement** (gross card sales, fees, net deposits) | Square, Clover, Worldpay, the bank's merchant services | card fees as a line, and card deposits matched to the statement so retail takings tie to the bank |
+| **PioneerRx: Basis of Reimbursement (NCPDP 522-FM) and the remittance date on the claims export** | a column added to the scheduled report | which plans pay on NADAC and which on a MAC, settled outright instead of inferred from the money; the receivable aged by plan |
+| **PioneerRx: the sales summary with its tax line, and a receivables (on-account) report** | scheduled reports | retail before tax already; patient accounts as a real receivable |
+| **The wholesaler rebate statement every month**, and the credit memos | McKesson (and any other with a ladder), emailed to the mailbox | a closed month's rebate as the wholesaler's figure; returns credited against the invoice they came from |
+| **Statements of account from each wholesaler** | monthly, by email | every invoice on the statement held, nothing paid twice, the payable exact |
+| **DIR / performance fee statements** from each PBM | the PBM's pharmacy portal | offsets read rather than typed, matched to the period they claw back |
+| **The 340B or manufacturer assistance statements**, if any apply | the programme | fills priced on the right basis |
+| **The contracts** — already in the folder; the first full read is the step | — | rates, appeal routes, 835 routing facts for every payer |
+| **Leases, loan schedules, insurance policies** | the files | standing costs with their paid day and end date typed once; the balance-sheet lines below the cash account |
+| **A year of history**: last year's claims exports, sales summaries, invoices and bank statements | PioneerRx and the bank's archives | the trend pages mean something, the replay ranks contracts on a real year, the pace has a last year to compare against |
