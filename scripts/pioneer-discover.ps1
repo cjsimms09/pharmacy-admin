@@ -46,10 +46,13 @@ function Read-Rows($cn, [string]$sql) {
   return $rows
 }
 
-# ── Which SQL Server, if nobody said ────────────────────────────────────────
+# ── Is anything even listening, and will it let us in ───────────────────────
 $candidates = @()
-if ($Server) { $candidates += $Server }
-else {
+if ($Server) {
+  # An address on its own means the default instance; also try the usual named ones.
+  $candidates += $Server
+  if ($Server -notmatch '\\') { $candidates += @("$Server\PIONEERRX", "$Server\SQLEXPRESS", "$Server\PIONEER") }
+} else {
   Write-Host "Looking for a SQL Server on this computer..."
   foreach ($svc in Get-Service | Where-Object { $_.Name -like "MSSQL*" -and $_.Status -eq "Running" }) {
     if ($svc.Name -eq "MSSQLSERVER") { $candidates += "localhost" }
@@ -58,16 +61,53 @@ else {
   $candidates += @("localhost", "localhost\PIONEERRX", "localhost\SQLEXPRESS", ".\PIONEERRX")
 }
 
-$cn = $null; $server = $null
+# Reaching the machine at all is a different problem from being let in, and they need
+# different things from support, so they are told apart before anything is tried.
+$hostOnly = ($candidates[0] -split '\\')[0]
+if ($hostOnly -notin @("localhost", ".")) {
+  Write-Host "Can this computer reach $hostOnly on the SQL port?"
+  $reach = Test-NetConnection -ComputerName $hostOnly -Port 1433 -WarningAction SilentlyContinue
+  if ($reach.TcpTestSucceeded) { Write-Host "  yes - port 1433 is open" -ForegroundColor Green }
+  else {
+    Write-Host "  no - nothing is listening on 1433, or a firewall is in the way" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  Tell PioneerRx support: the pharmacy computer cannot reach $hostOnly on TCP 1433."
+    Write-Host "  Ask them to enable TCP/IP for the instance and allow 1433 from this computer,"
+    Write-Host "  or to give you the port the instance actually listens on."
+    Write-Host "  (A named instance on a non-standard port is common and is not a refusal.)"
+  }
+}
+
+$cn = $null; $server = $null; $whyNot = @()
 foreach ($c in ($candidates | Select-Object -Unique)) {
-  try { $cn = Connect-Sql $c "master"; $server = $c; Write-Host "  connected to $c"; break }
-  catch { Write-Host "  not $c" }
+  try { $cn = Connect-Sql $c "master"; $server = $c; Write-Host "  connected to $c" -ForegroundColor Green; break }
+  catch {
+    $m = $_.Exception.Message
+    $whyNot += "$c : $m"
+    if ($m -match "Login failed") { Write-Host "  $c - the server answered but refused the login" -ForegroundColor Yellow }
+    elseif ($m -match "not allow remote|network-related|not accessible") { Write-Host "  $c - no answer" }
+    else { Write-Host "  $c - $($m.Split([Environment]::NewLine)[0])" }
+  }
 }
 if (-not $cn) {
   Write-Host ""
-  Write-Host "No SQL Server answered on this computer." -ForegroundColor Yellow
-  Write-Host "If PioneerRx runs on a different machine, give its name:"
-  Write-Host "    powershell -ExecutionPolicy Bypass -File scripts\pioneer-discover.ps1 -Server THATPC\PIONEERRX"
+  $refused = $whyNot | Where-Object { $_ -match "Login failed" }
+  if ($refused) {
+    Write-Host "The server is there and running. It refused the login." -ForegroundColor Yellow
+    Write-Host "That is the answer we needed: the route works, we just need an account."
+    Write-Host ""
+    Write-Host "Send PioneerRx support the request in docs\reference\pioneerrx-support-request.md"
+    Write-Host "and tell them the server is $hostOnly. Ask for a db_datareader login."
+    Write-Host "When they give you one, run this again with:"
+    Write-Host "    -Server $($candidates[0]) -User THELOGIN -Password THEPASSWORD"
+  } else {
+    Write-Host "Nothing answered as SQL Server at $hostOnly." -ForegroundColor Yellow
+    Write-Host "Most likely TCP/IP is off for the instance, or it is on another port,"
+    Write-Host "or the Windows firewall on that server is blocking this computer."
+  }
+  Write-Host ""
+  Write-Host "Details, for the support ticket:"
+  $whyNot | Select-Object -First 4 | ForEach-Object { Write-Host "  $_" }
   exit 1
 }
 
