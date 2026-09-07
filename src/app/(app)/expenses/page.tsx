@@ -7,7 +7,7 @@ import { categories, vendors, recentExpenses, unpaid, missingThisMonth, seedCate
 import { formatCents } from "@/lib/money";
 import { fmt, todayIso } from "@/lib/dates";
 import { PageHeader, Notice, Empty, Card, Figure, Field } from "@/components/ui";
-import { allStandingCosts, addStandingCost, endStandingCost, deleteStandingCost, standingLines } from "@/lib/standing-costs";
+import { allStandingCosts, addStandingCost, updateStandingCost, endStandingCost, deleteStandingCost, standingLines } from "@/lib/standing-costs";
 import { parseCents } from "@/lib/money";
 import { ExportData } from "@/components/export-data";
 import { SubmitButton } from "@/components/submit-button";
@@ -33,9 +33,9 @@ const KIND_LABEL: Record<string, string> = {
  * The rule lives on the vendor rather than in a rules screen of its own, because the thing somebody
  * wants to say is "bills from Stamps.com are postage" — a fact about Stamps.com.
  */
-export default async function ExpensesPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string; edit?: string }> }) {
+export default async function ExpensesPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string; edit?: string; standing?: string; vendor?: string }> }) {
   await requireUser();
-  const { ok, error, edit } = await searchParams;
+  const { ok, error, edit, standing, vendor } = await searchParams;
 
   // Standard chart of accounts on first visit. An empty one gets filled badly.
   await seedCategories();
@@ -50,6 +50,8 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
     allStandingCosts(),
   ]);
   const month = todayIso().slice(0, 7);
+  const changing = standing ? standingAll.find((x) => x.id === standing) ?? null : null;
+  const editingVendor = vendor ? vend.find((v) => v.id === vendor) ?? null : null;
   const standingNow = standingLines(standingAll, month, todayIso(), recent.filter((e) => e.status === "confirmed" && e.invoiceDate.startsWith(month)));
 
   /*
@@ -82,6 +84,68 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
     revalidatePath("/money");
     revalidatePath("/money/monthly");
     redirect("/expenses?ok=" + encodeURIComponent(`${name} is on the account at ${formatCents(amountCents)} a month, by the day.`));
+  }
+
+  /*
+   * Changing a standing cost, which is two different things wearing one word.
+   *
+   * A typo is a correction: the figure was never right and every month that carried it was wrong,
+   * so it is put right everywhere. A rent rise is not a correction — last month really did cost
+   * what it cost, and rewriting it would quietly restate a month that has already been reported
+   * on. That one ends the old figure and starts a new one, which is what an accountant would do
+   * and what the account needs in order to keep adding up.
+   *
+   * The screen asks which, rather than guessing, because only the person typing knows.
+   */
+  async function editStanding(form: FormData) {
+    "use server";
+    const u = await requireManager();
+    const id = String(form.get("id") ?? "");
+    const how = String(form.get("how") ?? "");
+    const name = String(form.get("name") ?? "").trim();
+    const amountCents = parseCents(String(form.get("amount") ?? ""));
+    const fromMonth = String(form.get("fromMonth") ?? "").trim();
+    const toMonth = String(form.get("toMonth") ?? "").trim() || null;
+    const paidDayText = String(form.get("paidDay") ?? "").trim();
+    const paidDay = paidDayText ? Number(paidDayText) : null;
+    const back = (m: string) => redirect("/expenses?error=" + encodeURIComponent(m));
+    if (!id) back("Nothing was named to change.");
+    if (!name) back("Give the cost a name.");
+    if (amountCents === null || amountCents <= 0) back("Put the month's figure in dollars.");
+    if (!/^\d{4}-\d{2}$/.test(fromMonth)) back("Say the month, as YYYY-MM.");
+    if (toMonth && !/^\d{4}-\d{2}$/.test(toMonth)) back("The last month must be YYYY-MM, or blank while it runs.");
+    if (paidDay !== null && (!Number.isInteger(paidDay) || paidDay < 1 || paidDay > 31)) back("The day it is paid is a day of the month, 1 to 31, or blank.");
+
+    const fields = {
+      name,
+      amountCents: amountCents as number,
+      categoryId: String(form.get("categoryId") ?? "") || null,
+      vendorId: String(form.get("vendorId") ?? "") || null,
+      fromMonth,
+      toMonth,
+      paidDay,
+      notes: String(form.get("notes") ?? "").trim() || null,
+    };
+
+    if (how === "from") {
+      // The month before the new figure starts is the last month the old one applies to.
+      const [y, mo] = fromMonth.split("-").map(Number);
+      const last = mo === 1 ? `${y - 1}-12` : `${y}-${String(mo - 1).padStart(2, "0")}`;
+      await endStandingCost(id, last);
+      const made = await addStandingCost(fields, u);
+      await audit({ action: "standing_cost.changed_from", userId: u.id, userName: u.name, entity: "standing_cost", entityId: made, details: `${name} becomes ${formatCents(fields.amountCents)} from ${fromMonth}; the old figure ends ${last}` });
+      revalidatePath("/expenses");
+      revalidatePath("/money");
+      revalidatePath("/money/monthly");
+      redirect("/expenses?ok=" + encodeURIComponent(`${name} is ${formatCents(fields.amountCents)} a month from ${fromMonth}. Months up to ${last} keep what they cost.`));
+    }
+
+    await updateStandingCost(id, fields);
+    await audit({ action: "standing_cost.correct", userId: u.id, userName: u.name, entity: "standing_cost", entityId: id, details: `${name} corrected to ${formatCents(fields.amountCents)} a month` });
+    revalidatePath("/expenses");
+    revalidatePath("/money");
+    revalidatePath("/money/monthly");
+    redirect("/expenses?ok=" + encodeURIComponent(`Corrected. ${name} reads ${formatCents(fields.amountCents)} a month in every month it covers.`));
   }
 
   async function endStanding(form: FormData) {
@@ -406,7 +470,8 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
                       <td className="text-xs text-ink-2">{l.paidDay ? `the ${l.paidDay}${ordinal(l.paidDay)}` : <span className="text-warn">not said · left out of the cash account</span>}</td>
                       <td className="text-xs text-ink-2">{c.fromMonth} → {c.toMonth ?? "open"}</td>
                       <td className="whitespace-nowrap">
-                        <form action={endStanding} className="inline-flex items-center gap-1">
+                        <Link href={`/expenses?standing=${c.id}`} className="btn btn-sm">Change</Link>
+                        <form action={endStanding} className="ml-1 inline-flex items-center gap-1">
                           <input type="hidden" name="id" value={c.id} />
                           <input type="month" name="lastMonth" defaultValue={month} aria-label="Last month" className="w-auto py-0.5 text-xs" />
                           <button className="btn btn-sm">End</button>
@@ -426,6 +491,53 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
         {standingAll.length > standingNow.length && (
           <p className="mb-3 text-xs text-ink-3">{standingAll.length - standingNow.length} more not in force this month (ended, or starting later).</p>
         )}
+        {/*
+          Changing one, which is two different things.
+
+          A typo was never right and every month that carried it was wrong, so it is put right
+          everywhere. A rent rise is not a correction: last month really did cost what it cost, and
+          rewriting it would restate a month already reported on. So the screen asks which, and the
+          second route ends the old figure and starts a new one from the month named.
+        */}
+        {changing && (
+          <form action={editStanding} className="mb-4 grid gap-3 rounded border border-line bg-paper-2 p-3 sm:grid-cols-2 lg:grid-cols-6">
+            <input type="hidden" name="id" value={changing.id} />
+            <div className="lg:col-span-6 text-sm font-medium">Changing “{changing.name}”, {formatCents(changing.amountCents)} a month from {changing.fromMonth}</div>
+            <Field label="Cost" className="lg:col-span-2">
+              <input name="name" defaultValue={changing.name} required className="w-full" />
+            </Field>
+            <Field label="A month, in dollars">
+              <input name="amount" inputMode="decimal" defaultValue={(changing.amountCents / 100).toFixed(2)} required className="w-full" />
+            </Field>
+            <Field label="Category">
+              <select name="categoryId" defaultValue={changing.categoryId ?? ""} className="w-full">
+                <option value="">—</option>
+                {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Vendor">
+              <select name="vendorId" defaultValue={changing.vendorId ?? ""} className="w-full">
+                <option value="">—</option>
+                {vend.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Paid on the">
+              <input name="paidDay" inputMode="numeric" defaultValue={changing.paidDay ?? ""} className="w-full" />
+            </Field>
+            <Field label="From month" className="lg:col-span-2" hint="For a correction this is the month it has always started; for a new figure it is the month it changes.">
+              <input type="month" name="fromMonth" defaultValue={changing.fromMonth} required className="w-full" />
+            </Field>
+            <Field label="Last month" hint="Blank while it runs.">
+              <input type="month" name="toMonth" defaultValue={changing.toMonth ?? ""} className="w-full" />
+            </Field>
+            <div className="lg:col-span-6 flex flex-wrap items-center gap-2">
+              <button name="how" value="correct" className="btn">Correct it — it was always this</button>
+              <button name="how" value="from" className="btn btn-primary">It changed — keep earlier months as they were</button>
+              <Link href="/expenses" className="btn">Cancel</Link>
+            </div>
+          </form>
+        )}
+
         <form action={addStanding} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
           <Field label="Cost" className="lg:col-span-2">
             <input name="name" placeholder="Payroll" required className="w-full" />
@@ -477,6 +589,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
                   <th>Files as</th>
                   <th>Bills from</th>
                   <th>How often</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -488,21 +601,28 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
                     </td>
                     <td className="font-mono text-[11px] text-ink-3">{v.senderEmails || "—"}</td>
                     <td className="text-xs">{v.cadence}</td>
+                    <td className="whitespace-nowrap"><Link href={`/expenses?vendor=${v.id}`} className="btn btn-sm">Change</Link></td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
+        {/*
+          The same form adds a vendor and changes one. A rule is a fact about a vendor — "bills
+          from Stamps.com are postage" — and a fact that cannot be corrected once typed is worse
+          than no fact at all, because the wrong bills go on filing themselves under it.
+        */}
         <form action={addVendor} className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {editingVendor && <input type="hidden" name="id" value={editingVendor.id} />}
           <Field label="Name">
-            <input name="name" placeholder="Stamps.com" className="w-full" />
+            <input name="name" placeholder="Stamps.com" defaultValue={editingVendor?.name ?? ""} className="w-full" />
           </Field>
           <Field label="Bills arrive from" hint="One address, or several separated by commas.">
-            <input name="senderEmails" placeholder="billing@stamps.com" className="w-full" />
+            <input name="senderEmails" placeholder="billing@stamps.com" defaultValue={editingVendor?.senderEmails ?? ""} className="w-full" />
           </Field>
           <Field label="Files as">
-            <select name="categoryId" className="w-full">
+            <select name="categoryId" defaultValue={editingVendor?.categoryId ?? ""} className="w-full">
               <option value="">Category…</option>
               {cats.map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
@@ -511,13 +631,14 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
           </Field>
           <Field label="How often">
             <div className="flex gap-2">
-              <select name="cadence" className="flex-1">
+              <select name="cadence" defaultValue={editingVendor?.cadence ?? "monthly"} className="flex-1">
                 <option value="monthly">Monthly</option>
                 <option value="quarterly">Quarterly</option>
                 <option value="annual">Annual</option>
                 <option value="irregular">Irregular</option>
               </select>
-              <SubmitButton className="btn" pendingLabel="…">Add</SubmitButton>
+              <SubmitButton className="btn" pendingLabel="…">{editingVendor ? "Save" : "Add"}</SubmitButton>
+              {editingVendor && <Link href="/expenses" className="btn">Cancel</Link>}
             </div>
           </Field>
         </form>
