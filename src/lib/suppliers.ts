@@ -245,6 +245,8 @@ async function writeSection(
   // The screens hold the catalogue between requests; a fresh import must be seen at once rather
   // than on the next key check, or the page the import redirects to shows the prices from before it.
   (await import("./catalogue-cache")).forgetCatalogue();
+  // A catalogue names drugs the claims archive could not; see drug-names.
+  (await import("./drug-names")).forgetDrugNames();
 
   await db.update(schema.supplierImports).set({
     itemsAdded: added, itemsUpdated: updated, skipped: 0,
@@ -334,6 +336,8 @@ export async function importSupplierCatalog(
   // The screens hold the catalogue between requests; a fresh import must be seen at once rather
   // than on the next key check, or the page the import redirects to shows the prices from before it.
   (await import("./catalogue-cache")).forgetCatalogue();
+  // A catalogue names drugs the claims archive could not; see drug-names.
+  (await import("./drug-names")).forgetDrugNames();
 
   const skipped = Object.values(skipReasons).reduce((a, b) => a + b, 0);
   await db.update(schema.supplierImports).set({

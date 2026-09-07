@@ -181,6 +181,9 @@ export async function fileOnHand(
   for (let i = 0; i < values.length; i += 300)
     await db.insert(schema.onHand).values(values.slice(i, i + 300));
 
+  // Today's count carries the best drug names the site has; see drug-names.
+  (await import("./drug-names")).forgetDrugNames();
+
   return {
     ok: true,
     countedOn,
@@ -264,7 +267,8 @@ export async function movement(
    */
   const { groupIntoFills } = await import("./fills");
   const { laterPayments } = await import("./claim-payments");
-  const later = await laterPayments();
+  const { drugNames } = await import("./drug-names");
+  const [later, names] = await Promise.all([laterPayments(), drugNames()]);
   const fills = groupIntoFills(
     claims.map((c) => ({
       id: c.id,
@@ -272,7 +276,15 @@ export async function movement(
       fillNumber: c.fillNumber,
       dateFilled: c.dateFilled,
       ndc11: c.ndc11,
-      itemName: c.itemName,
+      /*
+       * Named from what the site holds now, not from what it held the day the claim was imported.
+       *
+       * Every claim in the archive was filed with no name — the transaction report carries none and
+       * the catalogue had not been imported yet — so the buy list, which is a page meant to be acted
+       * on, listed bare eleven-digit numbers. The name is a lookup, not a fact about the claim, so
+       * it is resolved here where everything downstream reads it.
+       */
+      itemName: (c.ndc11 ? names.get(c.ndc11) : null) ?? c.itemName,
       bin: c.bin,
       pcn: c.pcn,
       groupNumber: c.groupNumber,

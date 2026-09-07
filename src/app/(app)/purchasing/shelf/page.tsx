@@ -5,6 +5,8 @@ import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { fileOnHand, leanShelfNow, latestShelf, movement, SHELF_POLICY } from "@/lib/shelf";
 import { units } from "@/lib/usage";
+import { countAge } from "@/lib/count-age";
+import { fmt, todayIso } from "@/lib/dates";
 import { PageHeader, Card, Notice, Empty, Figure, Field } from "@/components/ui";
 import { ExportData } from "@/components/export-data";
 import { requireReimbursement } from "@/lib/features";
@@ -77,6 +79,11 @@ export default async function ShelfPage({ searchParams }: { searchParams: Promis
 
   const t = view.totals;
   const urgent = view.rows.filter((r) => r.urgency === "today" || r.urgency === "this week");
+  /*
+   * How old the count is. Everything on this page is the shelf as it stood when the report ran, and
+   * a fortnight-old count looks exactly like this morning's unless it is said out loud.
+   */
+  const age = snapshot ? countAge(snapshot.countedOn, todayIso()) : null;
 
   return (
     <>
@@ -99,8 +106,8 @@ export default async function ShelfPage({ searchParams }: { searchParams: Promis
         <Figure
           value={snapshot ? snapshot.items.toLocaleString() : "—"}
           label="items counted"
-          sub={snapshot ? `Counted ${snapshot.countedOn}` : "No count uploaded yet"}
-          tone={snapshot ? "ok" : "warn"}
+          sub={snapshot ? `${fmt(snapshot.countedOn)} — ${age!.says}` : "No count uploaded yet"}
+          tone={!snapshot || age!.state === "stale" ? "warn" : "ok"}
         />
         <Figure
           value={snapshot?.rxValueCents !== null && snapshot?.rxValueCents !== undefined ? money(snapshot.rxValueCents) : "—"}

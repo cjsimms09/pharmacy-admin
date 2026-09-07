@@ -11,6 +11,8 @@ import { productLedger, opportunities, margins, losers, type Flag } from "@/lib/
 import Link from "next/link";
 import { looksLikePioneerCatalog } from "@/lib/pioneer-catalog";
 import { formatCents } from "@/lib/money";
+import { countAge } from "@/lib/count-age";
+import { fmt, todayIso } from "@/lib/dates";
 import { requireReimbursement } from "@/lib/features";
 import { PageHeader, Notice, Empty, Field, Card, Figure } from "@/components/ui";
 import { Hub } from "@/components/hub";
@@ -132,6 +134,7 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
   }
 
   const totalSaving = opps.rows.reduce((s, r) => s + (r.savingCents ?? 0), 0);
+  const countAge_ = buyList.snapshot ? countAge(buyList.snapshot.countedOn, todayIso()) : null;
   const ordering = buyList.plan.baskets.filter((b) => b.verdict === "order" || b.verdict === "top_up_to_order");
   const held = buyList.plan.baskets.filter((b) => b.verdict === "hold").length;
 
@@ -144,6 +147,25 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
 
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
+
+      {/*
+        Everything below is computed against the daily count. An order placed off a stale one buys
+        a second bottle of what landed on Wednesday, so the age of the count is said before the
+        figures rather than buried under them.
+      */}
+      {countAge_ && countAge_.warns && (
+        <Notice kind="warn">
+          <b>The shelf was {countAge_.says}</b> — {fmt(buyList.snapshot!.countedOn)}. {countAge_.warns}{" "}
+          <Link href="/purchasing/shelf" className="underline">Upload it here</Link>.
+        </Notice>
+      )}
+      {!buyList.snapshot && (
+        <Notice kind="warn">
+          <b>No inventory count has been uploaded.</b> Without one the site cannot tell a shelf that is short from one
+          that is full, so nothing below knows what is already held.{" "}
+          <Link href="/purchasing/shelf" className="underline">Upload today&rsquo;s count</Link>.
+        </Notice>
+      )}
 
       {/*
         The section at a glance, before any list. Each figure is a link to the part of the page
