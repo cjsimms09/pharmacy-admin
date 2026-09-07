@@ -357,7 +357,7 @@ export function monthlyPL(i: PLInputs): MonthlyPL {
     cogs: reconcileCogs({
       dispensed: { cents: i.dispensedCostCents, from: "the acquisition cost on each dispensing" },
       purchases: { cents: i.purchasesCents, from: "the wholesaler invoices dated in the month" },
-      openingStock: { cents: i.openingStockCents ?? null, from: "the dispensing shelf at the first inventory count of the month" },
+      openingStock: { cents: i.openingStockCents ?? null, from: "the dispensing shelf at the last inventory count before the month began" },
       closingStock: { cents: i.closingStockCents ?? null, from: "the dispensing shelf at the last inventory count of the month" },
     }),
     revenue: reconcileRevenue({
@@ -451,7 +451,13 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
     allSuppliers(true),
     db.query.supplierInvoices.findMany({ columns: { totalCents: true, paidOn: true, invoiceDate: true } }),
     db.query.invoiceLines.findMany({ where: and(gte(schema.invoiceLines.invoiceDate, from), lte(schema.invoiceLines.invoiceDate, to)), columns: { invoiceDate: true, extendedCents: true } }),
-    db.query.onHandImports.findMany({ where: and(gte(schema.onHandImports.countedOn, from), lte(schema.onHandImports.countedOn, to)), columns: { countedOn: true, valueCents: true, rxValueCents: true } }),
+    /*
+     * Every count, not just the ones inside the months asked for: a month opens on the last count
+     * taken before it began, which lives in the month before. It is one small row per count — a
+     * week of daily ones and a closing one per month after retention — so the whole list is cheaper
+     * than working out which single earlier row is wanted.
+     */
+    db.query.onHandImports.findMany({ columns: { countedOn: true, valueCents: true, rxValueCents: true } }),
     db.query.claimPayments.findMany({ columns: { source: true, receivedOn: true, amountCents: true, revenueCents: true } }),
   ]);
 
@@ -517,17 +523,26 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
   /*
    * The shelf at each end of the month, which is what makes the cost of goods checkable at all.
    *
-   * The first count of the month stands for the opening position and the last for the closing one.
-   * They are the counts that exist, not the first and last day. The dispensing shelf, not the whole
-   * building: front-shop stock moves on retail sales that leave no claim behind them.
+   * The closing position is the last count taken in the month. The opening position is the last
+   * count taken *before* it — which is normally the previous month's closing count, and is the same
+   * shelf seen from the other side.
+   *
+   * It used to take the first and last count within the month, which needed two counts in the same
+   * month to report anything and was wrong even then: if the first count of September fell on the
+   * third, two days of buying and dispensing sat outside the month's own arithmetic. The month
+   * opens where the last one closed.
+   *
+   * The dispensing shelf, not the whole building: front-shop stock moves on retail sales that leave
+   * no claim behind them.
    */
   const valued = counts
-    .filter((c) => c.countedOn.startsWith(month))
     .map((c) => ({ countedOn: c.countedOn, valueCents: c.rxValueCents ?? c.valueCents }))
     .filter((c) => c.valueCents !== null)
     .sort((a, b) => a.countedOn.localeCompare(b.countedOn));
-  const openingStockCents = valued.length > 1 ? valued[0].valueCents : null;
-  const closingStockCents = valued.length > 1 ? valued[valued.length - 1].valueCents : null;
+  const inMonth = valued.filter((c) => c.countedOn.startsWith(month));
+  const before = valued.filter((c) => c.countedOn < `${month}-01`);
+  const closingStockCents = inMonth.length > 0 ? inMonth[inMonth.length - 1].valueCents : null;
+  const openingStockCents = before.length > 0 ? before[before.length - 1].valueCents : null;
 
   /*
    * Facilitator money for the cash account, from the remittances themselves.
