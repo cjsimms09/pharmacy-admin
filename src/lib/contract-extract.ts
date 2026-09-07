@@ -7,7 +7,7 @@ import { eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { audit } from "./audit";
 import { contractsDir } from "./reference";
-import { ContractTerms, EXTRACT_SYSTEM, requireCitations, fillNulls, type ContractTermsT } from "./contract-terms";
+import { ContractTerms, ContractTermsWire, EXTRACT_SYSTEM, requireCitations, fillNulls, fromWire, type ContractTermsT } from "./contract-terms";
 
 /**
  * Reading the contract library.
@@ -46,7 +46,8 @@ function docRequest(id: string, pdf: Buffer, name: string, model: string): Anthr
       model,
       max_tokens: 32000,
       thinking: { type: "adaptive" },
-      output_config: { effort: "high", format: zodOutputFormat(ContractTerms) },
+      // Nothing in the wire schema is optional or nullable; the API caps both. See contract-terms.
+      output_config: { effort: "high", format: zodOutputFormat(ContractTermsWire) },
       // Cached: identical on every document in the run, so it is billed once.
       system: [{ type: "text", text: EXTRACT_SYSTEM, cache_control: { type: "ephemeral" } }],
       messages: [
@@ -208,7 +209,7 @@ async function absorb(doc: { id: string; documentName: string; fileName: string 
   const text = msg.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("");
   let terms: ContractTermsT;
   try {
-    terms = fillNulls(ContractTerms, ContractTerms.parse(JSON.parse(text))) as ContractTermsT;
+    terms = fillNulls(ContractTerms, fromWire(ContractTerms, ContractTermsWire.parse(JSON.parse(text)))) as ContractTermsT;
   } catch {
     const why = "The answer did not match the expected shape. Try this one again.";
     await fail(doc.id, why);
@@ -674,7 +675,7 @@ export async function testReader(docId: string, userId: string, userName: string
     const text = msg.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("");
     let terms: ContractTermsT;
     try {
-      terms = fillNulls(ContractTerms, ContractTerms.parse(JSON.parse(text))) as ContractTermsT;
+      terms = fillNulls(ContractTerms, fromWire(ContractTerms, ContractTermsWire.parse(JSON.parse(text)))) as ContractTermsT;
     } catch (e) {
       return { ok: false, documentName: doc.documentName, reason: "The answer did not match the expected shape", detail: `${e instanceof Error ? e.message.slice(0, 300) : String(e)} · first words: ${text.slice(0, 200)}` };
     }

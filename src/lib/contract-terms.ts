@@ -297,6 +297,94 @@ export const ContractTerms = z.object({
 });
 
 /**
+ * The same schema, rewritten so nothing in it is optional.
+ *
+ * The API caps a schema at 16 union-typed parameters *and* at 24 optional ones. `.nullable()` broke
+ * the first — a nullable field is a union — so every one of them became `.optional()`, which broke
+ * the second: 0 unions, 111 optionals. Both caps exist for the same reason, that either shape makes
+ * the response grammar expensive to compile, and this schema is large enough to hit whichever one
+ * it is allowed to.
+ *
+ * So the wire schema has neither. Every field is required, and "the contract does not state this"
+ * is carried by a value the type can hold:
+ *
+ *   a text field that may be absent   ->  "" for absent
+ *   a number that may be absent       ->  the number written as text, "" for absent
+ *   a yes/no that may be absent       ->  "yes" | "no" | "not stated"
+ *   an object that may be absent      ->  the object, with its own fields empty
+ *
+ * It is derived from the schema above rather than written out, because a hundred and eleven fields
+ * transcribed by hand is a hundred and eleven chances to describe a field one way on the wire and
+ * read it another. `fromWire` walks the same original schema to turn the answer back into the nulls,
+ * numbers and booleans the rest of the site is written against.
+ */
+
+const NOT_STATED = "not stated";
+
+type Def = { type?: string; innerType?: z.ZodTypeAny; element?: z.ZodTypeAny; shape?: unknown };
+const defOf = (t: z.ZodTypeAny): Def | undefined => (t as unknown as { _zod?: { def?: Def } })._zod?.def;
+const shapeOf = (d: Def): Record<string, z.ZodTypeAny> | undefined =>
+  (typeof d.shape === "function" ? (d.shape as () => Record<string, z.ZodTypeAny>)() : d.shape) as
+    | Record<string, z.ZodTypeAny>
+    | undefined;
+
+/** The schema with every field required, absence carried by a value. */
+export function toWire(schema: z.ZodTypeAny): z.ZodTypeAny {
+  const d = defOf(schema);
+  if (!d) return schema;
+
+  if (d.type === "optional" || d.type === "nullable") {
+    const inner = d.innerType ? toWire(d.innerType) : z.string();
+    const id = defOf(d.innerType ?? z.string());
+    // A number or a yes/no cannot carry "absent" in its own type, so each gets one that can.
+    if (id?.type === "number") return z.string();
+    if (id?.type === "boolean") return z.enum(["yes", "no", NOT_STATED]);
+    return inner;
+  }
+  if (d.type === "object") {
+    const shape = shapeOf(d);
+    if (!shape) return schema;
+    return z.object(Object.fromEntries(Object.entries(shape).map(([k, v]) => [k, toWire(v)])));
+  }
+  if (d.type === "array") return d.element ? z.array(toWire(d.element)) : schema;
+  return schema;
+}
+
+/** The answer turned back into what the rest of the site reads: nulls, numbers and booleans. */
+export function fromWire(schema: z.ZodTypeAny, value: unknown): unknown {
+  const d = defOf(schema);
+  if (!d) return value;
+
+  if (d.type === "optional" || d.type === "nullable") {
+    const id = defOf(d.innerType ?? z.string());
+    if (value === undefined || value === null || value === "" || value === NOT_STATED) return null;
+    if (id?.type === "number") {
+      const n = Number(String(value).replace(/[$,\s]/g, ""));
+      return Number.isFinite(n) ? n : null;
+    }
+    if (id?.type === "boolean") return value === "yes" ? true : value === "no" ? false : null;
+    return d.innerType ? fromWire(d.innerType, value) : value;
+  }
+  if (d.type === "object") {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
+    const shape = shapeOf(d);
+    if (!shape) return value;
+    const src = value as Record<string, unknown>;
+    const out: Record<string, unknown> = { ...src };
+    for (const [k, child] of Object.entries(shape)) out[k] = fromWire(child, src[k]);
+    return out;
+  }
+  if (d.type === "array") {
+    if (!Array.isArray(value)) return value;
+    return d.element ? value.map((v) => fromWire(d.element as z.ZodTypeAny, v)) : value;
+  }
+  return value;
+}
+
+/** What is actually sent to the API. */
+export const ContractTermsWire = toWire(ContractTerms);
+
+/**
  * A term the contract does not state, as the rest of the site sees it: null, never missing.
  *
  * The schema sent to the API uses `.optional()` rather than `.nullable()` because a nullable field
@@ -354,7 +442,7 @@ What this is used for, so you understand the stakes: the pharmacy will compute w
 
 RULES, in order of importance:
 
-1. **Never infer a number.** If a rate, fee, window or date is not stated in this document, leave the field out entirely. Do not fill it from what is typical, from another PBM, or from an earlier version. A missing field is useful; a guess is dangerous.
+1. **Never infer a number.** If a rate, fee, window or date is not stated in this document, give the empty string "" for it — and "not stated" where the field offers that. Every field is required, so answer every one; "" is the answer meaning the document does not say. Numbers are written as text: "180", or "" where there is none. Do not fill a figure from what is typical, from another PBM, or from an earlier version. An empty answer is useful; a guess is dangerous.
 
 2. **Cite every figure that decides money.** Rates, dispensing fees, GCR tiers, appeal windows, DIR terms — each carries the contract's own words in its quote field, copied exactly, with the page and section where you found them. Copy the sentence, not your summary of it.
 

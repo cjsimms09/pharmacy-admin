@@ -390,7 +390,16 @@ export default async function SuppliersPage({
                     })()}
                   </dd>
                   <dt className="text-ink-3">Rebate</dt>
-                  <dd>{terms.get(sup.id)?.rebate ? describeRebate(terms.get(sup.id)!.rebate!.terms) : <span className="text-ink-3">not recorded</span>}</dd>
+                  {/* "Nobody has typed it in" and "there are none" are different answers; see suppliers.noRebates. */}
+                  <dd>
+                    {terms.get(sup.id)?.rebate ? (
+                      describeRebate(terms.get(sup.id)!.rebate!.terms)
+                    ) : sup.noRebates ? (
+                      <span className="text-ink-2">none — they pay no rebates</span>
+                    ) : (
+                      <span className="text-ink-3">not recorded</span>
+                    )}
+                  </dd>
                   <dt className="text-ink-3">Returns</dt>
                   <dd>{terms.get(sup.id)?.returns ? describeReturns(terms.get(sup.id)!.returns!.terms) : <span className="text-ink-3">not recorded</span>}</dd>
                   {/*

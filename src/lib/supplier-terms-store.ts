@@ -289,3 +289,32 @@ export async function duplicateRebatePrograms(supplierId: string): Promise<{ kee
   }
   return out;
 }
+
+/**
+ * Records that a supplier pays no rebates at all, or takes that answer back.
+ *
+ * "Nobody has typed the terms in" and "there are none" look identical to every screen unless one of
+ * them is written down, and they want opposite things: the first is work outstanding, the second is
+ * a finished question. IPC and IPD pay nothing here, and their absence was being reported forever.
+ *
+ * No arithmetic changes — a supplier with no ladder was already compared at gross. What changes is
+ * that the site stops calling a settled fact a gap.
+ */
+export async function setNoRebates(supplierId: string, none: boolean, user: { name: string }): Promise<string> {
+  const supplier = await db.query.suppliers.findFirst({ where: eq(schema.suppliers.id, supplierId) });
+  if (!supplier) return "That supplier is not on the register.";
+  if (none && (await rebateProgramsFor(supplierId)).length > 0) {
+    return `${supplier.name} has a rebate schedule on file. Remove it first — saying they pay nothing while a ladder still discounts their prices would leave two answers standing.`;
+  }
+  await db
+    .update(schema.suppliers)
+    .set(
+      none
+        ? { noRebates: true, noRebatesBy: user.name, noRebatesAt: new Date().toISOString() }
+        : { noRebates: false, noRebatesBy: null, noRebatesAt: null },
+    )
+    .where(eq(schema.suppliers.id, supplierId));
+  return none
+    ? `Recorded: ${supplier.name} pays no rebates. Their prices are compared as they stand, and the site will stop asking for a schedule.`
+    : `${supplier.name}'s rebate terms are outstanding again.`;
+}

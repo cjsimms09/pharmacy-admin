@@ -765,6 +765,21 @@ export const suppliers = sqliteTable(
      */
     rebateStatementJson: text("rebate_statement_json"),
     /**
+     * That this supplier pays no rebates at all, said by the pharmacy rather than assumed.
+     *
+     * Without it there is no way to tell a supplier whose terms nobody has typed in from one that
+     * genuinely has none, and the two want opposite things: the first is a gap to fill, the second
+     * is an answer. IPC and IPD pay nothing here, and every screen kept reporting their absent
+     * schedule as something outstanding.
+     *
+     * It changes no arithmetic — a supplier with no ladder is already compared at gross. It changes
+     * what the site says about them, which is the difference between a list that can be finished
+     * and one that cannot.
+     */
+    noRebates: integer("no_rebates", { mode: "boolean" }).notNull().default(false),
+    noRebatesBy: text("no_rebates_by"),
+    noRebatesAt: text("no_rebates_at"),
+    /**
      * The order value they will not ship under, in cents.
      *
      * A secondary wholesaler is often cheaper on a handful of items and will not take the order

@@ -136,6 +136,8 @@ function figuresFor(terms: RebateTermsT, a: Achieved): { achieved: number | null
 export function rebateView(
   programmes: { id: string; name: string; effectiveFrom: string; terms: RebateTermsT }[],
   achieved: Achieved | null,
+  /** Where the pharmacy has said this supplier pays nothing, so absence is an answer not a gap. */
+  noRebates?: { by: string | null; at: string | null } | null,
 ): RebateView {
   const a: Achieved = achieved ?? {
     scrubbedGcrPercent: null,
@@ -215,7 +217,9 @@ export function rebateView(
     ? `${bits.join(", ")}${a.periodFrom ? `, on the ${a.periodFrom} figures` : ""}.`
     : programmes.length
       ? "Ladders are on file, but nothing has said which band this pharmacy is in, so no price is being discounted."
-      : "No rebate schedule on file, so every comparison uses this supplier's gross prices.";
+      : noRebates
+        ? `This supplier pays no rebates${noRebates.by ? `, confirmed by ${noRebates.by}` : ""}. Their prices are compared as they stand.`
+        : "No rebate schedule on file, so every comparison uses this supplier's gross prices.";
 
   return { programmes: views, contractGenericPercent, brandPercent, allGenericsPercent, asOf: a.periodFrom, headline, nextBandWorthCents };
 }
