@@ -92,6 +92,14 @@ it and said so on the pull request. The owner reads this too.
   `standingLines` takes the basis. Your `period-account.ts` types were not touched; its test
   fixture gained the three fields. The owner has asked for a logic audit of every page; findings
   go in `logic-audit.md` page by page as I reach them.
+- **The bank's statement reads in** (`src/lib/bank-statement.ts`, pure and tested; `money/bank.ts`
+  action; `bank_lines` table in migration `0077`). The CSV export's date, description and amount
+  columns are found by name (one amount column, or debit and credit); a deposit naming a PBM on the
+  claims, the facilitator, a wholesaler or card takings is banked as a receipt of that kind; a
+  payment exactly matching one open bill or invoice by amount and name marks it paid on that day;
+  everything else is listed on the books page as not placed; every line is remembered by date,
+  amount and description so a statement read twice banks nothing twice. Verified end to end on a
+  fresh database. The intake review card seeds the expense categories if Spending was never opened.
 - **The intake now takes anything with money on it** (`src/lib/business-docs.ts`; `intake/actions.ts`
   `readIntoIntake` and `applyBusiness`; `intake/[id]/business-review.tsx`; "Sort it" on the Inbox,
   `sortInboxItem`). A dropped or photographed file goes: recognised report → loads itself; an X12

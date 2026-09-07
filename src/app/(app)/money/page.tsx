@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { addCashReceipt, deleteCashReceipt, cashReceiptsFor } from "@/lib/expenses";
+import { readBankStatement, lastStatementLines } from "./bank";
 import { Field } from "@/components/ui";
 import { formatCents, parseCents } from "@/lib/money";
 import { todayIso } from "@/lib/dates";
@@ -33,7 +34,7 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
   const { period: periodParam, ok, error } = await searchParams;
   const today = todayIso();
   const period = (periodParam && parsePeriod(periodParam)) || periodOf("month", today.slice(0, 7));
-  const [books, recent, found, banked] = await Promise.all([booksFor(period, today), recentMonths(6, today), moneyFound().catch(() => null), cashReceiptsFor(period.months)]);
+  const [books, recent, found, banked, bankLines] = await Promise.all([booksFor(period, today), recentMonths(6, today), moneyFound().catch(() => null), cashReceiptsFor(period.months), lastStatementLines(period.months)]);
   const { accrual, cash, scripts, gap, pace, sources } = books;
   const KINDS: { key: "third_party" | "patient" | "retail" | "facilitator" | "rebate" | "other"; label: string }[] = [
     { key: "third_party", label: "Plan remittances" },
@@ -244,9 +245,38 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
           </Field>
           <div className="flex items-end"><button className="btn btn-primary">Bank it</button></div>
         </form>
-        <p className="mt-2 text-xs text-ink-3">
-          The bank&rsquo;s own statement will replace this typing once it can be read in (engine.md §3.1); until then these lines are the cash account.
-        </p>
+        {/*
+          The bank's own statement, read in. Deposits from a payer the site knows are banked;
+          a payment that exactly matches one open bill or invoice from the name on it marks it
+          paid; everything else is listed here to be placed by hand. Every line is remembered,
+          so the same export read twice banks nothing twice.
+        */}
+        <form action={readBankStatement} encType="multipart/form-data" className="mt-4 flex flex-wrap items-end gap-2 border-t border-line pt-3">
+          <input type="hidden" name="period" value={period.key} />
+          <Field label="Or read the bank's statement" hint="The CSV export from the bank's site: date, description, amount.">
+            <input type="file" name="file" accept=".csv,.txt" required className="w-full" />
+          </Field>
+          <button className="btn">Read the statement</button>
+        </form>
+        {bankLines.unplaced.length > 0 && (
+          <div className="mt-3">
+            <p className="text-xs font-semibold">{bankLines.unplaced.length} line{bankLines.unplaced.length === 1 ? "" : "s"} from the statement not placed</p>
+            <ul className="mt-1 max-h-48 overflow-auto text-xs text-ink-2">
+              {bankLines.unplaced.map((l) => (
+                <li key={l.id} className="flex flex-wrap gap-2 py-0.5">
+                  <span className="tabular-nums">{l.on}</span>
+                  <span className="min-w-0 grow truncate">{l.description}</span>
+                  <span className={`tabular-nums ${l.amountCents < 0 ? "text-crit" : ""}`}>{formatCents(l.amountCents)}</span>
+                  <span className="text-ink-3">{l.why}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1 text-xs text-ink-3">A deposit here is banked with the form above; a payment is marked paid on Spending or the invoices page.</p>
+          </div>
+        )}
+        {bankLines.placed > 0 && bankLines.unplaced.length === 0 && (
+          <p className="mt-2 text-xs text-ink-3">{bankLines.placed} statement lines placed in this period; nothing left over.</p>
+        )}
       </Card>
 
       {/* The trend, because the trend is the point here. Each bar opens its month. */}

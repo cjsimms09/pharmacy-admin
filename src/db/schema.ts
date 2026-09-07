@@ -1821,6 +1821,33 @@ export const cashReceipts = sqliteTable(
   (t) => [index("cash_receipts_month_idx").on(t.month)],
 );
 
+/**
+ * Every line read off a bank statement, remembered so the same statement read twice banks nothing
+ * twice, and so a deposit or a payment can be traced back to the line that made it.
+ */
+export const bankLines = sqliteTable(
+  "bank_lines",
+  {
+    id: text("id").primaryKey(),
+    /** date | cents | hash of the description: the line's identity across re-uploads. */
+    key: text("key").notNull().unique(),
+    on: text("on").notNull(),
+    description: text("description").notNull().default(""),
+    /** Positive in, negative out. */
+    amountCents: integer("amount_cents").notNull(),
+    /** deposit, pays_bill, pays_invoice, unplaced. */
+    placedAs: text("placed_as").notNull().default("unplaced"),
+    why: text("why"),
+    receiptId: text("receipt_id"),
+    expenseId: text("expense_id"),
+    invoiceId: text("invoice_id"),
+    documentId: text("document_id"),
+    createdBy: text("created_by").notNull(),
+    createdAt: text("created_at").notNull().default(now()),
+  },
+  (t) => [index("bank_lines_on_idx").on(t.on)],
+);
+
 export const claimImports = sqliteTable("claim_imports", {
   id: text("id").primaryKey(),
   fileName: text("file_name").notNull(),

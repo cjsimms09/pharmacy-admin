@@ -66,7 +66,7 @@ State: **in** = arrives and is used; **partial** = arrives, something is not rea
 
 | Feed | Arrives by | Fills | Ties to | State |
 |---|---|---|---|---|
-| Deposits and payments (the bank statement or feed) | typed on the books page ("What reached the bank"), by the month the money arrived | `cash_receipts` (revenue banked), and the `paid_on` of invoices and bills | every cash-basis figure; the receivable | **partial** as of 7 Sept: receipts can be typed, so the cash account has revenue. A statement import (CSV/OFX from the bank) would derive deposits by payer and mark bills and invoices paid on the day the money left; that is what makes the cash account exact rather than typed. |
+| Deposits and payments (the bank's statement) | the bank's CSV export read on the books page ("Read the statement"), or typed | `cash_receipts` by payer and kind (a PBM on the claims, the facilitator, a wholesaler's rebate, card and cash takings); `paid_on` on the one open bill or invoice a payment exactly matches by amount and name; every line kept in `bank_lines` so nothing is banked twice; the rest listed as not placed | every cash-basis figure; the receivable | **in** as of 7 Sept (`bank-statement.ts`, tested). Next: a bank feed rather than an export, and rules for the payers the statement names differently from the claims. |
 
 ### 2.5 Compliance and people
 
@@ -79,9 +79,9 @@ State: **in** = arrives and is used; **partial** = arrives, something is not rea
 
 ## 3. What to build next, in the order the balances need it
 
-1. **Bank in** — receipts are typed on the books page as of 7 Sept; next, imported from the
-   bank's statement file so deposits are derived and bills and invoices are marked paid on the
-   day the money left.
+1. **Bank in** — done 7 Sept: the bank's CSV export is read on the books page; deposits banked
+   by payer, bills and invoices marked paid on the day the money left, every line remembered.
+   Next: a bank feed, and payer aliases where the statement's wording differs from the claims.
 2. **Commercial 835s** — enrol each PBM (the routing page), receive the files (email or portal
    download), post each payment to its fill and the batch to the bank. This is "remits balance to
    claims".

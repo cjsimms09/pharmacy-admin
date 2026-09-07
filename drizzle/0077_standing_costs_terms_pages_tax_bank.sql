@@ -1,3 +1,21 @@
+CREATE TABLE `bank_lines` (
+	`id` text PRIMARY KEY NOT NULL,
+	`key` text NOT NULL,
+	`on` text NOT NULL,
+	`description` text DEFAULT '' NOT NULL,
+	`amount_cents` integer NOT NULL,
+	`placed_as` text DEFAULT 'unplaced' NOT NULL,
+	`why` text,
+	`receipt_id` text,
+	`expense_id` text,
+	`invoice_id` text,
+	`document_id` text,
+	`created_by` text NOT NULL,
+	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) NOT NULL
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `bank_lines_key_unique` ON `bank_lines` (`key`);--> statement-breakpoint
+CREATE INDEX `bank_lines_on_idx` ON `bank_lines` (`on`);--> statement-breakpoint
 CREATE TABLE `standing_costs` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,

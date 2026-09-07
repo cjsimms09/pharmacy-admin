@@ -101,7 +101,12 @@ export default async function IntakeReviewPage({ params, searchParams }: { param
           as={as && (BUSINESS_KINDS as readonly string[]).includes(as) ? (as as (typeof BUSINESS_KINDS)[number]) : business.kind}
           suppliers={(await (await import("@/lib/suppliers-registry")).allSuppliers(true)).map((s) => ({ id: s.id, name: s.name, alsoKnownAs: s.catalogName ?? null }))}
           vendors={(await (await import("@/lib/expenses")).vendors()).map((v) => ({ id: v.id, name: v.name, categoryId: v.categoryId }))}
-          categories={(await (await import("@/lib/expenses")).categories()).map((c) => ({ id: c.id, name: c.name, kind: c.kind }))}
+          categories={await (async () => {
+            // The chart of accounts, seeded here if Spending has never been opened, so a bill can be filed from the first day.
+            const x = await import("@/lib/expenses");
+            if ((await x.categories()).length === 0) await x.seedCategories();
+            return (await x.categories()).map((c) => ({ id: c.id, name: c.name, kind: c.kind }));
+          })()}
           error={error}
         />
       ) : (
