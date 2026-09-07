@@ -134,7 +134,7 @@ export async function appealQueue(today = todayIso()): Promise<Queue & { since: 
       };
     });
   const invoices = await invoicesFor(queueClaims.map((c) => ({ claimId: c.claimId, ndc11: c.ndc11, dateFilled: c.dateFilled })));
-  const rateRows: RateRow[] = rates.map((r) => ({ pbmName: r.pbmName, network: r.network, lineOfBusiness: r.lineOfBusiness, brandRate: r.brandRate, genericRate: r.genericRate }));
+  const rateRows: RateRow[] = rates.map((r) => ({ pbmName: r.pbmName, network: r.network, lineOfBusiness: r.lineOfBusiness, brandRate: r.brandRate, genericRate: r.genericRate, effectiveDate: r.effectiveDate, effectiveTo: r.effectiveTo, status: r.status }));
   const q = buildQueue({ claims: queueClaims, rates: rateRows, terms, invoices, today, pharmacy, appealed: new Set(existing.map((e) => e.claimId).filter((x): x is string => Boolean(x))) });
   return { ...q, since };
 }

@@ -247,3 +247,47 @@ complaints are one packet per plan from the floor review, for the Insurance Depa
 Settings (NCPDP, NPI, the new `pharmacy_tin`) and the site's mailbox as the delivery point, sends
 it to the payment or EFT contact the contract named, and keeps the per-payer state: requested,
 confirmed, receiving.
+
+## 9. The audit before the first full run (September 2026)
+
+The owner asked, before paying to read 357 documents, that the process be sound end to end. What
+was found and what was done, in order of what would have gone wrong first:
+
+1. **Every read was refused.** The structured-output grammar allows sixteen union-typed fields
+   and the schema has a hundred and eleven, because a contract's terms are almost all "a figure
+   or null". The schema now goes into the cached system prompt as words and the answer is held
+   to the same zod schema on this side (`termsFromAnswer`). Same prompt, same effort, same cost.
+2. **The run would have held the whole folder in memory.** Every PDF was read and base64-encoded
+   before the first batch was created. Now the files are sized from disk, the batches planned on
+   the sizes, and each batch's files are opened when that batch is built and let go; batches are
+   kept under forty megabytes so one upload finishes in minutes; documents are marked queued the
+   moment their batch is accepted. The sort does the same and sends at most forty scans a press.
+3. **The library opened every PDF to draw a list.** Page counts are now on the row
+   (`contract_docs.pages`), counted once at adoption or first use.
+4. **The proving document.** A two-page agreement the site wrote itself, for a plan that does not
+   exist, with every figure known (`fixtures/contracts/proving-agreement.pdf`, from
+   `contract-proving.ts`). "Prove the reader" on the Sort page reads it through the exact batch
+   request and marks the answer: identifiers, both rate lines with fees, the guarantee kept out of
+   the rates, the fee taken back, the appeal window, the payment path, the dispute clock, every
+   quote found in the text. Cents. Press it before a paid run and after any change to the prompt.
+5. **A quote is checked against the document's own text** (`quoteInText`) wherever the PDF has
+   one. A rate whose sentence is not in the document is never applied by "Apply everything
+   certain"; it is listed for a person, because a reader can copy a sentence from the wrong page
+   or make one up, and the payer's own words are the only thing an appeal stands on.
+6. **A document that does not govern this pharmacy is read and never applied.** An exhibit for
+   other chain codes, or naming other NCPDPs, is marked "not ours"; one whose governing cannot be
+   told because the pharmacy's own code is not in Settings waits for a person.
+7. **A rate line carries its own line of business and its own end date**, and the appeal queue
+   prices a claim only on a row in force on the day it was filled and never on one a later
+   document superseded (`rateFor`, `network_rates.effective_to`, `status`). The effective-rate
+   guarantees over a line ride beside it as words (`ber_guardrail`, `ger_guardrail`).
+8. **Everything else the documents carry is on one page per counterparty** (`contract-file.ts`,
+   `/payers/[pbm]`): the chain of documents with what each supersedes, what is taken back after a
+   claim pays, the clocks (notice to terminate as a date; dispute, appeal, submission and reversal
+   windows as rules), the reports owed, the fees, the measures that move DIR, the definitions the
+   money rests on, the guarantees, the wholesaler's ladder, and what the documents could not
+   answer. Every line names its document and carries the sentence.
+
+What is still open: the arithmetic check of a rate against the claims paid under it belongs on
+the same page and is next; the per-document review page (`/payers/contracts/[id]`) is the
+pharmacy session's and should show `quoteFound` and `governs` on each proposal.

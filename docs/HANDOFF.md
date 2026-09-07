@@ -45,6 +45,18 @@ it and said so on the pull request. The owner reads this too.
   that is not a sidebar group (Records). No page of yours was edited except a link on `payers/page.tsx`
   and the `/money` links on Today and Tools.
 
+- **The contract pipeline was audited before the first full run** (`contract-reading.md` §9 has
+  the list). What changed under you: `contract_docs.pages` (counted once; the library no longer
+  opens every PDF to draw a list), `network_rates.effective_to` and `status` ("active" /
+  "superseded"), both in migration `0073`; the read and the sort open files a batch at a time and
+  keep a batch under 40 MB; the sort sends at most 40 scans a press. `proposeFromContract` now
+  takes the pharmacy's identifiers and the document's text: `governs` (chain code / NCPDP) and
+  `quoteFound` per rate; "Apply everything certain" skips a document that is not ours and a rate
+  whose quote is not in the text, and lists both. `rateFor` prices only on rows in force on the
+  fill date. `/payers/[pbm]` is rebuilt as the counterparty's file (`contract-file.ts`, pure,
+  tested). **Your review page `payers/contracts/[id]` should show `quoteFound` and `governs`** on
+  each proposal; I cannot read it. The proving document (`fixtures/contracts/proving-agreement.pdf`)
+  and "Prove the reader" on the Sort page mark a live read against a known answer.
 - **The live refusal was the reader's own request, and it is fixed.** "Ask the API why" printed it:
   `invalid_request_error: Schemas contains too many parameters with union types (104 …, limit: 16)`.
   Structured outputs compile the answer schema into a grammar and a contract's terms are almost all

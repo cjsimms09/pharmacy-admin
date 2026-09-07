@@ -16,7 +16,18 @@ import { buildPacket, type AppealClaim, type AppealTerms, type Invoice, type Pac
 
 export type QueueClaim = AppealClaim & { claimId: string; networkId: string | null; classification: "B" | "G" | null; awpTotalCents: number | null; nadacUnitMicros: number | null };
 
-export type RateRow = { pbmName: string; network: string; lineOfBusiness: string; brandRate: string | null; genericRate: string | null };
+export type RateRow = {
+  pbmName: string;
+  network: string;
+  lineOfBusiness: string;
+  brandRate: string | null;
+  genericRate: string | null;
+  /** The days the row is in force; null at either end means open. A claim outside them is not priced on it. */
+  effectiveDate?: string | null;
+  effectiveTo?: string | null;
+  /** "superseded" once a later document replaced this one; such a row prices nothing. */
+  status?: string | null;
+};
 
 export type QueueRow = {
   claim: QueueClaim;
@@ -43,8 +54,16 @@ export type Queue = {
 const norm = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
 
 /** The rate row for a claim: its network id's row where named, else the PBM's single row. */
-export function rateFor(rates: RateRow[], claim: { pbmName: string; networkId: string | null }): RateRow | null {
-  const mine = rates.filter((r) => norm(r.pbmName) === norm(claim.pbmName));
+export function rateFor(rates: RateRow[], claim: { pbmName: string; networkId: string | null; dateFilled?: string | null }): RateRow | null {
+  const day = claim.dateFilled ?? null;
+  /*
+   * Only rows in force on the day the claim was filled, and never one a later document replaced.
+   * A rate sheet's successor applied to last year's claim, or last year's applied to this one, is
+   * an appeal citing the wrong exhibit.
+   */
+  const inForce = (r: RateRow) =>
+    r.status !== "superseded" && (!day || ((!r.effectiveDate || r.effectiveDate <= day) && (!r.effectiveTo || r.effectiveTo >= day)));
+  const mine = rates.filter((r) => norm(r.pbmName) === norm(claim.pbmName) && inForce(r));
   if (mine.length === 0) return null;
   if (claim.networkId) {
     const hit = mine.find((r) => norm(r.network).includes(norm(claim.networkId)) || norm(claim.networkId).includes(norm(r.network)));

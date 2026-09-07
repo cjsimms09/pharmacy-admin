@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "751e20a7-00b7-45a2-824d-c54a828bf16d",
+  "id": "cefd6909-b54b-4f91-9e95-9f425e427355",
   "prevId": "bd1642e9-48cd-4b47-aa1f-0b2f136a6862",
   "tables": {
     "appeals": {
@@ -1413,6 +1413,13 @@
         "triage_batch": {
           "name": "triage_batch",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pages": {
+          "name": "pages",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -4394,6 +4401,13 @@
         },
         "effective_date": {
           "name": "effective_date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "effective_to": {
+          "name": "effective_to",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

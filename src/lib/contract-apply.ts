@@ -34,14 +34,25 @@ export type RateProposal = {
     lineOfBusiness: string;
     network: string;
     effectiveDate: string | null;
+    /** The last day it applies, where the exhibit says; null while it runs. */
+    effectiveTo: string | null;
     daysSupply: string | null;
     brandRate: string | null;
     genericRate: string | null;
+    /** The effective-rate guarantees that sit over this line, as words. Never used to price a claim. */
+    berGuardrail: string | null;
+    gerGuardrail: string | null;
     notes: string | null;
   };
   /** Whether the site can price a claim on it, and if not why. */
   readable: { brand: boolean; generic: boolean };
   quote: string | null;
+  /**
+   * Whether the quote appears in the document's own text: true, false, or null where the document
+   * has no text of its own to check (a scan). A false is a figure the reader may have invented,
+   * and it is never applied without a person looking.
+   */
+  quoteFound: boolean | null;
   existing?: Record<string, string | null>;
 };
 
@@ -94,6 +105,13 @@ export type PlanMatch = {
 export type Proposals = {
   pbmName: string;
   sourceLabel: string;
+  /**
+   * Whether this document governs this pharmacy at all. An exhibit headed "Chain codes 605 & 630"
+   * governs only pharmacies with one of those codes, and a document naming NCPDPs governs only
+   * those. `ok` false is a document read correctly that does not apply here; null is unknown
+   * because the pharmacy's own code is not in Settings yet.
+   */
+  governs: { ok: boolean | null; why: string | null };
   rates: RateProposal[];
   appeal: AppealProposal | null;
   contacts: ContactProposal[];
@@ -127,10 +145,60 @@ function pbmOf(t: ContractTermsT, vendor: string | null, fallback: string): stri
   return (vendor ?? "").trim() || fallback;
 }
 
-export function proposeFromContract(t: ContractTermsT, documentName: string, plans: PlanForMatch[], existing: Existing = {}, opts: { pbmName?: string } = {}): Proposals {
+export type Pharmacy = { chainCode: string | null; ncpdp: string | null; npi: string | null };
+
+/**
+ * Whether a quote appears in a document's own text.
+ *
+ * Both sides are reduced to lowercase letters and digits with single spaces, so a line break or a
+ * curly quote in the PDF does not fail a sentence the reader copied faithfully. A long quote is
+ * checked on its first sixty letters and its last sixty, because scanners and readers both lose
+ * the middle of a table row before they lose its ends. Null where there is no text to check.
+ */
+export function quoteInText(quote: string | null | undefined, text: string | null | undefined): boolean | null {
+  const fold = (x: string) => x.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  // The site's own PDF reader runs lines together ("date ofadjudication"), so the check is also
+  // made with every space removed: a quote is present if its letters are, in order.
+  const tight = (x: string) => fold(x).replace(/ /g, "");
+  if (!text || fold(text).length < 40) return null;
+  const q = fold(quote ?? "");
+  if (q.length < 12) return null;
+  const t = fold(text);
+  const tt = tight(text);
+  const tq = tight(q);
+  if (t.includes(q) || tt.includes(tq)) return true;
+  if (q.length > 80) return t.includes(q.slice(0, 60)) || t.includes(q.slice(-60)) || tt.includes(tq.slice(0, 50)) || tt.includes(tq.slice(-50));
+  return false;
+}
+
+/** Whether the document governs this pharmacy, from the chain codes and NCPDPs it names. */
+export function governsPharmacy(t: ContractTermsT, pharmacy: Pharmacy | undefined): { ok: boolean | null; why: string | null } {
+  const codes = t.chainCodes.map((c) => norm(c)).filter(Boolean) as string[];
+  const ncpdps = t.pharmacyNcpdps.map((c) => (c ?? "").replace(/\D/g, "")).filter(Boolean);
+  if (ncpdps.length > 0) {
+    const mine = (pharmacy?.ncpdp ?? "").replace(/\D/g, "");
+    if (!mine) return { ok: null, why: `Names NCPDP ${ncpdps.join(", ")}; the pharmacy's NCPDP is not in Settings, so whether this is ours is not known.` };
+    if (!ncpdps.includes(mine)) return { ok: false, why: `Names NCPDP ${ncpdps.join(", ")}, not this pharmacy's ${mine}.` };
+  }
+  if (codes.length > 0) {
+    const mine = norm(pharmacy?.chainCode);
+    if (!mine) return { ok: null, why: `Governs chain code${codes.length === 1 ? "" : "s"} ${codes.join(", ")}; the pharmacy's chain code is not in Settings, so whether this applies is not known.` };
+    if (!codes.includes(mine)) return { ok: false, why: `Governs chain code${codes.length === 1 ? "" : "s"} ${codes.join(", ")}, not this pharmacy's ${mine}.` };
+  }
+  return { ok: true, why: null };
+}
+
+export function proposeFromContract(
+  t: ContractTermsT,
+  documentName: string,
+  plans: PlanForMatch[],
+  existing: Existing = {},
+  opts: { pbmName?: string; pharmacy?: Pharmacy; text?: string | null } = {},
+): Proposals {
   const sourceLabel = documentName;
   // The payer pages are keyed on one canonical name per PBM; the document's own spelling is kept in the rows' notes.
   const pbmName = opts.pbmName?.trim() || t.counterparty;
+  const governs = governsPharmacy(t, opts.pharmacy);
 
   // ── Rates: one row per line of the schedule, priced only where the sentence reads ──
   const rates: RateProposal[] = [];
@@ -141,15 +209,26 @@ export function proposeFromContract(t: ContractTermsT, documentName: string, pla
     const brandRate = r.brandFormula ? `${r.brandFormula}${/\$/.test(r.brandFormula) ? "" : fee(r.brandDispensingFee)}` : null;
     const genericRate = r.genericBasis ? `${r.genericBasis}${/\$/.test(r.genericBasis) ? "" : fee(r.genericDispensingFee)}` : null;
     const daysSupply = r.daysSupplyMin != null || r.daysSupplyMax != null ? `${r.daysSupplyMin ?? 1}-${r.daysSupplyMax ?? ""}`.replace(/-$/, "+") : null;
+    /*
+     * The effective-rate guarantees that sit over this line — the same vendor and network, or the
+     * document's only guarantee — kept as words beside the rate. They are aggregates the payer
+     * reconciles yearly and never price a claim; they are here so the annual reconciliation can be
+     * checked for arrival against the line it applies to.
+     */
+    const over = t.effectiveRateGuarantees.filter((g) => (g.pbmVendor == null || norm(g.pbmVendor) === norm(r.pbmVendor ?? t.counterparty)) && (g.network == null || norm(g.network) === norm(r.network)));
+    const guard = over.length === 1 ? over[0] : over.find((g) => norm(g.network) === norm(r.network)) ?? null;
     const row = {
       pbmName: pbmOf(t, r.pbmVendor, pbmName),
       sourceLabel,
-      lineOfBusiness: t.linesOfBusiness[0] ?? "unknown",
+      lineOfBusiness: r.lineOfBusiness ?? t.linesOfBusiness[0] ?? "unknown",
       network: [r.network, r.costSharingTier !== "unknown" && r.costSharingTier !== "both" ? r.costSharingTier : null].filter(Boolean).join(" · ") || "all",
       effectiveDate: r.effectiveFrom ?? t.effectiveDate ?? null,
+      effectiveTo: r.effectiveTo ?? t.endDate ?? null,
       daysSupply,
       brandRate,
       genericRate,
+      berGuardrail: guard?.brandEffectiveRate ?? null,
+      gerGuardrail: guard?.genericEffectiveRate ?? null,
       notes: [r.specialtyTerms && `Specialty: ${r.specialtyTerms}`, r.compoundTerms && `Compounds: ${r.compoundTerms}`, r.vaccineTerms && `Vaccines: ${r.vaccineTerms}`].filter(Boolean).join(" ") || null,
     };
     const prior = existing.rates?.find((e) => norm(e.pbmName) === norm(row.pbmName) && norm(e.network) === norm(row.network) && norm(e.lineOfBusiness) === norm(row.lineOfBusiness) && same(e.daysSupply, row.daysSupply));
@@ -159,6 +238,7 @@ export function proposeFromContract(t: ContractTermsT, documentName: string, pla
       row,
       readable: { brand: !brandRate || parseFormula(brandRate).kind === "priced", generic: !genericRate || parseFormula(genericRate).kind === "priced" },
       quote: r.citation?.quote ?? null,
+      quoteFound: quoteInText(r.citation?.quote, opts.text),
       existing: prior ? { brandRate: prior.brandRate, genericRate: prior.genericRate } : undefined,
     });
   }
@@ -263,13 +343,15 @@ export function proposeFromContract(t: ContractTermsT, documentName: string, pla
   matches.sort((a, b) => b.matchedOn.length - a.matchedOn.length || b.plan.claims - a.plan.claims);
 
   const caveats = [
+    ...(governs.why ? [governs.why] : []),
+    ...rates.filter((r) => r.quoteFound === false).map((r) => `The ${r.row.network} rate's quote was not found in the document's own text; look before applying it.`),
     ...t.unclearOrMissing,
     ...(t.incorporatesByReference.length ? [`Cannot be read alone: incorporates ${t.incorporatesByReference.join(", ")}.`] : []),
     ...(t.definitionsDelegatedTo ? [`Definitions (AWP, brand, generic, U&C) live in ${t.definitionsDelegatedTo}.`] : []),
     ...rates.filter((r) => !r.readable.brand || !r.readable.generic).map((r) => `The ${r.row.network} rate is written in words the site cannot price: "${!r.readable.brand ? r.row.brandRate : r.row.genericRate}".`),
   ];
 
-  return { pbmName, sourceLabel, rates, appeal, contacts, routing, plans: matches, caveats };
+  return { pbmName, sourceLabel, governs, rates, appeal, contacts, routing, plans: matches, caveats };
 }
 
 /** Third parties grouped: every document under the counterparty it names, with what each contributes. */

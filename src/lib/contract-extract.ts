@@ -35,9 +35,11 @@ async function client(): Promise<{ client: Anthropic; model: string }> {
   };
 }
 
-import { estimateCost, pdfPageCount, planBatches, batchIdsIn, PDF_PAGE_LIMIT, PDF_BYTES_LIMIT } from "./contract-run";
+import { estimateCost, pdfPageCount, planBatches, batchIdsIn, PDF_PAGE_LIMIT, PDF_BYTES_LIMIT, UPLOAD_BYTES_LIMIT, BATCH_REQUEST_LIMIT } from "./contract-run";
 import { Triage, TRIAGE_SYSTEM, triageByText, shouldRead, estimateTriageCost, type TriageT } from "./contract-triage";
 import { pdfText } from "./pdf-text";
+import { checkProving, PROVING_TITLE, type ProvingCheck } from "./contract-proving";
+import { quoteInText } from "./contract-apply";
 export { estimateCost, pdfPageCount, planBatches, PDF_PAGE_LIMIT, PDF_BYTES_LIMIT, BATCH_BYTES_LIMIT, BATCH_REQUEST_LIMIT } from "./contract-run";
 
 /*
@@ -107,28 +109,44 @@ export async function queueExtraction(userId: string, userName: string, onlyIds?
   const { client: c, model } = await client();
   const { rates, monthlyCap, dollars } = await import("./ai-spend");
   const r = await rates();
-  const requests: { req: Anthropic.Messages.Batches.BatchCreateParams.Request; bytes: number }[] = [];
+
+  /*
+   * Sized first, opened later.
+   *
+   * The run used to read every PDF into memory and base64 it before the first batch went out — a
+   * folder of three hundred and fifty scans is most of a gigabyte held at once on a computer that
+   * is also running the dispensing system. Now each document is sized from the file system, the
+   * batches are planned on those sizes, and a batch's files are opened only when that batch is
+   * built, then let go. Each batch is kept under forty megabytes so one upload from the pharmacy's
+   * connection finishes in minutes, and the documents in it are marked queued the moment it is
+   * accepted, so a run cut off halfway loses nothing that was sent.
+   */
+  const sized: { doc: (typeof pending)[number]; bytes: number; pages: number }[] = [];
   let pages = 0;
   for (const d of pending) {
     try {
-      const buf = await fs.readFile(path.join(contractsDir(), d.fileName!));
-      const n = pdfPageCount(buf);
+      const file = path.join(contractsDir(), d.fileName!);
+      const size = (await fs.stat(file)).size;
+      let n = d.pages ?? null;
+      if (n === null) {
+        n = pdfPageCount(await fs.readFile(file));
+        await db.update(schema.contractDocs).set({ pages: n }).where(eq(schema.contractDocs.id, d.id));
+      }
       if (n > PDF_PAGE_LIMIT) {
         skipped.push(`${d.documentName} (${n} pages; the limit is ${PDF_PAGE_LIMIT} a document — split it into parts and put the parts in the folder)`);
         continue;
       }
-      if (buf.length > PDF_BYTES_LIMIT) {
-        skipped.push(`${d.documentName} (${Math.round(buf.length / 1024 / 1024)} MB; the limit is 32 MB — re-save it smaller)`);
+      if (size > PDF_BYTES_LIMIT) {
+        skipped.push(`${d.documentName} (${Math.round(size / 1024 / 1024)} MB; the limit is 32 MB — re-save it smaller)`);
         continue;
       }
       pages += n;
-      const req = docRequest(d.id, buf, d.documentName, model);
-      requests.push({ req, bytes: Math.ceil((buf.length * 4) / 3) });
+      sized.push({ doc: d, bytes: Math.ceil((size * 4) / 3), pages: n });
     } catch {
       skipped.push(`${d.documentName} (the file could not be read)`);
     }
   }
-  if (requests.length === 0) return { queued: 0, batchId: null, batches: [], skipped, estimate: { low: 0, high: 0 } };
+  if (sized.length === 0) return { queued: 0, batchId: null, batches: [], skipped, estimate: { low: 0, high: 0 } };
 
   /*
    * The ceiling, before anything is sent.
@@ -146,16 +164,27 @@ export async function queueExtraction(userId: string, userName: string, onlyIds?
   }
 
   const batches: string[] = [];
-  for (const group of planBatches(requests.map((x) => ({ item: x.req, bytes: x.bytes })))) {
-    const batch = await c.messages.batches.create({ requests: group });
+  let queued = 0;
+  for (const group of planBatches(sized.map((x) => ({ item: x, bytes: x.bytes })), { bytes: UPLOAD_BYTES_LIMIT, count: BATCH_REQUEST_LIMIT })) {
+    const requests: Anthropic.Messages.Batches.BatchCreateParams.Request[] = [];
+    for (const x of group) {
+      try {
+        requests.push(docRequest(x.doc.id, await fs.readFile(path.join(contractsDir(), x.doc.fileName!)), x.doc.documentName, model));
+      } catch {
+        skipped.push(`${x.doc.documentName} (the file could not be read)`);
+      }
+    }
+    if (requests.length === 0) continue;
+    const batch = await c.messages.batches.create({ requests });
     batches.push(batch.id);
+    queued += requests.length;
     await db
       .update(schema.contractDocs)
       .set({ extractionState: "queued", extractionError: batch.id })
-      .where(inArray(schema.contractDocs.id, group.map((g) => g.custom_id)));
+      .where(inArray(schema.contractDocs.id, requests.map((g) => g.custom_id)));
   }
-  await audit({ action: "contracts.extract.queued", userId, userName, details: `${requests.length} document(s), ${pages} pages, ${batches.length} batch(es): ${batches.join(", ")}; estimate ${dollars(estimate.low)}–${dollars(estimate.high)}` });
-  return { queued: requests.length, batchId: batches[0] ?? null, batches, skipped, estimate };
+  await audit({ action: "contracts.extract.queued", userId, userName, details: `${queued} document(s), ${pages} pages, ${batches.length} batch(es): ${batches.join(", ")}; estimate ${dollars(estimate.low)}–${dollars(estimate.high)}` });
+  return { queued, batchId: batches[0] ?? null, batches, skipped, estimate };
 }
 
 export type CollectResult = { done: number; failed: number; stillRunning: number; rejected: { doc: string; why: string }[] };
@@ -389,6 +418,7 @@ function mockTerms(name: string, pbm: string): ContractTermsT {
       {
         pbmVendor: "CVS/Caremark",
         network: "Mock Commercial Broad",
+        lineOfBusiness: "Commercial",
         costSharingTier: "standard" as const,
         daysSupplyMin: 1,
         daysSupplyMax: 34,
@@ -452,7 +482,9 @@ function mockTerms(name: string, pbm: string): ContractTermsT {
 /** The small model the sort runs on. Reads a PDF the same way; answers in a sentence. */
 export const TRIAGE_MODEL = "claude-haiku-4-5-20251001";
 
-export type TriageQueue = { sortedByText: number; sentToModel: number; batches: string[]; skipped: string[]; estimate: number; alreadySorted: number };
+export type TriageQueue = { sortedByText: number; sentToModel: number; batches: string[]; skipped: string[]; estimate: number; alreadySorted: number; /** Scans not sent this press; press again for them. */ scansLeft: number };
+/** How many scans one press of Sort sends to the model. Enough to be worth a batch; few enough that the press answers in a minute or two. */
+export const SCANS_A_PRESS = 40;
 
 /**
  * Sorts every unsorted document: by its own text where it has one, by the small model where not.
@@ -463,18 +495,28 @@ export type TriageQueue = { sortedByText: number; sentToModel: number; batches: 
  */
 export async function queueTriage(userId: string, userName: string): Promise<TriageQueue> {
   const all = await db.query.contractDocs.findMany();
-  const out: TriageQueue = { sortedByText: 0, sentToModel: 0, batches: [], skipped: [], estimate: 0, alreadySorted: 0 };
-  const toModel: { req: Anthropic.Messages.Batches.BatchCreateParams.Request; bytes: number; id: string }[] = [];
+  const out: TriageQueue = { sortedByText: 0, sentToModel: 0, batches: [], skipped: [], estimate: 0, alreadySorted: 0, scansLeft: 0 };
+  /*
+   * Text first, for nothing; then the scans, a few dozen a press.
+   *
+   * Every PDF with a text layer is sorted by its words here, however many there are. The scans go
+   * to the model, and each press sends at most SCANS_A_PRESS of them: a press that base64-encodes
+   * a hundred scans and uploads them all before it answers looks, from the chair, like a button
+   * that hangs. The page says how many are left, and the next press sends the next few dozen.
+   */
+  const toModel: { id: string; name: string; file: string; bytes: number; pages: number }[] = [];
   let pages = 0;
+  let scansLeft = 0;
   for (const d of all) {
     if (!d.fileName || d.extractionState === "done") continue;
     if (d.triage || d.triageBatch) {
       out.alreadySorted++;
       continue;
     }
+    const file = path.join(contractsDir(), d.fileName);
     let buf: Buffer;
     try {
-      buf = await fs.readFile(path.join(contractsDir(), d.fileName));
+      buf = await fs.readFile(file);
     } catch {
       out.skipped.push(`${d.documentName} (the file could not be read)`);
       continue;
@@ -497,19 +539,46 @@ export async function queueTriage(userId: string, userName: string): Promise<Tri
       out.sentToModel++;
       continue;
     }
-    const n = pdfPageCount(buf);
+    let n = d.pages ?? null;
+    if (n === null) {
+      n = pdfPageCount(buf);
+      await db.update(schema.contractDocs).set({ pages: n }).where(eq(schema.contractDocs.id, d.id));
+    }
     if (n > PDF_PAGE_LIMIT || buf.length > PDF_BYTES_LIMIT) {
       // Too long to send at all; the read will say the same. Marked unsure so it is not forgotten.
       await db.update(schema.contractDocs).set({ triage: "unsure", triageWhy: `Too long to sort by model (${n} pages); split it and sort the parts.`, triageBy: "rule" }).where(eq(schema.contractDocs.id, d.id));
       out.skipped.push(`${d.documentName} (${n} pages; split it)`);
       continue;
     }
+    if (toModel.length >= SCANS_A_PRESS) {
+      scansLeft++;
+      continue;
+    }
     pages += n;
-    toModel.push({
-      id: d.id,
-      bytes: Math.ceil((buf.length * 4) / 3),
-      req: {
-        custom_id: d.id,
+    toModel.push({ id: d.id, name: d.fileName, file, bytes: Math.ceil((buf.length * 4) / 3), pages: n });
+  }
+  out.scansLeft = scansLeft;
+  if (toModel.length === 0) return out;
+
+  out.estimate = estimateTriageCost(pages);
+  const { monthlyCap, dollars } = await import("./ai-spend");
+  const cap = await monthlyCap();
+  if (cap.cap !== null && cap.spent + out.estimate > cap.cap) {
+    throw new Error(`Sorting the scans could cost up to ${dollars(out.estimate)}, and the month has ${dollars(cap.left)} left under the ceiling of ${dollars(cap.cap)}.`);
+  }
+  const { client: c } = await client();
+  for (const group of planBatches(toModel.map((x) => ({ item: x, bytes: x.bytes })), { bytes: UPLOAD_BYTES_LIMIT, count: BATCH_REQUEST_LIMIT })) {
+    const requests: Anthropic.Messages.Batches.BatchCreateParams.Request[] = [];
+    for (const g of group) {
+      let buf: Buffer;
+      try {
+        buf = await fs.readFile(g.file);
+      } catch {
+        out.skipped.push(`${g.name} (the file could not be read)`);
+        continue;
+      }
+      requests.push({
+        custom_id: g.id,
         params: {
           model: TRIAGE_MODEL,
           max_tokens: 400,
@@ -520,28 +589,18 @@ export async function queueTriage(userId: string, userName: string): Promise<Tri
               role: "user",
               content: [
                 { type: "document", source: { type: "base64", media_type: "application/pdf", data: buf.toString("base64") } },
-                { type: "text", text: `File name: ${d.fileName}\n\nWhat kind of document is this?` },
+                { type: "text", text: `File name: ${g.name}\n\nWhat kind of document is this?` },
               ],
             },
           ],
         },
-      },
-    });
-  }
-  if (toModel.length === 0) return out;
-
-  out.estimate = estimateTriageCost(pages);
-  const { monthlyCap, dollars } = await import("./ai-spend");
-  const cap = await monthlyCap();
-  if (cap.cap !== null && cap.spent + out.estimate > cap.cap) {
-    throw new Error(`Sorting the scans could cost up to ${dollars(out.estimate)}, and the month has ${dollars(cap.left)} left under the ceiling of ${dollars(cap.cap)}.`);
-  }
-  const { client: c } = await client();
-  for (const group of planBatches(toModel.map((x) => ({ item: x, bytes: x.bytes })))) {
-    const batch = await c.messages.batches.create({ requests: group.map((g) => g.req) });
+      });
+    }
+    if (requests.length === 0) continue;
+    const batch = await c.messages.batches.create({ requests });
     out.batches.push(batch.id);
-    await db.update(schema.contractDocs).set({ triageBatch: batch.id }).where(inArray(schema.contractDocs.id, group.map((g) => g.id)));
-    out.sentToModel += group.length;
+    await db.update(schema.contractDocs).set({ triageBatch: batch.id }).where(inArray(schema.contractDocs.id, requests.map((g) => g.custom_id)));
+    out.sentToModel += requests.length;
   }
   await audit({ action: "contracts.triage.queued", userId, userName, details: `${out.sortedByText} sorted by text, ${out.sentToModel} scan(s) sent to ${TRIAGE_MODEL} in ${out.batches.length} batch(es), ${pages} pages; estimate ${dollars(out.estimate)}` });
   return out;
@@ -665,4 +724,50 @@ export async function testReader(docId: string, userId: string, userName: string
     await audit({ action: "contracts.extract.test", userId, userName, entity: "contract_doc", entityId: doc.id, details: `${doc.documentName} refused on ${model}: ${kind}${err.status ? ` (${err.status})` : ""}: ${message.slice(0, 300)}` });
     return { ok: false, documentName: doc.documentName, reason: explained, detail: `${model} · ${kind}${err.status ? ` · HTTP ${err.status}` : ""} · ${message}` };
   }
+}
+
+export type ProvingResult = { ok: boolean; passed: number; of: number; checks: ProvingCheck[]; seconds: number; tokensIn: number; tokensOut: number; refusal: string | null };
+
+/**
+ * The reader, proved on the site's own document.
+ *
+ * The proving agreement (`fixtures/contracts/proving-agreement.pdf`, written by the site from
+ * `contract-proving.ts`) is sent through the exact request the batch uses, and the answer is
+ * marked against what the document is known to say: the identifiers, both rate lines with their
+ * fees, the guarantee kept out of the rates, the fee taken back, the appeal window, the payment
+ * path, the dispute clock, and that every quote is in the text. A pass is the reader working
+ * today, on this key, with this prompt and this model; a fail names which part of the read to
+ * look at before a real document is paid for.
+ */
+export async function proveReader(userId: string, userName: string): Promise<ProvingResult> {
+  const file = path.join(process.cwd(), "fixtures", "contracts", "proving-agreement.pdf");
+  const buf = await fs.readFile(file);
+  if (MOCK) {
+    const checks = checkProving(mockTerms(PROVING_TITLE, "Proving Benefit Managers"), quoteInText);
+    return { ok: false, passed: checks.filter((c) => c.ok).length, of: checks.length, checks, seconds: 0, tokensIn: 0, tokensOut: 0, refusal: "Mock: the mock terms are not the proving document's, so most checks fail by design." };
+  }
+  const { client: c, model } = await client();
+  const req = docRequest("proving", buf, "proving-agreement.pdf", model);
+  const t0 = Date.now();
+  let msg: Anthropic.Message;
+  try {
+    msg = await c.messages.create(req.params);
+  } catch (e) {
+    const err = e as { error?: { error?: { type?: string; message?: string } }; message?: string };
+    return { ok: false, passed: 0, of: 0, checks: [], seconds: Math.round((Date.now() - t0) / 1000), tokensIn: 0, tokensOut: 0, refusal: explainFailure({ type: "errored", error: { error: err.error?.error ?? { type: "unknown", message: err.message } } }) };
+  }
+  const seconds = Math.round((Date.now() - t0) / 1000);
+  const tokensIn = msg.usage?.input_tokens ?? 0;
+  const tokensOut = msg.usage?.output_tokens ?? 0;
+  await audit({ action: "contracts.extract.proved", userId, userName, details: `proving document read on ${model} · tokens in=${tokensIn} out=${tokensOut}` });
+  const text = msg.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("");
+  let terms: ContractTermsT;
+  try {
+    terms = termsFromAnswer(text);
+  } catch (e) {
+    return { ok: false, passed: 0, of: 0, checks: [], seconds, tokensIn, tokensOut, refusal: `The answer did not match the expected shape: ${e instanceof Error ? e.message.slice(0, 200) : String(e)}` };
+  }
+  const checks = checkProving(terms, quoteInText);
+  const passed = checks.filter((c) => c.ok).length;
+  return { ok: passed === checks.length, passed, of: checks.length, checks, seconds, tokensIn, tokensOut, refusal: null };
 }

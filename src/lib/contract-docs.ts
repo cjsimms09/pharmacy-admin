@@ -81,10 +81,16 @@ export async function contractLibrary(): Promise<Library> {
   const rows: LibraryDoc[] = [];
   for (const d of docs) {
     const terms = d.extractionState === "done" ? parseTerms(d.extractionJson) : null;
-    let pages: number | null = null;
+    let pages: number | null = d.pages ?? null;
     if (d.fileName) {
       withFile++;
-      try { pages = pdfPageCount(await fs.readFile(path.join(contractsDir(), d.fileName))); } catch { /* counted as nothing */ }
+      // Counted once and kept on the row; the folder is not opened to draw a list.
+      if (pages === null) {
+        try {
+          pages = pdfPageCount(await fs.readFile(path.join(contractsDir(), d.fileName)));
+          await db.update(schema.contractDocs).set({ pages }).where(eq(schema.contractDocs.id, d.id));
+        } catch { /* counted as nothing */ }
+      }
       allPages += pages ?? 0;
       // What a read would cost counts only what a read would send: the sort's rejects are out.
       if (d.extractionState !== "done" && d.extractionState !== "queued" && shouldRead(d.triage as never)) pendingPages += pages ?? 0;
@@ -148,6 +154,8 @@ export async function adoptUnattached(): Promise<{ added: number; named: number 
     if (attached.has(f)) continue;
     const buf = await fs.readFile(path.join(dir, f));
     const m = manifest.get(f);
+    let pages: number | null = null;
+    try { pages = pdfPageCount(buf); } catch { /* not a PDF the counter can read; the read will say so */ }
     await db.insert(schema.contractDocs).values({
       id: newId(),
       pbmName: m?.pbm ?? "Unnamed",
@@ -156,6 +164,7 @@ export async function adoptUnattached(): Promise<{ added: number; named: number 
       sizeBytes: buf.length,
       sha256: sha256(buf),
       matchedBy: "manual",
+      pages,
     });
     added++;
     if (m?.pbm) named++;
@@ -236,8 +245,15 @@ export async function proposalsFor(docId: string): Promise<{ doc: typeof schema.
   const terms = parseTerms(doc.extractionJson);
   if (!terms) return null;
   const pbmName = await canonicalCounterparty(doc.pbmName !== "Unnamed" ? doc.pbmName : terms.counterparty);
-  const [plans, existing] = await Promise.all([plansForMatching(), existingFor(pbmName, doc.id)]);
-  return { doc, proposals: proposeFromContract(terms, doc.documentName, plans, existing, { pbmName }) };
+  const [plans, existing, s, text] = await Promise.all([
+    plansForMatching(),
+    existingFor(pbmName, doc.id),
+    getSettings(),
+    // Only the PDF's own words can check a quote; the text a read left behind is the quotes themselves.
+    doc.fileName ? db.query.contractText.findFirst({ where: eq(schema.contractText.fileName, doc.fileName), columns: { body: true, source: true } }) : Promise.resolve(null),
+  ]);
+  const pharmacy = { chainCode: s.pharmacy_chain_code || null, ncpdp: s.pharmacy_ncpdp || null, npi: s.pharmacy_npi || null };
+  return { doc, proposals: proposeFromContract(terms, doc.documentName, plans, existing, { pbmName, pharmacy, text: text && text.source !== "read" ? text.body : null }) };
 }
 
 export type ApplyAllResult = {
@@ -250,7 +266,11 @@ export type ApplyAllResult = {
   links: number;
   claims: number;
   /** Documents with plan links a person still has to decide, because another document prints the same BIN. */
-  decisions: { docId: string; documentName: string; contested: number }[];
+  decisions: { docId: string; documentName: string; contested: number; why?: string }[];
+  /** Documents read correctly that do not govern this pharmacy (another chain code, another NCPDP); nothing from them is applied. */
+  notOurs: { docId: string; documentName: string; why: string }[];
+  /** Rates held back because their quote was not found in the document's own text. */
+  unverified: number;
 };
 
 /**
@@ -263,7 +283,7 @@ export type ApplyAllResult = {
  * in the payer pages' own spelling.
  */
 export async function applyAllReads(user: { name: string }): Promise<ApplyAllResult> {
-  const out: ApplyAllResult = { documents: 0, named: 0, rates: 0, appeals: 0, contacts: 0, routing: 0, links: 0, claims: 0, decisions: [] };
+  const out: ApplyAllResult = { documents: 0, named: 0, rates: 0, appeals: 0, contacts: 0, routing: 0, links: 0, claims: 0, decisions: [], notOurs: [], unverified: 0 };
   const docs = await db.query.contractDocs.findMany({ where: eq(schema.contractDocs.extractionState, "done") });
   for (const doc of docs) {
     const terms = parseTerms(doc.extractionJson);
@@ -276,9 +296,24 @@ export async function applyAllReads(user: { name: string }): Promise<ApplyAllRes
     const got = await proposalsFor(doc.id);
     if (!got) continue;
     const p = got.proposals;
+    /*
+     * A document that names another chain code or another NCPDP is somebody else's contract: read
+     * correctly, applied never. One whose governing is unknown (the pharmacy's own code not in
+     * Settings) is a decision, not a fact, and is listed for a person like a contested BIN.
+     */
+    if (p.governs.ok === false) {
+      out.notOurs.push({ docId: doc.id, documentName: doc.documentName, why: p.governs.why ?? "" });
+      continue;
+    }
+    if (p.governs.ok === null) {
+      out.decisions.push({ docId: doc.id, documentName: doc.documentName, contested: 0, why: p.governs.why ?? "" });
+      continue;
+    }
+    const certainRates = p.rates.map((r, i) => (r.quoteFound === false ? -1 : i)).filter((i) => i >= 0);
+    out.unverified += p.rates.length - certainRates.length;
     const certainPlans = p.plans.map((m, i) => (m.contested.length === 0 ? i : -1)).filter((i) => i >= 0);
     const r = await acceptProposals(doc.id, {
-      rates: p.rates.map((_, i) => i),
+      rates: certainRates,
       appeal: Boolean(p.appeal),
       contacts: p.contacts.map((_, i) => i),
       routing: Boolean(p.routing),
@@ -287,7 +322,15 @@ export async function applyAllReads(user: { name: string }): Promise<ApplyAllRes
     out.documents++;
     out.rates += r.rates; out.appeals += r.appeal ? 1 : 0; out.contacts += r.contacts; out.routing += r.routing ? 1 : 0; out.links += r.links; out.claims += r.claims;
     const contested = p.plans.length - certainPlans.length;
-    if (contested > 0) out.decisions.push({ docId: doc.id, documentName: doc.documentName, contested });
+    const held = p.rates.length - certainRates.length;
+    if (contested > 0 || held > 0) {
+      out.decisions.push({
+        docId: doc.id,
+        documentName: doc.documentName,
+        contested,
+        why: [contested ? `${contested} plan link${contested === 1 ? "" : "s"} contested by another document` : null, held ? `${held} rate${held === 1 ? "" : "s"} whose quote was not found in the document's text` : null].filter(Boolean).join("; "),
+      });
+    }
   }
   return out;
 }
@@ -313,10 +356,28 @@ export async function acceptProposals(docId: string, picks: Picks, user: { name:
     const prior = await db.query.networkRates.findFirst({
       where: and(eq(schema.networkRates.pbmName, r.row.pbmName), eq(schema.networkRates.network, r.row.network), eq(schema.networkRates.lineOfBusiness, r.row.lineOfBusiness), r.row.daysSupply === null ? isNull(schema.networkRates.daysSupply) : eq(schema.networkRates.daysSupply, r.row.daysSupply)),
     });
-    const values = { ...r.row, sourceLabel: source, notes: [r.row.notes, r.quote && `“${r.quote}”`].filter(Boolean).join(" ") || null, sourceUrl: null };
+    const values = { ...r.row, sourceLabel: source, status: "active", notes: [r.row.notes, r.quote && `“${r.quote}”`].filter(Boolean).join(" ") || null, sourceUrl: null };
     if (prior) await db.update(schema.networkRates).set(values).where(eq(schema.networkRates.id, prior.id));
     else await db.insert(schema.networkRates).values({ id: newId(), ...values });
     out.rates++;
+  }
+  /*
+   * What this document replaces stops pricing claims. The names are the document's own for what
+   * it supersedes; a rate row whose source carries that name is marked, never deleted, so the
+   * old figure is still there to read and never used for a claim filled after the new one began.
+   */
+  if (picks.rates.length > 0) {
+    const terms = parseTerms(doc.extractionJson);
+    for (const name of terms?.supersedes ?? []) {
+      const key = name.trim().toLowerCase();
+      if (key.length < 6) continue;
+      const rows = await db.query.networkRates.findMany({ where: eq(schema.networkRates.pbmName, p.pbmName) });
+      for (const row of rows) {
+        if (row.sourceLabel && row.sourceLabel !== source && (row.sourceLabel.toLowerCase().includes(key) || key.includes(row.sourceLabel.toLowerCase()))) {
+          await db.update(schema.networkRates).set({ status: "superseded" }).where(eq(schema.networkRates.id, row.id));
+        }
+      }
+    }
   }
 
   if (picks.appeal && p.appeal) {

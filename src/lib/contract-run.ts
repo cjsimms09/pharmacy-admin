@@ -46,6 +46,12 @@ export function estimateCost(pages: number, model: string, rates?: { in: number;
 export const PDF_PAGE_LIMIT = 300;
 export const PDF_BYTES_LIMIT = 32 * 1024 * 1024;
 export const BATCH_BYTES_LIMIT = 100 * 1024 * 1024;
+/**
+ * What one upload from the pharmacy carries. The API takes 256 MB a batch; a pharmacy's upload
+ * link does not, in the time a person will wait for a button. Forty megabytes of base64 is a few
+ * minutes on a slow connection and a batch is accepted the moment it lands.
+ */
+export const UPLOAD_BYTES_LIMIT = 40 * 1024 * 1024;
 export const BATCH_REQUEST_LIMIT = 100;
 
 /** Rough page count from the PDF itself, for the estimate and the page limit. */

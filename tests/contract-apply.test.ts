@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { proposeFromContract, groupByCounterparty } from "../src/lib/contract-apply";
+import { proposeFromContract, groupByCounterparty, quoteInText, governsPharmacy } from "../src/lib/contract-apply";
 import type { ContractTermsT } from "../src/lib/contract-terms";
 
 /**
@@ -33,10 +33,10 @@ const draft = (): ContractTermsT => ({
   claimSubmissionWindowDays: 90,
   reversalWindowDays: 14,
   rates: [
-    { pbmVendor: "CVS Caremark", network: "Preferred", costSharingTier: "preferred", daysSupplyMin: 1, daysSupplyMax: 34, brandFormula: "AWP-15%", brandDispensingFee: 1.0, genericBasis: "Lesser of (MAC or AWP-25%)", genericDispensingFee: 1.0, specialtyTerms: null, compoundTerms: null, vaccineTerms: null, effectiveFrom: "2026-01-01", effectiveTo: null, citation: cite("Brand: AWP-15% + $1.00. Generic: Lesser of (MAC or AWP-25%) + $1.00.") },
-    { pbmVendor: "Express Scripts", network: "Preferred", costSharingTier: "preferred", daysSupplyMin: 1, daysSupplyMax: 34, brandFormula: "AWP-16%", brandDispensingFee: 0.75, genericBasis: "Per Schedule 2 of the Provider Manual", genericDispensingFee: 0.75, specialtyTerms: null, compoundTerms: null, vaccineTerms: null, effectiveFrom: null, effectiveTo: null, citation: cite("Express Scripts: AWP-16% + $0.75.") },
+    { pbmVendor: "CVS Caremark", network: "Preferred", lineOfBusiness: "Commercial", costSharingTier: "preferred", daysSupplyMin: 1, daysSupplyMax: 34, brandFormula: "AWP-15%", brandDispensingFee: 1.0, genericBasis: "Lesser of (MAC or AWP-25%)", genericDispensingFee: 1.0, specialtyTerms: null, compoundTerms: null, vaccineTerms: null, effectiveFrom: "2026-01-01", effectiveTo: null, citation: cite("Brand: AWP-15% + $1.00. Generic: Lesser of (MAC or AWP-25%) + $1.00.") },
+    { pbmVendor: "Express Scripts", network: "Preferred", lineOfBusiness: null, costSharingTier: "preferred", daysSupplyMin: 1, daysSupplyMax: 34, brandFormula: "AWP-16%", brandDispensingFee: 0.75, genericBasis: "Per Schedule 2 of the Provider Manual", genericDispensingFee: 0.75, specialtyTerms: null, compoundTerms: null, vaccineTerms: null, effectiveFrom: null, effectiveTo: null, citation: cite("Express Scripts: AWP-16% + $0.75.") },
     // A rate with money and no quote: refused, as requireCitations would refuse it.
-    { pbmVendor: "Unknown", network: "Value", costSharingTier: "unknown", daysSupplyMin: null, daysSupplyMax: null, brandFormula: "AWP-20%", brandDispensingFee: null, genericBasis: null, genericDispensingFee: null, specialtyTerms: null, compoundTerms: null, vaccineTerms: null, effectiveFrom: null, effectiveTo: null, citation: null },
+    { pbmVendor: "Unknown", network: "Value", lineOfBusiness: null, costSharingTier: "unknown", daysSupplyMin: null, daysSupplyMax: null, brandFormula: "AWP-20%", brandDispensingFee: null, genericBasis: null, genericDispensingFee: null, specialtyTerms: null, compoundTerms: null, vaccineTerms: null, effectiveFrom: null, effectiveTo: null, citation: null },
   ],
   effectiveRateGuarantees: [],
   postPointOfSaleDiscounts: [],
@@ -118,7 +118,7 @@ describe("what a contract proposes", () => {
 
   test("new, same and changed against what the tables hold", () => {
     const p = proposeFromContract(draft(), "2026 Rate Exhibit.pdf", plans, {
-      rates: [{ pbmName: "CVS Caremark", lineOfBusiness: "Medicare Part D", network: "Preferred · preferred", daysSupply: "1-34", brandRate: "AWP-14% + $1.00", genericRate: "Lesser of (MAC or AWP-25%) + $1.00" }],
+      rates: [{ pbmName: "CVS Caremark", lineOfBusiness: "Commercial", network: "Preferred · preferred", daysSupply: "1-34", brandRate: "AWP-14% + $1.00", genericRate: "Lesser of (MAC or AWP-25%) + $1.00" }],
       appeal: { pbmName: "Example Part D Plan", submissionChannel: "Provider portal", submissionTarget: "https://portal.example.invalid/appeals", appealWindowDays: 30, windowBasis: "date_of_adjudication" },
     });
     assert.equal(p.rates[0].standing, "changed");
@@ -166,5 +166,55 @@ describe("the third parties grouped", () => {
     assert.equal(g[1].documents[0].rates, 3);
     assert.equal(g[1].documents[1].role, "base");
     assert.equal(g[0].documents[0].role, "unknown");
+  });
+});
+
+describe("what is checked before a figure is applied", () => {
+  test("each rate line carries its own line of business, the document's first where it has none, and its end date", () => {
+    const p = proposeFromContract(draft(), "2026 Rate Exhibit.pdf", plans);
+    assert.equal(p.rates[0].row.lineOfBusiness, "Commercial", "the line's own heading wins");
+    assert.equal(p.rates[1].row.lineOfBusiness, "Medicare Part D", "the document's first line where the rate names none");
+    assert.equal(p.rates[0].row.effectiveTo, null);
+    const d = draft();
+    d.endDate = "2026-12-31";
+    assert.equal(proposeFromContract(d, "x.pdf", plans).rates[1].row.effectiveTo, "2026-12-31");
+  });
+
+  test("the guarantee over a line rides beside it as words, never as a rate", () => {
+    const d = draft();
+    d.effectiveRateGuarantees = [
+      { pbmVendor: "CVS Caremark", network: "Preferred", costSharingTier: "preferred", daysSupplyMin: null, daysSupplyMax: null, brandEffectiveRate: "AWP-17.5%", genericEffectiveRate: "AWP-84.5%", measurementBasis: "annual, PSAO-wide", reconciledBy: "Aetna, by March 31", citation: cite("GER of AWP-84.5% measured annually.") },
+    ];
+    const p = proposeFromContract(d, "x.pdf", plans);
+    assert.equal(p.rates[0].row.gerGuardrail, "AWP-84.5%");
+    assert.equal(p.rates[0].row.berGuardrail, "AWP-17.5%");
+    assert.equal(p.rates[1].row.gerGuardrail, null, "the other vendor's line carries no guarantee it was not given");
+    assert.equal(p.rates[0].row.genericRate, "Lesser of (MAC or AWP-25%) + $1.00", "the rate is still the rate");
+  });
+
+  test("a quote is looked for in the document's own text, across line breaks and curly quotes", () => {
+    const text = "EXHIBIT B\nBrand:  AWP-15% + $1.00.\nGeneric: “Lesser of (MAC or AWP-25%) + $1.00”.\nDisputes not raised within 30 days are deemed accepted.";
+    assert.equal(quoteInText("Brand: AWP-15% + $1.00. Generic: Lesser of (MAC or AWP-25%) + $1.00.", text), true);
+    assert.equal(quoteInText("Brand: AWP-12% + $2.00.", text), false);
+    assert.equal(quoteInText("Brand: AWP-15% + $1.00.", null), null, "a scan has nothing to check against");
+    assert.equal(quoteInText("AWP", text), null, "too short to mean anything");
+    const p = proposeFromContract(draft(), "x.pdf", plans, {}, { text });
+    assert.equal(p.rates[0].quoteFound, true);
+    assert.equal(p.rates[1].quoteFound, false, "Express Scripts' sentence is not in this text");
+    assert.match(p.caveats.join(" "), /quote was not found/);
+  });
+
+  test("an exhibit for other chain codes or another NCPDP is read, and does not govern here", () => {
+    const d = draft();
+    d.chainCodes = ["605", "630"];
+    assert.deepEqual(governsPharmacy(d, { chainCode: "630", ncpdp: null, npi: null }).ok, true);
+    assert.equal(governsPharmacy(d, { chainCode: "717", ncpdp: null, npi: null }).ok, false);
+    assert.equal(governsPharmacy(d, { chainCode: null, ncpdp: null, npi: null }).ok, null, "not known until Settings says the code");
+    d.pharmacyNcpdps = ["1712345"];
+    assert.equal(governsPharmacy(d, { chainCode: "630", ncpdp: "1799999", npi: null }).ok, false);
+    assert.equal(governsPharmacy(d, { chainCode: "630", ncpdp: "17-12345", npi: null }).ok, true);
+    const p = proposeFromContract(d, "x.pdf", plans, {}, { pharmacy: { chainCode: "717", ncpdp: "1712345", npi: null } });
+    assert.equal(p.governs.ok, false);
+    assert.match(p.caveats[0], /chain code/);
   });
 });

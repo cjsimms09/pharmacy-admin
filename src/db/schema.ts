@@ -1413,6 +1413,13 @@ export const contractDocs = sqliteTable(
     triageBy: text("triage_by"),
     /** The batch the model sort is running in, until it is collected. */
     triageBatch: text("triage_batch"),
+    /**
+     * How many pages the file has, counted once when it is adopted or first read.
+     *
+     * The library used to open every PDF in the folder to count its pages on every page view —
+     * three hundred and fifty files read from disk to show a list. Counted once and kept.
+     */
+    pages: integer("pages"),
     loadedAt: text("loaded_at").notNull().default(now()),
   },
   (t) => [index("contract_docs_pbm_idx").on(t.pbmName), index("contract_docs_priority_idx").on(t.priority)],
@@ -1496,6 +1503,9 @@ export const networkRates = sqliteTable(
     lineOfBusiness: text("line_of_business").notNull(),
     network: text("network").notNull(),
     effectiveDate: text("effective_date"),
+    /** The last day the rate applies, where the exhibit says; null while it runs. A claim after it is not priced on this row. */
+    effectiveTo: text("effective_to"),
+    /** null or "active" while in force; "superseded" once a later document names this one as replaced. */
     status: text("status"),
     daysSupply: text("days_supply"),
     /** Rate expressions as published, e.g. "AWP-18.75% + $0.75". Never parsed into a number here. */

@@ -32,6 +32,12 @@ export const RateTerm = z.object({
   pbmVendor: z.string().nullable(),
   /** Which network or plan this rate applies to, as the document names it. */
   network: z.string().nullable(),
+  /**
+   * The line of business this line prices — Commercial, Medicare Part D, Medicaid, FEHB — as the
+   * exhibit heading names it. One agreement carries several, and a Part D rate applied to a
+   * commercial claim is a wrong appeal. Null where the document prices one line only.
+   */
+  lineOfBusiness: z.string().nullable().default(null),
   /** Preferred or standard cost sharing, where the schedule splits on it. */
   costSharingTier: z.enum(["preferred", "standard", "both", "unknown"]),
   /** Rates split by days supply — "Monthly (1-34 days)" against "Extended Day Supply (35+)". */
@@ -297,7 +303,7 @@ RULES, in order of importance:
 
 5. **Capture the identifiers.** BINs, PCNs, group IDs, chain codes and network names are how a live claim gets matched back to this contract. They are frequently printed only inside a rate exhibit. Chain codes matter especially: an exhibit headed "Chain Codes 605 & 630" governs only pharmacies with one of those codes.
 
-6. **A document can carry several rates** — and the axes are not obvious. One Medicare Part D agreement carries different rates per **PBM vendor** (CVS/Caremark at AWP-15% + $1.00, Express Scripts at AWP-16% + $0.75, in the same schedule), per **network** (Premier, Standard, Value, Saver), per **cost sharing tier** (preferred against standard), and per **days supply band** (1-34 days against 35+). Return one entry per distinct combination. A rate without its vendor and network cannot price a claim.
+6. **A document can carry several rates** — and the axes are not obvious. One Medicare Part D agreement carries different rates per **PBM vendor** (CVS/Caremark at AWP-15% + $1.00, Express Scripts at AWP-16% + $0.75, in the same schedule), per **line of business** (Commercial, Medicare Part D, Medicaid, FEHB — name it on each rate line where the document prices more than one), per **network** (Premier, Standard, Value, Saver), per **cost sharing tier** (preferred against standard), and per **days supply band** (1-34 days against 35+). Return one entry per distinct combination, with its own effective dates where the exhibit gives them. A rate without its vendor, line and network cannot price a claim.
 
 7. **Never put an effective rate guarantee in the rates array.** This is the most damaging mistake available to you. A Brand or Generic Effective Rate (BER / GER) is an aggregate discount measured across every pharmacy, network and PBM in a PSAO over a year and reconciled annually by the payer — it is not what a claim pays. The same Aetna agreement pays generics at "Lesser of (MAC or AWP-25%) + $1.00" while guaranteeing a Generic Effective Rate of "AWP-84.5%". Both appear under headings about generic rates, one page apart. Putting the guarantee in "rates" would understate expected reimbursement by an order of magnitude and produce a schedule of nonsense that gets a filing thrown out. Effective rate guarantees go in "effectiveRateGuarantees", always.
 

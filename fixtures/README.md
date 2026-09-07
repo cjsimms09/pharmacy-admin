@@ -29,5 +29,6 @@ arrives rather than what somebody remembers arriving.
 | `nadac-weekly-head.csv` | first ten lines of a CMS weekly file | pins the column spelling the CSV download actually uses |
 | `rebate-schedule-mckesson.md` | the OneStop tier ladder, in words, with the ratio definition as the agreement states it | fills in `/suppliers/[id]/terms` correctly; the numbers can be real, they are commercial not personal |
 | `return-policy-*.md` | each supplier's return policy, in words | same |
+| `contracts/proving-agreement.pdf` | **committed** — not a real file at all: a two-page agreement the site wrote for a plan that does not exist, generated from `src/lib/contract-proving.ts` by `scripts/make-proving-pdf.ts` | "Prove the reader" on Payers → Sort the folder sends it through the exact batch request and marks the answer against what it is known to say; `tests/contract-proving.test.ts` keeps the PDF, the pages and the checks in step |
 
 To get the text layer of a PDF on the pharmacy machine: `npx tsx -e "import {pdfText} from './src/lib/pdf-text'; console.log(pdfText(require('fs').readFileSync('invoice.pdf')))" > fixtures/invoice-mckesson.txt`, then edit the identifiers before committing. The pre-commit hook refuses `.pdf`, `.csv` and `.xlsx` outside this folder; inside it they are allowed, but text is easier to redact and to read.

@@ -128,3 +128,17 @@ describe("the appeal queue", () => {
     assert.ok(lines.some((l) => /Appeal window closes 2026-09-15/.test(l.text)));
   });
 });
+
+describe("a rate row is only used on the days it is in force", () => {
+  test("the claim's fill date picks between an old exhibit and its successor, and a superseded row prices nothing", () => {
+    const rates = [
+      { pbmName: "Example PBM", network: "Standard", lineOfBusiness: "Commercial", brandRate: "AWP-15% + $1.00", genericRate: "MAC + $1.00", effectiveDate: "2025-01-01", effectiveTo: "2025-12-31" },
+      { pbmName: "Example PBM", network: "Standard", lineOfBusiness: "Commercial", brandRate: "AWP-17% + $1.50", genericRate: "MAC + $1.50", effectiveDate: "2026-01-01", effectiveTo: null },
+      { pbmName: "Example PBM", network: "Old", lineOfBusiness: "Commercial", brandRate: "AWP-10%", genericRate: null, status: "superseded" },
+    ];
+    assert.equal(rateFor(rates, { pbmName: "Example PBM", networkId: null, dateFilled: "2025-06-01" })?.brandRate, "AWP-15% + $1.00");
+    assert.equal(rateFor(rates, { pbmName: "Example PBM", networkId: null, dateFilled: "2026-03-01" })?.brandRate, "AWP-17% + $1.50");
+    assert.equal(rateFor(rates, { pbmName: "Example PBM", networkId: "Old", dateFilled: "2026-03-01" })?.network, "Standard", "the superseded row is never the match");
+    assert.equal(rateFor(rates, { pbmName: "Example PBM", networkId: null, dateFilled: "2024-06-01" }), null, "before any row was in force");
+  });
+});

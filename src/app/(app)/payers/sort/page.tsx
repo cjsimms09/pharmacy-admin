@@ -5,7 +5,7 @@ import { requireManager, requireUser } from "@/lib/auth";
 import { requireReimbursement } from "@/lib/features";
 import { audit } from "@/lib/audit";
 import { contractLibrary, type LibraryDoc } from "@/lib/contract-docs";
-import { queueTriage, collectTriage, setTriage, testReader, recoverFailures, TRIAGE_MODEL } from "@/lib/contract-extract";
+import { queueTriage, collectTriage, setTriage, testReader, recoverFailures, proveReader, TRIAGE_MODEL } from "@/lib/contract-extract";
 import { TRIAGE_KINDS, KIND_MEANS, estimateTriageCost, type TriageKind } from "@/lib/contract-triage";
 import { dollars } from "@/lib/ai-spend";
 import { PageHeader, Card, Notice, Figure, Empty } from "@/components/ui";
@@ -22,10 +22,10 @@ export const metadata = { title: "Sort the folder" };
  * own text, and for a few cents a document where it is a scan and the small model has to look. The
  * full read then skips only what the sort ruled out, and a person can overrule any verdict here.
  */
-export default async function SortPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string; test?: string }> }) {
+export default async function SortPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string; test?: string; prove?: string }> }) {
   await requireReimbursement();
   const user = await requireUser();
-  const { ok, error, test } = await searchParams;
+  const { ok, error, test, prove } = await searchParams;
   const lib = await contractLibrary();
   const withFile = lib.docs.filter((d) => d.fileName && d.state !== "done");
   const unsorted = withFile.filter((d) => !d.triage && !d.sorting);
@@ -48,6 +48,7 @@ export default async function SortPage({ searchParams }: { searchParams: Promise
           encodeURIComponent(
             `${r.sortedByText} sorted by their own text for nothing` +
               (r.sentToModel ? `; ${r.sentToModel} scan${r.sentToModel === 1 ? "" : "s"} sent to ${TRIAGE_MODEL} (about ${dollars(r.estimate)}) — press Collect when the batch has finished` : "") +
+              (r.scansLeft ? `; ${r.scansLeft} more scan${r.scansLeft === 1 ? "" : "s"} wait for the next press of Sort` : "") +
               (r.alreadySorted ? `; ${r.alreadySorted} already sorted` : "") +
               (r.skipped.length ? `; skipped: ${r.skipped.slice(0, 3).join(", ")}${r.skipped.length > 3 ? "…" : ""}` : "") +
               ".",
@@ -120,6 +121,20 @@ export default async function SortPage({ searchParams }: { searchParams: Promise
     }
   }
 
+  /*
+   * The reader, on the site's own document, marked against a known answer.
+   *
+   * A real contract proves the request runs; only an invented one, whose every figure is known,
+   * proves the read is right. Cents, and the one press to make before a paid run.
+   */
+  async function proveIt() {
+    "use server";
+    const u = await requireManager();
+    const r = await proveReader(u.id, u.name);
+    revalidatePath("/payers/sort");
+    redirect("/payers/sort?prove=" + encodeURIComponent(JSON.stringify(r)));
+  }
+
   async function decide(fd: FormData) {
     "use server";
     const u = await requireManager();
@@ -168,6 +183,7 @@ export default async function SortPage({ searchParams }: { searchParams: Promise
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
       {test && <TestResult json={test} />}
+      {prove && <ProveResult json={prove} />}
 
       {(refused.length > 0 || canManage) && (
         <Card
@@ -199,6 +215,15 @@ export default async function SortPage({ searchParams }: { searchParams: Promise
               ))}
             </ul>
           )}
+        </Card>
+      )}
+
+      {canManage && (
+        <Card className="mb-4" title="Prove the reader on the site's own document" subtitle="A two-page agreement the site wrote itself, with every figure known: two rate lines, a guarantee that must stay out of the rates, a fee taken back, the appeal window, the payment path. Read through the exact batch request and marked. Cents.">
+          <form action={proveIt} className="flex flex-wrap items-center gap-2">
+            <SubmitButton pendingLabel="Reading the proving document… (about a minute)" className="btn btn-primary">Prove the reader</SubmitButton>
+            <span className="text-xs text-ink-3">Do this before a paid run, and after any change to the prompt, the schema or the model.</span>
+          </form>
         </Card>
       )}
 
@@ -305,5 +330,31 @@ function TestResult({ json }: { json: string }) {
       <b>{r.documentName} was refused.</b> {r.reason}
       <span className="mt-1 block font-mono text-[11px] text-ink-2">{r.detail}</span>
     </Notice>
+  );
+}
+
+function ProveResult({ json }: { json: string }) {
+  let r: import("@/lib/contract-extract").ProvingResult | null = null;
+  try {
+    r = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  if (!r) return null;
+  return (
+    <Card className="mb-4" title={r.ok ? "The reader passed" : r.refusal ? "The reader was refused" : `The reader passed ${r.passed} of ${r.of} checks`} tone={r.ok ? "ok" : "crit"} subtitle={r.refusal ?? `${r.seconds}s · ${r.tokensIn.toLocaleString()} tokens in, ${r.tokensOut.toLocaleString()} out.`}>
+      {r.checks.length > 0 && (
+        <ul className="rows text-sm">
+          {r.checks.map((c) => (
+            <li key={c.check} className="row">
+              <span className="min-w-0">
+                <span className="row-title">{c.ok ? "✓" : "✗"} {c.check}</span>
+                <span className="row-why block font-mono text-[11px]">{c.got.slice(0, 240)}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }

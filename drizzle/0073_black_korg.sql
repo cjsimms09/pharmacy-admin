@@ -15,4 +15,6 @@ CREATE TABLE `standing_costs` (
 );
 --> statement-breakpoint
 CREATE INDEX `standing_costs_from_idx` ON `standing_costs` (`from_month`);--> statement-breakpoint
+ALTER TABLE `contract_docs` ADD `pages` integer;--> statement-breakpoint
+ALTER TABLE `network_rates` ADD `effective_to` text;--> statement-breakpoint
 ALTER TABLE `suppliers` ADD `payment_terms_days` integer;
