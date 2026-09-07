@@ -51,6 +51,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <form action="/find">
               <input name="q" type="search" placeholder="Find anything…" aria-label="Find anything in the site" className="field h-9 w-44 rounded-full" />
             </form>
+            {/* The inbox on every page: what arrived is looked at several times a day, from anywhere. */}
+            <Link href="/inbox" className="btn btn-sm">Inbox</Link>
             <SendToClaude />
             <div className="hidden text-right text-xs leading-tight text-ink-2 lg:block">
               <div className="font-medium text-ink">{user.name}</div>
