@@ -303,6 +303,51 @@ export async function scrubCopy(dbFile: string): Promise<ScrubReport> {
     }
 
     /*
+     * The catalogue's identifiers are entropy, and entropy is the reason the file will not fit.
+     *
+     * "im trying to send you backup file but its says it too big". 147,730 catalogue rows each
+     * carry a random UUID of their own and another for the import they arrived in: ten megabytes of
+     * pure randomness in a thirty-four megabyte payload, and randomness is exactly what a
+     * compressor cannot do anything with. The timestamps are another three.
+     *
+     * None of it is a fact about a drug. The row's identity only has to be unique, the import's
+     * only has to group rows that came in together, and a price file is dated by the day rather
+     * than the millisecond. Nothing outside this table refers to either id, so they are renumbered
+     * — and the file becomes something that can actually be sent, which is the only thing standing
+     * between a fault and its diagnosis.
+     */
+    if (present.has("supplier_items")) {
+      const before = await count("supplier_items");
+      // Column by column, because this is a saving rather than a requirement: a schema that has
+      // moved on should cost the copy some size, never the copy itself.
+      const have = await columnsOf(db, "supplier_items");
+      if (before > 0) {
+        if (have.has("updated_at")) await db.execute("update supplier_items set updated_at = substr(updated_at, 1, 10)");
+        /*
+         * The row already has a unique integer — SQLite gave it one — so the id is just that.
+         *
+         * The first attempt counted the rows before each row to number them, which is a hundred and
+         * forty-seven thousand squared comparisons and does not finish. `rowid` is the answer that
+         * was already there.
+         */
+        if (have.has("id")) await db.execute("update supplier_items set id = cast(rowid as text)");
+        /*
+         * And the import id becomes a short code per import — seventy-odd of them, so seventy-odd
+         * statements rather than one that walks the table for every row.
+         */
+        if (have.has("import_id")) {
+          const imports = await db.execute("select distinct import_id as v from supplier_items where import_id is not null order by import_id");
+          let n = 0;
+          for (const row of imports.rows) {
+            n++;
+            await db.execute(`update supplier_items set import_id = ${q(`i${n}`)} where import_id = ${q(String(row.v))}`);
+          }
+        }
+        changed.push({ what: "catalogue row and import identifiers renumbered, and price dates shortened to the day", rows: before });
+      }
+    }
+
+    /*
      * And the space the deletions freed is given back, or none of this makes the file smaller.
      *
      * SQLite keeps emptied pages for reuse rather than shrinking the file, so dropping 1.4 million
@@ -497,11 +542,22 @@ export async function buildClaudeCopy(): Promise<ClaudeCopy & { data?: Buffer }>
       "have been written at all.\n\n" +
       "The real backup is a different thing and is taken separately: Settings, Backups.\n";
 
-    const archive = createZip([
-      { name: "pharmacy-admin.db", data: scrubbed },
-      { name: "MANIFEST.json", data: Buffer.from(JSON.stringify(manifest, null, 2)) },
-      { name: "READ-ME-FIRST.txt", data: Buffer.from(readme) },
-    ]);
+    /*
+     * Squeezed as hard as deflate goes, because this file has to fit through a chat window.
+     *
+     * The backups use the default because they are written every night and speed matters there;
+     * this is made by hand, once, and a few extra seconds is nothing against being told the file
+     * is too big to send.
+     */
+    const archive = createZip(
+      [
+        { name: "pharmacy-admin.db", data: scrubbed },
+        { name: "MANIFEST.json", data: Buffer.from(JSON.stringify(manifest, null, 2)) },
+        { name: "READ-ME-FIRST.txt", data: Buffer.from(readme) },
+      ],
+      new Date(),
+      9,
+    );
 
     return {
       ok: true,
