@@ -28,7 +28,21 @@ query it on a schedule for our own reporting. Specifically, please provide:
 
 We are not asking to modify anything. Read access only, to our own dispensing data.
 
-**2. If read-only access is not possible: please add these fields to the "Rx Transaction Details
+**2. Alternatively, a scheduled data extract delivered to SFTP.**
+
+If direct database access is not something you grant, do you offer a **data extract or integration
+feed** — the kind provided to analytics and inventory partners — separate from the user-facing
+reports? If so we would like a nightly extract of dispensing detail containing the fields listed
+below.
+
+Please **host the SFTP endpoint on your side and give us credentials to pull from it**. We would
+rather not run an internet-facing SFTP server in the pharmacy. If you can only push, tell us and
+we will arrange a managed endpoint.
+
+We would need: the hostname and port, key-based authentication if you support it, the file format
+and naming, and a signed BAA covering the transfer.
+
+**3. If neither of those is possible: please add these fields to the "Rx Transaction Details
 By Submission Type (BETA)" report,** which we already have scheduled and emailed daily.
 
 In order of how much each matters to us:
@@ -47,7 +61,7 @@ All of these already exist on the canned **daily_report**, so the data is clearl
 just cannot schedule that report. **If it is easier to make daily_report schedulable instead, that
 would work just as well.**
 
-**3. A question about the daily_report, either way.**
+**4. A question about the daily_report, whichever of the above we end up with.**
 
 That report carries both an `Acquisition Cost` column and a `Net Profit` column. On a single day's
 data they disagree on 59 of 117 rows — backing the cost out of Net Profit gives a different figure
@@ -65,7 +79,7 @@ West Wichita Family Pharmacy
 
 ---
 
-## If they say no to #1
+## If they say no to #1 and #2
 
 It is a common ask and many pharmacies have it — third-party analytics and inventory vendors
 connect to PioneerRx databases routinely, so there is precedent to point at. If it is still
