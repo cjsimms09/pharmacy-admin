@@ -4,7 +4,7 @@ import { db, schema } from "@/db";
 import { newId } from "./crypto";
 import { audit } from "./audit";
 import { problemsWith, packUnits } from "./catalogue-check";
-import { buildDrugRow, reimbursementFrom, marginOf, packReadings, type DrugRow, type DrugSearch, type SupplierOffer } from "./drug-file";
+import { buildDrugRow, reimbursementFrom, marginOf, packReadings, withEquivalents, type DrugRow, type DrugSearch, type SupplierOffer } from "./drug-file";
 
 /**
  * The drug file: every NDC the site holds, from every file, in one place.
@@ -18,15 +18,17 @@ let held: { key: string; at: number; rows: DrugRow[] } | null = null;
 const MAX_AGE_MS = 10 * 60_000;
 
 async function currentKey(): Promise<string> {
-  const [supplierImport, count, claim, fixes, packFixes] = await Promise.all([
+  const [supplierImport, count, claim, fixes, packFixes, directoryLoad] = await Promise.all([
     db.query.supplierImports.findFirst({ orderBy: (i, { desc }) => [desc(i.createdAt)], columns: { id: true } }),
     db.query.onHandImports.findFirst({ orderBy: (i, { desc }) => [desc(i.countedOn)], columns: { id: true } }),
     db.query.claims.findFirst({ orderBy: (c, { desc }) => [desc(c.createdAt)], columns: { id: true } }),
     db.query.supplierItemFixes.findMany({ columns: { id: true } }),
     db.query.ndcPackFixes.findMany({ columns: { id: true, correctedAt: true } }),
+    // The FDA directory decides which NDCs are the same drug, so a fresh load has to rebuild the file.
+    db.query.drugDirectoryLoads.findFirst({ orderBy: (l, { desc }) => [desc(l.loadedAt)], columns: { id: true } }),
   ]);
   const newestFix = packFixes.map((f) => f.correctedAt).sort().pop() ?? "none";
-  return `${supplierImport?.id ?? "-"}|${count?.id ?? "-"}|${claim?.id ?? "-"}|${fixes.length}|${packFixes.length}:${newestFix}`;
+  return `${supplierImport?.id ?? "-"}|${count?.id ?? "-"}|${claim?.id ?? "-"}|${fixes.length}|${packFixes.length}:${newestFix}|${directoryLoad?.id ?? "-"}`;
 }
 
 /** Every drug the site holds anything about, assembled from every file. */
@@ -39,7 +41,9 @@ export async function drugFile(): Promise<DrugRow[]> {
   const { drugNames } = await import("./drug-names");
   const { latestShelf, movement } = await import("./shelf");
 
-  const [items, nadac, names, shelf, move, itemFixes, packFixes] = await Promise.all([
+  const { contractRatesBySupplier } = await import("./rebate-rates");
+  const { directoryKeys } = await import("./drug-directory-store");
+  const [items, nadac, names, shelf, move, itemFixes, packFixes, rebateRates, directory] = await Promise.all([
     catalogueRows(),
     nadacNow(),
     drugNames(),
@@ -47,7 +51,26 @@ export async function drugFile(): Promise<DrugRow[]> {
     movement(),
     db.query.supplierItemFixes.findMany(),
     db.query.ndcPackFixes.findMany(),
+    contractRatesBySupplier(),
+    directoryKeys(),
   ]);
+
+  /*
+   * The rate a supplier's rebate pays, by whatever the catalogue calls them.
+   *
+   * A catalogue spells a supplier differently from the register often enough that an exact match
+   * alone loses rebates — and a lost rebate makes a cheap supplier look dear, which sends the
+   * order elsewhere. A contained match settles it, the same way the purchasing ledger does.
+   */
+  const rateFor = (supplier: string): number | null => {
+    const a = supplier.trim().toLowerCase();
+    const exact = rebateRates[a];
+    if (typeof exact === "number") return exact;
+    for (const [name, r] of Object.entries(rebateRates)) {
+      if (a.includes(name) || name.includes(a)) return r;
+    }
+    return null;
+  };
 
   const benchmark = new Map(nadac.map((n) => [n.ndc11, n]));
   const correctedItems = new Set(itemFixes.map((f) => `${f.supplier.trim().toLowerCase()}|${f.ndc11}`));
@@ -81,9 +104,20 @@ export async function drugFile(): Promise<DrugRow[]> {
     const offers: SupplierOffer[] = (byNdc.get(ndc11) ?? [])
       .map((it) => ({
         supplier: it.supplier,
+        itemNumber: it.itemNumber ?? null,
         packSize: it.packSize,
         packUnits: packUnits(it.packSize),
         unitCostMicros: it.unitCostMicros,
+        ...(() => {
+          // Net of the rebate this line earns, so two suppliers are compared on what they really cost.
+          const rebated = it.contractFlag === "rebated" ? true : it.contractFlag === "not rebated" ? false : null;
+          const rate = rateFor(it.supplier);
+          const apply = rebated === true && rate !== null && it.unitCostMicros !== null;
+          return {
+            netUnitMicros: apply ? Math.round((it.unitCostMicros as number) * (1 - (rate as number))) : it.unitCostMicros,
+            rebateApplied: apply,
+          };
+        })(),
         packCostCents: it.packCostCents,
         awpCents: it.awpCents,
         contractFlag: it.contractFlag,
@@ -115,8 +149,16 @@ export async function drugFile(): Promise<DrugRow[]> {
     );
   }
 
-  held = { key, at: Date.now(), rows };
-  return rows;
+  /*
+   * The same drug from other labellers, filled in last.
+   *
+   * It is a fact about the whole set rather than about one row — which NDCs the FDA rates
+   * interchangeable with this one, and what each of them can be bought for — so it can only be
+   * answered once every row exists.
+   */
+  const withEq = withEquivalents(rows, directory);
+  held = { key, at: Date.now(), rows: withEq };
+  return withEq;
 }
 
 export function forgetDrugFile(): void {
@@ -145,6 +187,7 @@ export async function searchDrugs(q: DrugSearch = {}): Promise<DrugSearchResult>
     if (q.problemsOnly && r.problems.length === 0) continue;
     if (q.dispensedOnly && !r.reimbursement) continue;
     if (q.fixedOnly && !r.packFix) continue;
+    if (q.switchableOnly && !r.equivalence?.cheaper) continue;
     matched++;
     if (out.length < (q.limit ?? 200)) out.push(r);
   }
@@ -157,10 +200,13 @@ export async function searchDrugs(q: DrugSearch = {}): Promise<DrugSearchResult>
    */
   const rank = (r: DrugRow) => (r.problems.some((p) => p.level === "wrong") ? 0 : r.problems.length ? 1 : 2);
   const worth = (r: DrugRow) => Math.max(0, ...r.problems.map((p) => p.costCents));
+  // What switching labeller would have saved on the fills already on file: money on the table, so it outranks size.
+  const saves = (r: DrugRow) => r.equivalence?.savesOnFilledCents ?? 0;
   out.sort(
     (a, b) =>
       rank(a) - rank(b) ||
       worth(b) - worth(a) ||
+      saves(b) - saves(a) ||
       (b.reimbursement?.remitCents ?? 0) - (a.reimbursement?.remitCents ?? 0) ||
       (b.bestPackCostCents ?? 0) - (a.bestPackCostCents ?? 0),
   );
@@ -176,6 +222,14 @@ export async function drugFileHealth(): Promise<{
   dispensed: number;
   problems: number;
   reimbursedCents: number;
+  /** NDCs the FDA directory covers, so equivalents can be answered for them at all. */
+  inDirectory: number;
+  /** NDCs at least one supplier gives an item number for — what an order actually has to carry. */
+  withItemNumber: number;
+  /** NDCs an interchangeable NDC is cheaper than. */
+  switchable: number;
+  /** What switching every one of those would have saved on the fills already on file. */
+  switchableSavingsCents: number;
 }> {
   const { held } = await import("./held");
   return held("drug-file-health", loadDrugFileHealth);
@@ -189,10 +243,19 @@ async function loadDrugFileHealth(): Promise<{
   dispensed: number;
   problems: number;
   reimbursedCents: number;
+  /** NDCs the FDA directory covers, so equivalents can be answered for them at all. */
+  inDirectory: number;
+  /** NDCs at least one supplier gives an item number for — what an order actually has to carry. */
+  withItemNumber: number;
+  /** NDCs an interchangeable NDC is cheaper than. */
+  switchable: number;
+  /** What switching every one of those would have saved on the fills already on file. */
+  switchableSavingsCents: number;
 }> {
   const all = await drugFile();
   const bySupplier = new Map<string, number>();
   let mismatches = 0, settled = 0, dispensed = 0, problems = 0, reimbursedCents = 0;
+  let inDirectory = 0, switchable = 0, switchableSavingsCents = 0, withItemNumber = 0;
   for (const r of all) {
     for (const o of r.offers) bySupplier.set(o.supplier, (bySupplier.get(o.supplier) ?? 0) + 1);
     if (r.packDisagreement && !r.packFix) mismatches++;
@@ -202,6 +265,12 @@ async function loadDrugFileHealth(): Promise<{
       reimbursedCents += r.reimbursement.remitCents;
     }
     if (r.problems.length > 0) problems++;
+    if (r.offers.some((o) => o.itemNumber)) withItemNumber++;
+    if (r.equivalence && r.equivalence.key) inDirectory++;
+    if (r.equivalence?.cheaper) {
+      switchable++;
+      switchableSavingsCents += r.equivalence.savesOnFilledCents ?? 0;
+    }
   }
   return {
     total: all.length,
@@ -211,6 +280,10 @@ async function loadDrugFileHealth(): Promise<{
     dispensed,
     problems,
     reimbursedCents,
+    inDirectory,
+    withItemNumber,
+    switchable,
+    switchableSavingsCents,
   };
 }
 

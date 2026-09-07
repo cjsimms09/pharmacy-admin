@@ -164,11 +164,37 @@ export async function catalogueRows(): Promise<CatalogueRow[]> {
      * a pack size does not silently wipe a price that was right.
      */
     const packSize = fix?.packSize ?? settledPack ?? r.packSize;
-    const unitCostMicros = fix?.unitCostMicros ?? r.unitCostMicros;
-    // The pack cost follows from the two figures above; keeping the file's would leave the row
-    // disagreeing with itself, which is one of the faults the correction exists to remove.
     const units = packSize ? unitsIn(packSize) : null;
-    const packCostCents = unitCostMicros !== null && units !== null ? Math.round((unitCostMicros * units) / 10_000) : r.packCostCents;
+
+    /*
+     * Settling a package must not throw away what the box costs.
+     *
+     * The pack total is the figure a comparison can trust — the whole reason `wholePackage` exists
+     * — and the printed unit cost is the untrustworthy half, because wholesalers quote it against
+     * different levels of the same box. So when the pharmacy says how many units a package holds,
+     * the box price is kept and the unit price is derived from it.
+     *
+     * It used to run the other way: keep the supplier's unit cost and multiply it by the new unit
+     * count. On a row McKesson writes as "(4) 0.5 ML" that unit cost is the price of one vial, so
+     * settling the package at "2 ML" multiplied a vial by four. Trulicity went from a correct
+     * $976.72 to $3,906.88, while a supplier who wrote the same box as "2 ML" was left alone — so
+     * the act of correcting a package invented a fourfold difference between two suppliers who
+     * had agreed to within three per cent. The levelling had already got it right; the correction
+     * was what broke it.
+     *
+     * A supplier-specific correction that names a unit price is the exception: there the pharmacy
+     * is stating the price itself, and it is the pack total that follows.
+     */
+    const unitGiven = fix?.unitCostMicros ?? null;
+    const unitCostMicros =
+      unitGiven ??
+      (r.packCostCents !== null && units !== null && units > 0
+        ? Math.round((r.packCostCents * 10_000) / units)
+        : r.unitCostMicros);
+    const packCostCents =
+      unitGiven !== null && units !== null
+        ? Math.round((unitGiven * units) / 10_000)
+        : r.packCostCents;
     return {
       ...r,
       packSize,

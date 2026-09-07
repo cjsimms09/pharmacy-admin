@@ -157,4 +157,19 @@ describe("the more menu is not inside the thing that scrolls", () => {
       "the more menu is inside the element that scrolls, so its panel will be clipped and the menu will look dead",
     );
   });
+  /*
+   * And the panel is hidden by the stylesheet, not by the browser.
+   *
+   * A closed <details> hides its content in Chrome; in WebKit an absolutely positioned child
+   * escapes that and paints anyway, which stood every menu open on every screen. Two engines
+   * disagree, so the stylesheet has to say it.
+   */
+  const css = readFileSync(new URL("../src/app/globals.css", import.meta.url), "utf8");
+
+  test("the panel is hidden when the menu is closed and shown when it is open", () => {
+    const closed = /\.nav-more > div \{[^}]*\bhidden\b/.test(css);
+    const open = /\.nav-more\[open\] > div \{[^}]*\bblock\b/.test(css);
+    assert.ok(closed, "a closed more menu must hide its panel in CSS, not leave it to the browser");
+    assert.ok(open, "an open more menu must show its panel again");
+  });
 });

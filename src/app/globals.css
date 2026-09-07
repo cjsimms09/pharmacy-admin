@@ -168,7 +168,19 @@ body { @apply bg-ground text-ink antialiased; font-size: 0.9375rem; line-height:
   .nav-more { @apply relative; }
   .nav-more summary { @apply inline-flex h-8 cursor-pointer list-none items-center whitespace-nowrap rounded-full px-3 text-xs font-medium text-ink-2 transition-colors hover:bg-surface hover:text-ink; }
   .nav-more[open] summary { @apply bg-surface text-ink; }
-  .nav-more > div { @apply absolute right-0 top-9 z-40 min-w-[14rem] rounded-xl border border-line bg-surface p-2; box-shadow: var(--shadow-lift); }
+  /*
+    The panel is hidden by this rule, not by the browser.
+
+    A closed <details> is supposed to hide everything but its summary, and in Chrome it does. But
+    the panel is absolutely positioned, and in WebKit an absolutely positioned child of a closed
+    <details> escapes that hiding and paints anyway — so the menu stood open on every screen, on
+    exactly the browsers where nobody had looked. Relying on a UA behaviour that two engines
+    disagree about is the bug; saying it in the stylesheet is the fix, and it costs one line.
+  */
+  .nav-more > div { @apply absolute right-0 top-9 z-40 hidden min-w-[14rem] rounded-xl border border-line bg-surface p-2; box-shadow: var(--shadow-lift); }
+  .nav-more[open] > div { @apply block; }
+  /* Older WebKit draws its own triangle regardless of list-style. */
+  .nav-more summary::-webkit-details-marker { display: none; }
   .nav-more > div a { @apply block rounded-md px-3 py-1.5 text-sm text-ink-2 hover:bg-ground hover:text-ink; }
   .nav-more > div a.on { @apply font-semibold text-ink; }
 
