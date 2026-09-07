@@ -27,6 +27,7 @@ export const FAMILIES = {
     { href: "/purchasing", label: "Today's order" },
     { href: "/purchasing/shelf", label: "The shelf" },
     { href: "/purchasing/products", label: "Which NDC pays" },
+    { href: "/purchasing/over-nadac", label: "Bought over NADAC" },
   ],
   floor: [
     { href: "/claims/floor", label: "Paid under the floor" },

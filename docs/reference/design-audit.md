@@ -297,6 +297,7 @@ retires a page whose address is still linked.
 | The shelf `/purchasing/shelf` | join the order family | The stock behind today's order; the same question from the shelf's side. |
 | Order minimums `/purchasing/minimums` | **folded into What to buy**, redirects | It decided a basket the pharmacist had not put in a cart; a ranked list with a running total does what it was for. |
 | Is everything arriving? `/settings/feeds` | **new** | Every feed and outside service: cadence, last arrival, state from the data, a proof of completeness, a live check on request. The answer to "how do I know it is all working". |
+| Bought over NADAC `/purchasing/over-nadac` | **new**, join the order family | The weekly list for the buying group: every NDC invoiced above NADAC after the rebate, the gap in dollars, where it is cheaper, and what the gap cost on fills paying NADAC by law. Downloads as the file. |
 | Which NDC pays `/purchasing/products` | **new**, join the order family | Leads with the per-drug answer: how each drug is paid (NADAC + fee, AWP − discount, MAC, flat), and therefore which NDC to buy and from where to earn the most on this pharmacy's fills. Then the comparison cards that used to sit under today's order: buy these instead, what each drug earns, dispensed at a loss. |
 | Which contract `/purchasing/replay` | keep | A renewal decision made once a year; nothing daily belongs beside it. |
 | Suppliers and rebates `/suppliers` | keep | The counterparties, their ladders, the ratio. |

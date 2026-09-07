@@ -129,6 +129,46 @@ it and said so on the pull request. The owner reads this too.
   own NADAC; under AWP − x% the higher AWP. Reads `dispensingFeePaidCents` and `ingredientPaidCents`
   where your readers fill them; where the transaction report carries neither basis nor AWP the
   page says so and reads the model from the fee split alone.
+  **Reworked after the owner's rethink (e1d1258 and after):** the law settles a fill before any
+  arithmetic. A fill on a plan the register (`plan_groups`) classes as Medicaid is NADAC + fee; a
+  fill from 1 July 2026 on a plan whose class is in scope for SB 20 (`planScopeOf` →
+  `commercial_non_erisa`) and paid within 3% of NADAC + the floor fee was priced on the floor,
+  and a fill paid above it was priced by the contract and is read the ordinary way. Every drug
+  now carries `mix` (each way it is paid, by share), `settledBy` (law / code / read from the
+  money), `confidence` ("settled" at four fills in five by law or code) and `floor` (bound /
+  above / unpriced); a candidate NDC is valued under every way with at least 5% of fills and
+  weighed by share, and left out whole where one of those ways cannot price it (an NDC with no
+  NADAC is never the answer on a floor plan). `drugProfitReport` also returns a summary — share
+  of paid dollars settled by law, share of floor fills where the floor bound — shown as figures
+  at the top of the card. Grouping is the FDA directory's key (`groupResolver` in
+  `drug-directory-store.ts`) where it carries the NDC, NADAC's description otherwise.
+  **The register decides all of this: an unclassified plan is settled by nothing.**
+- **Bought over NADAC** (`/purchasing/over-nadac`, `over-nadac.ts` pure with tests,
+  `over-nadac-store.ts`, `/api/over-nadac?days=7` as CSV; a fourth tab on the order family; all
+  mine). The owner's ask: the weekly list of what was bought over NADAC, to take to the buying
+  group. One row per NDC per supplier over the window (7, 28 or 90 days): units bought (invoice
+  lines put per unit by the catalogue's pack size, through `packQtyOf`), the invoice price and
+  the price after the supplier's tier rate (`contractRatesBySupplier`), NADAC in force, the gap
+  per unit and in dollars, the cheapest other supplier's listing (never short-dated), and the
+  units of it dispensed in the window on plans paying NADAC by law with the gap on those as the
+  loss. Rebated lines with no rate on file are compared gross and say so. **The buying group's
+  own form is coming from the owner; `overNadacRows` is the one function to rewrite to its
+  layout, and the weekly send should then go through `send-mail.ts` from Connections.**
+  Reads `invoice_lines` (yours) and `plan_groups` (yours); edits neither.
+- **The drug directory** (`drug-directory.ts` pure with tests, `zip-read.ts`,
+  `drug-directory-store.ts`, migration **`0079`** `drug_directory` + `drug_directory_loads`,
+  shape-only fixtures `fixtures/fda-ndc-*.txt` and `fixtures/orange-book-products.txt`). The FDA
+  NDC Directory and the Orange Book joined into one row per marketed package with an equivalence
+  key (sorted ingredients | strength | form | route) and the TE code joined by application number
+  and strength; `substitutable` = same key and both A-rated. `fetchDrugDirectory` pulls both zips
+  from the FDA; `loadDrugDirectory` takes them by hand. **Not yet on a page or a schedule:** the
+  NADAC page card ("Fetch now" / load by hand) and a weekly refresh beside the NADAC job in
+  `src/instrumentation.ts` are next on my side unless you want them; a "Drug directory" row on
+  `/settings/feeds` too. Until a load runs, every grouping falls back to NADAC's description and
+  the products page says "0 of N dispensed" are on the directory.
+- **Still needed from PioneerRx for the fills the law does not settle:** Basis of Reimbursement
+  (NCPDP 522-FM), Dispensed AWP, Usual and Customary submitted, and DAW on the daily transaction
+  report. The catalogue exports now carry AWP (the feeds page prints the share per file).
 - **"Is everything arriving?" under Settings** (`/settings/feeds`, `feeds.ts`, `feed-rules.ts`,
   all mine). The owner asked how to verify every feed is working — NADAC current, MTF payments
   found, catalogues up to date. One row per feed: cadence, newest row in the table it fills,
@@ -679,7 +719,8 @@ id only), and twelve further uses of the data ranked by value against readiness.
 now delegates to `product-key.ts`, which it had duplicated.
 
 ### Files this branch touched
-`src/db/schema.ts`, `drizzle/0048_*`, `drizzle/0049_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down,recommendations,recommendation-log,recommendation-store,reimbursement-fit,band-strategy,month-plan,price-moves,rate-formula,contract-apply,appeal-packet}.ts` (new), `drizzle/0069_*`,
+`src/db/schema.ts`, `drizzle/0078_*`, `drizzle/0079_*`, `src/lib/{drug-profit,drug-profit-store,over-nadac,over-nadac-store,drug-directory,drug-directory-store,zip-read,families}.ts`, `src/app/(app)/purchasing/{products,over-nadac}/page.tsx`, `src/app/api/over-nadac/route.ts`, `tests/{drug-profit,over-nadac,drug-directory}.test.ts`, `fixtures/{fda-ndc-product,fda-ndc-package,orange-book-products}.txt`,
+`drizzle/0048_*`, `drizzle/0049_*`, `src/lib/{ndc,ndc-held,supplier-terms,supplier-terms-store,invoice-lines,nadac-sources,product-groups,pay-basis,under-nadac,ndc-choice,ratio-effect,drill-down,recommendations,recommendation-log,recommendation-store,reimbursement-fit,band-strategy,month-plan,price-moves,rate-formula,contract-apply,appeal-packet}.ts` (new), `drizzle/0069_*`,
 `src/lib/{claims,rx-transactions,suppliers,suppliers-registry,pioneer-catalog,invoices,nadac-fetch,settings}.ts`,
 `src/app/(app)/suppliers/page.tsx`, `src/app/(app)/suppliers/[id]/terms/page.tsx` (new),
 `src/app/(app)/inventory/invoices/page.tsx`, `src/app/(app)/nadac/page.tsx`, `src/app/(app)/claims/page.tsx`,

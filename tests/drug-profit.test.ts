@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { drugProfit, modelFromBasis, type ClaimLeg, type Price, type Bench } from "../src/lib/drug-profit";
+import { drugProfit, drugProfitReport, modelFromBasis, type ClaimLeg, type Price, type Bench } from "../src/lib/drug-profit";
 
 /**
  * Omeprazole 20 mg, two NDCs. A is the cheap one; B is dearer but carries a much higher NADAC and AWP.
@@ -105,5 +105,88 @@ describe("which NDC earns most, given how the payer pays", () => {
   test("cash fills are not a payer model, and a fill with no quantity is skipped", () => {
     const legs = [leg(0, { cashPlan: true, remitCents: 2_000 }), leg(1, { quantityThousandths: null, remitCents: 2_000 })];
     assert.deepEqual(drugProfit({ legs, prices, bench, groupOf: group, months: 1 }), []);
+  });
+});
+
+describe("what the law settles, and the mix of ways a drug is paid", () => {
+  test("a fill on a plan the floor reaches, paid at the floor, is NADAC plus the fee by law — whatever the code says", () => {
+    // Paid exactly NADAC(A) × 30 + $10.50, the PBM's code saying MAC: the floor bound, and the law wins.
+    const legs = Array.from({ length: 6 }, (_, i) => leg(i, { settled: "floor", basisCode: "06", remitCents: 1_155, ingredientPaidCents: 105, feePaidCents: 1_050 }));
+    const { rows, summary } = drugProfitReport({ legs, prices, bench, groupOf: group, months: 1, floorFeeCents: 1_050 });
+    const [r] = rows;
+    assert.equal(r.model, "NADAC");
+    assert.equal(r.modelSays, "NADAC + $10.50");
+    assert.deepEqual(r.settledBy, { law: 6, code: 0, inferred: 0 });
+    assert.equal(r.confidence, "settled");
+    assert.deepEqual(r.floor, { bound: 6, above: 0, unpriced: 0 });
+    assert.equal(r.best?.ndc11, B, "the NDC furthest under its own NADAC, because the floor pays each NDC's own");
+    assert.equal(summary.byLaw.fills, 6);
+    assert.equal(summary.byLaw.remitCents, 6 * 1_155);
+    assert.deepEqual(summary.floor, { fills: 6, bound: 6, above: 0, unpriced: 0 });
+  });
+
+  test("a floor fill paid well above the floor was priced by the contract, and is read the ordinary way", () => {
+    // $3.50 paid on a $1.05 NADAC fill: the MAC paid more than the floor, so the floor did not bind.
+    const legs = Array.from({ length: 4 }, (_, i) => leg(i, { settled: "floor", basisCode: "06", remitCents: 1_600, ingredientPaidCents: 400, feePaidCents: 1_200 }));
+    const { rows, summary } = drugProfitReport({ legs, prices, bench, groupOf: group, months: 1, floorFeeCents: 1_050 });
+    const [r] = rows;
+    assert.equal(r.model, "MAC");
+    assert.deepEqual(r.settledBy, { law: 0, code: 4, inferred: 0 });
+    assert.deepEqual(r.floor, { bound: 0, above: 4, unpriced: 0 });
+    assert.equal(r.best?.ndc11, A, "the contract pays the same whichever NDC, so the cheapest wins");
+    assert.equal(summary.floor.above, 4);
+  });
+
+  test("a floor fill on an NDC with no NADAC cannot be priced against the floor, and says so", () => {
+    const legs = Array.from({ length: 3 }, (_, i) => leg(i, { settled: "floor", remitCents: 1_155, ingredientPaidCents: 105, feePaidCents: 1_050 }));
+    const { rows } = drugProfitReport({ legs, prices, bench: [{ ...bench[0], nadacMicros: null }, bench[1]], groupOf: group, months: 1 });
+    assert.deepEqual(rows[0].floor, { bound: 0, above: 0, unpriced: 3 });
+    assert.equal(rows[0].settledBy.inferred, 3);
+  });
+
+  test("Medicaid is NADAC by law, at the ratio it actually paid", () => {
+    const legs = Array.from({ length: 3 }, (_, i) => leg(i, { settled: "medicaid", payer: "KS Medicaid", remitCents: 105 + 1_200, ingredientPaidCents: 105, feePaidCents: 1_200 }));
+    const [r] = drugProfit({ legs, prices, bench, groupOf: group, months: 1 });
+    assert.equal(r.model, "NADAC");
+    assert.equal(r.modelSays, "NADAC + $12.00");
+    assert.equal(r.settledBy.law, 3);
+  });
+
+  test("a drug split between a floor plan and a MAC plan gets the NDC that wins on the month, weighed by share", () => {
+    // Half the fills at the floor (B earns $11.40, A at IPC $10.65), half on a MAC paying $2.00 + $1.50 (A $2.60, B $1.70).
+    const legs = [
+      ...Array.from({ length: 5 }, (_, i) => leg(i, { settled: "floor", remitCents: 1_155, ingredientPaidCents: 105, feePaidCents: 1_050 })),
+      ...Array.from({ length: 5 }, (_, i) => leg(10 + i, { payer: "ESI", basisCode: "06", remitCents: 350, ingredientPaidCents: 200, feePaidCents: 150 })),
+    ];
+    const [r] = drugProfit({ legs, prices, bench, groupOf: group, months: 1, floorFeeCents: 1_050 });
+    assert.equal(r.mix.length, 2);
+    assert.deepEqual(r.mix.map((m) => [m.model, m.share]), [["NADAC", 0.5], ["MAC", 0.5]]);
+    // Weighted revenue: B (270 + 1050)/2 + 350/2 = 835 → margin 835 − 180 = 655. A at IPC (105 + 1050)/2 + 350/2 = 752.5 → 753 − 90 = 663.
+    assert.equal(r.best?.ndc11, A, "on the whole month A wins by a hair; on the floor fills alone B would");
+    assert.equal(r.best?.marginCents, 663);
+    const b = r.candidates.find((c) => c.ndc11 === B);
+    assert.equal(b?.marginCents, 655);
+    assert.match(r.why, /50% of fills are paid another way/);
+    assert.equal(r.confidence, "settled");
+  });
+
+  test("a way of paying under one fill in twenty does not decide, and an NDC that one weighed way cannot price is left out whole", () => {
+    // 24 floor fills and one AWP fill: the AWP fill is too thin to weigh, so B needs no AWP to be placed.
+    const legs = [
+      ...Array.from({ length: 24 }, (_, i) => leg(i, { settled: "floor", remitCents: 1_155, ingredientPaidCents: 105, feePaidCents: 1_050 })),
+      leg(99, { basisCode: "01", remitCents: 400, ingredientPaidCents: 300, feePaidCents: 100, awpCents: 1_500 }),
+    ];
+    const noAwp = bench.map((b) => ({ ...b, awpMicros: null }));
+    const [r] = drugProfit({ legs, prices, bench: noAwp, groupOf: group, months: 1 });
+    assert.equal(r.best?.ndc11, B);
+    assert.equal(r.leftOut.noBenchmark, 0);
+    // Half AWP fills: now B cannot be priced without an AWP, and is left out rather than valued on the floor fills alone.
+    const half = [
+      ...Array.from({ length: 5 }, (_, i) => leg(i, { settled: "floor", remitCents: 1_155, ingredientPaidCents: 105, feePaidCents: 1_050 })),
+      ...Array.from({ length: 5 }, (_, i) => leg(10 + i, { basisCode: "01", remitCents: 400, ingredientPaidCents: 300, feePaidCents: 100, awpCents: 1_500 })),
+    ];
+    const [r2] = drugProfit({ legs: half, prices, bench: noAwp, groupOf: group, months: 1 });
+    assert.equal(r2.leftOut.noBenchmark, 2, "both NDCs lack an AWP");
+    assert.equal(r2.candidates.length, 0);
   });
 });

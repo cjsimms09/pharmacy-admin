@@ -37,6 +37,7 @@ export default async function ProductsPage() {
   const byModel = new Map<Model, number>();
   for (const r of profit.rows) byModel.set(r.model, (byModel.get(r.model) ?? 0) + r.fills);
   const modelMix = [...byModel.entries()].sort((a, b) => b[1] - a[1]).map(([m, n]) => `${MODEL_WORDS[m]} ${Math.round((100 * n) / Math.max(1, profit.rows.reduce((t, r) => t + r.fills, 0)))}%`).join(" · ");
+  const sum = profit.summary;
   const ledgerRows = opportunities(ledger.rows);
   const { underNadac, switchNdc, notYetBought } = await import("@/lib/under-nadac");
   const { groupKey } = await import("@/lib/product-groups");
@@ -80,14 +81,27 @@ export default async function ProductsPage() {
         AWP earns more. The model is read off the claims — the PBM's basis code where the export
         carries it, the arithmetic of what was paid against the benchmarks where it does not.
       */}
-      <Card id="bymodel" title="What to buy for each drug, given how it is paid" className="my-4" count={profit.ready ? `${profit.rows.length} drugs · ${profit.fills.toLocaleString()} fills over ${profit.months.toFixed(1)} months` : undefined}>
+      <Card id="bymodel" title="Under NADAC, and the rest: what to buy for each drug, given how it is paid" className="my-4" count={profit.ready ? `${profit.rows.length} drugs · ${profit.fills.toLocaleString()} fills over ${profit.months.toFixed(1)} months` : undefined}>
         {!profit.ready ? (
           <Empty>{profit.reason}</Empty>
         ) : (
           <>
+            {/*
+              The two figures that say how much of the answer the floor is. On a fill the law settles
+              (Medicaid; a plan the register says the floor reaches, from 1 July 2026) the plan pays
+              the NDC's own NADAC plus the fee, and the NDC furthest under its own NADAC is the
+              exact answer. Where the floor did not bind the contract paid more, and the contract's
+              way decides. Everything else is the PBM's code or the money, and the row says which.
+            */}
+            <div className="mb-3 grid gap-3 sm:grid-cols-3">
+              <Figure size="sm" value={sum.remitCents > 0 ? `${Math.round((100 * sum.byLaw.remitCents) / sum.remitCents)}%` : "—"} label="Of paid dollars settled by law" sub={`${sum.byLaw.fills.toLocaleString()} fills on Medicaid or a plan the floor reaches`} tone={sum.byLaw.fills ? "ok" : "muted"} href="/plans" />
+              <Figure size="sm" value={sum.floor.bound + sum.floor.above > 0 ? `${Math.round((100 * sum.floor.bound) / (sum.floor.bound + sum.floor.above))}%` : "—"} label="Of floor fills where the floor bound" sub={sum.floor.fills ? `${sum.floor.above.toLocaleString()} paid above it by the contract${sum.floor.unpriced ? `, ${sum.floor.unpriced} with no NADAC` : ""}` : "no plan is classified as one the floor reaches"} tone={sum.floor.fills ? "ok" : "muted"} href="/claims/floor" />
+              <Figure size="sm" value={sum.fills > 0 ? `${Math.round((100 * (sum.byLaw.fills + sum.byCode)) / sum.fills)}%` : "—"} label="Of fills settled by law or the PBM's code" sub={`${sum.inferred.toLocaleString()} read from the money against NADAC and AWP`} tone={sum.fills && (sum.byLaw.fills + sum.byCode) / sum.fills >= 0.8 ? "ok" : "warn"} />
+            </div>
             <p className="mb-2 text-xs text-ink-2">
-              How this pharmacy&rsquo;s fills are paid: {modelMix}. {profit.withBasis > 0 ? `${Math.round((100 * profit.withBasis) / profit.fills)}% of fills carry the PBM's basis code; the rest are read from what was paid against NADAC and AWP.` : "The claims export carries no basis-of-reimbursement column (NCPDP 522-FM), so every model here is read from what was paid against NADAC and AWP; add the column to the PioneerRx report and the reading becomes the PBM's own word."}
-              {" "}Margins are per fill of the drug&rsquo;s typical quantity, after the rebate each price earns.
+              How this pharmacy&rsquo;s fills are paid: {modelMix}. {profit.withBasis > 0 ? `${Math.round((100 * profit.withBasis) / profit.fills)}% of fills carry the PBM's basis code.` : "The claims export carries no basis-of-reimbursement column (NCPDP 522-FM); add it to the PioneerRx report and every fill the law does not settle becomes the PBM's own word."}
+              {" "}Drugs are grouped on the FDA directory where it carries the NDC ({profit.grouping.directory.toLocaleString()} of {(profit.grouping.directory + profit.grouping.description).toLocaleString()} dispensed) and on NADAC&rsquo;s description for the rest.
+              {" "}Margins are per fill of the drug&rsquo;s typical quantity, after the rebate each price earns; a drug paid more than one way is valued under each, weighed by share.
             </p>
             {better.length === 0 ? (
               <Empty>No drug has an NDC or source worth five dollars a month more than the one dispensed today, on the prices and benchmarks held.</Empty>
@@ -115,8 +129,15 @@ export default async function ProductsPage() {
                         </td>
                         <td className="num">{r.fillsPerMonth.toFixed(1)}</td>
                         <td className="text-xs">
-                          <span className="block">{r.modelSays}</span>
-                          <span className="block text-ink-3">{Math.round(r.modelShare * 100)}% of fills · {r.payers.slice(0, 2).map((p) => `${p.payer} ${p.fills}`).join(", ")}</span>
+                          <span className="block">{r.modelSays}{r.mix.length > 1 ? <span className="text-ink-3"> · {Math.round(r.modelShare * 100)}%</span> : null}</span>
+                          {r.mix.slice(1, 3).map((m) => (
+                            <span key={m.model} className="block text-ink-3">{m.says} · {Math.round(m.share * 100)}%</span>
+                          ))}
+                          <span className="block text-ink-3">
+                            {r.settledBy.law > 0 ? `${r.settledBy.law} by law` : null}{r.settledBy.law > 0 && r.settledBy.code > 0 ? ", " : ""}{r.settledBy.code > 0 ? `${r.settledBy.code} by code` : null}{(r.settledBy.law > 0 || r.settledBy.code > 0) && r.settledBy.inferred > 0 ? ", " : ""}{r.settledBy.inferred > 0 ? `${r.settledBy.inferred} read` : null}
+                            {" · "}{r.payers.slice(0, 2).map((p) => `${p.payer} ${p.fills}`).join(", ")}
+                          </span>
+                          {r.confidence === "read" ? <span className="badge badge-warn mt-0.5">read from the money</span> : null}
                         </td>
                         <td className="text-xs">
                           <span className="block font-mono">{r.current?.ndc11}</span>
@@ -137,7 +158,7 @@ export default async function ProductsPage() {
             )}
             {unplaced.length > 0 && (
               <p className="mt-2 text-xs text-ink-3">
-                {unplaced.length} drug{unplaced.length === 1 ? "" : "s"} dispensed more than once could not be placed: no price is held for the NDC dispensed, or no benchmark under the model it is paid on — {unplaced.slice(0, 5).map((r) => r.name ?? r.current?.ndc11 ?? r.group).join(", ")}{unplaced.length > 5 ? ", …" : ""}.
+                {unplaced.length} drug{unplaced.length === 1 ? "" : "s"} dispensed more than once could not be placed: no price is held for the NDC dispensed, or no benchmark under a way it is paid (an NDC with no NADAC cannot be priced on a floor plan, and is never the answer there) — {unplaced.slice(0, 5).map((r) => r.name ?? r.current?.ndc11 ?? r.group).join(", ")}{unplaced.length > 5 ? ", …" : ""}.
               </p>
             )}
           </>

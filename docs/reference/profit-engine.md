@@ -108,7 +108,22 @@ what has been dismissed. This is the difference between a report and something t
    `contract-apply.ts` are the pure side, tested; the pages are on the handoff. The specification
    is `contract-reading.md`.)
 6. Brand steering: which brands to move to a secondary this month, and what the band is worth.
-7. ~~Cash pricing against cost and NADAC + fee, now that cash fills are kept.~~ Built: `cash-pricing.ts` (pure, tested) and `cash-pricing-store.ts`; a recurring row on Money found ("cash-pricing"), each product's median cash price against its median invoice cost and against NADAC plus the greater of $10.50 and the Medicaid fee, scaled to fills a month. A page listing every product is the pharmacy session's when wanted.
+7. ~~Cash pricing against cost and NADAC + fee, now that cash fills are kept.~~ (see below)
+8. **The floor first, the model second.** Agreed with the owner on 7 September: most of the
+   profit is on the cost side and needs no model, and the one case where the dearer NDC earns
+   more is exactly the floor and Medicaid, where the plan pays the NDC's own NADAC. So the
+   engine settles a fill in this order — the law (`ClaimLeg.settled` from the plan register), the
+   PBM's 522-FM code, the money — values every candidate under each way a drug is paid, weighed
+   by share, and labels the row "settled" or "read from the money". Built in `drug-profit.ts`.
+   The per-plan lesser-of fitting and the counterfactual replay from the owner's analysis are
+   **deferred to a monthly check** once a month of basis-labelled claims exists; they are not
+   what the engine needs to start.
+9. **Bought over NADAC, weekly, for the buying group.** Built: `over-nadac.ts`,
+   `/purchasing/over-nadac`, `/api/over-nadac`. The group's own form and the weekly send are
+   next, when the owner sends the form.
+10. The drug directory on a schedule (weekly with NADAC) and on the NADAC page, and a feeds row.
+11. A prediction log: what the engine said to buy and what the fills then paid, per plan, so the
+    "read from the money" rows earn or lose their standing. Built: `cash-pricing.ts` (pure, tested) and `cash-pricing-store.ts`; a recurring row on Money found ("cash-pricing"), each product's median cash price against its median invoice cost and against NADAC plus the greater of $10.50 and the Medicaid fee, scaled to fills a month. A page listing every product is the pharmacy session's when wanted.
 
 ## 7. What is audited, and when
 
