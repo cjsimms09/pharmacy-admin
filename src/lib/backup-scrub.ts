@@ -155,31 +155,59 @@ async function standInPrescriptions(db: Client, salt: string): Promise<number> {
     return made;
   };
 
+  /*
+   * The replacement is a join, not ten thousand statements.
+   *
+   * Written as one UPDATE per distinct prescription it is a full scan of the claims table each
+   * time: at this pharmacy's size that measured 1.9 ms each and nineteen seconds for ten thousand,
+   * on top of the copy and the proof — and a browser waiting on a form does not last that long. It
+   * showed as a button that does nothing, which is exactly what it was.
+   *
+   * So the whole mapping goes into a table of its own with an index on it, and each holder is
+   * rewritten in a single statement.
+   */
   const present = new Set(await tablesOf(db));
+  const wanted: { table: string; column: string }[] = [];
+  const distinct = new Set<string>();
   for (const h of holders) {
     if (!present.has(h.table)) continue;
     if (!(await columnsOf(db, h.table)).has(h.column)) continue;
+    wanted.push(h);
     const rows = await db.execute(`select distinct ${h.column} as v from ${h.table} where ${h.column} is not null and ${h.column} <> ''`);
-    for (const r of rows.rows) {
-      const real = String(r.v);
-      await db.execute(`update ${h.table} set ${h.column} = ${q(standIn(real))} where ${h.column} = ${q(real)}`);
-    }
+    for (const r of rows.rows) distinct.add(String(r.v));
   }
+  if (wanted.length === 0 || distinct.size === 0) return 0;
+
+  await db.execute("drop table if exists _rx_map");
+  await db.execute("create table _rx_map (old text primary key, new text not null)");
+  const values = [...distinct].map((real) => `(${q(real)}, ${q(standIn(real))})`);
+  for (let i = 0; i < values.length; i += 500) await db.execute(`insert into _rx_map (old, new) values ${values.slice(i, i + 500).join(",")}`);
+
+  for (const h of wanted) {
+    await db.execute(
+      `update ${h.table} set ${h.column} = (select new from _rx_map where old = ${h.table}.${h.column}) ` +
+        `where ${h.column} in (select old from _rx_map)`,
+    );
+  }
+  // The mapping is the one thing that must never travel: it is the key to everything above.
+  await db.execute("drop table _rx_map");
   return map.size;
 }
 
 /** Runs every rule above against an already-copied database, in place. */
-export async function scrubCopy(dbFile: string): Promise<ScrubReport> {
+export async function scrubCopy(dbFile: string, onStep: (s: string) => void | Promise<void> = () => {}): Promise<ScrubReport> {
   const db = createClient({ url: `file:${dbFile}` });
   const changed: { what: string; rows: number }[] = [];
   try {
     const present = new Set(await tablesOf(db));
     const count = async (t: string) => Number((await db.execute(`select count(*) as n from ${t}`)).rows[0].n);
 
+    await onStep("Replacing prescription numbers");
     const salt = crypto.randomBytes(32).toString("hex");
     const prescriptions = await standInPrescriptions(db, salt);
     if (prescriptions > 0) changed.push({ what: "prescription numbers replaced with stand-ins", rows: prescriptions });
 
+    await onStep("Emptying free text, secrets and names");
     for (const [table, columns] of Object.entries(BLANKED_TEXT)) {
       if (!present.has(table)) continue;
       const have = await columnsOf(db, table);
@@ -274,6 +302,7 @@ export async function scrubCopy(dbFile: string): Promise<ScrubReport> {
      * nothing else. Trimming it is the difference between a copy that can be sent and one that
      * cannot, which is the only reason a copy exists.
      */
+    await onStep("Trimming the reference tables");
     if (present.has("nadac_prices")) {
       /*
        * The newest price for each drug, not the newest week.
@@ -387,6 +416,7 @@ export async function scrubCopy(dbFile: string): Promise<ScrubReport> {
      * NADAC rows made the copy *larger* — the pages stayed and the write-ahead log grew on top.
      * A vacuum is what actually reclaims them.
      */
+    await onStep("Reclaiming the space that freed");
     await db.execute("VACUUM");
 
     const tables: Record<string, number> = {};
@@ -507,6 +537,31 @@ import { sha256 } from "./crypto";
 
 const dbPath = () => path.resolve(process.env.DATABASE_PATH ?? "./data/pharmacy-admin.db");
 
+/**
+ * Removing the working file, on an operating system that may refuse.
+ *
+ * Windows will not unlink a file any process still holds open, and SQLite does not always let go
+ * the instant `close()` returns — the journal and shared-memory files beside it lag behind. The
+ * pharmacy hit exactly this: the copy was built, proved and written, and then the tidy-up threw
+ * `EBUSY: resource busy or locked` and turned a finished job into a failed one.
+ *
+ * A working file that outlives its job is a nuisance; a finished copy thrown away because the
+ * nuisance could not be tidied is a bug. So this tries, waits, tries again, and then gives up
+ * quietly — the file is in the operating system's own temporary folder, which is cleaned for us.
+ */
+export async function removeWorkingFile(file: string, remove: (f: string) => Promise<void> = (f) => fs.rm(f, { force: true }), wait: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms))): Promise<void> {
+  for (const f of [file, `${file}-wal`, `${file}-shm`, `${file}-journal`]) {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        await remove(f);
+        break;
+      } catch {
+        await wait(200 * (attempt + 1));
+      }
+    }
+  }
+}
+
 export type ClaudeCopy =
   | { ok: true; fileName: string; bytes: number; report: ScrubReport; checked: number }
   | { ok: false; why: string; found?: { table: string; column: string; example: string }[] };
@@ -518,11 +573,12 @@ export type ClaudeCopy =
  * a person could send. Nothing that failed the proof is ever turned into a file, so there is no
  * moment at which an unscrubbed copy exists anywhere it could be picked up by mistake.
  */
-export async function buildClaudeCopy(): Promise<ClaudeCopy & { data?: Buffer }> {
+export async function buildClaudeCopy(onStep: (s: string) => void | Promise<void> = () => {}): Promise<ClaudeCopy & { data?: Buffer }> {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   const tmp = path.join(os.tmpdir(), `pa-for-claude-${stamp}.db`);
-  await fs.rm(tmp, { force: true });
+  await removeWorkingFile(tmp);
 
+  await onStep("Taking a copy of the database");
   const live = createClient({ url: `file:${dbPath()}` });
   try {
     // SQLite's own consistent snapshot, so a copy taken mid-import is still a coherent database.
@@ -532,10 +588,11 @@ export async function buildClaudeCopy(): Promise<ClaudeCopy & { data?: Buffer }>
   }
 
   try {
-    const report = await scrubCopy(tmp);
+    const report = await scrubCopy(tmp, onStep);
+    await onStep("Checking every value in the result for anything identifying");
     const proof = await provePrivate(tmp);
     if (!proof.ok) {
-      await fs.rm(tmp, { force: true });
+      await removeWorkingFile(tmp);
       return {
         ok: false,
         why:
@@ -545,6 +602,7 @@ export async function buildClaudeCopy(): Promise<ClaudeCopy & { data?: Buffer }>
       };
     }
 
+    await onStep("Compressing");
     const scrubbed = await fs.readFile(tmp);
     const manifest = {
       takenAt: new Date().toISOString(),
@@ -601,7 +659,7 @@ export async function buildClaudeCopy(): Promise<ClaudeCopy & { data?: Buffer }>
       data: archive,
     };
   } finally {
-    await fs.rm(tmp, { force: true });
+    await removeWorkingFile(tmp);
   }
 }
 
@@ -617,9 +675,10 @@ export async function buildClaudeCopy(): Promise<ClaudeCopy & { data?: Buffer }>
  * folder the backups already go to. That folder is usually OneDrive, which means the copy is
  * somewhere it can be attached from without a download having to succeed at all.
  */
-export async function writeClaudeCopy(destination: string): Promise<{ ok: true; path: string; bytes: number; report: ScrubReport; checked: number } | { ok: false; why: string; found?: { table: string; column: string; example: string }[] }> {
-  const built = await buildClaudeCopy();
+export async function writeClaudeCopy(destination: string, onStep: (s: string) => void | Promise<void> = () => {}): Promise<{ ok: true; path: string; bytes: number; report: ScrubReport; checked: number } | { ok: false; why: string; found?: { table: string; column: string; example: string }[] }> {
+  const built = await buildClaudeCopy(onStep);
   if (!built.ok) return built;
+  await onStep("Writing the file");
   const dir = path.resolve(destination);
   await fs.mkdir(dir, { recursive: true });
   const out = path.join(dir, built.fileName);

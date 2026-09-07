@@ -235,3 +235,39 @@ test("the fixtures leave nothing behind", () => {
   }
   assert.ok(true);
 });
+
+/*
+ * The pharmacy's own crash, held so it cannot come back.
+ *
+ * The copy was built, proved and written, and then the tidy-up threw
+ * `EBUSY: resource busy or locked, unlink 'C:\Users\wwfprx\AppData\Local\Temp\pa-for-claude-...db'`
+ * and turned a finished job into a failed one. Windows will not unlink a file a process still
+ * holds, and SQLite does not always let go the moment close() returns.
+ */
+test("a working file the operating system will not release does not fail the copy", async () => {
+  const { removeWorkingFile } = await import("../src/lib/backup-scrub");
+  const tried: string[] = [];
+  const busy = async (f: string) => {
+    tried.push(f);
+    const e = new Error(`EBUSY: resource busy or locked, unlink '${f}'`);
+    throw e;
+  };
+  // It must not throw, whatever the operating system says.
+  await removeWorkingFile("/tmp/pa-for-claude-x.db", busy, async () => {});
+  // Five attempts each at the database and the three files SQLite keeps beside it.
+  assert.equal(tried.length, 20);
+  assert.ok(tried.includes("/tmp/pa-for-claude-x.db-wal"));
+  assert.ok(tried.includes("/tmp/pa-for-claude-x.db-shm"));
+});
+
+test("a working file that goes on the first attempt is not attacked four more times", async () => {
+  const { removeWorkingFile } = await import("../src/lib/backup-scrub");
+  const tried: string[] = [];
+  await removeWorkingFile("/tmp/pa-for-claude-y.db", async (f) => { tried.push(f); }, async () => {});
+  assert.deepEqual(tried, [
+    "/tmp/pa-for-claude-y.db",
+    "/tmp/pa-for-claude-y.db-wal",
+    "/tmp/pa-for-claude-y.db-shm",
+    "/tmp/pa-for-claude-y.db-journal",
+  ]);
+});

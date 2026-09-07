@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import { requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
@@ -18,7 +19,9 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
   const { ok, error, showKey } = await searchParams;
   const [s, clouds] = await Promise.all([backupStatus(), detectCloudFolders()]);
   const { existingClaudeCopies } = await import("@/lib/backup-scrub");
-  const claudeCopies = await existingClaudeCopies(s.destination);
+  const { copyJob, copyJobRunning } = await import("@/lib/claude-copy-job");
+  const [claudeCopies, copy] = await Promise.all([existingClaudeCopies(s.destination), copyJob()]);
+  const copying = copyJobRunning(copy);
   const key = showKey === "1" ? encryptionKey() : null;
 
   async function save(fd: FormData) {
@@ -89,40 +92,22 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
   }
 
   /*
-   * Making the copy is a press with an answer, not a download link that appears to do nothing.
+   * The press claims a job and returns at once; the work runs behind the response.
    *
-   * On this database the work is a minute or two — a snapshot, a scrub, and every text value in the
-   * result read back — and a browser shows nothing at all for the whole of it. The first version
-   * was a plain download link and the honest report on it was "hitting button, nothing is
-   * happening". So the file is written beside the backups, which is usually OneDrive, and the page
-   * says what happened either way.
+   * It was a form the browser had to sit and wait on, and on the pharmacy's data the work is
+   * minutes — a copy of the database, ten thousand prescription replacements, a scan of every value
+   * in the result. The response never came, so the page never changed, so the button looked dead.
+   * The NADAC fetch and the FDA directory both learned this; this is the same answer.
    */
   async function makeCopy() {
     "use server";
     const u = await requireManager();
     const st = await backupStatus();
-    const { writeClaudeCopy } = await import("@/lib/backup-scrub");
-    const r = await writeClaudeCopy(st.destination);
-    if (!r.ok) {
-      await audit({ action: "backup.copy_for_claude_refused", userId: u.id, userName: u.name, details: r.why.slice(0, 400) });
-      const where = r.found?.length ? ` Still holding something: ${r.found.map((f) => `${f.table}.${f.column} (${f.example})`).join("; ")}.` : "";
-      redirect("/settings/backups?error=" + encodeURIComponent(r.why + where));
-    }
-    await audit({
-      action: "backup.copy_for_claude",
-      userId: u.id,
-      userName: u.name,
-      details: `${r.path}, ${(r.bytes / 1_048_576).toFixed(1)} MB. ${r.report.prescriptions.toLocaleString()} prescription numbers replaced; ${r.checked.toLocaleString()} values checked and none held an identifier.`,
-    });
+    const { startCopy, runCopy } = await import("@/lib/claude-copy-job");
+    const r = await startCopy(u);
+    if (r.started) after(() => runCopy(u, r.runId!, st.destination));
     revalidatePath("/settings/backups");
-    redirect(
-      "/settings/backups?ok=" +
-        encodeURIComponent(
-          `Copy made: ${mb(r.bytes)}, saved in ${st.destination}. ` +
-            `${r.report.prescriptions.toLocaleString()} prescription numbers replaced, ` +
-            `${r.checked.toLocaleString()} values checked and none held an identifier.`,
-        ),
-    );
+    redirect(`/settings/backups?${r.started ? "ok" : "error"}=` + encodeURIComponent(r.message));
   }
 
   const hoursSince = s.lastRun ? (Date.now() - Date.parse(s.lastRun)) / 3_600_000 : null;
@@ -362,12 +347,21 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
         </p>
         <div className="mt-3 border-t border-line pt-3">
           <form action={makeCopy}>
-            <button className="btn btn-primary">Make a copy for Claude</button>
+            <button className="btn btn-primary" disabled={copying}>
+              {copying ? "Making it…" : "Make a copy for Claude"}
+            </button>
           </form>
+          {copy && (
+            <p className={`mt-2 text-xs ${copy.state === "failed" ? "text-crit" : copying ? "text-ink-2" : "text-ink-3"}`}>
+              <b>{copying ? "Working" : copy.state === "failed" ? "The last attempt failed" : "The last one finished"}:</b>{" "}
+              {copy.step}
+              {copying ? " Refresh this page to see where it has got to." : ""}
+            </p>
+          )}
           <p className="mt-2 text-xs text-ink-3">
-            The page will sit still for a minute or two while it works — a snapshot, the scrub, and every value in the
-            result read back — and then say what it did. It saves into <b>{s.destination || "the backup folder"}</b>,
-            the same place the backups go, so you can attach it from there. Every copy is written to the audit log.
+            It takes a few minutes and runs in the background — you can leave this page. It saves into{" "}
+            <b>{s.destination || "the backup folder"}</b>, the same place the backups go, so you can attach it from
+            there. Every copy is written to the audit log.
           </p>
         </div>
 
