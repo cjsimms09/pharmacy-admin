@@ -132,6 +132,83 @@ export const SOURCES: Source[] = [
     },
   },
   {
+    key: "payers",
+    title: "A payer, its contracts and how its claims price against them",
+    href: "/payers",
+    load: async () => {
+      const { parseTerms } = await import("./contract-extract");
+      const { checkClaim } = await import("./claim-contract");
+      const { db } = await import("@/db");
+
+      const contracts: import("./claim-contract").ContractForMatch[] = [];
+      // The terms as read, plus how far the claims can actually be checked against them. A question
+      // about a payer is nearly always "why is this not being priced", and the answer is one of
+      // three: no contract names this plan, the contract names no rate for the fill, or the rate is
+      // a MAC that cannot be computed from the contract at all.
+      const docs = await db.query.contractDocs.findMany();
+      for (const d of docs) {
+        if (d.extractionState !== "done") continue;
+        const terms = parseTerms(d.extractionJson);
+        if (!terms) continue;
+        contracts.push({
+          documentId: d.id,
+          documentName: d.documentName,
+          counterparty: terms.counterparty ?? d.pbmName,
+          bins: terms.bins ?? [],
+          pcns: terms.pcns ?? [],
+          groupIds: terms.groupIds ?? [],
+          effectiveDate: terms.effectiveDate,
+          endDate: terms.endDate,
+          rates: (terms.rates ?? []).map((r) => ({
+            network: r.network,
+            daysSupplyMin: r.daysSupplyMin,
+            daysSupplyMax: r.daysSupplyMax,
+            brandFormula: r.brandFormula,
+            brandDispensingFee: r.brandDispensingFee,
+            genericBasis: r.genericBasis,
+            genericDispensingFee: r.genericDispensingFee,
+            citationQuote: r.citation?.quote ?? null,
+          })),
+        });
+      }
+
+      const claims = await db.query.claims.findMany({ limit: 400 });
+      const counts = { matched: 0, priced: 0, unmatched: 0, unpriceable: 0, shortCents: 0, overCents: 0 };
+      const examples: unknown[] = [];
+      for (const c of claims) {
+        const r = checkClaim(
+          {
+            bin: c.bin, pcn: c.pcn, groupNumber: c.groupNumber, dateFilled: c.dateFilled,
+            daysSupply: c.daysSupply, remitCents: c.remitCents, awpCents: c.awpCents,
+            acquisitionCents: c.acquisitionCents, isBrand: null,
+          },
+          contracts,
+        );
+        if (!r.matched) counts.unmatched++;
+        else {
+          counts.matched++;
+          if (r.priced?.ok) counts.priced++;
+          else counts.unpriceable++;
+        }
+        if (r.differenceCents !== null) {
+          if (r.differenceCents < 0) counts.shortCents += -r.differenceCents;
+          else counts.overCents += r.differenceCents;
+        }
+        if (examples.length < 20 && (r.matched || counts.unmatched <= 5))
+          examples.push({ bin: c.bin, pcn: c.pcn, group: c.groupNumber, filled: c.dateFilled, days: c.daysSupply, remitCents: c.remitCents, awpCents: c.awpCents, check: r });
+      }
+
+      return {
+        data: { contracts, counts, examples },
+        shownWith: { contractsOnFile: contracts.length, claimsChecked: claims.length },
+        notes: [
+          "Every contract read, as the site holds it, and every claim run against them.",
+          "A claim that matches no contract, or matches one with no computable rate, is the usual reason a payer shows nothing.",
+        ],
+      };
+    },
+  },
+  {
     key: "catalog",
     title: "The supplier catalogue",
     href: "/purchasing/catalog",
