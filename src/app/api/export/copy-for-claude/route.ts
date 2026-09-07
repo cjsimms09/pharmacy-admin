@@ -1,63 +1,60 @@
-import { NextResponse } from "next/server";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { NextRequest, NextResponse } from "next/server";
 import { requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { buildClaudeCopy } from "@/lib/backup-scrub";
+import { backupStatus } from "@/lib/backup";
 
 export const dynamic = "force-dynamic";
-// Copying, scrubbing and proving a database of this size takes tens of seconds, not the default.
-export const maxDuration = 300;
 
 /**
- * The scrubbed copy, as a download.
+ * Hands over a copy that has already been made.
  *
- * Behind the manager login, written to the audit log, and — this is the part that matters — never
- * produced at all unless the copy passes its own privacy check. `buildClaudeCopy` snapshots,
- * scrubs, and then reads every text value back looking for anything that still looks like an
- * identifier; a copy that fails is refused and nothing is written. So there is no moment at which
- * an unscrubbed file exists somewhere it could be picked up by mistake, and no way for this route
- * to hand one over.
+ * It does not make one. Making it takes a minute or two and a browser shows nothing at all for the
+ * whole of it, which is exactly how the first version of this ended up being reported as a button
+ * that does nothing. So the making is a press on the page, with an answer; this only serves the
+ * finished file, at once.
  *
- * A route rather than a form action because it is a file leaving the building, and a file leaving
- * the building should be a download with a name on it rather than something a page does invisibly.
+ * The name is taken from the query and checked against what is actually in the backup folder,
+ * because a file name that arrives from outside is not a path anybody should be allowed to
+ * assemble — "../../.env" is a file name too.
  */
-export async function GET() {
+export async function GET(req: NextRequest) {
   const user = await requireManager();
-  const built = await buildClaudeCopy();
+  const wanted = req.nextUrl.searchParams.get("file") ?? "";
+  const status = await backupStatus();
+  const dir = path.resolve(status.destination);
 
-  if (!built.ok) {
-    await audit({
-      action: "backup.copy_for_claude_refused",
-      userId: user.id,
-      userName: user.name,
-      details: built.why.slice(0, 400),
-    });
+  const held = (await fs.readdir(dir).catch(() => [] as string[])).filter((n) =>
+    /^pharmacy-copy-for-claude-.*\.zip$/.test(n),
+  );
+  // The newest, where none was named, so a plain link still does the obvious thing.
+  const name = wanted ? held.find((n) => n === wanted) : [...held].sort().pop();
+  if (!name) {
     return NextResponse.json(
       {
-        error: built.why,
-        found: built.found,
-        whatToDo:
-          "Nothing was written and nothing left the pharmacy. Send this message to Claude: the site has a column " +
-          "the scrubber does not know about, and the scrubber is what needs changing before a copy can be made.",
+        error: wanted
+          ? `There is no copy called ${wanted} in ${dir}.`
+          : `No copy has been made yet. Settings, Backups, "Make a copy for Claude".`,
       },
-      { status: 409 },
+      { status: 404 },
     );
   }
 
+  const full = path.join(dir, name);
+  const data = await fs.readFile(full);
   await audit({
-    action: "backup.copy_for_claude",
+    action: "backup.copy_for_claude_downloaded",
     userId: user.id,
     userName: user.name,
-    details:
-      `${built.fileName}, ${(built.bytes / 1_048_576).toFixed(1)} MB. ` +
-      `${built.report.prescriptions.toLocaleString()} prescription numbers replaced; ` +
-      `${built.checked.toLocaleString()} values checked and none held an identifier.`,
+    details: `${name}, ${(data.length / 1_048_576).toFixed(1)} MB`,
   });
 
-  return new NextResponse(new Uint8Array(built.data!), {
+  return new NextResponse(new Uint8Array(data), {
     headers: {
       "Content-Type": "application/zip",
-      "Content-Disposition": `attachment; filename="${built.fileName}"`,
-      "Content-Length": String(built.bytes),
+      "Content-Disposition": `attachment; filename="${name}"`,
+      "Content-Length": String(data.length),
       "Cache-Control": "no-store",
     },
   });

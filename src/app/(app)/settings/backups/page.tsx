@@ -17,6 +17,8 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
   await requireManager();
   const { ok, error, showKey } = await searchParams;
   const [s, clouds] = await Promise.all([backupStatus(), detectCloudFolders()]);
+  const { existingClaudeCopies } = await import("@/lib/backup-scrub");
+  const claudeCopies = await existingClaudeCopies(s.destination);
   const key = showKey === "1" ? encryptionKey() : null;
 
   async function save(fd: FormData) {
@@ -84,6 +86,43 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
     await audit({ action: "backup.rehearse", userId: u.id, userName: u.name, details: r.message });
     revalidatePath("/settings/backups");
     redirect(`/settings/backups?${r.ok ? "ok" : "error"}=` + encodeURIComponent(r.message));
+  }
+
+  /*
+   * Making the copy is a press with an answer, not a download link that appears to do nothing.
+   *
+   * On this database the work is a minute or two — a snapshot, a scrub, and every text value in the
+   * result read back — and a browser shows nothing at all for the whole of it. The first version
+   * was a plain download link and the honest report on it was "hitting button, nothing is
+   * happening". So the file is written beside the backups, which is usually OneDrive, and the page
+   * says what happened either way.
+   */
+  async function makeCopy() {
+    "use server";
+    const u = await requireManager();
+    const st = await backupStatus();
+    const { writeClaudeCopy } = await import("@/lib/backup-scrub");
+    const r = await writeClaudeCopy(st.destination);
+    if (!r.ok) {
+      await audit({ action: "backup.copy_for_claude_refused", userId: u.id, userName: u.name, details: r.why.slice(0, 400) });
+      const where = r.found?.length ? ` Still holding something: ${r.found.map((f) => `${f.table}.${f.column} (${f.example})`).join("; ")}.` : "";
+      redirect("/settings/backups?error=" + encodeURIComponent(r.why + where));
+    }
+    await audit({
+      action: "backup.copy_for_claude",
+      userId: u.id,
+      userName: u.name,
+      details: `${r.path}, ${(r.bytes / 1_048_576).toFixed(1)} MB. ${r.report.prescriptions.toLocaleString()} prescription numbers replaced; ${r.checked.toLocaleString()} values checked and none held an identifier.`,
+    });
+    revalidatePath("/settings/backups");
+    redirect(
+      "/settings/backups?ok=" +
+        encodeURIComponent(
+          `Copy made: ${mb(r.bytes)}, saved in ${st.destination}. ` +
+            `${r.report.prescriptions.toLocaleString()} prescription numbers replaced, ` +
+            `${r.checked.toLocaleString()} values checked and none held an identifier.`,
+        ),
+    );
   }
 
   const hoursSince = s.lastRun ? (Date.now() - Date.parse(s.lastRun)) / 3_600_000 : null;
@@ -321,15 +360,39 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
           not written at all, and the page says which column it was — which means the site has grown something the
           scrubber does not know about, and the scrubber is what needs fixing.
         </p>
-        <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-line pt-3">
-          <a href="/api/export/copy-for-claude" download className="btn btn-primary">
-            Make a copy for Claude
-          </a>
-          <span className="text-xs text-ink-3">
-            Takes about half a minute and downloads when it is done. Every copy is written to the audit log.
-          </span>
+        <div className="mt-3 border-t border-line pt-3">
+          <form action={makeCopy}>
+            <button className="btn btn-primary">Make a copy for Claude</button>
+          </form>
+          <p className="mt-2 text-xs text-ink-3">
+            The page will sit still for a minute or two while it works — a snapshot, the scrub, and every value in the
+            result read back — and then say what it did. It saves into <b>{s.destination || "the backup folder"}</b>,
+            the same place the backups go, so you can attach it from there. Every copy is written to the audit log.
+          </p>
         </div>
-        <p className="mt-2 text-xs text-ink-3">
+
+        {claudeCopies.length > 0 && (
+          <div className="mt-3 border-t border-line pt-3">
+            <p className="text-xs font-medium text-ink-2">Copies already made</p>
+            <ul className="mt-1 space-y-1">
+              {claudeCopies.slice(0, 5).map((c) => (
+                <li key={c.name} className="flex flex-wrap items-baseline gap-2 text-xs">
+                  <a href={`/api/export/copy-for-claude?file=${encodeURIComponent(c.name)}`} download className="text-accent underline">
+                    {c.name}
+                  </a>
+                  <span className="text-ink-3">
+                    {mb(c.bytes)} · {new Date(c.madeAt).toLocaleString()}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1 text-xs text-ink-3">
+              These download at once — the work is already done. They are also sitting in the folder above.
+            </p>
+          </div>
+        )}
+
+        <p className="mt-3 text-xs text-ink-3">
           This is not a backup and cannot restore this pharmacy: no documents, no passwords, and the prescription
           numbers are gone for good. The real backup is the card above.
         </p>

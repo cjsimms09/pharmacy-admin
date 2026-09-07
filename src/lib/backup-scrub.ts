@@ -515,3 +515,51 @@ export async function buildClaudeCopy(): Promise<ClaudeCopy & { data?: Buffer }>
     await fs.rm(tmp, { force: true });
   }
 }
+
+/**
+ * Makes the copy and writes it beside the backups, rather than only down a browser connection.
+ *
+ * A download link that takes two minutes and shows nothing is a broken button: the pharmacist
+ * pressed it, watched nothing happen, and said so. On a database this size the work is a minute or
+ * two — a snapshot, a scrub, and 1.7 million values read back — and a browser gives no sign of any
+ * of it.
+ *
+ * So the press starts the work, the page says where it got to, and the finished file lands in the
+ * folder the backups already go to. That folder is usually OneDrive, which means the copy is
+ * somewhere it can be attached from without a download having to succeed at all.
+ */
+export async function writeClaudeCopy(destination: string): Promise<{ ok: true; path: string; bytes: number; report: ScrubReport; checked: number } | { ok: false; why: string; found?: { table: string; column: string; example: string }[] }> {
+  const built = await buildClaudeCopy();
+  if (!built.ok) return built;
+  const dir = path.resolve(destination);
+  await fs.mkdir(dir, { recursive: true });
+  const out = path.join(dir, built.fileName);
+  await fs.writeFile(out, built.data!);
+
+  /*
+   * Read back what was actually written, not the buffer still in memory — which would prove
+   * nothing about the file on the disk, and the disk is the thing that fills up.
+   */
+  const onDisk = await fs.stat(out);
+  if (onDisk.size !== built.bytes) {
+    await fs.rm(out, { force: true });
+    return { ok: false, why: `The copy was ${built.bytes.toLocaleString()} bytes but only ${onDisk.size.toLocaleString()} reached ${dir}. It has been removed rather than left half-written. Check the folder has room.` };
+  }
+  return { ok: true, path: out, bytes: built.bytes, report: built.report, checked: built.checked };
+}
+
+/** The copies already made, newest first, so the page can offer one without building another. */
+export async function existingClaudeCopies(destination: string): Promise<{ name: string; bytes: number; madeAt: string }[]> {
+  try {
+    const dir = path.resolve(destination);
+    const names = (await fs.readdir(dir)).filter((n) => /^pharmacy-copy-for-claude-.*\.zip$/.test(n));
+    const out = [];
+    for (const name of names) {
+      const s = await fs.stat(path.join(dir, name));
+      out.push({ name, bytes: s.size, madeAt: s.mtime.toISOString() });
+    }
+    return out.sort((a, b) => b.madeAt.localeCompare(a.madeAt));
+  } catch {
+    return [];
+  }
+}
