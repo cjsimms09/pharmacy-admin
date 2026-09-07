@@ -138,12 +138,27 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
         {isCurrent && pace && <span className="text-xs text-ink-3">{pace.says}</span>}
       </div>
 
+      {/*
+        Computed, and leaning. Kept apart from the incomplete-account notice above: that one says
+        the bottom line cannot be read at all, this one says it can be read and is too high. A
+        pharmacist who is told everything is a crisis stops reading either.
+      */}
+      {accrual.usable && accrual.caveats.length > 0 && (
+        <Notice kind="warn">
+          <b>Right as far as it goes, and high.</b>
+          <ul className="mt-1 list-disc space-y-0.5 pl-5">
+            {accrual.caveats.map((c, i) => <li key={i}>{c}</li>)}
+          </ul>
+        </Notice>
+      )}
+
       {!accrual.usable && (
         <Notice kind="crit">
           <b>Not yet a complete account of {period.label}.</b> Until these are in, the bottom line is wrong in the flattering direction:
           <ul className="mt-1 list-disc space-y-0.5 pl-5">
             {accrual.missing.slice(0, 6).map((m, i) => <li key={i}>{m}</li>)}
             {accrual.missing.length > 6 && <li>and {accrual.missing.length - 6} more on the statement.</li>}
+            {accrual.caveats.map((c, i) => <li key={`c${i}`}>{c}</li>)}
           </ul>
           <span className="mt-1 block">
             Record them on <Link href="/expenses" className="underline">Spending</Link>.

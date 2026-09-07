@@ -276,10 +276,30 @@ export function buildDirectory(products: DirectoryProduct[], packages: Directory
 export const isARated = (teCode: string | null): boolean => /^A/i.test(teCode ?? "");
 
 /**
+ * The numeric suffix on an A-rating is a subgroup, and it is not decoration.
+ *
+ * Where the FDA cannot say that every product under one code is interchangeable with every other —
+ * different delivery systems, different bioequivalence findings — it splits them into AB1, AB2,
+ * AB3. Products are equivalent *within* a subgroup and explicitly not across one. Treating every
+ * AB* as one pool would substitute across that line, which is the single mistake this whole module
+ * exists to prevent, and would do it while displaying an FDA rating as its justification.
+ *
+ * A bare "AB" is its own group too: it is not a wildcard that matches AB1.
+ */
+export const teGroup = (teCode: string | null): string | null => {
+  const t = (teCode ?? "").trim().toUpperCase();
+  return t === "" ? null : t;
+};
+
+/**
  * Whether one NDC may be dispensed in place of another: the same key, and both rated
  * therapeutically equivalent. Two unrated products with the same key are the same drug on paper
  * and still not called substitutable here, because nothing has said they are.
  */
 export function substitutable(a: Pick<DrugDirectoryRow, "equivalenceKey" | "teCode">, b: Pick<DrugDirectoryRow, "equivalenceKey" | "teCode">): boolean {
-  return a.equivalenceKey === b.equivalenceKey && isARated(a.teCode) && isARated(b.teCode);
+  if (a.equivalenceKey !== b.equivalenceKey) return false;
+  if (!isARated(a.teCode) || !isARated(b.teCode)) return false;
+  // The same rating, suffix and all: AB1 is not AB2, and neither is a bare AB.
+  const ga = teGroup(a.teCode);
+  return ga !== null && ga === teGroup(b.teCode);
 }

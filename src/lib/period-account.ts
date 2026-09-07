@@ -111,6 +111,8 @@ export type PeriodTotals = {
   unusableMonths: string[];
   /** Everything the months said was missing, said once. */
   missing: string[];
+  /** Everything the months computed and knew leaned, said once. See MonthlyPL.caveats. */
+  caveats: string[];
 };
 
 const share = (part: number, whole: number): number | null =>
@@ -150,6 +152,7 @@ export function periodTotals(period: Period, basis: "accrual" | "cash", months: 
     emptyMonths: period.months.filter((m) => !inPeriod.some((x) => x.month === m)),
     unusableMonths: inPeriod.filter((m) => !m.usable).map((m) => m.month),
     missing: [...new Set(inPeriod.flatMap((m) => m.missing))],
+    caveats: [...new Set(inPeriod.flatMap((m) => m.caveats ?? []))],
   };
 }
 
