@@ -155,6 +155,25 @@ export async function importPioneerCatalog(file: Buffer, fileName: string, userI
   return { importIds, suppliers, rowsRead, skipped: parsed.skipped, skipReasons: parsed.reasons, pricedOn, problems };
 }
 
+/**
+ * What to store for a column when the file being imported may not have carried it at all.
+ *
+ * A section is written by deleting its NDCs and inserting them again, so every column is decided
+ * from scratch on every import. That is fine while the files all have the same shape, and wrong the
+ * moment they do not: PioneerRx's newer catalogue export carries AWP and a rebate flag and its
+ * older one carries neither, and importing the older export blanked AWP on twenty-six thousand
+ * McKesson rows that had one.
+ *
+ * Absent is not empty. A file that never mentions a column says nothing about it and must leave
+ * what the site holds alone. A file that carries the column and leaves this row blank is making a
+ * statement — that this item has none — and that statement is stored.
+ */
+export function fieldAfterImport<T>(fromFile: T | null | undefined, fileCarriesColumn: boolean, held: T | null | undefined): T | null {
+  if (fromFile !== null && fromFile !== undefined) return fromFile;
+  if (fileCarriesColumn) return null;
+  return held ?? null;
+}
+
 async function writeSection(
   section: CatalogSection,
   fileName: string,
@@ -168,9 +187,28 @@ async function writeSection(
     id: importId, supplier, supplierId, fileName, rowsRead: rows.length, createdBy: userId,
   });
 
-  const before = new Set(
-    (await db.query.supplierItems.findMany({ where: eq(schema.supplierItems.supplier, supplier), columns: { ndc11: true } })).map((e) => e.ndc11),
-  );
+  /*
+   * What this supplier's rows already say, so a file that is silent about a column does not erase it.
+   *
+   * The two catalogue exports PioneerRx produces are not the same shape: the newer one carries AWP
+   * and a rebate flag, the older one carries neither. Because a section is written by deleting its
+   * NDCs and inserting them again, importing the older export blanked AWP on twenty-six thousand
+   * McKesson rows that had one — a column the file never mentioned, emptied because it was absent.
+   *
+   * Absent is not empty. A file that carries no AWP at all leaves the AWP the site holds alone; a
+   * file that carries the column and leaves one row blank is genuinely saying that row has none.
+   */
+  const held = new Map<string, { awpCents: number | null; contractFlag: string | null }>();
+  for (const e of await db.query.supplierItems.findMany({
+    where: eq(schema.supplierItems.supplier, supplier),
+    columns: { ndc11: true, awpCents: true, contractFlag: true },
+  }))
+    held.set(e.ndc11, { awpCents: e.awpCents, contractFlag: e.contractFlag });
+  const before = new Set(held.keys());
+
+  // Whether this section's file carried the columns at all, judged by whether anything filled them.
+  const fileHasAwp = rows.some((r) => r.awpCents !== null && r.awpCents !== undefined);
+  const fileHasRebateFlag = rows.some((r) => r.rebated !== null && r.rebated !== undefined);
 
   /*
    * One NDC, several rows: keep the one a comparison should see.
@@ -220,14 +258,23 @@ async function writeSection(
       packCostCents: pick.unitCostMicros !== null && pick.packQty ? Math.round((pick.unitCostMicros * pick.packQty) / 10_000) : null,
       // AWP off whichever row was picked, and off any row in the group that has one — the same
       // product at a short date is the same product, and only one of the rows tends to carry it.
-      awpCents: pick.awpCents ?? group.find((r) => r.awpCents !== null)?.awpCents ?? null,
+      awpCents: fieldAfterImport(
+        pick.awpCents ?? group.find((r) => r.awpCents !== null)?.awpCents,
+        fileHasAwp,
+        held.get(ndc11)?.awpCents,
+      ),
       /*
        * Whether the tier rebate applies to this item — the one fact that lets a comparison take
        * the rebate off a McKesson generic's gross price and nothing else's. Read from the file's
        * rebate column. Null where the file had no such column, in which case the comparison has
        * to say it is estimating.
        */
-      contractFlag: isRebated === null ? null : isRebated ? "rebated" : "not rebated",
+      // The same rule as AWP: a file with no rebate column at all does not un-flag an item.
+      contractFlag: fieldAfterImport(
+        isRebated === null ? undefined : isRebated ? "rebated" : "not rebated",
+        fileHasRebateFlag,
+        held.get(ndc11)?.contractFlag,
+      ),
       availability,
       pricedOn,
       importId,

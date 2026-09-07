@@ -519,6 +519,13 @@
       "when": 1788742513177,
       "tag": "0073_high_mac_gargan",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "6",
+      "when": 1788747519692,
+      "tag": "0074_careless_sharon_carter",
+      "breakpoints": true
     }
   ]
 }

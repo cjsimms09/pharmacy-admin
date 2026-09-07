@@ -2261,6 +2261,34 @@ export const supplierItemFixes = sqliteTable(
   (t) => [uniqueIndex("supplier_item_fixes_key_idx").on(t.supplier, t.ndc11)],
 );
 
+/**
+ * What a package of this NDC actually holds, decided once by the pharmacy.
+ *
+ * An NDC names a package. Two wholesalers listing the same NDC at different pack sizes are not
+ * describing two products — one of them is wrong — and the same is true when a wholesaler's file
+ * disagrees with what PioneerRx counted off the shelf. The pharmacy is the only party that can
+ * settle it, because the pharmacy has the bottle.
+ *
+ * So this is keyed on the NDC alone, not on the supplier. `supplier_item_fixes` corrects one
+ * wholesaler's row; this says what the package is, everywhere, for everyone — which is what makes
+ * a disagreement between suppliers fixable in one action rather than once per supplier, and what
+ * makes the answer still right when a supplier the pharmacy has never bought from sends a file
+ * next week.
+ *
+ * A supplier-specific fix still wins where one exists: it is the more specific statement, and it
+ * is how a pharmacy records that one wholesaler genuinely ships a different configuration.
+ */
+export const ndcPackFixes = sqliteTable("ndc_pack_fixes", {
+  id: text("id").primaryKey(),
+  ndc11: text("ndc11").notNull().unique(),
+  /** The pack size as it should read — "180 EA", "60 ML". */
+  packSize: text("pack_size").notNull(),
+  /** What it was checked against: the bottle, the invoice, the manufacturer's page. */
+  note: text("note"),
+  correctedBy: text("corrected_by").notNull(),
+  correctedAt: text("corrected_at").notNull().default(now()),
+});
+
 // ── Training assignments ─────────────────────────────────────────────
 // The loop that turns "I should get everyone through FWA training" into evidence.
 //
