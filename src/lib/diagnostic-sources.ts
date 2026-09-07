@@ -132,6 +132,103 @@ export const SOURCES: Source[] = [
     },
   },
   {
+    /*
+     * The invoice file, which is where most of what has gone wrong here has gone wrong: a statement
+     * that would not leave, a drill down offered as an invoice, a delete that took the wrong row.
+     * All three were invisible from outside, and all three are answerable from this.
+     */
+    key: "invoices",
+    title: "Supplier invoices",
+    href: "/inventory/invoices",
+    load: async () => {
+      const { invoices, awaitingReview, invoiceCounts, invoiceIssues, adoptableDocuments, misfiledInVault, missingTotals, invoicesWithoutLines, awaitingReceipt } =
+        await import("./invoices");
+      const { invoiceCompliance } = await import("./invoice-compliance");
+      const [filed, review, counts, issues, adoptable, misfiled, compliance, noAmount, noLines, unreceipted] = await Promise.all([
+        invoices({}),
+        awaitingReview(),
+        invoiceCounts(),
+        invoiceIssues(),
+        adoptableDocuments(),
+        misfiledInVault(),
+        invoiceCompliance(),
+        missingTotals(),
+        invoicesWithoutLines(),
+        awaitingReceipt(),
+      ]);
+      return {
+        data: { filed, awaitingReview: review, counts, issues, adoptable, misfiled, compliance, unreceipted },
+        shownWith: { noAmount, noLines },
+        notes: [
+          `${filed.length} filed, ${adoptable.length} offered for filing, ${misfiled.length} in the invoice folder that do not read as invoices.`,
+          "Every filed row carries its document id, so a row that will not go away can be traced to what it points at.",
+        ],
+      };
+    },
+  },
+  {
+    key: "cqi",
+    title: "CQI programme",
+    href: "/cqi",
+    load: async () => {
+      const { currentCqiObligation, incidentsWithStage, carriedForward } = await import("./cqi");
+      const { db } = await import("@/db");
+      const obligation = await currentCqiObligation();
+      const [rows, summaries, carried] = await Promise.all([
+        incidentsWithStage(),
+        db.query.cqiSummaries.findMany({ orderBy: (x, { desc }) => [desc(x.periodStart)] }),
+        carriedForward(obligation.period.periodStart),
+      ]);
+      return {
+        data: { obligation, summaries, incidents: rows, carried },
+        notes: [`The period actually outstanding is ${obligation.period.label}, due ${obligation.period.dueOn}.`],
+      };
+    },
+  },
+  {
+    key: "deliveries",
+    title: "The delivery round",
+    href: "/deliveries",
+    load: async (p) => {
+      const { monthState, invoiceParties, allInvoices, monthsWithDays } = await import("./deliveries");
+      const { todayIso } = await import("./dates");
+      const month = p.get("month") ?? todayIso().slice(0, 7);
+      const [state, parties, invoices, months] = await Promise.all([monthState(month), invoiceParties(), allInvoices(), monthsWithDays()]);
+      return { data: { state, parties, invoices }, shownWith: { month, monthsWithDays: months } };
+    },
+  },
+  {
+    key: "temps",
+    title: "Temperatures",
+    href: "/temps",
+    load: async () => {
+      const { db } = await import("@/db");
+      const [sensors, notes] = await Promise.all([db.query.tempSensors.findMany(), db.query.tempNotes.findMany()]);
+      const readings = await db.query.tempReadings.findMany({ orderBy: (r, { desc }) => [desc(r.takenAt)], limit: 2000 });
+      return {
+        data: { sensors, notes, readings },
+        notes: ["The two thousand most recent readings only — the whole history would be a file nobody can send."],
+      };
+    },
+  },
+  {
+    key: "staff",
+    title: "People and credentials",
+    href: "/staff",
+    load: async () => {
+      const { db } = await import("@/db");
+      const [people, credentials, assignments] = await Promise.all([
+        db.query.people.findMany(),
+        db.query.credentials.findMany(),
+        db.query.trainingAssignments.findMany(),
+      ]);
+      return {
+        data: { people, credentials, assignments },
+        notes: ["Staff are the pharmacy's own employees, so names are kept: they are not patient information."],
+      };
+    },
+  },
+  {
     key: "expenses",
     title: "Spending",
     href: "/expenses",
@@ -307,4 +404,66 @@ export async function buildBundle(
     data,
   };
   return { ok: true, bundle, filename: `${key}-${new Date().toISOString().slice(0, 10)}.json` };
+}
+
+/**
+ * Which export belongs to the page somebody is looking at.
+ *
+ * The button used to be added to pages one at a time, and reached eleven of a hundred and one. The
+ * ninety it never reached were the ones where a figure looked wrong and there was no way to send
+ * the figure — which is precisely backwards, because a page nobody thought to instrument is a page
+ * nobody has checked.
+ *
+ * So the button lives in the frame now and asks this which source to use. Longest match wins, so
+ * /purchasing/shelf gets the shelf's export rather than purchasing's, and anything with no source
+ * of its own still exports — see `genericBundle` — rather than offering a button that does nothing.
+ */
+export function sourceForPath(pathname: string): Source | null {
+  const path = (pathname || "/").split("?")[0].replace(/\/+$/, "") || "/";
+  let best: Source | null = null;
+  for (const s of SOURCES) {
+    const href = s.href.replace(/\/+$/, "") || "/";
+    if (path === href || path.startsWith(`${href}/`)) {
+      if (!best || href.length > best.href.replace(/\/+$/, "").length) best = s;
+    }
+  }
+  return best;
+}
+
+/**
+ * An export for a page that has no loader of its own.
+ *
+ * It cannot carry what the page computed, and it says so plainly rather than pretending. What it
+ * can carry is everything needed to ask a sensible first question about that page: which page it
+ * was, what it was showing, and the state of the site behind it — how much of each thing is held,
+ * whether the mailbox is running, which reports have arrived. On this site that has been enough to
+ * find most faults, because most of them are a feed that did not arrive rather than a sum that
+ * came out wrong.
+ */
+export async function genericBundle(
+  pathname: string,
+  params: URLSearchParams,
+): Promise<{ bundle: Bundle; filename: string }> {
+  const slug = pathname.replace(/^\/+|\/+$/g, "").replace(/\//g, "-") || "today";
+  return {
+    filename: `${slug}-${new Date().toISOString().slice(0, 10)}.json`,
+    bundle: {
+      readme: [
+        `This is the “${pathname}” page. It has no export of its own yet, so this file does not carry what the page`,
+        "computed — it carries what the site holds behind it, which is usually where the fault is.",
+        "Say what looked wrong on the screen and this is enough to start from.",
+      ],
+      page: slug,
+      pageTitle: pathname,
+      takenAt: new Date().toISOString(),
+      shownWith: Object.fromEntries(params),
+      environment: await environment().catch((e) => ({ unreadable: String(e) })),
+      privacy: { prescriptionsPseudonymised: 0, distinctPrescriptions: 0, dropped: {}, identifiersIncluded: false },
+      notes: [
+        "No page-specific loader is registered for this path, so no computed figures are included.",
+        "Everything below is the state of the site at the moment the file was made.",
+      ],
+      data: null,
+    },
+  };
 }

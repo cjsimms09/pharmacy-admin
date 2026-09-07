@@ -1,0 +1,66 @@
+"use client";
+
+import { usePathname, useSearchParams } from "next/navigation";
+import { Suspense } from "react";
+
+/**
+ * "Send this page to Claude", on every page, in the same place.
+ *
+ * The export existed and reached eleven pages of a hundred and one, because it was added a page at
+ * a time. The ninety it missed are the ones where something looked wrong and there was no way to
+ * send it — which is backwards: a page nobody thought to instrument is a page nobody has checked.
+ *
+ * So it lives in the frame, at the foot of the sidebar, where it never moves and never has to be
+ * looked for. It takes the page's own path and query string with it, so the file answers the same
+ * question the screen was answering — the month being viewed, the filter that was set.
+ *
+ * Two links rather than one, and the second says exactly what it does. A diagnosis is almost
+ * always possible without real prescription numbers, so that is the default.
+ */
+function Buttons() {
+  const path = usePathname();
+  const search = useSearchParams();
+
+  const qs = new URLSearchParams(search?.toString() ?? "");
+  qs.set("path", path ?? "/");
+  const safe = `/api/export/for?${qs.toString()}`;
+  const withIds = `/api/export/for?${new URLSearchParams({ ...Object.fromEntries(qs), identifiers: "include" }).toString()}`;
+
+  return (
+    <details className="no-print mt-2">
+      <summary className="cursor-pointer list-none">
+        <span className="btn btn-sm w-full justify-center text-[11px]">Send this page to Claude</span>
+      </summary>
+      <div className="mt-2 space-y-2 text-[11px] leading-relaxed text-ink-3">
+        <a href={safe} download className="btn btn-sm btn-primary w-full justify-center text-[11px]">
+          Download the file
+        </a>
+        <p>
+          Everything this page computed, what it was filtered to, and what the site had loaded at the time. Send it in
+          the chat and the answer can be about the actual row.
+        </p>
+        <p>
+          Prescription numbers are replaced with stand-ins that mean nothing outside the file. Patient names, dates of
+          birth and addresses are never stored by this site, so they cannot be in it.
+        </p>
+        <a href={withIds} download className="underline hover:text-ink">
+          With the real prescription numbers
+        </a>
+        <p>Only when the question is about one prescription by name. Every download is recorded either way.</p>
+      </div>
+    </details>
+  );
+}
+
+export function SendToClaude() {
+  /*
+   * useSearchParams needs a boundary, or every page that renders this frame is forced out of
+   * static rendering at build time. The fallback is the closed button, which is what it looks like
+   * anyway until somebody opens it.
+   */
+  return (
+    <Suspense fallback={<div className="no-print mt-2 h-7" />}>
+      <Buttons />
+    </Suspense>
+  );
+}

@@ -4,6 +4,7 @@ import { requireUser, logout } from "@/lib/auth";
 import { reimbursementEnabled } from "@/lib/features";
 import { noteRequest } from "@/lib/activity";
 import { Nav } from "@/components/nav";
+import { SendToClaude } from "@/components/send-to-claude";
 import { logo } from "@/lib/branding";
 import { getSettings } from "@/lib/settings";
 
@@ -76,6 +77,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <div className="truncate text-ink-2">{user.name}</div>
           <div className="capitalize">{user.role}</div>
           <form action={signOut}><button className="mt-1 underline hover:text-ink">Sign out</button></form>
+          {/*
+            On every page, in one place that never moves.
+
+            The export was added a page at a time and reached eleven of a hundred and one — and the
+            ninety it missed are exactly the ones where something looked wrong and there was no way
+            to send it. In the frame it is always there, and it takes the page's own path and
+            filters with it so the file answers the question that was on the screen.
+          */}
+          <SendToClaude />
         </div>
       </aside>
       <main className="min-w-0 px-4 py-6 md:px-8">{children}</main>

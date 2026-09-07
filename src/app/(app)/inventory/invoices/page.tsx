@@ -138,6 +138,19 @@ export default async function InvoicesPage({
     adoptableDocuments(),
     invoiceCompliance(),
   ]);
+  /*
+   * Rows whose document is gone.
+   *
+   * An invoice record points at the PDF it was read from. Delete the document without the record —
+   * which the old per-page delete paths could do — and what is left is a row that opens nothing,
+   * proves nothing to an inspector, still counts as a purchase, and cannot be explained by looking
+   * at it. That is the shape of the row that would not go away, and until now the table gave no
+   * hint of it: it looked like an ordinary invoice with no date and no amount.
+   */
+  const { db: database } = await import("@/db");
+  const documentIds = new Set((await database.query.documents.findMany({ columns: { id: true } })).map((d) => d.id));
+  const orphanRows = rows.filter((r) => !documentIds.has(r.documentId));
+
   // What is in the invoice folder that is not an invoice. Only an invoice belongs there.
   const misfiled = canManage ? await misfiledInVault() : [];
   // The ones the site can name for itself; the rest need a person and are asked about per row.
@@ -790,6 +803,38 @@ export default async function InvoicesPage({
         fills with documents that prove nothing, and the one question the folder exists to answer
         stops having a clean answer.
       */}
+      {orphanRows.length > 0 && canManage && (
+        <Card
+          tone="crit"
+          title="Invoice records whose document has gone"
+          count={orphanRows.length}
+          subtitle="Each of these points at a PDF that no longer exists. It opens nothing, proves nothing to an inspector, and still counts as a purchase — and on the table below it looks like an ordinary invoice with no date and no amount, which is why one of them could not be explained by looking at it."
+          className="mt-4 mb-6"
+        >
+          <ul className="rows">
+            {orphanRows.map((r) => (
+              <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                <span className="min-w-0 text-sm">
+                  {[r.supplier, r.invoiceNumber, r.invoiceDate ? fmt(r.invoiceDate) : "no date", r.totalCents === null ? "no amount" : money(r.totalCents)]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
+                <form action={destroy} className="shrink-0">
+                  <button
+                    name="destroyId"
+                    value={r.id}
+                    className="btn btn-sm border-crit text-crit hover:bg-crit-soft"
+                    formNoValidate
+                  >
+                    Delete this record
+                  </button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
       {misfiled.length > 0 && canManage && (
         <Card
           tone="crit"
