@@ -46,7 +46,19 @@ export function SubNav({ tools }: { tools: boolean }) {
     <>
       {(
         <div className="nav-sub">
-          <div className="site-row h-11 gap-1.5 overflow-x-auto">
+          {/*
+            The pills scroll; the menu must not be inside the thing that scrolls.
+
+            "more" is a <details> whose panel is absolutely positioned below the row. It was a child
+            of the row itself, and that row carries overflow-x-auto for narrow screens — which
+            establishes a clipping box on *both* axes, not just the one named. So the panel opened
+            forty-odd pixels down inside a forty-four pixel box and was cut off entirely: the arrow
+            turned, nothing appeared, and every group's menu was dead in the same way.
+
+            So the scrolling moved inward, onto the pills alone, and the menu sits outside it.
+          */}
+          <div className="site-row h-11 gap-1.5">
+            <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
             {listed.map((i) => (
               <Link key={i.href} href={i.href} className={`nav-item ${isOn(i.href) ? "on" : ""}`} aria-current={isOn(i.href) ? "page" : undefined}>
                 {i.label}
@@ -58,6 +70,7 @@ export function SubNav({ tools }: { tools: boolean }) {
                 {i.label}
               </Link>
             ))}
+            </div>
             {more.length > 0 && (
               <details className="nav-more">
                 <summary>more ▾</summary>
