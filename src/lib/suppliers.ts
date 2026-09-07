@@ -316,7 +316,10 @@ export async function importSupplierCatalog(
       packSize: (g("packSize") ?? "").trim() || null,
       unitCostMicros,
       packCostCents,
-      contractFlag: (g("contractFlag") ?? "").trim() || null,
+      // The flag as the two comparisons read it, "rebated" or "not rebated", never the file's own
+      // word: a column of Y and N landed here as Y and N, which neither the purchasing ledger nor
+      // the buy list recognised, so no catalogue line from this path ever carried its discount.
+      contractFlag: contractFlagOf(g("contractFlag")),
       availability: (g("availability") ?? "").trim() || null,
       pricedOn: date,
       importId,
@@ -522,4 +525,18 @@ export async function latestSupplierImport(): Promise<string | null> {
     limit: 1,
   });
   return rows[0]?.createdAt ?? null;
+}
+
+/**
+ * A catalogue's contract column as the site reads it. Yes-words are "rebated", no-words are
+ * "not rebated", and anything else — a blank, a code the file does not explain — is null, which
+ * every comparison treats as "cannot tell" rather than as a discount.
+ */
+export function contractFlagOf(raw: string | undefined | null): "rebated" | "not rebated" | null {
+  const v = (raw ?? "").trim().toLowerCase();
+  if (!v) return null;
+  if (/^(y|yes|true|1|x|c|contract|on contract|onestop|one stop|rebated|generic contract|source)$/.test(v)) return "rebated";
+  if (/^(n|no|false|0|not rebated|off|off contract|non-contract|noncontract)$/.test(v)) return "not rebated";
+  if (v === "rebated") return "rebated";
+  return null;
 }

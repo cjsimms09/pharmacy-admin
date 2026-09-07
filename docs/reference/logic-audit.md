@@ -36,3 +36,26 @@ side), `standing-math.ts`, `reconcile.ts`. The statement and the books read the 
 - 835 remittances → cash revenue derived, and the receivable aged (ledger §7).
 - Sales tax on the summary's retail line.
 - `period-account.ts` (the pharmacy session's) and `loadShared` both exist; one should absorb the other (HANDOFF).
+
+## Money found `/money/found` and the rows it draws from
+
+| Row | Source | Finding |
+|---|---|---|
+| Buying from a cheaper supplier; dispensed at a loss | `product-ledger.ts`: invoice price per unit less the supplier's rate where the line is marked rebated, against every catalogue's effective price; margins on the units dispensed | **Fixed:** the fill's revenue left out money that reached it later (facilitator refunds), so every Part D brand with a refund landed read as dispensed at a loss. Note: cost here is the latest invoice price net of rebate applied to every unit dispensed in the period, while the Claims page costs each fill at PioneerRx's acquisition cost; both are said on their pages. |
+| Next rebate band; band at risk | `ratio-effect.ts` on the month's invoice lines at the primary | **Fixed:** the ratio's denominator was every line on the invoices, over-the-counter included; the compliance ratio is measured on prescription purchases, so the spend a band needs was overstated. Now the lines carrying a class letter, where the invoice prints them. **Fixed:** the brand factor was applied to every "not rebated" line, OTC included. Simplification kept and said: the band's worth is the rate difference on the month's contract generics so far, not projected to month end, and not counting the rate the extra spend itself would earn; both understate. |
+| Rebate estimate on the books | `earningSoFar` | **Fixed:** used today's ladders for any month asked for; now the ladders in force at the end of that month. **Open:** the ratio that picks the band is the latest known (one statement is held per supplier, not one per period), so a closed month's estimate can carry this month's band until `rebate_statements` exist (ledger §7.1). |
+| Returns closing | `returns-due.ts`: days since the invoice against the supplier's credit steps, less the restocking fee | Sound. Nothing for a supplier without a policy on file, said. |
+| Kansas floor | was `claimFlags.underFee` | **Fixed (two faults):** the row was called "paid below the Kansas floor" but summed a different thing — fills that received less than the $10.50 fee alone; and that test ran per claim row, so the secondary leg of a coordinated fill ($0 paid because the primary paid) counted as under the fee by the whole $10.50. The row now carries the floor page's own figure: NADAC in force on the fill date plus the fee, per fill, on claims that pass every check. The under-fee sieve on the Claims page is judged per fill. |
+| Payer spread | `payer-map.ts`: best against worst plan per drug, cards excluded | Marked "worth checking", as it should be: plans buy different things. |
+| Totals | `totals()` counts each overlapping problem once | Sound. |
+
+## What to buy `/purchasing`, the shelf, the minimums, Which contract
+
+| Figure | Source | Finding |
+|---|---|---|
+| Order quantity | `toOrderThousandths`: (target days + lead time) × rate, less on hand and on order, whole units | **Fixed:** the lead time used was `Math.min(...leads, 1)`, never more than a day, so a three-day supplier's order was sized two days short. Now the shortest lead on file, and never under a day. |
+| Offers | catalogue price less the supplier's rate where the line is rebated | **Fixed:** any flag at all counted as rebated, so a line the catalogue marked "not rebated" got the discount and could beat the contract line. **Fixed:** the generic catalogue importer stored the file's own word (Y, N, …), which neither comparison recognised, so no line from that path ever carried its discount; the flag is normalised on import (`contractFlagOf`). |
+| Moving a basket off the primary | `bandCostOfMoving`: the whole basket treated as contract generics | Conservative by design, said in code; denominator now prescription lines. |
+| Minimum filler | `minimum-filler.ts` | Sound: generics by CMS flag, controlled excluded, cheapest here after rebate, whole packs inside the horizon, overshoot said. |
+| Which contract | `contract-replay.ts`: each fill at the supplier's cheapest equivalent, ladder at the replayed month's unscrubbed ratio | Sound as far as the data allows; the unscrubbed ratio understates every ladder equally, and the table now follows the ranking (coverage first). |
+| Driver invoices | trips × rate | Sound. |

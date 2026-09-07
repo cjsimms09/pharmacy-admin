@@ -380,8 +380,10 @@ export async function productLedger(): Promise<{ rows: LedgerRow[]; rate: number
     ndc11: f.ndc11,
     itemName: f.itemName,
     quantityThousandths: f.quantityThousandths,
-    // The whole fill's revenue on one row: every plan's remit plus what the patient actually paid.
-    remitCents: f.remitCents,
+    // The whole fill's revenue on one row: every plan's remit plus what the patient actually paid,
+    // plus money that reached the fill later. A Part D brand whose facilitator refund has landed
+    // is not dispensed at a loss, and this page used to say it was on every one of them.
+    remitCents: f.remitCents + f.laterPaymentsCents,
     copayCents: f.patientPaidCents,
     status: "paid" as const,
   }));

@@ -234,9 +234,9 @@ export async function moneyFound(): Promise<MoneyFound> {
        * programme measured by something else is not moved by where a generic is bought.
        */
       const ladder = rates?.view.programmes.find((p) => p.terms.kind === "tiered_ratio" && /compliance|gcr/i.test(p.measuredBy ?? p.name));
-      if (rates && earning && ladder && ladder.achievedPercent !== null && ladder.terms.tiers.length > 0 && earning.totalPurchasedCents > 0) {
+      if (rates && earning && ladder && ladder.achievedPercent !== null && ladder.terms.tiers.length > 0 && earning.rxPurchasedCents > 0) {
         const { tierEffect } = await import("./ratio-effect");
-        const position = { ratioPercent: ladder.achievedPercent, denominatorCents: earning.totalPurchasedCents, definition: "generics_over_rx" as const, scrub: "statement" as const };
+        const position = { ratioPercent: ladder.achievedPercent, denominatorCents: earning.rxPurchasedCents, definition: "generics_over_rx" as const, scrub: "statement" as const };
         const bands = ladder.terms.tiers.map((t) => ({ thresholdPercent: t.thresholdPercent, rebatePercent: t.rebatePercent }));
         recInput.tier = { supplierName: primary.name, effect: tierEffect(position, bands, [], earning.contractPurchasedCents), baseCents: earning.contractPurchasedCents, bands };
       }
@@ -387,21 +387,34 @@ export async function moneyFound(): Promise<MoneyFound> {
   }
 
   // ── What the plans have underpaid ──
+  /*
+   * The floor itself, not the screen for it. The claims page's "under $10.50" test is a quick
+   * sieve — a fill that received less than the dispensing fee alone — and this list used to call
+   * that sum "paid below the Kansas floor". The floor is NADAC plus the fee, priced per fill on
+   * the NADAC in force that day, and only a claim that passes every check is filable money. That
+   * is what the floor page computes, so that is the figure here.
+   */
   try {
-    const { claimFlags } = await import("./claims");
-    const f = await claimFlags({ all: true });
-    if (f.underFee.length > 0 && f.underFeeShortfallCents > 0) {
+    const { floorReview } = await import("./floor-review");
+    const r = await floorReview();
+    if (r.filable.length > 0 && r.filableCents > 0) {
       rows.push({
         key: "kansas-floor",
-        says: `${money(f.underFeeShortfallCents)} paid below the Kansas floor on ${f.underFee.length} claim${f.underFee.length === 1 ? "" : "s"}.`,
-        todo: "These are on plans the floor applies to and were paid less in total than the dispensing fee alone. Appeal them.",
-        amountCents: f.underFeeShortfallCents,
+        says: `${money(r.filableCents)} paid below the Kansas floor on ${r.filable.length} claim${r.filable.length === 1 ? "" : "s"} that pass every check.`,
+        todo: "Each is priced on the NADAC in force on its fill date, on a plan the floor reaches, paid and not adjusted since. File them.",
+        amountCents: r.filableCents,
         cadence: "one_off",
         confidence: "certain",
-        basis: "Kansas SB 20: the floor is NADAC plus the greater of $10.50 and the Medicaid dispensing fee. Only plans classified as in scope are counted.",
+        basis: "Kansas SB 20: NADAC plus the greater of $10.50 and the Medicaid dispensing fee, per fill, less what was received. Only claims passing every check on the floor page are counted; the blocked ones are listed there with what would clear them.",
         href: "/claims/floor",
       });
     }
+  } catch {
+    /* No claims or no NADAC held. */
+  }
+  try {
+    const { claimFlags } = await import("./claims");
+    const f = await claimFlags({ all: true });
     if (f.undetermined > 0) {
       blocked.push({
         says: `${f.undetermined} claims are on plans nobody has classified, so nothing can say whether the Kansas floor applies to them.`,

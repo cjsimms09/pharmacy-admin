@@ -183,6 +183,13 @@ export type EarningSoFar = {
   brandPurchasedCents: number;
   unmarkedPurchasedCents: number;
   totalPurchasedCents: number;
+  /**
+   * The prescription lines only — the supplier's class letter is printed (legend or scheduled) —
+   * which is the denominator the compliance ratio is measured on. Over-the-counter lines carry no
+   * class and are not in the ratio; put in the denominator they overstate the spend a band needs.
+   * Equal to the total where the invoice prints no class letters at all.
+   */
+  rxPurchasedCents: number;
   contractRatePercent: number | null;
   brandRatePercent: number | null;
   contractRebateCents: number | null;
@@ -215,7 +222,11 @@ export async function earningSoFar(supplierId: string, month?: string): Promise<
   let brand = 0;
   let unmarked = 0;
   let unmarkedLines = 0;
+  let rx = 0;
+  const classed = mine.some((l) => /^[RXBDE]$/i.test((l.itemClass ?? "").trim()));
+  const isRx = (l: (typeof mine)[number]) => !classed || /^[RXBDE]$/i.test((l.itemClass ?? "").trim());
   for (const l of mine) {
+    if (isRx(l)) rx += l.extendedCents;
     /*
      * Brand or generic, decided by the invoice's own marking rather than by the drug name.
      *
@@ -225,14 +236,23 @@ export async function earningSoFar(supplierId: string, month?: string): Promise<
      * so both sit in the same bucket and the figure is called an estimate.
      */
     if (l.rebated === true) contract += l.extendedCents;
-    else if (l.rebated === false) brand += l.extendedCents;
+    // The brand factor is paid on brand prescription purchases; an over-the-counter line marked
+    // "not rebated" is neither, and earned the factor here until the class letter was read.
+    else if (l.rebated === false && isRx(l)) brand += l.extendedCents;
+    else if (l.rebated === false) unmarked += l.extendedCents;
     else {
       unmarked += l.extendedCents;
       unmarkedLines++;
     }
   }
 
-  const rates = await ratesFor(supplierId);
+  /*
+   * The ladders in force at the end of the month asked for, not today's: an August account drawn
+   * in September must use August's programme. The ratio that picks the band is still the latest
+   * known (the statement on file, or the current drill-down), because statements are held one per
+   * supplier rather than one per period — see money-ledger.md §7.1.
+   */
+  const rates = await ratesFor(supplierId, `${m}-${String(new Date(Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5, 7)), 0)).getUTCDate()).padStart(2, "0")}`);
   const contractRate = rates?.view.contractGenericPercent ?? null;
   const brandRate = rates?.view.brandPercent ?? null;
   const contractRebate = contractRate === null ? null : Math.round((contract * contractRate) / 100);
@@ -246,6 +266,7 @@ export async function earningSoFar(supplierId: string, month?: string): Promise<
     brandPurchasedCents: brand,
     unmarkedPurchasedCents: unmarked,
     totalPurchasedCents: contract + brand + unmarked,
+    rxPurchasedCents: rx,
     contractRatePercent: contractRate,
     brandRatePercent: brandRate,
     contractRebateCents: contractRebate,

@@ -88,3 +88,12 @@ describe("mapSupplierColumns", () => {
     assert.ok(unmapped.includes("Warehouse"));
   });
 });
+
+describe("a catalogue's contract column, as the comparisons read it", () => {
+  test("yes-words are rebated, no-words are not, and anything else cannot tell", async () => {
+    const { contractFlagOf } = await import("../src/lib/suppliers");
+    for (const y of ["Y", "yes", "1", "Contract", "OneStop", "rebated"]) assert.equal(contractFlagOf(y), "rebated", y);
+    for (const n of ["N", "no", "0", "not rebated", "Off"]) assert.equal(contractFlagOf(n), "not rebated", n);
+    for (const u of ["", "  ", "Q", "special"]) assert.equal(contractFlagOf(u), null, JSON.stringify(u));
+  });
+});

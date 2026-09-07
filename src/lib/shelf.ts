@@ -538,7 +538,9 @@ export async function buyListNow(): Promise<BuyListView> {
   const leadBy = new Map(
     suppliers.map((s) => [s.supplier, s.leadTimeDays ?? 1]),
   );
-  const shortestLead = Math.min(...[...leadBy.values()], 1);
+  // The shortest lead time on file, and never under a day: Math.min(..., 1) made every lead a
+  // day at most, so a shelf with a three-day supplier was told to order two days late.
+  const shortestLead = Math.max(1, leadBy.size > 0 ? Math.min(...leadBy.values()) : 1);
 
   // Held between requests rather than read again per page. See catalogue-cache.
   const items = await (await import("./catalogue-cache")).catalogueRows();
@@ -562,7 +564,9 @@ export async function buyListNow(): Promise<BuyListView> {
   for (const it of items) {
     if (it.unitCostMicros === null) continue;
     const packQty = packQtyOf(it.packSize);
-    const rebated = it.contractFlag ? true : null;
+    // The same reading the purchasing ledger gives the flag: a line the catalogue marks "not
+    // rebated" earned the discount here because any flag at all read as rebated.
+    const rebated = it.contractFlag === "rebated" ? true : it.contractFlag === "not rebated" ? false : null;
     const rate = rates[it.supplier.trim().toLowerCase()] ?? null;
     const effective =
       rebated === true && rate !== null
@@ -723,7 +727,7 @@ export async function bandCostOfMoving(
    * taken from what has actually been bought at this supplier this period, so the projection is
    * against real money rather than a nominal base.
    */
-  const denominatorCents = earning.totalPurchasedCents;
+  const denominatorCents = earning.rxPurchasedCents;
   if (denominatorCents <= 0) return null;
 
   const { tierEffect } = await import("./ratio-effect");
@@ -831,11 +835,11 @@ export async function nextTierNow(month?: string): Promise<NextTier | null> {
     (p) => p.terms.kind === "tiered_ratio" && /compliance|gcr/i.test(p.measuredBy ?? p.name),
   );
   if (!ladder || ladder.achievedPercent === null || ladder.terms.tiers.length === 0) return null;
-  if (earning.totalPurchasedCents <= 0) return null;
+  if (earning.rxPurchasedCents <= 0) return null;
 
   const { tierEffect, nextTierAdvice } = await import("./ratio-effect");
   const effect = tierEffect(
-    { ratioPercent: ladder.achievedPercent, denominatorCents: earning.totalPurchasedCents, definition: "generics_over_rx", scrub: "statement" },
+    { ratioPercent: ladder.achievedPercent, denominatorCents: earning.rxPurchasedCents, definition: "generics_over_rx", scrub: "statement" },
     ladder.terms.tiers.map((t) => ({ thresholdPercent: t.thresholdPercent, rebatePercent: t.rebatePercent })),
     [],
     earning.contractPurchasedCents,

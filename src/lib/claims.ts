@@ -6,6 +6,7 @@ import { parseCents, parseQuantityThousandths, isPricingUnit, receivedCents } fr
 import { readSheetAsObjects, excelSerialToIso } from "./xlsx";
 import { parseCsv, buildPbmResolver } from "./reference";
 import { SB20_MIN_DISPENSING_FEE_CENTS } from "./reimbursement-rules";
+import { fillKey } from "./fills";
 import { CLASS_INFO, planLookup } from "./plans";
 import { readNdc } from "./ndc";
 import { heldNdcs } from "./ndc-held";
@@ -982,11 +983,30 @@ export async function claimFlags(scope: ClaimScope = {}) {
     return cls === undefined || cls === "unknown";
   });
 
-  const under = (xs: typeof rows) =>
-    xs.filter((c) => {
-      const got = receivedCents(c.remitCents, c.copayCents);
-      return got !== null && got < SB20_MIN_DISPENSING_FEE_CENTS;
+  /*
+   * Under the fee, judged on the bottle rather than on the transmission.
+   *
+   * A fill billed to a primary and then a secondary is two rows, and the secondary's row reads
+   * "$0 paid, $0 owing" because the primary paid. Read row by row that is a claim paid nothing,
+   * under the fee by the whole $10.50, and this screen invented exactly that shortfall on every
+   * coordinated fill it held. What was received for the bottle is the fill's own figure, every
+   * payer and the patient together and any money that reached it later, and a fill is counted
+   * once however many rows it took.
+   */
+  const fillOf = new Map(fills.map((f) => [f.key, f]));
+  const keyOf = (c: (typeof rows)[number]) => fillKey({ rxNumber: c.rxNumber, fillNumber: c.fillNumber, dateFilled: c.dateFilled, ndc11: c.ndc11 });
+  const under = (xs: typeof rows) => {
+    const seen = new Set<string>();
+    return xs.filter((c) => {
+      const k = keyOf(c);
+      if (seen.has(k)) return false;
+      const f = fillOf.get(k);
+      const got = f ? f.revenueCents : receivedCents(c.remitCents, c.copayCents);
+      if (got === null || got >= SB20_MIN_DISPENSING_FEE_CENTS) return false;
+      seen.add(k);
+      return true;
     });
+  };
   const underFee = under(inScope);
   const underFeeUndetermined = under(undetermined);
 
@@ -994,7 +1014,11 @@ export async function claimFlags(scope: ClaimScope = {}) {
     xs.reduce((s, x) => s + (x.grossProfitCents ?? 0), 0);
 
   const shortfall = (xs: typeof rows) =>
-    xs.reduce((s, c) => s + (SB20_MIN_DISPENSING_FEE_CENTS - (receivedCents(c.remitCents, c.copayCents) ?? 0)), 0);
+    xs.reduce((s, c) => {
+      const f = fillOf.get(keyOf(c));
+      const got = f ? f.revenueCents : (receivedCents(c.remitCents, c.copayCents) ?? 0);
+      return s + Math.max(0, SB20_MIN_DISPENSING_FEE_CENTS - got);
+    }, 0);
 
   return {
     total: rows.length,
