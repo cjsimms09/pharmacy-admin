@@ -81,7 +81,7 @@ export const NAV: NavGroup[] = [
     label: "Ordering",
     blurb: "What to buy, from whom, at what it really costs after the rebate, and what is on the shelf.",
     items: [
-      { href: "/purchasing", label: "What to buy", blurb: "Today's order by supplier, the shelf behind it, and each supplier's minimum", gated: true },
+      { href: "/purchasing", label: "Add to a secondary", blurb: "What to add to a secondary's order to reach its minimum, and what the primary's order would get wrong", gated: true },
       { href: "/purchasing/replay", label: "Which contract", blurb: "A year of dispensing replayed through each wholesaler's catalogue and ladder", gated: true },
       { href: "/suppliers", label: "Suppliers and rebates", blurb: "The ladders, the ratio, and what this month's buying is earning" },
       { href: "/inventory/invoices", label: "Supplier invoices", blurb: "Filed by schedule, with the C2s kept apart" },

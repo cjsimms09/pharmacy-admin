@@ -24,7 +24,7 @@ export const FAMILIES = {
     { href: "/settings/feeds", label: "Is everything arriving?" },
   ],
   order: [
-    { href: "/purchasing", label: "Today's order" },
+    { href: "/purchasing", label: "Add to a secondary" },
     { href: "/purchasing/shelf", label: "The shelf" },
     { href: "/purchasing/products", label: "Which NDC pays" },
     { href: "/purchasing/over-nadac", label: "Bought over NADAC" },

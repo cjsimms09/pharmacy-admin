@@ -13,26 +13,34 @@ import { formatCents } from "@/lib/money";
 import { countAge } from "@/lib/count-age";
 import { fmt, todayIso } from "@/lib/dates";
 import { requireReimbursement } from "@/lib/features";
-import { PageHeader, Notice, Field, Card, Figure } from "@/components/ui";
-import { Hub } from "@/components/hub";
+import { PageHeader, Notice, Field, Card } from "@/components/ui";
 import { minimumsNow } from "@/lib/minimum-store";
+import { drugProfitNow } from "@/lib/drug-profit-store";
+import { overNadacNow } from "@/lib/over-nadac-store";
 
-export const metadata = { title: "What to buy" };
+export const metadata = { title: "Add to a secondary" };
 export const dynamic = "force-dynamic";
 
 const money = (cents: number) => formatCents(cents);
 const perUnit = (micros: number | null) => (micros === null ? "—" : `$${(Math.abs(micros) / 1_000_000).toFixed(4)}`);
 
 /**
- * What to order from each secondary this week, to reach its minimum.
+ * What to add to a secondary's order to reach its minimum, and what the primary's order would
+ * get wrong.
  *
- * The owner's brief: "the whole goal of this page is to list things we could order from secondary
- * suppliers to meet our minimum order amount. McKesson shouldn't be on this list." So the page is
- * one section per secondary, and each section is one order: what the shelf needs that this
- * supplier is cheapest on, then what to add to reach their minimum — generics this supplier is
- * the best place to buy, in quantities the next two months will use — with the supplier's own
- * item number on every row so the order can be keyed straight in. The primary gets everything the
- * secondaries do not beat, as it always did; that is one line here and the whole of the shelf page.
+ * The owner's brief, the third time: "I don't use this site to build my daily order; I use
+ * McKesson. What I need is to identify drugs I could add on to secondary supplier orders if I'm
+ * trying to hit their minimums and my current order from them is not enough, and alerts to
+ * things my current order wouldn't do — this drug is more expensive but reimburses more."
+ *
+ * So the page is two things. First, one card per secondary: the owner types what is already in
+ * that wholesaler's cart, the card says how much more the minimum needs, and lists the best things
+ * to add — what the shelf is short of and this supplier is cheapest on, then every generic this
+ * supplier is the cheapest place for, soonest to run out first, one pack at a time — with a
+ * running total from the typed amount, so the line at which the minimum is reached is visible.
+ * Second, above the cards, the alerts: the handful of things the primary's order would do wrong
+ * today, each one sentence with a number and where it came from. Nothing here is the order; the
+ * order is built at the wholesaler.
  */
 type Row = {
   kind: "short" | "next";
@@ -54,10 +62,10 @@ type Row = {
   why: string | null;
   overCap: { days: number; cap: number; smallerPack: { supplier: string; packQty: number; days: number; costCents: number } | null } | null;
   alternative: { supplier: string; unitMicros: number } | null;
-  runningCents: number;
-  /** The line at which the running total first reaches the minimum. */
-  reaches: boolean;
 };
+
+/** A supplier's name as an anchor. */
+const slug = (supplier: string) => supplier.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 const days = (d: number) => (Number.isFinite(d) ? String(Math.round(d)) : "—");
 
@@ -66,7 +74,7 @@ export default async function WhatToBuyPage({ searchParams }: { searchParams: Pr
   await requireUser();
   const { ok, error } = await searchParams;
   const { buyListNow, SHELF_POLICY, nextTierNow } = await import("@/lib/shelf");
-  const [buyList, minimums, nextTier, summary, schedule, s, mailReady] = await Promise.all([
+  const [buyList, minimums, nextTier, summary, schedule, s, mailReady, profit, over] = await Promise.all([
     buyListNow(),
     minimumsNow(),
     nextTierNow(),
@@ -74,6 +82,8 @@ export default async function WhatToBuyPage({ searchParams }: { searchParams: Pr
     catalogSchedule(),
     getSettings(),
     hasMailPassword(),
+    drugProfitNow(),
+    overNadacNow(28),
   ]);
   const autoImport = (s.mail_auto_import ?? "").toLowerCase() === "yes";
   const mailOn = s.mail_enabled === "yes";
@@ -118,19 +128,14 @@ export default async function WhatToBuyPage({ searchParams }: { searchParams: Pr
 
 
   const primary = buyList.suppliers.find((x) => x.primary) ?? null;
-  const primaryBasket = primary ? buyList.plan.baskets.find((b) => b.supplier === primary.supplier) ?? null : null;
+  const primaryName = primary?.supplier ?? "the primary";
+
   /*
-   * One order per secondary: the basket the planner built (needs it is cheapest on, and the
-   * top-ups it chose) plus the minimum filler's picks, in one table. The two were on two pages
-   * and read as two orders to the same wholesaler.
-   */
-  /*
-   * One card per secondary: everything worth ordering there today, ranked. First what the shelf
-   * is short of and this wholesaler is cheapest on, sized to the need; then every generic that
-   * qualifies to add, soonest needed first, one pack each. A running total runs down the whole
-   * list so the line at which the minimum is reached is visible without arithmetic. The site
-   * cannot see what is in the cart at the wholesaler's website and does not pretend to: it ranks,
-   * the pharmacist orders.
+   * One card per secondary: everything worth adding to its order today, ranked. First what the
+   * shelf is short of and this wholesaler is cheapest on, sized to the need; then every generic
+   * that qualifies to add, soonest needed first, one pack each. The running total starts from
+   * what the owner typed as already in the cart — the site cannot see the wholesaler's cart, so it
+   * asks — and the line at which the minimum is reached is marked.
    */
   const sections = buyList.suppliers
     .filter((x) => !x.primary)
@@ -138,98 +143,109 @@ export default async function WhatToBuyPage({ searchParams }: { searchParams: Pr
       const basket = buyList.plan.baskets.find((b) => b.supplier === sup.supplier) ?? null;
       const fill = minimums.fills.find((f) => f.supplier === sup.supplier) ?? null;
       const minimumCents = sup.minimumCents ?? null;
-      let run = 0;
-      const reach = (before: number, after: number) => minimumCents !== null && before < minimumCents && after >= minimumCents;
       const rows: Row[] = [];
       for (const l of (basket?.lines ?? []).filter((l) => l.reason === "need")) {
         const shelf = minimums.shelf.get(l.ndc11);
-        const before = run;
-        run += l.costCents;
         rows.push({
-          kind: "short",
-          itemNumber: l.itemNumber ?? null,
-          ndc11: l.ndc11,
-          name: l.name,
-          packs: l.packs,
-          packQty: l.packQty,
-          units: Math.round(l.unitsThousandths / 1000),
-          unitMicros: l.effectiveUnitMicros,
-          costCents: l.costCents,
-          savingCents: l.savingCents,
+          kind: "short", itemNumber: l.itemNumber ?? null, ndc11: l.ndc11, name: l.name, packs: l.packs, packQty: l.packQty,
+          units: Math.round(l.unitsThousandths / 1000), unitMicros: l.effectiveUnitMicros, costCents: l.costCents, savingCents: l.savingCents,
           daysOnHand: shelf && shelf.perDayThousandths > 0 ? shelf.onHandThousandths / shelf.perDayThousandths : Infinity,
-          perDayThousandths: shelf?.perDayThousandths ?? 0,
-          daysAfter: l.daysOfStockAfter,
-          maxPacks: null,
-          why: l.why,
-          overCap: l.overCap,
-          alternative: null,
-          runningCents: run,
-          reaches: reach(before, run),
+          perDayThousandths: shelf?.perDayThousandths ?? 0, daysAfter: l.daysOfStockAfter, maxPacks: null, why: l.why, overCap: l.overCap, alternative: null,
         });
       }
       const shortCount = rows.length;
-      const needCents = run;
+      const needCents = rows.reduce((n, r) => n + r.costCents, 0);
       const needSavingCents = rows.reduce((n, r) => n + r.savingCents, 0);
       for (const c of fill?.candidates ?? []) {
-        const before = run;
-        run += c.packCostCents;
         rows.push({
-          kind: "next",
-          itemNumber: c.itemNumber,
-          ndc11: c.ndc11,
-          name: c.name,
-          packs: 1,
-          packQty: c.packQty,
-          units: c.packQty,
-          unitMicros: c.unitMicros,
-          costCents: c.packCostCents,
-          savingCents: c.savingPerPackCents,
-          daysOnHand: c.daysOnHand,
-          perDayThousandths: c.perDayThousandths,
-          daysAfter: c.daysAfterOnePack,
-          maxPacks: c.maxPacks,
-          why: null,
-          overCap: null,
-          alternative: c.alternative,
-          runningCents: run,
-          reaches: reach(before, run),
+          kind: "next", itemNumber: c.itemNumber, ndc11: c.ndc11, name: c.name, packs: 1, packQty: c.packQty, units: c.packQty, unitMicros: c.unitMicros,
+          costCents: c.packCostCents, savingCents: c.savingPerPackCents, daysOnHand: c.daysOnHand, perDayThousandths: c.perDayThousandths,
+          daysAfter: c.daysAfterOnePack, maxPacks: c.maxPacks, why: null, overCap: null, alternative: c.alternative,
         });
       }
-      const crossAt = rows.findIndex((r) => r.reaches);
-      // Every short line, then the next-best ones up to the crossing and a few past it.
-      const shown = crossAt >= 0 ? rows.slice(0, Math.max(shortCount, crossAt + 7)) : rows.slice(0, shortCount + 25);
-      const nextCount = rows.length - shortCount;
+      // Every short line, then the add-ons; enough of them to reach the minimum from nothing, and a few past.
+      let run = 0;
+      let crossAt = -1;
+      rows.forEach((r, i) => {
+        run += r.costCents;
+        if (crossAt < 0 && minimumCents !== null && run >= minimumCents) crossAt = i;
+      });
+      const shown = crossAt >= 0 ? rows.slice(0, Math.max(shortCount, crossAt + 6)) : rows.slice(0, shortCount + 20);
       const allAddCents = (fill?.candidates ?? []).reduce((n, c) => n + c.packCostCents * c.maxPacks, 0);
-      const toAddCents = minimumCents === null ? 0 : Math.max(0, minimumCents - needCents);
-      const state: "nothing" | "no_minimum" | "meets" | "reachable" | "deeper" | "short" =
-        minimumCents === null
-          ? "no_minimum"
-          : rows.length === 0
-            ? "nothing"
-            : needCents >= minimumCents
-              ? "meets"
-              : crossAt >= 0
-                ? "reachable"
-                : needCents + allAddCents >= minimumCents
-                  ? "deeper"
-                  : "short";
-      return { sup, basket, fill, rows, shown, shortCount, nextCount, needCents, needSavingCents, minimumCents, crossAt, toAddCents, allAddCents, state };
+      return { sup, basket, fill, rows, shown, shortCount, needCents, needSavingCents, minimumCents, allAddCents, listCents: run };
     })
     .sort((a, b) => Number(b.shortCount > 0) - Number(a.shortCount > 0) || b.needCents - a.needCents || (b.minimumCents ?? 0) - (a.minimumCents ?? 0));
   const withMinimum = sections.filter((x) => x.minimumCents !== null);
-  const active = withMinimum.filter((x) => x.state !== "nothing");
-  const meeting = active.filter((x) => x.state === "meets");
-  const reachable = active.filter((x) => x.state === "reachable" || x.state === "deeper");
-  const shortOnes = active.filter((x) => x.state === "short");
-  const toAddAll = active.reduce((n, x) => n + x.toAddCents, 0);
   const missing = [...new Set([...buyList.missing, ...minimums.missing])];
+
+  /*
+   * What the primary's order would get wrong today. Each alert is one sentence with a number and
+   * the page it came from, ranked by dollars a month. Three kinds, and only three, because each is
+   * something the site can prove: a different NDC of the same drug earns more on how this pharmacy
+   * is paid (Which NDC pays); the shelf needs something a secondary is materially cheaper on
+   * (the cards below); the primary has been charging over NADAC on something a secondary lists
+   * under it (Bought over NADAC).
+   */
+  type Alert = { key: string; monthCents: number; text: React.ReactNode; href: string; from: string; confidence?: "settled" | "read" };
+  const alerts: Alert[] = [];
+  for (const r of profit.rows) {
+    if ((r.gainPerMonthCents ?? 0) < 500 || !r.best || !r.current) continue;
+    const sameNdc = r.best.ndc11 === r.current.ndc11;
+    alerts.push({
+      key: `ndc-${r.group}`,
+      monthCents: r.gainPerMonthCents ?? 0,
+      href: "/purchasing/products#bymodel",
+      from: "Which NDC pays",
+      confidence: r.confidence,
+      text: sameNdc ? (
+        <>
+          <b>{r.name ?? r.best.ndc11}</b>: the same NDC is {perUnit(r.best.unitMicros)} a unit at {r.best.supplier}{r.best.itemNumber ? ` (#${r.best.itemNumber})` : ""}, {money(r.gainPerFillCents ?? 0)} more a fill than what it is bought for today.
+        </>
+      ) : (
+        <>
+          <b>{r.name ?? r.best.ndc11}</b>: buy <span className="font-mono">{r.best.ndc11}</span> from {r.best.supplier}{r.best.itemNumber ? ` (#${r.best.itemNumber})` : ""} instead of <span className="font-mono">{r.current.ndc11}</span>. It {r.best.costCents > (r.candidates.find((c) => c.ndc11 === r.current!.ndc11)?.costCents ?? 0) ? "costs more and" : ""} earns {money(r.gainPerFillCents ?? 0)} more a fill, because this drug is paid {r.modelSays}{r.mix.length > 1 ? ` on ${Math.round(r.modelShare * 100)}% of fills` : ""}.
+        </>
+      ),
+    });
+  }
+  const primaryKey = primaryName.trim().toLowerCase();
+  for (const r of over.rows) {
+    if (r.supplier.trim().toLowerCase() !== primaryKey || !r.elsewhere?.underNadac) continue;
+    alerts.push({
+      key: `over-${r.ndc11}`,
+      monthCents: Math.round((r.overCents * 30) / 28),
+      href: "/purchasing/over-nadac?days=28",
+      from: "Bought over NADAC",
+      text: (
+        <>
+          <b>{r.name ?? r.ndc11}</b>: {primaryName} invoiced it at {perUnit(r.effectiveUnitMicros)} a unit, {r.overPercent.toFixed(0)}% over NADAC, in the last four weeks; {r.elsewhere.supplier} lists it under NADAC at {perUnit(r.elsewhere.effectiveUnitMicros)}{r.elsewhere.itemNumber ? ` (#${r.elsewhere.itemNumber})` : ""}.
+        </>
+      ),
+    });
+  }
+  for (const x of sections) {
+    if (x.shortCount === 0 || x.needSavingCents < 500) continue;
+    alerts.push({
+      key: `short-${x.sup.supplier}`,
+      monthCents: x.needSavingCents,
+      href: `#${slug(x.sup.supplier)}`,
+      from: "the card below",
+      text: (
+        <>
+          <b>{x.shortCount} line{x.shortCount === 1 ? "" : "s"} the shelf needs</b> {x.shortCount === 1 ? "is" : "are"} cheaper at {x.sup.supplier} than at {primaryName}: {money(x.needSavingCents)} saved after every rebate if they go on that order instead.
+        </>
+      ),
+    });
+  }
+  alerts.sort((a, b) => b.monthCents - a.monthCents);
+  const topAlerts = alerts.slice(0, 8);
 
   return (
     <>
       <PageHeader
         tabs={familyTabs("order", "/purchasing")}
-        title="What to buy"
-        subtitle={`One order per secondary wholesaler: what the shelf needs that they are cheapest on, and what to add to reach their minimum. ${primary ? `${primary.supplier} gets everything else as usual.` : ""}`}
+        title="Add to a secondary"
+        subtitle={`The order is built at ${primaryName}. This page ranks what to add to a secondary's order when it is not at the minimum, and says what ${primaryName}'s order would get wrong today.`}
       />
 
       {ok && <Notice kind="ok">{ok}</Notice>}
@@ -241,70 +257,62 @@ export default async function WhatToBuyPage({ searchParams }: { searchParams: Pr
         </Notice>
       )}
       {missing.map((m) => <Notice key={m} kind="warn">{m}</Notice>)}
-      {sections.filter((x) => x.rows.length > 0 && x.rows.every((r) => !r.itemNumber)).map((x) => (
-        <Notice key={x.sup.supplier} kind="warn">
-          <b>{x.sup.supplier}&rsquo;s price file carried no item numbers</b>, so its lines below cannot be keyed by number. The PioneerRx catalogue export has a &ldquo;Supplier Item Number&rdquo; column; a file from the wholesaler&rsquo;s own site needs one headed item number, item #, or SKU.
-        </Notice>
-      ))}
       {withMinimum.length === 0 && sections.length > 0 && (
         <Notice kind="warn">
-          <b>No secondary has an order minimum on file.</b> Put each wholesaler&rsquo;s minimum on its terms page and this page fills each order to it.{" "}
+          <b>No secondary has an order minimum on file.</b> Put each wholesaler&rsquo;s minimum on its terms page and each card here counts to it.{" "}
           <Link href="/suppliers" className="underline">Suppliers</Link>.
         </Notice>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Figure size="sm" value={sections.filter((x) => x.shortCount > 0).length} label="Secondaries with lines to order" sub={`${withMinimum.length} of ${sections.length} with a minimum on file`} tone="muted" />
-        <Figure size="sm" value={money(sections.reduce((n, x) => n + x.needCents, 0))} label="Short and cheapest at a secondary" sub={`${sections.reduce((n, x) => n + x.shortCount, 0)} lines, before anything is added`} tone="muted" />
-        <Figure size="sm" value={money(sections.reduce((n, x) => n + x.needSavingCents, 0))} label="Saved against the primary" sub="after every rebate, on those lines" tone={sections.some((x) => x.needSavingCents > 0) ? "ok" : "muted"} />
-        <Figure
-          size="sm"
-          value={active.length === 0 ? "—" : toAddAll === 0 ? "met" : money(toAddAll)}
-          label="To add to reach the minimums"
-          sub={
-            active.length === 0
-              ? "no order at a secondary today"
-              : toAddAll === 0
-                ? `${meeting.length} order${meeting.length === 1 ? "" : "s"} at or over the minimum`
-                : `${reachable.length} reachable from the list${reachable.length === 1 ? "" : "s"} below${shortOnes.length ? ` · ${shortOnes.length} not: ${shortOnes.map((x) => x.sup.supplier).join(", ")}` : ""}`
-          }
-          tone={active.length === 0 ? "muted" : shortOnes.length ? "warn" : "ok"}
-        />
-      </div>
-
-      {nextTier && nextTier.worthCents > 0 && nextTier.breakEvenPremiumPercent !== null && (
-        <Notice kind={nextTier.daysLeft <= 7 ? "warn" : undefined}>
-          <b>Before moving generics away from {nextTier.supplier}:</b> the {nextTier.nextRatePercent}% band there is worth {money(nextTier.worthCents)} more this month{nextTier.daysLeft > 0 ? `, with ${nextTier.daysLeft} day${nextTier.daysLeft === 1 ? "" : "s"} to earn it` : ""}. {nextTier.says} A line below that saves less than {nextTier.breakEvenPremiumPercent.toFixed(2)}% is cheaper bought at {nextTier.supplier} this month.
-        </Notice>
-      )}
+      <Card
+        title={`Before you send ${primaryName}'s order`}
+        count={topAlerts.length ? `${topAlerts.length} thing${topAlerts.length === 1 ? "" : "s"} it would get wrong` : undefined}
+        tone={topAlerts.length ? "warn" : undefined}
+        className="mb-4"
+      >
+        {topAlerts.length === 0 ? (
+          <p className="text-sm text-ink-2">Nothing today. No drug has an NDC or source worth five dollars a month more than what is bought now, nothing the shelf needs is materially cheaper at a secondary, and {primaryName} has not been over NADAC on anything a secondary lists under it.</p>
+        ) : (
+          <ol className="space-y-2 text-sm">
+            {topAlerts.map((a) => (
+              <li key={a.key} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+                <span className="min-w-[5.5rem] font-semibold tabular-nums text-accent">{money(a.monthCents)} / mo</span>
+                <span className="flex-1 min-w-[16rem]">{a.text}</span>
+                <span className="text-xs text-ink-3">
+                  {a.confidence === "read" ? <span className="badge badge-warn mr-2">read from the money</span> : null}
+                  <Link href={a.href} className="underline">{a.from}</Link>
+                </span>
+              </li>
+            ))}
+          </ol>
+        )}
+        {nextTier && nextTier.worthCents > 0 && nextTier.breakEvenPremiumPercent !== null && (
+          <p className="mt-3 text-xs text-ink-2">
+            <b>Before moving generics away from {nextTier.supplier}:</b> the {nextTier.nextRatePercent}% band there is worth {money(nextTier.worthCents)} more this month{nextTier.daysLeft > 0 ? `, with ${nextTier.daysLeft} day${nextTier.daysLeft === 1 ? "" : "s"} to earn it` : ""}. A line that saves less than {nextTier.breakEvenPremiumPercent.toFixed(2)}% is cheaper bought at {nextTier.supplier} this month.
+          </p>
+        )}
+      </Card>
 
       {sections.length === 0 ? (
-        <Card className="mt-4" title="No secondary wholesaler on the register">
-          <p className="text-sm text-ink-2">Add the secondaries under <Link href="/suppliers" className="text-accent underline">Suppliers</Link>, load their price files below, and each gets an order here.</p>
+        <Card title="No secondary wholesaler on the register">
+          <p className="text-sm text-ink-2">Add the secondaries under <Link href="/suppliers" className="text-accent underline">Suppliers</Link>, load their price files below, and each gets a card here.</p>
         </Card>
       ) : (
-        sections.map(({ sup, basket, fill, rows, shown, shortCount, nextCount, needCents, needSavingCents, minimumCents, crossAt, toAddCents, allAddCents, state }) => {
-          const shortSays = shortCount ? `The ${shortCount} line${shortCount === 1 ? "" : "s"} the shelf is short of come${shortCount === 1 ? "s" : ""} to ${money(needCents)}` : "Nothing is short here today";
-          const subtitle =
-            state === "no_minimum"
-              ? "No order minimum on file for this wholesaler. Put it on the terms page and this card ranks to it."
-              : state === "nothing"
-                ? `Minimum ${money(minimumCents!)}. Nothing the shelf is short of is cheapest here today, and nothing qualifies to add.`
-                : state === "meets"
-                  ? `Minimum ${money(minimumCents!)}. ${shortSays}, which meets it${needCents > minimumCents! ? `, ${money(needCents - minimumCents!)} over` : ""}.`
-                  : state === "reachable"
-                    ? `Minimum ${money(minimumCents!)}. ${shortSays}; the ranked list reaches it at line ${crossAt + 1}.`
-                    : state === "deeper"
-                      ? `Minimum ${money(minimumCents!)}. ${shortSays}; ${money(toAddCents)} more is needed. One pack of each line below does not get there; taking more packs where the "up to" figure allows adds up to ${money(allAddCents)}, which does.`
-                      : `Minimum ${money(minimumCents!)}. ${shortSays}; ${money(toAddCents)} more is needed, and everything that qualifies here adds only ${money(allAddCents)} even at every pack the shelf will use. Buy the short lines at the primary today, or wait for more need.`;
+        sections.map(({ sup, basket, fill, rows, shown, shortCount, needCents, needSavingCents, minimumCents, allAddCents, listCents }) => {
+          const key = slug(sup.supplier);
+          const says =
+            minimumCents === null ? "No order minimum on file for this wholesaler; put it on the terms page."
+              : rows.length === 0 ? `Nothing qualifies to add here today: nothing the shelf is short of is cheapest here, and no generic this wholesaler is cheapest on runs out inside ${minimums.horizonDays} days.`
+                : `Add from the top until the ${sup.supplier} screen shows ${money(minimumCents)}. One pack of everything here comes to ${money(listCents)}${allAddCents > listCents - needCents ? `; ${money(needCents + allAddCents)} where a line says "up to"` : ""}.`;
           return (
             <Card
               key={sup.supplier}
-              className="mt-4"
-              tone={state === "meets" || state === "reachable" || state === "deeper" ? "ok" : state === "short" ? "warn" : undefined}
+              id={key}
+              className="mb-4"
+              tone={shortCount > 0 ? "ok" : undefined}
               title={sup.supplier}
-              count={shortCount ? `${shortCount} short · ${money(needCents)}` : "nothing short today"}
-              subtitle={subtitle}
+              count={minimumCents !== null ? `minimum ${money(minimumCents)}` : "no minimum on file"}
+              subtitle={says}
               actions={<Link href={sup.supplierId ? `/suppliers/${sup.supplierId}/terms` : "/suppliers"} className="btn btn-sm">Terms</Link>}
             >
               {rows.length > 0 && (
@@ -313,92 +321,46 @@ export default async function WhatToBuyPage({ searchParams }: { searchParams: Pr
                     <thead>
                       <tr>
                         <th>Item #</th>
-                        <th>Product</th>
-                        <th className="num">Order</th>
-                        <th className="num">Line</th>
-                        <th className="num">Saves</th>
-                        <th className="num">Days on hand</th>
-                        <th className="num">A day</th>
-                        <th className="num">Days after</th>
-                        <th className="num">Running total</th>
+                        <th>Add</th>
+                        <th className="num">Pack</th>
+                        <th className="num">Price</th>
+                        <th className="num">vs {primaryName}</th>
+                        <th className="num">On hand</th>
+                        <th className="num">After</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {shown.map((r, i) => (
-                        <React.Fragment key={`${r.kind}-${r.ndc11}`}>
-                          {i === 0 && r.kind === "short" && (
-                            <tr>
-                              <td colSpan={9} className="bg-ground/60 text-xs font-semibold uppercase tracking-wide text-ink-2">Short now — the shelf needs these, and this is the cheapest place after every rebate</td>
-                            </tr>
-                          )}
-                          {i === shortCount && r.kind === "next" && (
-                            <tr>
-                              <td colSpan={9} className="bg-ground/60 text-xs font-semibold uppercase tracking-wide text-ink-2">
-                                Next best to add — ranked by how soon it runs out and how much cheaper it is here; only generics this wholesaler is the cheapest place to buy, that a pack of fits inside {minimums.horizonDays} days of use, one pack each
-                              </td>
-                            </tr>
-                          )}
-                          <tr className={crossAt >= 0 && i > crossAt ? "text-ink-3" : ""}>
-                            <td className="font-mono text-xs">{r.itemNumber ?? <span className="text-ink-3" title="The price file carried no item number for this line">—</span>}</td>
-                            <td>
-                              <span className="block">{r.name ?? r.ndc11}</span>
-                              <span className="block font-mono text-[11px] text-ink-3">
-                                {r.ndc11} · {perUnit(r.unitMicros)}{r.alternative ? ` here, ${perUnit(r.alternative.unitMicros)} at ${r.alternative.supplier}` : ""}
-                              </span>
-                            </td>
-                            <td className="num whitespace-nowrap">
-                              {r.packs} × {r.packQty.toLocaleString()} <span className="text-xs text-ink-3">= {r.units.toLocaleString()}</span>
-                              {r.maxPacks !== null && r.maxPacks > 1 && <span className="block text-[11px] text-ink-3" title={`Whole packs that fit inside ${minimums.horizonDays} days of use after what is on hand and on order`}>up to {r.maxPacks} packs</span>}
-                              {/* Why this quantity, not why the drug is listed: the pack decides it, and the pack is what a person needs to see. */}
-                              {r.why && <span className="block max-w-[16rem] whitespace-normal text-left text-[11px] text-ink-3">{r.why}</span>}
-                              {r.overCap && (
-                                <span className="block max-w-[16rem] whitespace-normal text-left text-[11px] text-warn">
-                                  {Math.round(r.overCap.days)} days of stock, past the {r.overCap.cap}-day shelf.
-                                  {r.overCap.smallerPack
-                                    ? ` ${r.overCap.smallerPack.supplier} ships packs of ${r.overCap.smallerPack.packQty} — ${Math.round(r.overCap.smallerPack.days)} days for ${money(r.overCap.smallerPack.costCents)}.`
-                                    : " No supplier ships it smaller."}
-                                </span>
-                              )}
-                            </td>
-                            <td className="num font-medium">{money(r.costCents)}</td>
-                            <td className={`num ${r.savingCents > 0 ? "text-accent" : "text-ink-3"}`}>{r.savingCents > 0 ? money(r.savingCents) : "—"}</td>
-                            <td className="num">{days(r.daysOnHand)}</td>
-                            <td className="num text-xs">{r.perDayThousandths > 0 ? (r.perDayThousandths / 1000).toFixed(1) : "—"}</td>
-                            <td className="num">{days(r.daysAfter)}</td>
-                            <td className={`num whitespace-nowrap ${r.reaches ? "font-semibold text-accent" : ""}`}>
-                              {money(r.runningCents)}
-                              {r.reaches && <span className="badge badge-ok ml-2">minimum</span>}
-                            </td>
-                          </tr>
-                        </React.Fragment>
+                      {shown.map((r) => (
+                        <tr key={`${r.kind}-${r.ndc11}`}>
+                          <td className="font-mono text-xs">{r.itemNumber ?? <span className="text-ink-3" title="The price file carried no item number for this line">—</span>}</td>
+                          <td>
+                            <span className="block">
+                              {r.name ?? r.ndc11}
+                              {r.kind === "short" && <span className="badge badge-warn ml-2" title={r.why ?? "The shelf is short of this and this is the cheapest place after every rebate"}>short</span>}
+                              {r.overCap && <span className="badge badge-muted ml-1" title={`${Math.round(r.overCap.days)} days of stock, past the ${r.overCap.cap}-day shelf.${r.overCap.smallerPack ? ` ${r.overCap.smallerPack.supplier} ships packs of ${r.overCap.smallerPack.packQty}.` : " No supplier ships it smaller."}`}>big pack</span>}
+                            </span>
+                            <span className="block font-mono text-[11px] text-ink-3">{r.ndc11} · {perUnit(r.unitMicros)} a unit{r.alternative ? `, ${perUnit(r.alternative.unitMicros)} at ${r.alternative.supplier}` : ""}</span>
+                          </td>
+                          <td className="num whitespace-nowrap">
+                            {r.packs} × {r.packQty.toLocaleString()}
+                            {r.maxPacks !== null && r.maxPacks > 1 && <span className="block text-[11px] text-ink-3" title={`Whole packs that fit inside ${minimums.horizonDays} days of use after what is on hand and on order`}>up to {r.maxPacks}</span>}
+                          </td>
+                          <td className="num font-medium">{money(r.costCents)}</td>
+                          <td className={`num ${r.savingCents > 0 ? "text-accent" : "text-ink-3"}`}>{r.savingCents > 0 ? `−${money(r.savingCents)}` : "—"}</td>
+                          <td className="num" title={r.perDayThousandths > 0 ? `${(r.perDayThousandths / 1000).toFixed(1)} a day` : undefined}>{days(r.daysOnHand)}d</td>
+                          <td className="num">{days(r.daysAfter)}d</td>
+                        </tr>
                       ))}
                     </tbody>
-                    <tfoot>
-                      <tr className="font-semibold">
-                        <td colSpan={3}>{minimumCents !== null ? `Short lines against a ${money(minimumCents)} minimum` : "Short lines"}</td>
-                        <td className="num">{money(needCents)}</td>
-                        <td className="num text-accent">{needSavingCents > 0 ? money(needSavingCents) : "—"}</td>
-                        <td colSpan={4} className="text-xs font-normal text-ink-3">
-                          {minimumCents !== null && needCents < minimumCents ? `${money(minimumCents - needCents)} short before anything is added` : minimumCents !== null ? "met on the short lines alone" : ""}
-                          {basket?.freightCents ? ` · plus ${money(basket.freightCents)} freight` : ""}
-                        </td>
-                      </tr>
-                    </tfoot>
                   </table>
                 </div>
               )}
               {rows.length > shown.length && (
-                <p className="mt-1 text-xs text-ink-3">{rows.length - shown.length} more qualify below these, further from needing a reorder.</p>
+                <p className="mt-1 text-xs text-ink-3">{rows.length - shown.length} more qualify below these, further from running out.</p>
               )}
-              {nextCount === 0 && shortCount > 0 && minimumCents !== null && needCents < minimumCents && (
-                <p className="mt-2 text-xs text-ink-3">Nothing else qualifies to add here: no generic this wholesaler is cheapest on moves steadily enough to buy {minimums.horizonDays} days of.</p>
-              )}
-
-              {basket && basket.bandDeltaCents !== null && basket.bandDeltaCents !== 0 && (
-                <p className="mt-3 text-xs">
-                  <b className={basket.bandDeltaCents < 0 ? "text-crit" : "text-accent"}>{basket.bandDeltaCents < 0 ? "−" : "+"}{money(Math.abs(basket.bandDeltaCents))}</b> through {primary?.supplier ?? "the primary"}&rsquo;s rebate band if these generics leave it, against {money(basket.savingCents)} saved on the invoice.
-                  {basket.verdict === "move_to_primary" ? " Buying them at the primary is the cheaper month." : ""}
-                </p>
+              {shortCount > 0 && needSavingCents > 0 && (
+                <p className="mt-2 text-xs text-ink-3">The {shortCount} short line{shortCount === 1 ? "" : "s"} save{shortCount === 1 ? "s" : ""} {money(needSavingCents)} here against {primaryName}{basket?.freightCents ? `; freight ${money(basket.freightCents)}` : ""}.
+                {basket && basket.bandDeltaCents !== null && basket.bandDeltaCents < 0 ? ` Moving them costs ${money(Math.abs(basket.bandDeltaCents))} through ${primaryName}'s rebate band${basket.verdict === "move_to_primary" ? ", which makes the primary the cheaper month" : ""}.` : ""}</p>
               )}
               {((basket?.refusals.length ?? 0) > 0 || (fill?.refused.length ?? 0) > 0) && (
                 <details className="mt-2">
@@ -412,37 +374,28 @@ export default async function WhatToBuyPage({ searchParams }: { searchParams: Pr
                   </ul>
                 </details>
               )}
-              {fill && state !== "no_minimum" && (
-                <p className="mt-2 text-xs text-ink-3">
-                  Never listed: {fill.leftOut.notGeneric} brands, {fill.leftOut.controlled} controlled, {fill.leftOut.unknownClass} with no brand/generic flag on the NADAC file.
-                </p>
+              {rows.length > 0 && rows.every((r) => !r.itemNumber) && (
+                <p className="mt-2 text-xs text-warn">This wholesaler&rsquo;s price file carried no item numbers, so these lines cannot be keyed by number; the PioneerRx catalogue export has a &ldquo;Supplier Item Number&rdquo; column.</p>
               )}
             </Card>
           );
         })
       )}
 
-      {primary && (
-        <Card className="mt-4" title={`${primary.supplier} — the rest, as usual`} subtitle="Everything the shelf needs that no secondary beats after rebates. Not listed here on purpose; the shelf page has every line.">
-          <p className="text-sm text-ink-2">
-            {primaryBasket && primaryBasket.lines.length > 0
-              ? `${primaryBasket.lines.length} line${primaryBasket.lines.length === 1 ? "" : "s"}, ${money(primaryBasket.subtotalCents)} today.`
-              : `Nothing the shelf is short of today is cheapest at ${primary.supplier}.`}{" "}
-            <Link href="/purchasing/shelf" className="text-accent underline">The shelf</Link>
-            {buyList.plan.unfilled.length > 0 && ` · ${buyList.plan.unfilled.length} needed item${buyList.plan.unfilled.length === 1 ? " has" : "s have"} no supplier price with a known pack size, so nothing can be ordered for ${buyList.plan.unfilled.length === 1 ? "it" : "them"}.`}
-          </p>
-        </Card>
-      )}
+      <details className="mt-2">
+        <summary className="cursor-pointer text-xs text-ink-3">How the lists are built</summary>
+        <p className="mt-1 text-xs text-ink-3">
+          A line is on a card only when that supplier&rsquo;s price after its rebate is the lowest of everyone who prices it. A short line is sized to {SHELF_POLICY.targetDays} days plus the lead time, less what is on hand and on order. A line to add is a generic by CMS&rsquo;s flag, not controlled, dispensed at a steady rate rather than in one large fill, and shown a pack at a time up to what {minimums.horizonDays} days of use will take; they are ordered by how soon each runs out and how much cheaper it is here.
+          {minimums.evidence.days > 0
+            ? ` Rates come from ${minimums.evidence.days} day${minimums.evidence.days === 1 ? "" : "s"} of claims (${minimums.evidence.from} to ${minimums.evidence.to})${minimums.evidence.days < minimums.evidence.fullAt ? `; the window grows with every evening's report until it holds ${minimums.evidence.fullAt} days, and the buys deepen to 60 days with it` : ""}.`
+            : " No claims are held yet, so there are no rates to buy against."}
+          {" "}The item number is the supplier&rsquo;s own, off their price file. {primaryName} is never on a card: everything no secondary beats goes there as usual, and <Link href="/purchasing/shelf" className="underline">the shelf</Link> has every line.
+          {fill_leftOut(sections)}
+        </p>
+      </details>
 
-      <p className="mt-4 text-xs text-ink-3">
-        {minimums.evidence.days > 0
-          ? `Rates come from ${minimums.evidence.days} day${minimums.evidence.days === 1 ? "" : "s"} of claims (${minimums.evidence.from} to ${minimums.evidence.to}), so a suggested buy goes at most ${minimums.horizonDays} days deep${minimums.evidence.days < minimums.evidence.fullAt ? `; the window grows with every evening's report until it holds ${minimums.evidence.fullAt} days, and the buys deepen to 60 days with it` : ""}. `
-          : "No claims are held yet, so there are no rates to buy against. "}
-        A line is here only when this supplier&rsquo;s price after its rebate is the lowest of everyone who prices it. A line to order is sized to {SHELF_POLICY.targetDays} days plus the lead time, less what is on hand and on order. A line to add is a generic by CMS&rsquo;s flag, not controlled, dispensed at a steady rate rather than in one large fill, and shown a pack at a time up to what {minimums.horizonDays} days of use will take. The item number is the supplier&rsquo;s own, off their price file; a dash means the file carried none, and the next Monday catalogue fills it in.
-      </p>
-
-      <details className="mt-6">
-        <summary className="cursor-pointer text-sm font-semibold">Price files: what each order is priced from</summary>
+      <details className="mt-4">
+        <summary className="cursor-pointer text-sm font-semibold">Price files: what each card is priced from</summary>
       <Card title="Load a supplier price file" className="my-4">        <p className="mt-1 text-xs text-ink-3">
           An order guide or price list from any wholesaler, as .xlsx or .csv. Column names differ between suppliers
           and are matched loosely — anything not recognised is reported back rather than ignored. Loading a file again
@@ -533,9 +486,12 @@ export default async function WhatToBuyPage({ searchParams }: { searchParams: Pr
       </Card>
 
       </details>
-
-      <h2 className="mb-3 mt-8">Elsewhere in Ordering</h2>
-      <Hub href="/purchasing" />
     </>
   );
+}
+
+/** One line naming what is never listed, from the first card that counted it. */
+function fill_leftOut(sections: { fill: { leftOut: { notGeneric: number; controlled: number; unknownClass: number } } | null }[]): string {
+  const f = sections.find((x) => x.fill)?.fill;
+  return f ? ` Never listed: ${f.leftOut.notGeneric} brands, ${f.leftOut.controlled} controlled, ${f.leftOut.unknownClass} with no brand/generic flag on the NADAC file.` : "";
 }
