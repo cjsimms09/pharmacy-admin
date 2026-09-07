@@ -1401,7 +1401,11 @@ export const contractDocs = sqliteTable(
     fileName: text("file_name"),
     sizeBytes: integer("size_bytes"),
     sha256: text("sha256"),
-    matchedBy: text("matched_by", { enum: ["manifest", "filename", "manual", "unmatched"] }),
+    /**
+     * How this document was tied to a payer. "read" is the contract naming its own counterparty,
+     * which is the most reliable of the four: the other three infer it from a file name or a list.
+     */
+    matchedBy: text("matched_by", { enum: ["manifest", "filename", "manual", "read", "unmatched"] }),
     /** Whether this one is in the priority set worth extracting. */
     priority: integer("priority", { mode: "boolean" }).notNull().default(false),
     extractionState: text("extraction_state", { enum: ["none", "queued", "done", "failed"] }).notNull().default("none"),

@@ -209,6 +209,31 @@ export async function planRegister(): Promise<PlanRow[]> {
  * a Part D BIN, a state Medicaid processor, a card that names itself — and the payer's own name is
  * recorded as the basis.
  */
+/**
+ * The four ways this finding is ever actually established, offered rather than typed.
+ *
+ * The requirement was right and the blank box was not: a rule that has to be satisfied before the
+ * work can proceed, answered by free text with a ten-character minimum, is a rule people learn to
+ * write "checked it" against. These are the sources an appeal can stand on, so they are the
+ * choices — and the detail beside them is what makes the record checkable a year later.
+ */
+export const BASIS_KINDS = [
+  { key: "form_5500", label: "A Form 5500 filing", detail: "plan year and what the Schedule A shows" },
+  { key: "plan_document", label: "The plan document", detail: "which section, and what it says" },
+  { key: "employer", label: "The employer's own answer", detail: "who said it, and when" },
+  { key: "confirmed", label: "Confirmed by", detail: "who confirmed it, and how" },
+] as const;
+
+export type BasisKind = (typeof BASIS_KINDS)[number]["key"];
+
+/** The basis as it is stored: the source, then what was actually seen. */
+export function composeBasis(kind: string | null | undefined, detail: string | null | undefined): string {
+  const k = BASIS_KINDS.find((b) => b.key === (kind ?? "").trim());
+  const d = (detail ?? "").trim();
+  if (!k) return d;
+  return d ? `${k.label} — ${d}` : k.label;
+}
+
 export function needsBasis(cls: PlanClass): boolean {
   return cls === "commercial_fully_insured" || cls === "commercial_self_funded" || cls === "governmental" || cls === "church_plan";
 }

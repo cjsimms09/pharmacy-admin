@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { planRegister, registerProgress, syncPlanGroups, classifyPlan, CLASS_INFO } from "@/lib/plans";
+import { planRegister, registerProgress, syncPlanGroups, classifyPlan, CLASS_INFO, BASIS_KINDS, composeBasis, needsBasis } from "@/lib/plans";
 import { PLAN_CLASSES, type PlanClass } from "@/db/schema";
 import { formatCents } from "@/lib/money";
 import { requireReimbursement } from "@/lib/features";
@@ -37,7 +37,8 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
         {
           classification: String(fd.get("classification") ?? "unknown") as PlanClass,
           sponsorName: String(fd.get("sponsorName") ?? ""),
-          basis: String(fd.get("basis") ?? ""),
+          // The source and what it says are stored as one line; see composeBasis.
+          basis: composeBasis(String(fd.get("basisKind") ?? ""), String(fd.get("basisDetail") ?? "")),
           sourceUrl: String(fd.get("sourceUrl") ?? ""),
         },
         u,
@@ -166,9 +167,12 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
                     <div className="mt-4 grid gap-3 sm:grid-cols-2">
                       <Field label="Classification">
                         <select name="classification" defaultValue={r.classification} className="w-full">
+                          {/* Which classes will ask for a basis is said here, not after the button. */}
                           {PLAN_CLASSES.map((c) => (
                             <option key={c} value={c}>
-                              {CLASS_INFO[c].label}{CLASS_INFO[c].inScope ? " — floor applies" : ""}
+                              {CLASS_INFO[c].label}
+                              {CLASS_INFO[c].inScope ? " — floor applies" : ""}
+                              {needsBasis(c) ? " · needs a basis" : ""}
                             </option>
                           ))}
                         </select>
@@ -176,8 +180,28 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
                       <Field label="Plan sponsor / employer">
                         <input name="sponsorName" defaultValue={r.sponsorName ?? ""} placeholder="What you would search on efast.dol.gov" className="w-full" />
                       </Field>
-                      <Field label="How this was established" className="sm:col-span-2">
-                        <input name="basis" defaultValue={r.basis ?? ""} placeholder="Form 5500 for plan year 2025 shows a Schedule A for the health benefit — fully insured" className="w-full" />
+                      {/*
+                        The four sources an appeal can stand on, offered rather than typed.
+
+                        A rule answered by a blank box with a ten-character minimum is a rule people
+                        learn to write "checked it" against. Picking the source takes a second; the
+                        detail beside it is what makes the record checkable a year later.
+                      */}
+                      <Field label="How this was established" hint="Required for the classes that decide whether the floor applies.">
+                        <select name="basisKind" defaultValue="" className="w-full">
+                          <option value="">Choose the source…</option>
+                          {BASIS_KINDS.map((b) => (
+                            <option key={b.key} value={b.key}>{b.label}</option>
+                          ))}
+                        </select>
+                      </Field>
+                      <Field label="What it says">
+                        <input
+                          name="basisDetail"
+                          defaultValue={r.basis ?? ""}
+                          placeholder="plan year 2025, Schedule A for the health benefit — fully insured"
+                          className="w-full"
+                        />
                       </Field>
                       <Field label="Source link" className="sm:col-span-2">
                         <input name="sourceUrl" defaultValue={r.sourceUrl ?? ""} placeholder="Link to the filing or document" className="w-full" />
