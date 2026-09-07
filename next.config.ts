@@ -15,6 +15,21 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  /*
+   * The pharmacy computer compiles the code; it does not check it.
+   *
+   * Type checking and linting are the largest part of a Next build's peak memory, and the machine
+   * this rebuilds on has the dispensing system, the label printer software and a browser open while
+   * it runs. Its build died — "build worker exited with code 3221225786", a Windows kill rather than
+   * a compile error — and a half-written .next left the pharmacy with no site at all.
+   *
+   * Nothing is skipped, only moved. `npm run check` runs the typechecker and the whole suite before
+   * anything is pushed, and a type error must never be discovered for the first time on the machine
+   * people are trying to dispense from: there, the only useful question is whether the code that is
+   * already known to be correct will compile.
+   */
+  eslint: { ignoreDuringBuilds: true },
+  typescript: { ignoreBuildErrors: true },
   serverExternalPackages: ["@libsql/client", "imapflow", "mailparser"],
   experimental: {
     serverActions: { bodySizeLimit: "25mb" },

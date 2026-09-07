@@ -62,9 +62,15 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
   const { underNadac, switchNdc, notYetBought } = await import("@/lib/under-nadac");
   const { groupKey } = await import("@/lib/product-groups");
   const { db, schema } = await import("@/db");
-  const nadacForGroups = await db.query.nadacPrices.findMany({
-    columns: { ndc11: true, description: true, classification: true, pricingUnit: true },
-  });
+  /*
+   * One row per drug, not every price ever published.
+   *
+   * This map only needs a description and a classification per NDC, and it kept the first row it
+   * saw of each. Reading the whole table to do that is fourteen seconds on a year of weekly files,
+   * on the page the owner opens to decide an order — which is what made pressing a button here
+   * look like nothing happening.
+   */
+  const nadacForGroups = await (await import("@/lib/nadac-latest")).nadacNow();
   void schema;
   const groupByNdc = new Map<string, string | null>();
   for (const r of nadacForGroups) {

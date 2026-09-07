@@ -31,6 +31,8 @@ import {
   purgeFromInvoiceFile,
   fileMisfiled,
   misfiledInVault,
+  confirmIsInvoice,
+  markNotAnInvoice,
   recheckFiledInvoices,
   sumOf,
   money,
@@ -138,6 +140,8 @@ export default async function InvoicesPage({
   ]);
   // What is in the invoice folder that is not an invoice. Only an invoice belongs there.
   const misfiled = canManage ? await misfiledInVault() : [];
+  // The ones the site can name for itself; the rest need a person and are asked about per row.
+  const namedMisfiled = misfiled.filter((m) => m.belongsIn !== null);
   const noAmountCount = await missingTotals();
   const noLinesCount = await invoicesWithoutLines();
   const unreceipted = await awaitingReceipt();
@@ -549,6 +553,32 @@ export default async function InvoicesPage({
    * pointed at it is what left a statement that could not be opened, could not be taken out of the
    * invoice file, and went on counting as purchases — the one that would not go away.
    */
+  /**
+   * A person's answer about a document the site could not name.
+   *
+   * Two buttons and no typing, because the question is a yes or a no and anything more elaborate is
+   * how a row ends up sitting there for a week. Confirming keeps it and stops the asking;
+   * the other takes it out along with anything counted as a purchase off it.
+   */
+  async function callItAnInvoice(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const message = await confirmIsInvoice(String(fd.get("documentId") ?? ""), u);
+    revalidatePath("/inventory/invoices");
+    redirect("/inventory/invoices?ok=" + encodeURIComponent(message));
+  }
+
+  async function callItNotAnInvoice(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const message = await markNotAnInvoice(String(fd.get("documentId") ?? ""), u);
+    revalidatePath("/inventory/invoices");
+    revalidatePath("/documents");
+    revalidatePath("/purchasing");
+    revalidatePath("/money/monthly");
+    redirect("/inventory/invoices?ok=" + encodeURIComponent(message));
+  }
+
   /** Files everything in the invoice folder that is not an invoice where it does belong. */
   async function refile() {
     "use server";
@@ -765,12 +795,16 @@ export default async function InvoicesPage({
           tone="crit"
           title="In the invoice folder, and not invoices"
           count={misfiled.length}
-          subtitle="Read on their own words. Filing them puts each where it belongs and takes anything counted as a purchase off them — and a purchase drill down has its compliance ratio read while it goes."
+          subtitle="An invoice folder is worth having only if everything in it is an invoice, so the burden is on the document: a PDF listing item lines with NDCs and prices is left alone, and everything else is here. The named ones file themselves — and a purchase drill down has its compliance ratio read while it goes."
           className="mt-4 mb-6"
           actions={
-            <form action={refile}>
-              <button className="btn btn-sm btn-primary">Put {misfiled.length === 1 ? "it" : "them"} where {misfiled.length === 1 ? "it belongs" : "they belong"}</button>
-            </form>
+            namedMisfiled.length > 0 ? (
+              <form action={refile}>
+                <button className="btn btn-sm btn-primary">
+                  File the {namedMisfiled.length} {namedMisfiled.length === 1 ? "it can name" : "it can name"}
+                </button>
+              </form>
+            ) : undefined
           }
         >
           <ul className="rows">
@@ -780,8 +814,30 @@ export default async function InvoicesPage({
                   <a href={`/files/${m.id}`} target="_blank" rel="noreferrer" className="text-sm text-accent hover:underline">{m.title}</a>
                   <span className="mt-0.5 block text-xs text-ink-3">{m.why}</span>
                 </span>
-                <span className="flex shrink-0 gap-1">
-                  <span className="badge badge-warn self-center">{m.kind.replace(/_/g, " ")}</span>
+                <span className="flex shrink-0 flex-wrap items-center gap-1">
+                  <span className={`badge ${m.belongsIn ? "badge-warn" : "badge-muted"} self-center`}>
+                    {m.kind === "unknown" ? "cannot tell" : m.kind.replace(/_/g, " ")}
+                  </span>
+                  {/*
+                    The site will not move what it cannot name, and will not leave it unanswerable
+                    either. These two buttons are the answer, on the row, needing nothing typed.
+                  */}
+                  {!m.belongsIn && (
+                    <>
+                      <form action={callItAnInvoice}>
+                        <input type="hidden" name="documentId" value={m.id} />
+                        <button className="btn btn-sm" formNoValidate title="Keeps it in the invoice folder and stops asking about it.">
+                          It is an invoice
+                        </button>
+                      </form>
+                      <form action={callItNotAnInvoice}>
+                        <input type="hidden" name="documentId" value={m.id} />
+                        <button className="btn btn-sm" formNoValidate title="Files it under supplier statements and takes anything read off it out of purchases.">
+                          Not an invoice
+                        </button>
+                      </form>
+                    </>
+                  )}
                   <form action={destroy}>
                     <input type="hidden" name="documentId" value={m.id} />
                     <button className="btn btn-sm border-crit text-crit hover:bg-crit-soft" formNoValidate title="Deletes it outright.">Delete</button>

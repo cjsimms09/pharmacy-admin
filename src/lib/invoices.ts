@@ -2004,10 +2004,19 @@ export type Misfiled = {
   /** Carried so re-reading it needs no second query. */
   storageKey: string;
   category: string;
-  kind: SupplierDocumentKind;
+  /** "unreadable" where the PDF carries no text at all — a scan, which says nothing about itself. */
+  kind: SupplierDocumentKind | "unreadable";
   why: string;
-  /** The category it should be in. */
-  belongsIn: "supplier_statement" | "report";
+  /**
+   * The category it should be in, or null where the site cannot tell.
+   *
+   * Null is the important case and the one that was missing. A document that reads as a statement
+   * can be filed automatically; one that reads as *nothing* cannot be filed anywhere on the site's
+   * own authority — but it equally has no business sitting in the invoice folder unchallenged,
+   * because an invoice folder is only worth having if everything in it is an invoice. So it is
+   * listed, with a person's answer asked for, rather than moved or hidden.
+   */
+  belongsIn: "supplier_statement" | "report" | null;
 };
 
 const NOT_AN_INVOICE: Record<string, { belongsIn: Misfiled["belongsIn"]; word: string }> = {
@@ -2017,6 +2026,20 @@ const NOT_AN_INVOICE: Record<string, { belongsIn: Misfiled["belongsIn"]; word: s
   purchase_report: { belongsIn: "report", word: "purchase drill down" },
 };
 
+/**
+ * Everything in the invoice folder that does not prove itself an invoice.
+ *
+ * The rule the owner asked for, stated the only way it can be checked: an invoice folder is worth
+ * having if everything in it is an invoice, so the burden is on the document. A PDF that lists item
+ * lines with NDCs and prices is an invoice and is left alone. Anything else is here — the ones the
+ * site can name, which one press files, and the ones it cannot, which it will not move on its own
+ * and instead asks about.
+ *
+ * That last group is why a statement could survive every sweep. The recheck skipped anything that
+ * came back "unknown", on the reasoning that removing an invoice by mistake is the worse error —
+ * which is true of *moving* it and false of *showing* it. So it never appeared anywhere, and the
+ * only evidence it existed was a row in the table with no date, no amount and no lines.
+ */
 export async function misfiledInVault(): Promise<Misfiled[]> {
   const docs = await db.query.documents.findMany();
   const out: Misfiled[] = [];
@@ -2024,17 +2047,48 @@ export async function misfiledInVault(): Promise<Misfiled[]> {
     // Only where invoices live. A statement already filed under statements is where it belongs.
     if (!["invoice", "invoice_schedule_2", "invoice_schedule_3_5"].includes(d.category)) continue;
     if (!/\.pdf$/i.test(d.fileName) && d.mimeType !== "application/pdf") continue;
+    // Somebody has already looked at this one and said it is an invoice. Their word settles it.
+    if ((d.notes ?? "").includes(CONFIRMED_INVOICE)) continue;
     let words = "";
+    let readable = true;
     try {
       words = pdfText(await readStoredFile(d.storageKey));
     } catch {
-      continue; // A scan says nothing about itself; it is left alone rather than moved on a guess.
+      readable = false;
     }
-    if (words.trim().length <= 40) continue;
+    if (!readable || words.trim().length <= 40) {
+      /*
+       * A scan. It could be a perfectly good invoice with no text layer, and it could be anything
+       * else — nothing here can tell, and nothing here should pretend to. It is listed so somebody
+       * who can open it says which, and it is never moved automatically.
+       */
+      out.push({
+        id: d.id,
+        title: d.title || d.fileName,
+        fileName: d.fileName,
+        storageKey: d.storageKey,
+        category: d.category,
+        kind: "unreadable",
+        why: "No text could be read from it, so nothing on it can be checked. If it is a scanned invoice it belongs here; open it and say.",
+        belongsIn: null,
+      });
+      continue;
+    }
     const c = classifySupplierDocument(words, d.fileName, d.title);
+    if (c.kind === "invoice") continue;
     const where = NOT_AN_INVOICE[c.kind];
-    if (!where) continue;
-    out.push({ id: d.id, title: d.title || d.fileName, fileName: d.fileName, storageKey: d.storageKey, category: d.category, kind: c.kind, why: c.why, belongsIn: where.belongsIn });
+    out.push({
+      id: d.id,
+      title: d.title || d.fileName,
+      fileName: d.fileName,
+      storageKey: d.storageKey,
+      category: d.category,
+      kind: c.kind,
+      why: where
+        ? c.why
+        : "Its words do not make it an invoice: no item lines with NDCs and prices on them, and nothing that reads as a statement, a credit memo or a purchase report either. It is in the invoice folder on nobody's authority.",
+      belongsIn: where?.belongsIn ?? null,
+    });
   }
   return out;
 }
@@ -2043,7 +2097,9 @@ export async function misfiledInVault(): Promise<Misfiled[]> {
 export async function fileMisfiled(
   user: { id?: string | null; name: string },
 ): Promise<{ moved: number; ratioRead: string | null; found: Misfiled[] }> {
-  const found = await misfiledInVault();
+  const all = await misfiledInVault();
+  // Only the ones the site can name. The rest need a person, and moving them would be a guess.
+  const found = all.filter((m) => m.belongsIn !== null);
   let ratioRead: string | null = null;
   for (const m of found) {
     const word = NOT_AN_INVOICE[m.kind]?.word ?? "document";
@@ -2056,7 +2112,8 @@ export async function fileMisfiled(
     }
     await db
       .update(schema.documents)
-      .set({ category: m.belongsIn, notes: `Filed as a ${word} by ${user.name}: ${m.why}` })
+      // Narrowed above: only rows the site could name reach here.
+      .set({ category: m.belongsIn as "supplier_statement" | "report", notes: `Filed as a ${word} by ${user.name}: ${m.why}` })
       .where(eq(schema.documents.id, m.id));
 
     if (m.kind === "purchase_report" && ratioRead === null) {
@@ -2101,4 +2158,65 @@ export async function fileMisfiled(
     });
   }
   return { moved: found.length, ratioRead, found };
+}
+
+/**
+ * The mark that says a person has looked at a document and called it an invoice.
+ *
+ * Kept in the document's own notes rather than in a column of its own. The alternative is a
+ * migration, and this pharmacy's database has had enough of those this week for a fact that is
+ * one bit wide and belongs with the rest of the document's history anyway. It is a fixed string so
+ * that finding it is exact rather than a search for words somebody might have typed.
+ */
+export const CONFIRMED_INVOICE = "[confirmed-invoice]";
+
+/** Keeps a document in the invoice folder on a person's word, and stops asking about it. */
+export async function confirmIsInvoice(documentId: string, user: { id?: string | null; name: string }): Promise<string> {
+  const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, documentId) });
+  if (!doc) return "That document is no longer here.";
+  if ((doc.notes ?? "").includes(CONFIRMED_INVOICE)) return `“${doc.title}” was already confirmed as an invoice.`;
+  await db
+    .update(schema.documents)
+    .set({ notes: [doc.notes, `${CONFIRMED_INVOICE} Confirmed an invoice by ${user.name}.`].filter(Boolean).join(" ") })
+    .where(eq(schema.documents.id, documentId));
+  await audit({ action: "invoice.confirmed", userId: user.id ?? null, userName: user.name, entity: "document", entityId: documentId, details: doc.title });
+  return `“${doc.title}” stays in the invoice folder and will not be asked about again.`;
+}
+
+/**
+ * Takes a document out of the invoice folder on a person's word.
+ *
+ * The invoice record goes with it, and its lines: it was never a receipt of goods, and leaving them
+ * would go on counting a statement's figures as purchases.
+ */
+export async function markNotAnInvoice(documentId: string, user: { id?: string | null; name: string }): Promise<string> {
+  const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, documentId) });
+  if (!doc) return "That document is no longer here.";
+  const invoices = await db.query.supplierInvoices.findMany({ where: eq(schema.supplierInvoices.documentId, documentId) });
+  let lines = 0;
+  for (const inv of invoices) {
+    const its = await db.query.invoiceLines.findMany({ where: eq(schema.invoiceLines.invoiceId, inv.id), columns: { id: true } });
+    lines += its.length;
+    await db.delete(schema.invoiceLines).where(eq(schema.invoiceLines.invoiceId, inv.id));
+    await db.delete(schema.supplierInvoices).where(eq(schema.supplierInvoices.id, inv.id));
+  }
+  await db
+    .update(schema.documents)
+    .set({
+      category: "supplier_statement",
+      notes: [doc.notes, `Taken out of the invoice folder by ${user.name}: not an invoice.`].filter(Boolean).join(" "),
+    })
+    .where(eq(schema.documents.id, documentId));
+  await audit({
+    action: "invoice.not_an_invoice",
+    userId: user.id ?? null,
+    userName: user.name,
+    entity: "document",
+    entityId: documentId,
+    details: `${doc.title}${invoices.length ? ` · ${invoices.length} invoice record(s), ${lines} line(s) removed` : ""}`,
+  });
+  return (
+    `“${doc.title}” is filed under supplier statements` +
+    (invoices.length ? `, and ${lines ? `${lines} line${lines === 1 ? "" : "s"} and ` : ""}its invoice record no longer count as purchases.` : ".")
+  );
 }

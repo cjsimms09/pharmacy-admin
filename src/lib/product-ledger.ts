@@ -321,8 +321,11 @@ export async function productLedger(): Promise<{ rows: LedgerRow[]; rate: number
 
   const [lines, catalogue, nadac, rawClaims, s, shelf] = await Promise.all([
     db.query.invoiceLines.findMany(),
-    db.query.supplierItems.findMany(),
-    db.query.nadacPrices.findMany({ columns: { ndc11: true, unitMicros: true, effectiveOn: true, description: true } }),
+    // Held between requests: forty-five thousand rows that change once a week. See catalogue-cache.
+    (await import("./catalogue-cache")).catalogueRows(),
+    // The newest price per drug, asked for in SQL and held between requests. Loading every NADAC
+    // row ever published to keep one per NDC is what made this page unusable. See nadac-latest.
+    (await import("./nadac-latest")).nadacNow(),
     db.query.claims.findMany(),
     getSettings(),
     // The latest count, for the pack sizes it carries against everything actually on the shelf.

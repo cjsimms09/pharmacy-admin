@@ -242,6 +242,9 @@ async function writeSection(
       .where(and(eq(schema.supplierItems.supplier, supplier), inArray(schema.supplierItems.ndc11, covered.slice(i, i + 300))));
   }
   for (let i = 0; i < rows2.length; i += 300) await db.insert(schema.supplierItems).values(rows2.slice(i, i + 300));
+  // The screens hold the catalogue between requests; a fresh import must be seen at once rather
+  // than on the next key check, or the page the import redirects to shows the prices from before it.
+  (await import("./catalogue-cache")).forgetCatalogue();
 
   await db.update(schema.supplierImports).set({
     itemsAdded: added, itemsUpdated: updated, skipped: 0,
@@ -328,6 +331,9 @@ export async function importSupplierCatalog(
       .where(and(eq(schema.supplierItems.supplier, supplier), inArray(schema.supplierItems.ndc11, covered.slice(i, i + 300))));
   }
   for (let i = 0; i < rows2.length; i += 300) await db.insert(schema.supplierItems).values(rows2.slice(i, i + 300));
+  // The screens hold the catalogue between requests; a fresh import must be seen at once rather
+  // than on the next key check, or the page the import redirects to shows the prices from before it.
+  (await import("./catalogue-cache")).forgetCatalogue();
 
   const skipped = Object.values(skipReasons).reduce((a, b) => a + b, 0);
   await db.update(schema.supplierImports).set({

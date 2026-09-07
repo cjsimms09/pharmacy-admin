@@ -230,15 +230,33 @@ function sourceStamp() {
 function build(logged = false) {
   const r = logged ? runLogged : run;
   r(npmCmd, ["install", "--no-audit", "--no-fund"], logged ? 20 * 60_000 : undefined);
-  const buildEnv = { NODE_OPTIONS: "--max-old-space-size=4096", NEXT_TELEMETRY_DISABLED: "1" };
+  const once = (env, timeout) => {
+    if (logged) runLogged(npmCmd, ["run", "build"], timeout, env);
+    else run(npmCmd, ["run", "build"], { env: { ...process.env, ...env } });
+    // A build that exits nought without writing a BUILD_ID has not produced a site. Next has done
+    // this when a worker died late, and the app then starts against a directory that looks built.
+    if (!fs.existsSync(path.join(root, ".next", "BUILD_ID"))) {
+      throw new Error("the build finished without producing a site (no BUILD_ID)");
+    }
+  };
   try {
-    if (logged) runLogged(npmCmd, ["run", "build"], 30 * 60_000, buildEnv);
-    else run(npmCmd, ["run", "build"], { env: { ...process.env, ...buildEnv } });
+    once({ NODE_OPTIONS: "--max-old-space-size=4096", NEXT_TELEMETRY_DISABLED: "1" }, 30 * 60_000);
   } catch (e) {
-    step(`The build ran out of room (${e.message.split("\n")[0]}). Trying again with less of it at once…`);
-    const lean = { NODE_OPTIONS: "--max-old-space-size=2048", NEXT_TELEMETRY_DISABLED: "1", UV_THREADPOOL_SIZE: "2" };
-    if (logged) runLogged(npmCmd, ["run", "build"], 40 * 60_000, lean);
-    else run(npmCmd, ["run", "build"], { env: { ...process.env, ...lean } });
+    /*
+     * Start again from nothing rather than on top of the wreckage.
+     *
+     * A build killed part way leaves .next half written, and the next attempt reads that cache and
+     * fails in stranger ways — while the app cannot start at all, because the working build it
+     * replaced is gone. Clearing it costs a few minutes and is the difference between a pharmacy
+     * that is slow to update and one that has no site.
+     */
+    step(`The build did not finish (${String(e.message).split("\n")[0]}). Clearing the half-built copy and trying again with less at once…`);
+    try {
+      fs.rmSync(path.join(root, ".next"), { recursive: true, force: true });
+    } catch {
+      /* Locked by something still running; the retry will overwrite what it can. */
+    }
+    once({ NODE_OPTIONS: "--max-old-space-size=2048", NEXT_TELEMETRY_DISABLED: "1", UV_THREADPOOL_SIZE: "2" }, 40 * 60_000);
   }
   fs.writeFileSync(path.join(root, ".next", "source-stamp"), sourceStamp());
 }
@@ -290,6 +308,30 @@ async function main() {
   fs.mkdirSync(path.join(root, "data"), { recursive: true });
   ensureFolders();
   ensureEnv();
+  /*
+   * With no site at all, take the latest code before trying to build one.
+   *
+   * A build that fails leaves .next half written: the working site gone and the new one not there.
+   * The app then cannot start, and the only way to ask for an update was a button inside the app —
+   * so the fix for the failure sat on GitHub with no way to reach it, and every restart rebuilt the
+   * same code the same way and failed the same way.
+   *
+   * A computer with no site has nothing to lose by taking the newest code first. If GitHub cannot
+   * be reached, that is not a reason to stop: it builds what is here, which is what it would have
+   * done anyway.
+   */
+  const noSite = !fs.existsSync(path.join(root, ".next", "BUILD_ID"));
+  if (noSite && fs.existsSync(path.join(root, ".git"))) {
+    const branch = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8", shell: isWin }).stdout.trim() || "main";
+    log(`No built site found. Taking the latest ${branch} before building…`);
+    for (const args of [["checkout", "--", "."], ["fetch", "origin", branch], ["merge", "--ff-only", `origin/${branch}`]]) {
+      const r = spawnSync("git", args, { encoding: "utf8", shell: isWin, timeout: 5 * 60_000 });
+      if (r.status !== 0) {
+        log(`  git ${args[0]} did not run (${(r.stderr || "").trim().split("\n")[0] || "no network"}). Building what is here.`);
+        break;
+      }
+    }
+  }
   if (!fs.existsSync(path.join(root, "node_modules")) || needsBuild()) build();
   let first = true;
   for (;;) {
