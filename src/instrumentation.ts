@@ -36,6 +36,38 @@ export async function register() {
     }
   })();
 
+  /*
+   * Warm the held readings once the server is up, so the first page of the morning is not the one
+   * that pays for the year's claims. Each is held by held.ts until the data changes.
+   */
+  setTimeout(() => {
+    void (async () => {
+      try {
+        const { allFills } = await import("./lib/claims");
+        await allFills();
+        const { productLedger } = await import("./lib/product-ledger");
+        await productLedger();
+        const { booksFor } = await import("./lib/ledger-store");
+        const { parsePeriod } = await import("./lib/ledger");
+        const { todayIso } = await import("./lib/dates");
+        const period = parsePeriod(todayIso().slice(0, 7));
+        if (period) await booksFor(period);
+        const { moneyFound } = await import("./lib/money-found");
+        await moneyFound();
+        const { buyListNow } = await import("./lib/shelf");
+        await buyListNow();
+        const { drugProfitNow } = await import("./lib/drug-profit-store");
+        await drugProfitNow();
+        const { minimumsNow } = await import("./lib/minimum-store");
+        await minimumsNow();
+        const { overNadacNow } = await import("./lib/over-nadac-store");
+        await overNadacNow(28);
+      } catch {
+        // A warm-up that fails costs nothing; the page computes it on demand.
+      }
+    })();
+  }, 15_000);
+
   let busy = false;
   const whenIdle = async (name: string, job: () => Promise<void>) => {
     if (busy) return;

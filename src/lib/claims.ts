@@ -1213,6 +1213,12 @@ export async function claimFlags(scope: ClaimScope = {}) {
  * and the dashboard cannot be allowed to give different answers to the same question.
  */
 export async function allFills() {
+  const { held } = await import("./held");
+  return held("fills", loadFills);
+}
+
+/** Every claim grouped into fills. Held between requests (held.ts); read it, never write into it. */
+async function loadFills() {
   const rows = await db.query.claims.findMany();
   const { groupIntoFills } = await import("./fills");
   const { laterPayments } = await import("./claim-payments");

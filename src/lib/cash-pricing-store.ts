@@ -8,6 +8,11 @@ import { daysBetween } from "./dates";
 
 /** Cash fills from the claims held, priced against their cost and the Kansas floor. */
 export async function cashPricingNow(): Promise<CashPricing & { months: number }> {
+  const { held } = await import("./held");
+  return held("cash-pricing", loadCashPricing);
+}
+
+async function loadCashPricing(): Promise<CashPricing & { months: number }> {
   const [fills, nadac, s] = await Promise.all([allFills(), nadacNow(), getSettings()]);
   const cash = fills.filter((f) => f.cashPlan && f.ndc11);
   const ksFee = Number(s.ks_medicaid_dispensing_fee_cents ?? "") || null;

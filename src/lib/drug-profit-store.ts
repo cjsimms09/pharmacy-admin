@@ -44,6 +44,11 @@ const median = (xs: number[]): number => {
 };
 
 export async function drugProfitNow(): Promise<DrugProfitView> {
+  const { held } = await import("./held");
+  return held("drug-profit", loadDrugProfit);
+}
+
+async function loadDrugProfit(): Promise<DrugProfitView> {
   const [claims, nadac, catalogue, ledger, plans, s, directory] = await Promise.all([
     db.query.claims.findMany({
       columns: {

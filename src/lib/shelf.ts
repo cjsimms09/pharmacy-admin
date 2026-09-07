@@ -525,6 +525,12 @@ export type BuyListView = {
  * recommend leaving a contract for a discount the pharmacy already has.
  */
 export async function buyListNow(): Promise<BuyListView> {
+  const { held } = await import("./held");
+  return held("buy-list", loadBuyList);
+}
+
+/** Today's order built from the tables. Held between requests (held.ts); read it, never write into it. */
+async function loadBuyList(): Promise<BuyListView> {
   const { movement: move, velocity: vel, snapshot } = await shelfMovement();
   const missing: string[] = [];
   if (!snapshot)

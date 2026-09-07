@@ -20,6 +20,11 @@ import type { PlanClass } from "@/db/schema";
  * the weekly file, longer to see a pattern.
  */
 export async function overNadacNow(days = 7, to = todayIso()): Promise<OverNadac> {
+  const { held } = await import("./held");
+  return held(`over-nadac:${days}:${to}`, () => loadOverNadac(days, to));
+}
+
+async function loadOverNadac(days: number, to: string): Promise<OverNadac> {
   const from = addDays(to, -(days - 1));
   const [lines, catalogue, nadac, ledger, rates, claims, plans] = await Promise.all([
     db.query.invoiceLines.findMany({ columns: { ndc11: true, supplier: true, description: true, itemNumber: true, invoiceDate: true, quantity: true, unitCostCents: true, rebated: true } }),

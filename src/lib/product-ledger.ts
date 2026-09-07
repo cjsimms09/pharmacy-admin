@@ -315,6 +315,12 @@ export function opportunities(rows: LedgerRow[]): LedgerRow[] {
 
 /** Loads everything the ledger needs and builds it. */
 export async function productLedger(): Promise<{ rows: LedgerRow[]; rate: number | null; materialityCents: number }> {
+  const { held } = await import("./held");
+  return held("ledger", loadProductLedger);
+}
+
+/** The ledger built from the tables. Held between requests (held.ts); read it, never write into it. */
+async function loadProductLedger(): Promise<{ rows: LedgerRow[]; rate: number | null; materialityCents: number }> {
   const { db, schema } = await import("@/db");
   const { getSettings } = await import("./settings");
   const { eq } = await import("drizzle-orm");

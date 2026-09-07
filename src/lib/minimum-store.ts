@@ -47,6 +47,11 @@ async function controlledNdcs(names: Map<string, string | null>): Promise<Set<st
 }
 
 export async function minimumsNow(): Promise<MinimumsView> {
+  const { held } = await import("./held");
+  return held("minimums", loadMinimums);
+}
+
+async function loadMinimums(): Promise<MinimumsView> {
   const [view, move, rates] = await Promise.all([buyListNow(), shelfMovement(), contractRatesBySupplier()]);
   const missing = [...view.missing];
 

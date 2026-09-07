@@ -24,6 +24,11 @@ export type Books = {
 };
 
 export async function booksFor(period: Period, today = todayIso()): Promise<Books> {
+  const { held } = await import("./held");
+  return held(`books:${period.key}:${today}`, () => loadBooks(period, today));
+}
+
+async function loadBooks(period: Period, today: string): Promise<Books> {
   const [accrualShared, cashShared] = await Promise.all([loadShared(period.months, "accrual"), loadShared(period.months, "cash")]);
   const accrualMonths: MonthlyPL[] = period.months.map((m) => monthlyPL(monthInputs(m, "accrual", accrualShared)));
   const cashMonths: MonthlyPL[] = period.months.map((m) => monthlyPL(monthInputs(m, "cash", cashShared)));
@@ -63,6 +68,11 @@ export async function booksFor(period: Period, today = todayIso()): Promise<Book
 
 /** The last n months' accrual accounts, for the chart. One read for all of them. */
 export async function recentMonths(n: number, today = todayIso()): Promise<{ month: string; pl: MonthlyPL; scripts: number }[]> {
+  const { held } = await import("./held");
+  return held(`recent:${n}:${today}`, () => loadRecentMonths(n, today));
+}
+
+async function loadRecentMonths(n: number, today: string): Promise<{ month: string; pl: MonthlyPL; scripts: number }[]> {
   const periods = periodsBack("month", today.slice(0, 7), n);
   const months = periods.map((p) => p.key);
   const shared = await loadShared(months, "accrual");

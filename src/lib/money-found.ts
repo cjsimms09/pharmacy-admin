@@ -103,6 +103,11 @@ export function totals(rows: MoneyRow[]): { firstYearCents: number; recurringMon
  * tell you yet, and here is why" is a useful sentence and a silently short list is not.
  */
 export async function moneyFound(): Promise<MoneyFound> {
+  const { held } = await import("./held");
+  return held("money-found", loadMoneyFound);
+}
+
+async function loadMoneyFound(): Promise<MoneyFound> {
   const rows: MoneyRow[] = [];
   const blocked: MoneyFound["blocked"] = [];
 
