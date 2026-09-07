@@ -120,7 +120,12 @@ export default async function ShelfPage({ searchParams }: { searchParams: Promis
           sub={t.surplusShare !== null ? `${Math.round(t.surplusShare * 100)}% of it surplus` : "The file carried no values"}
           tone="muted"
         />
-        <Figure value={money(t.surplusValueCents)} label="surplus" sub={`Beyond a ${SHELF_POLICY.targetDays}-day hold, across ${t.lines} lines`} tone={t.surplusValueCents > 0 ? "warn" : "ok"} />
+        <Figure
+          value={snapshot?.valueCents === null || snapshot?.valueCents === undefined ? "—" : money(t.surplusValueCents)}
+          label="surplus"
+          sub={snapshot?.valueCents === null || snapshot?.valueCents === undefined ? `${t.lines} lines beyond a ${SHELF_POLICY.targetDays}-day hold; the count carried no values, so no dollars` : `Beyond a ${SHELF_POLICY.targetDays}-day hold, across ${t.lines} lines`}
+          tone={t.surplusValueCents > 0 ? "warn" : "ok"}
+        />
         <Figure
           value={money(t.atRiskCents)}
           label="credit falling away"
@@ -140,7 +145,7 @@ export default async function ShelfPage({ searchParams }: { searchParams: Promis
         <div className="mt-4">
           <Notice kind="warn">
             <b>{t.deadLines} {t.deadLines === 1 ? "line has" : "lines have"} not been dispensed at all</b> in the{" "}
-            {move ? `${move.from} to ${move.to}` : "window"} claims, worth {money(t.deadValueCents)}. That is a stocking decision to undo,
+            {move ? `${move.from} to ${move.to}` : "window"} claims{snapshot?.valueCents === null || snapshot?.valueCents === undefined ? " (the count carried no values, so what they are worth is not known)" : `, worth ${money(t.deadValueCents)}`}. That is a stocking decision to undo,
             not a quantity to trim — and the only question left on it is whether it can still go back.
           </Notice>
         </div>

@@ -20,6 +20,7 @@ const KIND_LABEL: Record<string, string> = {
   operating: "Overhead",
   cost_of_goods: "Cost of goods",
   revenue_offset: "Taken back out of revenue",
+  balance_sheet: "Not a cost: cash out",
 };
 
 /**

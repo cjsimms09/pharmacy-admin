@@ -976,7 +976,8 @@ export async function claimFlags(scope: ClaimScope = {}) {
    * pharmacy set the price. Counting it among the unclassified would put every cash fill on a list
    * of things somebody has to go and settle, which is a list of work that does not exist.
    */
-  const thirdParty = rows.filter((c) => !c.cashPlan);
+  // A reversed claim is on nobody's floor and nobody's list of plans to classify; only paid rows count.
+  const thirdParty = rows.filter((c) => !c.cashPlan && c.status === "paid");
   const inScope = thirdParty.filter((c) => {
     const cls = classOf(c);
     return cls !== undefined && CLASS_INFO[cls].inScope;

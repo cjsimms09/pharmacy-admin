@@ -705,7 +705,7 @@ export default async function InvoicesPage({
   return (
     <>
       <PageHeader
-        back={{ href: "/inventory", label: "Controlled substances" }}
+        back={{ href: "/purchasing", label: "Ordering" }}
         title="Supplier invoices"
         subtitle="Emailed in by the supplier, read on arrival, and filed by what each one carries. Schedule II invoices are kept apart from everything else, which is what the rule actually asks for."
         actions={

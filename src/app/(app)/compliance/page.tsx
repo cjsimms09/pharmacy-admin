@@ -9,6 +9,8 @@ import { complianceSummary, type OpenItem, type Unanswered } from "@/lib/complia
 import { attestAction, answerAction } from "../_actions/compliance";
 import { periodLabel } from "@/lib/periods";
 import { dueList } from "@/lib/due";
+import { cqiSnapshot, csInventoryStatus } from "@/lib/compliance";
+import { daysUntil } from "@/lib/dates";
 import { assignTraining, recordGroupTraining } from "@/lib/training-assignments";
 import { TRAINING_LABEL } from "@/lib/labels";
 import type { TrainingType } from "@/db/schema";
@@ -24,7 +26,21 @@ export const dynamic = "force-dynamic";
 export default async function CompliancePage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string; all?: string }> }) {
   const user = await requireUser();
   const { ok, error, all } = await searchParams;
-  const [summary, expiring] = await Promise.all([complianceSummary(), dueList({ horizonDays: 60 })]);
+  const [summary, expiring, cqi, cs] = await Promise.all([complianceSummary(), dueList({ horizonDays: 60 }), cqiSnapshot(), csInventoryStatus()]);
+  /*
+   * The two duties the register does not carry as periods, judged exactly as Today judges them —
+   * so this page cannot say "you are clean" on a morning Today says two things are late. The CQI
+   * summary for a finished period, and the annual controlled substance inventory.
+   */
+  const cqiDays = daysUntil(cqi.dueOn) ?? 0;
+  const csDays = cs.dueOn ? daysUntil(cs.dueOn) : null;
+  const alsoLate: { key: string; title: string; why: string; badge: string; tone: "crit" | "warn"; href: string }[] = [];
+  if (cqi.status !== "final" && cqiDays < 0) {
+    alsoLate.push({ key: "cqi", title: `CQI summary — ${cqi.label}`, why: `${cqi.incidentCount} incident${cqi.incidentCount === 1 ? "" : "s"} in the period. Currently ${cqi.status}.`, badge: `${-cqiDays} days late`, tone: "crit", href: cqi.summaryId ? `/cqi/summaries/${cqi.summaryId}` : "/cqi" });
+  }
+  if (cs.dueOn === null || (csDays !== null && csDays < 0)) {
+    alsoLate.push({ key: "cs", title: "Annual controlled substance inventory", why: cs.last ? `Last taken ${fmt(cs.last)}. A year and ten days is the outside limit.` : "None has ever been recorded here, and it is the first thing a DEA inspector asks for.", badge: csDays === null ? "none on file" : `${-csDays} days late`, tone: csDays === null ? "warn" : "crit", href: "/inventory" });
+  }
 
   // Credentials and training are their own thing; only what is actually late or missing belongs
   // on this screen, and everything else waits until it is close enough to matter.
@@ -36,7 +52,7 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
   const needsAction = [...summary.missed, ...summary.partial];
   const shown = needsAction;
   const notYetDue = summary.openNow;
-  const clean = needsAction.length === 0 && people.length === 0;
+  const clean = needsAction.length === 0 && people.length === 0 && alsoLate.length === 0;
 
   async function assignFromList(fd: FormData) {
     "use server";
@@ -116,7 +132,7 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
         subtitle={
           clean
             ? "Nothing outstanding."
-            : `${needsAction.length + people.length} thing${needsAction.length + people.length === 1 ? "" : "s"} need you.`
+            : `${needsAction.length + people.length + alsoLate.length} thing${needsAction.length + people.length + alsoLate.length === 1 ? "" : "s"} need you.`
         }
         actions={
           <>
@@ -148,6 +164,17 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
           )}
 
           <div className="space-y-3">
+            {alsoLate.map((r) => (
+              <article key={r.key} className="rounded-lg border border-line bg-surface p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-semibold"><Link href={r.href} className="hover:text-accent hover:underline">{r.title}</Link></h3>
+                    <p className="mt-1 text-sm text-ink-2">{r.why}</p>
+                  </div>
+                  <Badge state={r.tone === "crit" ? "missed" : "partial"}>{r.badge}</Badge>
+                </div>
+              </article>
+            ))}
             {shown.map((i) => (
               <Item key={`${i.obligationId}-${i.periodKey}`} i={i} attestAction={attestAction} fileAction={fileEvidence} signerName={user.name} />
             ))}

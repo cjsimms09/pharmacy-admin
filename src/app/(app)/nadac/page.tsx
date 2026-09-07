@@ -315,6 +315,9 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
         </form>
       </Card>
 
+      {/* Three more ways in, needed once in a while: the archive for back weeks, a pasted address, a file by hand. */}
+      <details className="my-4">
+        <summary className="cursor-pointer text-sm font-semibold">Other ways to load a file <span className="font-normal text-ink-3">— earlier weeks, a pasted address, or by hand</span></summary>
       <Card className="my-4">
         <h2 className="text-sm font-semibold">Earlier weeks of {years[0]}</h2>
         <p className="mt-1 text-sm text-ink-2">
@@ -372,6 +375,7 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
           Files can also be copied straight into <code>{nadacDir()}</code> and loaded from here.
         </p>
       </Card>
+      </details>
 
       {cov.prices > 0 && (
         <>
@@ -402,8 +406,9 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
 
               {claimCov.missing.length > 0 && (
                 <>
-                  <h3 className="mt-6 text-sm font-semibold">Drugs with no NADAC in force</h3>
-                  <p className="mb-2 text-xs text-ink-3">
+                  <details className="mt-6">
+                  <summary className="cursor-pointer text-sm font-semibold">Drugs with no NADAC in force <span className="font-normal text-ink-3">— {claimCov.missing.length}, most claimed first</span></summary>
+                  <p className="mb-2 mt-1 text-xs text-ink-3">
                     Usually means the weekly file covering that fill date has not been loaded. Some products genuinely
                     have no NADAC — CMS does not price everything.
                   </p>
@@ -423,6 +428,7 @@ export default async function NadacPage({ searchParams }: { searchParams: Promis
                       </tbody>
                     </table>
                   </div>
+                  </details>
                 </>
               )}
             </>

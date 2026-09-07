@@ -174,13 +174,15 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
             </thead>
             <tbody>
               <Line label="Revenue" a={accrual.revenueCents} c={cash.revenueCents} href={sources.revenue} note={cash.revenue.length === 0 ? "no receipts entered for the period" : undefined} />
-              <Line label="Net revenue" a={accrual.netRevenueCents} c={cash.netRevenueCents} />
+              {(accrual.netRevenueCents !== accrual.revenueCents || cash.netRevenueCents !== cash.revenueCents) && (
+                <Line label="Net revenue" a={accrual.netRevenueCents} c={cash.netRevenueCents} note="after DIR fees and chargebacks" />
+              )}
               <Line label="Cost of goods" a={accrual.costOfGoodsCents} c={cash.costOfGoodsCents} href={sources.purchases} note={cash.costOfGoods.length === 0 ? "no wholesaler invoice falls in the period by its payment date or its terms" : undefined} />
               <Line label="Gross profit" a={accrual.grossProfitCents} c={cash.grossProfitCents} strong />
               <Line label="Operating" a={accrual.operatingCents} c={cash.operatingCents} href={sources.expenses} />
               <Line label="Net" a={accrual.netProfitCents} c={cash.netProfitCents} strong note="accrual: profit before tax · cash: net cash from operations" />
               {cash.otherCashOut.length > 0 && <Line label="Loan principal, draws, equipment, tax" a={0} c={cash.otherCashOutCents} note="not a cost; cash out all the same" />}
-              <Line label="Cash change" a={accrual.netProfitCents} c={cash.cashChangeCents ?? cash.netProfitCents} strong note="what the bank balance did, against what the period earned" />
+              <Line label="Cash change" a={null} c={cash.cashChangeCents ?? cash.netProfitCents} strong note="what the bank balance did in the period; there is no accrual side to it" />
             </tbody>
           </table>
         </div>
@@ -361,17 +363,18 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
   );
 }
 
-function Line({ label, a, c, href, note, strong }: { label: string; a: number; c: number; href?: string; note?: string; strong?: boolean }) {
-  const gap = a - c;
+/** One statement line. `a` null means the line has no accrual meaning, and neither column pretends it does. */
+function Line({ label, a, c, href, note, strong }: { label: string; a: number | null; c: number; href?: string; note?: string; strong?: boolean }) {
+  const gap = a === null ? null : a - c;
   return (
     <tr className={strong ? "font-semibold" : ""}>
       <td>
         {href ? <Link href={href} className="text-accent underline">{label}</Link> : label}
         {note && <span className="block text-[11px] font-normal text-ink-3">{note}</span>}
       </td>
-      <td className="num">{formatCents(a)}</td>
+      <td className="num">{a === null ? <span className="text-ink-3">—</span> : formatCents(a)}</td>
       <td className="num">{formatCents(c)}</td>
-      <td className={`num ${gap < 0 ? "text-crit" : "text-ink-2"}`}>{formatCents(gap)}</td>
+      <td className={`num ${gap !== null && gap < 0 ? "text-crit" : "text-ink-2"}`}>{gap === null ? <span className="text-ink-3">—</span> : formatCents(gap)}</td>
     </tr>
   );
 }

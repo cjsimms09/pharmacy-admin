@@ -454,32 +454,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         )}
       </section>
 
-      <section className="card mt-6 max-w-3xl">
-        <h2 className="mb-1 font-semibold">Network — other computers in the pharmacy</h2>
-        <p className="mb-2 text-sm text-ink-2">On another computer on the same network, open one of these addresses in the browser:</p>
-        <ul className="mb-2 space-y-1 font-mono text-sm">
-          {lanAddresses().map((a) => <li key={a}>http://{a}:{process.env.PORT ?? "3000"}</li>)}
-          {lanAddresses().length === 0 && <li className="font-sans text-ink-3">No network address found on this computer.</li>}
-        </ul>
-        <p className="text-xs text-ink-3">The first time, Windows must be told to allow it: in the app folder, right-click <b>Allow on network</b> and choose "Run as administrator" (once). Only computers on the pharmacy's own network can reach it; nothing is exposed to the internet. Phone access from outside comes with the hosting step in the plan.</p>
-      </section>
-
-      {/*
-        This used to tell the pharmacy to close the app and copy the data folder by hand. That
-        advice is now wrong — backups run daily on their own, are verified before they are kept,
-        go to two places and are proved to restore once a month — and stale instructions sitting
-        next to a working mechanism are how somebody ends up doing neither.
-      */}
-      <section className="card mt-6 max-w-3xl">
-        <h2 className="mb-1 font-semibold">Backups</h2>
-        <p className="text-sm text-ink-2">
-          Taken automatically, once a day, without anybody copying anything. Each one is read back off the disk and
-          checked against the live database before it is kept, written to a second place if one is set, and once a
-          month an archive already on disk is opened cold and proved to restore.{" "}
-          <Link href="/settings/backups" className="underline">Backups</Link> shows the state of all of that, and holds
-          the encryption key you should have written down somewhere else.
-        </p>
-      </section>
+      {/* Network and Backups are pages of their own, listed below; saying it twice on one screen is not twice as helpful. */}
 
       <div className="max-w-3xl">
         <h2 className="mb-3 mt-8">Elsewhere in settings</h2>

@@ -71,12 +71,14 @@ export default async function ReportPage({
   const money = (c: number) => formatCents(c);
   /* A comparison only where the earlier period had something in it; a change against nothing is not
      a change, and showing it as a percentage would be inventing a trend out of a first month. */
-  const against = (now: number, before: number | undefined) => {
-    if (before === undefined || (before === 0 && now === 0)) return null;
+  const prevEmpty = !prev || (prev.scripts === 0 && prev.netRevenueCents === 0 && prev.costOfGoodsCents === 0 && prev.operatingCents === 0);
+  const against = (now: number, before: number | undefined, as: "money" | "count" = "money") => {
+    if (prevEmpty || before === undefined || (before === 0 && now === 0)) return null;
     const c = changeFrom(now, before);
     const dir = c.deltaCents >= 0 ? "+" : "−";
+    const shown = as === "count" ? Math.abs(c.deltaCents).toLocaleString() : money(Math.abs(c.deltaCents));
     return {
-      display: `${dir}${money(Math.abs(c.deltaCents))}${c.percent !== null ? ` (${c.percent > 0 ? "+" : ""}${c.percent}%)` : ""} on ${prevKey}`,
+      display: `${dir}${shown}${c.percent !== null ? ` (${c.percent > 0 ? "+" : ""}${c.percent}%)` : ""} on ${prevKey}`,
       percent: c.percent,
     };
   };
@@ -153,7 +155,7 @@ export default async function ReportPage({
 
       <Card className="mb-4" title={totals.period.label} subtitle={`${basis === "cash" ? "What reached the bank" : "What the period earned"}, across ${totals.months.length} month${totals.months.length === 1 ? "" : "s"}`}>
         <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
-          <Movement label="scripts" value={totals.scripts.toLocaleString()} change={against(totals.scripts, prev?.scripts)} />
+          <Movement label="scripts" value={totals.scripts.toLocaleString()} change={against(totals.scripts, prev?.scripts, "count")} />
           <Movement label="net revenue" value={money(totals.netRevenueCents)} change={against(totals.netRevenueCents, prev?.netRevenueCents)} />
           <Movement label="cost of goods" value={money(totals.costOfGoodsCents)} change={against(totals.costOfGoodsCents, prev?.costOfGoodsCents)} invert />
           <Movement

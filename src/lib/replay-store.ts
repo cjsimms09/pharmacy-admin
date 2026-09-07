@@ -1,5 +1,6 @@
 import "server-only";
 import { db } from "@/db";
+import { catalogueRows } from "./catalogue-cache";
 import { allFills } from "./claims";
 import { allSuppliers } from "./suppliers-registry";
 import { rebateProgramsInForce } from "./supplier-terms-store";
@@ -23,7 +24,11 @@ export async function replayNow(monthsBack = 12): Promise<ReplayView> {
   const [fills, nadac, items, suppliers] = await Promise.all([
     allFills(),
     db.query.nadacPrices.findMany({ columns: { ndc11: true, description: true, classification: true, pricingUnit: true, otc: true, effectiveOn: true } }),
-    db.query.supplierItems.findMany({ columns: { supplier: true, ndc11: true, description: true, unitCostMicros: true, contractFlag: true } }),
+    // The levelled catalogue: every supplier's row on the same footing (one whole package, the unit
+    // derived from its total) with the pharmacy's corrections applied. Read raw, McKesson's "(3) 28 EA"
+    // priced per inner pack against IPD's "84 EA" per tablet showed a twenty-three-fold gap that was
+    // notation, not price.
+    catalogueRows(),
     allSuppliers(true),
   ]);
   const missing: string[] = [];
@@ -47,9 +52,10 @@ export async function replayNow(monthsBack = 12): Promise<ReplayView> {
   }
   if (seen.size === 0) missing.push("No NADAC file is loaded, so no two NDCs can be told to be the same product.");
 
+  // The flag is read the way the buy list reads it: "rebated" is rebated, "not rebated" is not, and anything else is unknown.
   const offers: ReplayOffer[] = items
     .filter((it) => it.unitCostMicros !== null)
-    .map((it) => ({ supplier: it.supplier, ndc11: it.ndc11, unitCostMicros: it.unitCostMicros!, rebated: it.contractFlag ? true : null, description: it.description }));
+    .map((it) => ({ supplier: it.supplier, ndc11: it.ndc11, unitCostMicros: it.unitCostMicros as number, rebated: it.contractFlag === "rebated" ? true : it.contractFlag === "not rebated" ? false : null, description: it.description }));
   if (offers.length === 0) missing.push("No supplier catalogue is loaded.");
 
   const contracts: ReplayContract[] = [];

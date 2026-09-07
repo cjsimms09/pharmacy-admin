@@ -88,6 +88,27 @@ it and said so on the pull request. The owner reads this too.
   time made the target window zero and nothing short), and the contract flag maps through
   `contractFlagOf`. The supplier terms field is now labelled "Lead time, in days" with what it
   does — the owner read "Days from order to shelf" as meaningless.
+- **Second design and logic pass, page by page on the seeded scratch database.** Fixed (mine unless
+  said): the books' "Cash change" row printed the accrual net in the accrual column — there is no
+  accrual side to a cash change, so it is a dash now; "Net revenue" no longer repeats "Revenue" when
+  there are no offsets; the Reports page (yours, `money/report`) printed the scripts delta as
+  dollars ("+$5.11") and compared against a quarter with nothing in it — counts print as counts and a
+  period with nothing recorded is no comparison; the Compliance page said "You are clean" on a
+  morning Today listed the CQI summary and the annual controlled substance inventory as late — it
+  now judges both exactly as Today does; the Which-contract replay priced from raw `supplier_items`
+  rows, so McKesson's "(3) 28 EA" per inner pack against IPD's "84 EA" per tablet read as a
+  twenty-three-fold gap, and every flagged row — "not rebated" included — counted as rebated
+  (`replay-store.ts` now reads the levelled `catalogueRows()` and the flag the way the buy list
+  does; McKesson's replayed rebate on the scratch data fell from $14,657 to $584); the shelf said
+  surplus was "worth $0.00" where the count carried no values; Claims ended in a raw list of every
+  file loaded (folded, newest on the summary); the NADAC page's three secondary loaders and its
+  long no-NADAC list are folded; Spending's balance-sheet categories showed a blank badge; Settings
+  repeated the Backups and Network cards as paragraphs (yours; removed); the supplier invoices page
+  pointed "back" at Controlled substances from under Ordering.
+  **Yours to look at:** `/remits/mtf` (a path this session cannot read) has its back link on
+  Connections though it sits under Claims, and its title "Medicare MFP refunds" does not match the
+  sidebar's "Facilitator payments"; the Claude key is entered on both `/settings` and
+  `/settings/connections`, which should be one place.
 - **Profit by reimbursement model** (`drug-profit.ts` pure with tests, `drug-profit-store.ts`,
   the lead table on `/purchasing/products`; all mine). The owner's brief: not the cheapest NDC but
   the most profitable one given how his payers pay — "if omeprazole is paid NADAC + $10.50, find

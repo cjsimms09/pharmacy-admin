@@ -987,8 +987,12 @@ export default async function ClaimsPage({
 
           {imports.length > 0 && (
             <>
-              <h2 className="mt-8 text-sm font-semibold">Loads</h2>
-              <ul className="divide-y divide-line rounded-lg border border-line bg-surface text-sm">
+              {/* Every file ever loaded is a record, not a reading: folded, with the newest on the summary line. */}
+              <details className="mt-8">
+                <summary className="cursor-pointer text-sm font-semibold">
+                  Files loaded <span className="font-normal text-ink-3">— {imports.length}, the newest {imports[0]?.fileName ?? "none"}{imports[0] ? ` (${imports[0].claimsAdded} added)` : ""}</span>
+                </summary>
+              <ul className="mt-2 divide-y divide-line rounded-lg border border-line bg-surface text-sm">
                 {imports.map((i) => (
                   <li key={i.id} className="px-3 py-2">
                     <div className="font-medium">{i.fileName}</div>
@@ -1002,6 +1006,7 @@ export default async function ClaimsPage({
                   </li>
                 ))}
               </ul>
+              </details>
             </>
           )}
         </>
