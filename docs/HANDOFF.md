@@ -166,6 +166,35 @@ it and said so on the pull request. The owner reads this too.
   `src/instrumentation.ts` are next on my side unless you want them; a "Drug directory" row on
   `/settings/feeds` too. Until a load runs, every grouping falls back to NADAC's description and
   the products page says "0 of N dispensed" are on the directory.
+- **"Finish setting up" (`/settings/setup`, `setup-checklist.ts` pure with tests, `setup-store.ts`;
+  listed first under Settings and a button on Today).** The owner: "I'm getting overwhelmed about
+  what I need to do to get the site complete and accurate." One ranked list of everything the site
+  can *check* is missing — the Claude key, the mailbox, each feed not arriving, each job never run,
+  the plan register, the Kansas fee, the four report columns, the contracts unread, the shelf
+  count, each secondary without a minimum, each supplier without a ladder, NADAC, the directory,
+  standing costs, bills, the pharmacy's own details. Three ranks: **stops** (a figure is wrong or
+  missing until it is done), **sharpens** (works, but on an estimate), **later**. Each item carries
+  what breaks, where it stands now, a minute estimate and one button. **Nothing is ticked by hand:
+  an item is done because a table, a setting or a feed says so, and it un-ticks itself.** Add an
+  item by adding a check to `setupItems`; it takes an input, never a query, so it stays testable.
+- **"Add" in the head of every page** (`components/add-anything.tsx`, posting to your
+  `intake/actions.ts` `dropFiles`). Drop a photograph, a PDF, an 835 or a spreadsheet from wherever
+  you are; it lands on the intake review card with what Claude read, every field editable. The
+  Inbox button sits beside it. Nothing about the intake pipeline changed.
+- **The drug catalogue ranked the wrong hundred and fifty.** `searchDrugs` took the first `limit`
+  matches *in file order* and ranked those, so on fifty thousand items the package mismatch worth
+  the most money was usually never on the screen — which is why the owner said he could not find
+  the packages he needed to settle. Every match is now ranked and then cut to the page. Also:
+  `ndc_pack_fixes` (count and newest `corrected_at`) is named in the `held.ts` fingerprint, so a
+  settled package invalidates every held reading at once rather than relying on the audit row.
+- **Edit / delete / sort, as it stands** (audited 7 September; yours to close the gaps you own):
+  edit and delete are present where a wrong entry costs money — bills, cash receipts, supplier
+  invoices, licences, agreements, staff, CQI, supplier terms, standing costs, vendor rules,
+  settled packages. **Sorting is the gap:** only `payers/performance` and `purchasing/products`
+  use `components/data-table.tsx`, which gives sort-by-column, a filter box and paging for free.
+  The lists a person works down and cannot yet re-order are the drug catalogue, supplier invoices,
+  bills, claims, the shelf, returns, the plan register and the appeal queue. `DataTable` takes
+  server-rendered cells plus a sort value per column, so converting one is mechanical.
 - **The efficiency pass, 7 September evening** (the owner: "site is so painfully slow; make it
   as efficient as possible and keep it that way, it will get lots of data every day"). Measured
   on a scratch database at a year's scale — 30,000 claims, 1.5 million NADAC rows, 4,000
