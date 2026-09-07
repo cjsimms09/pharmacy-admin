@@ -36,8 +36,10 @@ export it to a folder on a timer, nothing else here is needed.
 PioneerRx runs on Microsoft SQL Server on the pharmacy's own machine. A scheduled script can pull
 exactly these fields nightly with no report involved — and can pull history, not just today.
 
-`scripts/pioneer-discover.py` reads the table and column *names* only, so the query can be written
-against what is really there rather than guessed. It opens no patient data and writes nothing.
+Double-click **Find the PioneerRx tables.cmd** in the app folder. It needs nothing installed —
+Windows already carries what it uses — and it finds the SQL Server and the database by itself.
+It reads the table and column *names* only, so the query can be written against what is really
+there rather than guessed: no patient data is opened, nothing is written, no lock is taken.
 
 Needs a read-only SQL login. Ask PioneerRx support for one for reporting, and check the support
 agreement first — some vendors treat direct database access as outside their scope.
