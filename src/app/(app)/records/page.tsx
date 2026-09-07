@@ -43,7 +43,8 @@ export default async function RecordsPage() {
           { href: "/documents", label: "Pharmacy documents", blurb: "Protocols, policies and everything else on file" },
           { href: "/agreements", label: "Agreements", blurb: "Business associates and everyone else with access" },
           { href: "/compliance/attestations", label: "Attestations", blurb: "Every standing duty confirmed, in the wording used" },
-          { href: "/invoices", label: "Invoices", blurb: "Both kinds: what suppliers bill us, and what we bill for deliveries" },
+          { href: "/inventory/invoices", label: "Supplier invoices", blurb: "What the wholesalers bill, filed by schedule, the C2s kept apart" },
+          { href: "/deliveries", label: "Driver invoices", blurb: "What the pharmacy raises for deliveries, one a month" },
           { href: "/inbox", label: "Inbox", blurb: "Reports that arrived by email and what was made of them" },
           { href: "/audit", label: "Activity log", blurb: "Who did what in this system, and when" },
         ]}

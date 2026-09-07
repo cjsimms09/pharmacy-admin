@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { NAV, groupFor } from "../src/lib/nav";
+import { NAV, groupFor, itemFor } from "../src/lib/nav";
 
 /**
  * The sidebar's job is to be right about where you are.
@@ -73,7 +73,10 @@ describe("navigation", () => {
     assert.equal(groupFor("/inventory/invoices")?.label, "Ordering");
     assert.equal(groupFor("/inventory/returns")?.label, "Ordering");
     // Who pays best is a money question; the payer register is a claims one.
-    assert.equal(groupFor("/payers/performance")?.label, "Money");
+    assert.equal(groupFor("/payers/performance")?.label, "Claims");
+    assert.equal(groupFor("/remits/mtf")?.label, "Claims");
+    assert.equal(groupFor("/purchasing/minimums")?.label, "Ordering");
+    assert.equal(groupFor("/plans")?.label, "Claims");
     assert.equal(groupFor("/payers/contracts/abc")?.label, "Claims");
   });
 
@@ -86,18 +89,31 @@ describe("navigation", () => {
     assert.equal(groupFor("/money/found")?.label, "Money");
     assert.equal(groupFor("/money/monthly")?.label, "Money");
     assert.equal(groupFor("/purchasing/shelf")?.label, "Ordering");
-    assert.equal(groupFor("/remits/mtf")?.label, "Remits");
+    assert.equal(groupFor("/intake")?.label, "Tools");
+    assert.equal(groupFor("/inspection/walk")?.label, "Compliance");
     assert.equal(groupFor("/inbox")?.label, "Tools");
   });
 
   test("the sections are the ones the owner named, in the order the day runs", () => {
     assert.deepEqual(
       NAV.map((g) => g.label),
-      ["Today", "Money", "Ordering", "Claims", "Remits", "Compliance", "People", "Controlled substances", "Tools", "Settings"],
+      ["Today", "Money", "Ordering", "Claims", "Compliance", "People", "Controlled substances", "Tools", "Settings"],
     );
   });
 
   test("a path nobody has claimed does not guess", () => {
     assert.equal(groupFor("/nowhere"), undefined);
+  });
+});
+
+describe("a page listed only through its family", () => {
+  test("still has a sidebar item and a breadcrumb", () => {
+    assert.equal(itemFor("/plans")?.item.href, "/claims/floor");
+    assert.equal(itemFor("/plans")?.tab?.label, "Which plans it reaches");
+    assert.equal(itemFor("/purchasing/minimums")?.item.href, "/purchasing");
+    assert.equal(itemFor("/intake")?.item.href, "/inbox");
+    assert.equal(itemFor("/payers/sort")?.item.href, "/payers");
+    assert.equal(itemFor("/claims/floor")?.tab, undefined);
+    assert.equal(itemFor("/money"), undefined, "a group landing is the group, not an item under it");
   });
 });

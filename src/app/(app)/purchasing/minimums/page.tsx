@@ -1,3 +1,4 @@
+import { familyTabs } from "@/lib/families";
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { requireReimbursement } from "@/lib/features";
@@ -28,9 +29,9 @@ export default async function MinimumsPage() {
   return (
     <>
       <PageHeader
+        tabs={familyTabs("order", "/purchasing/minimums")}
         title="Order minimums"
         subtitle="What to add at each supplier to reach its minimum: generics it is the best place to buy, in quantities the next two months will use."
-        back={{ href: "/purchasing", label: "What to buy" }}
         help={
           <>
             <p><b>A pick has to pass every test:</b> CMS says generic (never the name); no invoice class letter or name list says controlled; the claims show a steady rate, not one big fill; this supplier&rsquo;s price after the rebate is the lowest of everyone who prices it; whole packs fit inside sixty days of use with the shelf and the on-order counted.</p>
@@ -46,7 +47,7 @@ export default async function MinimumsPage() {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Figure value={withMinimum.length} label="suppliers with a minimum" sub={`${short.length} short of it on today's order`} tone={short.length ? "warn" : "ok"} />
         <Figure value={formatCents(short.reduce((n, f) => n + f.shortfallCents, 0))} label="short in total" sub="before anything is added" tone="muted" />
-        <Figure value={formatCents(short.reduce((n, f) => n + f.addedCents, 0))} label="worth adding" sub={`${short.reduce((n, f) => n + f.picks.length, 0)} generics that qualify`} tone="ok" />
+        <Figure value={formatCents(short.reduce((n, f) => n + f.addedCents, 0))} label="worth adding" sub={`${short.reduce((n, f) => n + f.picks.length, 0)} generics that qualify`} tone={short.some((f) => f.addedCents > 0) ? "ok" : "muted"} />
         <Figure value={view.known.generics} label="generics moving" sub={`${view.known.brands} brands · ${view.known.controlled} controlled · ${view.known.unclassified} not on the NADAC file`} tone="muted" />
       </div>
 

@@ -1,3 +1,4 @@
+import { familyTabs } from "@/lib/families";
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { formatCents } from "@/lib/money";
@@ -48,6 +49,7 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
   return (
     <>
       <PageHeader
+        tabs={familyTabs("money", "/money")}
         title="Money"
         subtitle="The books: what the period earned and what reached the bank, both kept, neither mixed."
         help={
@@ -61,7 +63,6 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
         }
         actions={
           <>
-            <Link href={`/money/monthly?period=${period.key}`} className="btn btn-primary">Statement</Link>
             <Link href="/expenses" className="btn">Spending</Link>
             <Link href="/money/found" className="btn">Money found</Link>
           </>

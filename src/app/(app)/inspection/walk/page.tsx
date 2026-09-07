@@ -1,3 +1,4 @@
+import { familyTabs } from "@/lib/families";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -117,7 +118,7 @@ export default async function WalkPage({
   return (
     <>
       <PageHeader
-        back={{ href: "/inspection", label: "Inspection readiness" }}
+        tabs={familyTabs("inspection", "/inspection/walk")}
         title="Self-inspection"
         subtitle="Walk the pharmacy against the criteria an inspector uses. What impresses them is not a clean checklist — it is findings with the dates they were put right."
         actions={

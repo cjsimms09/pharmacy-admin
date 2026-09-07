@@ -1,3 +1,4 @@
+import { familyTabs } from "@/lib/families";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -178,6 +179,7 @@ export default async function ContractsPage({ searchParams }: { searchParams: Pr
     <>
       <BackLink href="/payers">Payers</BackLink>
       <PageHeader
+        tabs={familyTabs("payers", "/payers/contracts")}
         title="The contracts"
         subtitle="Every agreement the pharmacy holds, read once by Claude with the contract's own words beside every figure, and accepted into the payer pages by you."
         actions={

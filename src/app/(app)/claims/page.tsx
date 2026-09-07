@@ -248,7 +248,7 @@ export default async function ClaimsPage({
         subtitle="Dispensing and adjudication detail from PioneerRx, matched to the payer that priced it."
         actions={
           <>
-            <Link href="/payers/performance" className="btn btn-primary">Who pays best</Link>
+            <Link href="/payers/performance" className="btn">Who pays best</Link>
             <Link href="/claims/floor" className="btn">Paid under the floor</Link>
             <Link href="/plans" className="btn">Classify plans</Link>
             <form action={recheckEverything}>
@@ -492,41 +492,11 @@ export default async function ClaimsPage({
             {flags.unpriceable > 0 && ` ${flags.unpriceable} carry no dispensed quantity and cannot be priced at all.`}
           </p>
 
-          {flags.undetermined > 0 && (
-            <Notice kind="warn">
-              {flags.undetermined} of {flags.total} claims are on plans nobody has classified yet, and{" "}
-              {flags.underFeeUndetermined} of those received less than $10.50
-              {flags.underFeeUndetermined > 0 && ` — ${formatCents(flags.underFeeUndeterminedShortfallCents)} that may or may not be owed`}.
-              A low payment is only a shortfall on a plan the Kansas floor reaches; on a cash discount programme it is
-              simply the price. Settle them in <a href="/plans" className="underline">Plans</a>.
-            </Notice>
-          )}
-
-          {flags.unpriceable > 0 && (
-            <Notice kind="warn">
-              {flags.unpriceable} of {flags.total} claims carry no dispensed quantity, so they cannot be priced against
-              a contract or against NADAC. That column comes through blank on the current PioneerRx export — it is the
-              first thing to get fixed.
-            </Notice>
-          )}
-
-          {flags.ambiguousPayer > 0 && (
-            <Notice kind="warn">
-              {flags.ambiguousPayer} claim{flags.ambiguousPayer === 1 ? "" : "s"} sit on a BIN that the listing gives to
-              more than one PBM, and the payer name did not settle which. Read the PCN or network ID off the claim to
-              decide — they are not attached to a guess.
-            </Notice>
-          )}
-
-          {flags.unlistedBins.length > 0 && (
-            <Notice kind="crit">
-              {flags.unlistedClaims} claim{flags.unlistedClaims === 1 ? "" : "s"} adjudicated to{" "}
-              {flags.unlistedBins.length} BIN{flags.unlistedBins.length === 1 ? "" : "s"} that Health Mart Atlas does
-              not publish at all: {flags.unlistedBins.join(", ")}. We hold no contract reference for these payers, so
-              nothing they pay can be checked against a rate. Getting these identified is the highest-value thing on
-              the contract review.
-            </Notice>
-          )}
+          {/*
+            The unclassified plans, the unlisted BINs, the missing quantities and the shared BINs
+            are each one line of the list at the top of the page, with the amount and the way to
+            it. They were repeated here as four paragraphs, so the same news arrived twice.
+          */}
 
           {/*
             Folded shut. It is a reference table, not a morning read — nobody opens this screen to

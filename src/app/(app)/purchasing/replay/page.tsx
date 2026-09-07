@@ -26,6 +26,7 @@ export default async function ReplayPage({ searchParams }: { searchParams: Promi
   const view = await replayNow(12);
   const r = view.replay;
   const ranked = r.ranking;
+  const eligible = new Set(ranked.filter((x) => x.eligible).map((x) => x.supplier));
   const pairA = a ?? ranked[0]?.supplier;
   const pairB = b ?? ranked[1]?.supplier;
   const h2h = pairA && pairB ? headToHead(r, pairA, pairB) : null;
@@ -85,7 +86,17 @@ export default async function ReplayPage({ searchParams }: { searchParams: Promi
                   </tr>
                 </thead>
                 <tbody>
-                  {[...r.suppliers].sort((x, y) => (x.coverage.matched === 0 ? 1 : 0) - (y.coverage.matched === 0 ? 1 : 0) || x.netCents - y.netCents).map((s) => (
+                  {/* The same order as the ranking: the suppliers that cover the dispensing first, cheapest first
+                      among them, and only then the ones that could supply part of it. A cheap partial supplier at
+                      the top of the table read as the winner. */}
+                  {[...r.suppliers]
+                    .sort(
+                      (x, y) =>
+                        Number(eligible.has(y.supplier)) - Number(eligible.has(x.supplier)) ||
+                        (x.coverage.matched === 0 ? 1 : 0) - (y.coverage.matched === 0 ? 1 : 0) ||
+                        x.netCents - y.netCents,
+                    )
+                    .map((s) => (
                     <tr key={s.supplier}>
                       <td className="font-medium">{s.supplier}{!s.hasTerms && <span className="badge badge-warn ml-2">no ladder on file</span>}</td>
                       <td className="num">{Math.round(s.coverage.share * 100)}%</td>

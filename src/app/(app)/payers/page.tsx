@@ -1,3 +1,4 @@
+import { familyTabs } from "@/lib/families";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -120,11 +121,12 @@ export default async function PayersPage({ searchParams }: { searchParams: Promi
   return (
     <>
       <PageHeader
+        tabs={familyTabs("payers", "/payers")}
         title="Payers"
         subtitle="Every BIN we bill, the network rates behind it, how a MAC appeal reaches it, and where the money comes from."
         actions={
           <>
-            <Link href="/payers/performance" className="btn btn-primary">Who pays best</Link>
+            <Link href="/payers/performance" className="btn">Who pays best</Link>
             <Link href="/payers/contracts" className="btn">The contracts</Link>
             <Link href="/payers/sort" className="btn">Sort the folder</Link>
             <Link href="/claims/floor" className="btn">Kansas floor (SB 20)</Link>
@@ -150,11 +152,13 @@ export default async function PayersPage({ searchParams }: { searchParams: Promi
         A filing cabinet is not a record. The question actually asked of a contract is "which one
         covers this BIN", and answering it meant opening twenty PDFs by hand.
       */}
-      <Card title="Search the contracts on file" className="mb-6">        <p className="mt-1 text-xs text-ink-2">
+      <Card title="Search the contracts on file" className="mb-6">
+        <p className="mt-1 text-xs text-ink-2">
           {indexState.files === 0 ? (
             <>
-              Nothing has been read yet. The contract PDFs live in <code>data/contracts/</code>; press below and their
-              words are kept so a BIN, PCN or group number can be traced to the agreement that covers it.
+              No file has been indexed yet. Indexing keeps the words of every PDF in <code>data/contracts/</code> so a
+              BIN, PCN or group number can be traced to the agreement that covers it. It costs nothing and reads no
+              meaning into anything; that is the reader on the Contracts page.
             </>
           ) : (
             <>
@@ -182,8 +186,8 @@ export default async function PayersPage({ searchParams }: { searchParams: Promi
           </form>
           {canManage && (
             <form action={reindex}>
-              <SubmitButton className="btn btn-sm" pendingLabel="Reading the contracts…">
-                {indexState.files === 0 ? "Read the contracts" : "Read them again"}
+              <SubmitButton className="btn btn-sm" pendingLabel="Indexing the files…">
+                {indexState.files === 0 ? "Index the files" : "Index them again"}
               </SubmitButton>
             </form>
           )}
@@ -193,7 +197,7 @@ export default async function PayersPage({ searchParams }: { searchParams: Promi
             {found.length === 0 ? (
               <p className="text-sm text-ink-2">
                 Nothing on file contains &ldquo;{q}&rdquo;.
-                {indexState.withText === 0 && " Nothing has been read yet — press the button above first."}
+                {indexState.withText === 0 && " Nothing has been indexed yet — press the button above first."}
               </p>
             ) : (
               <ul className="rows text-sm">

@@ -1,3 +1,4 @@
+import { familyTabs } from "@/lib/families";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -81,7 +82,7 @@ export default async function ShelfPage({ searchParams }: { searchParams: Promis
   return (
     <>
       <PageHeader
-        back={{ href: "/purchasing", label: "What to buy" }}
+        tabs={familyTabs("order", "/purchasing/shelf")}
         title="The shelf"
         subtitle={`Days of stock against a ${SHELF_POLICY.targetDays}-day target, what is surplus, and what the supplier still credits for it.`}
       />

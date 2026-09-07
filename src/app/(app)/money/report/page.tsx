@@ -1,3 +1,4 @@
+import { familyTabs } from "@/lib/families";
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { periodAccount, monthlyTrend, accountMonths } from "@/lib/profit-and-loss";
@@ -59,7 +60,7 @@ export default async function ReportPage({
   if (recorded.length === 0 || !totals) {
     return (
       <>
-        <PageHeader title="Reports" subtitle="Quarters, years and how the months are moving." />
+        <PageHeader tabs={familyTabs("money", "/money/report")} title="Reports" subtitle="Quarters, years and how the months are moving." />
         <Empty>
           Nothing has been recorded yet. A month appears here as soon as it has claims, sales or bills against it.
         </Empty>
@@ -97,6 +98,7 @@ export default async function ReportPage({
   return (
     <>
       <PageHeader
+        tabs={familyTabs("money", "/money/report")}
         title="Reports"
         subtitle="Quarters, years, and how the months are moving. Every figure is the monthly account added up, never worked out a second way."
         actions={

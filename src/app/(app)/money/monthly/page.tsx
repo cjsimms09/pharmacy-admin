@@ -1,3 +1,4 @@
+import { familyTabs } from "@/lib/families";
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { accountMonths, excludedFromAccount, type AccountExclusion } from "@/lib/profit-and-loss";
@@ -57,9 +58,9 @@ export default async function MonthlyPLPage({
   return (
     <>
       <PageHeader
+        tabs={familyTabs("money", "/money/monthly")}
         title={`Statement · ${period.label}`}
         subtitle="What the period took, what the goods cost, and what it cost to keep the doors open."
-        back={{ href: `/money?period=${period.key}`, label: "The books" }}
         help={
           <>
             <p><b>Cost of goods comes from what was dispensed, not what was bought.</b> A month with a big buy-in would look catastrophic and the month that sold the stock wonderful. PioneerRx prints the acquisition cost of every fill, so the cost of what actually sold is known per bottle and no stocktake is needed.</p>

@@ -1,3 +1,4 @@
+import { familyTabs } from "@/lib/families";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -317,7 +318,7 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
   if (people.length === 0) {
     return (
       <>
-        <PageHeader back={{ href: "/compliance", label: "Compliance" }} title="Training" />
+        <PageHeader tabs={familyTabs("training", "/compliance/training")} back={{ href: "/compliance", label: "Compliance" }} title="Training" />
         <Empty>No active staff. <Link href="/staff/new" className="underline">Add someone first.</Link></Empty>
       </>
     );
@@ -326,6 +327,7 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
   return (
     <>
       <PageHeader
+        tabs={familyTabs("training", "/compliance/training")}
         back={{ href: "/compliance", label: "Compliance" }}
         title="Training"
         subtitle={

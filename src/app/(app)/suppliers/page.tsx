@@ -151,7 +151,7 @@ export default async function SuppliersPage({
   return (
     <>
       <PageHeader
-        back={{ href: "/invoices", label: "Invoices" }}
+        back={{ href: "/purchasing", label: "Ordering" }}
         title="Suppliers"
         subtitle="The wholesalers this pharmacy buys from, and the addresses they send invoices from. An invoice only files itself if the sender is recognised."
         actions={<Link href="/inventory/invoices" className="btn">Supplier invoices</Link>}
@@ -200,7 +200,7 @@ export default async function SuppliersPage({
         >
           <div className="grid gap-3 sm:grid-cols-4">
             <Stat
-              value={ratio?.gcrPercent != null ? `${ratio.gcrPercent}%` : rates.view.asOf ? "—" : "—"}
+              value={ratio?.gcrPercent != null ? `${ratio.gcrPercent}%` : "—"}
               label="Scrubbed compliance ratio"
               sub={ratio?.month ? `as at ${ratio.month}` : "not read yet"}
             />
@@ -517,11 +517,12 @@ function addressesFrom(raw: string): string {
 
 /** A figure with its label, small enough that four fit across a card. */
 function Stat({ value, label, sub, strong }: { value: string; label: string; sub?: string; strong?: boolean }) {
+  const tone = value === "—" ? "" : strong ? "kpi-ok" : "";
   return (
-    <div className="rounded-lg border border-line p-3">
-      <div className={`text-2xl font-bold leading-none tabular-nums ${strong ? "text-accent" : value === "—" ? "text-ink-3" : "text-ink"}`}>{value}</div>
-      <div className="mt-1.5 text-xs font-semibold">{label}</div>
-      {sub && <div className="mt-0.5 text-[11px] text-ink-3">{sub}</div>}
+    <div className={`kpi ${tone}`}>
+      <div className="kpi-label">{label}</div>
+      <div className={`kpi-value text-xl ${value === "—" ? "text-ink-3" : strong ? "text-accent" : ""}`}>{value}</div>
+      {sub && <div className="kpi-sub">{sub}</div>}
     </div>
   );
 }

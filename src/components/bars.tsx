@@ -49,17 +49,25 @@ export function Bars({
   const max = Math.max(0, ...all);
   const min = Math.min(0, ...all);
   const span = max - min || 1;
-  const groupW = 100 / Math.max(1, labels.length);
+  /*
+   * Drawn in a box as wide as the card it usually sits in, and scaled to the real width while
+   * keeping its shape. A 100-unit box stretched to fit (the earlier drawing) turned every printed
+   * figure into a smear ten times too wide; the shape has to be kept for text to stay text.
+   */
+  const W = 1000;
+  const groupW = W / Math.max(1, labels.length);
   const barW = (groupW * 0.7) / Math.max(1, series.length);
   const top = 18;
   const bottom = 18;
   const plotH = height - top - bottom;
   const y0 = top + (max / span) * plotH;
+  /* A figure is printed on a bar only where it fits; the rest are read from the tooltip. */
+  const printed = (j: number) => barW >= 44 || j === 0;
 
   return (
     <div className="w-full">
-      <svg viewBox={`0 0 100 ${height}`} preserveAspectRatio="none" className="h-40 w-full" role="img" aria-label={series.map((s) => s.label).join(", ")}>
-        <line x1="0" x2="100" y1={y0} y2={y0} stroke="var(--color-line-strong)" strokeWidth="0.3" vectorEffect="non-scaling-stroke" />
+      <svg viewBox={`0 0 ${W} ${height}`} className="h-auto w-full" role="img" aria-label={series.map((s) => s.label).join(", ")}>
+        <line x1="0" x2={W} y1={y0} y2={y0} stroke="var(--color-line-strong)" strokeWidth="1" />
         {labels.map((label, i) => {
           const gx = i * groupW + groupW * 0.15;
           const group = series.map((s, j) => {
@@ -70,10 +78,14 @@ export function Bars({
             const x = gx + j * barW;
             return (
               <g key={s.label}>
-                <rect x={x} y={y} width={barW * 0.9} height={Math.max(h, 0.5)} fill={FILL[s.tone ?? "accent"]} opacity={j === 0 ? 1 : 0.55} />
-                <text x={x + barW * 0.45} y={v >= 0 ? y - 3 : y + h + 9} textAnchor="middle" fontSize="7" fill="var(--color-ink-2)" style={{ fontVariantNumeric: "tabular-nums" }}>
-                  {format(v)}
-                </text>
+                <rect x={x} y={y} width={barW * 0.9} height={Math.max(h, 1)} rx="1.5" fill={FILL[s.tone ?? "accent"]} opacity={j === 0 ? 1 : 0.55}>
+                  <title>{`${s.label}, ${label}: ${format(v)}`}</title>
+                </rect>
+                {printed(j) && (
+                  <text x={x + barW * 0.45} y={v >= 0 ? y - 4 : y + h + 11} textAnchor="middle" fontSize="11" fill="var(--color-ink-2)" style={{ fontVariantNumeric: "tabular-nums" }}>
+                    {format(v)}
+                  </text>
+                )}
               </g>
             );
           });
@@ -81,7 +93,7 @@ export function Bars({
             <g>
               <rect x={i * groupW} y={0} width={groupW} height={height} fill="transparent" />
               {group}
-              <text x={i * groupW + groupW / 2} y={height - 5} textAnchor="middle" fontSize="7" fill="var(--color-ink-3)">
+              <text x={i * groupW + groupW / 2} y={height - 4} textAnchor="middle" fontSize="11" fill="var(--color-ink-3)">
                 {label}
               </text>
             </g>

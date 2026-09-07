@@ -1,3 +1,4 @@
+import { familyTabs } from "@/lib/families";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -67,9 +68,9 @@ export default async function RoutingPage({ searchParams }: { searchParams: Prom
   return (
     <>
       <PageHeader
+        tabs={familyTabs("payers", "/payers/routing")}
         title="835 routing"
         subtitle="Getting each PBM's remittance delivered to this site: the request, written from what is on file, and where each one stands."
-        back={{ href: "/payers", label: "Payers" }}
       />
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { NAV, groupFor } from "@/lib/nav";
+import { NAV, groupFor, itemFor } from "@/lib/nav";
 import { Icon, iconFor } from "./icons";
 
 /**
@@ -41,7 +41,7 @@ export function Nav({ tools }: { tools: boolean }) {
             {open && g.items.length > 0 && (
               <ul className="mb-2 ml-[1.35rem] mt-0.5 space-y-px border-l border-[color:var(--color-side-line)] pl-2">
                 {g.items.map((i) => {
-                  const on = pathname === i.href || pathname.startsWith(`${i.href}/`);
+                  const on = pathname === i.href || pathname.startsWith(`${i.href}/`) || itemFor(pathname)?.item.href === i.href;
                   return (
                     <li key={i.href}>
                       <Link href={i.href} className={`side-item ${on ? "on" : ""}`} aria-current={on ? "page" : undefined}>

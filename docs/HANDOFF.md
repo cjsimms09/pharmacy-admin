@@ -74,6 +74,19 @@ it and said so on the pull request. The owner reads this too.
   on Money → Spending; the month carries its share by calendar day (`standing-math.ts`, tested) and
   drops it where a bill from the same vendor is in for the month. Joins the bills by category in
   `monthlyPL`.
+- **Pages that were sides of one thing are now families** (`src/lib/families.ts`, `PageHeader tabs`,
+  `itemFor` in `nav.ts`; `design-audit.md` §8 has the verdict on every page and why). The sidebar
+  lists a family once and each page in it carries a row of tabs: the books / statement / over time;
+  today's order / the shelf / minimums; the floor / plans / appeals; payers / contracts / sort /
+  routing; training / file / material; inspection / walk; inbox / intake. The Remits group (one
+  page) is folded into Claims with "Who pays best"; `/invoices` (two links) redirects to the
+  supplier invoices; "Find anything" leaves the menu (the search box is the way in). **Pages of
+  yours touched, header only** (a `tabs=` line and the import; a `back=` link that pointed inside
+  the same family removed): `money/report`, `purchasing`, `purchasing/shelf`, `claims/floor`,
+  `plans`, `payers/contracts`, `compliance/training`, `compliance/training/material`, `inspection`,
+  `inspection/walk`, `inbox`, `intake`; `records` links the two invoice pages directly. Nothing
+  below any header changed. The `Bars` chart (`bars.tsx`) was drawn in a 100-unit box stretched to
+  the card, which smeared every printed figure ten times wide; it now keeps its shape.
 - **The whole site is restyled from the system, not the pages:** `globals.css` (a tighter type scale,
   one control height, KPI tiles, denser tables), a dark sidebar with icons (`nav.tsx`, `icons.tsx`),
   a top bar with the breadcrumb (`crumbs.tsx`, `layout.tsx`), and `ui.tsx`/`kit.tsx`. Pages that use

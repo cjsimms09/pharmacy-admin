@@ -1,3 +1,4 @@
+import { familyTabs } from "@/lib/families";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -151,9 +152,9 @@ export default async function SortPage({ searchParams }: { searchParams: Promise
   return (
     <>
       <PageHeader
+        tabs={familyTabs("payers", "/payers/sort")}
         title="Sort the folder"
         subtitle="Which PDFs are contracts and which are not, decided before anything is paid to read them."
-        back={{ href: "/payers/contracts", label: "The contracts" }}
         help={
           <>
             <p><b>Two sorters, cheapest first.</b> A PDF with its own text is sorted here by its words for nothing: agreement, reimbursement, MAC, AWP, BIN, network and effective date mark a contract; a W-9, a statement, a newsletter mark something else. Anything naming a price or a term is never ruled out.</p>

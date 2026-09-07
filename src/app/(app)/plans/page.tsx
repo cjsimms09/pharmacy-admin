@@ -1,3 +1,4 @@
+import { familyTabs } from "@/lib/families";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireUser, requireManager } from "@/lib/auth";
@@ -54,6 +55,7 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
   return (
     <>
       <PageHeader
+        tabs={familyTabs("floor", "/plans")}
         title="Plans"
         subtitle="Which benefit plans the Kansas floor can reach. This one determination decides what is filable — the contract, the rate schedule and the MAC list are not needed for it."
       />

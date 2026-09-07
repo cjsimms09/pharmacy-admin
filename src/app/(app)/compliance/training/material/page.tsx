@@ -1,3 +1,4 @@
+import { familyTabs } from "@/lib/families";
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
@@ -36,7 +37,7 @@ export default async function TrainingMaterialPage() {
   return (
     <>
       <PageHeader
-        back={{ href: "/compliance/training", label: "Training" }}
+        tabs={familyTabs("training", "/compliance/training/material")}
         title="Training material"
         subtitle="The exact document each member of staff is sent, to read on screen or print for the file. Opening one uses your browser's PDF viewer, so print is the button in there."
         actions={<Link href="/compliance/training/records" className="btn">The training file</Link>}

@@ -17,6 +17,7 @@ export function PageHeader({
   actions,
   back,
   help,
+  tabs,
 }: {
   title: string;
   subtitle?: string;
@@ -24,6 +25,8 @@ export function PageHeader({
   back?: { href: string; label: string };
   /** The explanation, behind a "?" beside the title: paragraphs the page used to carry above its figures. */
   help?: React.ReactNode;
+  /** The other sides of the same thing (`familyTabs` in `lib/families.ts`), as one row under the title. */
+  tabs?: { active: string; items: { href: string; label: string }[] };
 }) {
   return (
     <div className="mb-5">
@@ -42,6 +45,23 @@ export function PageHeader({
         </div>
         {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
       </div>
+      {tabs && (
+        <nav className="mt-3 flex flex-wrap gap-1 border-b border-line" aria-label="Views of this page">
+          {tabs.items.map((t) => {
+            const on = t.href === tabs.active;
+            return (
+              <Link
+                key={t.href}
+                href={t.href}
+                aria-current={on ? "page" : undefined}
+                className={`-mb-px border-b-2 px-3 py-1.5 text-sm ${on ? "border-accent font-semibold text-ink" : "border-transparent text-ink-2 hover:border-line-strong hover:text-ink"}`}
+              >
+                {t.label}
+              </Link>
+            );
+          })}
+        </nav>
+      )}
     </div>
   );
 }

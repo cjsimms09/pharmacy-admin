@@ -1,3 +1,4 @@
+import { familyTabs } from "@/lib/families";
 import type React from "react";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -138,6 +139,7 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
   return (
     <>
       <PageHeader
+        tabs={familyTabs("order", "/purchasing")}
         title="Purchasing"
         subtitle="What we dispense, what we paid for it, and whether a cheaper source exists for the same product."
       />

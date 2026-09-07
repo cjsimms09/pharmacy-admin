@@ -1,3 +1,4 @@
+import { familyTabs } from "@/lib/families";
 import Link from "next/link";
 import { db, schema } from "@/db";
 import { eq } from "drizzle-orm";
@@ -29,6 +30,7 @@ export default async function IntakePage({ searchParams }: { searchParams: Promi
   return (
     <>
       <PageHeader
+        tabs={familyTabs("arrivals", "/intake")}
         title="Add documents"
         subtitle="Drop anything in — a licence, a CPR card, a training certificate, a signed form. Claude reads it, works out what it is and whose it is, and fills in the dates. You check it before it is filed."
       />

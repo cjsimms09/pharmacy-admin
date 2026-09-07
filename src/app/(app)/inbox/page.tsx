@@ -1,3 +1,4 @@
+import { familyTabs } from "@/lib/families";
 import Link from "next/link";
 import { desc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
@@ -25,6 +26,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
   return (
     <>
       <PageHeader
+        tabs={familyTabs("arrivals", "/inbox")}
         title="Inbox"
         subtitle="Reports that arrived by email, and anything that was refused."
         actions={

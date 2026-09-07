@@ -1,3 +1,4 @@
+import { familyTabs } from "@/lib/families";
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { requireReimbursement } from "@/lib/features";
@@ -31,6 +32,7 @@ export default async function FloorPage() {
     <>
       <BackLink href="/claims">Claims</BackLink>
       <PageHeader
+        tabs={familyTabs("floor", "/claims/floor")}
         title="Paid under the floor"
         subtitle={`Kansas SB 20 sets a floor of NADAC plus the greater of $10.50 or the state Medicaid dispensing fee, for commercial plans the state can reach, on claims filled from ${SB20_EFFECTIVE_FROM}.`}
         actions={<Link href="/plans" className="btn">Plan register</Link>}

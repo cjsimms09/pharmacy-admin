@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { NAV, groupFor } from "@/lib/nav";
+import { groupFor, itemFor } from "@/lib/nav";
 
 /**
  * Where you are, in the top bar: the section, then the page.
@@ -14,21 +14,30 @@ export function Crumbs() {
   const pathname = usePathname() || "/";
   const g = groupFor(pathname);
   if (!g) return <div className="crumb"><span className="crumb-here">Pharmacy Admin</span></div>;
-  const item = pathname === g.href ? undefined : [...g.items].sort((a, b) => b.href.length - a.href.length).find((i) => pathname === i.href || pathname.startsWith(`${i.href}/`));
-  const deeper = item ? pathname !== item.href : pathname !== g.href;
+  const found = itemFor(pathname);
+  const item = found?.item;
+  const tab = found?.tab;
+  const leaf = tab?.href ?? item?.href ?? g.href;
+  const deeper = pathname !== leaf;
   return (
     <div className="crumb">
       <Link href={g.href}>{g.label}</Link>
       {item && (
         <>
           <span className="crumb-sep">/</span>
-          {deeper ? <Link href={item.href}>{item.label}</Link> : <span className="crumb-here">{item.label}</span>}
+          {deeper || tab ? <Link href={item.href}>{item.label}</Link> : <span className="crumb-here">{item.label}</span>}
+        </>
+      )}
+      {tab && (
+        <>
+          <span className="crumb-sep">/</span>
+          {deeper ? <Link href={tab.href}>{tab.label}</Link> : <span className="crumb-here">{tab.label}</span>}
         </>
       )}
       {deeper && (
         <>
           <span className="crumb-sep">/</span>
-          <span className="crumb-here">{humanise(pathname.slice((item?.href ?? g.href).length))}</span>
+          <span className="crumb-here">{humanise(pathname.slice(leaf.length))}</span>
         </>
       )}
     </div>

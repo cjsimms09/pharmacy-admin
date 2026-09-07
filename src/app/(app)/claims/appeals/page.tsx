@@ -1,3 +1,4 @@
+import { familyTabs } from "@/lib/families";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -97,6 +98,7 @@ export default async function AppealsPage({ searchParams }: { searchParams: Prom
   return (
     <>
       <PageHeader
+        tabs={familyTabs("floor", "/claims/appeals")}
         title="Appeals"
         subtitle="What the contracts say is owed on the claims, packet by packet, with the deadline on each; sent by the PBM's own route and scored by the next remittance."
         help={

@@ -1,3 +1,4 @@
+import { familyTabs } from "@/lib/families";
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { inspectionReport, type Check } from "@/lib/inspection";
@@ -42,6 +43,7 @@ export default async function InspectionPage({
   return (
     <>
       <PageHeader
+        tabs={familyTabs("inspection", "/inspection")}
         title="If they walked in tomorrow"
         subtitle={`${r.pharmacy.name}${r.pharmacy.registration ? ` · registration ${r.pharmacy.registration}` : ""}${r.pharmacy.dea ? ` · DEA ${r.pharmacy.dea}` : ""} — checked ${fmtLong(r.takenOn)}`}
         actions={
