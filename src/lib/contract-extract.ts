@@ -7,7 +7,8 @@ import { eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { audit } from "./audit";
 import { contractsDir } from "./reference";
-import { ContractTerms, EXTRACT_SYSTEM, requireCitations, type ContractTermsT } from "./contract-terms";
+import { ContractTerms, EXTRACT_SYSTEM, requireCitations, termsFromAnswer, termsFromObject, type ContractTermsT } from "./contract-terms";
+export { termsFromAnswer } from "./contract-terms";
 
 /**
  * Reading the contract library.
@@ -39,6 +40,20 @@ import { Triage, TRIAGE_SYSTEM, triageByText, shouldRead, estimateTriageCost, ty
 import { pdfText } from "./pdf-text";
 export { estimateCost, pdfPageCount, planBatches, PDF_PAGE_LIMIT, PDF_BYTES_LIMIT, BATCH_BYTES_LIMIT, BATCH_REQUEST_LIMIT } from "./contract-run";
 
+/*
+ * The answer's shape is asked for in words, not enforced as a grammar.
+ *
+ * The first live run was refused on every document: "Schemas contains too many parameters with
+ * union types (104 parameters with type arrays or anyOf) … limit: 16". Structured outputs compile
+ * the schema into a grammar, and a contract's terms are almost all "a figure or null", which is a
+ * union each. Sixteen is not enough to say "not stated" honestly, and saying "not stated" honestly
+ * is the whole point (null over a guess, contract-reading.md §2). So the schema is printed into
+ * the cached system prompt and the model is told to answer with that JSON and nothing else; the
+ * answer is then held to the same zod schema on this side, which is the check the grammar was.
+ */
+const SCHEMA_TEXT = JSON.stringify(zodOutputFormat(ContractTerms).schema);
+const SYSTEM_TEXT = `${EXTRACT_SYSTEM}\n\n## The answer\n\nReply with exactly one JSON object and nothing else: no prose before or after it, no code fence. It must match this JSON schema. Use null for anything the document does not state; never invent a value.\n\n${SCHEMA_TEXT}`;
+
 function docRequest(id: string, pdf: Buffer, name: string, model: string): Anthropic.Messages.Batches.BatchCreateParams.Request {
   return {
     custom_id: id,
@@ -46,21 +61,22 @@ function docRequest(id: string, pdf: Buffer, name: string, model: string): Anthr
       model,
       max_tokens: 32000,
       thinking: { type: "adaptive" },
-      output_config: { effort: "high", format: zodOutputFormat(ContractTerms) },
+      output_config: { effort: "high" },
       // Cached: identical on every document in the run, so it is billed once.
-      system: [{ type: "text", text: EXTRACT_SYSTEM, cache_control: { type: "ephemeral" } }],
+      system: [{ type: "text", text: SYSTEM_TEXT, cache_control: { type: "ephemeral" } }],
       messages: [
         {
           role: "user",
           content: [
             { type: "document", source: { type: "base64", media_type: "application/pdf", data: pdf.toString("base64") } },
-            { type: "text", text: `File name: ${name}\n\nExtract this contract's terms.` },
+            { type: "text", text: `File name: ${name}\n\nExtract this contract's terms as the one JSON object described in your instructions.` },
           ],
         },
       ],
     },
   };
 }
+
 
 export type QueueResult = { queued: number; batchId: string | null; batches: string[]; skipped: string[]; estimate: { low: number; high: number } };
 
@@ -206,7 +222,7 @@ async function absorb(doc: { id: string; documentName: string; fileName: string 
   const text = msg.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("");
   let terms: ContractTermsT;
   try {
-    terms = ContractTerms.parse(JSON.parse(text));
+    terms = termsFromAnswer(text);
   } catch {
     const why = "The answer did not match the expected shape. Try this one again.";
     await fail(doc.id, why);
@@ -323,6 +339,9 @@ export function explainFailure(result: { type: string; error?: { error?: { type?
   if (/could not process (the )?(pdf|document|image)|invalid.*(pdf|document)|not a valid|corrupt|unsupported/.test(low)) {
     return `The file could not be read as a PDF (${msg}). Open it and re-save it as a PDF, or replace it.`;
   }
+  if (/too many parameters with union types/.test(low)) {
+    return `The answer's schema was too complex for the API's grammar compiler (${msg}). This is the site's request, not the document; update the site and read again.`;
+  }
   if (kind === "authentication_error" || kind === "permission_error") return `The Claude key was refused (${msg}). Check it under Settings → Connections.`;
   if (kind === "billing_error") return `Claude's billing refused the request (${msg}). Check the account's credit.`;
   if (kind === "rate_limit_error" || kind === "overloaded_error") return `Claude was busy (${msg}). Nothing was charged; press \"Read again\" later.`;
@@ -336,18 +355,7 @@ async function fail(id: string, why: string) {
 export function parseTerms(json: string | null): ContractTermsT | null {
   if (!json) return null;
   try {
-    // Fields added to the schema after a document was read are absent from its draft; an old
-    // draft is still a draft, not a failure, so the additions default to "not stated".
-    const raw = JSON.parse(json) as Record<string, unknown>;
-    return ContractTerms.parse({
-      macAppealRequiredFields: [], macAppealInvoiceRequired: null, macAppealSubmissionTarget: null, contacts: [], remittance: null,
-      networkReimbursementIds: [], pharmacyNcpdps: [], pharmacyNpis: [], claimSubmissionWindowDays: null, reversalWindowDays: null,
-      transactionFees: [], keyDefinitions: [], sections: [],
-      pricingCompendium: { value: null, citation: null }, macListAccess: { value: null, citation: null }, performanceMeasures: [],
-      dawRules: { value: null, citation: null }, promptPayDays: null, latePaymentInterest: null,
-      recoupmentTerms: { value: null, citation: null },
-      ...raw,
-    });
+    return termsFromObject(JSON.parse(json) as Record<string, unknown>);
   } catch {
     return null;
   }
@@ -636,7 +644,7 @@ export async function testReader(docId: string, userId: string, userName: string
     const text = msg.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("");
     let terms: ContractTermsT;
     try {
-      terms = ContractTerms.parse(JSON.parse(text));
+      terms = termsFromAnswer(text);
     } catch (e) {
       return { ok: false, documentName: doc.documentName, reason: "The answer did not match the expected shape", detail: `${e instanceof Error ? e.message.slice(0, 300) : String(e)} · first words: ${text.slice(0, 200)}` };
     }

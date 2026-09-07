@@ -345,3 +345,33 @@ export function requireCitations(t: ContractTermsT): CitationFailure[] {
   }
   return missing;
 }
+
+export function termsFromObject(raw: Record<string, unknown>): ContractTermsT {
+  // Fields added to the schema after a document was read are absent from its draft; an old
+  // draft is still a draft, not a failure, so the additions default to "not stated".
+  return ContractTerms.parse({
+    macAppealRequiredFields: [], macAppealInvoiceRequired: null, macAppealSubmissionTarget: null, contacts: [], remittance: null,
+    networkReimbursementIds: [], pharmacyNcpdps: [], pharmacyNpis: [], claimSubmissionWindowDays: null, reversalWindowDays: null,
+    transactionFees: [], keyDefinitions: [], sections: [],
+    pricingCompendium: { value: null, citation: null }, macListAccess: { value: null, citation: null }, performanceMeasures: [],
+    dawRules: { value: null, citation: null }, promptPayDays: null, latePaymentInterest: null,
+    recoupmentTerms: { value: null, citation: null },
+    ...raw,
+  });
+}
+
+
+/**
+ * The model's answer as terms, or a thrown reason.
+ *
+ * Without a grammar the answer can arrive wrapped in a code fence or with a sentence in front of
+ * it; the object is found between the first brace and the last and held to the schema. Fields the
+ * schema gained after a prompt was written default to "not stated", as they do for old drafts.
+ */
+export function termsFromAnswer(text: string): ContractTermsT {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end <= start) throw new Error("no JSON object in the answer");
+  const raw = JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
+  return termsFromObject(raw);
+}

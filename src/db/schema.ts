@@ -780,6 +780,16 @@ export const suppliers = sqliteTable(
     /** Days from order to shelf. Part of how much cover an order has to buy, not a footnote. */
     leadTimeDays: integer("lead_time_days"),
     /**
+     * Days after the invoice date the wholesaler is paid, from the supply agreement.
+     *
+     * The cash account's cost of goods is what left the bank, and the site is rarely told the day
+     * each invoice was paid. The terms are the next best fact the documents supply: McKesson drafts
+     * on its stated terms, so an invoice dated the 3rd on seven-day terms is the 10th's money. Null
+     * means not known, and an invoice with no paid date is then counted on its own date and said
+     * to be. Never the same thing as "paid": a recorded payment date wins over this every time.
+     */
+    paymentTermsDays: integer("payment_terms_days"),
+    /**
      * The wholesaler whose compliance ratio moving spend away from costs a rebate band.
      *
      * Exactly one supplier is the primary. It is not inferred from spend: the pharmacy's contract
@@ -2688,4 +2698,36 @@ export const eraEnrollments = sqliteTable(
     updatedAt: text("updated_at").notNull().default(now()),
   },
   (t) => [index("era_enrollments_pbm_idx").on(t.pbmName)],
+);
+
+/**
+ * A cost that is the same every month and known before its bill arrives.
+ *
+ * Payroll, rent, the software, the loan. A month in progress carries the share of it the days so far
+ * are owed — thirty thousand of payroll is ten thousand by the tenth — so the month-to-date account
+ * is not flattered by bills that have not come yet. A finished month carries the whole amount. A
+ * real bill entered for the same vendor in the same month replaces it, so nothing is counted twice.
+ * Only what the owner typed a monthly figure for is treated this way; nothing is inferred from
+ * history.
+ */
+export const standingCosts = sqliteTable(
+  "standing_costs",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    categoryId: text("category_id").references(() => expenseCategories.id),
+    /** The vendor whose real bill, when it is entered for a month, takes this month's place. */
+    vendorId: text("vendor_id").references(() => vendors.id),
+    /** The whole month's figure, in cents. */
+    amountCents: integer("amount_cents").notNull(),
+    /** First month it applies to, YYYY-MM. */
+    fromMonth: text("from_month").notNull(),
+    /** Last month it applies to, YYYY-MM, or null while it runs. */
+    toMonth: text("to_month"),
+    notes: text("notes"),
+    createdBy: text("created_by"),
+    createdAt: text("created_at").notNull().default(now()),
+    updatedAt: text("updated_at").notNull().default(now()),
+  },
+  (t) => [index("standing_costs_from_idx").on(t.fromMonth)],
 );

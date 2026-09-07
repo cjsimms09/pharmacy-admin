@@ -251,6 +251,7 @@ export default async function SupplierTermsPage({
         freeFreightCents: cents("freeFreightCents"),
         freightCents: cents("freightCents"),
         leadTimeDays: whole("leadTimeDays"),
+        paymentTermsDays: whole("paymentTermsDays"),
         primarySupplier: primary,
         updatedAt: new Date().toISOString(),
       })
@@ -495,6 +496,9 @@ export default async function SupplierTermsPage({
           </Field>
           <Field label="Days from order to shelf" hint="Part of how much cover an order has to buy, not a footnote.">
             <input name="leadTimeDays" type="number" min={0} step={1} defaultValue={supplier.leadTimeDays ?? ""} placeholder="1" />
+          </Field>
+          <Field label="Paid how many days after the invoice" hint="From the supply agreement. The cash account counts an invoice with no recorded payment date on its date plus this.">
+            <input name="paymentTermsDays" type="number" min={0} step={1} defaultValue={supplier.paymentTermsDays ?? ""} placeholder="7" />
           </Field>
           <div className="sm:col-span-2 lg:col-span-4">
             <label className="flex items-start gap-2 text-sm">

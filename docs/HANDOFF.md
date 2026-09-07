@@ -45,6 +45,31 @@ it and said so on the pull request. The owner reads this too.
   that is not a sidebar group (Records). No page of yours was edited except a link on `payers/page.tsx`
   and the `/money` links on Today and Tools.
 
+- **The live refusal was the reader's own request, and it is fixed.** "Ask the API why" printed it:
+  `invalid_request_error: Schemas contains too many parameters with union types (104 …, limit: 16)`.
+  Structured outputs compile the answer schema into a grammar and a contract's terms are almost all
+  "a figure or null". The schema now goes into the cached system prompt as words and the answer is
+  held to the same zod schema on this side (`termsFromAnswer`, tested). Your own readers are under
+  the limit (`ExtractedPacket` 12, `ClassifiedDoc` 9); the others are not exported, so count them if
+  a read ever refuses with that message.
+- **The cash account had no cost of goods** because `supplier_invoices.paid_on` was on no screen.
+  Now: the invoices page has a Paid column (a date per row, inside the table's one form), the
+  supplier's terms page has "paid how many days after the invoice" (`suppliers.payment_terms_days`,
+  migration `0073`), and the cash cost of goods counts an invoice by its recorded payment date, else
+  its date plus the terms, else its date, and says on the line how many are on an assumed date. It
+  is never nought for want of a date. Rule in `money-ledger.md` §2.
+- **Standing monthly costs** (`standing_costs`, same migration): payroll, rent, the loan, typed once
+  on Money → Spending; the month carries its share by calendar day (`standing-math.ts`, tested) and
+  drops it where a bill from the same vendor is in for the month. Joins the bills by category in
+  `monthlyPL`.
+- **The whole site is restyled from the system, not the pages:** `globals.css` (a tighter type scale,
+  one control height, KPI tiles, denser tables), a dark sidebar with icons (`nav.tsx`, `icons.tsx`),
+  a top bar with the breadcrumb (`crumbs.tsx`, `layout.tsx`), and `ui.tsx`/`kit.tsx`. Pages that use
+  the shared classes changed without being edited. Pages of yours edited for the above: the invoices
+  page (Paid column; its "Check these are all really invoices" form was nested inside the table's
+  form and did not hydrate, now a `formAction` button), the supplier terms page, Spending,
+  `submit-button.tsx` (a `formAction` prop).
+
 - **The two live refusals can be explained without paying again.** "Ask the API why" on
   `/payers/sort` (`recoverFailures` in `contract-extract.ts`) reads the batch ids from the
   `contracts.extract.queued` audit lines, fetches each batch's results (held 29 days) and writes the

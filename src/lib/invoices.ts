@@ -1279,6 +1279,22 @@ export async function setInvoiceDate(id: string, invoiceDate: string, user: { na
 }
 
 /**
+ * The day an invoice was paid, as somebody recorded it.
+ *
+ * The cash account's cost of goods is drawn from this: until a date is here the invoice is counted
+ * on its own date plus the supplier's terms and said to be. Blank clears it.
+ */
+export async function setInvoicePaidOn(id: string, paidOn: string, user: { name: string }): Promise<void> {
+  if (paidOn && !/^\d{4}-\d{2}-\d{2}$/.test(paidOn)) throw new Error("That is not a date.");
+  const inv = await db.query.supplierInvoices.findFirst({ where: eq(schema.supplierInvoices.id, id) });
+  if (!inv) throw new Error("That invoice no longer exists.");
+  await db
+    .update(schema.supplierInvoices)
+    .set({ paidOn: paidOn || null, basis: `${inv.basis ?? ""} ${paidOn ? `Paid ${paidOn}` : "Payment date cleared"}, entered by ${user.name} on ${todayIso()}.`.trim() })
+    .where(eq(schema.supplierInvoices.id, id));
+}
+
+/**
  * Documents that are supplier invoices but were never filed as one.
  *
  * Every invoice that arrived before this existed went into the document vault as an ordinary

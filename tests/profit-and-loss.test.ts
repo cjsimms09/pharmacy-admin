@@ -208,15 +208,26 @@ describe("cash and accrual are different accounts", () => {
      */
     const r = monthlyPL({ ...base, basis: "cash", receipts: [{ kind: "third_party", amountCents: 60_000_000 }], paidPurchasesCents: null });
     assert.equal(r.costOfGoods.some((l) => l.label.startsWith("Acquisition cost")), false);
-    assert.match(r.missing.join(" "), /No invoice carries a payment date/);
+    assert.match(r.missing.join(" "), /No wholesaler invoice falls in this month/);
   });
 
-  test("unpaid invoices in the month are named, so the gap is visible rather than quiet", () => {
+  test("invoices counted on an assumed date are named on the line, so the figure is never read as a bank statement", () => {
     const r = monthlyPL({
       ...base, basis: "cash", receipts: [{ kind: "third_party", amountCents: 60_000_000 }],
-      paidPurchasesCents: 48_000_000, purchasesUnpaidCount: 3,
+      paidPurchasesCents: 48_000_000, purchasesUnpaidCount: 3, purchasesAssumedCount: 3,
     });
-    assert.match(r.missing.join(" "), /3 wholesaler invoices have no payment date/);
+    const line = r.costOfGoods.find((l) => l.amountCents === 48_000_000);
+    assert.match(line?.note ?? "", /3 of them are counted on the invoice date plus the supplier's payment terms/);
+    assert.equal(r.costOfGoodsCents, 48_000_000);
+  });
+
+  test("a standing cost joins the expenses by category at the month's share", () => {
+    const r = monthlyPL({
+      ...base,
+      standing: [{ name: "Payroll", categoryId: "c-pay", categoryName: "Payroll", kind: "operating", accruedCents: 1_000_000, amountCents: 3_000_000, days: 10, of: 30 }],
+    });
+    const line = r.operating.find((l) => l.label === "Payroll");
+    assert.equal(line?.amountCents, 1_000_000);
   });
 });
 

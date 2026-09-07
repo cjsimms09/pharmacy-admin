@@ -14,7 +14,7 @@ export function LinkTabs({ tabs, active, className }: { tabs: { key: string; lab
         <Link
           key={t.key}
           href={t.href}
-          className={`px-3 py-1.5 ${t.key === active ? "bg-accent-soft font-semibold text-accent" : "text-ink-2 hover:bg-ground"}`}
+          className={`px-3 py-1.5 ${t.key === active ? "bg-accent text-white" : "bg-surface text-ink-2 hover:bg-ground"}`}
           aria-current={t.key === active ? "page" : undefined}
         >
           {t.label}
@@ -56,17 +56,16 @@ export function Stat({
   size?: "lg" | "sm";
 }) {
   const good = delta ? (delta.sign === 0 ? null : (delta.sign > 0) === upIsGood) : null;
-  const ink = tone === "crit" ? "text-crit" : tone === "warn" ? "text-warn" : tone === "muted" ? "text-ink-2" : "text-accent";
-  const ring = tone === "crit" ? "border-crit" : tone === "warn" ? "border-warn" : "border-line";
+  const state = tone === "crit" ? "kpi-crit" : tone === "warn" ? "kpi-warn" : tone === "ok" ? "kpi-ok" : "";
   const body = (
     <>
+      <div className="kpi-label">{label}</div>
       <div className="flex items-end justify-between gap-2">
-        <div className={`${size === "sm" ? "text-2xl" : "text-4xl"} font-bold leading-none tabular-nums ${ink}`}>{value}</div>
+        <div className={`kpi-value ${size === "sm" ? "text-xl" : ""}`}>{value}</div>
         {history && history.filter((h) => h !== null).length >= 2 && <Sparkline values={history} tone={good === false ? "crit" : "accent"} />}
       </div>
-      <div className="mt-2.5 text-sm font-semibold">{label}</div>
       {(delta || sub) && (
-        <div className="mt-0.5 text-xs leading-snug text-ink-3">
+        <div className="kpi-sub">
           {delta && <span className={`font-medium ${good === null ? "text-ink-3" : good ? "text-accent" : "text-crit"}`}>{delta.sign > 0 ? "▲" : delta.sign < 0 ? "▼" : "▬"} {delta.text}</span>}
           {delta && sub && <span className="mx-1.5 text-ink-3">·</span>}
           {sub}
@@ -74,9 +73,9 @@ export function Stat({
       )}
     </>
   );
-  if (!href) return <div className={`card ${ring}`}>{body}</div>;
+  if (!href) return <div className={`kpi ${state}`}>{body}</div>;
   return (
-    <Link href={href} className={`card ${ring} block transition-colors hover:border-accent`}>
+    <Link href={href} className={`kpi ${state} block`}>
       {body}
     </Link>
   );

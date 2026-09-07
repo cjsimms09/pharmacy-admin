@@ -7,6 +7,8 @@ import { categories, vendors, recentExpenses, unpaid, missingThisMonth, seedCate
 import { formatCents } from "@/lib/money";
 import { fmt, todayIso } from "@/lib/dates";
 import { PageHeader, Notice, Empty, Card, Figure, Field } from "@/components/ui";
+import { allStandingCosts, addStandingCost, endStandingCost, deleteStandingCost, standingLines } from "@/lib/standing-costs";
+import { parseCents } from "@/lib/money";
 import { ExportData } from "@/components/export-data";
 import { SubmitButton } from "@/components/submit-button";
 import { ConfirmButton } from "@/components/confirm-button";
@@ -37,14 +39,70 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
   // Standard chart of accounts on first visit. An empty one gets filled badly.
   await seedCategories();
 
-  const [cats, vend, recent, owed, missing, editing] = await Promise.all([
+  const [cats, vend, recent, owed, missing, editing, standingAll] = await Promise.all([
     categories(),
     vendors(),
     recentExpenses(100),
     unpaid(),
     missingThisMonth(),
     edit ? expenseById(edit) : Promise.resolve(null),
+    allStandingCosts(),
   ]);
+  const month = todayIso().slice(0, 7);
+  const standingNow = standingLines(standingAll, month, todayIso(), recent.filter((e) => e.status === "confirmed" && e.invoiceDate.startsWith(month)));
+
+  /*
+   * A cost the same every month, known before its bill: payroll, rent, the loan.
+   *
+   * Typed once, with the month it starts. The account carries the month's share of it by the day,
+   * so the month-to-date figure is not flattered by the bills that have not come, and drops it the
+   * moment the vendor's real bill for the month is entered.
+   */
+  async function addStanding(form: FormData) {
+    "use server";
+    const u = await requireManager();
+    const name = String(form.get("name") ?? "").trim();
+    const amountCents = parseCents(String(form.get("amount") ?? ""));
+    const fromMonth = String(form.get("fromMonth") ?? "").trim();
+    const toMonth = String(form.get("toMonth") ?? "").trim() || null;
+    if (!name) redirect("/expenses?error=" + encodeURIComponent("Give the cost a name."));
+    if (amountCents === null || amountCents <= 0) redirect("/expenses?error=" + encodeURIComponent("Put the month's figure in dollars."));
+    if (!/^\d{4}-\d{2}$/.test(fromMonth)) redirect("/expenses?error=" + encodeURIComponent("Say which month it starts, as YYYY-MM."));
+    if (toMonth && !/^\d{4}-\d{2}$/.test(toMonth)) redirect("/expenses?error=" + encodeURIComponent("The last month must be YYYY-MM, or blank while it runs."));
+    const id = await addStandingCost(
+      { name, amountCents, categoryId: String(form.get("categoryId") ?? "") || null, vendorId: String(form.get("vendorId") ?? "") || null, fromMonth, toMonth, notes: String(form.get("notes") ?? "").trim() || null },
+      u,
+    );
+    await audit({ action: "standing_cost.add", userId: u.id, userName: u.name, entity: "standing_cost", entityId: id, details: `${name} ${formatCents(amountCents)} a month from ${fromMonth}` });
+    revalidatePath("/expenses");
+    revalidatePath("/money");
+    revalidatePath("/money/monthly");
+    redirect("/expenses?ok=" + encodeURIComponent(`${name} is on the account at ${formatCents(amountCents)} a month, by the day.`));
+  }
+
+  async function endStanding(form: FormData) {
+    "use server";
+    const u = await requireManager();
+    const id = String(form.get("id") ?? "");
+    const lastMonth = String(form.get("lastMonth") ?? "").trim();
+    if (!/^\d{4}-\d{2}$/.test(lastMonth)) redirect("/expenses?error=" + encodeURIComponent("Say the last month it applies to, as YYYY-MM."));
+    await endStandingCost(id, lastMonth);
+    await audit({ action: "standing_cost.end", userId: u.id, userName: u.name, entity: "standing_cost", entityId: id, details: `ends ${lastMonth}` });
+    revalidatePath("/expenses");
+    revalidatePath("/money");
+    redirect("/expenses?ok=" + encodeURIComponent(`Ended after ${lastMonth}; earlier months keep it.`));
+  }
+
+  async function removeStanding(form: FormData) {
+    "use server";
+    const u = await requireManager();
+    const id = String(form.get("id") ?? "");
+    await deleteStandingCost(id);
+    await audit({ action: "standing_cost.delete", userId: u.id, userName: u.name, entity: "standing_cost", entityId: id });
+    revalidatePath("/expenses");
+    revalidatePath("/money");
+    redirect("/expenses?ok=" + encodeURIComponent("Removed from every month."));
+  }
 
   async function addBill(form: FormData) {
     "use server";
@@ -314,6 +372,83 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
             <SubmitButton className="btn btn-primary" pendingLabel="Saving…">{editing ? "Save changes" : "Record it"}</SubmitButton>
             {editing && <Link href="/expenses" className="btn">Cancel</Link>}
           </div>
+        </form>
+      </Card>
+
+      {/* ── Standing costs ──────────────────────────────────────────────── */}
+      <Card
+        className="mt-4"
+        title="Standing monthly costs"
+        count={standingAll.length}
+        subtitle={`Payroll, rent, the loan: the same every month and known before the bill. The account carries each month's share by the day — ${formatCents(3_000_000)} a month is ${formatCents(1_000_000)} by the 10th — and drops it when the vendor's real bill for the month is entered.`}
+      >
+        {standingNow.length > 0 && (
+          <div className="mb-4 overflow-x-auto">
+            <table className="table">
+              <thead>
+                <tr><th>Cost</th><th>Category</th><th className="num">A month</th><th className="num">So far this month</th><th>Runs</th><th></th></tr>
+              </thead>
+              <tbody>
+                {standingNow.map((l) => {
+                  const c = standingAll.find((x) => x.id === l.id)!;
+                  const cat = cats.find((x) => x.id === l.categoryId);
+                  return (
+                    <tr key={l.id}>
+                      <td className="font-medium">{l.name}{l.replacedByBill && <span className="badge badge-muted ml-2">real bill in, not counted</span>}</td>
+                      <td className="text-xs text-ink-2">{cat?.name ?? "—"}</td>
+                      <td className="num">{formatCents(l.amountCents)}</td>
+                      <td className="num">{l.replacedByBill ? "—" : formatCents(l.accruedCents)} <span className="text-xs text-ink-3">day {l.days} of {l.of}</span></td>
+                      <td className="text-xs text-ink-2">{c.fromMonth} → {c.toMonth ?? "open"}</td>
+                      <td className="whitespace-nowrap">
+                        <form action={endStanding} className="inline-flex items-center gap-1">
+                          <input type="hidden" name="id" value={c.id} />
+                          <input type="month" name="lastMonth" defaultValue={month} aria-label="Last month" className="w-auto py-0.5 text-xs" />
+                          <button className="btn btn-sm">End</button>
+                        </form>
+                        <form action={removeStanding} className="ml-1 inline">
+                          <input type="hidden" name="id" value={c.id} />
+                          <button className="btn btn-sm btn-danger">Delete</button>
+                        </form>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {standingAll.length > standingNow.length && (
+          <p className="mb-3 text-xs text-ink-3">{standingAll.length - standingNow.length} more not in force this month (ended, or starting later).</p>
+        )}
+        <form action={addStanding} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+          <Field label="Cost" className="lg:col-span-2">
+            <input name="name" placeholder="Payroll" required className="w-full" />
+          </Field>
+          <Field label="A month, in dollars">
+            <input name="amount" inputMode="decimal" placeholder="30000.00" required className="w-full" />
+          </Field>
+          <Field label="Category">
+            <select name="categoryId" className="w-full">
+              <option value="">—</option>
+              {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Vendor" hint="Its real bill for a month replaces this.">
+            <select name="vendorId" className="w-full">
+              <option value="">—</option>
+              {vend.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+            </select>
+          </Field>
+          <Field label="From month">
+            <input type="month" name="fromMonth" defaultValue={month} required className="w-full" />
+          </Field>
+          <Field label="Last month" hint="Blank while it runs." className="lg:col-span-2">
+            <input type="month" name="toMonth" className="w-full" />
+          </Field>
+          <Field label="Notes" className="sm:col-span-2 lg:col-span-3">
+            <input name="notes" className="w-full" />
+          </Field>
+          <div className="flex items-end"><button className="btn btn-primary">Add standing cost</button></div>
         </form>
       </Card>
 

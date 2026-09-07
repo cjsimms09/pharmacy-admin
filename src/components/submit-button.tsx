@@ -22,6 +22,7 @@ export function SubmitButton({
   hint,
   disabled,
   formNoValidate,
+  formAction,
 }: {
   children: React.ReactNode;
   /** What it says while it works. Name the work, not the wait. */
@@ -38,12 +39,18 @@ export function SubmitButton({
    * belonging to the button about sending.
    */
   formNoValidate?: boolean;
+  /**
+   * The action this button runs, where it shares a form with buttons that run others. A form
+   * inside a form is not HTML and the browser drops it, so a second action on the same table is
+   * a button that names its own rather than a form of its own.
+   */
+  formAction?: (fd: FormData) => void | Promise<void>;
 }) {
   const { pending } = useFormStatus();
 
   return (
     <span className="inline-flex flex-col gap-1">
-      <button className={className} disabled={pending || disabled} aria-busy={pending} formNoValidate={formNoValidate}>
+      <button className={className} disabled={pending || disabled} aria-busy={pending} formNoValidate={formNoValidate} formAction={formAction}>
         {pending ? (
           <span className="inline-flex items-center gap-2">
             {/*

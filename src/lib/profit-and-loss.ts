@@ -40,6 +40,8 @@
  * printing a confident total over a hole.
  */
 import { reconcileCogs, reconcileRevenue, type Check as ReconCheck } from "./reconcile";
+import { standingLines } from "./standing-math";
+import { todayIso } from "./dates";
 
 
 export type PLLine = { label: string; amountCents: number; note?: string };
@@ -134,6 +136,16 @@ export type PLInputs = {
   /** How many invoices in the month have no payment date, so the gap can be named rather than hidden. */
   purchasesUnpaidCount?: number;
   /**
+   * How many of the cash cost-of-goods invoices are counted on an assumed date — the invoice date
+   * plus the supplier's payment terms, or the invoice date alone — rather than a recorded payment.
+   */
+  purchasesAssumedCount?: number;
+  /**
+   * The standing costs the month carries so far: payroll and rent by the day, each already reduced
+   * to the month's share. Dropped where a real bill from the same vendor is entered for the month.
+   */
+  standing?: { name: string; categoryId: string | null; categoryName: string; kind: string; accruedCents: number; amountCents: number; days: number; of: number }[];
+  /**
    * Rebates the month's buying earned. Used on an accrual basis, where the discount belongs to the
    * month that earned it rather than the month the cheque cleared.
    */
@@ -166,7 +178,15 @@ function byCategory(rows: PLInputs["expenses"], kind: string): PLLine[] {
     .sort((a, b) => b.amountCents - a.amountCents);
 }
 
-export function monthlyPL(i: PLInputs): MonthlyPL {
+export function monthlyPL(given: PLInputs): MonthlyPL {
+  /*
+   * Standing costs are expenses the month is owed so far. They join the bills by category before
+   * anything is added up, so payroll accrued to the 15th sits on the same line as a payroll bill
+   * would, and the account reads the same whether the bill has come or not.
+   */
+  const i: PLInputs = given.standing?.length
+    ? { ...given, expenses: [...given.expenses, ...given.standing.map((st) => ({ categoryId: st.categoryId, categoryName: st.categoryName, kind: st.kind, amountCents: st.accruedCents }))] }
+    : given;
   const missing: string[] = [];
 
   /*
@@ -275,16 +295,13 @@ export function monthlyPL(i: PLInputs): MonthlyPL {
     costOfGoods.push({
       label: "Paid to the wholesalers",
       amountCents: i.paidPurchasesCents,
-      note: "Invoices marked paid in this month. On a cash account the goods are a cost when the money leaves, not when the bottle does.",
+      note: i.purchasesAssumedCount
+        ? `Wholesaler invoices paid in this month. ${i.purchasesAssumedCount} of them ${i.purchasesAssumedCount === 1 ? "is" : "are"} counted on the invoice date plus the supplier's payment terms, because no payment date was recorded; enter the date paid on the invoices page and this becomes exact.`
+        : "Invoices marked paid in this month. On a cash account the goods are a cost when the money leaves, not when the bottle does.",
     });
-    if (i.purchasesUnpaidCount) {
-      missing.push(
-        `${i.purchasesUnpaidCount} wholesaler ${i.purchasesUnpaidCount === 1 ? "invoice has" : "invoices have"} no payment date, so ${i.purchasesUnpaidCount === 1 ? "it is" : "they are"} not in the cash cost of goods. Enter the date each was paid and this becomes exact.`,
-      );
-    }
   } else {
     missing.push(
-      "What was paid to the wholesalers this month. No invoice carries a payment date yet, so a cash account has no cost of goods — " +
+      "What was paid to the wholesalers this month. No wholesaler invoice falls in this month by its recorded payment date or by its date plus the supplier's terms, so a cash account has no cost of goods — " +
         "the dispensed cost is deliberately not substituted, because that is the accrual answer and would make the two accounts agree when they should not.",
     );
   }
@@ -422,7 +439,11 @@ export type SharedInputs = {
   cats: Awaited<ReturnType<typeof import("./expenses").categories>>;
   fills: Awaited<ReturnType<typeof import("./claims").allFills>>;
   suppliers: Awaited<ReturnType<typeof import("./suppliers-registry").allSuppliers>>;
-  invoices: { totalCents: number | null; paidOn: string | null; invoiceDate: string | null }[];
+  invoices: { totalCents: number | null; paidOn: string | null; invoiceDate: string | null; supplierId: string | null; supplier: string | null }[];
+  /** Every standing cost on file; which apply to a month is decided per month. */
+  standing: { id: string; name: string; categoryId: string | null; vendorId: string | null; amountCents: number; fromMonth: string; toMonth: string | null }[];
+  /** The day the account is drawn, which decides how much of a standing cost a month in progress carries. */
+  today: string;
   lines: { invoiceDate: string | null; extendedCents: number }[];
   counts: { countedOn: string; valueCents: number | null; rxValueCents: number | null }[];
   /** Money received against fills, by the day it arrived, for the cash account. */
@@ -444,15 +465,17 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
   const from = `${sorted[0]}-01`;
   const to = `${sorted[sorted.length - 1]}-31`;
 
-  const [sales, cats, fills, suppliers, invoices, lines, counts, payments] = await Promise.all([
+  const { allStandingCosts } = await import("./standing-costs");
+  const [sales, cats, fills, suppliers, invoices, lines, counts, payments, standing] = await Promise.all([
     salesMonths(),
     categories(true),
     allFills(),
     allSuppliers(true),
-    db.query.supplierInvoices.findMany({ columns: { totalCents: true, paidOn: true, invoiceDate: true } }),
+    db.query.supplierInvoices.findMany({ columns: { totalCents: true, paidOn: true, invoiceDate: true, supplierId: true, supplier: true } }),
     db.query.invoiceLines.findMany({ where: and(gte(schema.invoiceLines.invoiceDate, from), lte(schema.invoiceLines.invoiceDate, to)), columns: { invoiceDate: true, extendedCents: true } }),
     db.query.onHandImports.findMany({ where: and(gte(schema.onHandImports.countedOn, from), lte(schema.onHandImports.countedOn, to)), columns: { countedOn: true, valueCents: true, rxValueCents: true } }),
     db.query.claimPayments.findMany({ columns: { source: true, receivedOn: true, amountCents: true, revenueCents: true } }),
+    allStandingCosts(),
   ]);
 
   const byMonth: SharedInputs["byMonth"] = new Map();
@@ -470,7 +493,7 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
       driverCents,
     });
   }
-  return { basis, sales, cats, fills, suppliers, invoices, lines, counts, payments, byMonth };
+  return { basis, sales, cats, fills, suppliers, invoices, lines, counts, payments, byMonth, standing, today: todayIso() };
 }
 
 /** One month's inputs, sliced from what was loaded. Nothing here computes; `monthlyPL` does. */
@@ -510,9 +533,30 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
    * that is what was paid; where a total was never read the invoice cannot contribute and is
    * counted as unpaid-unknown instead of as zero.
    */
-  const paidThisMonth = invoices.filter((v) => v.paidOn?.startsWith(month) && v.totalCents !== null);
+  /*
+   * The day an invoice's money left, in order of how well it is known: the payment date somebody
+   * recorded; else the invoice date plus the supplier's payment terms from its agreement; else the
+   * invoice date itself. The first is a fact, the second is the document's own rule, the third is
+   * the nearest thing to either — and every invoice on the second or third is counted and said to
+   * be, so the figure is never mistaken for a bank statement. What it is never allowed to be is
+   * nought for want of a date, which is what a cash account with no cost of goods was saying.
+   */
+  const termsFor = (v: (typeof invoices)[number]): number => {
+    const sup = shared.suppliers.find((s) => s.id === v.supplierId) ?? shared.suppliers.find((s) => v.supplier && s.name.toLowerCase() === v.supplier.toLowerCase());
+    return sup?.paymentTermsDays ?? 0;
+  };
+  const cashDateOf = (v: (typeof invoices)[number]): string | null => {
+    if (v.paidOn) return v.paidOn;
+    if (!v.invoiceDate) return null;
+    const d = new Date(`${v.invoiceDate}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + termsFor(v));
+    return d.toISOString().slice(0, 10);
+  };
+  const paidThisMonth = invoices.filter((v) => v.totalCents !== null && cashDateOf(v)?.startsWith(month));
   const paidPurchasesCents = paidThisMonth.length ? paidThisMonth.reduce((n, v) => n + (v.totalCents ?? 0), 0) : null;
+  const purchasesAssumedCount = paidThisMonth.filter((v) => !v.paidOn).length;
   const purchasesUnpaidCount = invoices.filter((v) => !v.paidOn && v.invoiceDate?.startsWith(month)).length;
+
 
   /*
    * The shelf at each end of the month, which is what makes the cost of goods checkable at all.
@@ -543,6 +587,14 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
   }
 
   const byId = new Map(cats.map((c) => [c.id, c]));
+
+  /* Payroll and rent by the day, dropped where the real bill for the month is already in. */
+  const standing = standingLines(shared.standing, month, shared.today, per.bills)
+    .filter((l) => !l.replacedByBill)
+    .map((l) => {
+      const c = l.categoryId ? byId.get(l.categoryId) : undefined;
+      return { name: l.name, categoryId: l.categoryId, categoryName: c?.name ?? "Uncategorised", kind: c?.kind ?? "operating", accruedCents: l.accruedCents, amountCents: l.amountCents, days: l.days, of: l.of };
+    });
   return {
     month,
     basis,
@@ -555,6 +607,8 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
     purchasesCents,
     paidPurchasesCents,
     purchasesUnpaidCount,
+    purchasesAssumedCount,
+    standing,
     openingStockCents,
     closingStockCents,
     rebatesCents: per.rebatesCents,

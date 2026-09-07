@@ -5,6 +5,7 @@ import { reimbursementEnabled } from "@/lib/features";
 import { noteRequest } from "@/lib/activity";
 import { Nav } from "@/components/nav";
 import { SendToClaude } from "@/components/send-to-claude";
+import { Crumbs } from "@/components/crumbs";
 import { logo } from "@/lib/branding";
 import { getSettings } from "@/lib/settings";
 
@@ -12,6 +13,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   noteRequest();
   const user = await requireUser();
   const [showTools, mark, s] = await Promise.all([reimbursementEnabled(), logo(), getSettings()]);
+  const today = new Date().toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
 
   async function signOut() {
     "use server";
@@ -20,14 +22,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <div className="app-shell min-h-screen md:grid md:grid-cols-[228px_1fr]">
+    <div className="app-shell min-h-screen md:grid md:grid-cols-[232px_1fr]">
       {/*
         The sidebar sticks and scrolls on its own. It got taller when the pages under each group
         became visible, and a footer pinned to the bottom of a column that now overflows is a
         sign-out button you cannot reach.
       */}
-      <aside className="no-print border-b border-line bg-surface md:sticky md:top-0 md:flex md:h-screen md:flex-col md:border-b-0 md:border-r">
-        <div className="shrink-0 px-4 py-4">
+      <aside className="no-print side md:sticky md:top-0 md:flex md:h-screen md:flex-col">
+        <div className="shrink-0 px-4 pb-3 pt-4">
           {/*
             The pharmacy's own mark, where the product name used to be alone.
 
@@ -36,13 +38,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             makes it read as theirs — and it is the same image that goes on everything the site
             prints, so the screen and the paper agree.
           */}
-          <Link href="/" className="block">
+          <Link href="/" className="flex items-center gap-2.5">
             {mark ? (
+              // The pharmacy's mark on a white tile, so a dark logo is not lost on the dark column.
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={mark.url} alt={s.pharmacy_name || "Pharmacy Admin"} className="max-h-11 w-auto max-w-full object-contain" />
+              <span className="flex h-9 shrink-0 items-center rounded-md bg-white px-1.5"><img src={mark.url} alt={s.pharmacy_name || "Pharmacy Admin"} className="max-h-7 w-auto max-w-[150px] object-contain" /></span>
             ) : (
-              <span className="text-base font-bold tracking-tight">Pharmacy Admin</span>
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-accent text-sm font-bold text-white">Rx</span>
             )}
+            {!mark && <span className="text-sm font-semibold tracking-tight text-white">Pharmacy Admin</span>}
           </Link>
           {/*
             What this is, in the pharmacy's own terms.
@@ -52,7 +56,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             the month's profit. A tool that describes itself as the smallest thing it does teaches
             its owner to think of it that way.
           */}
-          <div className="mt-1 text-xs text-ink-3">{mark ? s.pharmacy_name || "Pharmacy desk" : "Compliance, claims and money"}</div>
+          <div className="mt-1.5 truncate text-xs text-ink-3">{mark ? s.pharmacy_name || "Pharmacy desk" : "Compliance, claims and money"}</div>
           {/*
             On every screen, because the moment it is needed is not a moment for navigating to it.
 
@@ -73,10 +77,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <div className="md:min-h-0 md:flex-1 md:overflow-y-auto">
           <Nav tools={showTools} />
         </div>
-        <div className="shrink-0 border-t border-line px-4 py-3 text-xs text-ink-3">
-          <div className="truncate text-ink-2">{user.name}</div>
-          <div className="capitalize">{user.role}</div>
-          <form action={signOut}><button className="mt-1 underline hover:text-ink">Sign out</button></form>
+        <div className="shrink-0 border-t border-[color:var(--color-side-line)] px-4 py-3 text-xs text-ink-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="truncate font-medium text-white">{user.name}</div>
+              <div className="capitalize">{user.role}</div>
+            </div>
+            <form action={signOut}><button className="btn btn-sm">Sign out</button></form>
+          </div>
           {/*
             On every page, in one place that never moves.
 
@@ -88,7 +96,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <SendToClaude />
         </div>
       </aside>
-      <main className="min-w-0 px-4 py-6 md:px-8">{children}</main>
+      <div className="min-w-0">
+        <header className="topbar no-print">
+          <Crumbs />
+          <div className="hidden items-center gap-3 sm:flex">
+            <span className="tabular-nums">{today}</span>
+            <span className="text-ink-3">·</span>
+            <span className="truncate">{s.pharmacy_name || "Pharmacy Admin"}</span>
+          </div>
+        </header>
+        <main className="min-w-0 px-4 py-5 md:px-6">{children}</main>
+      </div>
     </div>
   );
 }

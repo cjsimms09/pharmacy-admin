@@ -26,21 +26,21 @@ export function PageHeader({
   help?: React.ReactNode;
 }) {
   return (
-    <div className="mb-6">
+    <div className="mb-5">
       {back && (
-        <Link href={back.href} className="mb-2 inline-block text-sm text-ink-2 hover:text-ink">
-          ← {back.label}
+        <Link href={back.href} className="mb-1.5 inline-flex items-center gap-1 text-xs font-medium text-ink-2 hover:text-ink">
+          <span aria-hidden="true">←</span> {back.label}
         </Link>
       )}
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="min-w-0">
+      <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
+        <div className="min-w-0 max-w-3xl">
           <h1 className="flex items-center gap-2">
             {title}
             {help && <HelpPanel title={title}>{help}</HelpPanel>}
           </h1>
-          {subtitle && <p className="mt-1 text-sm text-ink-2">{subtitle}</p>}
+          {subtitle && <p className="mt-1 text-sm leading-relaxed text-ink-2">{subtitle}</p>}
         </div>
-        {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
+        {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
       </div>
     </div>
   );
@@ -72,14 +72,14 @@ export function Card({
   children: React.ReactNode;
   className?: string;
 }) {
-  const border = tone === "crit" ? "border-crit" : tone === "warn" ? "border-warn" : tone === "ok" ? "border-accent" : "";
+  const edge = tone === "crit" ? "border-l-[3px] border-l-crit" : tone === "warn" ? "border-l-[3px] border-l-warn" : tone === "ok" ? "border-l-[3px] border-l-accent" : "";
   return (
-    <section id={id} className={`card ${border} ${className ?? ""}`}>
+    <section id={id} className={`card ${edge} ${className ?? ""}`}>
       {title && (
         <div className="card-head">
           <h2 className="flex items-baseline gap-2">
             {title}
-            {count !== undefined && <span className="text-sm font-normal text-ink-3">{count}</span>}
+            {count !== undefined && <span className="text-xs font-normal tabular-nums text-ink-3">{count}</span>}
           </h2>
           {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
         </div>
@@ -107,30 +107,29 @@ export function Figure({
   /** "sm" for a row of five dollar figures, which do not fit at the large size. */
   size?: "lg" | "sm";
 }) {
-  const ring = tone === "crit" ? "border-crit" : tone === "warn" ? "border-warn" : "border-line";
-  const ink = tone === "crit" ? "text-crit" : tone === "warn" ? "text-warn" : tone === "muted" ? "text-ink-2" : "text-accent";
+  const state = tone === "crit" ? "kpi-crit" : tone === "warn" ? "kpi-warn" : tone === "ok" ? "kpi-ok" : "";
   const body = (
     <>
-      <div className={`${size === "sm" ? "text-2xl" : "text-4xl"} font-bold leading-none tabular-nums ${ink}`}>{value}</div>
-      <div className="mt-2.5 text-sm font-semibold">{label}</div>
-      {sub && <div className="mt-0.5 text-xs leading-snug text-ink-3">{sub}</div>}
+      <div className="kpi-label">{label}</div>
+      <div className={`kpi-value ${size === "sm" ? "text-xl" : ""}`}>{value}</div>
+      {sub && <div className="kpi-sub">{sub}</div>}
     </>
   );
-  if (!href) return <div className={`card ${ring}`}>{body}</div>;
+  if (!href) return <div className={`kpi ${state}`}>{body}</div>;
   return (
-    <Link href={href} className={`card ${ring} block transition-colors hover:border-accent`}>
+    <Link href={href} className={`kpi ${state} block`}>
       {body}
     </Link>
   );
 }
 
 export function Empty({ children }: { children: React.ReactNode }) {
-  return <div className="rounded-lg border border-dashed border-line px-4 py-10 text-center text-sm text-ink-3">{children}</div>;
+  return <div className="rounded-lg border border-dashed border-line-strong bg-surface/60 px-4 py-8 text-center text-sm text-ink-3">{children}</div>;
 }
 
 export function Notice({ kind = "ok", children }: { kind?: "ok" | "warn" | "crit"; children: React.ReactNode }) {
-  const cls = kind === "ok" ? "bg-accent-soft text-accent" : kind === "warn" ? "bg-warn-soft text-warn" : "bg-crit-soft text-crit";
-  return <div className={`mb-4 rounded-md px-3.5 py-2.5 text-sm font-medium ${cls}`}>{children}</div>;
+  const cls = kind === "ok" ? "border-accent bg-accent-soft text-accent" : kind === "warn" ? "border-warn bg-warn-soft text-warn" : "border-crit bg-crit-soft text-crit";
+  return <div className={`mb-4 rounded-md border-l-[3px] px-3.5 py-2.5 text-sm font-medium leading-relaxed ${cls}`}>{children}</div>;
 }
 
 /**
@@ -224,7 +223,7 @@ export function History({
 }) {
   if (count === 0) return null;
   return (
-    <details className={`mt-4 rounded-md border border-line bg-ground px-3 py-2 ${className ?? ""}`}>
+    <details className={`mt-4 rounded-md border border-line bg-ground/70 px-3 py-2 ${className ?? ""}`}>
       <summary className="cursor-pointer select-none text-sm text-ink-3">
         {label} <span className="text-ink-3">({count})</span>
       </summary>

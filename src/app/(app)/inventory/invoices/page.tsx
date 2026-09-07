@@ -13,6 +13,7 @@ import {
   invoiceMonths,
   setSchedule,
   setInvoiceDate,
+  setInvoicePaidOn,
   forwardInvoices,
   recentForwards,
   parseExpected,
@@ -225,6 +226,31 @@ export default async function InvoicesPage({
    * the total would put a number the site invented onto a financial record that gets reconciled
    * against a payment — a blank somebody fills in is the honest version of not knowing.
    */
+  /*
+   * The day the money left, per invoice.
+   *
+   * The cash account had no cost of goods at all, because this column existed in the database and
+   * on no screen. A date typed here is a fact; until it is, the account counts the invoice on its
+   * date plus the supplier's terms and says so.
+   */
+  async function paidIt(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const id = String(fd.get("id") ?? "");
+    const paidOn = String(fd.get("paidOn") ?? "").trim();
+    try {
+      await setInvoicePaidOn(id, paidOn, u);
+      await audit({ action: "invoice.paid", userId: u.id, userName: u.name, entity: "invoice", entityId: id, details: paidOn || "cleared" });
+      revalidatePath("/inventory/invoices");
+      revalidatePath("/money");
+      revalidatePath("/money/monthly");
+      redirect("/inventory/invoices?ok=" + encodeURIComponent(paidOn ? "Payment date recorded; the cash account uses it." : "Payment date cleared."));
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/inventory/invoices?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not record that date."));
+    }
+  }
+
   async function amount(fd: FormData) {
     "use server";
     const u = await requireManager();
@@ -1200,16 +1226,17 @@ export default async function InvoicesPage({
           subtitle={onlyUndated ? "In the archive, but not retrievable by date — which is what an inspector asks for." : TABS.find((t) => t.key === active)!.blurb}
           className="mt-3"
         >
+          {/* Inside the table's one form, so the button names its own action rather than opening a second form. */}
           {canManage && (
-            <form action={recheckAll} className="mb-3">
-              <SubmitButton className="btn btn-sm" pendingLabel="Reading them again…" formNoValidate>
+            <div className="mb-3">
+              <SubmitButton className="btn btn-sm" pendingLabel="Reading them again…" formNoValidate formAction={recheckAll}>
                 Check these are all really invoices
               </SubmitButton>
               <span className="ml-2 text-xs text-ink-3">
                 Reads each filed document again on its own words and takes out anything that turns out to be a statement,
                 a rebate breakdown or a credit memo. It only ever moves things out of the invoice file.
               </span>
-            </form>
+            </div>
           )}
           {shown.length === 0 ? (
             <Empty>
@@ -1224,7 +1251,7 @@ export default async function InvoicesPage({
                   <thead>
                     <tr>
                       {canManage && <th className="w-8"></th>}
-                      <th>Date</th><th>Supplier</th><th>Invoice</th><th className="text-right">Amount</th><th>Carries</th><th>Lines</th><th></th>
+                      <th>Date</th><th>Supplier</th><th>Invoice</th><th className="text-right">Amount</th><th>Paid</th><th>Carries</th><th>Lines</th><th></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1253,6 +1280,19 @@ export default async function InvoicesPage({
                             <Link href="/inventory/invoices?noamount=1" className="badge badge-muted">no amount</Link>
                           ) : (
                             money(i.totalCents)
+                          )}
+                        </td>
+                        <td className="whitespace-nowrap align-top text-xs">
+                          {canManage ? (
+                            <form action={paidIt} className="flex items-center gap-1">
+                              <input type="hidden" name="id" value={i.id} />
+                              <input type="date" name="paidOn" defaultValue={i.paidOn ?? ""} aria-label="Date paid" className="field w-auto py-0.5 text-xs" />
+                              <button className="btn btn-sm">{i.paidOn ? "Save" : "Paid"}</button>
+                            </form>
+                          ) : i.paidOn ? (
+                            fmt(i.paidOn)
+                          ) : (
+                            <span className="text-ink-3">on terms</span>
                           )}
                         </td>
                         <td className="align-top">

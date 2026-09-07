@@ -512,6 +512,13 @@
       "when": 1788729218211,
       "tag": "0072_crazy_felicia_hardy",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "6",
+      "when": 1788743667982,
+      "tag": "0073_lyrical_living_lightning",
+      "breakpoints": true
     }
   ]
 }
