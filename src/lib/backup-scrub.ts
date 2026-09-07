@@ -348,6 +348,39 @@ export async function scrubCopy(dbFile: string): Promise<ScrubReport> {
     }
 
     /*
+     * The FDA directory, cut to the drugs this pharmacy actually touches.
+     *
+     * It is a quarter of a million packages — every drug marketed in the United States — and it
+     * would be the largest thing in the copy by some way. But an equivalent nobody sells is not an
+     * option, and a package nobody stocks has no pack size to argue about, so the rows worth
+     * carrying are the ones some supplier prices, the shelf holds, or a claim has dispensed.
+     *
+     * The verbose columns go with them. `substances` and `te_why` are long, highly repetitive, and
+     * say nothing the equivalence key and the rating do not: the key already encodes the
+     * ingredients, and the reason a product has no rating is recomputable from the application.
+     * What stays is what the pack-size and equivalence work reads.
+     */
+    if (present.has("drug_directory")) {
+      const before = await count("drug_directory");
+      if (before > 0) {
+        const referenced = ["supplier_items", "on_hand", "claims"].filter((t) => present.has(t));
+        if (referenced.length > 0) {
+          const union = referenced.map((t) => `select ndc11 from ${t}`).join(" union ");
+          await db.execute(`delete from drug_directory where ndc11 not in (${union})`);
+        }
+        const have = await columnsOf(db, "drug_directory");
+        const drop = ["substances", "te_why", "product_ndc", "application", "marketing_category", "brand_name", "route"].filter((c) => have.has(c));
+        if (drop.length > 0) await db.execute(`update drug_directory set ${await emptyValues(db, "drug_directory", drop)}`);
+        if (have.has("loaded_at")) await db.execute("update drug_directory set loaded_at = substr(loaded_at, 1, 10)");
+        const after = await count("drug_directory");
+        changed.push({
+          what: `FDA directory cut to the ${after.toLocaleString()} packages this pharmacy prices, stocks or has dispensed, and its long descriptive columns dropped`,
+          rows: before - after,
+        });
+      }
+    }
+
+    /*
      * And the space the deletions freed is given back, or none of this makes the file smaller.
      *
      * SQLite keeps emptied pages for reuse rather than shrinking the file, so dropping 1.4 million
