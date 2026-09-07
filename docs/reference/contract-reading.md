@@ -221,8 +221,10 @@ contract, rate_sheet, notice, manual, not_relevant, unsure. The full read skips 
 `not_relevant`, and only when the model was confident; a person's word on the sort page overrules
 either sorter. A refused read now records the API's own reason in plain words (too long for one
 read: split it; not a PDF: re-save it; key refused; busy, try again), and a refused request costs
-nothing. The per-request page limit is 50, not 100: a scanned page is sent as an image and costs
-up to 3,000 tokens, so a hundred of them overflow a 200,000-token window.
+nothing. The per-request page limit is 300, under the API's 600: a scanned page is sent as an image and costs
+up to 3,000 tokens, and the model takes a million tokens in one request at the ordinary price, so a
+150-page agreement is read whole and nobody splits it by hand. The earlier limit of fifty was set for
+a 200,000-token window this model does not have.
 
 **The refusals that were thrown away can be fetched back (`recoverFailures`, "Ask the API why" on
 `/payers/sort`).** The audit line written when a run was queued names its batches, and the API
