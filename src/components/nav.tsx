@@ -3,77 +3,76 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { NAV, groupFor, itemFor } from "@/lib/nav";
-import { Icon, iconFor } from "./icons";
 
 /**
- * The sidebar.
+ * The head of the site: six words across the top, and under them the pages of the one you are in.
  *
- * Two levels, with only the group you are inside expanded. A flat list of every page would be
- * forty links to read every time; a list that hides everything behind a click is the memory test
- * this replaced. Showing the current group's pages is the middle: you can always see where you
- * are, what else is here, and what the next thing is — without a menu that has to be learnt.
- *
- * Each group has an icon, so it is found by shape from the corner of the eye, and the group you
- * are in carries a rule down its edge as well as its colour.
+ * A dark sidebar of fifty links was the thing the owner could not read. This is a bar with six
+ * entries, and a second, lighter row that appears only inside a group and holds the pages
+ * somebody opens on a normal day; the rest of the group is behind "more". Where you are is the
+ * word with the line under it and the pill in the second row.
  */
-export function Nav({ tools }: { tools: boolean }) {
+/*
+ * A link that lands on Today is worse than no link. The reimbursement pages redirect home while
+ * the flag is off, so their entries are dropped rather than left to fail silently.
+ */
+const visibleGroups = (tools: boolean) => NAV.map((g) => ({ ...g, items: tools ? g.items : g.items.filter((i) => !i.gated) })).filter((g, i) => NAV[i].items.length === 0 || g.items.length > 0);
+
+/** The six words. */
+export function TopNav({ tools }: { tools: boolean }) {
   const pathname = usePathname() || "/";
   const active = groupFor(pathname);
-  /*
-   * A link that lands on Today is worse than no link. The reimbursement pages redirect home while
-   * the flag is off, so their entries are dropped rather than left to fail silently; a group whose
-   * every page is behind the flag has nowhere to land, so it goes with them.
-   */
-  const visible = tools ? NAV : NAV.map((g) => ({ ...g, items: g.items.filter((i) => !i.gated) }));
-  const groups = visible.filter((g, i) => NAV[i].items.length === 0 || g.items.length > 0 || !NAV[i].items.every((it) => it.gated));
-  // The item the page lives under, by the same rule as the breadcrumb — never a prefix, so Staff is not lit on New employee.
-  const isOn = (href: string) => pathname === href || itemFor(pathname)?.item.href === href;
-
   return (
-    <nav className="px-2 pb-4" aria-label="Sections">
-      {groups.map((g) => {
-        const open = active?.href === g.href;
-        const here = pathname === g.href;
-        return (
-          <div key={g.href} className="mb-px">
-            <Link href={g.href} className={`side-group ${here || open ? "on" : ""}`} aria-current={here ? "page" : undefined}>
-              <Icon name={iconFor(g.href)} />
-              <span className="truncate">{g.label}</span>
-            </Link>
-            {open && g.items.length > 0 && (
-              <ul className="mb-2 ml-[1.35rem] mt-0.5 space-y-px border-l border-[color:var(--color-side-line)] pl-2">
-                {g.items.filter((i) => !i.hidden).map((i) => (
-                  <li key={i.href}>
-                    <Link href={i.href} className={`side-item ${isOn(i.href) ? "on" : ""}`} aria-current={isOn(i.href) ? "page" : undefined}>
+    <nav className="flex items-center gap-5" aria-label="Sections">
+      {visibleGroups(tools).map((g) => (
+        <Link key={g.href} href={g.href} className={`nav-group ${active?.href === g.href ? "on" : ""}`} aria-current={pathname === g.href ? "page" : undefined}>
+          {g.label}
+        </Link>
+      ))}
+    </nav>
+  );
+}
+
+/** The second row: the pages of the group you are in, and "more" for the rest. Nothing outside a group. */
+export function SubNav({ tools }: { tools: boolean }) {
+  const pathname = usePathname() || "/";
+  const active = groupFor(pathname);
+  const isOn = (href: string) => pathname === href || itemFor(pathname)?.item.href === href;
+  const open = visibleGroups(tools).find((g) => g.href === active?.href);
+  const listed = open?.items.filter((i) => !i.hidden) ?? [];
+  const more = open?.items.filter((i) => i.hidden) ?? [];
+  if (!open || open.items.length === 0) return null;
+  return (
+    <>
+      {(
+        <div className="nav-sub">
+          <div className="site-row h-11 gap-1.5 overflow-x-auto">
+            {listed.map((i) => (
+              <Link key={i.href} href={i.href} className={`nav-item ${isOn(i.href) ? "on" : ""}`} aria-current={isOn(i.href) ? "page" : undefined}>
+                {i.label}
+              </Link>
+            ))}
+            {/* A hidden page you are on gets a pill of its own, so the highlight is never inside a closed menu. */}
+            {more.filter((i) => isOn(i.href)).map((i) => (
+              <Link key={i.href} href={i.href} className="nav-item on" aria-current="page">
+                {i.label}
+              </Link>
+            ))}
+            {more.length > 0 && (
+              <details className="nav-more">
+                <summary>more ▾</summary>
+                <div>
+                  {more.map((i) => (
+                    <Link key={i.href} href={i.href} className={isOn(i.href) ? "on" : ""}>
                       {i.label}
                     </Link>
-                  </li>
-                ))}
-                {/*
-                  The rest of the group, folded. Open when the page you are on is one of them, so
-                  the highlight is never on a link you cannot see.
-                */}
-                {g.items.some((i) => i.hidden) && (
-                  <li>
-                    <details open={g.items.some((i) => i.hidden && isOn(i.href))}>
-                      <summary className="side-item cursor-pointer text-[color:var(--color-side-ink-2)]">more</summary>
-                      <ul className="space-y-px">
-                        {g.items.filter((i) => i.hidden).map((i) => (
-                          <li key={i.href}>
-                            <Link href={i.href} className={`side-item ${isOn(i.href) ? "on" : ""}`} aria-current={isOn(i.href) ? "page" : undefined}>
-                              {i.label}
-                            </Link>
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
-                  </li>
-                )}
-              </ul>
+                  ))}
+                </div>
+              </details>
             )}
           </div>
-        );
-      })}
-    </nav>
+        </div>
+      )}
+    </>
   );
 }

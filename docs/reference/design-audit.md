@@ -332,6 +332,13 @@ retires a page whose address is still linked.
 | Tools `/tools` | keep, the hand-typed status board dropped | The section landing, like `/compliance` and `/staff`. Its second half was nine cards with a typed "ready / waiting / needs work" that was wrong within a month of being written; the pages say what they wait on, in figures. |
 | Settings and its eight pages | keep | Each a different connection or fact; eight is the ceiling and it is at it. |
 
+**The look, 7 September evening.** The dark sidebar is gone; the owner called it awful. The head
+of the site is a white bar with the pharmacy's mark, the six words, the search and the person; a
+second row carries the pages of the group you are in. The page is centred at 1280 px on warm
+paper; body type is 15 px, titles 30 px bold; cards are white with a soft shadow and no rule;
+buttons are pills. The scale in `globals.css` says why: the previous one was a step tighter and
+the owner found the site unreadable.
+
 **Revised again, 7 September, on the owner's verdict ("this site has too many tools; I don't
 understand anything"): six groups.** Today; Buying (`/purchasing`: what the primary's order would
 get wrong and what to add to each secondary, with Which NDC pays and Bought over NADAC as its

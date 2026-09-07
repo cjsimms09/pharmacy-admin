@@ -27,13 +27,13 @@ function Buttons() {
   const withIds = `/api/export/for?${new URLSearchParams({ ...Object.fromEntries(qs), identifiers: "include" }).toString()}`;
 
   return (
-    <details className="no-print mt-2">
+    <details className="no-print relative">
       <summary className="cursor-pointer list-none">
-        <span className="btn btn-sm w-full justify-center text-[11px]">Send this page to Claude</span>
+        <span className="btn btn-sm">Send to Claude</span>
       </summary>
-      <div className="mt-2 space-y-2 text-[11px] leading-relaxed text-ink-3">
-        <a href={safe} download className="btn btn-sm btn-primary w-full justify-center text-[11px]">
-          Download the file
+      <div className="absolute right-0 top-10 z-40 w-72 space-y-2 rounded-xl bg-surface p-4 text-xs leading-relaxed text-ink-3" style={{ boxShadow: "var(--shadow-lift)" }}>
+        <a href={safe} download className="btn btn-sm btn-primary w-full justify-center">
+          Download this page&rsquo;s file
         </a>
         <p>
           Everything this page computed, what it was filtered to, and what the site had loaded at the time. Send it in

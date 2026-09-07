@@ -166,6 +166,35 @@ it and said so on the pull request. The owner reads this too.
   `src/instrumentation.ts` are next on my side unless you want them; a "Drug directory" row on
   `/settings/feeds` too. Until a load runs, every grouping falls back to NADAC's description and
   the products page says "0 of N dispensed" are on the directory.
+- **Speed: the heavy readings are held between requests** (`held.ts`). On a year of claims Today
+  took 13 s, the books 14 s and Buying 11 s, most of it the same claims scan repeated through
+  different helpers. `held(key, compute)` keeps a reading keyed on a fingerprint of the tables
+  that feed it (claims count, newest audit event, price files, benchmark, invoice lines, counts,
+  driver invoices, expenses, payments, plan groups): same fingerprint within ten minutes is the
+  held value; older, served at once and refreshed behind; changed, computed now; concurrent
+  callers share one computation. Wrapped: `allFills` (yours, `claims.ts`), `productLedger`
+  (yours), `buyListNow` (yours, `shelf.ts`), `minimumsNow`, `drugProfitNow`, `overNadacNow`,
+  `moneyFound`, `cashPricingNow`, `booksFor`, `recentMonths`; each wrap is three lines at the
+  export with the body renamed `load…`. **A held value is shared by reference: read it, never
+  sort or write into it.** `instrumentation.ts` warms them fifteen seconds after boot. After:
+  Today 0.5 s, the books 0.2 s, Buying 0.2 s warm (7 s cold). `forgetHeld()` exists for an
+  import that wants to drop everything at once; the fingerprint makes it unnecessary in practice.
+- **The delivery round is an expense** (`driver-cost.ts`, pure, tested; `driverCostFor(month,
+  basis)` in `profit-and-loss.ts`; two lines in your `deliveries/page.tsx` read the same default).
+  The owner: "you have a driver invoice for this month yet you aren't applying it as an expense."
+  The default was the clinic paying the driver, and drafts never counted, so the month in progress
+  showed nothing. Now the pharmacy pays unless `driver_paid_by = clinic`; the accrual month
+  carries the draft's running total (the days driven so far, as payroll is carried by the day),
+  a finished month its issued invoice, never a superseded one; the cash account counts a sent
+  invoice on the day it was sent. `money-ledger.md` §2 row updated.
+- **The look is new** (`globals.css`, `(app)/layout.tsx`, `components/nav.tsx`,
+  `send-to-claude.tsx`). The owner: "the tool bar colour change is awful", "you changed the
+  colour of the tool bar and gave me the same thing". Gone: the dark sidebar. Now: a white bar
+  across the top with the six words, a second row with the group's pages and "more", the page
+  centred at 1280 px on warm paper, body type 15 px (was 13), titles 30 px bold, cards without
+  rules and with a soft shadow, pill buttons, table headers in sentence case. Every page uses the
+  same classes, so nothing of yours was edited for it; a page that set its own widths may want a
+  look. Print CSS: the head and the crumb bar are hidden, the page frame drops its padding.
 - **The menu is six entries** (`nav.ts`, `components/nav.tsx`, `tests/nav.test.ts`; `/tools`
   redirects to Settings). The owner: "this site has too many tools; I don't understand anything."
   Today, Buying, Getting paid, Money, Compliance, Settings. **Your pages are all still reachable

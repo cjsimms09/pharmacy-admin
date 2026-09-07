@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { requireUser, logout } from "@/lib/auth";
 import { reimbursementEnabled } from "@/lib/features";
 import { noteRequest } from "@/lib/activity";
-import { Nav } from "@/components/nav";
+import { TopNav, SubNav } from "@/components/nav";
 import { SendToClaude } from "@/components/send-to-claude";
 import { Crumbs } from "@/components/crumbs";
 import { logo } from "@/lib/branding";
@@ -22,91 +22,54 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <div className="app-shell min-h-screen md:grid md:grid-cols-[232px_1fr]">
+    <div className="min-h-screen">
       {/*
-        The sidebar sticks and scrolls on its own. It got taller when the pages under each group
-        became visible, and a footer pinned to the bottom of a column that now overflows is a
-        sign-out button you cannot reach.
+        The head of the site: the pharmacy's own mark, six words, the search, and the person.
+
+        One bar across the top rather than a column down the side. The column was dark and held
+        fifty links; this holds six, and the page has the whole width of the screen under it.
       */}
-      <aside className="no-print side md:sticky md:top-0 md:flex md:h-screen md:flex-col">
-        <div className="shrink-0 px-4 pb-3 pt-4">
-          {/*
-            The pharmacy's own mark, where the product name used to be alone.
-
-            This is one pharmacy's system, on one pharmacy's computer, and the person using it does
-            not need reminding what software they are looking at. Their own name at the top is what
-            makes it read as theirs — and it is the same image that goes on everything the site
-            prints, so the screen and the paper agree.
-          */}
-          <Link href="/" className="flex items-center gap-2.5">
+      <header className="site-head no-print">
+        <div className="site-row">
+          <Link href="/" className="flex shrink-0 items-center gap-2.5">
             {mark ? (
-              // The pharmacy's mark on a white tile, so a dark logo is not lost on the dark column.
               // eslint-disable-next-line @next/next/no-img-element
-              <span className="flex h-9 shrink-0 items-center rounded-md bg-white px-1.5"><img src={mark.url} alt={s.pharmacy_name || "Pharmacy Admin"} className="max-h-7 w-auto max-w-[150px] object-contain" /></span>
+              <img src={mark.url} alt={s.pharmacy_name || "Pharmacy Admin"} className="h-8 w-auto max-w-[160px] object-contain" />
             ) : (
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-accent text-sm font-bold text-white">Rx</span>
+              <>
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-sm font-bold text-white">Rx</span>
+                <span className="text-base font-semibold tracking-tight text-ink">{s.pharmacy_name || "Pharmacy Admin"}</span>
+              </>
             )}
-            {!mark && <span className="text-sm font-semibold tracking-tight text-white">Pharmacy Admin</span>}
           </Link>
-          {/*
-            What this is, in the pharmacy's own terms.
-
-            It said "Compliance desk", which was true when compliance was all it did and is now
-            most of the way to an insult: the system runs the claims, the buying, the rebates and
-            the month's profit. A tool that describes itself as the smallest thing it does teaches
-            its owner to think of it that way.
-          */}
-          <div className="mt-1.5 truncate text-xs text-ink-3">{mark ? s.pharmacy_name || "Pharmacy desk" : "Compliance, claims and money"}</div>
-          {/*
-            On every screen, because the moment it is needed is not a moment for navigating to it.
-
-            A menu is a map somebody has to have learned. This is the one thing on the page that
-            works when you know what you want and not where it lives — which is the position the
-            pharmacist-in-charge is in when an inspector asks for something by name.
-          */}
-          <form action="/find" className="mt-3">
-            <input
-              name="q"
-              type="search"
-              placeholder="Find anything…"
-              aria-label="Find anything in the site"
-              className="field w-full py-1.5 text-sm"
-            />
-          </form>
-        </div>
-        <div className="md:min-h-0 md:flex-1 md:overflow-y-auto">
-          <Nav tools={showTools} />
-        </div>
-        <div className="shrink-0 border-t border-[color:var(--color-side-line)] px-4 py-3 text-xs text-ink-3">
-          <div className="flex items-center justify-between gap-2">
-            <div className="min-w-0">
-              <div className="truncate font-medium text-white">{user.name}</div>
+          <TopNav tools={showTools} />
+          <div className="ml-auto flex shrink-0 items-center gap-3">
+            {/*
+              On every screen, because the moment it is needed is not a moment for navigating to it:
+              the one thing that works when you know what you want and not where it lives.
+            */}
+            <form action="/find">
+              <input name="q" type="search" placeholder="Find anything…" aria-label="Find anything in the site" className="field h-9 w-44 rounded-full" />
+            </form>
+            <SendToClaude />
+            <div className="hidden text-right text-xs leading-tight text-ink-2 lg:block">
+              <div className="font-medium text-ink">{user.name}</div>
               <div className="capitalize">{user.role}</div>
             </div>
             <form action={signOut}><button className="btn btn-sm">Sign out</button></form>
           </div>
-          {/*
-            On every page, in one place that never moves.
-
-            The export was added a page at a time and reached eleven of a hundred and one — and the
-            ninety it missed are exactly the ones where something looked wrong and there was no way
-            to send it. In the frame it is always there, and it takes the page's own path and
-            filters with it so the file answers the question that was on the screen.
-          */}
-          <SendToClaude />
         </div>
-      </aside>
-      <div className="min-w-0">
-        <header className="topbar no-print">
+        <SubNav tools={showTools} />
+      </header>
+      <main className="page">
+        <div className="topbar no-print">
           <Crumbs />
           <div className="hidden items-center gap-3 sm:flex">
             <span className="tabular-nums">{today}</span>
-            <span className="text-ink-3">·</span>
-            <span className="truncate">{s.pharmacy_name || "Pharmacy Admin"}</span>
           </div>
-        </header>
-        <main className="min-w-0 px-4 py-5 md:px-6">{children}</main>
-      </div>
+        </div>
+        {children}
+      </main>
     </div>
   );
 }
