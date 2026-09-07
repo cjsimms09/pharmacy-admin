@@ -7,7 +7,7 @@ import { eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { audit } from "./audit";
 import { contractsDir } from "./reference";
-import { ContractTerms, EXTRACT_SYSTEM, requireCitations, type ContractTermsT } from "./contract-terms";
+import { ContractTerms, EXTRACT_SYSTEM, requireCitations, fillNulls, type ContractTermsT } from "./contract-terms";
 
 /**
  * Reading the contract library.
@@ -208,7 +208,7 @@ async function absorb(doc: { id: string; documentName: string; fileName: string 
   const text = msg.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("");
   let terms: ContractTermsT;
   try {
-    terms = ContractTerms.parse(JSON.parse(text));
+    terms = fillNulls(ContractTerms, ContractTerms.parse(JSON.parse(text))) as ContractTermsT;
   } catch {
     const why = "The answer did not match the expected shape. Try this one again.";
     await fail(doc.id, why);
@@ -336,21 +336,44 @@ async function fail(id: string, why: string) {
   await db.update(schema.contractDocs).set({ extractionState: "failed", extractionError: why }).where(eq(schema.contractDocs.id, id));
 }
 
+/**
+ * Drops every null, at any depth, so a draft read before the schema stopped using them still opens.
+ *
+ * An optional field and a null field say the same thing — the contract does not state it — but
+ * `.optional()` rejects an explicit null, and every draft already stored is full of them. Throwing
+ * those reads away to satisfy a schema change would be the site losing work the pharmacy paid for.
+ * An empty array is not a null and is left alone: "no transaction fees" is an answer.
+ */
+function withoutNulls(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(withoutNulls);
+  if (v && typeof v === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+      if (x === null) continue;
+      out[k] = withoutNulls(x);
+    }
+    return out;
+  }
+  return v;
+}
+
 export function parseTerms(json: string | null): ContractTermsT | null {
   if (!json) return null;
   try {
     // Fields added to the schema after a document was read are absent from its draft; an old
-    // draft is still a draft, not a failure, so the additions default to "not stated".
-    const raw = JSON.parse(json) as Record<string, unknown>;
-    return ContractTerms.parse({
-      macAppealRequiredFields: [], macAppealInvoiceRequired: null, macAppealSubmissionTarget: null, contacts: [], remittance: null,
-      networkReimbursementIds: [], pharmacyNcpdps: [], pharmacyNpis: [], claimSubmissionWindowDays: null, reversalWindowDays: null,
+    // draft is still a draft, not a failure, so the additions default to "not stated" — which is
+    // now the field's absence rather than a null, so they are simply left out.
+    const raw = withoutNulls(JSON.parse(json)) as Record<string, unknown>;
+    const parsed = ContractTerms.parse({
+      macAppealRequiredFields: [], contacts: [],
+      networkReimbursementIds: [], pharmacyNcpdps: [], pharmacyNpis: [],
       transactionFees: [], keyDefinitions: [], sections: [],
-      pricingCompendium: { value: null, citation: null }, macListAccess: { value: null, citation: null }, performanceMeasures: [],
-      dawRules: { value: null, citation: null }, promptPayDays: null, latePaymentInterest: null,
-      recoupmentTerms: { value: null, citation: null },
+      pricingCompendium: {}, macListAccess: {}, performanceMeasures: [],
+      dawRules: {},
+      recoupmentTerms: {},
       ...raw,
     });
+    return fillNulls(ContractTerms, parsed) as ContractTermsT;
   } catch {
     return null;
   }
@@ -647,7 +670,7 @@ export async function testReader(docId: string, userId: string, userName: string
     const text = msg.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("");
     let terms: ContractTermsT;
     try {
-      terms = ContractTerms.parse(JSON.parse(text));
+      terms = fillNulls(ContractTerms, ContractTerms.parse(JSON.parse(text))) as ContractTermsT;
     } catch (e) {
       return { ok: false, documentName: doc.documentName, reason: "The answer did not match the expected shape", detail: `${e instanceof Error ? e.message.slice(0, 300) : String(e)} · first words: ${text.slice(0, 200)}` };
     }
