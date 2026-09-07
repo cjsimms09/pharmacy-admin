@@ -7,7 +7,7 @@ import { getSettings } from "@/lib/settings";
 import { hasMailPassword } from "@/lib/mailbox";
 import { allSuppliers, addressesOf, type Supplier } from "@/lib/suppliers-registry";
 import { PageHeader, Notice, Empty } from "@/components/ui";
-import { fileInboxItem, deleteInboxItem, sweepNow, rereadItem, sortInboxItem } from "./actions";
+import { fileInboxItem, deleteInboxItem, sweepNow, rereadItem, sortInboxItem, attributeInboxItem } from "./actions";
 
 export const metadata = { title: "Inbox" };
 export const dynamic = "force-dynamic";
@@ -139,6 +139,36 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
                     {i.documentId && i.routedAs !== "invoice" && (
                       <form action={sortInboxItem.bind(null, i.id)} className="mb-2">
                         <button className="btn btn-sm btn-primary">Sort it: read and file where the money goes</button>
+                      </form>
+                    )}
+                    {/*
+                      Whose file this is, answered where the problem is.
+
+                      A file from an address the register does not know is refused rather than
+                      guessed at — loading ParMed's prices under McKesson would send orders to the
+                      wrong place. But the only way out used to be leaving here, finding Suppliers,
+                      adding the supplier, remembering to type the address it sends from, coming
+                      back, and pressing read again. Now: name them once, the address is recorded
+                      against them, and the file is read on the spot.
+                    */}
+                    {i.documentId && i.fromAddress && !supplierByAddress(suppliers, i.fromAddress) && (
+                      <form action={attributeInboxItem} className="mb-2 rounded border border-line bg-paper-2 p-2">
+                        <input type="hidden" name="itemId" value={i.id} />
+                        <p className="mb-1.5 text-xs text-ink-2">
+                          Nothing on the register sends from <span className="font-mono">{i.fromAddress}</span>, so this could not be placed. Who is it?
+                        </p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <select name="supplierId" className="py-1 text-sm" defaultValue="">
+                            <option value="">A supplier already on the register…</option>
+                            {suppliers.map((sup) => <option key={sup.id} value={sup.id}>{sup.name}</option>)}
+                          </select>
+                          <span className="text-xs text-ink-3">or</span>
+                          <input name="newSupplier" placeholder="a new one, by name" className="py-1 text-sm" />
+                          <button className="btn btn-sm btn-primary">Remember and read it</button>
+                        </div>
+                        <p className="mt-1 text-[11px] text-ink-3">
+                          Everything from that address will place itself from now on. Ask again only if they change it.
+                        </p>
                       </form>
                     )}
                     {i.documentId && i.routedAs !== "invoice" && (
