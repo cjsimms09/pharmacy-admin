@@ -187,6 +187,25 @@ export default async function SortPage({ searchParams }: { searchParams: Promise
       {test && <TestResult json={test} />}
       {prove && <ProveResult json={prove} />}
 
+      {/*
+        Where the sort has got to, in the only terms that matter: how many documents the read now
+        covers, and what it will cost. The sort's whole purpose is to make that number smaller, and
+        it was possible to sort the whole folder here without ever seeing it change.
+      */}
+      <Card className="mb-4" title="What the read now covers" subtitle="The sort's rejects are out of this count and out of this price. They are not sent.">
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Figure value={lib.pending} label="waiting to be read" sub={`${lib.pendingPages} pages`} tone={lib.pending ? "ok" : "muted"} />
+          <Figure value={ruledOut.length} label="ruled out" sub={ruledOut.length ? "never sent" : "nothing ruled out yet"} tone="muted" />
+          <Figure value={`$${lib.estimate.low.toFixed(2)}–${lib.estimate.high.toFixed(2)}`} label="what the read would cost" sub={`at batch prices on ${lib.model}`} tone="muted" />
+        </div>
+        <p className="mt-3 text-sm text-ink-2">
+          {unsorted.length > 0
+            ? `${unsorted.length} document${unsorted.length === 1 ? " is" : "s are"} still unsorted, and ${unsorted.length === 1 ? "is" : "are"} counted and priced above as ${unsorted.length === 1 ? "a contract" : "contracts"}. Sorting ${unsorted.length === 1 ? "it" : "them"} first is what makes that figure honest.`
+            : "Everything with a file has been sorted."}{" "}
+          <Link href="/payers/contracts" className="underline">The contracts</Link> is where the read is started.
+        </p>
+      </Card>
+
       {(refused.length > 0 || canManage) && (
         <Card
           className="mb-4"

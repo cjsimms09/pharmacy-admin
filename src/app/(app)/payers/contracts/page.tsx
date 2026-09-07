@@ -7,7 +7,8 @@ import { requireReimbursement } from "@/lib/features";
 import { audit } from "@/lib/audit";
 import { indexContracts } from "@/lib/contract-search";
 import { scanContracts } from "@/lib/reference";
-import { queueExtraction, collectExtraction } from "@/lib/contract-extract";
+import { queueExtraction, collectExtraction, setTriage } from "@/lib/contract-extract";
+import { shouldRead, KIND_MEANS, type TriageKind } from "@/lib/contract-triage";
 import { contractLibrary, adoptUnattached, nameDocument, resetDocument, resetAll, applyAllReads } from "@/lib/contract-docs";
 import { PageHeader, Card, Notice, Empty, Figure, BackLink } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
@@ -159,6 +160,18 @@ export default async function ContractsPage({ searchParams }: { searchParams: Pr
     }
   }
 
+  /** Overruling the sort from here, because this is where a wrongly-rejected document is noticed. */
+  async function putBack(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const id = String(fd.get("id") ?? "");
+    await setTriage(id, "unsure", u.name);
+    await audit({ action: "contracts.triage.override", userId: u.id, userName: u.name, details: `${id} put back into the read` });
+    revalidatePath("/payers/contracts");
+    revalidatePath("/payers/sort");
+    redirect("/payers/contracts?ok=" + encodeURIComponent("Put back into the library. It will be read with the rest."));
+  }
+
   async function rename(fd: FormData) {
     "use server";
     const u = await requireManager();
@@ -170,10 +183,22 @@ export default async function ContractsPage({ searchParams }: { searchParams: Pr
     redirect("/payers/contracts?ok=" + encodeURIComponent("Named."));
   }
 
-  const read_ = lib.docs.filter((d) => d.state === "done");
-  const queued = lib.docs.filter((d) => d.state === "queued");
-  const failed = lib.docs.filter((d) => d.state === "failed");
-  const unnamed = lib.docs.filter((d) => d.pbmName === "Unnamed");
+  /*
+   * The sort's rejects are not in the library any more.
+   *
+   * A document ruled out on the sort page went on appearing here in the same table as everything
+   * else, with a "Read this one" button beside it that would have sent it — the two pages did not
+   * agree on what the library was, and the disagreement was next to the button that spends money.
+   * They are still visible, and still one press from being put back, but they are out of the list
+   * of what is going to be read.
+   */
+  const live = lib.docs.filter((d) => shouldRead(d.triage as TriageKind | null));
+  const unsorted = live.filter((d) => d.fileName && !d.triage && !d.sorting && d.state === "none");
+  const ruledOut = lib.docs.filter((d) => !shouldRead(d.triage as TriageKind | null));
+  const read_ = live.filter((d) => d.state === "done");
+  const queued = live.filter((d) => d.state === "queued");
+  const failed = live.filter((d) => d.state === "failed");
+  const unnamed = live.filter((d) => d.pbmName === "Unnamed");
 
   return (
     <>
@@ -224,6 +249,19 @@ export default async function ContractsPage({ searchParams }: { searchParams: Pr
 
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
+      {/*
+        The sort and this page are one process, and used to say nothing about each other. Reading a
+        library that has not been sorted means paying to read the W-9s, the statements and the
+        cover letters in it — the sort costs a fraction of a cent a document and takes them out.
+      */}
+      {unsorted.length > 0 && lib.keyPresent && (
+        <Notice kind="warn">
+          {unsorted.length} document{unsorted.length === 1 ? " has" : "s have"} not been through{" "}
+          <Link href="/payers/sort" className="underline">the sort</Link> yet, so {unsorted.length === 1 ? "it is" : "they are"} counted and priced here as
+          {unsorted.length === 1 ? " a contract" : " contracts"}. The sort reads the first pages of each on the cheap model and takes the W-9s,
+          statements and cover letters out — do it first and this run gets smaller.
+        </Notice>
+      )}
       {!lib.keyPresent && (
         <Notice kind="warn">
           No Anthropic key is on file, so nothing can be read yet. Add it under <Link href="/settings" className="underline">Settings → Claude</Link>; the folder can still be looked in and searched.
@@ -232,7 +270,7 @@ export default async function ContractsPage({ searchParams }: { searchParams: Pr
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Figure value={lib.filesInFolder} label="PDFs in the folder" sub={lib.folder} tone="muted" />
-        <Figure value={lib.docs.length} label="documents the site knows" sub={lib.unattached.length ? `${lib.unattached.length} file${lib.unattached.length === 1 ? "" : "s"} not yet a document: look in the folder` : "every file is a document"} tone={lib.unattached.length ? "warn" : "muted"} />
+        <Figure value={live.length} label="documents to read" sub={lib.ruledOut ? `${lib.ruledOut} ruled out by the sort, not counted here` : lib.unattached.length ? `${lib.unattached.length} file${lib.unattached.length === 1 ? "" : "s"} not yet a document: look in the folder` : "every file is a document"} tone={lib.unattached.length ? "warn" : "muted"} />
         <Figure value={read_.length} label="read" sub={queued.length ? `${queued.length} running` : lib.pending ? `${lib.pending} waiting to be read` : "nothing waiting"} tone={read_.length ? "ok" : "muted"} />
         <Figure value={unnamed.length} label="unnamed" sub={unnamed.length ? "name the counterparty before reading, where you can" : "every document has its counterparty"} tone={unnamed.length ? "warn" : "ok"} />
       </div>
@@ -243,6 +281,7 @@ export default async function ContractsPage({ searchParams }: { searchParams: Pr
         subtitle="Four steps, each one a button above; nothing is written to a payer page by a machine."
       >
         <ol className="list-decimal space-y-1 pl-5 text-sm text-ink-2">
+          <li><b>Sort them first.</b> <Link href="/payers/sort" className="underline">The sort</Link> reads the first pages of each document on the cheap model and says what it is. Anything it rules out — a W-9, a statement, a blank form, a cover letter with no terms — drops out of this page and is never sent. It costs a fraction of what a wrong read does.</li>
           <li><b>Look in the folder.</b> Every PDF becomes a document, named from the portal's manifest where there is one, otherwise from its filename. Its words are indexed for search.</li>
           <li><b>Name what is unnamed.</b> The counterparty is the first axis; a document the read cannot name is still yours to name.</li>
           <li><b>Read one first.</b> “Read this one” on the most important exhibit costs a few cents and proves the whole path: the read, the collect, the review, the accept. Then read the library.</li>
@@ -252,8 +291,8 @@ export default async function ContractsPage({ searchParams }: { searchParams: Pr
         </ol>
       </Card>
 
-      <Card className="mt-4" title="Documents" count={lib.docs.length}>
-        {lib.docs.length === 0 ? (
+      <Card className="mt-4" title="Documents" count={live.length} subtitle={lib.ruledOut ? `What the read covers. ${lib.ruledOut} document${lib.ruledOut === 1 ? "" : "s"} the sort ruled out ${lib.ruledOut === 1 ? "is" : "are"} below, and ${lib.ruledOut === 1 ? "is" : "are"} not sent.` : undefined}>
+        {live.length === 0 ? (
           <Empty>Nothing yet. Put the PDFs in {lib.folder} and press “Look in the folder”.</Empty>
         ) : (
           <div className="overflow-x-auto">
@@ -262,7 +301,7 @@ export default async function ContractsPage({ searchParams }: { searchParams: Pr
                 <tr><th>Counterparty</th><th>Document</th><th>File</th><th>Read</th><th className="num">Rates</th><th>Confidence</th><th /></tr>
               </thead>
               <tbody>
-                {lib.docs.map((d) => (
+                {live.map((d) => (
                   <tr key={d.id} className={d.state === "failed" ? "bg-crit-soft/30" : ""}>
                     <td className="text-sm">
                       {d.pbmName === "Unnamed" && canManage ? (
@@ -281,6 +320,11 @@ export default async function ContractsPage({ searchParams }: { searchParams: Pr
                     <td className="text-sm">
                       {d.documentName}
                       {d.role && <span className="block text-xs text-ink-3">{d.role.replace(/_/g, " ")}</span>}
+                      {!d.role && (
+                        <span className="block text-xs text-ink-3">
+                          {d.sorting ? "being sorted…" : d.triage ? `sorted as ${d.triage.replace(/_/g, " ")}${d.triageBy ? ` by ${d.triageBy}` : ""}` : "not sorted yet — it will be read"}
+                        </span>
+                      )}
                     </td>
                     <td className="font-mono text-[11px] text-ink-3">{d.fileName ?? <span className="text-warn">no file</span>}</td>
                     <td className="text-xs">
@@ -318,6 +362,48 @@ export default async function ContractsPage({ searchParams }: { searchParams: Pr
           </p>
         )}
       </Card>
+
+      {ruledOut.length > 0 && (
+        <Card
+          className="mt-4"
+          tone="warn"
+          title="Ruled out by the sort"
+          count={ruledOut.length}
+          subtitle="Not counted above, not priced, and not sent to Claude. Shown because a wrong rejection is expensive in the other direction, and one press puts a document back."
+        >
+          <div className="overflow-x-auto">
+            <table className="table">
+              <thead><tr><th>Counterparty</th><th>Document</th><th>What the sort made of it</th><th /></tr></thead>
+              <tbody>
+                {ruledOut.map((d) => (
+                  <tr key={d.id}>
+                    <td className="text-sm">{d.pbmName}</td>
+                    <td className="text-sm">
+                      {d.documentName}
+                      <span className="block font-mono text-[11px] text-ink-3">{d.fileName}</span>
+                    </td>
+                    <td className="text-sm text-ink-2">
+                      {d.triageWhy ?? KIND_MEANS.not_relevant}
+                      <span className="block text-xs text-ink-3">decided by {d.triageBy ?? "the sort"}</span>
+                    </td>
+                    <td>
+                      <div className="flex items-center justify-end gap-1.5">
+                        <Link href="/payers/sort" className="btn btn-sm">The sort</Link>
+                        {canManage && (
+                          <form action={putBack}>
+                            <input type="hidden" name="id" value={d.id} />
+                            <SubmitButton className="btn btn-sm" pendingLabel="…">Put it back</SubmitButton>
+                          </form>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
     </>
   );
 }

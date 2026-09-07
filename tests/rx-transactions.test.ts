@@ -49,6 +49,8 @@ const SAMPLE = file(
   // a reversal of a claim paid on an earlier day
   '331488-1,A,"($1,204.25)",RX1606,,$0.00,$0.00,$0.00,9/5/2026 10:52:28 AM,09/04/26,004336,-60.0000,"($1,153.52)",ADV,81968004560,($50.73)',
   "20",
+  // Not a value of any kind: still page furniture, and still skipped.
+  "~ ~",
   "Third Party:,610455 (BCBSKS) - 610455",
   // group formatted as money by PioneerRx
   '319184-3,P,$12.56,"$714,553,005.00",BIDBRODCBR,$0.00,$10.50,$0.00,9/5/2026 9:00:00 AM,09/05/26,610455,30.0000,$1.91,BCBSKS,42806008805,$12.29',
@@ -69,7 +71,14 @@ describe("reading the report", () => {
 
   test("every transaction row is read; totals, footers, section lines and page fragments are not", () => {
     assert.equal(r.rows.length, 9);
-    assert.equal(r.reasons["a page-break fragment"], 1);
+    assert.equal(r.reasons["a page-break fragment"], 1, "only what is furniture is discarded");
+  });
+
+  test("a bare number standing alone is a wrapped days supply, not furniture", () => {
+    // The report is wider than its page, so a cell that will not fit prints on a line of its own.
+    // Discarding those is what left days supply at 0 of 1,590 and every contract rate uncomputable.
+    const t = r.rows.find((x) => x.rxNumber === "331488");
+    assert.equal(t?.daysSupply, 20);
   });
 
   test("the fields land where they belong", () => {

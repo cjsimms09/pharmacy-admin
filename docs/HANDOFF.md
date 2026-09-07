@@ -79,7 +79,7 @@ it and said so on the pull request. The owner reads this too.
   redirects here and is off the family tabs. The comparison cards ("Buy these instead", "What each
   drug earns", opps) moved to `/purchasing/products` ("Which NDC pays"), a tab in the same family.
   **The item number is new plumbing through your files**: `supplier_items.item_number` (in my
-  migration `0077`), read by both catalogue importers in `suppliers.ts` (`COLUMNS.itemNumber`
+  migration `0078`), read by both catalogue importers in `suppliers.ts` (`COLUMNS.itemNumber`
   aliases; the PioneerRx path already had it in `pick`), carried by `catalogue-cache.ts`
   (`CatalogueRow.itemNumber?`), `shelf.ts` offers, `order-plan.ts` (`Offer` and `PlannedLine`),
   and `minimum-filler.ts`. It fills in on the next catalogue import; until then every row shows a
@@ -87,10 +87,10 @@ it and said so on the pull request. The owner reads this too.
   time made the target window zero and nothing short), and the contract flag maps through
   `contractFlagOf`. The supplier terms field is now labelled "Lead time, in days" with what it
   does — the owner read "Days from order to shelf" as meaningless.
-- **Migration renumbered twice: mine is `0077_standing_costs_terms_pages_tax_bank_items`**
+- **Migration renumbered three times: mine is `0078_standing_costs_terms_pages_tax_bank_items`**
   (`standing_costs` with `paid_day`, `contract_docs.pages`, `network_rates.effective_to`,
   `suppliers.payment_terms_days`, `sales_months.retail_tax_cents`, `bank_lines`,
-  `supplier_items.item_number`), after your `0074`–`0076`. Regenerated from the schema, applied
+  `supplier_items.item_number`), after your `0074`–`0077`. Regenerated from the schema, applied
   to a fresh database. The reader is yours as merged at `32803b1` (the shape in the prompt,
   `toWire`/`fromWire`); `termsFromAnswer` reads the wire shape first and the readable shape as a
   fallback, so the proving read and older drafts still parse.
@@ -115,7 +115,7 @@ it and said so on the pull request. The owner reads this too.
   fixture gained the three fields. The owner has asked for a logic audit of every page; findings
   go in `logic-audit.md` page by page as I reach them.
 - **The bank's statement reads in** (`src/lib/bank-statement.ts`, pure and tested; `money/bank.ts`
-  action; `bank_lines` table in migration `0077`). The CSV export's date, description and amount
+  action; `bank_lines` table in migration `0078`). The CSV export's date, description and amount
   columns are found by name (one amount column, or debit and credit); a deposit naming a PBM on the
   claims, the facilitator, a wholesaler or card takings is banked as a receipt of that kind; a
   payment exactly matching one open bill or invoice by amount and name marks it paid on that day;

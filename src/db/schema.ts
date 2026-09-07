@@ -1417,7 +1417,11 @@ export const contractDocs = sqliteTable(
     fileName: text("file_name"),
     sizeBytes: integer("size_bytes"),
     sha256: text("sha256"),
-    matchedBy: text("matched_by", { enum: ["manifest", "filename", "manual", "unmatched"] }),
+    /**
+     * How this document was tied to a payer. "read" is the contract naming its own counterparty,
+     * which is the most reliable of the four: the other three infer it from a file name or a list.
+     */
+    matchedBy: text("matched_by", { enum: ["manifest", "filename", "manual", "read", "unmatched"] }),
     /** Whether this one is in the priority set worth extracting. */
     priority: integer("priority", { mode: "boolean" }).notNull().default(false),
     extractionState: text("extraction_state", { enum: ["none", "queued", "done", "failed"] }).notNull().default("none"),
@@ -1531,6 +1535,17 @@ export const networkRates = sqliteTable(
     sourceLabel: text("source_label").notNull(),
     lineOfBusiness: text("line_of_business").notNull(),
     network: text("network").notNull(),
+    /**
+     * The routing this rate line was printed against, comma separated, where the schedule printed
+     * one against the line rather than once for the whole document.
+     *
+     * Without it, a document carrying a Commercial table and a Part D table leaves two rates and no
+     * way to choose between them on a live claim — and two-thirds of this pharmacy's claims sit on
+     * a BIN that carries more than one book. Empty means the line inherits the contract's routing.
+     */
+    bins: text("bins"),
+    pcns: text("pcns"),
+    groupIds: text("group_ids"),
     effectiveDate: text("effective_date"),
     /** The last day the rate applies, where the exhibit says; null while it runs. A claim after it is not priced on this row. */
     effectiveTo: text("effective_to"),

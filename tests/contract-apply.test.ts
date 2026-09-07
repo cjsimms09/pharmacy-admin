@@ -28,15 +28,19 @@ const draft = (): ContractTermsT => ({
   effectiveDate: "2026-01-01",
   endDate: null,
   autoRenews: true,
+  agreementNumber: null,
+  terminationRights: { value: null, citation: null },
+  allProductsClause: { value: null, citation: null },
+  noticesOwedByPharmacy: [],
   terminationNoticeDays: 90,
   amendmentNoticeDays: 30,
   claimSubmissionWindowDays: 90,
   reversalWindowDays: 14,
   rates: [
-    { pbmVendor: "CVS Caremark", network: "Preferred", lineOfBusiness: "Commercial", costSharingTier: "preferred", daysSupplyMin: 1, daysSupplyMax: 34, brandFormula: "AWP-15%", brandDispensingFee: 1.0, genericBasis: "Lesser of (MAC or AWP-25%)", genericDispensingFee: 1.0, specialtyTerms: null, compoundTerms: null, vaccineTerms: null, effectiveFrom: "2026-01-01", effectiveTo: null, citation: cite("Brand: AWP-15% + $1.00. Generic: Lesser of (MAC or AWP-25%) + $1.00.") },
-    { pbmVendor: "Express Scripts", network: "Preferred", lineOfBusiness: null, costSharingTier: "preferred", daysSupplyMin: 1, daysSupplyMax: 34, brandFormula: "AWP-16%", brandDispensingFee: 0.75, genericBasis: "Per Schedule 2 of the Provider Manual", genericDispensingFee: 0.75, specialtyTerms: null, compoundTerms: null, vaccineTerms: null, effectiveFrom: null, effectiveTo: null, citation: cite("Express Scripts: AWP-16% + $0.75.") },
+    { pbmVendor: "CVS Caremark", network: "Preferred", costSharingTier: "preferred", bins: [], pcns: [], groupIds: [], lineOfBusiness: null, daysSupplyMin: 1, daysSupplyMax: 34, brandFormula: "AWP-15%", brandDispensingFee: 1.0, genericBasis: "Lesser of (MAC or AWP-25%)", genericDispensingFee: 1.0, specialtyTerms: null, compoundTerms: null, vaccineTerms: null, effectiveFrom: "2026-01-01", effectiveTo: null, citation: cite("Brand: AWP-15% + $1.00. Generic: Lesser of (MAC or AWP-25%) + $1.00.") },
+    { pbmVendor: "Express Scripts", network: "Preferred", costSharingTier: "preferred", bins: [], pcns: [], groupIds: [], lineOfBusiness: null, daysSupplyMin: 1, daysSupplyMax: 34, brandFormula: "AWP-16%", brandDispensingFee: 0.75, genericBasis: "Per Schedule 2 of the Provider Manual", genericDispensingFee: 0.75, specialtyTerms: null, compoundTerms: null, vaccineTerms: null, effectiveFrom: null, effectiveTo: null, citation: cite("Express Scripts: AWP-16% + $0.75.") },
     // A rate with money and no quote: refused, as requireCitations would refuse it.
-    { pbmVendor: "Unknown", network: "Value", lineOfBusiness: null, costSharingTier: "unknown", daysSupplyMin: null, daysSupplyMax: null, brandFormula: "AWP-20%", brandDispensingFee: null, genericBasis: null, genericDispensingFee: null, specialtyTerms: null, compoundTerms: null, vaccineTerms: null, effectiveFrom: null, effectiveTo: null, citation: null },
+    { pbmVendor: "Unknown", network: "Value", costSharingTier: "unknown", bins: [], pcns: [], groupIds: [], lineOfBusiness: null, daysSupplyMin: null, daysSupplyMax: null, brandFormula: "AWP-20%", brandDispensingFee: null, genericBasis: null, genericDispensingFee: null, specialtyTerms: null, compoundTerms: null, vaccineTerms: null, effectiveFrom: null, effectiveTo: null, citation: null },
   ],
   effectiveRateGuarantees: [],
   postPointOfSaleDiscounts: [],
@@ -68,7 +72,7 @@ const draft = (): ContractTermsT => ({
     { purpose: "mac_appeals", name: "MAC Appeals", organisation: "Example PBM", phone: "800-555-0100", fax: null, email: "macappeals@example.invalid", portalUrl: null, postalAddress: null, citation: cite("MAC appeals: 800-555-0100.") },
     { purpose: "payment_or_eft", name: null, organisation: "Example PBM", phone: null, fax: null, email: "eft@example.invalid", portalUrl: "https://portal.example.invalid/eft", postalAddress: null, citation: null },
   ],
-  remittance: { paidBy: "Example PBM", paymentMethod: "EFT", paymentCycle: "twice monthly", eraOffered: true, enrollmentMethod: "EFT/ERA enrollment form on the provider portal", remittanceContact: "eft@example.invalid", citation: cite("Payment is made twice monthly by EFT with an 835 remittance.") },
+  remittance: { payerNamesOnRemittance: [], payerIdentifiers: [], paidBy: "Example PBM", paymentMethod: "EFT", paymentCycle: "twice monthly", eraOffered: true, enrollmentMethod: "EFT/ERA enrollment form on the provider portal", remittanceContact: "eft@example.invalid", citation: cite("Payment is made twice monthly by EFT with an 835 remittance.") },
   auditLookbackYears: 2,
   auditExtrapolationAllowed: false,
   gcrTiers: [],
@@ -118,7 +122,7 @@ describe("what a contract proposes", () => {
 
   test("new, same and changed against what the tables hold", () => {
     const p = proposeFromContract(draft(), "2026 Rate Exhibit.pdf", plans, {
-      rates: [{ pbmName: "CVS Caremark", lineOfBusiness: "Commercial", network: "Preferred · preferred", daysSupply: "1-34", brandRate: "AWP-14% + $1.00", genericRate: "Lesser of (MAC or AWP-25%) + $1.00" }],
+      rates: [{ pbmName: "CVS Caremark", lineOfBusiness: "Medicare Part D", network: "Preferred · preferred", daysSupply: "1-34", brandRate: "AWP-14% + $1.00", genericRate: "Lesser of (MAC or AWP-25%) + $1.00" }],
       appeal: { pbmName: "Example Part D Plan", submissionChannel: "Provider portal", submissionTarget: "https://portal.example.invalid/appeals", appealWindowDays: 30, windowBasis: "date_of_adjudication" },
     });
     assert.equal(p.rates[0].standing, "changed");
@@ -170,10 +174,12 @@ describe("the third parties grouped", () => {
 });
 
 describe("what is checked before a figure is applied", () => {
-  test("each rate line carries its own line of business, the document's first where it has none, and its end date", () => {
-    const p = proposeFromContract(draft(), "2026 Rate Exhibit.pdf", plans);
+  test("each rate line carries its own line of business, the document's only one where it has none, and its end date", () => {
+    const own = draft();
+    own.rates[0].lineOfBusiness = "Commercial";
+    const p = proposeFromContract(own, "2026 Rate Exhibit.pdf", plans);
     assert.equal(p.rates[0].row.lineOfBusiness, "Commercial", "the line's own heading wins");
-    assert.equal(p.rates[1].row.lineOfBusiness, "Medicare Part D", "the document's first line where the rate names none");
+    assert.equal(p.rates[1].row.lineOfBusiness, "Medicare Part D", "the document's only book where the rate names none");
     assert.equal(p.rates[0].row.effectiveTo, null);
     const d = draft();
     d.endDate = "2026-12-31";
@@ -216,5 +222,37 @@ describe("what is checked before a figure is applied", () => {
     const p = proposeFromContract(d, "x.pdf", plans, {}, { pharmacy: { chainCode: "717", ncpdp: "1712345", npi: null } });
     assert.equal(p.governs.ok, false);
     assert.match(p.caveats[0], /chain code/);
+  });
+});
+
+describe("a document carrying two books", () => {
+  test("each rate keeps the book and the routing it was printed with, rather than the first in the list", () => {
+    const t = draft();
+    t.linesOfBusiness = ["Medicare Part D", "Commercial"];
+    t.rates[0].lineOfBusiness = "Medicare Part D";
+    t.rates[0].bins = ["610455"];
+    t.rates[0].pcns = ["PDPPCN"];
+    t.rates[1].lineOfBusiness = "Commercial";
+    t.rates[1].bins = ["004336"];
+    const p = proposeFromContract(t, "Exhibit B", []);
+    assert.equal(p.rates[0].row.lineOfBusiness, "Medicare Part D");
+    assert.equal(p.rates[0].row.bins, "610455");
+    assert.equal(p.rates[0].row.pcns, "PDPPCN");
+    assert.equal(p.rates[1].row.lineOfBusiness, "Commercial");
+    assert.equal(p.rates[1].row.bins, "004336");
+  });
+
+  test("with two books stated and no rate saying which, the book is unknown rather than guessed", () => {
+    const t = draft();
+    t.linesOfBusiness = ["Medicare Part D", "Commercial"];
+    const p = proposeFromContract(t, "Exhibit B", []);
+    assert.equal(p.rates[0].row.lineOfBusiness, "unknown");
+  });
+
+  test("with one book stated, every rate takes it", () => {
+    const t = draft();
+    t.linesOfBusiness = ["Medicare Part D"];
+    const p = proposeFromContract(t, "Exhibit B", []);
+    assert.equal(p.rates[0].row.lineOfBusiness, "Medicare Part D");
   });
 });

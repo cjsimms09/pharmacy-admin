@@ -57,10 +57,18 @@ export type Library = {
   pending: number;
   pendingPages: number;
   estimate: { low: number; high: number };
-  /** Every document with a file, read or not, and what reading all of them again would cost. */
+  /**
+   * Every document with a file the read would go to, and what reading all of them again would cost.
+   *
+   * The sort's rejects are out of all three. They were counted here once, which quoted a price for
+   * documents `queueExtraction` would then refuse to send — the two pages disagreed about what the
+   * library was, and the disagreement was on the button that spends the money.
+   */
   withFile: number;
   allPages: number;
   estimateAll: { low: number; high: number };
+  /** Documents the sort ruled out: not counted, not priced, not sent. */
+  ruledOut: number;
   model: string;
   keyPresent: boolean;
   folder: string;
@@ -87,7 +95,6 @@ export async function contractLibrary(): Promise<Library> {
     const terms = d.extractionState === "done" ? parseTerms(d.extractionJson) : null;
     let pages: number | null = d.pages ?? null;
     if (d.fileName) {
-      withFile++;
       // Counted once and kept on the row; the folder is not opened to draw a list.
       if (pages === null) {
         try {
@@ -95,9 +102,12 @@ export async function contractLibrary(): Promise<Library> {
           await db.update(schema.contractDocs).set({ pages }).where(eq(schema.contractDocs.id, d.id));
         } catch { /* counted as nothing */ }
       }
-      allPages += pages ?? 0;
-      // What a read would cost counts only what a read would send: the sort's rejects are out.
-      if (d.extractionState !== "done" && d.extractionState !== "queued" && shouldRead(d.triage as never)) pendingPages += pages ?? 0;
+      // Every count and every price here is of what a read would actually send. The rejects are out.
+      if (shouldRead(d.triage as never)) {
+        withFile++;
+        allPages += pages ?? 0;
+        if (d.extractionState !== "done" && d.extractionState !== "queued") pendingPages += pages ?? 0;
+      }
     }
     rows.push({
       id: d.id, documentName: d.documentName, pbmName: d.pbmName, fileName: d.fileName, matchedBy: d.matchedBy,
@@ -120,6 +130,7 @@ export async function contractLibrary(): Promise<Library> {
     withFile,
     allPages,
     estimateAll: estimateCost(allPages, model, r),
+    ruledOut: rows.filter((x) => x.fileName && !shouldRead(x.triage as never)).length,
     model,
     keyPresent: Boolean(s.anthropic_api_key_enc),
     folder: contractsDir(),
@@ -230,7 +241,7 @@ export async function existingFor(pbmName: string, exceptDocId: string): Promise
     db.query.contractDocs.findMany({ where: and(eq(schema.contractDocs.extractionState, "done")) }),
   ]);
   return {
-    rates: rates.map((r) => ({ pbmName: r.pbmName, lineOfBusiness: r.lineOfBusiness, network: r.network, daysSupply: r.daysSupply, brandRate: r.brandRate, genericRate: r.genericRate })),
+    rates: rates.map((r) => ({ pbmName: r.pbmName, lineOfBusiness: r.lineOfBusiness, network: r.network, bins: r.bins, daysSupply: r.daysSupply, brandRate: r.brandRate, genericRate: r.genericRate })),
     appeal: appeal ? { pbmName: appeal.pbmName, submissionChannel: appeal.submissionChannel, submissionTarget: appeal.submissionTarget, appealWindowDays: appeal.appealWindowDays, windowBasis: appeal.windowBasis } : null,
     contacts: contacts.map((c) => ({ pbmName: c.pbmName, contactType: c.contactType, phone: c.phone, email: c.email, portalUrl: c.portalUrl })),
     routing: routing ? { pbmName: routing.pbmName, paysVia: routing.paysVia, paymentMethod: routing.paymentMethod, remittanceSource: routing.remittanceSource, paymentCycle: routing.paymentCycle } : null,
@@ -359,7 +370,14 @@ export async function acceptProposals(docId: string, picks: Picks, user: { name:
     const r = p.rates[i];
     if (!r) continue;
     const prior = await db.query.networkRates.findFirst({
-      where: and(eq(schema.networkRates.pbmName, r.row.pbmName), eq(schema.networkRates.network, r.row.network), eq(schema.networkRates.lineOfBusiness, r.row.lineOfBusiness), r.row.daysSupply === null ? isNull(schema.networkRates.daysSupply) : eq(schema.networkRates.daysSupply, r.row.daysSupply)),
+      where: and(
+        eq(schema.networkRates.pbmName, r.row.pbmName),
+        eq(schema.networkRates.network, r.row.network),
+        eq(schema.networkRates.lineOfBusiness, r.row.lineOfBusiness),
+        r.row.daysSupply === null ? isNull(schema.networkRates.daysSupply) : eq(schema.networkRates.daysSupply, r.row.daysSupply),
+        // Two lines of one schedule that differ only in the BINs they price must not overwrite each other.
+        r.row.bins === null ? isNull(schema.networkRates.bins) : eq(schema.networkRates.bins, r.row.bins),
+      ),
     });
     const values = { ...r.row, sourceLabel: source, status: "active", notes: [r.row.notes, r.quote && `“${r.quote}”`].filter(Boolean).join(" ") || null, sourceUrl: null };
     if (prior) await db.update(schema.networkRates).set(values).where(eq(schema.networkRates.id, prior.id));

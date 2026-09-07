@@ -65,6 +65,18 @@ export type Transaction = {
   pcn: string | null;
   groupNumber: string | null;
   networkId: string | null;
+  /**
+   * Days supply, recovered from the line the report wrapped it onto.
+   *
+   * The report is wider than its page, so PioneerRx pushes a cell that will not fit onto a line of
+   * its own — and this reader was discarding those as "a page-break fragment". Days supply was one
+   * of them: 0 of 1,590 claims held one, which is why no claim could be priced against a contract
+   * rate written for a 30-day fill against a 90-day fill.
+   *
+   * Null where the file gives no unambiguous answer. A wrong days supply picks the wrong rate band,
+   * and an appeal filed on the wrong band is withdrawn — worse than not filing.
+   */
+  daysSupply: number | null;
   dateFilled: string;
   completedAt: string | null;
   quantityThousandths: number | null;
@@ -260,11 +272,22 @@ export function candidateLayouts(fieldCount: number): Layout[] {
  * currency symbol. Read this way the report can gain them in either order and nothing has to change.
  */
 /** Which added column plays which part, once the contents have said. */
-export type ExtraRoles = { money: number | null; code: number | null };
+export type ExtraRoles = { money: number | null; code: number | null; days: number | null };
 
-export function classifyExtra(values: string[]): "money" | "code" | "unknown" {
+export function classifyExtra(values: string[]): "money" | "code" | "days" | "unknown" {
   const seen = values.map((v) => v.trim()).filter((v) => v !== "");
   if (seen.length === 0) return "unknown";
+  /*
+   * Days supply, tested before money because "30.00" is both shapes at once.
+   *
+   * The report gained a days-supply column and every value in it — 30.00, 90.00, 28.00 — matched
+   * the money pattern, so it was absorbed as an amount and thrown away. What separates them is
+   * what a days supply cannot be: it is a whole number of days, never negative, never bracketed,
+   * never carrying a currency mark, and it does not run past a year. A money column of whole
+   * dollars would have to hold no cents at all across every row, and none does.
+   */
+  const asDays = seen.map((v) => (/^\d+(\.00)?$/.test(v) ? Number(v) : NaN));
+  if (asDays.every((n) => Number.isFinite(n) && n >= 1 && n <= 365)) return "days";
   if (seen.every((v) => /^\(?-?\$[\d,]+\.\d{2}\)?$/.test(v) || /^-?\d+\.\d{2}$/.test(v))) return "money";
   if (seen.every((v) => /^\d{1,2}$/.test(v))) return "code";
   return "unknown";
@@ -446,9 +469,26 @@ export function parseRxTransactions(text: string): TransactionParse {
 
   let section: ReturnType<typeof parseSectionLabel> | null = null;
   let submissionType: string | null = null;
+  /*
+   * Wrapped cell values waiting for the row they belong to; see the note where they are collected.
+   *
+   * Kept per row rather than resolved on sight, because a wrapped line sits next to its row and
+   * "next to" is sometimes above and sometimes below. They are paired after the file is read, when
+   * both neighbours are known.
+   */
+  let strayNumbers: string[] = [];
+  let strayIds: string[] = [];
+  const strayBefore: { numbers: string[]; ids: string[] }[] = [];
   let ordinal = 0;
   const keysSeen = new Map<string, number>();
-  const pending: { parts: string[]; section: ReturnType<typeof parseSectionLabel>; submissionType: string | null }[] = [];
+  const pending: {
+    parts: string[];
+    section: ReturnType<typeof parseSectionLabel>;
+    submissionType: string | null;
+    /** The values the report wrapped onto their own lines just above this row. */
+    strayNumbers: string[];
+    strayIds: string[];
+  }[] = [];
   const totals: { label: string; amounts: (number | null)[] }[] = [];
   let pendingTotalLabel: string | null = null;
 
@@ -515,12 +555,27 @@ export function parseRxTransactions(text: string): TransactionParse {
     // "Third Party,Script" — the header's group row — and "Transmitted", the submission type.
     if (parts.length === 2 && parts[0] === "Third Party" && parts[1] === "Script") continue;
     if (parts.length === 1) {
-      // The pharmacy's name is the second line of every page; "Transmitted" is the submission
-      // type the rows below belong to; anything else standing alone is a fragment of a page break.
+      /*
+       * A value the report wrapped onto its own line, not a fragment to throw away.
+       *
+       * The report is wider than the page, so a cell that will not fit is printed on a line of its
+       * own next to the row it belongs to. Two of them appear: the days supply ("30.00") and the
+       * network reimbursement id ("BIDBRODCBR"). They were being discarded as page furniture, which
+       * is why days supply read 0 of 1,590 and no claim could be priced against a contract.
+       *
+       * Which cell wrapped varies row by row — sometimes the days supply is in the row and the
+       * network id is on the stray line, sometimes the other way about — so they are told apart by
+       * shape: a bare number is a days supply, anything else is an id.
+       */
       if (/pharmacy$/i.test(line)) continue;
-      if (/^[A-Za-z][A-Za-z ]+$/.test(line)) submissionType = line;
-      else if (/^Uses invoice cost/i.test(line)) { /* the report's own note */ }
-      else skip("a page-break fragment");
+      if (/^Uses invoice cost/i.test(line)) continue;
+      if (/^\d+(\.\d+)?$/.test(line)) { strayNumbers.push(line); continue; }
+      // A network id is one unspaced run of capitals and digits. "Private Pay (Cash)" and
+      // "Transmitted" are the report describing itself, and adopting either as an id would file
+      // every row beneath them under a network that does not exist.
+      if (/^[A-Z0-9][A-Z0-9-]*$/.test(line)) { strayIds.push(line); continue; }
+      if (/^[A-Za-z][A-Za-z ]+$/.test(line)) { submissionType = line; continue; }
+      skip("a page-break fragment");
       continue;
     }
     if (/^Uses invoice cost/i.test(line)) continue;
@@ -544,7 +599,9 @@ export function parseRxTransactions(text: string): TransactionParse {
      * Held, not read. Which cell is which cannot be known from one row — it is decided below, from
      * all of them at once, so that a column added to the report is detected rather than absorbed.
      */
-    pending.push({ parts, section, submissionType });
+    pending.push({ parts, section, submissionType, strayNumbers, strayIds });
+    strayNumbers = [];
+    strayIds = [];
   }
 
   /*
@@ -578,19 +635,63 @@ export function parseRxTransactions(text: string): TransactionParse {
    * them position says nothing, and the header cannot say either — it wraps, and it names a column
    * that has no cell.
    */
-  const roles: ExtraRoles = { money: null, code: null };
+  const roles: ExtraRoles = { money: null, code: null, days: null };
   if (layout) {
     for (const x of layout.extras) {
       const kind = classifyExtra(usable.slice(0, 200).map((r) => r.parts[x] ?? ""));
       if (kind === "money" && roles.money === null) roles.money = x;
       else if (kind === "code" && roles.code === null) roles.code = x;
+      else if (kind === "days" && roles.days === null) roles.days = x;
     }
   }
 
   if (layout) {
-    for (const r of usable) {
+    /*
+     * Pair each wrapped value with its row, now that every row is known.
+     *
+     * A wrapped line sits next to its row, and "next to" is above for some rows and below for
+     * others — the same report shows both. So a row takes what it needs from the lines immediately
+     * above it first, and failing that from the lines immediately below, and each line is used once.
+     * Where neither neighbour offers one, the field stays null: a wrong days supply picks the wrong
+     * rate band, and an appeal filed on the wrong band is withdrawn.
+     */
+    const daysFor = new Array<number | null>(usable.length).fill(null);
+    /*
+     * A column of its own is the whole answer, and better than any of this.
+     *
+     * The report was changed to print days supply as a column rather than letting it wrap, so where
+     * that column is present it is read straight and the pairing below has nothing left to do.
+     */
+    if (roles.days !== null) {
+      for (let i = 0; i < usable.length; i++) {
+        const v = Number((usable[i].parts[roles.days] ?? "").trim());
+        daysFor[i] = Number.isFinite(v) && v > 0 ? v : null;
+      }
+    } else
+    {
+    const above = usable.map((r) => [...r.strayNumbers]);
+    for (let i = 0; i < usable.length; i++) {
+      const inRow = (usable[i].parts[layout.network] ?? "").trim();
+      // The row already carries it where the id wrapped instead.
+      if (/^\d+(\.\d+)?$/.test(inRow)) { daysFor[i] = Number(inRow); continue; }
+      // Nearest above, then nearest below, each line spent once.
+      if (above[i].length > 0) { daysFor[i] = Number(above[i].pop()); continue; }
+      const below = above[i + 1];
+      if (below && below.length > 0) daysFor[i] = Number(below.shift());
+    }
+    }
+
+    for (const [i, r] of usable.entries()) {
       const t = readRow(r.parts, layout, roles, r.section, r.submissionType, ++ordinal);
       if (typeof t === "string") { skip(t); continue; }
+      t.daysSupply = Number.isFinite(daysFor[i]) && (daysFor[i] as number) > 0 ? daysFor[i] : null;
+      /*
+       * Where the days supply is the cell in the row, the network id is the one that wrapped.
+       *
+       * Read straight, the row's cell would file the claim under a network called "10.00". Only
+       * this case takes the wrapped id; a row whose cell holds a real id keeps it.
+       */
+      if (/^\d+(\.\d+)?$/.test((r.parts[layout.network] ?? "").trim())) t.networkId = r.strayIds[0] ?? null;
       const n = (keysSeen.get(t.transactionKey) ?? 0) + 1;
       keysSeen.set(t.transactionKey, n);
       t.transactionKey = `${t.transactionKey}#${n}`;
@@ -740,6 +841,8 @@ function readRow(parts: string[], POS: Layout, roles: ExtraRoles, section: Retur
     pcn,
     groupNumber,
     networkId,
+    // Paired in after the file is read, from the line the report wrapped it onto.
+    daysSupply: null,
     dateFilled,
     completedAt: completed || null,
     quantityThousandths,

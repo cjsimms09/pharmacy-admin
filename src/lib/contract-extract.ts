@@ -241,7 +241,10 @@ type Absorbed = { outcome: "done" | "failed" | "rejected"; why: string; tokensIn
  * The collect step and the recovery step both come through here, so a result is judged the same
  * way whether it was picked up on time or fetched back weeks later.
  */
-async function absorb(doc: { id: string; documentName: string; fileName: string | null }, entry: Anthropic.Messages.Batches.MessageBatchIndividualResponse): Promise<Absorbed> {
+async function absorb(
+  doc: { id: string; documentName: string; fileName: string | null; pbmName: string | null; matchedBy: string | null },
+  entry: Anthropic.Messages.Batches.MessageBatchIndividualResponse,
+): Promise<Absorbed> {
   if (entry.result.type !== "succeeded") {
     const why = explainFailure(entry.result);
     await fail(doc.id, why);
@@ -272,9 +275,25 @@ async function absorb(doc: { id: string; documentName: string; fileName: string 
     await fail(doc.id, `${why}. Nothing was saved — a rate that cannot be traced to a sentence is not usable in an appeal.`);
     return { outcome: "rejected", why, tokensIn, tokensOut };
   }
+  /*
+   * The contract names its own counterparty, so the read is what ties the document to a payer.
+   *
+   * Until now it did not: the terms were stored with the counterparty inside them and the document
+   * row kept whatever the file name had suggested, or nothing. A contract read and filed under no
+   * payer cannot be found from the payer's page, which is the one place anybody looks for it.
+   *
+   * It is the most reliable of the four ways: a file name is a guess and a manifest is somebody
+   * else's list, where this is the agreement stating who it is with. It does not overrule a person
+   * — a document matched by hand keeps that.
+   */
+  const named = (terms.counterparty ?? "").trim();
+  const linkToPayer =
+    named && doc.matchedBy !== "manual" && (!doc.pbmName || doc.matchedBy === "filename" || doc.matchedBy === "unmatched")
+      ? { pbmName: await knownPayerName(named), matchedBy: "read" as const }
+      : {};
   await db
     .update(schema.contractDocs)
-    .set({ extractionState: "done", extractionJson: JSON.stringify(terms), extractionError: null })
+    .set({ extractionState: "done", extractionJson: JSON.stringify(terms), extractionError: null, ...linkToPayer })
     .where(eq(schema.contractDocs.id, doc.id));
   // A scan has no words of its own to search; the read's cited lines become them.
   if (doc.fileName) await (await import("./contract-search")).rememberReadText(doc.fileName, terms);
@@ -309,7 +328,7 @@ export async function recoverFailures(userId: string, userName: string): Promise
     out.note = `Mock: ${ids.length} batch id(s) found, nothing asked.`;
     return out;
   }
-  const docs = await db.query.contractDocs.findMany({ columns: { id: true, documentName: true, fileName: true, extractionState: true } });
+  const docs = await db.query.contractDocs.findMany({ columns: { id: true, documentName: true, fileName: true, extractionState: true, pbmName: true, matchedBy: true } });
   const byId = new Map(docs.map((d) => [d.id, d]));
   const seen = new Set<string>();
   const { client: c } = await client();
@@ -401,6 +420,28 @@ export function jsonIn(text: string): string {
   return start >= 0 && end > start ? body.slice(start, end + 1) : body;
 }
 
+/**
+ * The payer's name as this site already spells it, where it knows the payer at all.
+ *
+ * A contract signed with "CVS Caremark" and a BIN register that says "Caremark" are one payer, and
+ * storing both forks every screen that groups by name. The register wins where it recognises the
+ * name; where it does not, the contract's own wording stands rather than being forced into
+ * something close.
+ */
+async function knownPayerName(counterparty: string): Promise<string> {
+  const want = counterparty.trim().toLowerCase();
+  const bins = await db.query.payerBins.findMany({ columns: { pbmName: true } });
+  const names = [...new Set(bins.map((b) => b.pbmName).filter(Boolean))];
+  const exact = names.find((n) => n.trim().toLowerCase() === want);
+  if (exact) return exact;
+  // One name containing the other — "Caremark" inside "CVS Caremark" — is the same payer.
+  const contained = names.find((n) => {
+    const a = n.trim().toLowerCase();
+    return a.length >= 4 && (a.includes(want) || want.includes(a));
+  });
+  return contained ?? counterparty.trim();
+}
+
 async function fail(id: string, why: string) {
   // Stamped, so the message can never be read as the API refusing again; see the column's note.
   await db
@@ -449,14 +490,17 @@ function mockTerms(name: string, pbm: string): ContractTermsT {
     effectiveDate: "2025-01-01",
     endDate: null,
     autoRenews: true,
+    agreementNumber: null,
+    terminationRights: { value: null, citation: null },
+    allProductsClause: { value: null, citation: null },
+    noticesOwedByPharmacy: [],
     terminationNoticeDays: 90,
     amendmentNoticeDays: 30,
     rates: [
       {
         pbmVendor: "CVS/Caremark",
         network: "Mock Commercial Broad",
-        lineOfBusiness: "Commercial",
-        costSharingTier: "standard" as const,
+        costSharingTier: "standard" as const, bins: [], pcns: [], groupIds: [], lineOfBusiness: null,
         daysSupplyMin: 1,
         daysSupplyMax: 34,
         brandFormula: "AWP - 15.0%",
@@ -500,7 +544,7 @@ function mockTerms(name: string, pbm: string): ContractTermsT {
     macAppealInvoiceRequired: true,
     macAppealSubmissionTarget: "https://portal.example.invalid/mac-appeals",
     contacts: [{ purpose: "mac_appeals", name: "MAC Appeals Desk", organisation: pbm, phone: null, fax: null, email: "macappeals@example.invalid", portalUrl: "https://portal.example.invalid/mac-appeals", postalAddress: null, citation: cite }],
-    remittance: { paidBy: pbm, paymentMethod: "EFT", paymentCycle: "twice monthly", eraOffered: true, enrollmentMethod: "Provider portal, EFT/ERA enrollment form", remittanceContact: "providerpayments@example.invalid", citation: cite },
+    remittance: { payerNamesOnRemittance: [], payerIdentifiers: [], paidBy: pbm, paymentMethod: "EFT", paymentCycle: "twice monthly", eraOffered: true, enrollmentMethod: "Provider portal, EFT/ERA enrollment form", remittanceContact: "providerpayments@example.invalid", citation: cite },
     macAppealRetroactive: true,
     auditLookbackYears: 2,
     auditExtrapolationAllowed: false,

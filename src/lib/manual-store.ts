@@ -6,6 +6,7 @@ import { todayIso } from "./dates";
 import { unzip } from "./xlsx";
 import { policies, FORMS, appendixVersion } from "./manual";
 import { getSettings } from "./settings";
+import { revisionOf, type Revision } from "./manual-version";
 
 /**
  * The manual, as sections this site owns.
@@ -511,4 +512,46 @@ export function searchSections(rows: Section[], query: string): SectionHit[] {
   }
 
   return hits.sort((a, b) => (a.inTitle === b.inTitle ? a.number.localeCompare(b.number) : a.inTitle ? -1 : 1));
+}
+
+/**
+ * Where this pharmacy's policy and procedure manual actually stands.
+ *
+ * It used to be a Word document on somebody's desktop, so the inspection checklist looked for an
+ * upload under Documents and called its absence a finding. The manual has not been a file for some
+ * time: the whole of it is in this site, editable section by section and printable as one document.
+ * Asking for an uploaded copy of a manual the site itself maintains was asking for a second copy of
+ * the truth — which is the one thing the manual module exists to prevent.
+ *
+ * So this is the single answer both the Documents page and the inspection checklist read. A manual
+ * held here is the manual; a manual held elsewhere is the fallback, not the other way round.
+ */
+export type ManualStanding = {
+  /** True once the pharmacy's own prose is in the site, rather than only the generated appendix. */
+  inSite: boolean;
+  /** Live sections the pharmacy itself maintains. */
+  ownSections: number;
+  /** Live sections somebody else maintains — the medical practice's half of the handbook. */
+  managedElsewhere: number;
+  revision: Revision;
+  /** The pharmacy's own sections that have never been reviewed, and the oldest review on record. */
+  neverReviewed: number;
+  oldestReviewedOn: string | null;
+  /** Headings that promise something and have nothing under them. */
+  emptyHeadings: number;
+};
+
+export async function manualStanding(): Promise<ManualStanding> {
+  const live = await allSections();
+  const own = live.filter((s) => s.source === "pharmacy" && !s.managedBy);
+  const reviewed = own.map((s) => s.reviewedOn).filter((d): d is string => Boolean(d)).sort();
+  return {
+    inSite: own.length > 0,
+    ownSections: own.length,
+    managedElsewhere: live.filter((s) => s.managedBy).length,
+    revision: revisionOf(live),
+    neverReviewed: own.filter((s) => !s.reviewedOn).length,
+    oldestReviewedOn: reviewed[0] ?? null,
+    emptyHeadings: gaps(live).length,
+  };
 }

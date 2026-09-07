@@ -50,11 +50,22 @@ export const RateTerm = z.object({
   /** Which network or plan this rate applies to, as the document names it. */
   network: z.string().optional(),
   /**
-   * The line of business this line prices — Commercial, Medicare Part D, Medicaid, FEHB — as the
-   * exhibit heading names it. One agreement carries several, and a Part D rate applied to a
-   * commercial claim is a wrong appeal. Left out where the document prices one line only (null
-   * on this side, like every other unstated term).
+   * The routing printed against this rate line, where the schedule prints it per line rather than
+   * once for the whole document.
+   *
+   * This is what decides whether a claim gets the right rate. A document that carries a Commercial
+   * schedule and a Part D schedule prints two sets of BINs; collected into one list at the top of
+   * the document, the pairing is lost, and picking between the two rates becomes a guess made on
+   * days supply alone. Ten of this pharmacy's fifty-one BINs carry more than one book, and
+   * two-thirds of its claims sit on one of them, so the guess is not rare.
+   *
+   * Leave these empty where the schedule does not print routing against the line; the document's
+   * own lists then stand for all of them.
    */
+  bins: z.array(z.string()),
+  pcns: z.array(z.string()),
+  groupIds: z.array(z.string()),
+  /** The book this line prices, where the schedule says: Commercial, Medicare Part D, Medicaid. */
   lineOfBusiness: z.string().optional(),
   /** Preferred or standard cost sharing, where the schedule splits on it. */
   costSharingTier: z.enum(["preferred", "standard", "both", "unknown"]),
@@ -156,6 +167,17 @@ export const RemittanceTerms = z.object({
   eraOffered: z.boolean().optional().describe("Whether an electronic remittance (835) is provided."),
   enrollmentMethod: z.string().optional().describe("How EFT/ERA is set up or changed: a form, a portal, a clearinghouse."),
   remittanceContact: z.string().optional(),
+  /**
+   * How this payer appears on the remittance and on the bank statement.
+   *
+   * An 835 names its payer as a string in N1*PR and nothing else — no BIN, no contract number. That
+   * string is the only join between a remittance and everything held here, and it is routinely the
+   * plan sponsor, the facilitator or the bank's descriptor rather than the name on the contract.
+   * Recorded from the contract, the join exists before the first remittance arrives.
+   */
+  payerNamesOnRemittance: z.array(z.string()),
+  /** Any payer id, tax id or trace prefix the document gives for the remittance. */
+  payerIdentifiers: z.array(z.string()),
   citation: Citation.optional(),
 });
 
@@ -164,6 +186,22 @@ export const TransactionFee = z.object({
   name: z.string(),
   amount: z.string().optional().describe("As written: \"$0.10 per claim\", \"2% of ingredient cost\"."),
   appliesTo: z.string().optional(),
+  citation: Citation.optional(),
+});
+
+/**
+ * Something the pharmacy must tell the counterparty, and how long it has.
+ *
+ * These are the obligations that run the other way, and they terminate contracts. A change of
+ * ownership, a change of pharmacist-in-charge, a licence action, a change of address or hours:
+ * each is usually a notice owed within a stated number of days, and each is a clock nobody is
+ * running because nobody wrote it down.
+ */
+export const PharmacyNotice = z.object({
+  subject: z.string().describe("What must be notified."),
+  withinDays: z.number().int().optional(),
+  method: z.string().optional().describe("Where it goes, as written."),
+  consequenceIfMissed: z.string().optional(),
   citation: Citation.optional(),
 });
 
@@ -199,6 +237,13 @@ export const ContractTerms = z.object({
   // ── Identity ───────────────────────────────────────────────────────
   counterparty: z.string().describe("The PBM, payer or wholesaler, as named on the document."),
   documentTitle: z.string(),
+  /**
+   * The agreement's own number, as printed on it.
+   *
+   * This is what a payer's phone desk asks for before it will discuss anything, and what an appeal
+   * quotes. Nothing else here identifies the contract to the other party.
+   */
+  agreementNumber: z.string().optional(),
   contractType: z.enum(["payer_network", "wholesaler", "psao", "unknown"]),
   /**
    * Where this document sits in its chain. A rate sheet supersedes the exhibit before it; the base
@@ -230,6 +275,23 @@ export const ContractTerms = z.object({
   endDate: z.string().optional(),
   autoRenews: z.boolean().optional(),
   terminationNoticeDays: z.number().int().optional(),
+  /**
+   * Who may end this, on what grounds, and what a cure period allows.
+   *
+   * A notice period says how long; it does not say whether the pharmacy may walk without cause at
+   * all. Deciding which contracts are worth keeping is not possible without that sentence.
+   */
+  terminationRights: cited(z.string().optional()),
+  /**
+   * Whether signing one network signs you into all of them, and how a single network is left.
+   *
+   * An all-products clause is the reason a pharmacy cannot drop the one book that loses money
+   * without losing the ones that do not. It is the first thing to know before deciding anything
+   * about a payer, and it is never in the rate exhibit.
+   */
+  allProductsClause: cited(z.string().optional()),
+  /** What the pharmacy must tell them, and within how long. Clocks that run the other way. */
+  noticesOwedByPharmacy: z.array(PharmacyNotice),
   amendmentNoticeDays: z.number().int().optional(),
   /** How long after dispensing a claim may still be submitted, and reversed. */
   claimSubmissionWindowDays: z.number().int().optional(),
@@ -523,6 +585,12 @@ RULES, in order of importance:
 
 15. **Capture the identifiers the claims will carry and the definitions the money rests on.** Network reimbursement ids (NCPDP 545-2F) printed in the exhibits; the pharmacy's own NCPDP and NPI where the document names them; every per-claim or per-transaction fee; and each defined term — brand, generic, AWP, WAC, MAC, U&C, specialty, compound — as this document defines it, with the sentence. Claim submission and reversal windows go with the other clocks.
 
+17. **Put the routing on the rate line, not only at the top.** Where a schedule prints BINs, PCNs or group ids against a particular rate table — a Commercial exhibit and a Part D exhibit each with its own set — repeat them in that rate's own bins/pcns/groupIds, and name the book in its lineOfBusiness. The document-level lists stay as they are. Without this, two rate tables in one document cannot be told apart on a live claim, and the wrong book gets priced.
+
+18. **Capture what decides whether this contract can be left, and what the pharmacy owes.** The agreement's own number as printed on it; who may terminate and on what grounds, and any cure period; whether participation in one network obliges participation in all of them and how a single network is left; and every notice the pharmacy must give — change of ownership, of pharmacist-in-charge, of address, a licence action — with the days allowed. These decide which contracts are worth keeping, and are never in the rate exhibit.
+
+19. **Name the payer as the money will name itself.** An electronic remittance identifies its payer by a name string and nothing else. Record every name this payer's payments and remittances will carry — the plan sponsor, the facilitator, the bank descriptor, whatever the document gives — and any payer id or tax id, in the remittance section. That string is the only join between a remittance and this contract.
+
 16. **Be specific in unclearOrMissing.** "Generic rate for the Medicare Preferred network is referenced as Exhibit C but Exhibit C is not attached" is useful. "Some terms unclear" is not.
 
 Set confidence honestly. A clean, complete rate exhibit is 0.9+. A scan where half the table is illegible is 0.4, and you say which half.`;
@@ -573,16 +641,38 @@ function withoutNulls(value: unknown): unknown {
  */
 export function termsFromObject(raw: Record<string, unknown>): ContractTermsT {
   const clean = withoutNulls(raw) as Record<string, unknown>;
-  const parsed = ContractTerms.parse({
-    macAppealRequiredFields: [], contacts: [],
-    networkReimbursementIds: [], pharmacyNcpdps: [], pharmacyNpis: [],
-    transactionFees: [], keyDefinitions: [], sections: [],
-    pricingCompendium: {}, macListAccess: {}, performanceMeasures: [],
-    dawRules: {},
-    recoupmentTerms: {},
-    ...clean,
-  });
+  const parsed = ContractTerms.parse(withEmpties(ContractTerms, clean));
   return fillNulls(ContractTerms, parsed) as ContractTermsT;
+}
+
+
+/**
+ * "Not stated" for every list and every cited term the value is missing, at every depth, read off
+ * the schema itself — so a field added to the schema after a document was read is covered the day
+ * it is added rather than the day an old draft fails to parse. A list is empty; a cited term is an
+ * object with nothing in it, which its optional value allows. Nothing present is touched.
+ */
+export function withEmpties(schema: z.ZodTypeAny, value: unknown): unknown {
+  const def = defOf(schema);
+  if (!def) return value;
+  if (def.type === "optional" || def.type === "nullable") return value === undefined || value === null || !def.innerType ? value : withEmpties(def.innerType, value);
+  if (def.type === "array") return Array.isArray(value) && def.element ? value.map((v) => withEmpties(def.element as z.ZodTypeAny, v)) : value;
+  if (def.type === "object") {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
+    const shape = shapeOf(def);
+    if (!shape) return value;
+    const out: Record<string, unknown> = { ...(value as Record<string, unknown>) };
+    for (const [k, child] of Object.entries(shape)) {
+      const type = defOf(child)?.type;
+      if (out[k] === undefined) {
+        if (type === "array") out[k] = [];
+        else if (type === "object") out[k] = {};
+      }
+      if (out[k] !== undefined) out[k] = withEmpties(child, out[k]);
+    }
+    return out;
+  }
+  return value;
 }
 
 /**

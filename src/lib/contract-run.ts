@@ -127,6 +127,7 @@ export function planBatches<T>(items: { item: T; bytes: number }[], limits = { b
 export function searchBodyFromTerms(t: {
   counterparty: string;
   documentTitle: string;
+  agreementNumber?: string | null;
   contractType: string;
   documentRole: string;
   parentAgreement: string | null;
@@ -142,6 +143,7 @@ export function searchBodyFromTerms(t: {
   pharmacyNpis?: string[];
   contacts: { purpose: string; name: string | null; organisation: string | null; phone: string | null; fax: string | null; email: string | null; portalUrl: string | null; postalAddress: string | null; citation?: { page: number | null } | null }[];
   macAppealSubmissionTarget: string | null;
+  remittance?: { payerNamesOnRemittance?: string[]; payerIdentifiers?: string[] } | null;
   keyDefinitions: { term: string; definition: string; citation?: { page?: number | null } | null }[];
   sections: { title: string; pageFrom: number | null; pageTo: number | null; gist: string }[];
   incorporatesByReference: string[];
@@ -154,6 +156,7 @@ export function searchBodyFromTerms(t: {
   };
   lines.push(`[From the read, not the scan. Open the page it names.]`);
   lines.push(`${t.documentTitle} — ${t.counterparty} (${t.contractType}, ${t.documentRole}${t.amendmentNumber ? `, amendment ${t.amendmentNumber}` : ""})`);
+  if (t.agreementNumber) lines.push(`Agreement number: ${t.agreementNumber}`);
   if (t.parentAgreement) lines.push(`Attaches to: ${t.parentAgreement}`);
   list("Supersedes", t.supersedes);
   list("BIN", t.bins);
@@ -168,6 +171,9 @@ export function searchBodyFromTerms(t: {
     const parts = [c.name, c.organisation, c.phone, c.fax ? `fax ${c.fax}` : null, c.email, c.portalUrl, c.postalAddress].filter((x): x is string => Boolean(x && x.trim()));
     if (parts.length) lines.push(`Contact for ${c.purpose.replace(/_/g, " ")}${c.citation?.page ? ` (page ${c.citation.page})` : ""}: ${parts.join(", ")}`);
   }
+  // How the money will name itself on a remittance — the only join an 835 offers back to this contract.
+  list("Named on the remittance as", t.remittance?.payerNamesOnRemittance ?? []);
+  list("Payer identifier", t.remittance?.payerIdentifiers ?? []);
   if (t.macAppealSubmissionTarget) lines.push(`MAC appeals go to: ${t.macAppealSubmissionTarget}`);
   for (const d of t.keyDefinitions) lines.push(`Defines ${d.term}${d.citation?.page ? ` (page ${d.citation.page})` : ""}: ${d.definition}`);
   list("Incorporates by reference", t.incorporatesByReference);
