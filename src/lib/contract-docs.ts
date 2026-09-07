@@ -55,10 +55,18 @@ export type Library = {
   pending: number;
   pendingPages: number;
   estimate: { low: number; high: number };
-  /** Every document with a file, read or not, and what reading all of them again would cost. */
+  /**
+   * Every document with a file the read would go to, and what reading all of them again would cost.
+   *
+   * The sort's rejects are out of all three. They were counted here once, which quoted a price for
+   * documents `queueExtraction` would then refuse to send — the two pages disagreed about what the
+   * library was, and the disagreement was on the button that spends the money.
+   */
   withFile: number;
   allPages: number;
   estimateAll: { low: number; high: number };
+  /** Documents the sort ruled out: not counted, not priced, not sent. */
+  ruledOut: number;
   model: string;
   keyPresent: boolean;
   folder: string;
@@ -85,11 +93,13 @@ export async function contractLibrary(): Promise<Library> {
     const terms = d.extractionState === "done" ? parseTerms(d.extractionJson) : null;
     let pages: number | null = null;
     if (d.fileName) {
-      withFile++;
       try { pages = pdfPageCount(await fs.readFile(path.join(contractsDir(), d.fileName))); } catch { /* counted as nothing */ }
-      allPages += pages ?? 0;
-      // What a read would cost counts only what a read would send: the sort's rejects are out.
-      if (d.extractionState !== "done" && d.extractionState !== "queued" && shouldRead(d.triage as never)) pendingPages += pages ?? 0;
+      // Every count and every price here is of what a read would actually send. The rejects are out.
+      if (shouldRead(d.triage as never)) {
+        withFile++;
+        allPages += pages ?? 0;
+        if (d.extractionState !== "done" && d.extractionState !== "queued") pendingPages += pages ?? 0;
+      }
     }
     rows.push({
       id: d.id, documentName: d.documentName, pbmName: d.pbmName, fileName: d.fileName, matchedBy: d.matchedBy,
@@ -112,6 +122,7 @@ export async function contractLibrary(): Promise<Library> {
     withFile,
     allPages,
     estimateAll: estimateCost(allPages, model, r),
+    ruledOut: rows.filter((x) => x.fileName && !shouldRead(x.triage as never)).length,
     model,
     keyPresent: Boolean(s.anthropic_api_key_enc),
     folder: contractsDir(),
