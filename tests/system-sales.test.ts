@@ -70,7 +70,8 @@ describe("reading a month's takings", () => {
      * site can see the first of those at all — the transaction report is dispensing only, so read
      * as total revenue it understates the business by every OTC sale in the month.
      */
-    assert.equal(parsed.retailCents, 545_888, "$5,458.88 over the counter");
+    assert.equal(parsed.retailCents, 507_801, "$5,078.01 over the counter, before the $380.87 of sales tax");
+    assert.equal(parsed.retailTaxCents, 38_087, "the tax column, held for the state");
     assert.equal(parsed.rxPatientCents, 9_325_956, "$93,259.56 from patients");
     assert.equal(parsed.rxRemitCents, 57_077_894, "$570,778.94 from the plans");
     assert.equal(parsed.rxCents, 66_403_850, "$664,038.50 of prescriptions");
@@ -79,7 +80,7 @@ describe("reading a month's takings", () => {
 
   test("retail plus prescriptions is the total the report itself printed", () => {
     // The check that the three figures above were read off the right lines rather than plausible ones.
-    assert.equal(parsed.retailCents! + parsed.rxCents!, parsed.totalCents);
+    assert.equal(parsed.retailCents! + parsed.retailTaxCents! + parsed.rxCents!, parsed.totalCents, "the report's total is tax-inclusive");
   });
 
   test("a totals line belongs to the section it closes, not the last heading printed", () => {

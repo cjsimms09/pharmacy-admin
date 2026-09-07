@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "18eea257-5595-47f2-832a-cc7d0c6c2712",
+  "id": "39b05569-42ad-4184-ba4f-624d44eeae58",
   "prevId": "d872a140-6cdf-48e8-9c60-bc43110ea576",
   "tables": {
     "appeals": {
@@ -6102,6 +6102,13 @@
         },
         "retail_cents": {
           "name": "retail_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "retail_tax_cents": {
+          "name": "retail_tax_cents",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,

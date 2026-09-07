@@ -16,6 +16,7 @@ export type FiledSalesMonth = {
   periodFrom: string;
   periodTo: string;
   retailCents: number | null;
+  retailTaxCents: number | null;
   rxPatientCents: number | null;
   rxRemitCents: number | null;
   rxCents: number | null;
@@ -49,6 +50,7 @@ export async function fileSystemSales(
     periodFrom: parsed.period.from,
     periodTo: parsed.period.to,
     retailCents: parsed.retailCents,
+    retailTaxCents: parsed.retailTaxCents,
     rxPatientCents: parsed.rxPatientCents,
     rxRemitCents: parsed.rxRemitCents,
     rxCents: parsed.rxCents,
@@ -75,6 +77,7 @@ const read = (r: typeof schema.salesMonths.$inferSelect): FiledSalesMonth => ({
   periodFrom: r.periodFrom,
   periodTo: r.periodTo,
   retailCents: r.retailCents,
+  retailTaxCents: r.retailTaxCents ?? null,
   rxPatientCents: r.rxPatientCents,
   rxRemitCents: r.rxRemitCents,
   rxCents: r.rxCents,

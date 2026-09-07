@@ -1845,6 +1845,8 @@ export const salesMonths = sqliteTable("sales_months", {
   periodTo: text("period_to").notNull(),
   /** Over the counter — the part of the business no prescription report can see. */
   retailCents: integer("retail_cents"),
+  /** Sales tax collected on retail in the month, from the report's Tax column. Owed to the state, never revenue. */
+  retailTaxCents: integer("retail_tax_cents"),
   /** What patients paid at the till for prescriptions. */
   rxPatientCents: integer("rx_patient_cents"),
   /** What the plans remitted. */

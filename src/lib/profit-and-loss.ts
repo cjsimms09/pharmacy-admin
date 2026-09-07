@@ -237,7 +237,7 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
     if (i.sales) {
       if (i.sales.rxRemitCents) revenue.push({ label: "Third-party remittance", amountCents: i.sales.rxRemitCents });
       if (i.sales.rxPatientCents) revenue.push({ label: "Patient payments", amountCents: i.sales.rxPatientCents });
-      if (i.sales.retailCents) revenue.push({ label: "Retail and over the counter", amountCents: i.sales.retailCents });
+      if (i.sales.retailCents) revenue.push({ label: "Retail and over the counter", amountCents: i.sales.retailCents, note: "Before sales tax. The tax collected is the state's money and is not in this account." });
     } else if (i.claimsRevenueCents) {
       /*
        * The claims, when the till report has not arrived. Never as well as it — that would count

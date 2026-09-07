@@ -59,3 +59,11 @@ side), `standing-math.ts`, `reconcile.ts`. The statement and the books read the 
 | Minimum filler | `minimum-filler.ts` | Sound: generics by CMS flag, controlled excluded, cheapest here after rebate, whole packs inside the horizon, overshoot said. |
 | Which contract | `contract-replay.ts`: each fill at the supplier's cheapest equivalent, ladder at the replayed month's unscrubbed ratio | Sound as far as the data allows; the unscrubbed ratio understates every ladder equally, and the table now follows the ranking (coverage first). |
 | Driver invoices | trips × rate | Sound. |
+
+## The sales summary and the bank
+
+| Figure | Source | Finding |
+|---|---|---|
+| Retail revenue | System Sales Summary, "Retail Sales" totals row | **Fixed:** read from the Total column, which is after sales tax; on the real August that counted $380.87 of tax collected for Kansas as revenue. Now the Subtotal column, with the tax kept on the month as a liability (`sales_months.retail_tax_cents`). |
+| Cash revenue | `cash_receipts` | **Open, and large:** nothing on the site can enter a receipt — the table and `addCashReceipt` exist and no page calls them — so the cash account's revenue is always "missing". First fix: receipts typed on the books page; the real fix is the bank statement imported (`engine.md` §3.1). |
+| Remittances against claims | `claim_payments` | **Open:** only the Medicare facilitator's 835s are read. A commercial 835 has a parser and no path to the fills or the bank (`engine.md` §3.2). |

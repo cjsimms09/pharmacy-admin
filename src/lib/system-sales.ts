@@ -46,8 +46,14 @@ export type SystemSales = {
   month: string | null;
   printedOn: string | null;
   rows: SalesRow[];
-  /** Over the counter. The part of the business the transaction report cannot see at all. */
+  /**
+   * Over the counter, before sales tax: the part of the business the transaction report cannot see
+   * at all. The report's Total column carries the tax collected on top; that is Kansas's money,
+   * held for it, and it was being counted as revenue.
+   */
   retailCents: number | null;
+  /** Sales tax collected on retail, from the report's Tax column. A liability, never revenue. */
+  retailTaxCents: number | null;
   /** What patients paid at the till for prescriptions. */
   rxPatientCents: number | null;
   /** What the plans remitted. */
@@ -173,10 +179,19 @@ export function parseSystemSales(text: string): SystemSales {
     }
   }
 
-  const find = (section: string, kind: SalesRow["kind"]) =>
-    rows.find((x) => x.section === section && x.kind === kind)?.totalCents ?? null;
+  const rowOf = (section: string, kind: SalesRow["kind"]) => rows.find((x) => x.section === section && x.kind === kind) ?? null;
+  const find = (section: string, kind: SalesRow["kind"]) => rowOf(section, kind)?.totalCents ?? null;
 
-  const retailCents = find("Retail Sales", "subtotal") ?? find("Retail Sales", "total");
+  /*
+   * Retail is the Subtotal column — sales less discounts less returns — not the Total, which adds
+   * the sales tax on. On the real August the two differ by $380.87, and that is tax collected for
+   * the state, not something the pharmacy sold. Prescriptions carry no tax, so their subtotal and
+   * total agree and either column reads the same.
+   */
+  const retailRow = rowOf("Retail Sales", "subtotal") ?? rowOf("Retail Sales", "total");
+  const retailCents = retailRow?.subtotalCents ?? retailRow?.totalCents ?? null;
+  const retailTaxCents = retailRow?.taxCents ?? null;
+  const retailWithTaxCents = retailRow?.totalCents ?? null;
   const rxPatientCents = find("Rx Plan Customer Payments", "subtotal");
   const rxRemitCents = find("Rx Plan Third Party Remit", "subtotal");
   const rxCents = find("Rx Sales", "subtotal");
@@ -188,9 +203,10 @@ export function parseSystemSales(text: string): SystemSales {
   const totalCents = rows.find((x) => x.kind === "total")?.totalCents ?? null;
 
   if (rows.length === 0) problems.push(`This does not look like the "${SALES_TITLE}" report — no figures were found in it.`);
-  if (retailCents !== null && rxCents !== null && totalCents !== null && Math.abs(retailCents + rxCents - totalCents) > 2) {
+  // The report's own Total column, section by section against its grand total: tax included on both sides.
+  if (retailWithTaxCents !== null && rxCents !== null && totalCents !== null && Math.abs(retailWithTaxCents + rxCents - totalCents) > 2) {
     problems.push(
-      `Retail and prescriptions do not add to the total the report printed: ${(retailCents + rxCents) / 100} against ${totalCents / 100}.`,
+      `Retail and prescriptions do not add to the total the report printed: ${(retailWithTaxCents + rxCents) / 100} against ${totalCents / 100}.`,
     );
   }
 
@@ -200,6 +216,7 @@ export function parseSystemSales(text: string): SystemSales {
     printedOn,
     rows,
     retailCents,
+    retailTaxCents,
     rxPatientCents,
     rxRemitCents,
     rxCents,

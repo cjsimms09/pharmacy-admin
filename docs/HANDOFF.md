@@ -89,6 +89,18 @@ it and said so on the pull request. The owner reads this too.
   `standingLines` takes the basis. Your `period-account.ts` types were not touched; its test
   fixture gained the three fields. The owner has asked for a logic audit of every page; findings
   go in `logic-audit.md` page by page as I reach them.
+- **The engine map and the audit** (`engine.md`, `logic-audit.md`): every feed the business runs
+  on, what it ties to, and its state; the three balances (claims, books, remits to claims) and
+  which are working. Found on the way and fixed: retail on the sales summary was read from the
+  Total column (after sales tax; $380.87 on the real August was the state's money), now the
+  Subtotal with `sales_months.retail_tax_cents` held (migration `0074`, regenerated again);
+  the Kansas-floor row on Money found summed under-fee fills per claim row (a coordinated fill's
+  secondary leg counted as unpaid) and now carries the floor page's filable figure; the buy
+  list's lead time was never more than a day; any catalogue flag read as rebated and the generic
+  importer stored the file's own Y/N, which nothing recognised (`contractFlagOf`); the compliance
+  ratio's denominator included OTC lines; the purchasing ledger left facilitator refunds out of a
+  fill's revenue. **Nothing can enter a cash receipt** (`addCashReceipt` has no screen), so the
+  cash account's revenue is always missing; that and commercial 835s are the next two builds.
 - **Pages that were sides of one thing are now families** (`src/lib/families.ts`, `PageHeader tabs`,
   `itemFor` in `nav.ts`; `design-audit.md` §8 has the verdict on every page and why). The sidebar
   lists a family once and each page in it carries a row of tabs: the books / statement / over time;
