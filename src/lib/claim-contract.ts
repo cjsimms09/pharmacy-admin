@@ -25,6 +25,37 @@
  * that does govern March is the one the appeal has to quote.
  */
 
+/**
+ * The published price for the quantity dispensed, worked out from the catalogue.
+ *
+ * The transaction report the pharmacy exports does not carry AWP. Its columns are Rx number,
+ * status, amount, group, network reimbursement id, copay, total, date filled, BIN, quantity,
+ * acquisition cost, PCN, NDC and gross profit — and without a published price, every rate written
+ * as a discount off one is uncomputable. Not one claim of 1,590 could be priced.
+ *
+ * The supplier catalogues carry an AWP per package for 99% of the NDCs the claims dispense, so the
+ * figure can be built: the pack's AWP over the units in the pack, times the quantity dispensed.
+ *
+ * ── What this figure is and is not ──
+ *
+ * A contract saying "AWP" means the compendium's AWP — Medi-Span or First Databank — on the day of
+ * the fill. A wholesaler's catalogue AWP is a copy of that, and usually the same number, but it is
+ * this week's copy rather than that day's and it is the wholesaler's transcription.
+ *
+ * So it is good enough to find the claims worth looking at and not good enough to file on. Every
+ * figure derived this way says so, and an appeal quotes the compendium.
+ */
+export function awpForQuantity(a: {
+  packAwpCents: number | null;
+  packUnits: number | null;
+  quantityThousandths: number | null;
+}): number | null {
+  if (a.packAwpCents === null || a.packUnits === null || a.packUnits <= 0) return null;
+  if (a.quantityThousandths === null || a.quantityThousandths <= 0) return null;
+  const perUnit = a.packAwpCents / a.packUnits;
+  return Math.round((perUnit * a.quantityThousandths) / 1000);
+}
+
 export type ClaimForMatch = {
   bin: string | null;
   pcn: string | null;
@@ -33,8 +64,15 @@ export type ClaimForMatch = {
   daysSupply: number | null;
   /** What the plan actually paid, before the patient's share. */
   remitCents: number | null;
-  /** The published list price for the quantity dispensed, where the claim carried one. */
+  /** The published list price for the quantity dispensed, where one is known. */
   awpCents: number | null;
+  /**
+   * Where that price came from, because it changes what may be done with the answer.
+   *
+   * "claim" is the report's own figure. "catalogue" is derived from a wholesaler's AWP per pack —
+   * enough to find an underpayment worth reading, not enough to file an appeal on.
+   */
+  awpSource?: "claim" | "catalogue" | null;
   /** What the drug cost the pharmacy. */
   acquisitionCents: number | null;
   isBrand: boolean | null;
@@ -153,7 +191,15 @@ export function rateFor(contract: ContractForMatch, claim: ClaimForMatch): RateF
 }
 
 export type Priced =
-  | { ok: true; expectedCents: number; basis: string; feeCents: number; quote: string | null }
+  | {
+      ok: true;
+      expectedCents: number;
+      basis: string;
+      feeCents: number;
+      quote: string | null;
+      /** Where the published price came from; a derived one finds candidates rather than settling them. */
+      awpSource: "claim" | "catalogue";
+    }
   | { ok: false; why: string; basis: string | null };
 
 /**
@@ -195,7 +241,14 @@ export function priceFromRate(rate: RateForMatch, claim: ClaimForMatch): Priced 
   const off = Number(m[3]) / 100;
   const sign = m[2] === "-" ? -1 : 1;
   const ingredient = Math.round(claim.awpCents * (1 + sign * off));
-  return { ok: true, expectedCents: ingredient + feeCents, basis, feeCents, quote: rate.citationQuote };
+  return {
+    ok: true,
+    expectedCents: ingredient + feeCents,
+    basis,
+    feeCents,
+    quote: rate.citationQuote,
+    awpSource: claim.awpSource ?? "claim",
+  };
 }
 
 export type ClaimCheck = {

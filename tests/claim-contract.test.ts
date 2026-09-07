@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { governs, contractFor, rateFor, priceFromRate, checkClaim, type ClaimForMatch, type ContractForMatch, type RateForMatch } from "../src/lib/claim-contract";
+import { governs, contractFor, rateFor, priceFromRate, checkClaim, awpForQuantity, type ClaimForMatch, type ContractForMatch, type RateForMatch } from "../src/lib/claim-contract";
 
 const rate = (a: Partial<RateForMatch> = {}): RateForMatch => ({
   network: null, daysSupplyMin: null, daysSupplyMax: null,
@@ -146,5 +146,38 @@ describe("a claim checked against the contracts on file", () => {
     assert.ok(r.matched, "the claim is governed by a contract even where the rate cannot be computed");
     assert.equal(r.priced?.ok, false);
     assert.equal(r.differenceCents, null);
+  });
+});
+
+describe("the published price, built from the drug files", () => {
+  test("the pack's AWP over its units, times the quantity dispensed", () => {
+    // Levothyroxine 100mcg: a 1000-count pack at $582.40, thirty dispensed.
+    assert.equal(awpForQuantity({ packAwpCents: 58_240, packUnits: 1000, quantityThousandths: 30_000 }), 1_747);
+    // Pravastatin 40mg: a 90-count pack at $431.50, thirty dispensed.
+    assert.equal(awpForQuantity({ packAwpCents: 43_150, packUnits: 90, quantityThousandths: 30_000 }), 14_383);
+  });
+
+  test("a part-unit quantity is carried, because quantity is kept in thousandths", () => {
+    // 2.5 mL of a 30 mL pack listed at $30.00.
+    assert.equal(awpForQuantity({ packAwpCents: 3_000, packUnits: 30, quantityThousandths: 2_500 }), 250);
+  });
+
+  test("anything missing gives nothing, rather than a figure nobody can stand behind", () => {
+    assert.equal(awpForQuantity({ packAwpCents: null, packUnits: 90, quantityThousandths: 30_000 }), null);
+    assert.equal(awpForQuantity({ packAwpCents: 43_150, packUnits: null, quantityThousandths: 30_000 }), null);
+    assert.equal(awpForQuantity({ packAwpCents: 43_150, packUnits: 0, quantityThousandths: 30_000 }), null);
+    assert.equal(awpForQuantity({ packAwpCents: 43_150, packUnits: 90, quantityThousandths: null }), null);
+    assert.equal(awpForQuantity({ packAwpCents: 43_150, packUnits: 90, quantityThousandths: 0 }), null);
+  });
+
+  test("a price derived from the catalogue says so, so nobody files an appeal on it unchecked", () => {
+    // A contract's "AWP" is the compendium's on the day of the fill. The wholesaler's is this
+    // week's copy of it — enough to find the claim worth reading, not enough to file on.
+    const derived = priceFromRate(rate(), claim({ awpSource: "catalogue" }));
+    assert.ok(derived.ok);
+    assert.equal(derived.awpSource, "catalogue");
+    const own = priceFromRate(rate(), claim());
+    assert.ok(own.ok);
+    assert.equal(own.awpSource, "claim", "a figure the report carried is the report's");
   });
 });
