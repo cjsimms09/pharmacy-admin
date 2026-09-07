@@ -2,22 +2,22 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { packReadings, packDisagreement, reimbursementFrom, marginOf, buildDrugRow, withEquivalents, type SupplierOffer, type DirectoryFact, type DrugRow } from "../src/lib/drug-file";
 
-const offer = (supplier: string, packSize: string | null, a: Partial<SupplierOffer> = {}): SupplierOffer => ({ itemNumber: null, netUnitMicros: null, rebateApplied: false, withheld: null, supplier, packSize, packUnits: null, unitCostMicros: null, packCostCents: null, awpCents: null,
+const offer = (supplier: string, packSize: string | null, a: Partial<SupplierOffer> = {}): SupplierOffer => ({ itemNumber: null, netUnitMicros: null, rebateApplied: false, rebateWhy: null, withheld: null, supplier, packSize, packUnits: null, unitCostMicros: null, packCostCents: null, awpCents: null,
   contractFlag: null, pricedOn: null, availability: null, corrected: false, problems: [], ...a,
 });
 
 describe("the two ways a pack size can be written", () => {
   test("a bracket is cartons: the package is the two multiplied", () => {
-    assert.deepEqual(packReadings("(3) 30 ML"), { inner: 30, whole: 90 });
-    assert.deepEqual(packReadings("(6) 28 EA"), { inner: 28, whole: 168 });
+    assert.deepEqual(packReadings("(3) 30 ML"), { inner: 30, whole: 90, uom: "ML" });
+    assert.deepEqual(packReadings("(6) 28 EA"), { inner: 28, whole: 168, uom: "EA" });
   });
 
   test("without a bracket the two readings are the same number", () => {
-    assert.deepEqual(packReadings("180 EA"), { inner: 180, whole: 180 });
+    assert.deepEqual(packReadings("180 EA"), { inner: 180, whole: 180, uom: "EA" });
   });
 
   test("anything that gives no number gives neither reading", () => {
-    for (const p of [null, "", "Package", "0 EA"]) assert.deepEqual(packReadings(p), { inner: null, whole: null });
+    for (const p of [null, "", "Package", "0 EA"]) assert.deepEqual(packReadings(p), { inner: null, whole: null, uom: null });
   });
 });
 

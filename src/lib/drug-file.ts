@@ -50,6 +50,12 @@ export type SupplierOffer = {
   netUnitMicros: number | null;
   /** True where a rebate was actually applied above, so a screen can say the figure is net. */
   rebateApplied: boolean;
+  /**
+   * Where a line is marked as earning a rebate and none was applied, the reason — in the words of
+   * the thing the pharmacist would have to go and do. Null where a rebate did apply, or where the
+   * line never claimed one.
+   */
+  rebateWhy: string | null;
   packCostCents: number | null;
   awpCents: number | null;
   contractFlag: string | null;
@@ -203,14 +209,20 @@ const money = (cents: number) => `$${(cents / 100).toLocaleString("en-US", { min
  * So a pack size gives an inner figure (what one bottle or card holds) and a whole figure (what the
  * package holds altogether). Two suppliers agree when any one number satisfies both of them.
  */
-export function packReadings(packSize: string | null): { inner: number | null; whole: number | null } {
-  if (!packSize) return { inner: null, whole: null };
+export function packReadings(packSize: string | null): { inner: number | null; whole: number | null; uom: "EA" | "ML" | "GM" | null } {
+  if (!packSize) return { inner: null, whole: null, uom: null };
   const m = /(?:\((\d+)\)\s*)?([\d.]+)\s*(EA|ML|GM)\b/i.exec(packSize);
-  if (!m) return { inner: null, whole: null };
+  if (!m) return { inner: null, whole: null, uom: null };
   const inner = Number(m[2]);
-  if (!Number.isFinite(inner) || inner <= 0) return { inner: null, whole: null };
+  if (!Number.isFinite(inner) || inner <= 0) return { inner: null, whole: null, uom: null };
   const cartons = m[1] ? Number(m[1]) : 1;
-  return { inner, whole: inner * cartons };
+  /*
+   * The measure the file counts in, kept alongside the numbers.
+   *
+   * Without it "120" and "10.3" look like two readings of one package rather than two different
+   * things — actuations against grams — and the FDA's figure would be taken for a wholesaler's.
+   */
+  return { inner, whole: inner * cartons, uom: m[3].toUpperCase() as "EA" | "ML" | "GM" };
 }
 
 /**

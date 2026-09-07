@@ -295,6 +295,46 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
         )}
       </Card>
 
+      {/*
+        * A copy that can leave the building, which the backup above never should.
+        *
+        * The backup is the pharmacy's own and holds everything. This is the other thing that is
+        * sometimes needed: a copy carrying every figure the purchasing, pricing and money screens
+        * run on and nothing that could be traced to a person, so a fault can be reproduced by
+        * somebody who is not standing in the pharmacy.
+        */}
+      <Card
+        className="mt-6"
+        title="A copy for Claude"
+        subtitle="The database with every identifier taken out, so a problem can be reproduced and fixed without anybody guessing."
+      >
+        <p className="text-sm text-ink-2">
+          Every prescription number is replaced with a stand-in made fresh for each copy — the same prescription reads
+          the same throughout one copy, so coordinated claims still group as one fill, and no stand-in can be turned
+          back into a number or matched against another copy. The incident log&rsquo;s free text, the policy
+          manual&rsquo;s prose, staff names, every password and API key, and the pharmacy&rsquo;s DEA, NPI and NCPDP
+          numbers all go. No documents travel; the database only.
+        </p>
+        <p className="mt-2 text-sm text-ink-2">
+          Then it is <b>proved</b>: every text value in the finished copy is read back and searched for addresses,
+          telephone numbers, social security numbers and unreplaced prescription numbers. If one is found the file is
+          not written at all, and the page says which column it was — which means the site has grown something the
+          scrubber does not know about, and the scrubber is what needs fixing.
+        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-line pt-3">
+          <a href="/api/export/copy-for-claude" download className="btn btn-primary">
+            Make a copy for Claude
+          </a>
+          <span className="text-xs text-ink-3">
+            Takes about half a minute and downloads when it is done. Every copy is written to the audit log.
+          </span>
+        </div>
+        <p className="mt-2 text-xs text-ink-3">
+          This is not a backup and cannot restore this pharmacy: no documents, no passwords, and the prescription
+          numbers are gone for good. The real backup is the card above.
+        </p>
+      </Card>
+
       <h2 className="mt-8 text-sm font-semibold">Archives held</h2>
       {s.existing.length === 0 ? (
         <div className="mt-2"><Empty>None yet.</Empty></div>

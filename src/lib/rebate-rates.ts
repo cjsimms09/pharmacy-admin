@@ -1,6 +1,6 @@
 import "server-only";
 import { allSuppliers } from "./suppliers-registry";
-import { rebateProgramsInForce } from "./supplier-terms-store";
+import { rebateProgramsInForce, rebateProgramsFor } from "./supplier-terms-store";
 import { rebateStatementFor } from "./rebate-report-store";
 import { latestRatio } from "./purchase-ratio";
 import { rebateView, type RebateView } from "./rebate-view";
@@ -157,6 +157,61 @@ export async function contractRatesBySupplier(on = todayIso()): Promise<Record<s
     if (pct <= 0 || pct >= 100) continue;
     out[s.name.trim().toLowerCase()] = pct / 100;
     if (s.catalogName) out[s.catalogName.trim().toLowerCase()] = pct / 100;
+  }
+  return out;
+}
+
+/**
+ * Why a supplier's contract items are being compared on their printed price, in one sentence each.
+ *
+ * "No rebate ladder is on file" was the only thing the drug file could say, and it was wrong often
+ * enough to be worse than saying nothing: a ladder can be filed and still not reach a price. It can
+ * have lapsed, or not started; it can pay on brand only; it can run off a ratio the site has no
+ * figure for, in which case there is a ladder and no band. Each of those is a different thing to go
+ * and do, and the pharmacist is the only one who can do any of them.
+ *
+ * Keyed the way the catalogue names its suppliers, so a screen holding a catalogue row can look up
+ * its own supplier without knowing anything about the registry.
+ */
+export async function contractRateDiagnosis(on = todayIso()): Promise<Record<string, string>> {
+  const rows = await allSuppliers(true);
+  const out: Record<string, string> = {};
+  for (const s of rows) {
+    const names = [s.name, s.catalogName].filter((n): n is string => !!n).map((n) => n.trim().toLowerCase());
+    const say = (why: string) => names.forEach((n) => (out[n] = why));
+
+    const all = await rebateProgramsFor(s.id);
+    if (all.length === 0) {
+      say(`No rebate ladder has ever been recorded for ${s.name}. Their agreement states one; put it on the supplier's terms page and every price here follows.`);
+      continue;
+    }
+    const inForce = await rebateProgramsInForce(s.id, on);
+    if (inForce.length === 0) {
+      /*
+       * Filed but not in force is the failure that reads as "I do have a ladder set" — because he
+       * does. The dates are the answer, so the dates are what it says.
+       */
+      const dates = all
+        .map((r) => `${r.name}: ${r.effectiveFrom}${r.effectiveTo ? ` to ${r.effectiveTo}` : " onwards"}`)
+        .join("; ");
+      say(`${s.name} has ${all.length} ladder${all.length === 1 ? "" : "s"} on file but none of them covers ${on} — ${dates}. Give the current one a start date on or before today and no end date, and it applies again.`);
+      continue;
+    }
+    const r = await ratesFor(s.id, on);
+    const pct = (r?.view.contractGenericPercent ?? 0) + (r?.view.allGenericsPercent ?? 0);
+    if (pct > 0 && pct < 100) continue; // A rate is reaching prices; nothing to explain.
+
+    if (r && r.ratioSource === null) {
+      const measures = [...new Set(inForce.map((x) => x.terms.ratioMeasure ?? "an unstated figure"))].join(" and ");
+      say(`${s.name}'s ladder is in force but no band can be chosen: it pays by ${measures}, and no such figure is on file. The daily Purchase Drill Down or the monthly rebate statement carries it — file one and the rate applies itself.`);
+      continue;
+    }
+    const pays = [...new Set(inForce.map((x) => x.terms.eligibility))];
+    if (!pays.some((e) => e === "catalog_rebate_flag" || e === "all_generics")) {
+      say(`${s.name}'s ladder is in force but pays on ${pays.join(" and ").replace(/_/g, " ")} — nothing that comes off a contract generic's price, so the comparison uses the printed price and is right to.`);
+      continue;
+    }
+    say(`${s.name}'s ladder is in force and its ratio is on file, but the band it lands in pays nothing on contract generics today. The supplier's page shows the ladder and where this month sits on it.`);
   }
   return out;
 }

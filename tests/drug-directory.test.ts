@@ -2,7 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import zlib from "node:zlib";
-import { parseDirectoryProducts, parseDirectoryPackages, parseOrangeBook, buildDirectory, equivalenceKey, substitutable, applicationParts, strengthNumbers } from "../src/lib/drug-directory";
+import { parseDirectoryProducts, parseDirectoryPackages, parseOrangeBook, buildDirectory, equivalenceKey, substitutable, applicationParts, strengthNumbers, packageUnits } from "../src/lib/drug-directory";
 import { readZip } from "../src/lib/zip-read";
 
 const products = parseDirectoryProducts(fs.readFileSync("fixtures/fda-ndc-product.txt", "latin1"));
@@ -156,5 +156,72 @@ describe("the A-rating subgroup", () => {
 
   test("a different drug is never substitutable whatever the rating", () => {
     assert.equal(substitutable({ equivalenceKey: "a", teCode: "AB1" }, { equivalenceKey: "b", teCode: "AB1" }), false);
+  });
+});
+
+describe("what a package holds, from the FDA rather than from a wholesaler", () => {
+  /*
+   * Every string below is verbatim from the pharmacy's own failed load, so the reader is tested
+   * against the file as it really arrives rather than against a tidied version of it.
+   */
+  test("a plain bottle is its own count", () => {
+    assert.deepEqual(packageUnits("30 TABLET, COATED in 1 BOTTLE, PLASTIC (71921-105-33)"), { units: 30, uom: "EA" });
+    assert.deepEqual(packageUnits("900 PELLET in 1 VIAL, GLASS (71919-811-05)"), { units: 900, uom: "EA" });
+    assert.deepEqual(packageUnits("1000 TABLET in 1 BOTTLE (71930-006-13)"), { units: 1000, uom: "EA" });
+  });
+
+  test("a nest multiplies out, which is the whole answer to the argument", () => {
+    // The levels are joined by "/", not ">". A carton of 144 pouches of 0.9 g is 129.6 g.
+    assert.deepEqual(
+      packageUnits("144 POUCH in 1 BOX (71927-015-03) / .9 g in 1 POUCH (71927-015-01)"),
+      { units: 129.6, uom: "GM" },
+    );
+    // A box of six spray containers is six dispensing units.
+    assert.deepEqual(packageUnits("6 CONTAINER in 1 BOX (71921-170-61) / 1 SPRAY in 1 CONTAINER"), { units: 6, uom: "EA" });
+    // One dropper bottle in a carton is 5 mL, not 1.
+    assert.deepEqual(
+      packageUnits("1 BOTTLE, DROPPER in 1 CARTON (71921-188-05) / 5 mL in 1 BOTTLE, DROPPER"),
+      { units: 5, uom: "ML" },
+    );
+    assert.deepEqual(packageUnits("1 BOTTLE in 1 CARTON (71921-410-72) / 300 mL in 1 BOTTLE"), { units: 300, uom: "ML" });
+  });
+
+  test("a volume is a volume and a count is a count", () => {
+    assert.deepEqual(packageUnits("236.5 mL in 1 BOTTLE (71921-175-08)"), { units: 236.5, uom: "ML" });
+    assert.deepEqual(packageUnits("3.78 L in 1 BOTTLE, PLASTIC (71925-301-41)"), { units: 3780, uom: "ML" });
+    assert.deepEqual(packageUnits("30 g in 1 JAR (71922-100-30)"), { units: 30, uom: "GM" });
+    // Milligrams are converted rather than refused; a package stated in mg is still a package.
+    assert.deepEqual(packageUnits("5 mg in 1 BOTTLE, PLASTIC (71921-185-05)"), { units: 0.005, uom: "GM" });
+  });
+
+  test("a kit is refused rather than guessed at", () => {
+    // Fifty different remedies in one box have no single dispensing unit, and inventing one would
+    // put a wrong number exactly where this is meant to be the party nobody argues with.
+    assert.equal(
+      packageUnits("50 VIAL, GLASS in 1 KIT (71919-821-18) / 1 KIT in 1 VIAL, GLASS (71919-821-01) * 750 PELLET in 1 VIAL, GLASS (68428-127-01)"),
+      null,
+    );
+    assert.equal(
+      packageUnits("1 KIT in 1 CARTON (71921-307-51) * 11 TABLET, FILM COATED in 1 BLISTER PACK * 42 TABLET, FILM COATED in 1 BLISTER PACK"),
+      null,
+    );
+  });
+
+  test("anything that is not this shape gives nothing rather than a guess", () => {
+    for (const s of ["", "   ", "a bottle", "TABLET in 1 BOTTLE", "0 TABLET in 1 BOTTLE"]) assert.equal(packageUnits(s), null);
+  });
+
+  test("the same package NDC listed twice is one row, not a failed load", () => {
+    // The real file lists 72043-2500-1 twice, identically, which refused all 250,000 rows.
+    const products = [{
+      productNdc: "72043-2500", productType: "HUMAN OTC DRUG", brandName: "EltaMD UV Clear SPF46", genericName: "Zinc oxide",
+      form: "LOTION", route: "TOPICAL", substances: "ZINC OXIDE", strength: "90", strengthUnit: "g/1000g",
+      labeler: "CP Skin Health Group, Inc.", application: "M020", marketingCategory: "OTC MONOGRAPH DRUG",
+      deaSchedule: null, marketedFrom: null, marketedTo: null, excluded: false,
+    }];
+    const pkg = { ndc11: "72043250001", productNdc: "72043-2500", packageDescription: "48 g in 1 BOTTLE (72043-2500-1)", marketedFrom: null, marketedTo: null, sample: false };
+    const rows = buildDirectory(products, [pkg, { ...pkg }], []);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].ndc11, "72043250001");
   });
 });

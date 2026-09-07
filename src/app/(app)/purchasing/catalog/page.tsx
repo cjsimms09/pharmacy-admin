@@ -553,17 +553,13 @@ export default async function DrugFilePage({
                           * every comparison against a wholesaler who pays no rebate is decided on the wrong
                           * figure — and it looks right, because the column is filled in.
                           */}
-                        {r.offers.some((o) => o.contractFlag === "rebated" && !o.rebateApplied) && (
-                          <p className="mt-2 text-[11px] text-warn">
-                            {r.offers.filter((o) => o.contractFlag === "rebated" && !o.rebateApplied).map((o) => o.supplier).join(" and ")}{" "}
-                            {r.offers.filter((o) => o.contractFlag === "rebated" && !o.rebateApplied).length === 1 ? "marks this" : "mark this"} a
-                            contract item, but no rebate ladder is on file for{" "}
-                            {r.offers.filter((o) => o.contractFlag === "rebated" && !o.rebateApplied).length === 1 ? "them" : "them"}, so the net
-                            price above is the printed one and the comparison understates them.{" "}
-                            <Link href="/suppliers" className="text-accent underline">Record the ladder</Link> and every
-                            figure here follows.
+                        {r.offers.filter((o) => o.rebateWhy).map((o) => (
+                          <p key={`rebate-${o.supplier}`} className="mt-2 text-[11px] text-warn">
+                            <b>{o.supplier} marks this a contract item and the net price above is still the printed one.</b>{" "}
+                            <span className="text-ink-2">{o.rebateWhy}</span>{" "}
+                            <Link href="/suppliers" className="text-accent underline">Suppliers</Link>
                           </p>
-                        )}
+                        ))}
 
                         {/* Every interchangeable NDC, so the choice is visible rather than only its winner. */}
                         {r.equivalence && (r.equivalence.others.length > 0 || r.equivalence.why) && (

@@ -77,6 +77,21 @@ body { @apply bg-ground text-ink antialiased; font-size: 0.9375rem; line-height:
   h3 { @apply text-base font-semibold text-ink; }
   code, pre, kbd { @apply font-mono text-[0.85em]; }
   ::selection { background: var(--color-accent-soft); }
+
+  /*
+    A closed <details> hides its own content here, not in the browser.
+
+    It is supposed to hide everything but the summary, and in Chrome it does. Where the content is
+    absolutely positioned — every popover in this site is — WebKit lets it paint anyway, so the
+    "more" menu and the Send-to-Claude panel stood open on every screen for anybody not on Chrome.
+    Fixing the two of them by name left the next one to be written broken in the same way, so it is
+    said once, in the base layer, for every <details> there is or will be.
+
+    Specificity: this is (0,1,2) — `details` and `:not(summary)` are elements, `[open]` an
+    attribute — so a component rule that opens a panel with `[open]` (0,2,1) still wins, and one
+    that only styles the closed panel does not fight it.
+  */
+  details:not([open]) > *:not(summary) { display: none; }
 }
 
 @layer components {

@@ -1830,10 +1830,38 @@ export const cashReceipts = sqliteTable(
     payer: text("payer"),
     notes: text("notes"),
     documentId: text("document_id").references(() => documents.id, { onDelete: "set null" }),
+    /**
+     * The identity of the payment in whatever report it came from, so it is banked once.
+     *
+     * A payer payment report is a date range, and a date range gets re-run — the same week with a
+     * day added, or last month forwarded again. Every payment carries the payer's own number, and
+     * that number keyed against the payer is what stops this file inflating revenue every time it
+     * lands. Null for a receipt somebody typed in, which has no source to be identified by.
+     */
+    sourceKey: text("source_key").unique(),
+    /** The day it reached the bank. The month above is derived from this where it is known. */
+    receivedOn: text("received_on"),
+    /** The payer's own payment number, shown so a deposit can be traced without opening the file. */
+    reference: text("reference"),
+    /** "EFT", "COPY", "CHECK", as the report writes it. */
+    method: text("method"),
+    /*
+     * The report's own reconciliation figures, recorded and not yet used by anything.
+     *
+     * Whether a remittance advice was matched to the payment, what of it matched claims, and what
+     * did not. These are the beginning of the 835 work rather than part of it. They are stored as
+     * they arrive so that when that work happens the history is already here, and no figure on
+     * this site is drawn from them until it is — a number used before its source is understood is
+     * how a set of books goes quietly wrong.
+     */
+    remitMatched: integer("remit_matched", { mode: "boolean" }),
+    claimMatchCents: integer("claim_match_cents"),
+    noClaimMatchCents: integer("no_claim_match_cents"),
+    adjustmentsCents: integer("adjustments_cents"),
     createdBy: text("created_by").notNull(),
     createdAt: text("created_at").notNull().default(now()),
   },
-  (t) => [index("cash_receipts_month_idx").on(t.month)],
+  (t) => [index("cash_receipts_month_idx").on(t.month), index("cash_receipts_received_idx").on(t.receivedOn)],
 );
 
 /**

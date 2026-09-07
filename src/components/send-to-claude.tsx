@@ -26,13 +26,22 @@ function Buttons() {
   const safe = `/api/export/for?${qs.toString()}`;
   const withIds = `/api/export/for?${new URLSearchParams({ ...Object.fromEntries(qs), identifiers: "include" }).toString()}`;
 
+  /*
+   * Clicking a download inside a <details> does not close it, so the panel stayed open over the
+   * page after the file had been taken — "once i hit send this to claude button, that box never
+   * goes away". A link that has done its job closes the thing it was in.
+   */
+  const close = (e: React.MouseEvent<HTMLElement>) => {
+    e.currentTarget.closest("details")?.removeAttribute("open");
+  };
+
   return (
     <details className="no-print relative">
       <summary className="cursor-pointer list-none">
         <span className="btn btn-sm">Send to Claude</span>
       </summary>
       <div className="absolute right-0 top-10 z-40 w-72 space-y-2 rounded-xl bg-surface p-4 text-xs leading-relaxed text-ink-3" style={{ boxShadow: "var(--shadow-lift)" }}>
-        <a href={safe} download className="btn btn-sm btn-primary w-full justify-center">
+        <a href={safe} download onClick={close} className="btn btn-sm btn-primary w-full justify-center">
           Download this page&rsquo;s file
         </a>
         <p>
@@ -43,7 +52,7 @@ function Buttons() {
           Prescription numbers are replaced with stand-ins that mean nothing outside the file. Patient names, dates of
           birth and addresses are never stored by this site, so they cannot be in it.
         </p>
-        <a href={withIds} download className="underline hover:text-ink">
+        <a href={withIds} download onClick={close} className="underline hover:text-ink">
           With the real prescription numbers
         </a>
         <p>Only when the question is about one prescription by name. Every download is recorded either way.</p>

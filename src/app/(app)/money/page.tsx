@@ -29,6 +29,43 @@ export const metadata = { title: "Money" };
  *
  * The specification is docs/reference/money-ledger.md.
  */
+/*
+ * The payer payment report, uploaded by hand.
+ *
+ * It arrives by email and files itself, and this is for the day it does not: a report re-run for a
+ * range that was missed, or a month somebody wants in before the sweep. Same reader, same key, so
+ * a payment already banked is recognised whichever way it came in.
+ *
+ * At module level rather than inside the component: an inline action's closed-over values are
+ * serialised into the form and a function cannot be.
+ */
+async function uploadPayments(fd: FormData): Promise<never> {
+  "use server";
+  const u = await requireManager();
+  const period = String(fd.get("period") ?? "");
+  const back = `/money?period=${encodeURIComponent(period)}`;
+  const f = fd.get("file");
+  if (!(f instanceof File) || f.size === 0) redirect(`${back}&error=${encodeURIComponent("No file was chosen.")}`);
+  const text = Buffer.from(await (f as File).arrayBuffer()).toString("utf8");
+  const { looksLikePayerPayments } = await import("@/lib/payer-payments");
+  if (!looksLikePayerPayments(text)) {
+    redirect(`${back}&error=${encodeURIComponent("That is not a payer payment report: it needs a payment number, a payer, a deposit date and an amount. Nothing was banked.")}`);
+  }
+  const { importPayerPayments } = await import("@/lib/payer-payments-store");
+  const r = await importPayerPayments(text, { userId: u.id, userName: u.name, fileName: (f as File).name });
+  revalidatePath("/money");
+  if (!r.ok) redirect(`${back}&error=${encodeURIComponent(r.why)}`);
+  const said =
+    r.banked === 0
+      ? r.alreadyHeld > 0
+        ? `Nothing new: all ${r.alreadyHeld} payments in that report were already banked.`
+        : "That report covered a period with no deposits, so nothing was banked."
+      : `${formatCents(r.bankedCents)} banked across ${r.banked} payment${r.banked === 1 ? "" : "s"}${r.from ? `, ${r.from} to ${r.to}` : ""}` +
+        `${r.alreadyHeld ? `. ${r.alreadyHeld} were already held and were not banked again` : ""}` +
+        `${r.skipped.length ? `. ${r.skipped.length} row${r.skipped.length === 1 ? "" : "s"} could not be read: ${r.skipped.slice(0, 2).map((x) => `row ${x.row}, ${x.why}`).join("; ")}` : ""}.`;
+  redirect(`${back}&ok=${encodeURIComponent(said)}`);
+}
+
 export default async function MoneyPage({ searchParams }: { searchParams: Promise<{ period?: string; ok?: string; error?: string }> }) {
   await requireUser();
   const { period: periodParam, ok, error } = await searchParams;
@@ -219,16 +256,18 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
         {banked.length > 0 && (
           <div className="mb-3 overflow-x-auto">
             <table className="table text-sm">
-              <thead><tr><th>Month</th><th>Kind</th><th>Payer</th><th className="num">Amount</th><th>Notes</th><th></th></tr></thead>
+              <thead><tr><th>Banked</th><th>Kind</th><th>Payer</th><th className="num">Amount</th><th>Notes</th><th></th></tr></thead>
               <tbody>
                 {banked.map((r) => (
                   <tr key={r.id}>
-                    <td>{r.month}</td>
+                    {/* The day it landed where a report gave one; the month where somebody typed it. */}
+                    <td className="whitespace-nowrap">{r.receivedOn ?? r.month}</td>
                     <td>{KINDS.find((k) => k.key === r.kind)?.label ?? r.kind}</td>
                     <td className="text-ink-2">{r.payer ?? "—"}</td>
                     <td className="num">{formatCents(r.amountCents)}</td>
                     <td className="text-xs text-ink-3">{r.notes ?? ""}</td>
                     <td>
+                      {/* A payment banked from a report is removable like any other: the bank statement is the record. */}
                       <form action={unbank}>
                         <input type="hidden" name="id" value={r.id} />
                         <input type="hidden" name="period" value={period.key} />
@@ -241,6 +280,30 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
             </table>
           </div>
         )}
+        {/*
+          * The whole month of plan deposits, in one file, rather than typed one at a time.
+          *
+          * It is the same money the form below records, read off the payer's own report: a payment
+          * number, a payer, the day it was deposited and the amount. Keyed on the payment number,
+          * so a report re-run for an overlapping range banks only what is new — these reports are
+          * date ranges and a date range gets re-run.
+          */}
+        <div className="mb-4 rounded-lg border border-line bg-ground/40 p-3">
+          <form action={uploadPayments} className="flex flex-wrap items-end gap-3">
+            <input type="hidden" name="period" value={period.key} />
+            <Field label="A payer payment report" hint="The CSV from the remittance service, any date range.">
+              <input type="file" name="file" accept=".csv,.txt" className="w-full text-xs" />
+            </Field>
+            <button className="btn btn-primary">Bank the report</button>
+          </form>
+          <p className="mt-2 text-xs text-ink-3">
+            Sent to the site&rsquo;s mailbox it files itself; this is for a range that was missed. Each payment is
+            banked in the month it was <b>deposited</b>, and a payment already held is never banked twice. The
+            report&rsquo;s remittance and claim-match columns are recorded and not yet used by any figure —
+            they belong to the 835 work.
+          </p>
+        </div>
+
         <form action={bankIt} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
           <input type="hidden" name="period" value={period.key} />
           <Field label="Month it arrived">
