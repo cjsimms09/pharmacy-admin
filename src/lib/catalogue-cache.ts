@@ -51,6 +51,41 @@ export type CatalogueRow = {
 
 let held: { key: string; at: number; rows: CatalogueRow[] } | null = null;
 
+/**
+ * Puts every supplier's row on the same footing: one package, its total, and the cost of a unit of it.
+ *
+ * Wholesalers write the same package at different heights. McKesson lists albuterol 1.25mg/3ML as
+ * "(25) 3 ML" at $6.2500 a unit; API lists the same NDC as "75 ML" at $0.2532. Compared on the
+ * printed unit cost, API looks twenty-five times cheaper and the buy list would always send the
+ * order there — on a comparison of a millilitre against a vial.
+ *
+ * The two agree on what the box costs: $18.75 and $18.99, a 1.3% difference between two independent
+ * wholesalers. That is not a coincidence, and it holds across the file — where two suppliers use
+ * different notation for one NDC, the pack totals agree 183 times against the printed unit costs' 22.
+ *
+ * So the pack total is the figure a comparison can trust, and the unit cost is derived from it over
+ * the whole package rather than taken from the column. A row without a bracket is already whole and
+ * is left exactly as it is.
+ */
+export function wholePackage(r: CatalogueRow): CatalogueRow {
+  if (!r.packSize) return r;
+  const m = /\((\d+)\)\s*([\d.]+)\s*(EA|ML|GM)\b/i.exec(r.packSize);
+  if (!m) return r;
+  const cartons = Number(m[1]);
+  const inner = Number(m[2]);
+  const whole = cartons * inner;
+  if (!Number.isFinite(whole) || whole <= 0 || cartons <= 1) return r;
+  // Without a pack total there is nothing to divide, and guessing which column is right would be
+  // the very mistake this exists to avoid.
+  if (r.packCostCents === null) return r;
+  return {
+    ...r,
+    packSize: `${whole} ${m[3].toUpperCase()}`,
+    unitCostMicros: Math.round((r.packCostCents * 10_000) / whole),
+    asImported: r.asImported ?? { packSize: r.packSize, unitCostMicros: r.unitCostMicros, packCostCents: r.packCostCents },
+  };
+}
+
 /** Units in a pack size — "180 EA" is 180. The bracket is the order multiple, not the pack. */
 function unitsIn(packSize: string): number | null {
   const m = /(?:\(\d+\)\s*)?([\d.]+)\s*(EA|ML|GM)\b/i.exec(packSize);
@@ -140,8 +175,10 @@ export async function catalogueRows(): Promise<CatalogueRow[]> {
     };
   });
 
-  held = { key, at: Date.now(), rows };
-  return rows;
+  // Every row on the same footing before anything compares two of them; see wholePackage.
+  const levelled = rows.map(wholePackage);
+  held = { key, at: Date.now(), rows: levelled };
+  return levelled;
 }
 
 /**

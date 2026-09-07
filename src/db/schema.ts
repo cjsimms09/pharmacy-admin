@@ -1393,6 +1393,14 @@ export const contractDocs = sqliteTable(
     extractionJson: text("extraction_json"),
     extractionError: text("extraction_error"),
     /**
+     * When that error was recorded, because a stored failure reads exactly like a live one.
+     *
+     * The refused contract reads sat on screen unchanged after the cause had been fixed and the
+     * update installed — the message is the record of the last attempt, and nothing on it said so.
+     * Shown with its date, it can never again be mistaken for the API refusing again.
+     */
+    extractionFailedAt: text("extraction_failed_at"),
+    /**
      * What the cheap sort made of the document before the expensive read: contract, rate_sheet,
      * notice, manual, not_relevant or unsure (`contract-triage.ts`). The full read skips only
      * not_relevant. A person may overrule it; `triage_by` says who decided ("rule", "model", or

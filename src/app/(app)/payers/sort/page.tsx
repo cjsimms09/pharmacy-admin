@@ -8,6 +8,7 @@ import { contractLibrary, type LibraryDoc } from "@/lib/contract-docs";
 import { queueTriage, collectTriage, setTriage, testReader, recoverFailures, TRIAGE_MODEL } from "@/lib/contract-extract";
 import { TRIAGE_KINDS, KIND_MEANS, estimateTriageCost, type TriageKind } from "@/lib/contract-triage";
 import { dollars } from "@/lib/ai-spend";
+import { fmt } from "@/lib/dates";
 import { PageHeader, Card, Notice, Figure, Empty } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 
@@ -193,7 +194,18 @@ export default async function SortPage({ searchParams }: { searchParams: Promise
                   <div className="min-w-0">
                     <div className="row-title">{d.documentName}</div>
                     <p className="row-why">{d.pbmName} · {d.pages ?? "?"} page{d.pages === 1 ? "" : "s"}</p>
-                    <p className="mt-0.5 text-xs text-crit">{d.error ?? "Refused; the reason was not kept. Ask the API why."}</p>
+                    {/*
+                      Dated, because a stored failure reads exactly like a live one.
+
+                      The refusals that stopped every contract read sat here unchanged after the
+                      cause was fixed and the update installed, and nothing on the line said the
+                      message was a record rather than the API refusing again.
+                    */}
+                    <p className="mt-0.5 text-xs text-crit">
+                      {d.failedAt ? <span className="text-ink-3">Last read failed {fmt(d.failedAt)}: </span> : null}
+                      {d.error ?? "Refused; the reason was not kept. Ask the API why."}
+                      {d.failedAt ? <span className="text-ink-3"> — press Read again to try it on the current version.</span> : null}
+                    </p>
                   </div>
                 </li>
               ))}

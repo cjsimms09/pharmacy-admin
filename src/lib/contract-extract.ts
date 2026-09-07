@@ -333,7 +333,11 @@ export function explainFailure(result: { type: string; error?: { error?: { type?
 }
 
 async function fail(id: string, why: string) {
-  await db.update(schema.contractDocs).set({ extractionState: "failed", extractionError: why }).where(eq(schema.contractDocs.id, id));
+  // Stamped, so the message can never be read as the API refusing again; see the column's note.
+  await db
+    .update(schema.contractDocs)
+    .set({ extractionState: "failed", extractionError: why, extractionFailedAt: new Date().toISOString() })
+    .where(eq(schema.contractDocs.id, id));
 }
 
 /**
