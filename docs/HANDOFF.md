@@ -15,8 +15,8 @@ it and said so on the pull request. The owner reads this too.
 
 - **The first live reads failed as "errored" with the reason thrown away.** Fixed: the API's own
   message is recorded in words that say what to do (`explainFailure` in `contract-extract.ts`), the
-  per-request page limit is 50 (a scanned page is up to 3,000 tokens; a hundred overflow the
-  window), and the folder is sorted before it is read (`/payers/sort`, migration `0071`
+  per-request page limit is 300 (a scanned page is up to 3,000 tokens; the model takes a million
+  in one request), and the folder is sorted before it is read (`/payers/sort`, migration `0071`
   `contract_docs.triage*`) so W-9s and newsletters are never sent to the expensive reader. The
   contracts page (`payers/contracts/page.tsx`) is yours: it would help to show `triage` and
   `triageWhy` on each row and a "Sort the folder" link in its header; the read already skips what

@@ -28,19 +28,22 @@ export function estimateCost(pages: number, model: string, rates?: { in: number;
 /**
  * The limits a request and a batch must respect, so a run never fails on size.
  *
- * A PDF in one request may carry at most 100 pages by the API's rule and 50 by this site's (see below), and 32 MB; a batch at most 256 MB of requests.
- * A document over the page limit is not sent and is named, because sending it would fail after
- * the batch was paid for and the failure would look like a bad read.
+ * A PDF in one request may carry at most 600 pages by the API's rule and 300 by this site's (see
+ * below), and 32 MB; a batch at most 256 MB of requests. A document over the page limit is not
+ * sent and is named, because sending it would fail after the batch was paid for and the failure
+ * would look like a bad read.
  */
 /*
- * Fifty, not the API's hundred.
+ * Three hundred, not the API's six hundred.
  *
- * A PDF page is sent as text and as an image and costs up to 3,000 tokens; a hundred scanned pages
- * is 300,000, and a model with a 200,000-token window refuses the whole request. That refusal is
- * free but it is also a read that never happens, and it was the first thing the live folder hit.
- * Fifty pages at the worst case is 150,000 with room for the answer.
+ * A PDF page is sent as text and as an image and costs up to 3,000 tokens. The models this site
+ * runs (Opus 5 and its family) take a million tokens in one request at the ordinary price, so
+ * three hundred scanned pages at the worst case is 900,000 with room for the answer. The earlier
+ * limit of fifty was set for a 200,000-token window this model does not have, and it made a
+ * 150-page agreement look like something the owner had to split by hand. A document past three
+ * hundred pages is still named rather than sent; none has appeared yet.
  */
-export const PDF_PAGE_LIMIT = 50;
+export const PDF_PAGE_LIMIT = 300;
 export const PDF_BYTES_LIMIT = 32 * 1024 * 1024;
 export const BATCH_BYTES_LIMIT = 100 * 1024 * 1024;
 export const BATCH_REQUEST_LIMIT = 100;
