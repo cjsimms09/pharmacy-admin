@@ -34,10 +34,20 @@ export async function fingerprint(): Promise<string> {
   const r = await client.execute(
     "select (select count(*) from claims) as c, (select max(at) from audit_events) as a, (select count(*) from supplier_items) as s, " +
       "(select max(file_as_of) from nadac_prices) as n, (select count(*) from invoice_lines) as l, (select max(counted_on) from on_hand_imports) as o, " +
-      "(select count(*) from driver_invoices) as d, (select count(*) from expenses) as e, (select count(*) from claim_payments) as p, (select count(*) from plan_groups) as g",
+      "(select count(*) from driver_invoices) as d, (select count(*) from expenses) as e, (select count(*) from claim_payments) as p, (select count(*) from plan_groups) as g, " +
+      /*
+       * The price files, by their import rather than by their row count.
+       *
+       * A catalogue import replaces only the NDCs the file covers — it deletes them and puts them
+       * back — so next week's McKesson file, which lists the same drugs at new prices, lands on the
+       * same number of rows. Counting `supplier_items` therefore misses the one change that matters
+       * most to the buy list, and nothing else here would catch it: the supplier import path writes
+       * no audit event. An import always writes a row here, so this is the term that moves.
+       */
+      "(select count(*) from supplier_imports) as si, (select max(created_at) from supplier_imports) as sm",
   );
   const row = r.rows[0] ?? {};
-  const fp = ["c", "a", "s", "n", "l", "o", "d", "e", "p", "g"].map((k) => String(row[k] ?? "")).join("|");
+  const fp = ["c", "a", "s", "n", "l", "o", "d", "e", "p", "g", "si", "sm"].map((k) => String(row[k] ?? "")).join("|");
   fpCache = { at: Date.now(), fp };
   return fp;
 }
