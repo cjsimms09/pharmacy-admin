@@ -550,7 +550,7 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
       expensesIn(month, basis),
       cashReceiptsIn(month),
       Promise.all(suppliers.map((s) => earningSoFar(s.id, month))),
-      driverCostFor(month),
+      driverCostFor(month, basis),
     ]);
     byMonth.set(month, {
       bills,
@@ -765,15 +765,16 @@ export async function excludedFromAccount(month: string): Promise<AccountExclusi
   /*
    * The delivery round.
    *
-   * The site raises the driver's invoice, and raising an invoice says nothing about whose money it
-   * is: it is raised on his behalf and billed to the clinic, so it is neither revenue nor cost
-   * here. Where the pharmacy pays its own driver, the setting says so and the month's invoices go
-   * in as an operating cost instead — see `driverCostFor` below, which the account uses.
+   * The pharmacy pays its own driver, so the round is an operating cost of the month (`driverCostFor`,
+   * which the account uses). Only where the setting says the clinic pays him directly is the
+   * invoice raised on his behalf and the money between the two of them, and then it is named
+   * here so the omission is never mistaken for an oversight.
    */
   try {
     const invoices = await db.query.driverInvoices.findMany({ where: eq(schema.driverInvoices.month, month) });
     const total = invoices.reduce((n, i) => n + i.totalCents, 0);
-    if (invoices.length > 0 && (s.driver_paid_by ?? "clinic") !== "pharmacy") {
+    const { driverPaidBy } = await import("./driver-cost");
+    if (invoices.length > 0 && driverPaidBy(s.driver_paid_by) !== "pharmacy") {
       out.push({
         label: `The delivery round — ${invoices.length} invoice${invoices.length === 1 ? "" : "s"}`,
         amountCents: total,
@@ -818,21 +819,19 @@ export async function excludedFromAccount(month: string): Promise<AccountExclusi
 }
 
 /**
- * The delivery round as a cost, where the pharmacy is the one paying for it.
- *
- * Nought in the ordinary arrangement here, where the clinic pays the driver directly. Kept apart
- * from `excludedFromAccount` so the account can add it without deciding anything: one setting
- * governs both, and they cannot disagree about which way it went.
+ * The delivery round as a cost of the month. The rule is `driver-cost.ts`: the pharmacy pays its
+ * driver unless the setting says the clinic does; a month in progress carries the draft's running
+ * total on the accrual account; the cash account counts an invoice on the day it was sent.
  */
-export async function driverCostFor(month: string): Promise<number> {
-  const { db, schema } = await import("@/db");
-  const { eq } = await import("drizzle-orm");
+export async function driverCostFor(month: string, basis: "accrual" | "cash" = "accrual"): Promise<number> {
+  const { db } = await import("@/db");
   const { getSettings } = await import("./settings");
+  const { driverCostOf, driverPaidBy } = await import("./driver-cost");
   const s = await getSettings();
-  if ((s.driver_paid_by ?? "clinic") !== "pharmacy") return 0;
-  const invoices = await db.query.driverInvoices.findMany({ where: eq(schema.driverInvoices.month, month) });
-  // Drafts are not yet a bill: the month is unfinished and the figure would change under the account.
-  return invoices.filter((i) => i.status !== "draft").reduce((n, i) => n + i.totalCents, 0);
+  const paidBy = driverPaidBy(s.driver_paid_by);
+  if (paidBy !== "pharmacy") return 0;
+  const invoices = await db.query.driverInvoices.findMany({ columns: { month: true, status: true, totalCents: true, sentAt: true } });
+  return driverCostOf(invoices, month, basis, paidBy);
 }
 
 /**

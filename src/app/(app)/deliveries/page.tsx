@@ -62,7 +62,8 @@ export default async function DeliveriesPage({
 
   // Whose money the round is. Read here so the form shows what the account is actually using.
   const { getSettings } = await import("@/lib/settings");
-  const paidBy = ((await getSettings()).driver_paid_by ?? "clinic") === "pharmacy" ? "pharmacy" : "clinic";
+  const { driverPaidBy } = await import("@/lib/driver-cost");
+  const paidBy = driverPaidBy((await getSettings()).driver_paid_by);
 
   const known = [...new Set([month, todayIso().slice(0, 7), ...months])].sort().reverse().slice(0, 24);
   const here = `/deliveries?month=${month}`;
