@@ -45,13 +45,18 @@ export function DropZone() {
         name="files"
         multiple
         className="hidden"
-        accept=".pdf,.jpg,.jpeg,.png,.heic,.webp"
+        accept=".pdf,.jpg,.jpeg,.png,.heic,.webp,.835,.edi,.txt,.x12"
         onChange={(e) => setNames(Array.from(e.target.files ?? []).map((f) => f.name))}
       />
       {names.length === 0 ? (
         <>
           <p className="font-medium">Drop files here</p>
-          <p className="text-sm text-ink-2">or click to choose. A licence, a CPR card, a training certificate, a signed CQI form — anything.</p>
+          <p className="text-sm text-ink-2">or click to choose. An invoice, a bill, a remittance, a rebate statement, a licence, a certificate — anything.</p>
+          <label className="mt-1 inline-flex cursor-pointer items-center gap-2 rounded-md border border-line bg-surface px-3 py-1.5 text-sm hover:border-accent" onClick={(e) => e.stopPropagation()}>
+            Take a photo
+            {/* No name: the photo is handed to the main input above, which is what the form sends. */}
+            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => take(e.target.files)} />
+          </label>
         </>
       ) : (
         <>

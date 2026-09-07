@@ -27,7 +27,7 @@ export const ALLOWED_EXTENSIONS = new Set([
 ]);
 
 /** Report formats the swept mailbox may also bring in. */
-export const REPORT_EXTENSIONS = new Set(["csv", "tsv", "xls", "xlsx", "xml", "json", "835", "edi", "zip"]);
+export const REPORT_EXTENSIONS = new Set(["csv", "tsv", "xls", "xlsx", "xml", "json", "835", "edi", "x12", "zip"]);
 
 export const ALLOWED_MIME = new Set([
   "application/pdf",

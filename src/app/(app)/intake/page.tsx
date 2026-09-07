@@ -10,13 +10,15 @@ import { CREDENTIAL_LABEL } from "@/lib/labels";
 import { hasApiKey, type ClassifiedDocT } from "@/lib/ai";
 import { dropFiles } from "./actions";
 import { DropZone } from "./drop-zone";
+import { describeBusinessDoc, type BusinessDocT } from "@/lib/business-docs";
+import { KIND_LABEL as BUSINESS_LABEL } from "./[id]/business-review";
 
 export const metadata = { title: "Add documents" };
 export const dynamic = "force-dynamic";
 
-export default async function IntakePage({ searchParams }: { searchParams: Promise<{ error?: string; saved?: string; done?: string }> }) {
+export default async function IntakePage({ searchParams }: { searchParams: Promise<{ error?: string; saved?: string; done?: string; outcome?: string; where?: string }> }) {
   await requireManager();
-  const { error, saved, done } = await searchParams;
+  const { error, saved, done, outcome, where } = await searchParams;
   const [items, docs, aiReady, people] = await Promise.all([
     db.query.intakeItems.findMany({ orderBy: (i, { desc }) => [desc(i.createdAt)], limit: 60 }),
     db.query.documents.findMany(),
@@ -32,10 +34,16 @@ export default async function IntakePage({ searchParams }: { searchParams: Promi
       <PageHeader
         tabs={familyTabs("arrivals", "/intake")}
         title="Add documents"
-        subtitle="Drop anything in — a licence, a CPR card, a training certificate, a signed form. Claude reads it, works out what it is and whose it is, and fills in the dates. You check it before it is filed."
+        subtitle="Drop in or photograph anything the business runs on — a wholesaler's invoice, a supply bill, the electricity bill, a remittance advice, a rebate statement, a licence or a certificate. Claude reads it, says what it is and who it is from, and fills in the figures; you check the card and file it where the money goes."
       />
       {error && <Notice kind="crit">{error}</Notice>}
-      {saved && <Notice>{done ? "Filed. Nothing else is waiting." : "Filed."}</Notice>}
+      {saved && (
+        <Notice>
+          {outcome ?? "Filed."}{" "}
+          {where && <Link href={where} className="underline">See it there</Link>}
+          {done ? " Nothing else is waiting." : ""}
+        </Notice>
+      )}
 
       {!aiReady && (
         <Notice kind="warn">
@@ -75,7 +83,7 @@ export default async function IntakePage({ searchParams }: { searchParams: Promi
 
             <div className="flex flex-wrap items-center gap-3">
               <button className="btn btn-primary" type="submit">Read and sort</button>
-              <span className="text-xs text-ink-3">PDFs and photos. Several at once is fine — about half a minute each.</span>
+              <span className="text-xs text-ink-3">PDFs, photos and 835 files. Several at once is fine — about half a minute each. On a phone, &ldquo;Take a photo&rdquo; opens the camera.</span>
             </div>
           </form>
         </section>
@@ -105,18 +113,20 @@ export default async function IntakePage({ searchParams }: { searchParams: Promi
           <ul className="divide-y divide-line">
             {pending.map((i) => {
               const r = safeParse(i.resultJson);
+              const b = safeBusiness(i.resultJson);
               const doc = docOf(i.documentId);
               return (
                 <li key={i.id} className="flex flex-wrap items-center gap-3 py-3">
                   <div className="min-w-0 flex-1">
-                    <Link href={`/intake/${i.id}`} className="font-medium text-accent hover:underline">{r?.title || doc?.fileName || "Document"}</Link>
+                    <Link href={`/intake/${i.id}`} className="font-medium text-accent hover:underline">{b ? b.summary : r?.title || doc?.fileName || "Document"}</Link>
                     <div className="text-xs text-ink-2">
+                      {b ? `${describeBusinessDoc(b)} · ${BUSINESS_LABEL[b.kind]} · ` : ""}
                       {r?.personName ? `${r.personName} · ` : ""}
                       {r?.expiresOn ? `expires ${fmt(r.expiresOn)} · ` : ""}
                       {doc?.fileName}
                     </div>
                   </div>
-                  {r && r.confidence < 0.6 && <span className="badge badge-warn">check carefully</span>}
+                  {((r && r.confidence < 0.6) || (b && b.confidence < 0.6)) && <span className="badge badge-warn">check carefully</span>}
                   <Link href={`/intake/${i.id}`} className="btn">Check and file</Link>
                 </li>
               );
@@ -126,6 +136,15 @@ export default async function IntakePage({ searchParams }: { searchParams: Promi
       </section>
     </>
   );
+}
+
+function safeBusiness(json: string): BusinessDocT | null {
+  try {
+    const v = JSON.parse(json);
+    return v && typeof v === "object" && v.kind === "business" && v.doc ? (v.doc as BusinessDocT) : null;
+  } catch {
+    return null;
+  }
 }
 
 function safeParse(json: string): ClassifiedDocT | null {

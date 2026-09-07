@@ -246,6 +246,12 @@ export const DOCUMENT_CATEGORIES = [
   "invoice",
   /** The delivery driver's monthly invoice, as it was sent. */
   "driver_invoice",
+  /** A vendor's bill — rent, utilities, supplies, software — as it arrived, behind its expense row. */
+  "bill",
+  /** A payer's remittance advice (an 835 or its paper), behind the payments it posted. */
+  "remittance",
+  /** The bank's statement, kept until it can be read in. */
+  "bank_statement",
   "insurance",
   "agreement",
   /**

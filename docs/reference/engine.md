@@ -32,7 +32,7 @@ State: **in** = arrives and is used; **partial** = arrives, something is not rea
 | Claims export (PioneerRx transaction detail) | email, daily (`mailbox.ts`) | `claims` → fills, revenue, dispensed cost, scripts | the report's own gross profit; the sales summary | **in** |
 | System Sales Summary (the till, by month) | email or upload | `sales_months`: retail before tax, tax collected, patient payments, plan remits | the claims' prescription revenue | **in** — retail was read tax-inclusive until 7 Sept; fixed |
 | Facilitator 835s (Medicare Transaction Facilitator) | the MTF CLI, on a cycle | `claim_payments` source `mtf` → the fill; cash receipts by received date | the claim's promised amount | **in** where the CLI is set up |
-| Commercial 835s (every other PBM) | — | nothing | — | **missing.** This is the largest gap in the engine: without it the cash account's revenue is typed by hand and no plan's remittance is ever checked against its adjudication. The 835 routing page prepares the enrolment; once files arrive, `parse835` → `claim_payments` (a `plan` source) → the fill, and the total → `cash_receipts`. |
+| Commercial 835s (every other PBM) | dropped on Add documents, or forwarded to the mailbox and "Sort it" pressed | `claim_payments` source `plan` per claim (settling the adjudicated remit, never revenue twice) and the total to `cash_receipts` by the month paid; the file kept as a remittance | the claim's adjudicated remit (the match is what "remits balance to claims" needs next) | **partial** as of 7 Sept: by hand. Enrolment (the routing page) and automatic delivery are the rest; a remittance advice on paper is read by Claude the same way. |
 | RxRescue / copay-card credits | email | `claim_payments` | the fill | **in** |
 | Plan register (which plans the Kansas floor reaches) | typed on Plans, built from the claims | `plan_groups` | — | **in**, needs the owner's classification of each plan |
 | NADAC | fetched weekly from CMS | `nadac_prices` | — | **in** |
@@ -55,7 +55,7 @@ State: **in** = arrives and is used; **partial** = arrives, something is not rea
 
 | Feed | Arrives by | Fills | Ties to | State |
 |---|---|---|---|---|
-| Vendor bills (rent, utilities, software, insurance…) | email from a known sender (`vendors.sender_emails`) or typed | `expenses` with a category and, when paid, a date | the vendor's cadence and typical amount | **in** |
+| Vendor bills (rent, utilities, software, insurance…) | email from a known sender (`vendors.sender_emails`), or photographed / dropped on Add documents and read by Claude (vendor, number, date, amount, category; a new vendor added on the card; duplicates refused), or typed | `expenses` with a category and, when paid, a date | the vendor's cadence and typical amount | **in** |
 | Standing costs (payroll, rent, the loan) | typed once on Spending | accrued by the day (accrual); on `paid_day` (cash) | the real bill for the month, which replaces the estimate | **in** as of 7 Sept |
 | Payroll register (what was actually run) | — | — | the standing payroll cost | **missing** — the payroll provider's report would replace the estimate with the fact each pay day |
 | DIR fees and other concessions | typed | `expenses` kind `revenue_offset` | the plan's statement | **partial** — typed, never read from a statement |
@@ -85,10 +85,11 @@ State: **in** = arrives and is used; **partial** = arrives, something is not rea
 2. **Commercial 835s** — enrol each PBM (the routing page), receive the files (email or portal
    download), post each payment to its fill and the batch to the bank. This is "remits balance to
    claims".
-3. **The intake tool** — every document that is not a scheduled report (a photographed invoice, a
-   supply bill, a rebate statement, an 835 downloaded from a portal) dropped in from a phone or
-   forwarded by email, read by Claude, and filed to the right table with the right facts, adding
-   the vendor or supplier when it is new.
+3. **The intake tool** — built 7 Sept (`business-docs.ts`, Add documents, "Sort it" on the
+   Inbox): a wholesaler invoice, a bill, a remittance advice, a rebate statement, a statement or
+   credit memo, dropped in or photographed, read by Claude and filed where its money goes with a
+   card to check first; an 835 file posts itself. Next: the same for the mailbox automatically,
+   once a sender is trusted.
 4. **Rebate statements per period** — one row per supplier per month, so a closed month's rebate
    is the wholesaler's figure and the estimate is only ever for the month in progress.
 5. **Payroll and card-processing statements** — the two largest costs read from their own

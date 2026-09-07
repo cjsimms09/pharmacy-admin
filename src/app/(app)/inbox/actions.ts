@@ -267,3 +267,35 @@ export async function rereadItem(itemId: string) {
     fail("/inbox", e instanceof Error ? e.message : "Could not read that again.");
   }
 }
+
+
+/**
+ * A stored attachment the mailbox could not place, handed to the intake to be read and filed.
+ *
+ * Forwarding an invoice to the mailbox is the easiest way to get it here from a phone; this is
+ * what happens next. The same document row is used, so the vault holds one copy.
+ */
+export async function sortInboxItem(itemId: string) {
+  const { requireManager } = await import("@/lib/auth");
+  const { db, schema } = await import("@/db");
+  const { eq } = await import("drizzle-orm");
+  const { newId } = await import("@/lib/crypto");
+  const { readFile } = await import("@/lib/files");
+  const { readIntoIntake } = await import("../intake/actions");
+  const user = await requireManager();
+  const item = await db.query.inboxItems.findFirst({ where: eq(schema.inboxItems.id, itemId) });
+  if (!item?.documentId) redirect("/inbox?error=" + encodeURIComponent("Nothing was stored for that line."));
+  const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, item.documentId) });
+  if (!doc) redirect("/inbox?error=" + encodeURIComponent("The file behind that line is missing."));
+  const existing = await db.query.intakeItems.findFirst({ where: eq(schema.intakeItems.documentId, doc.id) });
+  const intakeId = existing?.id ?? newId();
+  if (!existing) await db.insert(schema.intakeItems).values({ id: intakeId, documentId: doc.id, createdBy: user.id });
+  else await db.update(schema.intakeItems).set({ status: "extracted", error: null }).where(eq(schema.intakeItems.id, intakeId));
+  const bytes = await readFile(doc.storageKey);
+  await readIntoIntake(bytes, { fileName: doc.fileName, mimeType: doc.mimeType }, intakeId, doc.id, { id: user.id, name: user.name });
+  const { audit } = await import("@/lib/audit");
+  await audit({ action: "inbox.sorted", userId: user.id, userName: user.name, entity: "document", entityId: doc.id, details: `${doc.fileName} handed to the intake` });
+  revalidatePath("/inbox");
+  revalidatePath("/intake");
+  redirect(`/intake/${intakeId}`);
+}

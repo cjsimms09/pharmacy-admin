@@ -89,6 +89,19 @@ it and said so on the pull request. The owner reads this too.
   `standingLines` takes the basis. Your `period-account.ts` types were not touched; its test
   fixture gained the three fields. The owner has asked for a logic audit of every page; findings
   go in `logic-audit.md` page by page as I reach them.
+- **The intake now takes anything with money on it** (`src/lib/business-docs.ts`; `intake/actions.ts`
+  `readIntoIntake` and `applyBusiness`; `intake/[id]/business-review.tsx`; "Sort it" on the Inbox,
+  `sortInboxItem`). A dropped or photographed file goes: recognised report → loads itself; an X12
+  835 → `importRemittance` (source `plan`, revenue nought — a plan's own remit settles the claim —
+  and the total banked as a receipt) with the file kept as `remittance`; else Claude reads it as a
+  wholesaler invoice / bill / remittance advice / rebate statement / statement / credit memo / bank
+  statement, and the review card files it: `fileInvoice` + lines; `saveExpense` with a new vendor
+  added on the card and a duplicate refused; payments per claim + the bank; a negative "Wholesaler
+  rebates" bill that replaces the estimate. Compliance documents still go to your `classifyDocument`.
+  Document categories gained `bill`, `remittance`, `bank_statement` (labels added). `ai.ts` now
+  exports `client`, `logUsage`, `MOCK` for the new reader; nothing else in it changed. Verified on a
+  scratch database with `AI_MOCK=1`: a bill lands on Spending with its vendor added; an 835 posts one
+  payment and one receipt.
 - **The engine map and the audit** (`engine.md`, `logic-audit.md`): every feed the business runs
   on, what it ties to, and its state; the three balances (claims, books, remits to claims) and
   which are working. Found on the way and fixed: retail on the sales summary was read from the

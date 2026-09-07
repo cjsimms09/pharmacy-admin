@@ -35,7 +35,7 @@ export type RecordPayment = {
    * memo weeks after the fill and is kept apart from the facilitator so each can be chased on its
    * own terms.
    */
-  source: "mtf" | "dir" | "copay_card" | "secondary" | "manual" | "rxrescue";
+  source: "mtf" | "dir" | "copay_card" | "secondary" | "manual" | "rxrescue" | "plan";
   /**
    * How much of this is money the claim did not already carry. Defaults to the whole amount.
    *
@@ -217,12 +217,33 @@ export async function backfillPatientTotals(): Promise<{ read: number; filled: n
 export async function importRemittance(
   text: string,
   fileName: string,
-  user: { name: string },
-): Promise<{ payments: number; alreadyHeld: number; matched: number; unmatched: number; amountCents: number; skipped: number; problems: string[] }> {
+  user: { name: string; id?: string },
+  opts: {
+    /**
+     * Record the remittance's total as money banked, by the month it was paid, so the cash account
+     * sees it without anybody typing it. Off for the facilitator sweep, which the books already read
+     * by received date; on for a remittance dropped in by hand.
+     */
+    bank?: boolean;
+    /** The file behind it, for the receipt's record. */
+    documentId?: string | null;
+  } = {},
+): Promise<{ payments: number; alreadyHeld: number; matched: number; unmatched: number; amountCents: number; skipped: number; problems: string[]; payer: string | null; paidOn: string | null; settles: boolean; banked: boolean }> {
   const { parse835, payableOnly } = await import("./x12-835");
   const r = parse835(text);
   const { keep, skipped } = payableOnly(r);
-  const out = { payments: 0, alreadyHeld: 0, matched: 0, unmatched: 0, amountCents: 0, skipped: skipped.length, problems: [...r.problems] };
+  /*
+   * Whose money this is decides what it does to a fill.
+   *
+   * The facilitator pays on top of what the plan adjudicated, so every dollar is new revenue. A
+   * plan's own 835 pays what the claim already carries as its remittance: the money is real and
+   * belongs on the bank, but counting it against the fill as well would book the same remittance
+   * twice. So a plan's payment settles the claim (revenue nought) and is kept for the match between
+   * what was adjudicated and what was paid — which is the whole point of reading it.
+   */
+  const facilitator = /transaction facilitator|\bmtf\b/i.test(r.payer ?? "");
+  const settles = !facilitator;
+  const out = { payments: 0, alreadyHeld: 0, matched: 0, unmatched: 0, amountCents: 0, skipped: skipped.length, problems: [...r.problems], payer: r.payer, paidOn: r.paidOn, settles, banked: false };
 
   const held = await db.query.claimPayments.findMany({ columns: { reference: true, rxNumber: true, amountCents: true } });
   const seen = new Set(held.map((h) => `${h.reference ?? ""}|${h.rxNumber}|${h.amountCents}`));
@@ -240,9 +261,10 @@ export async function importRemittance(
         dateFilled: p.serviceDate,
         ndc11: p.ndc11,
         // Named for who sent it rather than assumed: this reader takes any 835, not only the MTF's.
-        source: /transaction facilitator|\bmtf\b/i.test(r.payer ?? "") ? "mtf" : "secondary",
+        source: facilitator ? "mtf" : "plan",
         payer: r.payer,
         amountCents: p.paidCents!,
+        revenueCents: settles ? 0 : p.paidCents!,
         receivedOn: r.paidOn,
         reference,
         notes: `From ${fileName}${r.traceNumber ? `, trace ${r.traceNumber}` : ""}.`,
@@ -254,6 +276,18 @@ export async function importRemittance(
     if (rec.matched) out.matched++;
     else out.unmatched++;
     seen.add(`${reference}|${p.rxNumber}|${p.paidCents}`);
+  }
+  if (opts.bank && r.paidOn && (r.totalPaidCents ?? out.amountCents) > 0 && out.payments > 0) {
+    const { addCashReceipt } = await import("./expenses");
+    await addCashReceipt({
+      month: r.paidOn.slice(0, 7),
+      kind: facilitator ? "facilitator" : "third_party",
+      amountCents: r.totalPaidCents ?? out.amountCents,
+      payer: r.payer ?? null,
+      notes: `From ${fileName}${r.traceNumber ? `, trace ${r.traceNumber}` : ""}, ${out.payments} claims.`,
+      createdBy: user.id ?? user.name,
+    });
+    out.banked = true;
   }
   return out;
 }

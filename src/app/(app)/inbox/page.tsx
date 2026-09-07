@@ -7,7 +7,7 @@ import { getSettings } from "@/lib/settings";
 import { hasMailPassword } from "@/lib/mailbox";
 import { allSuppliers, addressesOf, type Supplier } from "@/lib/suppliers-registry";
 import { PageHeader, Notice, Empty } from "@/components/ui";
-import { fileInboxItem, deleteInboxItem, sweepNow, rereadItem } from "./actions";
+import { fileInboxItem, deleteInboxItem, sweepNow, rereadItem, sortInboxItem } from "./actions";
 
 export const metadata = { title: "Inbox" };
 export const dynamic = "force-dynamic";
@@ -136,6 +136,11 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
                       sweep takes. The sweep itself never touches a message twice, so this is the
                       only way a stored file gets a second chance.
                     */}
+                    {i.documentId && i.routedAs !== "invoice" && (
+                      <form action={sortInboxItem.bind(null, i.id)} className="mb-2">
+                        <button className="btn btn-sm btn-primary">Sort it: read and file where the money goes</button>
+                      </form>
+                    )}
                     {i.documentId && i.routedAs !== "invoice" && (
                       <form action={rereadItem.bind(null, i.id)} className="mb-2">
                         <button className="text-xs text-accent hover:underline" type="submit" title="Read this file again with the rules as they are now — after adding a supplier's address, or turning automatic loading on.">

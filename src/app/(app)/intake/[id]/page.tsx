@@ -11,6 +11,8 @@ import type { ClassifiedDocT } from "@/lib/ai";
 import { applyIntake, deleteIntake, dismissIntake, retryIntake } from "../actions";
 import { KindPicker } from "./kind-picker";
 import { DocumentViewer } from "./viewer";
+import { BusinessReview } from "./business-review";
+import { BUSINESS_KINDS, type BusinessDocT } from "@/lib/business-docs";
 
 export const dynamic = "force-dynamic";
 
@@ -26,16 +28,17 @@ const KIND_LABEL: Record<string, string> = {
   unknown: "Just file it in the vault",
 };
 
-export default async function IntakeReviewPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ error?: string }> }) {
+export default async function IntakeReviewPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ error?: string; as?: string }> }) {
   await requireManager();
   const { id } = await params;
-  const { error } = await searchParams;
+  const { error, as } = await searchParams;
   const item = await db.query.intakeItems.findFirst({ where: eq(schema.intakeItems.id, id) });
   if (!item) notFound();
   const [doc, people] = await Promise.all([
     db.query.documents.findFirst({ where: eq(schema.documents.id, item.documentId) }),
     db.query.people.findMany({ where: eq(schema.people.active, true), orderBy: (p, { asc }) => [asc(p.lastName)] }),
   ]);
+  const business = parseBusiness(item.resultJson);
   const r = parse(item.resultJson);
   const matched = r?.personName ? matchPerson(r.personName, people) : null;
   const failed = item.status === "failed";
@@ -81,6 +84,26 @@ export default async function IntakeReviewPage({ params, searchParams }: { param
             </form>
           </div>
         </section>
+      ) : item.status === "applied" ? (
+        <section className="card">
+          <h2 className="font-semibold">Filed</h2>
+          <p className="mt-1 text-sm text-ink-2">{appliedSummary(item.resultJson) ?? "This one has been filed."}</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <a href="/intake" className="btn btn-primary">Back to the queue</a>
+            {appliedWhere(item.resultJson) && <a href={appliedWhere(item.resultJson)!} className="btn">See it there</a>}
+          </div>
+        </section>
+      ) : business ? (
+        <BusinessReview
+          id={id}
+          doc={{ fileName: doc?.fileName ?? "file" }}
+          read={business}
+          as={as && (BUSINESS_KINDS as readonly string[]).includes(as) ? (as as (typeof BUSINESS_KINDS)[number]) : business.kind}
+          suppliers={(await (await import("@/lib/suppliers-registry")).allSuppliers(true)).map((s) => ({ id: s.id, name: s.name, alsoKnownAs: s.catalogName ?? null }))}
+          vendors={(await (await import("@/lib/expenses")).vendors()).map((v) => ({ id: v.id, name: v.name, categoryId: v.categoryId }))}
+          categories={(await (await import("@/lib/expenses")).categories()).map((c) => ({ id: c.id, name: c.name, kind: c.kind }))}
+          error={error}
+        />
       ) : (
         <>
           {r?.notes && <Notice kind={low ? "warn" : "ok"}>{r.notes}</Notice>}
@@ -178,6 +201,35 @@ export default async function IntakeReviewPage({ params, searchParams }: { param
       </p>
     </>
   );
+}
+
+/** What a filed item did, for the card: the report's summary, or the business filing's outcome. */
+function appliedSummary(json: string): string | null {
+  try {
+    const v = JSON.parse(json) as { summary?: string; outcome?: string; routedAs?: string };
+    return v.outcome ?? v.summary ?? (v.routedAs ? `Loaded as ${v.routedAs.replace(/_/g, " ")}.` : null);
+  } catch {
+    return null;
+  }
+}
+function appliedWhere(json: string): string | null {
+  try {
+    const v = JSON.parse(json) as { filedAs?: string; routedAs?: string };
+    const k = v.filedAs ?? v.routedAs;
+    if (!k) return null;
+    return { remittance: "/claims", bill: "/expenses", wholesaler_invoice: "/inventory/invoices", rebate_statement: "/expenses", claims: "/claims", rx_transactions: "/claims", accrual_sales: "/money", on_hand: "/purchasing/shelf", rebate_report: "/suppliers", purchase_drilldown: "/suppliers", nadac: "/nadac", supplier_catalog: "/purchasing", pioneer_catalog: "/purchasing" }[k] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function parseBusiness(json: string): BusinessDocT | null {
+  try {
+    const v = JSON.parse(json);
+    return v && typeof v === "object" && v.kind === "business" && v.doc ? (v.doc as BusinessDocT) : null;
+  } catch {
+    return null;
+  }
 }
 
 function parse(json: string): ClassifiedDocT | null {

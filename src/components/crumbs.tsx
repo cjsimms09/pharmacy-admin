@@ -46,5 +46,13 @@ export function Crumbs() {
 
 // The rest of the path as words: "/2026-09/print" → "2026-09 · print".
 function humanise(rest: string): string {
-  return rest.split("/").filter(Boolean).map((s) => decodeURIComponent(s).replace(/[-_]+/g, " ")).join(" · ") || "";
+  return (
+    rest
+      .split("/")
+      .filter(Boolean)
+      .map((s) => decodeURIComponent(s))
+      // A record's id is an address, not a word: "this one" reads better than a hash in the top bar.
+      .map((s) => (/^[0-9a-f]{8}-[0-9a-f-]{20,}$|^[0-9a-f]{20,}$/i.test(s) ? "this one" : s.replace(/[-_]+/g, " ")))
+      .join(" · ") || ""
+  );
 }

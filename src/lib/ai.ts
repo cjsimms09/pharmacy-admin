@@ -19,7 +19,7 @@ import { audit } from "./audit";
  */
 
 export const DEFAULT_MODEL = "claude-opus-5";
-const MOCK = process.env.AI_MOCK === "1";
+export const MOCK = process.env.AI_MOCK === "1";
 
 export class AiNotConfiguredError extends Error {
   constructor() {
@@ -78,7 +78,7 @@ export class AiCapReachedError extends Error {
  * added next year unguarded — and the point of a limit somebody sets to stop worrying is that they
  * do not then have to check whether it covers the thing they are about to press.
  */
-async function client(): Promise<{ client: Anthropic; model: string }> {
+export async function client(): Promise<{ client: Anthropic; model: string }> {
   const s = await getSettings();
   if (!s.anthropic_api_key_enc) throw new AiNotConfiguredError();
   const { monthlyCap, dollars } = await import("./ai-spend");
@@ -121,7 +121,7 @@ export function redactText(text: string, names: { name: string; role: string }[]
   return out;
 }
 
-async function logUsage(action: string, userId: string | null, userName: string | null, usage: { input_tokens: number; output_tokens: number } | undefined, details?: string) {
+export async function logUsage(action: string, userId: string | null, userName: string | null, usage: { input_tokens: number; output_tokens: number } | undefined, details?: string) {
   await audit({ action, userId, userName, details: `${details ?? ""}${usage ? ` · tokens in=${usage.input_tokens} out=${usage.output_tokens}` : ""}`.trim() });
 }
 

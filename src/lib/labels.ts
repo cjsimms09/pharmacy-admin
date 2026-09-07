@@ -120,6 +120,9 @@ export const CREDENTIAL_HINT: Partial<Record<CredentialType, string>> = {
 };
 
 export const DOCUMENT_CATEGORY_LABEL: Record<DocumentCategory, string> = {
+  bill: "Vendor bill",
+  remittance: "Remittance advice (835)",
+  bank_statement: "Bank statement",
   license: "License / registration",
   cpr_card: "CPR card",
   immunization_training: "Immunization training certificate",
