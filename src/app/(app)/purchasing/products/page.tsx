@@ -7,6 +7,8 @@ import { formatCents } from "@/lib/money";
 import { requireReimbursement } from "@/lib/features";
 import { PageHeader, Notice, Empty, Card, Figure } from "@/components/ui";
 import { DataTable } from "@/components/data-table";
+import { drugProfitNow } from "@/lib/drug-profit-store";
+import type { Model } from "@/lib/drug-profit";
 import { ExportData } from "@/components/export-data";
 
 export const metadata = { title: "Which NDC pays" };
@@ -26,7 +28,15 @@ const perUnit = (micros: number | null) =>
 export default async function ProductsPage() {
   await requireReimbursement();
   await requireUser();
-  const [opps, ledger] = await Promise.all([purchasingOpportunities(), productLedger()]);
+  const [opps, ledger, profit] = await Promise.all([purchasingOpportunities(), productLedger(), drugProfitNow()]);
+  // Worth acting on: a better NDC or source worth at least five dollars a month on this pharmacy's fills.
+  const better = profit.rows.filter((r) => (r.gainPerMonthCents ?? 0) >= 500);
+  const unplaced = profit.rows.filter((r) => r.gainPerMonthCents === null && r.fills >= 2);
+  const betterMonthCents = better.reduce((n, r) => n + (r.gainPerMonthCents ?? 0), 0);
+  const MODEL_WORDS: Record<Model, string> = { NADAC: "NADAC + fee", AWP: "AWP − discount", MAC: "MAC", UC: "usual & customary", WAC: "WAC − discount", FUL: "FUL", flat: "flat price", unknown: "flat (basis not on export)" };
+  const byModel = new Map<Model, number>();
+  for (const r of profit.rows) byModel.set(r.model, (byModel.get(r.model) ?? 0) + r.fills);
+  const modelMix = [...byModel.entries()].sort((a, b) => b[1] - a[1]).map(([m, n]) => `${MODEL_WORDS[m]} ${Math.round((100 * n) / Math.max(1, profit.rows.reduce((t, r) => t + r.fills, 0)))}%`).join(" · ");
   const ledgerRows = opportunities(ledger.rows);
   const { underNadac, switchNdc, notYetBought } = await import("@/lib/under-nadac");
   const { groupKey } = await import("@/lib/product-groups");
@@ -50,16 +60,89 @@ export default async function ProductsPage() {
       <PageHeader
         tabs={familyTabs("order", "/purchasing/products")}
         title="Which NDC pays"
-        subtitle="Of the drugs this pharmacy dispenses: which NDC and which source are worth moving to, what each earns after the rebate, and which are dispensed at a loss."
+        subtitle="For every drug this pharmacy dispenses: how its payers pay for it, and therefore which NDC to buy and from where to earn the most on it. Then what each drug earns, and which are dispensed at a loss."
         actions={<Link href="/purchasing" className="btn">What to buy</Link>}
       />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Figure size="sm" value={switches.length} label="Buy these instead" sub={`${unstocked.length} more offered under the benchmark and not stocked`} tone={switches.length ? "ok" : "muted"} href="#instead" />
-        <Figure size="sm" value={money(switches.reduce((n, p) => n + p.gainCents, 0))} label="Worth on what you dispense" sub="the better NDC against the one dispensed today" tone="muted" href="#instead" />
+        <Figure size="sm" value={better.length} label="Drugs with a better NDC or source" sub={`of ${profit.rows.length} dispensed, on how each is paid`} tone={better.length ? "ok" : "muted"} href="#bymodel" />
+        <Figure size="sm" value={money(betterMonthCents)} label="Worth a month" sub="on this pharmacy's own fills, after rebate" tone={betterMonthCents > 0 ? "ok" : "muted"} href="#bymodel" />
         <Figure size="sm" value={losing.length} label="Dispensed at a loss" sub={losing.length ? `${money(Math.abs(losing.reduce((n, m) => n + m.marginCents, 0)))} so far` : "every product held earns"} tone={losing.length ? "crit" : "ok"} href={earned.length ? "#earns" : undefined} />
         <Figure size="sm" value={money(totalMarginCents)} label="Earned across everything held" sub={`${earned.length.toLocaleString()} products`} tone={totalMarginCents < 0 ? "crit" : "ok"} href="#earns" />
       </div>
+
+      {/*
+        The owner's question, answered per drug: how is it paid, so which NDC should we buy.
+
+        The cheapest NDC is only the most profitable one when the reimbursement does not move with
+        the NDC. Under NADAC-plus-a-fee the plan pays each NDC's own NADAC, so the one to buy is the
+        one furthest under its own benchmark; under AWP-less-a-discount a dearer NDC with a higher
+        AWP earns more. The model is read off the claims — the PBM's basis code where the export
+        carries it, the arithmetic of what was paid against the benchmarks where it does not.
+      */}
+      <Card id="bymodel" title="What to buy for each drug, given how it is paid" className="my-4" count={profit.ready ? `${profit.rows.length} drugs · ${profit.fills.toLocaleString()} fills over ${profit.months.toFixed(1)} months` : undefined}>
+        {!profit.ready ? (
+          <Empty>{profit.reason}</Empty>
+        ) : (
+          <>
+            <p className="mb-2 text-xs text-ink-2">
+              How this pharmacy&rsquo;s fills are paid: {modelMix}. {profit.withBasis > 0 ? `${Math.round((100 * profit.withBasis) / profit.fills)}% of fills carry the PBM's basis code; the rest are read from what was paid against NADAC and AWP.` : "The claims export carries no basis-of-reimbursement column (NCPDP 522-FM), so every model here is read from what was paid against NADAC and AWP; add the column to the PioneerRx report and the reading becomes the PBM's own word."}
+              {" "}Margins are per fill of the drug&rsquo;s typical quantity, after the rebate each price earns.
+            </p>
+            {better.length === 0 ? (
+              <Empty>No drug has an NDC or source worth five dollars a month more than the one dispensed today, on the prices and benchmarks held.</Empty>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="table text-sm">
+                  <thead>
+                    <tr>
+                      <th>Drug</th>
+                      <th className="num">Fills / mo</th>
+                      <th>Paid how</th>
+                      <th>Dispensed today</th>
+                      <th>Buy instead</th>
+                      <th className="num">Earns / fill</th>
+                      <th className="num">Gain / fill</th>
+                      <th className="num">A month</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {better.slice(0, 40).map((r) => (
+                      <tr key={r.group}>
+                        <td>
+                          <span className="block font-medium">{r.name ?? r.current?.ndc11 ?? r.group}</span>
+                          <span className="block text-[11px] text-ink-3">{Math.round(r.typicalThousandths / 1000).toLocaleString()} a fill · {r.why}</span>
+                        </td>
+                        <td className="num">{r.fillsPerMonth.toFixed(1)}</td>
+                        <td className="text-xs">
+                          <span className="block">{r.modelSays}</span>
+                          <span className="block text-ink-3">{Math.round(r.modelShare * 100)}% of fills · {r.payers.slice(0, 2).map((p) => `${p.payer} ${p.fills}`).join(", ")}</span>
+                        </td>
+                        <td className="text-xs">
+                          <span className="block font-mono">{r.current?.ndc11}</span>
+                          <span className="block text-ink-3">{r.current?.supplier ?? "no price held"}{r.current?.marginCents !== null && r.current?.marginCents !== undefined ? ` · earns ${money(r.current.marginCents)}` : ""}</span>
+                        </td>
+                        <td className="text-xs">
+                          <span className="block font-mono">{r.best?.ndc11}{r.best?.itemNumber ? <span className="text-ink-3"> · #{r.best.itemNumber}</span> : null}</span>
+                          <span className="block text-ink-3">{r.best?.supplier} at {perUnit(r.best?.unitMicros ?? null)}{r.best?.ndc11 === r.current?.ndc11 ? " · same NDC, better source" : ""}</span>
+                        </td>
+                        <td className="num">{money(r.best?.marginCents ?? 0)}</td>
+                        <td className="num text-accent">{money(r.gainPerFillCents ?? 0)}</td>
+                        <td className="num font-medium text-accent">{money(r.gainPerMonthCents ?? 0)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {unplaced.length > 0 && (
+              <p className="mt-2 text-xs text-ink-3">
+                {unplaced.length} drug{unplaced.length === 1 ? "" : "s"} dispensed more than once could not be placed: no price is held for the NDC dispensed, or no benchmark under the model it is paid on — {unplaced.slice(0, 5).map((r) => r.name ?? r.current?.ndc11 ?? r.group).join(", ")}{unplaced.length > 5 ? ", …" : ""}.
+              </p>
+            )}
+          </>
+        )}
+      </Card>
 
       {/*
         Everything known about a drug, in one row.

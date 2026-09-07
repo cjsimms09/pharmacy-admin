@@ -88,6 +88,20 @@ it and said so on the pull request. The owner reads this too.
   time made the target window zero and nothing short), and the contract flag maps through
   `contractFlagOf`. The supplier terms field is now labelled "Lead time, in days" with what it
   does — the owner read "Days from order to shelf" as meaningless.
+- **Profit by reimbursement model** (`drug-profit.ts` pure with tests, `drug-profit-store.ts`,
+  the lead table on `/purchasing/products`; all mine). The owner's brief: not the cheapest NDC but
+  the most profitable one given how his payers pay — "if omeprazole is paid NADAC + $10.50, find
+  the NDC I can buy for the most under NADAC". Per product (NADAC's description through
+  `product-groups.ts`): the pricing leg of every fill is read for its model — the PBM's 522-FM code
+  where the export carries it (`claims.basisOfReimbursement`), else the arithmetic of what was paid
+  against the NDC's own NADAC (within 3%) and AWP (a stable share); the majority model wins and
+  its fee, ratio or discount is the median; then every NDC in the product with a price (the product
+  ledger's invoice and catalogue buys, after rebate) is valued per fill of the typical quantity
+  under that model, and the best is set against the NDC dispensed today at what it was last bought
+  for. Under a MAC or flat price the cheapest wins; under NADAC + fee the one furthest under its
+  own NADAC; under AWP − x% the higher AWP. Reads `dispensingFeePaidCents` and `ingredientPaidCents`
+  where your readers fill them; where the transaction report carries neither basis nor AWP the
+  page says so and reads the model from the fee split alone.
 - **"Is everything arriving?" under Settings** (`/settings/feeds`, `feeds.ts`, `feed-rules.ts`,
   all mine). The owner asked how to verify every feed is working — NADAC current, MTF payments
   found, catalogues up to date. One row per feed: cadence, newest row in the table it fills,

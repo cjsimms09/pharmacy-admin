@@ -77,6 +77,17 @@ State: **in** = arrives and is used; **partial** = arrives, something is not rea
 | CQI, inventories, the log, the manual | typed on their pages | their tables | **in** |
 | Board and DEA dates | the register (`compliance.ts`) | duties by period | **in** |
 
+### Profit by reimbursement model (built)
+
+For every drug dispensed, the model its payers pay on is read off the claims — the PBM's
+basis-of-reimbursement code where the export carries it, the arithmetic of what was paid against
+the NDC's own NADAC and AWP where it does not — and every NDC of that product with a price is
+valued per fill under that model. The cheapest NDC is the most profitable only under a MAC or a
+flat price; under NADAC + fee it is the NDC furthest under its own NADAC; under AWP − x% it is the
+one with the higher AWP. `drug-profit.ts`, on `/purchasing/products`. What sharpens it: the
+basis code and the ingredient/fee split on the claims export (NCPDP 522-FM, 506-F6, 507-F7), and
+the AWP per NDC on the catalogues.
+
 ## 3. What to build next, in the order the balances need it
 
 1. **Bank in** — done 7 Sept: the bank's CSV export is read on the books page; deposits banked
