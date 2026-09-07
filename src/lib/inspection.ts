@@ -424,27 +424,63 @@ export async function inspectionReport(): Promise<InspectionReport> {
   });
 
   const { currentAppendix } = await import("./manual");
+  const { manualStanding } = await import("./manual-store");
   const appendix = await currentAppendix();
+  const manual = await manualStanding();
   const manualDoc = docs.find((d) => d.category === "policy" && /polic(y|ies)|manual|procedure/i.test(d.title));
+
+  /*
+   * The manual is in this site, so stop asking for a copy of it under Documents.
+   *
+   * This check used to look for an uploaded file and call its absence a finding — which it was,
+   * back when the manual was a Word document on somebody's desktop. The whole of it is now held
+   * here, section by section, and prints as one document. Demanding an upload as well would be
+   * asking for a second copy of the truth, and two descriptions of one procedure is precisely what
+   * the manual module exists to prevent. An uploaded file is the fallback for a pharmacy that
+   * keeps its manual elsewhere, not the thing being asked for.
+   */
+  const heldElsewhere = !manual.inSite && Boolean(manualDoc);
   add({
     key: "policy_manual",
     who: "board",
     asks: "Your policy and procedure manual",
     authority: "K.A.R. 68-7-11. An inspector holds you to your own manual, so anything in it you do not do is a finding you wrote yourself.",
-    state: !manualDoc
-      ? "blocking"
-      : appendix.filedVersion === null || appendix.filedVersion !== appendix.version
+    state: manual.inSite
+      ? manual.emptyHeadings > 0
         ? "gap"
-        : "ready",
-    answer: !manualDoc
-      ? "No policy and procedure manual is filed under Documents. It is the first thing asked for and the document every other answer is measured against."
-      : appendix.filedVersion === null
-        ? `"${manualDoc.title}" is on file, but it has never been matched to a version of the site-maintained appendix — so nothing can tell you whether the filed copy still describes what this pharmacy does.`
-        : appendix.filedVersion !== appendix.version
-          ? `"${manualDoc.title}" carries appendix version ${appendix.filedVersion}, filed ${appendix.filedOn}. The current version is ${appendix.version} — a procedure or form has changed since, and the filed manual now describes something other than what happens.`
-          : `"${manualDoc.title}" is on file and its appendix is current at version ${appendix.version}, filed ${appendix.filedOn}.`,
-    href: "/documents/manual",
-    printHref: "/documents/manual",
+        : "ready"
+      : !manualDoc
+        ? "blocking"
+        : appendix.filedVersion === null || appendix.filedVersion !== appendix.version
+          ? "gap"
+          : "ready",
+    answer: manual.inSite
+      ? [
+          `The manual is kept in this site: ${manual.ownSections} section${manual.ownSections === 1 ? "" : "s"} this pharmacy maintains` +
+            (manual.managedElsewhere > 0 ? `, plus ${manual.managedElsewhere} the medical practice maintains` : "") +
+            `, at revision ${manual.revision.fingerprint}` +
+            (manual.revision.changedOn ? `, last edited ${fmt(manual.revision.changedOn)}` : "") +
+            ". It prints as one document, so there is nothing to file under Documents.",
+          manual.emptyHeadings > 0
+            ? `${manual.emptyHeadings} heading${manual.emptyHeadings === 1 ? " promises something and has" : "s promise something and have"} nothing written under ${manual.emptyHeadings === 1 ? "it" : "them"} — an inspector reading the contents page will ask about ${manual.emptyHeadings === 1 ? "it" : "them"}.`
+            : null,
+          manual.neverReviewed > 0
+            ? `${manual.neverReviewed} of them ${manual.neverReviewed === 1 ? "has" : "have"} no review date on record. The annual review is one sitting on the manual page.`
+            : manual.oldestReviewedOn
+              ? `Every section carries a review date; the oldest is ${fmt(manual.oldestReviewedOn)}.`
+              : null,
+        ]
+          .filter(Boolean)
+          .join(" ")
+      : !manualDoc
+        ? "No policy and procedure manual is filed under Documents, and none is held in this site either. It is the first thing asked for and the document every other answer is measured against — the quickest route is to import the Word manual on the P&P manual page, after which it is maintained here."
+        : appendix.filedVersion === null
+          ? `"${manualDoc!.title}" is on file, but it has never been matched to a version of the site-maintained appendix — so nothing can tell you whether the filed copy still describes what this pharmacy does.`
+          : appendix.filedVersion !== appendix.version
+            ? `"${manualDoc!.title}" carries appendix version ${appendix.filedVersion}, filed ${appendix.filedOn}. The current version is ${appendix.version} — a procedure or form has changed since, and the filed manual now describes something other than what happens.`
+            : `"${manualDoc!.title}" is on file and its appendix is current at version ${appendix.version}, filed ${appendix.filedOn}.`,
+    href: manual.inSite ? "/manual" : heldElsewhere ? "/documents/manual" : "/manual",
+    printHref: manual.inSite ? "/manual/print" : "/documents/manual",
   });
 
   const blocking = checks.filter((c) => c.state === "blocking").length;
