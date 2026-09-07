@@ -132,6 +132,28 @@ export const SOURCES: Source[] = [
     },
   },
   {
+    key: "catalog",
+    title: "The supplier catalogue",
+    href: "/purchasing/catalog",
+    load: async (p) => {
+      const { searchCatalogue, catalogueHealth } = await import("./catalogue");
+      const [health, found] = await Promise.all([
+        catalogueHealth(),
+        // The rows that do not add up, whatever the screen was filtered to: a question about the
+        // catalogue is always about one of those.
+        searchCatalogue({ text: p.get("q") ?? undefined, supplier: p.get("supplier") ?? undefined, problemsOnly: true, limit: 400 }),
+      ]);
+      return {
+        data: { health, problems: found.rows },
+        shownWith: { matched: found.matched, showing: found.rows.length },
+        notes: [
+          `${health.total.toLocaleString()} items held; ${health.wrong.toLocaleString()} do not add up and ${health.worthChecking.toLocaleString()} are worth a look.`,
+          "The first four hundred problem rows only, worst first — the whole catalogue would be a file nobody can send.",
+        ],
+      };
+    },
+  },
+  {
     /*
      * The invoice file, which is where most of what has gone wrong here has gone wrong: a statement
      * that would not leave, a drill down offered as an invoice, a delete that took the wrong row.

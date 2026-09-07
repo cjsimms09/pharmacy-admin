@@ -222,6 +222,7 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
         actions={
           <>
             <Link href="/purchasing/shelf" className="btn btn-sm">The shelf</Link>
+            <Link href="/purchasing/catalog" className="btn btn-sm">The catalogue</Link>
             <Link href="/purchasing/supplies" className="btn btn-sm">Supplies</Link>
           </>
         }

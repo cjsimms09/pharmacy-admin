@@ -196,7 +196,12 @@ export default async function SuppliersPage({
                 ? `From the ${rates.ratioAsOf ?? "last"} statement — the month that closed. Have the daily report emailed here and this follows it instead.`
                 : "No ratio has been read, so no band applies and nothing is being discounted."
           }
-          actions={<Link href={`/suppliers/${rates.supplierId}/terms`} className="btn btn-sm">The ladders</Link>}
+          actions={
+          <>
+            <Link href={`/purchasing/catalog?supplier=${encodeURIComponent(rates.supplierName)}`} className="btn btn-sm">Their catalogue</Link>
+            <Link href={`/suppliers/${rates.supplierId}/terms`} className="btn btn-sm">The ladders</Link>
+          </>
+        }
         >
           <div className="grid gap-3 sm:grid-cols-4">
             <Stat
