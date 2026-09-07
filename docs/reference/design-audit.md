@@ -293,9 +293,10 @@ retires a page whose address is still linked.
 | Spending `/expenses` | keep | Bills, standing costs, vendors, filing rules: nowhere else. |
 | Driver invoices `/deliveries` | keep | A count a day and an invoice a month; its own feed. |
 | Who pays best `/payers/performance` | keep, **moved to Claims** | It ranks payers; it was under Money because it prints dollars. |
-| What to buy `/purchasing` | keep, heads the **order** family; **rebuilt** | The secondaries only. One card per wholesaler: what is short and cheapest there, then every generic that qualifies to add, soonest needed first, with a running total from the cart the pharmacist types. The primary is one line. Price-file upload and the scheduled-catalogue panel fold under a `<details>`. |
+| What to buy `/purchasing` | keep, heads the **order** family; **rebuilt** | The secondaries only. One card per wholesaler, one ranked table: what is short and cheapest there, then every generic that qualifies to add, soonest needed first, with a running total down the list and the line where the minimum is reached marked. The primary is one line. Price-file upload and the scheduled-catalogue panel fold under a `<details>`. |
 | The shelf `/purchasing/shelf` | join the order family | The stock behind today's order; the same question from the shelf's side. |
 | Order minimums `/purchasing/minimums` | **folded into What to buy**, redirects | It decided a basket the pharmacist had not put in a cart; a ranked list with a running total does what it was for. |
+| Is everything arriving? `/settings/feeds` | **new** | Every feed and outside service: cadence, last arrival, state from the data, a proof of completeness, a live check on request. The answer to "how do I know it is all working". |
 | Which NDC pays `/purchasing/products` | **new**, join the order family | The comparison cards that used to sit under today's order: buy these instead, what each drug earns, dispensed at a loss. A different question from what to order today. |
 | Which contract `/purchasing/replay` | keep | A renewal decision made once a year; nothing daily belongs beside it. |
 | Suppliers and rebates `/suppliers` | keep | The counterparties, their ladders, the ratio. |

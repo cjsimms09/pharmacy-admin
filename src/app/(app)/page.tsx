@@ -7,6 +7,7 @@ import { StaffBoard } from "@/components/staff-board";
 import { invoiceIssues } from "@/lib/invoices";
 import { alerts, SOON_DAYS } from "@/lib/alerts";
 import { automationStatus, type JobStatus } from "@/lib/automation-status";
+import { feedsNow } from "@/lib/feeds";
 import { openFindings } from "@/lib/self-inspection";
 import { attestAction, answerAction } from "./_actions/compliance";
 import { daysUntil, fmt, fmtLong, todayIso } from "@/lib/dates";
@@ -257,6 +258,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const net = books?.accrual ?? null;
 
   const stalled = jobs.filter((j) => j.state === "stale");
+  // The feeds the figures come from, judged from their own tables; the sensors and backup are already in `jobs`.
+  const lateFeeds = (await feedsNow()).late.filter((f) => f.group === "arriving");
 
   return (
     <>
@@ -692,6 +695,19 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           </>
         );
       })()}
+
+      {lateFeeds.length > 0 && (
+        <Card
+          tone="crit"
+          title={lateFeeds.length === 1 ? "A report the site runs on has stopped arriving" : `${lateFeeds.length} reports the site runs on have stopped arriving`}
+          className="mb-6"
+        >
+          <p className="text-sm text-ink-2">
+            {lateFeeds.map((f) => `${f.label} (last ${f.lastAt ? f.lastAt.slice(0, 10) : "never"})`).join(", ")}. Every figure downstream of {lateFeeds.length === 1 ? "it" : "them"} is quietly going stale while continuing to look right.{" "}
+            <Link href="/settings/feeds" className="underline">Is everything arriving?</Link>
+          </p>
+        </Card>
+      )}
 
       {stalled.length > 0 && (
         <Card

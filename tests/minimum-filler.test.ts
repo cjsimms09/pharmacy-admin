@@ -118,8 +118,9 @@ describe("filling a minimum with the right generics", () => {
     assert.ok(!already.picks.some((p) => p.ndc11 === "00000000001"));
   });
 
-  test("every qualifying generic is ranked soonest-needed first, whether or not the lines already meet the minimum", () => {
-    // A holds 20 days (100 on hand at 5 a day); B holds 2 days (20 at 10 a day). B is needed sooner, so it leads.
+  test("every qualifying generic is ranked by need and price together, whether or not the lines already meet the minimum", () => {
+    // A holds 20 days (100 on hand at 5 a day) and is 40% cheaper here; B holds 2 days (20 at 10 a day) and is 25% cheaper.
+    // Urgency wins: B is 0.97 + 0.25 against A's 0.67 + 0.40.
     const ipc = fillMinimums(input({ movement: [move("00000000001", 5, 100), move("00000000002", 10, 20), move("00000000003", 5)] }))[1];
     assert.deepEqual(ipc.candidates.map((c) => c.ndc11), ["00000000002", "00000000001"]);
     const b = ipc.candidates[0];
@@ -134,6 +135,19 @@ describe("filling a minimum with the right generics", () => {
     assert.equal(met.picks.length, 0);
     assert.ok(met.candidates.length >= 2);
     assert.equal(fillMinimums(input())[0].candidates.length, 0, "no minimum, no list");
+    // The same two shelves but A now 90% cheaper here: price outranks a small difference in need.
+    const cheap = fillMinimums(input({ offers: [...input().offers.filter((o) => o.ndc11 !== "00000000001"), offer("00000000001", "IPC", 0.1), offer("00000000001", "McKesson", 1.0)], movement: [move("00000000001", 5, 60), move("00000000002", 10, 20), move("00000000003", 5)] }))[1];
+    assert.deepEqual(cheap.candidates.map((c) => c.ndc11), ["00000000001", "00000000002"]);
+  });
+
+  test("what the list refuses: dearer here, more than two months on the shelf, or one large fill", () => {
+    const ipc = fillMinimums(input({ movement: [move("00000000001", 5, 400), move("00000000002", 10), move("00000000003", 5), move("00000000006", 4, 0, false)] }))[1];
+    const listed = ipc.candidates.map((c) => c.ndc11);
+    assert.ok(!listed.includes("00000000003"), "McKesson is cheaper on C, so C is never offered here");
+    assert.ok(!listed.includes("00000000001"), "A holds 80 days already, over the horizon");
+    assert.ok(ipc.refused.some((r) => r.ndc11 === "00000000001" && /days of stock/.test(r.why)));
+    assert.ok(!listed.includes("00000000006"), "F was one large fill, not a rate");
+    assert.ok(ipc.refused.some((r) => r.ndc11 === "00000000006" && /one large fill/.test(r.why)));
   });
 
   test("when nothing qualifies it says so and prices the alternative rather than inventing a basket", () => {

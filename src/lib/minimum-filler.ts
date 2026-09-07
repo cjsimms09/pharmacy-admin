@@ -29,8 +29,8 @@
  * Two lists come out for each supplier with a minimum.
  *
  * `candidates` is the one the page shows: every generic that qualifies, one pack each, ranked by
- * how soon the shelf will need it — fewest days on hand first, and between two equally close the
- * one that saves more per dollar. It is built whether or not the planner's own lines reach the
+ * need and price together — how far through the horizon the shelf already is, plus how much
+ * cheaper a pack is here than anywhere else. It is built whether or not the planner's own lines reach the
  * minimum, because what the site thinks is going to a wholesaler and what is actually in the cart
  * at their website are two different things, and the pharmacist choosing from a ranked list can
  * reconcile them where a fixed basket cannot.
@@ -194,10 +194,19 @@ export function fillMinimums(input: FillInput): SupplierFill[] {
     });
     const rate = new Map(withCover.map((m) => [m.ndc11, m.perDayThousandths]));
     const held = new Map(withCover.map((m) => [m.ndc11, m.onHandThousandths]));
-    // Soonest needed first: the shelf that runs out on Thursday is the one to top up today.
+    /*
+     * Need and price together. Urgency is how far through the horizon the shelf already is — one
+     * for an empty shelf, nothing at sixty days of stock; value is how much cheaper a pack is here
+     * than at the next-best supplier, as a share of its price. Their sum ranks the list, so a line
+     * that runs out on Thursday leads, and between two that run out the same week the one that is
+     * forty per cent cheaper here leads the one that is two per cent cheaper. Everything on the
+     * list has already passed the three tests: cheapest here after rebate, a whole pack inside the
+     * horizon after what is on hand and on order, and a steady rate rather than one large fill.
+     */
+    const score = (c: FillCandidate) => Math.max(0, Math.min(1, 1 - c.daysOnHand / horizon)) + Math.min(1, c.savingPerPackCents / Math.max(1, c.packCostCents));
     const candidates = ranked
       .map((c) => candidateOf(c, rate.get(c.ndc11) ?? 0, held.get(c.ndc11) ?? 0))
-      .sort((a, b) => a.daysOnHand - b.daysOnHand || b.savingPerPackCents / Math.max(1, b.packCostCents) - a.savingPerPackCents / Math.max(1, a.packCostCents));
+      .sort((a, b) => score(b) - score(a) || a.daysOnHand - b.daysOnHand || b.perDayThousandths - a.perDayThousandths);
 
     if (shortfallCents === 0) {
       out.push({ ...base, candidates, picks: [], addedCents: 0, overshootCents: basketCents - minimumCents, meets: true, refused, says: `Today's lines of ${dollars(basketCents)} already meet the ${dollars(minimumCents)} minimum.` });

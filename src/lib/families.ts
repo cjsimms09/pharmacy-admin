@@ -19,6 +19,10 @@ export const FAMILIES = {
     { href: "/money/monthly", label: "Statement" },
     { href: "/money/report", label: "Over time" },
   ],
+  connections: [
+    { href: "/settings/connections", label: "Keys and credentials" },
+    { href: "/settings/feeds", label: "Is everything arriving?" },
+  ],
   order: [
     { href: "/purchasing", label: "Today's order" },
     { href: "/purchasing/shelf", label: "The shelf" },

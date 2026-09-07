@@ -1,4 +1,5 @@
 import "server-only";
+import { daysBetween } from "./dates";
 import { db, schema } from "@/db";
 import { buyListNow, shelfMovement, SHELF_POLICY } from "./shelf";
 import { fillMinimums, type SupplierFill, type Eligibility } from "./minimum-filler";
@@ -21,7 +22,10 @@ export type MinimumsView = {
   missing: string[];
   horizonDays: number;
   /** How the eligibility was known, so the page can say what it could not tell. */
-  known: { generics: number; brands: number; controlled: number; unclassified: number };
+  known: { generics: number; brands: number; controlled: number; unclassified: number };  /** On hand (with on order) and the daily rate per moving NDC, thousandths. */
+  shelf: Map<string, { onHandThousandths: number; perDayThousandths: number }>;
+  /** How many days of claims the rates rest on, and the span they cover; `fullAt` is where the window stops growing. */
+  evidence: { days: number; from: string | null; to: string | null; fullAt: number };
 };
 
 /**
@@ -98,6 +102,19 @@ export async function minimumsNow(): Promise<MinimumsView> {
 
   if (generic.size === 0) missing.push("No NADAC file is loaded, so nothing is known to be a generic and nothing can be added.");
 
+  /*
+   * How deep a suggested buy may go depends on how much evidence the rate rests on.
+   *
+   * Every rate is dispensing over the days of claims held, up to ninety. Six days of claims is a
+   * rate, but not one to buy two months against — a drug filled twice in a busy week reads as a
+   * daily habit. So the horizon is two days of stock for every day of claims, floored at a
+   * fortnight and capped at sixty: a pharmacy a week into the site is offered fourteen days deep,
+   * a month in gets the full sixty, and the page says which. The list gets deeper, and the rates
+   * steadier, with every evening's report.
+   */
+  const evidenceDays = move.from && move.to ? Math.max(1, daysBetween(move.from, move.to) + 1) : 0;
+  const horizonDays = evidenceDays === 0 ? 14 : Math.min(60, Math.max(14, 2 * evidenceDays));
+
   const fills = fillMinimums({
     suppliers: view.suppliers,
     basketCentsBySupplier,
@@ -107,7 +124,7 @@ export async function minimumsNow(): Promise<MinimumsView> {
     onOrderThousandths: onOrder,
     names,
     eligibility,
-    horizonDays: 60,
+    horizonDays,
     materialityCents: SHELF_POLICY.materialityCents,
   });
 
@@ -121,7 +138,9 @@ export async function minimumsNow(): Promise<MinimumsView> {
     else if (g === "B") brands++;
     else unclassified++;
   }
-  return { fills, missing, horizonDays: 60, known: { generics, brands, controlled: [...moving].filter((n) => controlled.has(n)).length, unclassified } };
+  // Where the shelf stands on every moving NDC, so a page can say "3 days on hand" beside a line.
+  const shelf = new Map(move.movement.map((m) => [m.ndc11, { onHandThousandths: m.onHandThousandths + (onOrder.get(m.ndc11) ?? 0), perDayThousandths: m.perDayThousandths }]));
+  return { fills, missing, horizonDays, evidence: { days: evidenceDays, from: move.from, to: move.to, fullAt: SHELF_POLICY.lookbackDays }, known: { generics, brands, controlled: [...moving].filter((n) => controlled.has(n)).length, unclassified }, shelf };
 }
 
 export type { SupplierFill } from "./minimum-filler";

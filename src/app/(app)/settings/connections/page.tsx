@@ -5,6 +5,7 @@ import { audit } from "@/lib/audit";
 import { setSetting, type SettingKey } from "@/lib/settings";
 import { CONNECTIONS, connectionState, saveSecret, clearSecret } from "@/lib/connections";
 import { PageHeader, Notice, BackLink, Field, Card } from "@/components/ui";
+import { familyTabs } from "@/lib/families";
 
 export const metadata = { title: "Connections" };
 export const dynamic = "force-dynamic";
@@ -58,6 +59,7 @@ export default async function ConnectionsPage({ searchParams }: { searchParams: 
     <>
       <BackLink href="/settings">Settings</BackLink>
       <PageHeader
+        tabs={familyTabs("connections", "/settings/connections")}
         title="Connections"
         subtitle="API keys and credentials for outside services. Everything here is encrypted on this machine and never shown again once saved."
       />

@@ -71,9 +71,10 @@ it and said so on the pull request. The owner reads this too.
   supplier's item number on every row, and "it doesn't know what's in our cart". So `/purchasing`
   is one card per non-primary wholesaler: "Order these" (short and cheapest there) and then "Next
   best to add, soonest needed first" — every qualifying generic one pack at a time, fewest days on
-  hand first, with a running total that starts from what the pharmacist types as the cart (a GET
-  field per card, `cart-<supplier>`) or from the order lines when nothing is typed. The greedy
-  filler still exists (`fillMinimums().picks`) but the page shows `candidates` instead;
+  hand first — in one ranked table with a running total, so the line at which the minimum is
+  reached is visible without arithmetic. The site cannot see the cart at the wholesaler's website
+  and does not pretend to: it ranks, the pharmacist orders. The greedy filler still exists
+  (`fillMinimums().picks`) but the page shows `candidates` instead;
   `minimum-store.ts` counts only the planner's `need` lines as spoken for, so the planner's own
   top-ups appear in the ranked list rather than as a decision already made. `/purchasing/minimums`
   redirects here and is off the family tabs. The comparison cards ("Buy these instead", "What each
@@ -87,6 +88,15 @@ it and said so on the pull request. The owner reads this too.
   time made the target window zero and nothing short), and the contract flag maps through
   `contractFlagOf`. The supplier terms field is now labelled "Lead time, in days" with what it
   does — the owner read "Days from order to shelf" as meaningless.
+- **"Is everything arriving?" under Settings** (`/settings/feeds`, `feeds.ts`, `feed-rules.ts`,
+  all mine). The owner asked how to verify every feed is working — NADAC current, MTF payments
+  found, catalogues up to date. One row per feed: cadence, newest row in the table it fills,
+  state judged from that row and never from a job's own claim to have run, a proof where one
+  exists (claims on every open day, share of two-to-ten-week-old fills with an 835 line, payers
+  and suppliers gone quiet, a price file too small to be whole), and a live check on request
+  (CMS's newest as-of against the held file, mailbox login, Claude, the facilitator's tool). Your
+  `automation-status.ts` is read for the sensors and the backup rather than duplicated. Today
+  shows a notice when any feed has stopped.
 - **Migration renumbered three times: mine is `0078_standing_costs_terms_pages_tax_bank_items`**
   (`standing_costs` with `paid_day`, `contract_docs.pages`, `network_rates.effective_to`,
   `suppliers.payment_terms_days`, `sales_months.retail_tax_cents`, `bank_lines`,

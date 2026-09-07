@@ -158,7 +158,7 @@ export const NAV: NavGroup[] = [
       { href: "/settings", label: "Pharmacy details", blurb: "Name, registration numbers, address" },
       { href: "/settings/backups", label: "Backups", blurb: "Daily, verified, in two places, proved monthly" },
       { href: "/settings/email", label: "Email", blurb: "Reading reports in and sending training out" },
-      { href: "/settings/connections", label: "Connections", blurb: "Claude, iMonnit and the rest" },
+      { href: "/settings/connections", label: "Connections", blurb: "Keys for Claude, iMonnit and the rest, and whether every report is arriving" },
       { href: "/settings/training", label: "Training settings", blurb: "Materials and cadence" },
       { href: "/settings/features", label: "Extra sections", blurb: "Parts of the site that are still being built" },
       { href: "/settings/network", label: "Network", blurb: "How to reach this from another computer" },

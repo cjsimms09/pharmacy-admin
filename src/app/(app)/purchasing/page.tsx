@@ -1,5 +1,5 @@
 import { familyTabs } from "@/lib/families";
-import type React from "react";
+import React from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -35,6 +35,7 @@ const perUnit = (micros: number | null) => (micros === null ? "—" : `$${(Math.
  * secondaries do not beat, as it always did; that is one line here and the whole of the shelf page.
  */
 type Row = {
+  kind: "short" | "next";
   itemNumber: string | null;
   ndc11: string;
   name: string | null;
@@ -44,23 +45,23 @@ type Row = {
   unitMicros: number;
   costCents: number;
   savingCents: number;
+  daysOnHand: number;
+  perDayThousandths: number;
   daysAfter: number;
+  /** For a next-best line: whole packs the horizon allows. */
+  maxPacks: number | null;
+  alternative: { supplier: string; unitMicros: number } | null;
+  runningCents: number;
+  /** The line at which the running total first reaches the minimum. */
+  reaches: boolean;
 };
 
-/** The query key holding what is in the cart at one wholesaler, so a recount keeps the others. */
-const cartKey = (supplier: string) => `cart-${supplier.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
-const parseDollars = (v: string | undefined): number | null => {
-  if (v === undefined) return null;
-  const n = Number(v.replace(/[$,\s]/g, ""));
-  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : null;
-};
 const days = (d: number) => (Number.isFinite(d) ? String(Math.round(d)) : "—");
 
-export default async function WhatToBuyPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
+export default async function WhatToBuyPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
   await requireReimbursement();
   await requireUser();
-  const params = await searchParams;
-  const { ok, error } = params;
+  const { ok, error } = await searchParams;
   const { buyListNow, SHELF_POLICY, nextTierNow } = await import("@/lib/shelf");
   const [buyList, minimums, nextTier, summary, schedule, s, mailReady] = await Promise.all([
     buyListNow(),
@@ -121,21 +122,28 @@ export default async function WhatToBuyPage({ searchParams }: { searchParams: Pr
    * and read as two orders to the same wholesaler.
    */
   /*
-   * One card per secondary, in two parts. First what the shelf is short of and this wholesaler
-   * is cheapest on — that goes in the cart whatever happens. Then the ranked list to add from to
-   * reach their minimum, with a running total. The total starts from what the cart actually holds
-   * where the pharmacist has typed it, and from the first part where they have not, because the
-   * site has no way of seeing the cart at the wholesaler's website and pretending otherwise was
-   * the fault the old minimums page had.
+   * One card per secondary: everything worth ordering there today, ranked. First what the shelf
+   * is short of and this wholesaler is cheapest on, sized to the need; then every generic that
+   * qualifies to add, soonest needed first, one pack each. A running total runs down the whole
+   * list so the line at which the minimum is reached is visible without arithmetic. The site
+   * cannot see what is in the cart at the wholesaler's website and does not pretend to: it ranks,
+   * the pharmacist orders.
    */
   const sections = buyList.suppliers
     .filter((x) => !x.primary)
     .map((sup) => {
       const basket = buyList.plan.baskets.find((b) => b.supplier === sup.supplier) ?? null;
       const fill = minimums.fills.find((f) => f.supplier === sup.supplier) ?? null;
-      const needs: Row[] = (basket?.lines ?? [])
-        .filter((l) => l.reason === "need")
-        .map((l) => ({
+      const minimumCents = sup.minimumCents ?? null;
+      let run = 0;
+      const reach = (before: number, after: number) => minimumCents !== null && before < minimumCents && after >= minimumCents;
+      const rows: Row[] = [];
+      for (const l of (basket?.lines ?? []).filter((l) => l.reason === "need")) {
+        const shelf = minimums.shelf.get(l.ndc11);
+        const before = run;
+        run += l.costCents;
+        rows.push({
+          kind: "short",
           itemNumber: l.itemNumber ?? null,
           ndc11: l.ndc11,
           name: l.name,
@@ -145,41 +153,62 @@ export default async function WhatToBuyPage({ searchParams }: { searchParams: Pr
           unitMicros: l.effectiveUnitMicros,
           costCents: l.costCents,
           savingCents: l.savingCents,
+          daysOnHand: shelf && shelf.perDayThousandths > 0 ? shelf.onHandThousandths / shelf.perDayThousandths : Infinity,
+          perDayThousandths: shelf?.perDayThousandths ?? 0,
           daysAfter: l.daysOfStockAfter,
-        }));
-      const needCents = needs.reduce((n, r) => n + r.costCents, 0);
-      const needSavingCents = needs.reduce((n, r) => n + r.savingCents, 0);
-      const minimumCents = sup.minimumCents ?? null;
-      const typed = parseDollars(params[cartKey(sup.supplier)]);
-      const cartCents = typed ?? needCents;
-      const candidates = fill?.candidates ?? [];
-      let run = cartCents;
-      const list = candidates.map((c) => {
+          maxPacks: null,
+          alternative: null,
+          runningCents: run,
+          reaches: reach(before, run),
+        });
+      }
+      const shortCount = rows.length;
+      const needCents = run;
+      const needSavingCents = rows.reduce((n, r) => n + r.savingCents, 0);
+      for (const c of fill?.candidates ?? []) {
         const before = run;
         run += c.packCostCents;
-        return { ...c, runningCents: run, reaches: minimumCents !== null && before < minimumCents && run >= minimumCents };
-      });
-      const crossAt = list.findIndex((c) => c.reaches);
-      const shown = crossAt >= 0 ? list.slice(0, Math.min(list.length, crossAt + 7)) : list.slice(0, 25);
-      const toAddCents = minimumCents === null ? 0 : Math.max(0, minimumCents - cartCents);
-      // One pack of each, and then every pack the shelf will use inside the horizon.
-      const onePackCents = candidates.reduce((n, c) => n + c.packCostCents, 0);
-      const allAddCents = candidates.reduce((n, c) => n + c.packCostCents * c.maxPacks, 0);
+        rows.push({
+          kind: "next",
+          itemNumber: c.itemNumber,
+          ndc11: c.ndc11,
+          name: c.name,
+          packs: 1,
+          packQty: c.packQty,
+          units: c.packQty,
+          unitMicros: c.unitMicros,
+          costCents: c.packCostCents,
+          savingCents: c.savingPerPackCents,
+          daysOnHand: c.daysOnHand,
+          perDayThousandths: c.perDayThousandths,
+          daysAfter: c.daysAfterOnePack,
+          maxPacks: c.maxPacks,
+          alternative: c.alternative,
+          runningCents: run,
+          reaches: reach(before, run),
+        });
+      }
+      const crossAt = rows.findIndex((r) => r.reaches);
+      // Every short line, then the next-best ones up to the crossing and a few past it.
+      const shown = crossAt >= 0 ? rows.slice(0, Math.max(shortCount, crossAt + 7)) : rows.slice(0, shortCount + 25);
+      const nextCount = rows.length - shortCount;
+      const allAddCents = (fill?.candidates ?? []).reduce((n, c) => n + c.packCostCents * c.maxPacks, 0);
+      const toAddCents = minimumCents === null ? 0 : Math.max(0, minimumCents - needCents);
       const state: "nothing" | "no_minimum" | "meets" | "reachable" | "deeper" | "short" =
         minimumCents === null
           ? "no_minimum"
-          : needs.length === 0 && candidates.length === 0
+          : rows.length === 0
             ? "nothing"
-            : cartCents >= minimumCents
+            : needCents >= minimumCents
               ? "meets"
               : crossAt >= 0
                 ? "reachable"
-                : cartCents + allAddCents >= minimumCents
+                : needCents + allAddCents >= minimumCents
                   ? "deeper"
                   : "short";
-      return { sup, basket, fill, needs, needCents, needSavingCents, minimumCents, typed, cartCents, list, shown, crossAt, toAddCents, onePackCents, allAddCents, state };
+      return { sup, basket, fill, rows, shown, shortCount, nextCount, needCents, needSavingCents, minimumCents, crossAt, toAddCents, allAddCents, state };
     })
-    .sort((a, b) => Number(b.needs.length > 0) - Number(a.needs.length > 0) || b.needCents - a.needCents || (b.minimumCents ?? 0) - (a.minimumCents ?? 0));
+    .sort((a, b) => Number(b.shortCount > 0) - Number(a.shortCount > 0) || b.needCents - a.needCents || (b.minimumCents ?? 0) - (a.minimumCents ?? 0));
   const withMinimum = sections.filter((x) => x.minimumCents !== null);
   const active = withMinimum.filter((x) => x.state !== "nothing");
   const meeting = active.filter((x) => x.state === "meets");
@@ -205,6 +234,11 @@ export default async function WhatToBuyPage({ searchParams }: { searchParams: Pr
         </Notice>
       )}
       {missing.map((m) => <Notice key={m} kind="warn">{m}</Notice>)}
+      {sections.filter((x) => x.rows.length > 0 && x.rows.every((r) => !r.itemNumber)).map((x) => (
+        <Notice key={x.sup.supplier} kind="warn">
+          <b>{x.sup.supplier}&rsquo;s price file carried no item numbers</b>, so its lines below cannot be keyed by number. The PioneerRx catalogue export has a &ldquo;Supplier Item Number&rdquo; column; a file from the wholesaler&rsquo;s own site needs one headed item number, item #, or SKU.
+        </Notice>
+      ))}
       {withMinimum.length === 0 && sections.length > 0 && (
         <Notice kind="warn">
           <b>No secondary has an order minimum on file.</b> Put each wholesaler&rsquo;s minimum on its terms page and this page fills each order to it.{" "}
@@ -213,8 +247,8 @@ export default async function WhatToBuyPage({ searchParams }: { searchParams: Pr
       )}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Figure size="sm" value={sections.filter((x) => x.needs.length > 0).length} label="Secondaries with lines to order" sub={`${withMinimum.length} of ${sections.length} with a minimum on file`} tone="muted" />
-        <Figure size="sm" value={money(sections.reduce((n, x) => n + x.needCents, 0))} label="Short and cheapest at a secondary" sub={`${sections.reduce((n, x) => n + x.needs.length, 0)} lines, before anything is added`} tone="muted" />
+        <Figure size="sm" value={sections.filter((x) => x.shortCount > 0).length} label="Secondaries with lines to order" sub={`${withMinimum.length} of ${sections.length} with a minimum on file`} tone="muted" />
+        <Figure size="sm" value={money(sections.reduce((n, x) => n + x.needCents, 0))} label="Short and cheapest at a secondary" sub={`${sections.reduce((n, x) => n + x.shortCount, 0)} lines, before anything is added`} tone="muted" />
         <Figure size="sm" value={money(sections.reduce((n, x) => n + x.needSavingCents, 0))} label="Saved against the primary" sub="after every rebate, on those lines" tone={sections.some((x) => x.needSavingCents > 0) ? "ok" : "muted"} />
         <Figure
           size="sm"
@@ -242,136 +276,105 @@ export default async function WhatToBuyPage({ searchParams }: { searchParams: Pr
           <p className="text-sm text-ink-2">Add the secondaries under <Link href="/suppliers" className="text-accent underline">Suppliers</Link>, load their price files below, and each gets an order here.</p>
         </Card>
       ) : (
-        sections.map(({ sup, basket, fill, needs, needCents, needSavingCents, minimumCents, typed, cartCents, list, shown, crossAt, toAddCents, onePackCents, allAddCents, state }) => {
-          const cartSays = typed !== null ? `The cart is at ${money(cartCents)}` : needs.length ? `The ${needs.length} line${needs.length === 1 ? "" : "s"} to order come${needs.length === 1 ? "s" : ""} to ${money(needCents)}` : "Nothing is short here today";
+        sections.map(({ sup, basket, fill, rows, shown, shortCount, nextCount, needCents, needSavingCents, minimumCents, crossAt, toAddCents, allAddCents, state }) => {
+          const shortSays = shortCount ? `The ${shortCount} line${shortCount === 1 ? "" : "s"} the shelf is short of come${shortCount === 1 ? "s" : ""} to ${money(needCents)}` : "Nothing is short here today";
           const subtitle =
             state === "no_minimum"
-              ? "No order minimum on file for this wholesaler. Put it on the terms page and this card fills to it."
+              ? "No order minimum on file for this wholesaler. Put it on the terms page and this card ranks to it."
               : state === "nothing"
                 ? `Minimum ${money(minimumCents!)}. Nothing the shelf is short of is cheapest here today, and nothing qualifies to add.`
                 : state === "meets"
-                  ? `Minimum ${money(minimumCents!)}. ${cartSays}, which meets it${cartCents > minimumCents! ? `, ${money(cartCents - minimumCents!)} over` : ""}.`
+                  ? `Minimum ${money(minimumCents!)}. ${shortSays}, which meets it${needCents > minimumCents! ? `, ${money(needCents - minimumCents!)} over` : ""}.`
                   : state === "reachable"
-                    ? `Minimum ${money(minimumCents!)}. ${cartSays}; ${money(toAddCents)} more reaches it, and the first ${crossAt + 1} below do that.`
+                    ? `Minimum ${money(minimumCents!)}. ${shortSays}; the ranked list reaches it at line ${crossAt + 1}.`
                     : state === "deeper"
-                      ? `Minimum ${money(minimumCents!)}. ${cartSays}; ${money(toAddCents)} more is needed. One pack of each below adds ${money(onePackCents)}, and taking more packs where the "up to" column allows adds up to ${money(allAddCents)}, which reaches it.`
-                      : `Minimum ${money(minimumCents!)}. ${cartSays}; ${money(toAddCents)} more is needed, and everything that qualifies here adds only ${money(allAddCents)} even at every pack the shelf will use. Buy the lines at the primary today, or wait for more need.`;
-          const others = sections.filter((o) => o.sup.supplier !== sup.supplier && o.typed !== null);
+                      ? `Minimum ${money(minimumCents!)}. ${shortSays}; ${money(toAddCents)} more is needed. One pack of each line below does not get there; taking more packs where the "up to" figure allows adds up to ${money(allAddCents)}, which does.`
+                      : `Minimum ${money(minimumCents!)}. ${shortSays}; ${money(toAddCents)} more is needed, and everything that qualifies here adds only ${money(allAddCents)} even at every pack the shelf will use. Buy the short lines at the primary today, or wait for more need.`;
           return (
             <Card
               key={sup.supplier}
               className="mt-4"
               tone={state === "meets" || state === "reachable" || state === "deeper" ? "ok" : state === "short" ? "warn" : undefined}
               title={sup.supplier}
-              count={needs.length ? `${needs.length} line${needs.length === 1 ? "" : "s"} to order · ${money(needCents)}` : "nothing short today"}
+              count={shortCount ? `${shortCount} short · ${money(needCents)}` : "nothing short today"}
               subtitle={subtitle}
               actions={<Link href={sup.supplierId ? `/suppliers/${sup.supplierId}/terms` : "/suppliers"} className="btn btn-sm">Terms</Link>}
             >
-              {needs.length > 0 && (
-                <>
-                  <h3 className="text-sm font-semibold">Order these</h3>
-                  <p className="mb-2 text-xs text-ink-3">The shelf is short of each, and after every rebate this is the cheapest place to buy it.</p>
-                  <div className="overflow-x-auto">
-                    <table className="table text-sm">
-                      <thead>
-                        <tr>
-                          <th>Item #</th>
-                          <th>Product</th>
-                          <th className="num">Order</th>
-                          <th className="num">Unit</th>
-                          <th className="num">Line</th>
-                          <th className="num">Saves</th>
-                          <th className="num">Days of stock after</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {needs.map((r) => (
-                          <tr key={r.ndc11}>
+              {rows.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="table text-sm">
+                    <thead>
+                      <tr>
+                        <th>Item #</th>
+                        <th>Product</th>
+                        <th className="num">Order</th>
+                        <th className="num">Line</th>
+                        <th className="num">Saves</th>
+                        <th className="num">Days on hand</th>
+                        <th className="num">A day</th>
+                        <th className="num">Days after</th>
+                        <th className="num">Running total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {shown.map((r, i) => (
+                        <React.Fragment key={`${r.kind}-${r.ndc11}`}>
+                          {i === 0 && r.kind === "short" && (
+                            <tr>
+                              <td colSpan={9} className="bg-ground/60 text-xs font-semibold uppercase tracking-wide text-ink-2">Short now — the shelf needs these, and this is the cheapest place after every rebate</td>
+                            </tr>
+                          )}
+                          {i === shortCount && r.kind === "next" && (
+                            <tr>
+                              <td colSpan={9} className="bg-ground/60 text-xs font-semibold uppercase tracking-wide text-ink-2">
+                                Next best to add — ranked by how soon it runs out and how much cheaper it is here; only generics this wholesaler is the cheapest place to buy, that a pack of fits inside {minimums.horizonDays} days of use, one pack each
+                              </td>
+                            </tr>
+                          )}
+                          <tr className={crossAt >= 0 && i > crossAt ? "text-ink-3" : ""}>
                             <td className="font-mono text-xs">{r.itemNumber ?? <span className="text-ink-3" title="The price file carried no item number for this line">—</span>}</td>
                             <td>
                               <span className="block">{r.name ?? r.ndc11}</span>
-                              <span className="block font-mono text-[11px] text-ink-3">{r.ndc11}</span>
+                              <span className="block font-mono text-[11px] text-ink-3">
+                                {r.ndc11} · {perUnit(r.unitMicros)}{r.alternative ? ` here, ${perUnit(r.alternative.unitMicros)} at ${r.alternative.supplier}` : ""}
+                              </span>
                             </td>
-                            <td className="num whitespace-nowrap">{r.packs} × {r.packQty} <span className="text-xs text-ink-3">= {r.units.toLocaleString()}</span></td>
-                            <td className="num text-xs">{perUnit(r.unitMicros)}</td>
+                            <td className="num whitespace-nowrap">
+                              {r.packs} × {r.packQty.toLocaleString()} <span className="text-xs text-ink-3">= {r.units.toLocaleString()}</span>
+                              {r.maxPacks !== null && r.maxPacks > 1 && <span className="block text-[11px] text-ink-3" title={`Whole packs that fit inside ${minimums.horizonDays} days of use after what is on hand and on order`}>up to {r.maxPacks} packs</span>}
+                            </td>
                             <td className="num font-medium">{money(r.costCents)}</td>
                             <td className={`num ${r.savingCents > 0 ? "text-accent" : "text-ink-3"}`}>{r.savingCents > 0 ? money(r.savingCents) : "—"}</td>
+                            <td className="num">{days(r.daysOnHand)}</td>
+                            <td className="num text-xs">{r.perDayThousandths > 0 ? (r.perDayThousandths / 1000).toFixed(1) : "—"}</td>
                             <td className="num">{days(r.daysAfter)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                      <tfoot>
-                        <tr className="font-semibold">
-                          <td colSpan={4}>{minimumCents !== null ? `Against a ${money(minimumCents)} minimum` : "Total"}</td>
-                          <td className="num">{money(needCents)}</td>
-                          <td className="num text-accent">{needSavingCents > 0 ? money(needSavingCents) : "—"}</td>
-                          <td className="num text-xs font-normal text-ink-3">{minimumCents !== null && needCents < minimumCents ? `${money(minimumCents - needCents)} short` : minimumCents !== null ? "met" : ""}</td>
-                        </tr>
-                      </tfoot>
-                    </table>
-                  </div>
-                </>
-              )}
-
-              {minimumCents !== null && list.length > 0 && (
-                <div className={needs.length ? "mt-5" : ""}>
-                  <div className="flex flex-wrap items-end justify-between gap-3">
-                    <div>
-                      <h3 className="text-sm font-semibold">Next best to add, soonest needed first</h3>
-                      <p className="text-xs text-ink-3">
-                        Generics this wholesaler is the cheapest place to buy, that the shelf will run through inside {minimums.horizonDays} days, one pack each. The running total starts from {typed !== null ? "what you typed as the cart" : "the lines above"}.
-                      </p>
-                    </div>
-                    <form method="get" className="flex items-end gap-2">
-                      {others.map((o) => <input key={o.sup.supplier} type="hidden" name={cartKey(o.sup.supplier)} value={(o.cartCents / 100).toFixed(2)} />)}
-                      <Field label="In the cart now" hint={typed === null ? "Defaults to the lines above" : "As typed"}>
-                        <input name={cartKey(sup.supplier)} inputMode="decimal" defaultValue={(cartCents / 100).toFixed(2)} className="w-28" />
-                      </Field>
-                      <button className="btn btn-sm">Recount</button>
-                    </form>
-                  </div>
-                  <div className="mt-2 overflow-x-auto">
-                    <table className="table text-sm">
-                      <thead>
-                        <tr>
-                          <th>Item #</th>
-                          <th>Product</th>
-                          <th className="num">Pack</th>
-                          <th className="num">Pack cost</th>
-                          <th className="num">Saves a pack</th>
-                          <th className="num">Days on hand</th>
-                          <th className="num">A day</th>
-                          <th className="num">Up to</th>
-                          <th className="num">Running total</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {shown.map((c, i) => (
-                          <tr key={c.ndc11} className={crossAt >= 0 && i > crossAt ? "text-ink-3" : ""}>
-                            <td className="font-mono text-xs">{c.itemNumber ?? <span className="text-ink-3" title="The price file carried no item number for this line">—</span>}</td>
-                            <td>
-                              <span className="block">{c.name ?? c.ndc11}</span>
-                              <span className="block font-mono text-[11px] text-ink-3">{c.ndc11}{c.alternative ? ` · ${perUnit(c.unitMicros)} here, ${perUnit(c.alternative.unitMicros)} at ${c.alternative.supplier}` : ""}</span>
-                            </td>
-                            <td className="num">{c.packQty.toLocaleString()}</td>
-                            <td className="num font-medium">{money(c.packCostCents)}</td>
-                            <td className={`num ${c.savingPerPackCents > 0 ? "text-accent" : "text-ink-3"}`}>{c.savingPerPackCents > 0 ? money(c.savingPerPackCents) : "—"}</td>
-                            <td className="num">{days(c.daysOnHand)}</td>
-                            <td className="num text-xs">{(c.perDayThousandths / 1000).toFixed(1)}</td>
-                            <td className="num text-xs" title={`Whole packs that fit inside ${minimums.horizonDays} days of use after what is on hand and on order`}>{c.maxPacks} pack{c.maxPacks === 1 ? "" : "s"}</td>
-                            <td className={`num whitespace-nowrap ${c.reaches ? "font-semibold text-accent" : ""}`}>
-                              {money(c.runningCents)}
-                              {c.reaches && <span className="badge badge-ok ml-2">minimum</span>}
+                            <td className={`num whitespace-nowrap ${r.reaches ? "font-semibold text-accent" : ""}`}>
+                              {money(r.runningCents)}
+                              {r.reaches && <span className="badge badge-ok ml-2">minimum</span>}
                             </td>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  {list.length > shown.length && (
-                    <p className="mt-1 text-xs text-ink-3">{list.length - shown.length} more qualify below these, further from needing a reorder.</p>
-                  )}
+                        </React.Fragment>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="font-semibold">
+                        <td colSpan={3}>{minimumCents !== null ? `Short lines against a ${money(minimumCents)} minimum` : "Short lines"}</td>
+                        <td className="num">{money(needCents)}</td>
+                        <td className="num text-accent">{needSavingCents > 0 ? money(needSavingCents) : "—"}</td>
+                        <td colSpan={4} className="text-xs font-normal text-ink-3">
+                          {minimumCents !== null && needCents < minimumCents ? `${money(minimumCents - needCents)} short before anything is added` : minimumCents !== null ? "met on the short lines alone" : ""}
+                          {basket?.freightCents ? ` · plus ${money(basket.freightCents)} freight` : ""}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
                 </div>
+              )}
+              {rows.length > shown.length && (
+                <p className="mt-1 text-xs text-ink-3">{rows.length - shown.length} more qualify below these, further from needing a reorder.</p>
+              )}
+              {nextCount === 0 && shortCount > 0 && minimumCents !== null && needCents < minimumCents && (
+                <p className="mt-2 text-xs text-ink-3">Nothing else qualifies to add here: no generic this wholesaler is cheapest on moves steadily enough to buy {minimums.horizonDays} days of.</p>
               )}
 
               {basket && basket.bandDeltaCents !== null && basket.bandDeltaCents !== 0 && (
@@ -415,6 +418,9 @@ export default async function WhatToBuyPage({ searchParams }: { searchParams: Pr
       )}
 
       <p className="mt-4 text-xs text-ink-3">
+        {minimums.evidence.days > 0
+          ? `Rates come from ${minimums.evidence.days} day${minimums.evidence.days === 1 ? "" : "s"} of claims (${minimums.evidence.from} to ${minimums.evidence.to}), so a suggested buy goes at most ${minimums.horizonDays} days deep${minimums.evidence.days < minimums.evidence.fullAt ? `; the window grows with every evening's report until it holds ${minimums.evidence.fullAt} days, and the buys deepen to 60 days with it` : ""}. `
+          : "No claims are held yet, so there are no rates to buy against. "}
         A line is here only when this supplier&rsquo;s price after its rebate is the lowest of everyone who prices it. A line to order is sized to {SHELF_POLICY.targetDays} days plus the lead time, less what is on hand and on order. A line to add is a generic by CMS&rsquo;s flag, not controlled, dispensed at a steady rate rather than in one large fill, and shown a pack at a time up to what {minimums.horizonDays} days of use will take. The item number is the supplier&rsquo;s own, off their price file; a dash means the file carried none, and the next Monday catalogue fills it in.
       </p>
 
