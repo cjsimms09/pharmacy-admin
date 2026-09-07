@@ -284,7 +284,47 @@ by what changes the owner's morning most. Each is small on its own; none needs a
 
 ### For the cloud session (from the pharmacy session)
 
-- [ ] Nothing outstanding. Reports on PR #2 and #3 have been read and acted on.
+- [ ] **Migration 0077 exists twice, and the merge would lose yours silently.** Both branches
+  generated a `0077`: mine is `0077_neat_ma_gnuci` (routing columns on `network_rates`), yours is
+  `0077_standing_costs_terms_pages_tax_bank` (`bank_lines`, `standing_costs`, four columns). This is
+  not a naming clash — drizzle decides what to apply from the `when` stamp in
+  `drizzle/meta/_journal.json` and nothing else, applying only what is stamped later than the last
+  one it ran. Yours is stamped `1788752482954`; mine is `1788755643749`, an hour later. The pharmacy
+  computer pulls `feature/compliance` (`update.ps1` line 12), so **mine is already applied there**.
+  When your branch merges, yours arrives with the earlier stamp, drizzle treats it as already run,
+  and `bank_lines` and `standing_costs` are never created — no error at migrate time, and a 500 the
+  first time `/money` is opened. Renaming the file does not fix it; the stamp decides.
+
+  **The fix, at the merge:** renumber *yours* to `0078` **and raise its `when` above `1788755643749`**.
+  Never renumber mine — it is the one already applied on his machine, and changing it re-runs an
+  `ALTER TABLE ADD COLUMN` against columns that exist.
+
+  `scripts/migrate.ts` now refuses to run on either shape of this — a duplicated `idx`, or a stamp
+  that is not after the one before it — with the message saying which file to change and to what.
+  So the merge will stop rather than lose a table, but it still has to be resolved by hand.
+
+- [ ] **`remitCheck` raises a false short-pay on every coordinated fill.** `remit-check.ts` compares
+  a fill's `remitCents` — which `groupIntoFills` sums across *every* payer leg — against the sum of
+  its `laterPayments` where `source === "plan"`. On a fill coordinated across two plans, the
+  primary's 835 arriving first gives `paidCents` = the primary alone against `adjudicatedCents` =
+  primary + secondary, and the fill is reported short by the whole of the secondary's payment. There
+  are 29 such fills in the data I have here (73 claim pairs on the full file), so this is roughly
+  5% of fills raising an appeal for money that was never short. An appeal filed on it is withdrawn,
+  which is the failure the citation rules elsewhere exist to prevent.
+
+  The fill already carries what is needed: `Fill.payers` is `FillPayer[]`, each with its own `name`
+  and `remitCents`. Compare per leg — match each plan payment to the leg whose payer it names, and a
+  leg with no payment against it is `awaiting`, not `short`. That also fixes `payer: plan[0].payer`
+  on the short line, which currently names one payer arbitrarily where there are two.
+
+- [x] **Contracts page: `triage` and `triageWhy` on each row, and the sort in its header.** Done,
+  and further than asked. Ruled-out documents are now out of the table, out of `withFile`/`allPages`,
+  and out of `estimateAll` — they were being counted and priced into "Read everything again" even
+  though `queueExtraction` would never have sent them, so the price on that button was wrong. They
+  sit in a card of their own with what the sort made of each and a button that puts one back. The
+  contracts page names the sort as step 1 and warns when documents have not been through it; the
+  sort page shows what the read now covers and what it would cost, so the figure the sort exists to
+  move is visible while it moves.
 
 ### For the owner, on the pharmacy computer
 
