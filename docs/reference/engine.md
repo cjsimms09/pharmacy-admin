@@ -15,7 +15,7 @@ is the site telling you what it needs.** Kept current by whichever session last 
 |---|---|---|---|---|
 | **The claims balance** | this site's margin per fill (remit + patient + later money − acquisition) | PioneerRx's own gross profit on the same rows | Claims page, every fill, to the cent (`fills.ts`) | **Working.** Any fill that disagrees is listed with the gap. |
 | **The books balance** | accrual account (what the period earned) | cash account (what reached the bank and left it) | The books, "Earned against banked"; the gap is named as receivable and payable (`ledger.ts`) | **Half working.** The accrual side is complete where the feeds are in. The cash side has no way to enter what was banked (see 2.5), so its revenue is always missing. |
-| **Remits balance to claims** | what each payer's remittance advice (835) says it paid, per claim | what the claim was adjudicated for | Only the Medicare facilitator today (`mtf.ts` → `claim_payments`) | **Missing for every commercial payer.** The 835 parser exists (`x12-835.ts`); no path posts a commercial 835 to the fills or to the bank. |
+| **Remits balance to claims** | what each payer's remittance advice (835) says it paid, per claim | what the claim was adjudicated for | The Claims page, per fill, on every plan 835 read in (`remit-check.ts`): agrees to the cent, short (to appeal), over (to be taken back), and the fills still awaiting their plan's payment | **Working where 835s are read in**, which today is by hand on Add documents; automatic delivery is what remains (§3.2). |
 
 Below those, cost of goods is checked three ways (dispensed cost, purchases, the shelf identity)
 and revenue two ways (claims against the till); see `money-ledger.md` §4.

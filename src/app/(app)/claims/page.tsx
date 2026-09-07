@@ -317,6 +317,40 @@ export default async function ClaimsPage({
                 why: "Counted as revenue, because the sale happened and the report counts it. The cash has not arrived, so it is not in the till and does not belong in any figure that says what the pharmacy took.",
               }
             : null,
+          /*
+           * Remits against claims. A plan's 835 says what it paid on each fill; the claim says what
+           * it was adjudicated for; the two must agree to the cent. Short is money to chase, over is
+           * money that will be taken back. Only where a plan's remittance has been read in.
+           */
+          flags.remits.short.length > 0
+            ? {
+                key: "remit-short",
+                tone: "crit" as const,
+                amount: formatCents(flags.remits.shortCents),
+                title: `paid short of what was adjudicated — ${flags.remits.short.length} fill${flags.remits.short.length === 1 ? "" : "s"} on the plans' own remittances`,
+                href: "/claims/appeals",
+                action: "Appeal",
+                why: `The plan's 835 paid less than the claim adjudicated for. Worst is Rx ${flags.remits.short[0].rxNumber}${flags.remits.short[0].fillNumber !== null ? `-${flags.remits.short[0].fillNumber}` : ""}${flags.remits.short[0].itemName ? ` (${flags.remits.short[0].itemName})` : ""}: adjudicated ${formatCents(flags.remits.short[0].adjudicatedCents)}, paid ${formatCents(flags.remits.short[0].paidCents)} by ${flags.remits.short[0].payer ?? "the plan"}.`,
+              }
+            : null,
+          flags.remits.over.length > 0
+            ? {
+                key: "remit-over",
+                tone: "warn" as const,
+                amount: formatCents(flags.remits.overCents),
+                title: `paid over what was adjudicated — ${flags.remits.over.length} fill${flags.remits.over.length === 1 ? "" : "s"}; expect it back`,
+                why: "A plan that paid more than it adjudicated will recover the difference. It is in the bank and it is not the pharmacy's; keep it out of any figure that says what the month made.",
+              }
+            : null,
+          flags.remits.checked > 0 && flags.remits.short.length === 0 && flags.remits.over.length === 0
+            ? {
+                key: "remit-ok",
+                tone: "ok" as const,
+                amount: "",
+                title: `the plans paid exactly what they adjudicated on ${flags.remits.checked} fill${flags.remits.checked === 1 ? "" : "s"}`,
+                why: "Every plan remittance read in agrees with its claim to the cent. The remits balance to the claims.",
+              }
+            : null,
           !flags.balance.balances
             ? {
                 key: "balance",

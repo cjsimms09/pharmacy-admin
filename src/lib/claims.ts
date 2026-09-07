@@ -7,6 +7,7 @@ import { readSheetAsObjects, excelSerialToIso } from "./xlsx";
 import { parseCsv, buildPbmResolver } from "./reference";
 import { SB20_MIN_DISPENSING_FEE_CENTS } from "./reimbursement-rules";
 import { fillKey } from "./fills";
+import { remitCheck } from "./remit-check";
 import { CLASS_INFO, planLookup } from "./plans";
 import { readNdc } from "./ndc";
 import { heldNdcs } from "./ndc-held";
@@ -1171,6 +1172,8 @@ export async function claimFlags(scope: ClaimScope = {}) {
     unreconciled: fills.filter((f) => f.unreconciledCents !== null).sort((a, b) => Math.abs(b.unreconciledCents!) - Math.abs(a.unreconciledCents!)),
     unreconciledCents: fills.reduce((n, f) => n + (f.unreconciledCents ?? 0), 0),
     lossFillsTotalCents: lossFills.reduce((n, f) => n + (f.marginCents ?? 0), 0),
+    /** The plans' own remittances against what each fill was adjudicated for: the third balance. */
+    remits: remitCheck(fills.filter((f) => !f.cashPlan)),
     /*
      * What these dispensings actually made, which is the only reason any of this is being counted.
      *
