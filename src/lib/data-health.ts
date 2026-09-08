@@ -250,8 +250,8 @@ export const SPECS: LinkSpec[] = [
   {
     key: "remits",
     group: "Datasets",
-    title: "835 remittances",
-    of: "835 payment lines loaded",
+    title: "Later payments and remittances",
+    of: "later payment lines loaded — facilitator payments, DIR, copay cards, and 835 remittance lines once any arrive",
     why: "What the plan actually paid, as opposed to what it said at adjudication.",
   },
   {
@@ -307,9 +307,10 @@ export const SPECS: LinkSpec[] = [
   {
     key: "claim-remit-deposit",
     group: "Links that must hold",
-    title: "Claim → 835 line → deposit",
-    of: "insured fills traced to an 835 line, and that line to a bank deposit, out of all insured fills",
-    why: "Cash actually received rather than promised. The only end-to-end proof the money arrived.",
+    title: "Claim → later payment → deposit",
+    of: "insured fills traced to a later payment, and that payment to a bank deposit, out of all insured fills",
+    why:
+      "Cash actually received rather than promised. Titled 'later payment' and not '835' on purpose: every payment on file is facilitator money, and calling it an 835 would report coverage of a remittance flow that has not started.",
   },
   {
     key: "invoice-supplier-ladder",
