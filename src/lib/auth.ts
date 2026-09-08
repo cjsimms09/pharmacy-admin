@@ -1,11 +1,12 @@
 import "server-only";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { eq, and, gt } from "drizzle-orm";
+import { eq, and, gt, like, inArray } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import { db, dbReady, schema } from "@/db";
 import { newId, randomToken } from "./crypto";
 import { audit } from "./audit";
+import { loginAllowed, WINDOW_MINUTES } from "./login-throttle";
 
 const COOKIE = "pa_session";
 const SESSION_HOURS = 8;
@@ -52,11 +53,32 @@ export async function requireManager(): Promise<CurrentUser> {
 
 export async function login(username: string, password: string): Promise<{ ok: true } | { ok: false; error: string }> {
   await dbReady;
-  const user = await db.query.users.findFirst({ where: eq(schema.users.username, username.trim().toLowerCase()) });
+  const name = username.trim().toLowerCase();
+
+  /*
+   * Guessing has to be expensive, and the audit log already knows how often it has been tried.
+   *
+   * Counting from the log rather than from memory means the limit survives a restart — otherwise
+   * the way past it is to wait for the nightly reboot — and it needs no new table. bcrypt at cost
+   * 12 already makes each attempt cost a quarter of a second; this makes the sixth cost fifteen
+   * minutes.
+   */
+  const since = new Date(Date.now() - WINDOW_MINUTES * 60_000).toISOString();
+  const recent = await db
+    .select({ at: schema.auditEvents.at, action: schema.auditEvents.action })
+    .from(schema.auditEvents)
+    .where(and(gt(schema.auditEvents.at, since), inArray(schema.auditEvents.action, ["login.failed", "login.success"]), like(schema.auditEvents.details, `username=${name}%`)));
+  const verdict = loginAllowed(recent.map((r) => ({ at: r.at, ok: r.action === "login.success" })));
+  if (!verdict.allowed) {
+    await audit({ action: "login.blocked", details: `username=${name} waitMinutes=${verdict.waitMinutes}` });
+    return { ok: false, error: verdict.says };
+  }
+
+  const user = await db.query.users.findFirst({ where: eq(schema.users.username, name) });
   const hash = user?.passwordHash ?? "$2a$12$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalid";
   const ok = await bcrypt.compare(password, hash);
   if (!user || !ok || !user.active) {
-    await audit({ action: "login.failed", details: `username=${username.trim().toLowerCase()}` });
+    await audit({ action: "login.failed", details: `username=${name}` });
     return { ok: false, error: "Incorrect username or password." };
   }
   const token = randomToken(32);
@@ -71,7 +93,8 @@ export async function login(username: string, password: string): Promise<{ ok: t
     path: "/",
     expires,
   });
-  await audit({ action: "login.success", userId: user.id, userName: user.name });
+  // The username is in the details so the throttle above can see that this account got in.
+  await audit({ action: "login.success", userId: user.id, userName: user.name, details: `username=${name}` });
   return { ok: true };
 }
 
