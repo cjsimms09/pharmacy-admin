@@ -23,6 +23,15 @@ the tree dirty. The owner's balance-on-hand report is re-filed through the repai
 November 2025) is on the ANDA supplier: 100% within a year less the 20% handling fee, expired
 and eleven other categories non-returnable, the rest in its notes.
 
+**Later on 8 September (1):** eight deploys in all, the last `6d90829` at 13:50 — Return soon
+(`/purchasing/return-soon`, BACKLOG 21), the add-on rule re-evaluated (BACKLOG 12: used, not steady;
+equal price allowed; a top-up sized to the gap — IPC 0 → 11 options, IPD 0 → 3), the directory load
+in its own process, the returns warning on Today and in the digest, the Windows-only tests fixed, the
+filler's sentences corrected for an equal price. ANDA's returns policy is on file; ANDA and ParMed
+still have no order minimum (asked of the owner). The first real directory fetch through
+`scripts/load-drug-directory.ts` runs tonight after 7 PM with memory watched; the Settings → Claude
+ceiling is still the owner's to raise before the contract read can resume.
+
 **Files 2 may edit on its branch, from 1 (13:30):** `src/lib/digest.ts` (a returns section) and the
 Today list in `src/app/(app)/page.tsx` (one row), both fed by `return-soon.ts returnSoonNow()`;
 `tests/mtf-cli-location.test.ts` and `tests/backup-scrub.test.ts` for the Windows-only failures.
