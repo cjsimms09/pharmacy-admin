@@ -627,6 +627,22 @@ written for this pharmacy's chain code; the reason is written on the link. Ran o
 document read so far, so provisional until the rest are read; Capital Rx, MedOne, two Navitus).
 Left: 47 networks with several documents written for us (590 claims: Optum 10, ESI 12, Caremark
 9–10) — the PSAO listing or the backtest; 21 with nothing written for us (135 claims: Humana, Argus).
+**8 September, 16:00 (1) — the 148 open claims, and what the web says (hints, never links).**
+Web findings carry a source and stay proposals until a document on file says the same. NET=400
+(5 claims, $3,960) is the **CMS Medicare GLP-1 Bridge**, BIN 028918 / PCN MEDDGLP1BR, paid by CMS's
+central processor at a fixed $50 copay through 31 December 2027 — CMS's own pharmacy document is
+downloaded and filed in the library (cms.gov/files/document/glp-1-pharmacies-c.pdf). PHXCOM30 (3
+claims) is the **Phoenix RxAdvantage discount card**, BIN 610268 / PCN PHXD (phoenixpbm.com savings
+card) — the discount-card family, item 25. DODT5IND (24 claims, $1,959) is **TRICARE**: BIN 003858,
+group DODA is TRICARE's own published BIN and group (tricare.mil FAQ); the rate is the TRICARE
+retail network agreement with Express Scripts, not in the folder. FEHBP01001 (11 claims, $1,617):
+BIN 610239 / PCN FEPRX is Caremark's Federal Employee Program routing (Caremark payer sheets), and
+the guide prints a "Federal Employee Health Benefit Plan National" Caremark rate — the strongest
+open proposal, one click or the backtest. Humana NET=0116/0111 (50 claims, $6,280): BIN 015581 /
+PCN 03200000 is Humana Medicare Advantage (Humana payer sheets); no web page prints the network
+id; the Humana Pharmacy Solutions manual and the pharmacy's own Humana agreement are the
+documents. RXADV and CNCKSNPN (13 claims): nothing on the web.
+
 Two follow-ups: run the deduction after every `applyAllReads`, and re-evaluate links the site made
 when new documents arrive (today it skips anything already linked).
 ### 24. Copay-card remittance confirmations have to be read and reconciled to the claims (8 September)
