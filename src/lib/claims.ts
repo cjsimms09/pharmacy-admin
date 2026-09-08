@@ -1301,9 +1301,51 @@ export async function allFills(range?: { from?: string; to?: string }) {
   return held(`fills:${from}:${to}`, () => loadFills(from, to));
 }
 
+/*
+ * The columns a fill is built from — twenty-two of the claims table's forty-two.
+ *
+ * This read every column and used half of them. It is the reading almost every page in the site
+ * sits on, and it covers a 400-day window by default, so the other twenty were carried out of the
+ * database and thrown away on the first page of every morning.
+ *
+ * Measured on a scratch database at the scale the owner is sending — 30,000 claims across a year:
+ * 1,614 ms for every column against 848 ms for these, and the whole of it blocks the web server,
+ * because the connection is serialized and no page is served while a query runs.
+ *
+ * Kept as a list rather than left implicit so that adding a field to the mapping below without
+ * adding it here fails the typecheck rather than silently reading `undefined`.
+ */
+const FILL_COLUMNS = {
+  id: true,
+  rxNumber: true,
+  fillNumber: true,
+  dateFilled: true,
+  ndc11: true,
+  itemName: true,
+  bin: true,
+  pcn: true,
+  groupNumber: true,
+  pbmName: true,
+  payerLabel: true,
+  quantityThousandths: true,
+  remitCents: true,
+  copayCents: true,
+  patientTotalCents: true,
+  acquisitionCents: true,
+  grossProfitCents: true,
+  expectedFacilitatorCents: true,
+  cashPlan: true,
+  onAccount: true,
+  status: true,
+  reversalKey: true,
+} as const;
+
 async function loadFills(from: string, to: string) {
   const { and, gte, lte } = await import("drizzle-orm");
-  const rows = await db.query.claims.findMany({ where: and(gte(schema.claims.dateFilled, from), lte(schema.claims.dateFilled, to)) });
+  const rows = await db.query.claims.findMany({
+    where: and(gte(schema.claims.dateFilled, from), lte(schema.claims.dateFilled, to)),
+    columns: FILL_COLUMNS,
+  });
   const { groupIntoFills } = await import("./fills");
   const { laterPayments } = await import("./claim-payments");
   return groupIntoFills(

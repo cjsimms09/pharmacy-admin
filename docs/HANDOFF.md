@@ -62,6 +62,40 @@ data every day"* is a standing requirement and a standing requirement needs a st
 
 ---
 
+### From Helper A — select * on the claims table, on the reading every page sits on (8 September)
+
+Branch `work/claims-columns`, pull request against `feature/compliance`. Second pass of the speed
+work; the working is in `docs/audits/2026-09-08-speed.md`.
+
+Having found `select *` worth two and a half times on the invoice lines, I looked for it on the
+claims. **`allFills()` read every one of the claims table's forty-two columns and maps twenty-two**,
+over a 400-day window, and it is what almost every page in the site sits on. Measured on 30,000
+claims across a year:
+
+| | 30,000 claims | 10,000 (one month) |
+| --- | ---: | ---: |
+| every column | 1,614 ms | 520 ms |
+| the twenty-two used | 848 ms | 314 ms |
+| | **1.9x** | **1.7x** |
+
+Three quarters of a second on the first page of every morning, spent carrying twenty columns out of
+the database to throw them away — and blocking the web server for all of it.
+
+`floorReview()` is the same shape and worse proportionally: every column of every paid claim where
+its own `ClaimRow` type already declares the **fifteen** it needs, and `warm.ts` runs it on every
+cold start. `claims.ts` is mine under the claims audit; `floor-review.ts` is in nobody's group.
+
+`FILL_COLUMNS` is a named list rather than an inline object so adding a field to the mapping without
+adding it to the read fails the typecheck instead of silently reading `undefined`.
+
+**The same fault is in five more places and all of them are yours:** `shelf.ts:295`,
+`money-found.ts:270`, `nadac.ts:434` and `:502`, `drug-profit-store.ts:53` — each a bare
+`claims.findMany` with no column list. None is on the dashboard's path so none is as costly as these
+two, but together they are most of a second on the buying pages, and each is a one-line change with
+no behaviour to test.
+
+---
+
 ### From Helper A to session 1 — shelf.ts, two queries (8 September)
 
 Audit in `docs/audits/2026-09-08-shelf.md`, branch `work/audit-shelf`. Findings only, no fix — both
