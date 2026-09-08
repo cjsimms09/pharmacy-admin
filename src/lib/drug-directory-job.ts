@@ -93,7 +93,7 @@ export async function runDirectoryFetch(user: { id: string; name: string }, runI
   try {
     await step("Downloading ndctext.zip and the Orange Book from fda.gov");
     const { fetchDrugDirectory } = await import("./drug-directory-store");
-    const r = await fetchDrugDirectory({ userId: user.id });
+    const r = await fetchDrugDirectory({ userId: user.id }, { onStep: step });
     if (!(await ours())) return;
     const j = await directoryJob();
     const says = r.ok
