@@ -102,6 +102,55 @@ claim carries (BIN, PCN, group, network reimbursement id, chain code, NCPDP, NPI
 to the 835/EFT/EDI enrolment instructions below. The claims side of the join is inventoried first
 so nothing extractable is left unasked.
 
+### 2b-ii. The payer model: payor → contract → plan → claim → payment (7 September)
+
+The owner: *"Once contract ingestion is done, you need to make sure the contract info (plans,
+groups, bins, payors) are organized in best way possible to not only match claims to contract and
+reimbursement but also to payors. To know the reimbursement of a claim we need to know the specific
+contract id (group #, etc) but payments come from the payor (ie Caremark, Blue Cross, Optum, etc).
+Payors will have many different BINs and groups under them. We also need to be thinking of data we
+will need to completely reconcile payments to claim when we start getting 835s."*
+
+Two different questions, which today are muddled into one `pbmName` string:
+
+- **Who priced it** — the contract. Reached from the claim through its routing (BIN, PCN, group,
+  network reimbursement id, days supply, line of business) to a rate line with a formula.
+- **Who pays it** — the payor. Reached from the 835 through the payer name on the remittance
+  (N1*PR) and payer id, and from the bank through the deposit descriptor. One payor has many BINs,
+  PCNs and groups under it, and one contract (a PSAO's, say) can price claims that several payors
+  then pay.
+
+The read so far confirms what the data has to look like: of 86 contracts read, 63 identify
+themselves by network name, 39 by chain code, 5 by BIN, 0 by network reimbursement id — so the
+contract side is named by network, the claim side is coded by BIN/PCN/group/network id, and the
+join between them is a table the pharmacy fills once per network id, not a string match.
+
+**Deliverable, session 1 after ingestion, audited by A:** `docs/reference/payer-model.md` defining
+the entities and their keys — payor, processor/PBM, contract document, rate schedule, network,
+plan (BIN/PCN/group), claim, remittance, deposit — with one canonical name per payor, the
+existing tables (`payer_bins`, `plan_groups`, `payer_links`, `network_rates`, `payment_routing`,
+`era_enrollments`) mapped onto it, and the migrations that make it so. Then the payers page shows a
+payor as a tree: its BINs and groups, its contracts, its enrolment state, its receivable.
+
+**What a claim must carry to be reconciled against an 835 later** (for B's ERA work and the
+PioneerRx export ask): the pharmacy's claim reference that will come back in CLP01 (the Rx number
+and fill as submitted), the PBM's authorization number (NCPDP 503-F3), the payer claim control
+number if returned, date of service, NDC, quantity, submitted and adjudicated amounts by component
+(ingredient, fee, tax, copay), and the BIN/PCN/group. From the 835: N1*PR payer name and id, the
+TRN trace (check/EFT number and amount), each CLP with its CAS adjustment codes, PLB provider-level
+adjustments (DIR, recoupment, fees) — which are money that belongs to no single claim and must
+still reach the books.
+
+### 2b-iii. Provider manuals do not fit one read (8 September)
+
+Twelve documents ran past the reader's 32,000-token answer limit — every provider manual in the
+library (CVS Caremark 2025 state addenda 256 pp, ESI 2026 state 182 pp, Capital Rx 2025 151 pp,
+ESI 2026 federal 142 pp, CVS Caremark 2026 114 pp, Liviniti 2025 66 pp) and five smaller ones that
+should not have (Aetna 2015 Medicare D 51 pp; four of 1–18 pages, which suggests the answer looped
+rather than the document being long). Manuals carry appeal windows, DIR and audit terms, not rates.
+Needs a read-in-parts path in `contract-extract.ts` (page ranges, one answer per part, merged with
+citations kept) and a retry of the four small ones. Session 1.
+
 ### 2c. Get the 835s sent here (7 September)
 
 The owner: *"Also want to search contracts for info to request 835 changes. Want to automate request

@@ -248,6 +248,13 @@ plus `era-enrollment.ts`, `era_enrollments`, `payment_routing`, `pbm_contacts` a
    you cannot see real contracts. The extraction's output shape is in `contract-terms.ts` — 1 will
    add the ERA fields there and note the names under "Open items" in HANDOFF.
 
+**Added 8 September:** the owner wants payments reconciled to claims once 835s arrive, so the
+request builder is the first half of a pair. Read `docs/BACKLOG.md` item 2b-ii for what a claim
+must carry to be matched to an 835 (the CLP01 reference, 503-F3 authorization number, amounts by
+component) and what the 835 carries (N1*PR, TRN, CLP with CAS codes, PLB provider-level
+adjustments). `x12-835.ts` exists; check what it keeps against that list and say in the pull
+request what it drops. PLB money belongs to no single claim and must still reach the books.
+
 Then the inbox recogniser below.
 
 
