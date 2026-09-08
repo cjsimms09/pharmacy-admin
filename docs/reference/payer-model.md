@@ -2,6 +2,12 @@
 
 *Draft, session 1, 8 September 2026. For helper A to audit before any migration is written.*
 
+*Audited by A, 8 September: `docs/audits/2026-09-08-payer-model.md`. Twelve findings; two blocking
+(the receivable cannot represent MTF money; `remittances` has no key against a re-sent file) and
+both are left to session 1 because they change the shape of the model. **Five corrections A was
+sure of are applied below and marked `[A]`.** Four reader faults the audit found are already fixed
+on `work/payer-model-audit`, so the tables here can now actually be filled.*
+
 ## Why this exists
 
 The owner, 7 September: *"To know the reimbursement of a claim we need to know the specific
@@ -40,10 +46,16 @@ Nine things, each with one key. Names in bold are new tables or renamed ones; th
 One row per organisation that remits. Key: a canonical name the pharmacy chooses once
 (`payors.name`), never a string from a file. Carries: every **payer name as printed on an 835**
 (`N1*PR` strings — there will be several), every **payer id** (the 835's `N1*PR` id, tax id, EFT
-trace prefix), the **bank descriptor** the deposit arrives under, and the ERA enrolment state
-(`era_enrollments`, keyed today by `pbmName`, re-keyed to the payor). A payor may be a PBM, a plan
-sponsor, a facilitator (the MTF), a PSAO paying on behalf of its members, or a discount card
-company.
+trace prefix), the **bank descriptor** the deposit arrives under, and the bank descriptor
+the deposit arrives under. A payor may be a PBM, a plan sponsor, a facilitator (the MTF), a PSAO
+paying on behalf of its members, or a discount card company.
+
+> **[A]** The ERA enrolment state does **not** belong here. You enrol for ERA with whoever
+> *produces* the 835, which is the adjudicator: on FEP you enrol with Caremark and the file's
+> `N1*PR` says Blue Cross. Keyed to the payor, `era_enrollments` gets one row per payor and asks the
+> pharmacy to enrol with an organisation that sends no files. `era_enrollments` and `pbm_contacts`
+> (help desks, audit contacts, network managers — all adjudicator-facing) key to the **processor**.
+> `payment_routing`, which is where the money comes from, keys to the payor as written.
 
 **Today:** there is no payor table. `pbmName` on claims, `network_rates.pbm_name`,
 `payment_routing.pbm_name`, `era_enrollments.pbm_name` and `pbm_contacts.pbm_name` each carry a
@@ -87,7 +99,15 @@ networks page, and every claim on that id follows. `resolveContract` already rea
 `plan_groups`, as now: one row per BIN/PCN/group triple, with the plan's **class** (commercial
 fully insured, self-funded, Medicare, Medicaid, discount card…), which decides which law governs
 the fill and whether the Kansas floor applies. Keyed by the triple. Belongs to a processor (through
-its BIN) and to a payor (who remits for it) — two links, because they differ. **Today 6 of 1,054
+its BIN) and to a payor (who remits for it) — two links, because they differ.
+
+> **[A]** The payor link must be **nullable, and its absence is a statement rather than a gap**: no
+> payor means the whole fill is patient money and **there is no receivable**. On a discount card
+> the patient pays the discounted price at the counter and nobody remits anything. Require a payor
+> and every one of those fills opens a receivable for money that will never arrive, which then ages,
+> which then reads as a lost remittance — a permanent false balance on the page whose entire job is
+> telling the owner what he is owed. The receivable must read the null itself and never infer it
+> from the plan class: a class is a label, the null is the fact. **Today 6 of 1,054
 fills sit on a classified plan**; the owner classifies the top plans, and the site proposes a class
 where the BIN listing states a line of business, never assumes one.
 
@@ -100,16 +120,39 @@ triple. A fill owns the profit; each claim on it owns its receivable (`payerShar
 
 ### 8. Remittance — *the 835*
 
-**New table** `remittances` (one per 835 file: payor as printed, payer id, TRN trace number and
-amount, production date, the deposit it expects) and `remittance_lines` (one per CLP: the
-pharmacy's claim reference as it comes back in CLP01, the payer's claim control number, the date of
-service, the NDC where carried, the charged, paid and patient-responsibility amounts, and every CAS
-adjustment with its group and reason code) and `remittance_adjustments` (one per PLB: the
+**New table** `remittances` (one per 835 file: payor as printed, payer id, the TRN trace number, the
+payment and its date, the production date, the deposit it expects) and `remittance_lines` (one per
+CLP: the pharmacy's claim reference as it comes back in CLP01, the payer's claim control number, the
+date of service, the NDC where carried, and the charged, paid and patient-responsibility amounts)
+and `remittance_adjustments` (one per PLB: the
 provider-level money — DIR, recoupment, transaction fees, interest — with its reason code and the
 payor's reference, belonging to no claim and still money). `x12-835.ts` exists and reads the file;
 `claim_payments` holds later payments today and stays for the MTF, DIR, copay-card and manual
 cases. A remittance line settles a claim's receivable by matching CLP01 to the rx and fill as
 submitted, then the date of service and the NDC; nothing settles on amount alone.
+
+> **[A]** Three corrections, all facts about the format rather than opinions about the model.
+>
+> **TRN has no amount.** `TRN02` is the trace and `TRN03` the originating company id; the amount is
+> `BPR02` and the date the money moves is `BPR16`, which is not the production date (`DTM*405`).
+> Written as it stood the migration would look for a field the format does not have.
+>
+> **The CAS adjustments cannot live on `remittance_lines`.** A CAS segment carries **up to six**
+> adjustments, not one: `CAS01` is the group code and then reason/amount/quantity repeats through
+> `CAS17/18/19`. One column set per line loses five in six. It needs a child table, one row per
+> triplet — group, reason, amount, quantity — **and the loop it sat in**, because a claim-level and
+> a service-level CAS for the same reason code are different money and flattening them adds the
+> deduction twice on exactly the files where it is large enough to notice. `x12-835.ts` now reads
+> them this way.
+>
+> **`remittances` needs a unique key against a re-sent file.** Every other import here has one —
+> `claims.transaction_key`, `cash_receipts.source_key` (*"a date range gets re-run"*),
+> `bank_lines.key`, `supplier_imports` — and an 835 is exactly the kind of file that arrives twice:
+> re-sent by a clearinghouse, downloaded again by the MTF CLI, forwarded by the owner after it also
+> reached the mailbox. Loaded twice it adds its whole value to revenue and settles every receivable
+> in it twice, silently, and it is the largest single figure in the file. Build the key from `ISA13`
+> and `ST02` where present, falling back to payer id + `TRN02` + `BPR02` + `BPR16`. The reader does
+> not yet read `ISA13` or `ST02`, so this is a reader change as well as a column.
 
 ### 9. Deposit — *the bank line*
 
@@ -150,6 +193,11 @@ it matched on fewer.
    new. `payer_links` gains a `network_id` reference. `era_enrollments`, `payment_routing`,
    `pbm_contacts` gain a `payor_id` beside their `pbm_name`, filled by a one-time mapping the owner
    confirms.
+2b. **[A]** `era_enrollments` and `pbm_contacts` gain a `processor_id`, not a `payor_id` — see
+   §1. And prefer replacing `pbm_name` rather than sitting an id beside it: two columns meaning
+   nearly the same thing with only one authoritative is how drift starts, and is how this whole
+   problem began. Fill the id, make the name derived for display, and add a test that no decision
+   reads the string.
 3. `pbmName` on claims stays as the processor's name and is renamed in the code, not the database,
    to `processorName` where it means that, and replaced by `payorName` where it meant the other
    thing — module by module, each with a test that the two are not confused.
@@ -166,3 +214,6 @@ it matched on fewer.
 - Never put patient money on a payor. It is the residual after the last plan.
 - Never let a PLB adjustment disappear. It belongs to no claim and it is still money the books owe
   an explanation for.
+- **[A]** Never post anything from a remittance whose own arithmetic does not close. `BPR02` is the
+  claims less the provider-level adjustments; when it is not, a segment was not read and the
+  difference is money. `parse835` now reports it and `importRemittance` posts nothing.
