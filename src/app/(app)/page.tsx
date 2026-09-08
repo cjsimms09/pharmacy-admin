@@ -7,6 +7,8 @@ import { StaffBoard } from "@/components/staff-board";
 import { invoiceIssues } from "@/lib/invoices";
 import { alerts, SOON_DAYS, type Alert } from "@/lib/alerts";
 import { returnWarningNow, WARN_CREDIT_DAYS } from "@/lib/return-soon";
+import { claimsProofNow } from "@/lib/data-health-claims-proof-store";
+import { claimsProofAlert } from "@/lib/data-health-claims-proof";
 import { automationStatus, type JobStatus } from "@/lib/automation-status";
 import { feedsNow } from "@/lib/feeds";
 import { openFindings } from "@/lib/self-inspection";
@@ -91,7 +93,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const { ok, error } = await searchParams;
   // The signer's own name, to fill in the attestation form without asking them to remember it.
   const user = await requireUser();
-  const [compliance, dated, matrix, cqi, cs, jobs, selfFindings, settings, mail, updates, invoiceProblems, alertList, money, found, books, clocks, returns] =
+  const [compliance, dated, matrix, cqi, cs, jobs, selfFindings, settings, mail, updates, invoiceProblems, alertList, money, found, books, clocks, returns, claimsProof] =
     await Promise.all([
     complianceSummary(),
     dueList({ horizonDays: 60 }),
@@ -128,6 +130,14 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
      * pharmacist-in-charge who cannot see whether a licence has lapsed.
      */
     returnWarningNow().catch(() => null),
+    /*
+     * The claims proof, read back from what the nightly script left behind.
+     *
+     * A settings read and nothing else — the proving itself happens in a process of its own each
+     * night, because re-reading every stored daily report is exactly the kind of work that must
+     * never happen on the thread answering this page.
+     */
+    claimsProofNow().catch(() => null),
   ]);
 
   /*
@@ -685,8 +695,26 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                   action: "Send it back",
                 },
               ];
-        const now = [...alertList, ...returnAlert].filter((a) => a.level === "now");
-        const soon = [...alertList, ...returnAlert].filter((a) => a.level === "soon");
+        /*
+          The claims disagreeing with the reports they came from, which outranks everything here.
+
+          The owner's words: "these things need to be right!! we need to make sure claims are
+          matching their info properly and continue to … this is the most important thing." Every
+          money figure on this site starts at the claims, so a claim that disagrees with the report
+          it was read from is not one wrong row — it is a reason to stop believing the scoreboard
+          above it until somebody has looked.
+
+          "Now", always, and never "soon". There is no version of this worth reading next month,
+          and the proof is silent on every night it finds nothing, so a row appearing here at all
+          means something changed.
+        */
+        const proofWarning = claimsProofAlert(claimsProof);
+        const proofAlert: Alert[] = proofWarning
+          ? [{ key: "claims-proof", level: "now", ...proofWarning, href: "/tools/data-health", action: "See what differs" }]
+          : [];
+        const extra = [...proofAlert, ...returnAlert];
+        const now = [...alertList, ...extra].filter((a) => a.level === "now");
+        const soon = [...alertList, ...extra].filter((a) => a.level === "soon");
         if (now.length === 0 && soon.length === 0) {
           return (
             <Card tone="ok" title="Nothing needs you today" className="mb-6">

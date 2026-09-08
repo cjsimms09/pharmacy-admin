@@ -250,6 +250,14 @@ export const SPECS: LinkSpec[] = [
     why: "What the pharmacy actually paid. An invoice with a total and no lines reaches the cost of no drug.",
   },
   {
+    key: "claims-proof",
+    group: "Datasets",
+    title: "Claims proved against the reports they came from",
+    of: "rows proved, out of every row that has to be proved — the paid rows in the daily reports plus the claim rows no report accounts for",
+    why:
+      "Every other row on this page measures whether the site's tables agree with each other, which they can do perfectly while all of them disagree with the file they were read from. This one re-reads the stored reports each night and sets them against the claims. Both directions count: a paid row in a report that reached no claim, and a claim no report explains, are the same failure seen from opposite ends, and a denominator that could only see one of them would read a hundred per cent with four hundred strays in the table.",
+  },
+  {
     key: "supplier-invoices",
     group: "Datasets",
     title: "Which wholesalers have sent an invoice",
