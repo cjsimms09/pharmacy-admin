@@ -121,6 +121,20 @@ type, service type, DAW or quantity unit — those are PioneerRx export columns 
 remit + copay − dispensing fee. `networkId` is filled on 95% of rows across 82 values and is the
 axis contracts are written on.
 
+**The contract library read, 8 September (session 1, `scripts/read-contracts.ts`).** Of 357
+documents: **177 read** (698 pages), **25 failed** — 18 ran past the 32,000-token answer limit
+(every provider manual, and a few small ones that looped), 3 did not match the shape, 3 were
+refused whole for a `dirFeeBasis` value with no quote, 1 hit the limit below — **126 unread and
+worth reading** (4,731 pages; the page-heavy ones are what is left), 29 ruled out by the sort.
+**The run stopped because the Anthropic API key reached the monthly spending limit set in the
+owner's console** — "You will regain access on 2026-10-01" — which also blocks every other AI
+feature on the site (triage, inbox reads, the proving read) until the limit is raised there.
+Spent on the read so far: roughly $15 at batch pricing. To resume once raised:
+`node node_modules/tsx/dist/cli.mjs --tsconfig tsconfig.script.json scripts/read-contracts.ts read --scans`
+(never-read documents only; `--retry` adds the failures on purpose, after reading their reasons).
+Of the 177 read: 63+ name a network, 39+ a chain code, 5 a BIN, 0 a network reimbursement id.
+`applyAllReads` has **not** been run yet; 1 runs it after reviewing the proposals.
+
 **Secondary payors, measured for A's audit (8 September, BACKLOG 2b-iv).** Of 1,054 insured paid
 fills, **22 have more than one payor** (2.1%), carrying $8,456.07 of remit between them. The
 fill grouping is sound on cost: on every one of the 22 the acquisition cost sits on exactly one

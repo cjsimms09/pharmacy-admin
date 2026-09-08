@@ -131,7 +131,7 @@ async function drain(u: { id: string; name: string }, everyMs: number) {
   }
 }
 
-async function read(scans: boolean) {
+async function read(scans: boolean, retry: boolean) {
   const u = await who();
   // Anything the sort sent to the small model and never collected is collected first, free.
   const tc = await collectTriage(u.id, u.name);
@@ -143,8 +143,15 @@ async function read(scans: boolean) {
   const rates = await priceRates();
 
   for (let round = 1; ; round++) {
+    /*
+     * Never-read documents only. A "failed" row is left alone here, and the reason is money: the
+     * pages send a failed document again when a person presses the button, but a loop that sends
+     * every failure every round would pay for the twelve provider manuals that overrun the answer
+     * limit again and again, failing identically each time. Failures are retried on purpose, with
+     * `retry`, after somebody has read the reason.
+     */
     const docs = (await db.query.contractDocs.findMany()).filter(
-      (d) => d.fileName && d.extractionState !== "done" && d.extractionState !== "queued" && shouldRead(d.triage) && (d.pages ?? 0) <= 300,
+      (d) => d.fileName && (d.extractionState === "none" || d.extractionState === null || (retry && d.extractionState === "failed")) && shouldRead(d.triage) && (d.pages ?? 0) <= 300,
     );
     // Sorted so the document that has waited longest (a failure, then never-read) goes first; the
     // page count decides the chunking, not the order.
@@ -182,8 +189,9 @@ async function apply() {
 async function main() {
   const stage = process.argv[2];
   const scans = process.argv.includes("--scans");
+  const retry = process.argv.includes("--retry");
   if (stage === "survey") await survey();
-  else if (stage === "read") await read(scans);
+  else if (stage === "read") await read(scans, retry);
   else if (stage === "apply") await apply();
   else if (stage === "report") await report();
   else throw new Error("stage must be survey, read [--scans], apply or report");
