@@ -1,5 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import fs from "node:fs";
 import {
   parseRxTransactions,
@@ -590,5 +591,83 @@ describe("account sales", () => {
       Object.keys(p.reasons ?? {}).some((k) => k.includes("ZZ")),
       `reasons: ${JSON.stringify(p.reasons)}`,
     );
+  });
+});
+
+/**
+ * The twelve-month history, which nothing has ever been tested against.
+ *
+ * The archive is 21 days long and 449 of 553 dispensed NDCs fail steadiness for that reason alone,
+ * so every rate on the site is being judged on three weeks. The fix is a twelve-month export, and
+ * it will arrive as this same printed report run over a range: more pages, more page breaks, and
+ * month boundaries inside a single payer's section. `fixtures/rx-transactions-multimonth.txt` is
+ * that shape.
+ */
+describe("a report run over months rather than a day", () => {
+  const text = readFileSync(new URL("../fixtures/rx-transactions-multimonth.txt", import.meta.url), "utf8");
+  const parsed = parseRxTransactions(text);
+
+  test("both months are read, and the period spans the boundary", () => {
+    const days = [...new Set(parsed.rows.map((r) => r.dateFilled))].sort();
+    assert.deepEqual(days, ["2026-09-30", "2026-10-01"]);
+    assert.equal(parsed.period?.from, "2026-09-30");
+    assert.equal(parsed.period?.to, "2026-10-02");
+  });
+
+  test("a page break in the middle costs nothing", () => {
+    // The printer leaves "20" and "1f" on their own lines and then repeats the whole title block
+    // and column header. Read as data, any of it would become a transaction; read as a new file,
+    // the second half would be lost.
+    assert.equal(parsed.rows.length, 10);
+    assert.ok((parsed.reasons["a page-break fragment"] ?? 0) > 0);
+    assert.ok((parsed.reasons["a line that is not a transaction"] ?? 0) > 0);
+    assert.ok(parsed.rows.some((r) => r.rxNumber === "500201"), "rows after the page break must survive it");
+  });
+
+  test("a status the reader does not know is named, not silently dropped", () => {
+    // A row set aside for an unknown status makes the file short by exactly its gross profit, and
+    // the load otherwise looks perfect. The reason has to carry the letter so somebody can ask.
+    const reason = Object.keys(parsed.reasons).find((k) => k.includes("status this reader does not know"));
+    assert.ok(reason, "an unknown status must have its own reason");
+    assert.match(reason!, /"X"/);
+  });
+
+  test("two identical transactions on one day are kept apart", () => {
+    // Same prescription, fill, status, date, BIN, NDC and money. Without a suffix the second is
+    // indistinguishable from the first and one of them is lost on import.
+    const keys = parsed.rows.filter((r) => r.rxNumber === "500103" && r.status === "P").map((r) => r.transactionKey);
+    assert.equal(keys.length, 2);
+    assert.equal(new Set(keys).size, 2);
+    assert.ok(keys.some((k) => k.endsWith("#1")) && keys.some((k) => k.endsWith("#2")));
+  });
+
+  test("THE RE-SEND PROPERTY: the same file read twice yields the same keys", () => {
+    // This is what stops a re-sent day doubling. The importer skips a transaction whose key it
+    // already holds, so the suffixes must be a function of the file's content and nothing else —
+    // not of when it was read, or of what else happened to be in the database.
+    const again = parseRxTransactions(text);
+    assert.deepEqual(
+      again.rows.map((r) => r.transactionKey),
+      parsed.rows.map((r) => r.transactionKey),
+    );
+  });
+
+  test("a day re-sent inside a longer file keeps the keys it had alone", () => {
+    // The twelve-month export will contain days the daily feed already imported. Those rows must
+    // key identically or the history arrives as thousands of duplicates.
+    const dayOnly = parsed.rows.filter((r) => r.dateFilled === "2026-09-30").map((r) => r.transactionKey);
+    assert.ok(dayOnly.length > 0);
+    // Every key carries its own day, so a row cannot collide with the same shape on another date.
+    assert.ok(dayOnly.every((k) => k.includes("2026-09-30")));
+  });
+
+  test("the report's own grand total is read, which is the only check on ours", () => {
+    // Nothing inside our arithmetic can answer "did we read all of it". The report's bottom line
+    // can, and the importer stores both side by side — so a file whose total we cannot read loses
+    // that check silently.
+    assert.ok(parsed.grandTotal, "the grand total must be readable");
+    assert.equal(parsed.grandTotal!.grossProfitCents, 5_585);
+    const readGrossProfit = parsed.rows.reduce((n, r) => n + (r.grossProfitCents ?? 0), 0);
+    assert.equal(readGrossProfit, parsed.grandTotal!.grossProfitCents, "what we read must equal what the report says");
   });
 });

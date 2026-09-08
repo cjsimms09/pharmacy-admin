@@ -1,0 +1,55 @@
+# Fixture: the same PioneerRx "Rx Transaction Details By Submission Type (BETA)" report, run over a
+# range rather than a day — which is the shape of the twelve-month history the pharmacy is asking
+# PioneerRx for, and the shape nothing has ever been tested against.
+#
+# Every prescription number and group number is invented. BINs, PCNs, NDCs and money follow the
+# real report's formatting exactly, because the reader's positions are fixed from the file and its
+# whole job is to refuse a row that does not fit the shape.
+#
+# What this file carries that the daily one cannot:
+#   - two months in one file, 30 September and 1 October, so a month boundary is crossed inside a
+#     single payer's section;
+#   - a page break in the middle: the stray "20" and "1f" fragments the printer leaves on their own
+#     line, followed by the title block and column header repeated as page two begins;
+#   - the same day's rows appearing twice — 30 September is printed once under each of two payers,
+#     which is what a re-sent day looks like to the importer;
+#   - two identical transactions on one day (same prescription, fill, status, date, BIN, NDC and
+#     money), which is the only case where the reader has to invent a suffix to tell two rows apart;
+#   - a row with a status the reader does not recognise, so the skip reasons can be asserted rather
+#     than assumed.
+Rx Transaction Details By Submission Type (BETA)
+West Wichita Family Pharmacy
+ Uses invoice cost based on cost for profit settings. Includes columns for estimated rebates and estimated dir fees.Based on claims transmitted/processed from
+9/30/2026 12:00:00 AM, to ,10/2/2026 12:00:00 AM
+Third Party,Script
+Dispensing Fee,Completed Date
+Rx Number,Status,Amount,Group,Ntw Reim. Id,Copay,Total,Date Filled,BIN,Tax,QTY,Acq. Inv. Cost,PCN,NDC,GrossProfit
+Transmitted
+Third Party:,003858 (MA) - 003858
+500101-0,P,$12.83,2XLA,CNCKSNPN,$0.00,$10.50,$0.00,9/30/2026 9:23:51 AM,09/30/26,003858,30.0000,$10.80,MA,72603039001,$6.35
+500102-0,P,$11.36,2XYA,EN45,$0.00,$10.50,$0.00,,09/30/26,003858,30.0000,$0.71,MA,68094090460,$11.15
+500103-1,P,$8.61,2XYA,EN45,$0.00,$10.50,$0.00,,09/30/26,003858,30.0000,$0.70,MA,68180051903,$8.10
+500103-1,A,($8.61),2XYA,,$0.00,$0.00,$0.00,,09/30/26,003858,-30.0000,($0.70),MA,68180051903,($8.10)
+500103-1,P,$8.61,2XYA,EN45,$0.00,$10.50,$0.00,,09/30/26,003858,30.0000,$0.70,MA,68180051903,$8.10
+500104-0,P,$4.20,2XLA,CNCKSNPN,$0.00,$10.50,$0.00,,10/01/26,003858,14.0000,$1.10,MA,00093727398,$3.10
+500105-0,P,$4.20,2XLA,CNCKSNPN,$0.00,$10.50,$0.00,,10/01/26,003858,14.0000,$1.10,MA,00093727398,$3.10
+003858 (MA) - 003858 Totals:
+$49.20,$0.00,$49.20,$0.00,$0.00,$0.00,$0.00,$49.20,$0.00,$0.00,$14.41,($3.14),$0.00,$0.00,$31.80
+20
+1f
+Rx Transaction Details By Submission Type (BETA)
+West Wichita Family Pharmacy
+ Uses invoice cost based on cost for profit settings. Includes columns for estimated rebates and estimated dir fees.Based on claims transmitted/processed from
+9/30/2026 12:00:00 AM, to ,10/2/2026 12:00:00 AM
+Third Party,Script
+Dispensing Fee,Completed Date
+Rx Number,Status,Amount,Group,Ntw Reim. Id,Copay,Total,Date Filled,BIN,Tax,QTY,Acq. Inv. Cost,PCN,NDC,GrossProfit
+Third Party:,004336 (ADV) - 004336
+500201-0,P,$8.81,RX1699,CNTRCT1010,$2.20,$10.50,$2.20,9/30/2026 11:32:08 AM,09/30/26,004336,15.0000,$0.39,ADV,10702001101,$11.11
+500202-0,P,$26.04,RX1699,CNTRCT1010,$0.00,$10.50,$0.00,,10/01/26,004336,90.0000,$13.10,ADV,65862057690,$12.94
+500203-0,X,$9.99,RX1699,CNTRCT1010,$0.00,$10.50,$0.00,,10/01/26,004336,30.0000,$1.00,ADV,68180051903,$8.99
+500204-0,R,$0.00,RX1699,,$0.00,$0.00,$0.00,,10/01/26,004336,30.0000,$0.00,ADV,68180051903,$0.00
+004336 (ADV) - 004336 Totals:
+$34.85,$0.00,$34.85,$0.00,$0.00,$0.00,$0.00,$34.85,$0.00,$0.00,$13.49,$0.00,$0.00,$0.00,$24.05
+Grand Total:,$83.75,$0.00,$83.75,$0.00,$0.00,$0.00,$0.00,$83.75,$0.00,$0.00,$27.90,($3.14),$0.00,$55.85
+9/30/2026 1:51 PM,*Evoucher Paid is a portion of the third party total.,Page 2 of 2
