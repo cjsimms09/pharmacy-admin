@@ -122,7 +122,7 @@ Works in its own worktree, never in 1's folder (a deploy runs `git checkout -- .
 branch to 1 by message when `npm run check` passes. **B audits this branch** — see B below.
 
 **Then (8 September, from 1, after the bank module): two ingestion jobs on the critical path.**
-(1) **The claims history** — the archive is 21 days long and every rate is judged on it; the
+(1) **The claims history** — the paid archive is 15 days long (24 August on) and every rate is judged on it; the
 owner is exporting twelve months of "Rx Transaction Details By Submission Type". Prove the reader
 (`rx-transactions.ts`, `importRxTransactions`) on a multi-month file: fixed columns across page
 breaks and month boundaries, `transactionKey` de-duplication on a re-sent day, a tens-of-thousands
@@ -274,6 +274,16 @@ work. You can, and you do not need the database to read arithmetic.
    offer several ranked options with a running total rather than one answer, since the site cannot
    see the cart; does it say plainly that no on-hand count has ever been received and what it is
    using instead. Session 1 will put the live top lines and the facts behind each in HANDOFF.
+
+5. **The site's memory footprint** (added 8 September, after the counter lost the page): the app's
+   process sits at **1.6 GB** after `warm.ts` warms every held reading on a cold start, on a
+   7.3 GB machine shared with the dispensing system, a browser, Defender and two Claude sessions.
+   Audit `warm.ts`, `held.ts`, `catalogue-cache.ts`, `nadac-latest.ts` and
+   `drug-directory-store.ts directoryKeys()` for what is held and whether it needs to be: which
+   readings are warmed before anyone asks, what each holds per row (`directoryKeys` keeps six
+   string fields for 217,773 NDCs when the grouping needs one), and what could be loaded on first
+   use or trimmed to the fields read. Findings with an estimate per reading in megabytes and the
+   pages that read it; no data needed.
 
 Write each audit as `docs/audits/2026-09-DD-<module>.md`: what is wrong, why it matters in
 dollars, the line, and **the query 1 should run on the real database to size it.** Open a pull

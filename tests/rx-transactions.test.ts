@@ -597,8 +597,11 @@ describe("account sales", () => {
 /**
  * The twelve-month history, which nothing has ever been tested against.
  *
- * The archive is 21 days long and 449 of 553 dispensed NDCs fail steadiness for that reason alone,
- * so every rate on the site is being judged on three weeks. The fix is a twelve-month export, and
+ * The paid archive is fifteen days — 24 August to 7 September — and 449 of 553 dispensed NDCs fail
+ * steadiness for that reason alone, so every rate on the site is being judged on a fortnight. (It
+ * was believed to be 21 days until the Data health row was built: the older figure came from a
+ * query that grouped by NDC without filtering status, and swept in a single reversed cash row dated
+ * 18 August.) The fix is a twelve-month export, and
  * it will arrive as this same printed report run over a range: more pages, more page breaks, and
  * month boundaries inside a single payer's section. `fixtures/rx-transactions-multimonth.txt` is
  * that shape.

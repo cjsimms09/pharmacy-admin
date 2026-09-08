@@ -600,6 +600,18 @@ async function main() {
         ...process.env,
         PHARMACY_LAUNCHER: "1",
         PORT,
+        /*
+         * A ceiling on the app's heap, so the machine survives the app.
+         *
+         * This computer has 7.3 GB, shared with the dispensing system, the label software, a
+         * browser, Defender and two Claude sessions. On 8 September the site's process sat at
+         * 1.6 GB after warming every held reading on a cold start, and with a test suite running
+         * beside it the counter had no page. Node's default heap ceiling on a box this size is
+         * higher than the box can spare. At 2.5 GB the app garbage-collects harder and, if it
+         * still cannot fit, exits — and the launcher below starts it again, which is a short
+         * outage in place of a machine that answers nothing to anybody.
+         */
+        NODE_OPTIONS: [process.env.NODE_OPTIONS, "--max-old-space-size=2560"].filter(Boolean).join(" "),
         // Both only ever set while a tunnel is actually up, and gone the moment it is not.
         ...(tunnel && access?.url ? { PUBLIC_ORIGIN: access.url, COOKIE_SECURE: "1" } : {}),
       },

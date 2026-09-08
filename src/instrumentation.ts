@@ -213,10 +213,62 @@ export async function register() {
     }
   };
 
+  /**
+   * Measures the site against itself once a day, so Data health is never older than that.
+   *
+   * On the same beat as the backup and for the same reason: this runs on a pharmacy computer that
+   * is switched off overnight, so a job scheduled for 2am would simply never happen. It takes one
+   * whenever a day has passed since the last, which on a machine used every day means shortly
+   * after it is turned on — and after the mail sweep above, so the morning's imports are counted
+   * rather than missed by an hour.
+   *
+   * Behind `whenIdle`, and in a process of its own. The measurement reads the whole catalogue and
+   * the whole NADAC table and took 12 to 16 seconds on the real database; every libsql call blocks
+   * the event loop, so run inside the web server it was a fifteen-second outage — and the first
+   * morning it ran that way it fired on a cold start after a deploy, on a machine already short of
+   * memory, and the pharmacist at the counter had no page. `whenIdle` chose the moment; it could
+   * not shorten the block. So this tick only decides that it is time and starts
+   * `scripts/measure-data-health.ts`, which does the work where the site cannot feel it.
+   *
+   * The page shows the date it was measured, so a machine left switched off for a week says so on
+   * its face rather than presenting week-old counts as today's.
+   */
+  const dataHealthTick = async () => {
+    try {
+      const { getSettings, setSetting } = await import("./lib/settings");
+      const s = await getSettings();
+      const last = s.data_health_last ? Date.parse(s.data_health_last) : 0;
+      if (Number.isFinite(last) && Date.now() - last < 20 * 60 * 60 * 1000) return;
+      /*
+       * In a process of its own, not here. The first morning this ran in the web server it fired
+       * on a cold start after a deploy, read the whole catalogue and the NADAC table into a process
+       * already short of memory, and the pharmacist at the counter had no page for a minute and a
+       * half. `whenIdle` chose the moment; it could not shorten the block. The child writes
+       * `data_health_last` itself when it finishes; the stamp here only stops a second start while
+       * it runs, and is overwritten by the child's.
+       */
+      await setSetting("data_health_last", new Date().toISOString());
+      const { spawn } = await import("node:child_process");
+      const path = await import("node:path");
+      const root = process.cwd();
+      const tsx = path.join(root, "node_modules", "tsx", "dist", "cli.mjs");
+      const child = spawn(process.execPath, [tsx, "--tsconfig", path.join(root, "tsconfig.script.json"), path.join(root, "scripts", "measure-data-health.ts")], {
+        cwd: root,
+        detached: true,
+        stdio: "ignore",
+        env: process.env,
+      });
+      child.unref();
+    } catch {
+      // A measurement that fails leaves yesterday's counts and their date, which is honest.
+    }
+  };
+
   const runAll = async () => {
     await publicAccessTick();
     await whenIdle("warm", warmTick);
     await whenIdle("mail", tick);
+    await whenIdle("data-health", dataHealthTick);
     await whenIdle("backup", backupTick);
     await whenIdle("reminders", reminderTick);
     await whenIdle("nadac", nadacTick);

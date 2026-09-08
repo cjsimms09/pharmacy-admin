@@ -213,6 +213,22 @@ export const SPECS: LinkSpec[] = [
     why: "A row with no price cannot be bought from or compared.",
   },
   {
+    key: "catalogue-currency",
+    group: "Datasets",
+    title: "Catalogue files arriving",
+    of: "supplier catalogues whose newest file arrived in the last two days, out of the suppliers the site expects a nightly catalogue from",
+    why:
+      "A wholesaler whose file stopped arriving still shows prices — last week's. Nothing else on the site says a catalogue went quiet, so a price that has not moved in a month looks exactly like a price that has not changed.",
+  },
+  {
+    key: "claims-window",
+    group: "Datasets",
+    title: "How much history the claims cover",
+    of: "days between the first and last fill held, out of the 365 a year's history would carry",
+    why:
+      "Every rate, every steadiness test and every trend is judged on whatever window exists. A window this short cannot tell a slow seller from a new one, and nothing else on the site says how short it is.",
+  },
+  {
     key: "nadac",
     group: "Datasets",
     title: "NADAC",

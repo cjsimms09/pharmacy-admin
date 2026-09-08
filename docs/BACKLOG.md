@@ -430,9 +430,10 @@ contract match; owner action for the top plans now.
 
 ### 10b. The site holds three weeks of claims (8 September)
 
-The claims archive runs from 18 August: a **21-day window**. Every rate the site computes — units
-a day, days on hand, steadiness, which NDC pays, the add-ons list — is judged on it, and 449 of
-553 dispensed NDCs fail the "dispensed on 3 separate days" test for that reason alone. **Owner
+The paid claims archive runs from 24 August: a **15-day span** (Data health, "claims window").
+Every rate the site computes — units a day, days on hand, steadiness, which NDC pays, the add-ons
+list — is judged on it, and 449 of 553 dispensed NDCs fail the "dispensed on 3 separate days"
+test for that reason alone. **Owner
 action: load the claims history** — a PioneerRx "Rx Transaction Details" export covering the past
 twelve months into the inbox, or the SQL read the owner is arranging. The reader already handles
 the report; it only needs the months.
@@ -472,7 +473,7 @@ place, and an arithmetic check before anything is stored.
 | NADAC | weekly | ingesting, coverage measured 7 Sep |
 | MTF / facilitator payments | as they arrive | page exists (`/remits/mtf`) |
 | On-hand counts | weekly | **owner asked 7 September: "Did we receive a balance on hand report yet? Didn't come in right?"** — checked on the live database that night; see Done/HANDOFF for the answer |
-| Supplier catalogues with pricing | weekly | ingesting, 5 suppliers |
+| Supplier catalogues with pricing | nightly from PioneerRx | ingesting, 5 suppliers — **but on 7 September only ANDA and ParMed arrived; McKesson, IPC and IPD did not.** Owner action: check PioneerRx's scheduled deliveries for those three. Data health gains a per-supplier "last file" row so the site says this itself. |
 | Other expense invoices | as they arrive | ingesting |
 | Third-party reimbursement contracts | as signed | reader built, first live runs done |
 | **835 remittance files** | **future** | **none received yet**; the request builder is live (B), the remittance tables are designed (`payer-model.md`, A auditing) |
