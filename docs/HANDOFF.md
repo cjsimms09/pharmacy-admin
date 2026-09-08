@@ -23,6 +23,15 @@ the tree dirty. The owner's balance-on-hand report is re-filed through the repai
 November 2025) is on the ANDA supplier: 100% within a year less the 20% handling fee, expired
 and eleven other categories non-returnable, the rest in its notes.
 
+**8 September, 16:10 (1) — the owner: "make all changes with medium or higher confidence."** Six
+networks linked on his instruction, each to a document fetched from its source and filed in the
+library, with the reason and the source on the link: NET=400 → CMS's GLP-1 Bridge pharmacy
+document; DODT5IND → Express Scripts' TRICARE payer sheet (identity only, the TRICARE rate is not
+on file); PHXCOM30 → the Phoenix RxAdvantage card; FEHBP01001 → the guide's Caremark document (the
+FEHB National rate); NET=0116 and NET=0111 → Humana's Medicare payer sheet (identity only, no
+Humana agreement on file, nothing prices on them). RXADV and CNCKSNPN stay open. The web findings
+are recorded under BACKLOG 23 with their URLs.
+
 **8 September, 15:40 (1) — the PSAO's networks guide closes the chain.** The owner uploaded
 Health Mart Atlas's 2025 Commercial and Medicaid Networks workbook (14 tabs). `psao-guide.ts`
 reads every tab (`xlsx.ts readSheets`) into 42 library documents, one per PBM, in the read-contract

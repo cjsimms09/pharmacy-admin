@@ -436,10 +436,10 @@ export function candidatesFor(a: {
   payerName: string | null;
   /** Other names the same payer goes by on the BIN listing — "Prime Therapeutics" behind "Blue Cross Blue Shield", by the owner's word. */
   payerAliases?: string[];
-  contracts: (ContractForMatch & { networkNames?: string[]; governsHere?: boolean | null })[];
+  contracts: (ContractForMatch & { networkNames?: string[]; governsHere?: boolean | null; hasRates?: boolean })[];
   /** A date the candidate has to be in force on, where the caller has one. */
   on?: string | null;
-}): { documentId: string; documentName: string; counterparty: string | null; networkNames: string[]; why: string }[] {
+}): { documentId: string; documentName: string; counterparty: string | null; networkNames: string[]; hasRates: boolean; why: string }[] {
   const id = norm(a.networkId);
   const payer = norm(a.payerName);
   const payers = [payer, ...(a.payerAliases ?? []).map(norm)].filter((p): p is string => p !== null);
@@ -462,6 +462,7 @@ export function candidatesFor(a: {
         documentName: c.documentName,
         counterparty: c.counterparty,
         networkNames: names,
+        hasRates: c.hasRates === true,
         rank,
         why: printsId
           ? `this document prints ${a.networkId} as one of its network reimbursement ids`

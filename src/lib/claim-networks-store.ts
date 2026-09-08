@@ -28,18 +28,18 @@ export type NetworkToLink = {
   bins: string[];
   /** Already tied to a document, and to which. */
   linkedTo: { documentId: string; documentName: string } | null;
-  candidates: { documentId: string; documentName: string; counterparty: string | null; networkNames: string[]; why: string }[];
+  candidates: { documentId: string; documentName: string; counterparty: string | null; networkNames: string[]; hasRates: boolean; why: string }[];
 };
 
 /** The contracts, in the shape the matcher wants, with the names the owner recognises them by. */
-async function contractsForLinking(): Promise<(ContractForMatch & { networkNames: string[]; governsHere: boolean | null })[]> {
+async function contractsForLinking(): Promise<(ContractForMatch & { networkNames: string[]; governsHere: boolean | null; hasRates: boolean })[]> {
   const { parseTerms } = await import("./contract-extract");
   const { governsPharmacy } = await import("./contract-apply");
   const { getSettings } = await import("./settings");
   const st = await getSettings();
   const pharmacy = { chainCode: st.pharmacy_chain_code || null, ncpdp: st.pharmacy_ncpdp || null, npi: st.pharmacy_npi || null };
   const docs = await db.query.contractDocs.findMany();
-  const out: (ContractForMatch & { networkNames: string[]; governsHere: boolean | null })[] = [];
+  const out: (ContractForMatch & { networkNames: string[]; governsHere: boolean | null; hasRates: boolean })[] = [];
   for (const d of docs) {
     if (d.extractionState !== "done") continue;
     const terms = parseTerms(d.extractionJson);
@@ -49,6 +49,7 @@ async function contractsForLinking(): Promise<(ContractForMatch & { networkNames
     const governsHere = terms.chainCodes.length === 0 && terms.pharmacyNcpdps.length === 0 ? null : g.ok;
     out.push({
       governsHere,
+      hasRates: (terms.rates ?? []).some((r) => r.brandFormula || r.genericBasis || r.brandDispensingFee != null || r.genericDispensingFee != null),
       documentId: d.id,
       documentName: d.documentName,
       counterparty: terms.counterparty ?? d.pbmName,
@@ -139,9 +140,17 @@ export async function networksToLink(): Promise<NetworkToLink[]> {
      */
     const payerName = bins.map((b) => payerByBin.get(b.toUpperCase())).find(Boolean) ?? (r.pbm ? r.pbm.trim() || null : null);
     const link = links.find((l) => (l.contractId ?? "").trim().toUpperCase() === networkId.toUpperCase() && l.contractDocId);
+    /*
+     * A settled id is one tied to a document — or one the owner has said is a programme, not a network:
+     * "these are loyalty/discount cards.. isn't a formula on loyalty or discount cards" (8 September). A
+     * programme has no rate to link to; its money is reconciled as a payment on the claim (BACKLOG 24).
+     */
+    const programme = link && !link.contractDocId && /^Programme:/.test(link.basis ?? "") ? link.basis! : null;
     const linkedTo = link?.contractDocId
       ? { documentId: link.contractDocId, documentName: nameOf.get(link.contractDocId) ?? "a document no longer on file" }
-      : null;
+      : programme
+        ? { documentId: "", documentName: programme }
+        : null;
     return {
       networkId,
       claims: Number(r.claims),
@@ -168,7 +177,7 @@ function withLearned(
   claims: number,
   learned: Map<string, number> | null,
   ranked: NetworkToLink["candidates"],
-  contracts: (ContractForMatch & { networkNames: string[] })[],
+  contracts: (ContractForMatch & { networkNames: string[]; hasRates?: boolean })[],
 ): NetworkToLink["candidates"] {
   if (!learned || learned.size === 0) return ranked;
   const first = [...learned.entries()]
@@ -180,6 +189,7 @@ function withLearned(
         documentName: c?.documentName ?? "a document no longer on file",
         counterparty: c?.counterparty ?? null,
         networkNames: c?.networkNames ?? [],
+        hasRates: c?.hasRates === true,
         why: `${n} of this network's ${claims} claims match it by BIN and group on the contract's own listing — the strongest sign short of the id printed on a document`,
       };
     });
@@ -217,7 +227,12 @@ export async function deduceNetworkLinks(user: { name: string }): Promise<{ link
     // guide prints the routing where it does not print the id (Optum's crosswalk is keyed that way).
     const learnedAll = /^(\d+) of this network's (\d+) claims match it by BIN and group/.exec(top.why);
     const allMatch = learnedAll !== null && learnedAll[1] === learnedAll[2];
-    const decided = prints ? top : allMatch ? top : here.length === 1 ? here[0] : null;
+    // The payer the claims name has exactly one document on file that carries rates: SmithRx, Drexi,
+    // Rightway — one commercial rate each in the PSAO's guide and nothing else in the folder. The owner,
+    // 8 September: "so this should be the SmithRx rate?? this should be done?" It is.
+    const priced = r.candidates.filter((c) => c.hasRates && /is who this network's BIN resolves to/.test(c.why));
+    const onlyPriced = priced.length === 1 ? priced[0] : null;
+    const decided = prints ? top : allMatch ? top : here.length === 1 ? here[0] : onlyPriced;
     if (!decided) {
       undecided++;
       continue;
@@ -226,6 +241,8 @@ export async function deduceNetworkLinks(user: { name: string }): Promise<{ link
       ? `Linked by the site: ${decided.documentName} prints ${r.networkId} as one of its network reimbursement ids.`
       : allMatch
         ? `Linked by the site: every one of this network's ${r.claims} claims matches ${decided.documentName} by the BIN, PCN and group it lists. Replace it if the PSAO's listing says otherwise.`
+        : here.length === 0 && onlyPriced
+          ? `Linked by the site: the only ${decided.counterparty ?? r.payerName ?? "payer"} document on file that carries rates. Replace it if another document for this payer is loaded.`
       : `Linked by the site: the only ${decided.counterparty ?? r.payerName ?? "payer"} document written for this pharmacy's chain code. Replace it if the PSAO's listing says otherwise.`;
     await savePayerLink(
       { bin: null, pcn: null, groupNumber: null, contractId: r.networkId },
