@@ -473,21 +473,38 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
     let unitDiffers = 0;
     let differs = 0;
 
+    let multipleCount = 0;
     for (const row of placed) {
       const v = comparePack(row.packSize, packageOf.get(row.ndc11!));
       if (v.verdict === "agree") agree++;
       else if (v.verdict === "cannot-compare") unreadable++;
       else if (v.verdict === "unit-differs") unitDiffers++;
       else if (v.verdict === "multiple") {
+        multipleCount++;
         if (multiples.length < 3) multiples.push(`${row.supplier} "${row.packSize}" against the FDA's ${v.fda} ${v.uom} — ${v.factor}× out`);
-        differs++;
       } else differs++;
     }
 
     const comparable = placed.length - unreadable;
     const gaps: string[] = [];
-    if (multiples.length > 0) {
-      gaps.push(`A whole multiple out, which is the expensive kind: ${multiples.join("; ")}`);
+    /*
+     * The count first, then the examples.
+     *
+     * Three worked examples with no total behind them is an anecdote: it says these exist without
+     * saying whether they are three rows or three thousand, and the answer decides whether this is
+     * an afternoon's work or a footnote. The multiples are the expensive kind — a pack size wrong
+     * by a whole factor is a per-unit cost wrong by that factor, in a figure the buy list acts on —
+     * so they are counted apart from the rows that merely disagree.
+     */
+    if (multipleCount > 0) {
+      gaps.push(
+        `${multipleCount.toLocaleString("en-US")} row${multipleCount === 1 ? " is" : "s are"} a whole multiple out, which is the expensive kind: the per-unit cost is wrong by that factor. For example ${multiples.join("; ")}`,
+      );
+    }
+    if (differs > 0) {
+      gaps.push(
+        `${differs.toLocaleString("en-US")} row${differs === 1 ? "" : "s"} disagree by something other than a whole factor, which usually means one side is describing a different package rather than counting it differently`,
+      );
     }
     if (unitDiffers > 0) {
       gaps.push(`${unitDiffers.toLocaleString("en-US")} rows are counted in a different unit from the FDA's — grams against tablets cannot be reconciled by any factor`);
