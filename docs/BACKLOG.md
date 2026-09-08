@@ -515,6 +515,21 @@ the directory load moves to a script (2), the column lists are 1's. Rule for eve
 machine, added to SESSION-RULES §1a: nothing that loads the catalogue or the directory runs in a
 second process during pharmacy hours; measure with a query, not by importing the module.
 
+### 17. The shelf screen has to show the drug, and everything a person needs beside it (8 September)
+
+The owner's words: "the shelf screen needs to be better. not showing the drug name or any other
+specifics that might be needed. need to audit this page and make better and more useful." Measured
+on the first count (8 September, 1,770 rows): **every row is nameless** — the report's first column
+is "Drug", which the reader's aliases did not include (fixed on 2's branch, ships with the reader
+fix); **every row is costless** — the report's "Cost" column is not an alias either, so the page
+says "the file carried no values"; "Order Point" and "Size" are dropped. And the page should not
+depend on the file for any of it: 1,652 of the 1,770 NDCs are in the FDA directory (name, strength,
+form, labeler, schedule) and 1,735 are in a supplier catalogue. The page itself is the surplus and
+returns list titled "The shelf": it lists only lines beyond twice the target days. What is wanted:
+the whole dispensing shelf, searchable — drug with strength and form, NDC, on hand in units and
+packages, per day and days of stock, PioneerRx's order point against on hand, cost and value, the
+cheapest supplier today, last dispensed, schedule — with the surplus section kept beneath it.
+Reader aliases ("Cost", "Order Point", "Size") are 2's; the page and `shelf.ts` are 1's.
 ## The data the site has to ingest
 
 Named by the owner on 7 September as what is still being connected. Each one needs a reader, a
