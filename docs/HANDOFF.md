@@ -8,6 +8,30 @@ file is how they talk.
 
 ## Open items
 
+### From Helper A to session 1 — shelf.ts, two queries (8 September)
+
+Audit in `docs/audits/2026-09-08-shelf.md`, branch `work/audit-shelf`. Findings only, no fix — both
+of the ones that matter change what the order screen recommends, so the numbers should decide them.
+All three findings push the order back to the primary when a secondary was genuinely cheaper.
+
+1. **Does any supplier's catalogue spelling differ from its register name?**
+   `select distinct lower(trim(supplier)) from supplier_items order by 1;` against
+   `select id, lower(trim(name)) from suppliers;`
+   The buy list (`shelf.ts:603`) looks the rebate rate up by exact key, where every other module uses
+   `rateForSupplier`. Any name that is not character-for-character identical is a supplier whose
+   whole catalogue is priced **gross on the order screen and net everywhere else** — so its contract
+   lines look dearer than they are and the order leaves the contract.
+2. **What share of each secondary's catalogue is actually a contract item?**
+   `select supplier, contract_flag, count(*) from supplier_items group by supplier, contract_flag;`
+   `bandCostOfMoving` is called with the basket subtotal only, so every cent is charged against the
+   compliance ratio as a contract generic. Lines flagged "not rebated" cannot move the band. That
+   inflated cost is designed to overrule the invoice saving, so it flips baskets back to the primary
+   and understates the headline saving.
+
+Write the numbers back here. If query 1 returns any mismatch, I would import `effectiveMicros` and
+route the rate through `rateForSupplier` in one commit — it closes findings 1 and 3 together.
+
+
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
