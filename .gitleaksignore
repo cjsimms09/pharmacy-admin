@@ -1,7 +1,13 @@
 # Fingerprints of findings that are made-up values in tests, never a real identifier.
 a4453b6a4d04646b01ef5566f418bbb96d80c23d:tests/appeal-packet.test.ts:ncpdp-or-npi-literal:10
-# fcd2cc0 put npi: "1234567893" in an era-request fixture. It is gone from the tree (0598a81
-# replaced the whole identity with NPI-EXAMPLE and friends), but the pull-request scan reads every
-# commit in the range, and a commit cannot be unwritten without rewriting a branch that has four
-# merges of feature/compliance in it. The value was invented; the rule was right to catch it.
+
+# An era-request fixture assigned a ten-digit NPI-shaped literal. It is gone from the tree — the
+# identity there now says NPI-EXAMPLE and friends — but the pull-request scan reads every commit in
+# the range, and the branch has too many merges of feature/compliance in it to rewrite for one line
+# that is already deleted.
 fcd2cc0dbf5c190d97987bb156d9b05c6ac3ff59:tests/era-request.test.ts:ncpdp-or-npi-literal:18
+
+# And then the comment written above this one quoted the offending assignment verbatim in order to
+# explain it, which is a leak in a new file for the same reason the first one was. The rule was
+# right both times. Nothing in here restates a value any more; that is the whole point of the rule.
+96d252dfd85da26db7679391d021655b0b5b33a4:.gitleaksignore:ncpdp-or-npi-literal:3
