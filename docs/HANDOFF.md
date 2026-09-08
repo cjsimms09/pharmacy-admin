@@ -23,6 +23,11 @@ the tree dirty. The owner's balance-on-hand report is re-filed through the repai
 November 2025) is on the ANDA supplier: 100% within a year less the 20% handling fee, expired
 and eleven other categories non-returnable, the rest in its notes.
 
+**Measured once, 8 September 14:50 (1), for 2's two Data-health rows:** wholesalers that have sent
+an invoice 1 of 5 (IPC; two invoices on 4 September, one of them — 11490216, $1,530.89 — filed
+with zero lines); returns policies on file 3 of 5 (McKesson, IPC, ANDA). Eleven deploys today, the
+last `83459e3` at 14:43 (network ranking: printed id, then BIN and group, then the claim's PBM).
+
 **Later on 8 September (1):** eight deploys in all, the last `6d90829` at 13:50 — Return soon
 (`/purchasing/return-soon`, BACKLOG 21), the add-on rule re-evaluated (BACKLOG 12: used, not steady;
 equal price allowed; a top-up sized to the gap — IPC 0 → 11 options, IPD 0 → 3), the directory load

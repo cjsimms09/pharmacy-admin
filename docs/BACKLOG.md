@@ -599,6 +599,26 @@ secondary is never offered. Two pieces: (1) a pack-mismatch guard on the add-on 
 line whose package the FDA and the wholesaler disagree on by a whole multiple is not offered until
 settled, and the row says so; (2) add-ons by product (`equivalence_key`), offering the cheapest
 equivalent NDC the pharmacy already dispenses under, never a brand for a generic or the reverse.
+### 23. The chain: payer → BIN/PCN/group → plan class → network id → contract → rate → backtest (8 September)
+
+The owner's framing, as ideas rather than statements: "Payor to bin to group to network id to
+contract sounds like the whole game right?? This is what we need to do and correctly. This should be
+organized this way also.. then we can backtest to see if correct.. especially on ERISA and part d
+plans. Commercial plans will most likely be paying NADAC + 10.50?" It is the payer model in
+`docs/reference/payer-model.md`, and the site holds every hop, unevenly. Measured 8 September:
+BIN → payer: the claims report names the PBM on 1,302 of 1,304 paid claims and 36 payer links
+came off contracts. BIN/PCN/group → plan class: 6 of 1,054 fills on a classified plan; item 10's
+proposals wait on the owner's clicks. Network id → contract: 82 ids on 1,030 claims, 0 linked;
+2 printed by a document, 52 ranked by their PBM, 28 with nothing to rank. Contract → rate: 65
+rate lines in `network_rates` from 74 applied documents. Rate → price: `priceFromRate` exists and
+prices nothing yet, because nothing is linked. **The backtest does not exist**: for every fill on
+a linked contract, price it from the rate and set it beside what the plan actually remitted, by
+plan class — Part D, Medicaid (the Kansas floor, NADAC plus the dispensing fee), commercial,
+ERISA where a document says so — with the differences ranked by dollars. That is item 19 built as
+a page, one hop per column, each hop's coverage as a fraction, and it is the shape the Payers
+section should take. Owner's two ideas to test, not assume: ERISA plans priced apart from the
+floor; commercial at NADAC plus $10.50. Order: link the top networks (one click each, biggest
+first), finish the read (the ceiling), then the backtest on what is linked.
 ## The data the site has to ingest
 
 Named by the owner on 7 September as what is still being connected. Each one needs a reader, a
