@@ -250,6 +250,22 @@ export const SPECS: LinkSpec[] = [
     why: "What the pharmacy actually paid. An invoice with a total and no lines reaches the cost of no drug.",
   },
   {
+    key: "supplier-invoices",
+    group: "Datasets",
+    title: "Which wholesalers have sent an invoice",
+    of: "active wholesalers with at least one invoice on file, out of every active wholesaler",
+    why:
+      "The row above counts the invoices that arrived and cannot see the ones that never did. Four of this pharmacy's five wholesalers have never had an invoice loaded, so nothing bought from them has a cost, a supplier or a return clock — and every screen that asks 'who sold this bottle' answers 'no invoice on file' without saying that it will go on answering that until somebody forwards one.",
+  },
+  {
+    key: "supplier-returns",
+    group: "Datasets",
+    title: "Returns policies",
+    of: "active wholesalers with a returns policy on file, out of every active wholesaler",
+    why:
+      "A returns policy is what turns an invoice line into a deadline: the credit now, the day it steps down, the day the window shuts. Without one the site is silent on that supplier's stock — correctly silent, because a guessed window would send a bottle back on a date nobody agreed to — but silence here reads exactly like nothing needing to go back.",
+  },
+  {
     key: "on-hand",
     group: "Datasets",
     title: "On-hand counts",
