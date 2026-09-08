@@ -445,14 +445,18 @@ export function candidatesFor(a: {
       const names = (c.networkNames ?? []).filter(Boolean);
       const samePayer = payer !== null && norm(c.counterparty) !== null && (norm(c.counterparty)!.includes(payer) || payer.includes(norm(c.counterparty)!));
       const namesId = id !== null && names.some((n) => norm(n)?.includes(id));
-      const rank = samePayer && namesId ? 0 : samePayer ? 1 : namesId ? 2 : 3;
+      // The document prints the id itself: 23 of the 177 read contracts list their network reimbursement ids, and three of those ids are on this pharmacy's claims.
+      const printsId = id !== null && (c.networkReimbursementIds ?? []).some((n) => norm(n) === id);
+      const rank = printsId ? -1 : samePayer && namesId ? 0 : samePayer ? 1 : namesId ? 2 : 3;
       return {
         documentId: c.documentId,
         documentName: c.documentName,
         counterparty: c.counterparty,
         networkNames: names,
         rank,
-        why: samePayer
+        why: printsId
+          ? `this document prints ${a.networkId} as one of its network reimbursement ids`
+          : samePayer
           ? `${c.counterparty} is who this network's BIN resolves to`
           : namesId
             ? `a network on this document is named for ${a.networkId}`

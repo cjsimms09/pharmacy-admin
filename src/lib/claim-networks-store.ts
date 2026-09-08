@@ -1,7 +1,7 @@
 import "server-only";
 import { db } from "@/db";
 import { sql } from "drizzle-orm";
-import { candidatesFor, type ContractForMatch } from "./claim-contract";
+import { candidatesFor, contractFor, type ContractForMatch } from "./claim-contract";
 import { allPayerLinks } from "./payer-links";
 
 /**
@@ -64,11 +64,12 @@ async function contractsForLinking(): Promise<(ContractForMatch & { networkNames
  * call blocks the event loop completely, and this page is opened while somebody is dispensing.
  */
 export async function networksToLink(): Promise<NetworkToLink[]> {
-  const rows = await db.all<{ network_id: string; claims: number; remit_cents: number; bins: string | null }>(sql`
+  const rows = await db.all<{ network_id: string; claims: number; remit_cents: number; bins: string | null; pbm: string | null }>(sql`
     select network_id,
            count(*)                              as claims,
            coalesce(sum(remit_cents), 0)         as remit_cents,
-           group_concat(distinct bin)            as bins
+           group_concat(distinct bin)            as bins,
+           max(pbm_name)                         as pbm
     from claims
     where network_id is not null and trim(network_id) <> ''
       and (status is null or status <> 'reversed')
@@ -80,6 +81,34 @@ export async function networksToLink(): Promise<NetworkToLink[]> {
   const contracts = await contractsForLinking();
   const nameOf = new Map(contracts.map((c) => [c.documentId, c.documentName]));
 
+  /*
+   * Learned from the claims themselves — the owner's own idea, 8 September: "If we have bin and
+   * group and network id, and we can match bin and group, can't we also then match network id and
+   * contract?" A contract that prints its BINs, PCNs and groups governs the claims that carry
+   * them; those claims also carry a network id; so the id is that contract's, and every other
+   * claim on the same id — different BIN or group, same network — follows. No document prints the
+   * id, so this is offered as the top candidate with the count behind it, and the owner links.
+   */
+  const triples = await db.all<{ network_id: string; bin: string | null; pcn: string | null; group_number: string | null; date_filled: string; n: number }>(sql`
+    select network_id, bin, pcn, group_number, max(date_filled) as date_filled, count(*) as n
+    from claims
+    where network_id is not null and trim(network_id) <> ''
+      and (status is null or status <> 'reversed')
+    group by network_id, bin, pcn, group_number
+  `);
+  const learned = new Map<string, Map<string, number>>();
+  for (const t of triples) {
+    const hit = contractFor(
+      { bin: t.bin, pcn: t.pcn, groupNumber: t.group_number, networkId: t.network_id, dateFilled: t.date_filled, daysSupply: null, remitCents: null, awpCents: null, acquisitionCents: null, isBrand: null },
+      contracts,
+    );
+    if (!hit) continue;
+    const key = t.network_id.trim().toUpperCase();
+    const by = learned.get(key) ?? new Map<string, number>();
+    by.set(hit.contract.documentId, (by.get(hit.contract.documentId) ?? 0) + Number(t.n));
+    learned.set(key, by);
+  }
+
   // Who a BIN resolves to, from the links already settled — the strongest hint available.
   const payerByBin = new Map<string, string>();
   for (const l of links) if (l.bin && l.pbmName) payerByBin.set(l.bin.trim().toUpperCase(), l.pbmName);
@@ -87,7 +116,13 @@ export async function networksToLink(): Promise<NetworkToLink[]> {
   return rows.map((r) => {
     const networkId = r.network_id.trim();
     const bins = (r.bins ?? "").split(",").map((b) => b.trim()).filter(Boolean);
-    const payerName = bins.map((b) => payerByBin.get(b.toUpperCase())).find(Boolean) ?? null;
+    /*
+     * The settled link first; else the PBM the claims report itself names on the claim. The report
+     * names one on 1,302 of 1,304 paid claims, and until 8 September it was ignored here, so every
+     * network was offered all 177 read contracts with nothing to rank them. It is a hint, not a
+     * finding: the ranking says "is who this network's BIN resolves to", and the owner still links.
+     */
+    const payerName = bins.map((b) => payerByBin.get(b.toUpperCase())).find(Boolean) ?? (r.pbm ? r.pbm.trim() || null : null);
     const link = links.find((l) => (l.contractId ?? "").trim().toUpperCase() === networkId.toUpperCase() && l.contractDocId);
     const linkedTo = link?.contractDocId
       ? { documentId: link.contractDocId, documentName: nameOf.get(link.contractDocId) ?? "a document no longer on file" }
@@ -99,7 +134,32 @@ export async function networksToLink(): Promise<NetworkToLink[]> {
       payerName,
       bins,
       linkedTo,
-      candidates: linkedTo ? [] : candidatesFor({ networkId, payerName, contracts }),
+      candidates: linkedTo ? [] : withLearned(networkId, Number(r.claims), learned.get(networkId.toUpperCase()) ?? null, candidatesFor({ networkId, payerName, contracts }), contracts),
     };
   });
+}
+
+/** The contracts the network's own claims matched by BIN and group go first, with the count; the rest follow. */
+function withLearned(
+  networkId: string,
+  claims: number,
+  learned: Map<string, number> | null,
+  ranked: NetworkToLink["candidates"],
+  contracts: (ContractForMatch & { networkNames: string[] })[],
+): NetworkToLink["candidates"] {
+  if (!learned || learned.size === 0) return ranked;
+  const first = [...learned.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([documentId, n]) => {
+      const c = contracts.find((x) => x.documentId === documentId);
+      return {
+        documentId,
+        documentName: c?.documentName ?? "a document no longer on file",
+        counterparty: c?.counterparty ?? null,
+        networkNames: c?.networkNames ?? [],
+        why: `${n} of this network's ${claims} claims match it by BIN and group on the contract's own listing — the strongest sign short of the id printed on a document`,
+      };
+    });
+  const seen = new Set(first.map((c) => c.documentId));
+  return [...first, ...ranked.filter((c) => !seen.has(c.documentId))];
 }
