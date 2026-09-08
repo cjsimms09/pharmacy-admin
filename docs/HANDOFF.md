@@ -30,7 +30,7 @@ under two PBMs marked `collides`. It prints no network id, PCN or group. 1,302 o
 now sit on a BIN a document names; not on it: 028249 "RedSail" (223 claims, $617), 610097 Optum
 (70), 015581 Humana (50) — Humana is not an Atlas PBM at all, so a direct agreement is what to ask
 the owner for. The "2027 Medicare D Reimbursement Guide" (80 pages, a rate grid the site's own PDF
-text reader cannot lift) is filed in the contract library as `288d7ef9…`, state none, for the
+text reader cannot lift) is filed in the contract library as `288d7ef9…`, and the 2026 guide (94 pages) as `736e1cb2…`, state none, for the
 next `read --scans` once the ceiling is raised. `deduceNetworkLinks` (live in 2936d25) has linked 15
 of 82 networks, 306 of 1,030 claims, on its own; not yet wired into the nightly tick or after
 `applyAllReads` — a follow-up on BACKLOG 23.
