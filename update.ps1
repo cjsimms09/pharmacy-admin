@@ -55,8 +55,21 @@ npm install --no-audit --no-fund --loglevel=error
 if ($LASTEXITCODE -ne 0) { Bad "Install failed."; exit 1 }
 
 Step "Building - this is the slow part, usually a minute or two..."
-npm run build 2>&1 | Select-String -Pattern "error|Error|failed" -Context 0,2
-if ($LASTEXITCODE -ne 0) { Bad "Build failed. The previous version is still on disk."; exit 1 }
+# ── Why the build is run this way ────────────────────────────────────
+# The build used to be piped through Select-String with $ErrorActionPreference = "Stop" in force.
+# Under "Stop", any line a native program writes to stderr becomes a terminating error, so a
+# harmless webpack *cache* warning ("Caching failed for pack: ENOENT ... 11.pack") aborted the
+# whole update on 8 September 2026 with "The update did not finish" — while the build itself
+# would have succeeded. A native program's verdict is its exit code and nothing else.
+#
+# The stale cache is cleared first, because that warning comes from a build that was interrupted
+# earlier leaving half a cache behind, and a fresh cache costs a minute once.
+if (Test-Path ".\.next\cache") { Remove-Item -Recurse -Force ".\.next\cache" -ErrorAction SilentlyContinue }
+$ErrorActionPreference = "Continue"
+& cmd /c "npm run build 2>&1" | ForEach-Object { if ($_ -match "error|Error|failed|Compiled") { Write-Host "  $_" } }
+$built = $LASTEXITCODE
+$ErrorActionPreference = "Stop"
+if ($built -ne 0) { Bad "Build failed. The previous version is still on disk."; exit 1 }
 Ok "Built."
 
 Step "Bringing the database up to date..."
