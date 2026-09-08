@@ -1,4 +1,4 @@
-import { readAccess, isOpen, timeLeft, clearAccess } from "@/lib/public-access";
+import { readAccess, isOpen, isReachable, timeLeft, clearAccess } from "@/lib/public-access";
 import { requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { revalidatePath } from "next/cache";
@@ -20,6 +20,14 @@ export async function PublicAccessBanner() {
   const access = readAccess();
   if (!isOpen(access)) return null;
   const left = timeLeft(access);
+  /*
+   * Asked for is not the same as open, and the stripe must not say otherwise.
+   *
+   * A request whose tunnel has not started — or could not start — is not exposure. Colouring it red
+   * and announcing the site is open to the internet trains somebody to read that stripe as noise,
+   * and it is the one stripe in this site that cannot afford to be read as noise.
+   */
+  const live = isReachable(access);
 
   async function stop() {
     "use server";
@@ -37,17 +45,29 @@ export async function PublicAccessBanner() {
   }
 
   return (
-    <div className="no-print bg-crit px-4 py-2 text-white">
+    <div className={`no-print px-4 py-2 text-white ${live ? "bg-crit" : "bg-warn"}`}>
       <div className="mx-auto flex max-w-[1400px] flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-        <span className="font-semibold uppercase tracking-wide">Open to the internet</span>
-        <span className="opacity-90">
-          Anyone with the address can reach this pharmacy&rsquo;s real records. Closes on its own in{" "}
-          <b className="tabular-nums">{left}</b>
-          {access?.reason ? ` — opened for: ${access.reason}` : ""}.
+        <span className="font-semibold uppercase tracking-wide">
+          {live ? "Open to the internet" : access?.status === "failed" ? "Outside access could not start" : "Outside access is waiting"}
         </span>
-        {access?.url ? <code className="rounded bg-white/15 px-1.5 py-0.5">{access.url}</code> : null}
+        <span className="opacity-90">
+          {live ? (
+            <>
+              Anyone with the address can reach this pharmacy&rsquo;s real records. Closes on its own in{" "}
+              <b className="tabular-nums">{left}</b>
+              {access?.reason ? ` — opened for: ${access.reason}` : ""}.
+            </>
+          ) : access?.status === "failed" ? (
+            <>{access.problem} The site is private in the meantime.</>
+          ) : (
+            <>Close the app and start it again — the tunnel comes up when the site starts. Nothing is exposed until it does.</>
+          )}
+        </span>
+        {live && access?.url ? <code className="rounded bg-white/15 px-1.5 py-0.5">{access.url}</code> : null}
         <form action={stop} className="ml-auto">
-          <button className="rounded-full border border-white/40 px-3 py-0.5 font-medium hover:bg-white/15">Close it now</button>
+          <button className="rounded-full border border-white/40 px-3 py-0.5 font-medium hover:bg-white/15">
+            {live ? "Close it now" : "Cancel it"}
+          </button>
         </form>
       </div>
     </div>

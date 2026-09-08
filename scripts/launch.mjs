@@ -546,9 +546,30 @@ async function main() {
     let access = readAccess();
     let tunnel = null;
     if (accessOpen(access)) {
+      /*
+       * However this turns out, the answer is written where the pharmacist can see it.
+       *
+       * Both failures below used to log to this console window — which is hidden by design — and
+       * leave the record on disk saying nothing at all. The page then showed "still coming up"
+       * forever, waiting for an address that was never coming, while the banner claimed the site
+       * was open to the internet when it was not. A failure nobody can see is the same as no
+       * failure handling.
+       */
+      const record = (patch) => {
+        access = { ...access, ...patch };
+        try { fs.writeFileSync(accessFile, JSON.stringify(access, null, 2)); } catch { /* the page reads it; the run is unaffected */ }
+      };
+
       const bin = cloudflaredPath();
       if (!bin) {
         log("Public access was asked for, but cloudflared is not installed on this computer. Starting privately.");
+        record({
+          status: "failed",
+          url: null,
+          problem:
+            "cloudflared is not installed on this computer, so there is nothing to make the outside address with. " +
+            "Install it in PowerShell with:  winget install --id Cloudflare.cloudflared  — then close the app and start it again.",
+        });
         access = null;
       } else {
         step(`Opening the site to the outside until ${new Date(access.expiresAt).toLocaleTimeString()}\u2026`);
@@ -556,11 +577,17 @@ async function main() {
         if (!t.url) {
           try { t.child?.kill(); } catch { /* it may already be gone */ }
           log("The tunnel did not come up. Starting privately, which is the safe way to fail.");
+          record({
+            status: "failed",
+            url: null,
+            problem:
+              "cloudflared is installed but did not produce an address within a minute. That is usually the pharmacy's " +
+              "network blocking it, or Cloudflare being busy. Close the app and start it again to try once more.",
+          });
           access = null;
         } else {
           tunnel = t.child;
-          access = { ...access, url: t.url };
-          try { fs.writeFileSync(accessFile, JSON.stringify(access, null, 2)); } catch { /* the app reads it for the banner only */ }
+          record({ status: "open", url: t.url, problem: null });
           log(`The site is reachable at ${t.url} until ${new Date(access.expiresAt).toLocaleTimeString()}.`);
         }
       }

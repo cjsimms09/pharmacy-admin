@@ -40,6 +40,23 @@ export type PublicAccess = {
    * travels with the exposure and resets when a new one begins.
    */
   noticedOn?: string | null;
+  /**
+   * Where the request has got to, which is not the same question as whether it was asked for.
+   *
+   * "requested" means somebody pressed the button and the tunnel has not been tried yet — it is
+   * tried when the site next starts, so this state persists until then and the page has to say so
+   * rather than showing an address that is never coming.
+   *
+   * "failed" means it was tried and could not be done, with `problem` saying why in the words of
+   * the thing somebody would have to go and do. This state existed before and was written nowhere:
+   * the launcher logged it to a console window that is hidden by design and left the record saying
+   * nothing, so the page waited for an address that would never arrive, forever.
+   *
+   * "open" means the tunnel is up and `url` is real.
+   */
+  status?: "requested" | "open" | "failed";
+  /** Why it is not open, where it is not. Null otherwise. */
+  problem?: string | null;
 };
 
 /**
@@ -94,6 +111,18 @@ export function isOpen(a: PublicAccess | null, now = new Date()): boolean {
   if (!a) return false;
   const ends = Date.parse(a.expiresAt);
   return Number.isFinite(ends) && ends > now.getTime();
+}
+
+/**
+ * Whether the world can actually reach it right now.
+ *
+ * Distinct from isOpen, which only says the request has not expired. A request that was made but
+ * whose tunnel has not started, or could not start, is not exposure — and saying it is exposed
+ * teaches somebody that the red stripe means nothing, which is the one thing that stripe cannot
+ * afford. The address has to exist before anything claims the site is reachable.
+ */
+export function isReachable(a: PublicAccess | null, now = new Date()): boolean {
+  return isOpen(a, now) && a!.status === "open" && !!a!.url;
 }
 
 export function minutesLeft(a: PublicAccess | null, now = new Date()): number {

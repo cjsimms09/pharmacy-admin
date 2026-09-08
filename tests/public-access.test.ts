@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isOpen, minutesLeft, timeLeft, expiryFor, allowedOrigins, MAX_HOURS, type PublicAccess } from "../src/lib/public-access";
+import { isOpen, isReachable, minutesLeft, timeLeft, expiryFor, allowedOrigins, MAX_HOURS, type PublicAccess } from "../src/lib/public-access";
 
 /*
  * The site can be opened to the internet on purpose. These hold the two ways that goes wrong, and
@@ -81,4 +81,34 @@ test("the time left is said the way a person would say it", () => {
 test("the last hour counts in minutes again, which is when it matters", () => {
   assert.equal(timeLeft(at("2026-09-08T12:59:00.000Z"), now), "59 minutes");
   assert.equal(timeLeft(at("2026-09-08T13:01:00.000Z"), now), "1 hour");
+});
+
+/*
+ * Asked for is not the same as open, and the site said otherwise for five minutes on the
+ * pharmacy's screen: "still coming up", forever, waiting for an address that was never coming.
+ * Both ways the tunnel can fail wrote nothing to the record — they logged to a console window
+ * that is hidden by design — so the page had nothing to show and the banner claimed the site was
+ * exposed when it was not.
+ */
+
+test("a request whose tunnel has not started is not exposure", () => {
+  const asked = { ...at("2026-09-22T12:00:00.000Z"), url: null, status: "requested" as const };
+  assert.equal(isOpen(asked, now), true, "the request stands");
+  assert.equal(isReachable(asked, now), false, "but nothing can reach it");
+});
+
+test("a tunnel that could not start is not exposure either", () => {
+  const failed = { ...at("2026-09-22T12:00:00.000Z"), url: null, status: "failed" as const, problem: "cloudflared is not installed" };
+  assert.equal(isReachable(failed, now), false);
+});
+
+test("only an address that exists counts as reachable", () => {
+  assert.equal(isReachable({ ...at("2026-09-22T12:00:00.000Z"), status: "open" }, now), true);
+  // Marked open with no address is a contradiction, and the safe reading is the closed one.
+  assert.equal(isReachable({ ...at("2026-09-22T12:00:00.000Z"), status: "open", url: null }, now), false);
+});
+
+test("an expired request is not reachable however it is marked", () => {
+  assert.equal(isReachable({ ...at("2026-09-08T11:00:00.000Z"), status: "open" }, now), false);
+  assert.equal(isReachable(null, now), false);
 });

@@ -3,7 +3,7 @@ import { revalidatePath } from "next/cache";
 import { requireManager } from "@/lib/auth";
 import { lanAddresses } from "@/lib/network";
 import { audit } from "@/lib/audit";
-import { readAccess, writeAccess, clearAccess, isOpen, timeLeft, expiryFor, MAX_HOURS } from "@/lib/public-access";
+import { readAccess, writeAccess, clearAccess, isOpen, isReachable, timeLeft, expiryFor, MAX_HOURS } from "@/lib/public-access";
 import { PageHeader, BackLink, Notice, Card } from "@/components/ui";
 
 export const metadata = { title: "Use from another computer" };
@@ -16,6 +16,7 @@ export default async function NetworkPage({ searchParams }: { searchParams: Prom
   const notice = await searchParams;
   const access = readAccess();
   const open = isOpen(access);
+  const live = isReachable(access);
 
   /*
    * Opening the pharmacy to the internet, for a stated reason and a stated length of time.
@@ -33,7 +34,7 @@ export default async function NetworkPage({ searchParams }: { searchParams: Prom
     if (reason.length < 4) {
       redirect("/settings/network?error=" + encodeURIComponent("Say what it is being opened for. It goes in the record."));
     }
-    const record = { url: null, requestedAt: new Date().toISOString(), expiresAt: expiryFor(hours), requestedBy: u.name, reason };
+    const record = { url: null, status: "requested" as const, problem: null, requestedAt: new Date().toISOString(), expiresAt: expiryFor(hours), requestedBy: u.name, reason };
     writeAccess(record);
     await audit({ action: "public_access.opened", userId: u.id, userName: u.name, details: `${reason} — until ${record.expiresAt}` });
     revalidatePath("/", "layout");
@@ -73,14 +74,38 @@ export default async function NetworkPage({ searchParams }: { searchParams: Prom
       >
         {open ? (
           <>
+            {!live ? (
+              <Notice kind={access?.status === "failed" ? "crit" : "warn"}>
+                {access?.status === "failed" ? (
+                  <>
+                    <b>The outside address could not be made, so nothing is exposed.</b> {access.problem}
+                  </>
+                ) : (
+                  <>
+                    <b>Asked for, but not started yet.</b> The tunnel comes up when the site starts, so close the app
+                    and start it again. Until then nothing is reachable from outside and this page will keep saying so
+                    rather than showing an address.
+                  </>
+                )}
+              </Notice>
+            ) : null}
             <p className="text-sm">
-              <b>The site is open to the internet right now.</b> It closes on its own in{" "}
+              <b>{live ? "The site is open to the internet right now." : "This is asked for but not running."}</b> It{" "}
+              {live ? "closes" : "would close"} on its own in{" "}
               <b className="tabular-nums">{timeLeft(access)}</b> — on{" "}
               <b>{access ? new Date(access.expiresAt).toLocaleString() : ""}</b> — whether or not anybody remembers.
             </p>
             <dl className="mt-3 grid gap-1 text-xs text-ink-2 sm:grid-cols-[7rem_1fr]">
               <dt className="font-medium text-ink">Address</dt>
-              <dd><code className="rounded bg-ground px-1.5 py-0.5 select-all">{access?.url ?? "still coming up — reload in a moment"}</code></dd>
+              <dd>
+                {access?.url ? (
+                  <code className="rounded bg-ground px-1.5 py-0.5 select-all">{access.url}</code>
+                ) : (
+                  <span className="text-ink-3">
+                    {access?.status === "failed" ? "none — it could not be made" : "none yet — it appears here once the site has been restarted"}
+                  </span>
+                )}
+              </dd>
               <dt className="font-medium text-ink">Opened for</dt>
               <dd>{access?.reason}</dd>
               <dt className="font-medium text-ink">Opened by</dt>
@@ -92,7 +117,7 @@ export default async function NetworkPage({ searchParams }: { searchParams: Prom
               </dd>
             </dl>
             <form action={closeDown} className="mt-3">
-              <button className="btn btn-danger">Close it now</button>
+              <button className="btn btn-danger">{live ? "Close it now" : "Cancel it"}</button>
             </form>
           </>
         ) : (
