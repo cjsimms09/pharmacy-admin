@@ -72,7 +72,7 @@ const draft = (): ContractTermsT => ({
     { purpose: "mac_appeals", name: "MAC Appeals", organisation: "Example PBM", phone: "800-555-0100", fax: null, email: "macappeals@example.invalid", portalUrl: null, postalAddress: null, citation: cite("MAC appeals: 800-555-0100.") },
     { purpose: "payment_or_eft", name: null, organisation: "Example PBM", phone: null, fax: null, email: "eft@example.invalid", portalUrl: "https://portal.example.invalid/eft", postalAddress: null, citation: null },
   ],
-  remittance: { payerNamesOnRemittance: [], payerIdentifiers: [], paidBy: "Example PBM", paymentMethod: "EFT", paymentCycle: "twice monthly", eraOffered: true, enrollmentMethod: "EFT/ERA enrollment form on the provider portal", remittanceContact: "eft@example.invalid", citation: cite("Payment is made twice monthly by EFT with an 835 remittance.") },
+  remittance: { payerNamesOnRemittance: [], payerIdentifiers: [], paidBy: "Example PBM", paymentMethod: "EFT", paymentCycle: "twice monthly", eraOffered: true, enrollmentMethod: "EFT/ERA enrollment form on the provider portal", enrollmentFormUrl: "https://portal.example.invalid/eft", clearinghouse: null, tradingPartnerId: null, remittanceContact: "eft@example.invalid", citation: cite("Payment is made twice monthly by EFT with an 835 remittance.") },
   auditLookbackYears: 2,
   auditExtrapolationAllowed: false,
   gcrTiers: [],

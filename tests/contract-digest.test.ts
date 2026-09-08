@@ -42,7 +42,7 @@ describe("the digest", () => {
     t.latePaymentInterest = "1% per month";
     t.postPointOfSaleDiscounts = [{ name: "GDR fee", trigger: "generic dispensing rate below 88%", calculation: "0.5% of ingredient cost", collectionMethod: "offset against the next cycle", frequency: "quarterly", appliesToPbmVendor: null, citation: { quote: "A fee of 0.5% applies where GDR falls below 88%.", page: 4, section: null } }];
     t.pricingCompendium = { value: "Medi-Span, date of service", citation: { quote: "AWP means the Medi-Span published price on the date of service.", page: 2, section: null } };
-    t.remittance = { paidBy: null, paymentMethod: null, paymentCycle: null, eraOffered: null, enrollmentMethod: null, remittanceContact: null, payerNamesOnRemittance: ["EXAMPLE HEALTH PLAN INC"], payerIdentifiers: ["87726"], citation: null };
+    t.remittance = { paidBy: null, paymentMethod: null, paymentCycle: null, eraOffered: null, enrollmentMethod: null, enrollmentFormUrl: null, clearinghouse: null, tradingPartnerId: null, remittanceContact: null, payerNamesOnRemittance: ["EXAMPLE HEALTH PLAN INC"], payerIdentifiers: ["87726"], citation: null };
     t.noticesOwedByPharmacy = [{ subject: "Change of pharmacist-in-charge", withinDays: 10, method: "written notice to Network Relations", consequenceIfMissed: "material breach", citation: null }];
 
     const groups = digest(t);

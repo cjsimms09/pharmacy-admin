@@ -544,7 +544,7 @@ function mockTerms(name: string, pbm: string): ContractTermsT {
     macAppealInvoiceRequired: true,
     macAppealSubmissionTarget: "https://portal.example.invalid/mac-appeals",
     contacts: [{ purpose: "mac_appeals", name: "MAC Appeals Desk", organisation: pbm, phone: null, fax: null, email: "macappeals@example.invalid", portalUrl: "https://portal.example.invalid/mac-appeals", postalAddress: null, citation: cite }],
-    remittance: { payerNamesOnRemittance: [], payerIdentifiers: [], paidBy: pbm, paymentMethod: "EFT", paymentCycle: "twice monthly", eraOffered: true, enrollmentMethod: "Provider portal, EFT/ERA enrollment form", remittanceContact: "providerpayments@example.invalid", citation: cite },
+    remittance: { payerNamesOnRemittance: [], payerIdentifiers: [], paidBy: pbm, paymentMethod: "EFT", paymentCycle: "twice monthly", eraOffered: true, enrollmentMethod: "Provider portal, EFT/ERA enrollment form", enrollmentFormUrl: "https://portal.example.invalid/eft-era", clearinghouse: null, tradingPartnerId: null, remittanceContact: "providerpayments@example.invalid", citation: cite },
     macAppealRetroactive: true,
     auditLookbackYears: 2,
     auditExtrapolationAllowed: false,

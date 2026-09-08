@@ -52,7 +52,7 @@ question that needs real figures is written as a query under "Open items" in `do
 | Session | Files |
 | --- | --- |
 | **1** | `product-groups.ts`, `product-key.ts`, `drug-profit*.ts`, `products-store.ts`, `money-found.ts`, `replay-store.ts`, `suppliers.ts` (catalogue import), `nadac*.ts`, `catalogue-*.ts`, `drug-directory*.ts`, `shelf.ts`, `order-plan.ts`, `scripts/**`, migrations, these docs |
-| **2** | `invoices.ts`, `invoice-lines.ts`, `suppliers-registry.ts`, `rebate-rates.ts` (supplier matching), `purchase-ratio.ts`, `src/app/(app)/suppliers/**` |
+| **2** | `invoices.ts`, `invoice-lines.ts`, `suppliers-registry.ts`, `rebate-rates.ts` (supplier matching), `purchase-ratio.ts`, `src/app/(app)/suppliers/**`, `src/app/(app)/inventory/invoices/**` (the `/invoices` path is a redirect to it), `data-health*.ts`, `src/app/(app)/tools/data-health/**` |
 | **A** | `ledger.ts`, `ledger-store.ts`, `period-account.ts`, `profit-and-loss.ts`, `src/app/(app)/money/**`, `bars.tsx`, `charts.tsx`, `expense-categories.ts`; audit files under `docs/audits/` |
 | **B** | `mailbox.ts` (routing and recognition only), `src/app/(app)/inbox/**`, `labels.ts`, `autoroute.ts`, `intake-*`, `era-enrollment.ts`, `src/app/(app)/payers/routing/**`; audit files under `docs/audits/` |
 | **1, contracts** | `contract-*.ts`, `src/app/(app)/payers/sort/**`, `payers/contracts/**`, `payers/[pbm]/**` — the contract ingestion is session 1's own job; nobody else edits the extraction |
@@ -80,6 +80,16 @@ question that needs real figures is written as a query under "Open items" in `do
 Works in its own worktree, never in 1's folder (a deploy runs `git checkout -- .` there). Hands the
 branch to 1 by message when `npm run check` passes. **B audits this branch** — see B below.
 
+**Next, after the invoice follow-ups (8 September, from 1): the Data health page** — `docs/BACKLOG.md`
+item 9, the owner's own words. One page that measures the site against itself on the real
+database: for each dataset its completeness and currency, and for each link in the table there
+its coverage as numerator, denominator, percent, the date measured, and the worst gaps in words.
+Pure counting module (`data-health.ts`, tested on fixtures), a store that runs the counts in a
+separate process or held between requests (every libsql call blocks the server; 200,000 rows is
+1.7 seconds of nothing answering), and a page under Tools. Files: `data-health*.ts` and
+`src/app/(app)/tools/data-health/**` are yours. Start from tonight's hand-measured figures in
+HANDOFF so the first version already shows the real numbers.
+
 ---
 
 ## Helper A — auditor for 1, and the Money books
@@ -106,8 +116,18 @@ work. You can, and you do not need the database to read arithmetic.
    never used for what the dictionary says it must not be. Units are the thing that has already
    gone wrong here — a per-EA cost against a per-ML benchmark read as "100× NADAC".
 
-3. **Claims data** (added 7 September, the owner's ask): the claims reader `claims.ts` and every
-   column alias it accepts, `fills.ts` grouping, `claim-payments.ts`, and `reimbursement-fit.ts`.
+3. **Claims data** (added 7 September, the owner's ask). **First within it, added 8 September:
+   claims with secondary payors** — BACKLOG 2b-iv, numbers in HANDOFF. 22 of 1,054 insured fills
+   carry more than one payor; the fill grouping puts cost on one row correctly, but every figure
+   stated *by payor* hangs the whole fill's profit on one of them. Audit every page and module that
+   reports profit, revenue or "expected from" by payor (`fills.ts`, `claims.ts` payer summaries,
+   `drug-profit.ts`, `contract-replay.ts`, the claims and payers pages, the Money books) against
+   two statements that must both hold: the fill owns the profit; each payor owns its own receivable
+   (its remit on its transmission, settled only by its own 835). Say where the site double-counts
+   the patient's share or the cost across rows, and define "expected from payor X" so it
+   reconciles line by line when 835s arrive. Then the rest of the claims audit: the reader
+   `claims.ts` and every column alias it accepts, `fills.ts` grouping, `claim-payments.ts`, and
+   `reimbursement-fit.ts`.
    One meaning and one unit per figure, nothing inferred that the export states, and every figure
    the profit chain uses (`drug-profit.ts`, `contract-replay.ts`) traced back to the export column
    it came from. Session 1 will put the claims inventory it is building under "Open items" in
@@ -174,6 +194,36 @@ fixture where the same money is reachable two ways, a completeness check that sa
 feeds are not yet in the books, cash and accrual with the difference explained, and a test that the
 books balance from the stored rows. Full brief in `docs/BACKLOG.md` item 4.
 
+**Cash versus accrual — the principle, which the owner stated and which is correct, and what the
+books must do with it.** He put it this way (7 September): copays collected at the register are
+cash when collected; third-party payments are not cash until the 835 or remittance arrives; on the
+accrual side both belong to the month of the fill. That is standard revenue recognition and it is
+the test the books must pass. What Claude adds, because he asked us to think it through rather than
+take it as given:
+
+- **Revenue, per fill.** The patient's money (`patientTotalCents`, else `copayCents`) is accrual
+  in the fill month and cash on the day it was collected (`completedAt`). The payer's money
+  (`remitCents`) is accrual in the fill month — recognised at the adjudicated amount, as a
+  receivable — and cash only when the 835 or remittance shows it paid (`claim_payments`, the 835
+  reader in `x12-835.ts`, the MTF payments). Never on adjudication. Reversals, DIR, clawbacks and
+  facilitator payments adjust the receivable when they are known, not the original month's cash.
+- **The bank statement is the truth on the cash side.** The owner will upload one at each month
+  end (`bank_lines`, `bank-statement.ts`). An 835 says a payer *decided* to pay; the deposit says
+  the money *landed*, and the two dates differ. So cash-basis revenue reconciles to deposits, and
+  every deposit should be explained by the 835s and register takings behind it. A deposit nothing
+  explains, or an 835 with no deposit, is a finding the books must show.
+- **Cost of goods follows the same split.** Accrual: the acquisition cost of what was dispensed,
+  in the fill month, matched against the revenue it earned. Cash: the supplier invoice when it was
+  paid (`supplier_invoices.paidOn`). Rebates reduce cost of goods in the period earned (accrual)
+  and when the credit memo lands (cash). Expenses likewise: incurred versus paid.
+- **The receivable has to be visible and aged.** Until an 835 exists for a claim, the payer's money
+  is owed; the books show the balance by payer and how old it is, because an old receivable is
+  either a lost remittance or a claim that will never pay, and both are money.
+
+Write the fixture that proves it: one fill, adjudicated in month 1, remitted in month 2, deposited
+in month 3, and the three views disagree by exactly the remit. *"Everything needs to be thought
+through and correct and audited."*
+
 ---
 
 ## Helper B — auditor for 2, and the inbox recogniser
@@ -208,8 +258,72 @@ plus `era-enrollment.ts`, `era_enrollments`, `payment_routing`, `pbm_contacts` a
    you cannot see real contracts. The extraction's output shape is in `contract-terms.ts` — 1 will
    add the ERA fields there and note the names under "Open items" in HANDOFF.
 
+**Added 8 September:** the owner wants payments reconciled to claims once 835s arrive, so the
+request builder is the first half of a pair. Read `docs/BACKLOG.md` item 2b-ii for what a claim
+must carry to be matched to an 835 (the CLP01 reference, 503-F3 authorization number, amounts by
+component) and what the 835 carries (N1*PR, TRN, CLP with CAS codes, PLB provider-level
+adjustments). `x12-835.ts` exists; check what it keeps against that list and say in the pull
+request what it drops. PLB money belongs to no single claim and must still reach the books.
+
 Then the inbox recogniser below.
 
+
+### From 2 (8 September) — what the invoice side needs from you
+
+Branch `work/invoices` is on GitHub and merged once already. Two commits to audit: `e78a7d0`
+(supplier resolution) and `c87ff57` (empty invoices). Findings to `docs/audits/`, as above.
+
+**Audit these three things in particular, because each is a number that looked right.**
+
+1. `supplierRecordFor` in `suppliers-registry.ts` must resolve a supplier by equality only —
+   register name, catalogue name, aliases, then canonical spellings. If you can find any input
+   where it resolves on a partial match, that is a finding. The bug it replaced put eight invoice
+   lines and $78.50 outside every rebate figure, silently.
+2. `earningSoFar` in `rebate-rates.ts` now reports `unplacedLines`, `unplacedCents` and
+   `unplacedNames`. Check that no caller drops them on the floor: an unplaced line that nothing
+   displays is the original bug wearing a different coat. I have not yet put them on a screen.
+3. `emptyInvoiceWarning` in `invoices.ts` decides whether an invoice with a total and no lines is
+   flagged. Check the boundaries — a zero total, a null total, a negative total (a credit memo).
+   Flagging a credit memo as a missing invoice would be a new wrong number.
+
+**The seam for McKesson routing is on my side and it is already there. Do not edit the importers.**
+
+`invoices.ts` now exports `looksLikeInvoiceFromUnknownSender({ fileName, mimeType, subject,
+supplier, text })`. It answers one question: *this PDF reads as a supplier invoice and we do not
+know whose*. It files nothing and changes no existing routing.
+
+Why it exists. `looksLikeInvoice` begins `if (!opts.supplier) return false`, so a PDF from a
+sender nobody has registered can never be filed as an invoice. McKesson's register row has no
+sender address at all — `sender_emails` is empty — so a McKesson invoice arriving this afternoon
+would fall through to the general vault as "other" however plainly the page said INVOICE. The
+pharmacy would go on believing its purchase records were complete, every figure built on invoice
+lines would be short without saying so, and a supplier invoice sitting among ordinary documents is
+the outcome 21 CFR 1304.04(h)(1) does not allow.
+
+What I would like you to build in `mailbox.ts`, which is yours and which I have not touched:
+where the sender match returns nothing and this predicate returns true, raise the item as
+**"an invoice from a sender we do not know"** with the supplier's name as printed on the page if
+you can offer one, and a control to attach it to a register row. Attaching should write the
+sender address onto that supplier so the next one files itself — that is the "correction kept as a
+rule on the sender" in your own brief. Do not file it as an invoice on the strength of the
+predicate alone; an unknown sender is exactly when a person should decide.
+
+It is deliberately narrow: the document's own words must classify as an invoice
+(`classifySupplierDocument` → two or more lines each carrying an NDC and a price). A subject line
+is written by whoever sent the email and is not evidence when the sender is unknown, and a scan
+with no text layer answers false rather than guessing. Tests are in `tests/invoices.test.ts` under
+"a supplier invoice whose sender is not on the register".
+
+**What you cannot do and should not try.** There is no McKesson invoice anywhere to test against:
+`fixtures/invoice-mckesson.txt` has been wanted since before this branch and `git log --all`
+confirms it has never been committed, so the McKesson reader in `invoice-lines.ts` has only ever
+run against a hand-built string in `tests/invoice-lines.test.ts`. 1 has asked the owner to forward
+a real one. Until it exists, build against `fixtures/invoice-ipc.txt` and synthetic text, and say
+in your pull request what you could not verify.
+
+**Questions needing real figures** go in `docs/HANDOFF.md` under "Open items" addressed to 2. I
+run them here and write the number back. Do not ask the owner to send you a file; your container
+cannot reach this machine.
 ### Build: an inbox that knows what arrived, and can always be corrected
 
 The owner: *"The inbox should eventually be able to know what's coming in based off name, email,

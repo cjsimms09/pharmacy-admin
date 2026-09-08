@@ -10,7 +10,7 @@ import { getSettings } from "./settings";
 import { pdfText } from "./pdf-text";
 import { looksLikeRebateReport } from "./rebate-report";
 import { isDrillDownText } from "./drill-down-read";
-import { allSuppliers, supplierForSender } from "./suppliers-registry";
+import { allSuppliers, supplierForSender, supplierRecordFor } from "./suppliers-registry";
 import { scheduleFromNames, linesMatching } from "./controlled-names";
 import { audit } from "./audit";
 import type { InvoiceSchedule, DocumentCategory } from "@/db/schema";
@@ -611,6 +611,23 @@ export async function fileInvoice(
     }
   }
 
+  /*
+   * The register row, from the sender first and from the printed name second.
+   *
+   * The sender address is the better answer and stays first: it is the part a wholesaler's billing
+   * system controls. But it is not always available — an invoice forwarded by hand arrives from the
+   * person who forwarded it, and an invoice filed from a document already in the vault has no
+   * sender at all — and when it was missing this simply stored null and never looked again. Both
+   * IPC invoices on the live database sit at supplier_id NULL for that reason, with "Independent
+   * Pharmacy Cooperative" printed on them the whole time and IPC's address registered.
+   *
+   * The fallback is the register's own matcher, so it is equality against the register name, the
+   * catalogue name and the aliases the pharmacy typed — never a substring. A name it cannot place
+   * stays null, which is the state the invoices page is meant to show rather than paper over.
+   */
+  const fromSender = meta.supplierId ?? null;
+  const supplierId = fromSender ?? supplierRecordFor(await allSuppliers(true), supplier)?.id ?? null;
+
   const id = newId();
   await db.insert(schema.supplierInvoices).values({
     id,
@@ -625,15 +642,81 @@ export async function fileInvoice(
     // should not push anything else out of the page it is shown on.
     itemsText: items.join("\n").slice(0, 20000),
     totalCents,
-    supplierId: meta.supplierId ?? null,
+    supplierId,
     needsReview: !confident,
     receivedFrom: meta.from,
   });
-  if (text) await writeInvoiceLines(id, text);
+  /*
+   * One path to the lines, not two.
+   *
+   * This called writeInvoiceLines and then storeInvoiceLines on the same text — the second
+   * re-parsing what the first had just stored and deleting the rows to write them again. Besides
+   * doing the work twice, it meant a model read obtained by the first call could be replaced by the
+   * second call's rule read, and the only thing preventing that was the rule reader returning
+   * before the delete when it read nothing.
+   *
+   * writeInvoiceLines is the whole path already: the rule reader first because it is free and
+   * deterministic, the model only where the rule read nothing at all, and linesRead / linesUnread
+   * recorded at the end. It reads the invoice row back, so it sees the supplierId resolved above
+   * rather than being told it a second time.
+   */
+  const written = text ? await writeInvoiceLines(id, text) : null;
 
-  await storeInvoiceLines(id, { supplier, supplierId: meta.supplierId ?? null, invoiceDate, text: text ?? "", printedTotalCents: totalCents });
+  /*
+   * An invoice carrying money and no lines under it is not a quiet success.
+   *
+   * A PDF with no text layer — a scan, which is how some wholesalers send — produces exactly this:
+   * the total is read off the front page, the row is filed, `text` is null, no line reader is ever
+   * called, and nothing anywhere says so. One is sitting on the live database now: $1,530.89, zero
+   * lines, zero unread, and needs_review already cleared. Every figure built on invoice lines — what
+   * the pharmacy paid for an NDC, the rebate ladder, the purchase ratio — is short by that invoice
+   * and looks complete.
+   *
+   * So the row says it. `needsReview` goes back on and the reason is written into `basis`, because
+   * a total with nothing under it is a document somebody has to open, not a number to be trusted.
+   */
+  const why = emptyInvoiceWarning({
+    linesStored: written?.read ?? 0,
+    totalCents,
+    hasTextLayer: text !== null,
+  });
+  if (why) {
+    await db
+      .update(schema.supplierInvoices)
+      .set({ needsReview: true, basis: `${basis} ${why}`.trim() })
+      .where(eq(schema.supplierInvoices.id, id));
+  }
 
-  return { id, documentId, schedule, needsReview: !confident };
+  return { id, documentId, schedule, needsReview: !confident || why !== null };
+}
+
+/**
+ * What to say about an invoice that carries money and has no lines under it.
+ *
+ * Returns the sentence to put on the row, or null where there is nothing wrong.
+ *
+ * A PDF with no text layer — a scan, which is how some wholesalers send — produces exactly this
+ * shape: the total is read off the front page, the row is filed, no line reader is ever called,
+ * and nothing anywhere says so. One is sitting on the live database now at $1,530.89 with zero
+ * lines, zero unread, and needs_review already cleared. Every figure built on invoice lines — what
+ * the pharmacy paid for an NDC, the rebate ladder, the purchase ratio — is short by that invoice
+ * and looks complete, which is the same failure mode as the supplier match that dropped eight
+ * lines without a word.
+ *
+ * A zero total with no lines is not this: an invoice for nothing has nothing to be missing.
+ */
+export function emptyInvoiceWarning(a: {
+  linesStored: number;
+  totalCents: number | null;
+  /** False for a scan. It changes the advice, because there is nothing on the page to re-read. */
+  hasTextLayer: boolean;
+}): string | null {
+  if (a.linesStored > 0) return null;
+  if (a.totalCents === null || a.totalCents <= 0) return null;
+  const total = `$${(a.totalCents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return a.hasTextLayer
+    ? `The total of ${total} was read off the page, but no item line could be read from it. Nothing on this invoice reaches the cost of any drug until somebody looks.`
+    : `The total of ${total} was read off the page, but this PDF carries no text layer, so not one item line could be read. Nothing on this invoice reaches the cost of any drug until somebody enters it or a readable copy replaces it.`;
 }
 
 /** The invoice as text, or null for a scan with no text layer. Short text is treated as none. */
@@ -873,6 +956,13 @@ export type InvoiceQuery = {
   maxAmount?: number;
   /** Only ones with no amount read, so they can be filled in. */
   noAmount?: boolean;
+  /**
+   * Only ones carrying a total with no item lines under them.
+   *
+   * Kept apart from `noAmount`, which is the opposite complaint. These have the money and are
+   * missing the goods, so every per-NDC cost and every rebate figure is short by them.
+   */
+  noLines?: boolean;
 };
 
 /**
@@ -911,14 +1001,27 @@ export async function invoices(q: InvoiceQuery = {}): Promise<SupplierInvoice[]>
    * typed has to appear somewhere, which is what makes "oxycodone march" behave the way
    * somebody expects rather than returning everything with either.
    */
+  // Asked of the lines rather than of `lines_read`, because that column records what one reading
+  // managed and this question is about what is on the invoice now.
+  const withLines = q.noLines ? await invoiceIdsWithLines() : null;
+
   return rows
     .filter((r) => matchesText(r, q.text))
     .filter((r) => {
+      if (withLines && !((r.totalCents ?? 0) > 0 && !withLines.has(r.id))) return false;
       if (q.noAmount) return r.totalCents === null;
       if (q.minAmount !== undefined && (r.totalCents === null || r.totalCents < q.minAmount * 100)) return false;
       if (q.maxAmount !== undefined && (r.totalCents === null || r.totalCents > q.maxAmount * 100)) return false;
       return true;
     });
+}
+
+/** The invoices that have at least one item line stored against them. */
+async function invoiceIdsWithLines(): Promise<Set<string>> {
+  const rows = await db
+    .selectDistinct({ invoiceId: schema.invoiceLines.invoiceId })
+    .from(schema.invoiceLines);
+  return new Set(rows.map((r) => r.invoiceId));
 }
 
 /** What the shown invoices come to, so a filtered list answers "how much was that month". */
@@ -927,6 +1030,49 @@ export function sumOf(rows: SupplierInvoice[]): { total: number; missing: number
     total: rows.reduce((n, r) => n + (r.totalCents ?? 0), 0),
     missing: rows.filter((r) => r.totalCents === null).length,
   };
+}
+
+/**
+ * A PDF that reads as a supplier invoice from a sender nobody has registered.
+ *
+ * `looksLikeInvoice` refuses these outright — `if (!opts.supplier) return false` — and that guard
+ * is right for what it does: a rule that filed PDFs from strangers under the heading an inspector
+ * reads first would sweep up the wrong things. But refusing is not the same as noticing, and at the
+ * moment nothing notices. The document falls through to the general vault as "other", and the only
+ * sign that a wholesaler's invoice was ever received is a row in a list of miscellany.
+ *
+ * That is how McKesson stands today. Its register row has no sender address at all, so
+ * `supplierForSender` returns null, `supplierName` is null, and a McKesson invoice arriving this
+ * afternoon could not be filed as an invoice however plainly it said so on the page. There are no
+ * McKesson invoices on the database and no McKesson document in the vault, so nothing has been lost
+ * yet — but the pharmacy would go on believing its purchase records were complete, and every figure
+ * built on invoice lines would be short without saying so. A supplier invoice commingled with
+ * ordinary documents is also the outcome 21 CFR 1304.04(h)(1) does not allow, which is the same
+ * reason `suppliers-registry.ts` treats the sender addresses as the load-bearing part.
+ *
+ * So this is the seam: it answers "this is an invoice and we do not know whose", and the caller
+ * raises it for a person instead of filing it or dropping it. It never files anything itself.
+ *
+ * Deliberately narrower than `looksLikeInvoice`, because there is no known sender to lean on:
+ * the document's own words have to say it. A subject line and a file name are written by whoever
+ * sent the email and are not evidence here, so a scan with no text layer answers false — unknown
+ * sender and unreadable page is not something to guess about. `classifySupplierDocument` returns
+ * "invoice" only for two or more lines each carrying an NDC and a price, which a newsletter, a
+ * statement, a credit memo and the daily purchase report all fail.
+ */
+export function looksLikeInvoiceFromUnknownSender(opts: {
+  fileName: string;
+  mimeType: string;
+  subject: string;
+  /** Null is the whole point: this asks about documents the sender match could not place. */
+  supplier: string | null;
+  text?: string | null;
+}): boolean {
+  if (opts.supplier) return false;
+  const isPdf = /\.pdf$/i.test(opts.fileName) || opts.mimeType === "application/pdf";
+  if (!isPdf) return false;
+  if (!opts.text) return false;
+  return classifySupplierDocument(opts.text, opts.fileName, opts.subject).kind === "invoice";
 }
 
 /**
@@ -1047,6 +1193,39 @@ export async function invoiceIssues(): Promise<InvoiceIssue[]> {
           : `The oldest arrived ${days === 0 ? "today" : `${days} day${days === 1 ? "" : "s"} ago`}.`),
       href: "/inventory/invoices?unconfirmed=1",
       action: "Say what they carry",
+    });
+  }
+
+  /*
+   * ── A total with nothing under it ────────────────────────────────
+   *
+   * Derived from the lines every time this is asked, not from a flag written when the invoice was
+   * filed. That matters for the ones already on the database: the invoice that prompted this was
+   * filed before anything checked, so its `needs_review` is clear and no flag will ever be set on
+   * it retrospectively. Asking the question of the data catches it and every future one alike, and
+   * it also catches an invoice whose lines were removed after the fact.
+   *
+   * The money is the point. A scanned PDF files perfectly and reads nothing, so the invoice is in
+   * the archive, the total is on the screen, and not one item line reaches the cost of any drug —
+   * which means every per-NDC cost, the rebate ladder and the purchase ratio are all short by
+   * exactly this much while looking complete.
+   */
+  const withLines = await invoiceIdsWithLines();
+  const empty = rows.filter((r) => (r.totalCents ?? 0) > 0 && !withLines.has(r.id));
+  if (empty.length > 0) {
+    const cents = empty.reduce((n, r) => n + (r.totalCents ?? 0), 0);
+    const money = `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    out.push({
+      key: "no-lines",
+      severity: "blocking",
+      title: `${empty.length} invoice${empty.length === 1 ? "" : "s"} worth ${money} with no item lines read`,
+      detail:
+        `The total was read off the page and not one line under it was. Usually a scan: a PDF with no text layer files ` +
+        `perfectly and reads nothing. Until the lines are entered or a readable copy replaces ${empty.length === 1 ? "it" : "them"}, ` +
+        `nothing on ${empty.length === 1 ? "this invoice" : "these invoices"} reaches the cost of any drug — so what the pharmacy ` +
+        `paid per NDC, the rebate ladder and the purchase ratio are every one of them short by ${money} and look complete.`,
+      href: "/inventory/invoices?nolines=1",
+      action: "Show me which",
     });
   }
 
@@ -1710,6 +1889,40 @@ export async function storeInvoiceLines(
   if (parsed.lines.length === 0) return { stored: 0, unread: parsed.unreadable.length, reconciles: parsed.reconciles, readCents: 0 };
   if (parsed.reconciles === false) return { stored: 0, unread: parsed.lines.length + parsed.unreadable.length, reconciles: false, readCents: parsed.totalCents };
 
+  /*
+   * What is already on this invoice, and whether this read has earned the right to replace it.
+   *
+   * The delete below is unconditional once a read produces lines, and that was safe only by the
+   * order of the early returns above: a model read that succeeded survived a later rule read
+   * because the rule read nothing and returned before reaching the delete. Luck, not design, and
+   * one refactor from wiping figures a person had already been shown.
+   *
+   * The hole it left is real. `reconciles` is null — not false — when the invoice printed no total
+   * to check against, so an unverified read fell straight through to the delete and could replace
+   * lines that had been proved against a printed total. `replacesStoredLines` settles it by
+   * arithmetic instead: lines that add up to what the invoice says it came to are not given up for
+   * a read that cannot prove the same.
+   */
+  const existing = await db.query.invoiceLines.findMany({
+    where: eq(schema.invoiceLines.invoiceId, invoiceId),
+    columns: { extendedCents: true },
+  });
+  if (
+    !replacesStoredLines({
+      storedLines: existing.length,
+      storedCents: existing.reduce((n, l) => n + l.extendedCents, 0),
+      readReconciles: parsed.reconciles,
+      printedTotalCents: meta.printedTotalCents,
+    })
+  ) {
+    return {
+      stored: existing.length,
+      unread: parsed.unreadable.length,
+      reconciles: true,
+      readCents: existing.reduce((n, l) => n + l.extendedCents, 0),
+    };
+  }
+
   await db.delete(schema.invoiceLines).where(eq(schema.invoiceLines.invoiceId, invoiceId));
   const rows = parsed.lines.map((l) => ({
     id: newId(),
@@ -1730,6 +1943,38 @@ export async function storeInvoiceLines(
   }));
   for (let i = 0; i < rows.length; i += 200) await db.insert(schema.invoiceLines).values(rows.slice(i, i + 200));
   return { stored: rows.length, unread: parsed.unreadable.length, reconciles: parsed.reconciles, readCents: parsed.totalCents };
+}
+
+/**
+ * Whether a fresh read may replace the lines already stored against an invoice.
+ *
+ * The question only arises because an invoice is read more than once: on filing, again from the
+ * inbox with today's rules, and again when somebody presses the button on the page. Each of those
+ * is a legitimate re-read and each is entitled to improve on the last. None of them is entitled to
+ * make it worse.
+ *
+ * "Better" here means one thing, and it is arithmetic rather than judgement: lines that add up to
+ * the total printed on the invoice have been proved against the document, and lines that do not
+ * have not. So proved lines are never given up for unproved ones. Where nothing is stored there is
+ * nothing to lose and the read goes in; where the invoice printed no total, nothing can be proved
+ * either way and the newer read stands, which is the behaviour that was already there.
+ *
+ * `readReconciles` is the parse's own verdict: true where it adds to the printed total, false where
+ * it does not, null where there was no total to check. Null is the case that mattered — it is not
+ * a failure, so it fell straight through to the delete and could replace proved lines with
+ * unproved ones.
+ */
+export function replacesStoredLines(a: {
+  storedLines: number;
+  storedCents: number;
+  readReconciles: boolean | null;
+  printedTotalCents: number | null;
+}): boolean {
+  if (a.storedLines === 0) return true;
+  if (a.printedTotalCents === null) return true;
+  const storedWasProved = a.storedCents === a.printedTotalCents;
+  if (!storedWasProved) return true;
+  return a.readReconciles === true;
 }
 
 
