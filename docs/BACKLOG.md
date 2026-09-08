@@ -530,6 +530,23 @@ the whole dispensing shelf, searchable — drug with strength and form, NDC, on 
 packages, per day and days of stock, PioneerRx's order point against on hand, cost and value, the
 cheapest supplier today, last dispensed, schedule — with the surplus section kept beneath it.
 Reader aliases ("Cost", "Order Point", "Size") are 2's; the page and `shelf.ts` are 1's.
+### 18. Pack sizes: where more than two suppliers carry an NDC, the majority settles it (8 September)
+
+The owner's rule: "if more than 2 suppliers then go with majority agreement." Placed in the
+levelling (`catalogue-cache.ts`, 1's) beneath the two documents: a pack the pharmacist typed wins,
+then the FDA where a supplier already reads the box the FDA's way, then — for the NDCs neither
+settles — the whole-package reading (count and unit) that more than half of three or more
+suppliers share. Compared as readings, not strings, so "(2) 33.4 GM" and "66.8 GM" are one
+vote. A tie or a two-supplier split still waits for the pharmacist on the pack-sizes page.
+
+### 19. When the contracts are read: how many claims match a contract, and what would raise it (8 September)
+
+The owner's ask: "once all contracts are done, want a breakdown of how many claims we can match
+to contract and how we can improve it more." Deliver as a page section on Payers and contracts and
+a HANDOFF paragraph: claims matched, by which route (network id, BIN, chain code, owner link), the
+unmatched grouped by BIN/PCN with the fills and dollars behind each, and for every unmatched group
+the one thing that would close it — a document not yet in the folder, a link the owner can make,
+a plan class. Waits on the read finishing, which waits on the Settings → Claude ceiling.
 ## The data the site has to ingest
 
 Named by the owner on 7 September as what is still being connected. Each one needs a reader, a

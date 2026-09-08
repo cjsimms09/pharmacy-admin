@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { fileOnHand, leanShelfNow, latestShelf, movement, SHELF_POLICY } from "@/lib/shelf";
+import { fileOnHand, leanShelfNow, latestShelf, movement, fullShelfNow, SHELF_POLICY } from "@/lib/shelf";
 import { units } from "@/lib/usage";
 import { countAge } from "@/lib/count-age";
 import { retentionRule } from "@/lib/count-retention";
@@ -36,11 +36,11 @@ export const metadata = { title: "The shelf" };
  * and the line that matters is buried. Ordered by the credit that falls at the next step, the
  * pharmacist's attention lands where the money is.
  */
-export default async function ShelfPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
+export default async function ShelfPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string; q?: string }> }) {
   await requireReimbursement();
   await requireUser();
-  const { ok, error } = await searchParams;
-  const [view, snapshot, move] = await Promise.all([leanShelfNow(), latestShelf(), movement()]);
+  const { ok, error, q } = await searchParams;
+  const [view, snapshot, move, full] = await Promise.all([leanShelfNow(), latestShelf(), movement(), fullShelfNow()]);
   /*
    * The front shop, told apart rather than mixed in.
    *
@@ -54,6 +54,22 @@ export default async function ShelfPage({ searchParams }: { searchParams: Promis
       : null;
   const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const days = (n: number) => (Number.isFinite(n) ? `${Math.round(n)} days` : "never");
+  const perUnit = (m: number) => `${(m / 1_000_000).toFixed(m < 100_000 ? 4 : 2)}`;
+  const position = (state: (typeof full.rows)[number]["state"]) =>
+    state === "out"
+      ? "Out — nothing on the shelf"
+      : state === "short"
+        ? `Under the ${SHELF_POLICY.targetDays}-day target`
+        : state === "lean"
+          ? "Lean"
+          : state === "overstocked"
+            ? "Beyond twice the target"
+            : "Not dispensed in the window";
+  const needle = (q ?? "").trim().toLowerCase();
+  const matched = needle
+    ? full.rows.filter((r) => [r.name, r.ndc11, r.labeler, r.strength, r.form].some((f) => (f ?? "").toLowerCase().includes(needle)))
+    : full.rows;
+  const shown = matched.slice(0, 300);
 
   async function upload(fd: FormData) {
     "use server";
@@ -152,32 +168,91 @@ export default async function ShelfPage({ searchParams }: { searchParams: Promis
       )}
 
       <Card
-        title="Upload today's count"
-        subtitle={`PioneerRx's Inventory Search Results, or any on-hand export in text or CSV. One snapshot per day — uploading the same day twice replaces it rather than doubling the shelf. ${retentionRule()}`}
+        title="Everything on the dispensing shelf"
+        subtitle={
+          full.countedOn
+            ? `${full.totals.items.toLocaleString()} products as counted on ${fmt(full.countedOn)}. The rate is the ${move ? `${move.from} to ${move.to}` : "held"} claims; the price is today's cheapest catalogue offer per unit, so "worth" is what it would cost to replace, not what was paid.`
+            : "No count uploaded yet."
+        }
       >
-        <form action={upload} className="grid gap-3 sm:grid-cols-[1fr_auto_auto] sm:items-end">
-          <Field label="The file" hint="The Inventory Search Results report as it comes, or any export with an NDC column beside a quantity-on-hand column.">
-            <input type="file" name="file" accept=".txt,.csv,.tsv" required />
+        <form method="get" className="flex flex-wrap items-end gap-2">
+          <Field label="Find a drug" hint="Name, NDC, strength, form or manufacturer.">
+            <input type="search" name="q" defaultValue={q ?? ""} placeholder="e.g. atorvastatin, 00093" />
           </Field>
-          <Field label="Count date" hint="Only needed where the file prints none.">
-            <input type="date" name="countedOn" />
-          </Field>
-          <button type="submit" className="btn">Upload</button>
+          <button type="submit" className="btn">Search</button>
+          {needle && (
+            <Link href="/purchasing/shelf" className="text-sm underline">
+              Show everything
+            </Link>
+          )}
         </form>
-        {snapshot && snapshot.unmappedColumns.length > 0 && (
+        {full.countedOn && (
           <p className="mt-3 text-sm text-ink-3">
-            Columns in the last file this site had no meaning for: {snapshot.unmappedColumns.join(", ")}. Nothing was
-            dropped silently — if one of those matters, say so and it can be read.
+            {full.totals.out} out, {full.totals.short} under the {SHELF_POLICY.targetDays}-day target, {full.totals.dead} not dispensed in the window.{" "}
+            {full.totals.named.toLocaleString()} of {full.totals.items.toLocaleString()} named; {full.totals.valued.toLocaleString()} priced, worth {money(full.totals.valueCents)} at today's cheapest.
           </p>
         )}
-        {snapshot && Object.keys(snapshot.skipReasons).length > 0 && (
-          <p className="mt-2 text-sm text-ink-3">
-            Rows not counted:{" "}
-            {Object.entries(snapshot.skipReasons)
-              .map(([why, n]) => `${n} ${why}`)
-              .join("; ")}
-            .
-          </p>
+        {shown.length === 0 ? (
+          <Empty>{needle ? `Nothing on the shelf matches "${q}".` : "Nothing can be shown until a count is uploaded."}</Empty>
+        ) : (
+          <div className="mt-3 overflow-x-auto">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Drug</th>
+                  <th className="text-right">On hand</th>
+                  <th className="text-right">Per day</th>
+                  <th className="text-right">Days of stock</th>
+                  <th>Last dispensed</th>
+                  <th className="text-right">Cheapest today</th>
+                  <th className="text-right">Worth</th>
+                  <th>Position</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shown.map((r) => (
+                  <tr key={r.ndc11}>
+                    <td>
+                      <div className="font-medium">{r.name ?? "No name on file"}</div>
+                      {(r.strength || r.form || r.labeler) && (
+                        <div className="text-xs text-ink-3">{[r.strength, r.form, r.labeler].filter(Boolean).join(" · ")}</div>
+                      )}
+                      <div className="text-xs text-ink-3">{r.ndc11}</div>
+                    </td>
+                    <td className="text-right">
+                      {units(r.onHandThousandths)}
+                      {r.packs !== null && (
+                        <div className="text-xs text-ink-3">
+                          {r.packs !== null && r.packs >= 1 ? `${r.packs} × ${r.packUnits}` : `part of a ${r.packUnits}-pack`}
+                        </div>
+                      )}
+                    </td>
+                    <td className="text-right">{r.perDayThousandths > 0 ? units(r.perDayThousandths) : "—"}</td>
+                    <td className="text-right">{r.daysOfStock === null ? "—" : `${Math.round(r.daysOfStock)} days`}</td>
+                    <td className="text-sm">{r.lastOn ? `${fmt(r.lastOn)} (${r.fills} ${r.fills === 1 ? "fill" : "fills"})` : "not in the window"}</td>
+                    <td className="text-right">
+                      {r.cheapest ? (
+                        <>
+                          {perUnit(r.cheapest.unitCostMicros)}
+                          <div className="text-xs text-ink-3">{r.cheapest.supplier}</div>
+                        </>
+                      ) : (
+                        "—"
+                      )}
+                      {r.nadacMicros !== null && <div className="text-xs text-ink-3">NADAC {perUnit(r.nadacMicros)}</div>}
+                    </td>
+                    <td className="text-right">{r.valueCents !== null ? money(r.valueCents) : "—"}</td>
+                    <td className="text-sm">{position(r.state)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {matched.length > shown.length && (
+              <p className="mt-2 text-sm text-ink-3">
+                Showing {shown.length} of {matched.length.toLocaleString()}, the shortest positions first. Search to narrow it.
+              </p>
+            )}
+          </div>
         )}
       </Card>
 
@@ -230,6 +305,36 @@ export default async function ShelfPage({ searchParams }: { searchParams: Promis
             </table>
             {view.rows.length > 200 && <p className="mt-2 text-sm text-ink-3">Showing the 200 with most at stake, of {view.rows.length}.</p>}
           </div>
+        )}
+      </Card>
+
+      <Card
+        title="Upload today's count"
+        subtitle={`PioneerRx's Inventory Search Results, or any on-hand export in text or CSV. One snapshot per day — uploading the same day twice replaces it rather than doubling the shelf. ${retentionRule()}`}
+      >
+        <form action={upload} className="grid gap-3 sm:grid-cols-[1fr_auto_auto] sm:items-end">
+          <Field label="The file" hint="The Inventory Search Results report as it comes, or any export with an NDC column beside a quantity-on-hand column.">
+            <input type="file" name="file" accept=".txt,.csv,.tsv" required />
+          </Field>
+          <Field label="Count date" hint="Only needed where the file prints none.">
+            <input type="date" name="countedOn" />
+          </Field>
+          <button type="submit" className="btn">Upload</button>
+        </form>
+        {snapshot && snapshot.unmappedColumns.length > 0 && (
+          <p className="mt-3 text-sm text-ink-3">
+            Columns in the last file this site had no meaning for: {snapshot.unmappedColumns.join(", ")}. Nothing was
+            dropped silently — if one of those matters, say so and it can be read.
+          </p>
+        )}
+        {snapshot && Object.keys(snapshot.skipReasons).length > 0 && (
+          <p className="mt-2 text-sm text-ink-3">
+            Rows not counted:{" "}
+            {Object.entries(snapshot.skipReasons)
+              .map(([why, n]) => `${n} ${why}`)
+              .join("; ")}
+            .
+          </p>
         )}
       </Card>
 
