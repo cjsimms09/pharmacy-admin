@@ -547,6 +547,24 @@ worklist for filling them is `unplacedNames`, which is finding 2 of the invoices
 renders nowhere. Queries to size all of it are in the audit. Not patched: `supplier-match.ts` and
 `shelf.ts` are 1's, it changes a rate that decides purchasing, and it is A's finding to carry.
 
+### The merge round of 8 September (session 1)
+
+Helper A said the uncomfortable thing plainly: nine pull requests open, none merged, findings that
+do not land change nothing. Right. Twelve branches were merged into `feature/compliance` in one
+sitting, in this order, each reviewed on its code diff: `work/audit-shelf`, `work/band-arithmetic`,
+`work/claims-audit`, `work/order-plan-audit` (short-dated lots no longer represent a supplier or
+measure a saving), `work/secondary-payors` (`payerShares` and `sharesReconcile` in `fills.ts`),
+`work/addons-audit` (`whyNotSteady`: the refusal names the test that failed), `work/ratio-measure`
+(a ladder cannot be saved without its measure; the diagnosis says so), `work/money-books` (the
+product-identity audit and its OTC fix), `work/invoices` (the NADAC-gated contents rule),
+`work/claim-contract` (`resolveContract` and the networks page), `claude/inbox-recogniser` (B: the
+recogniser, corrections kept as rules, the ERA request builder, migration `0086`), and the old
+`claude/repo-audit-catalog-claims-2l37sj` (the six-group sidebar, the setup checklist, Add on every
+page, and the pack-size search that ranked the first 150 rows instead of ranking all and cutting).
+`claude/fix-base-typecheck` is superseded by `1aef21d` and not merged. `docs/audits/` now exists on
+the branch. HANDOFF merges with the union driver, so both sides' additions survive; if a line reads
+twice, that is why.
+
 ### For the session running ON the pharmacy computer — read this first (8 September)
 
 You are the only session that can see the real database. The cloud session cannot: its container
