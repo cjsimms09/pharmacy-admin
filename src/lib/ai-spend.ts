@@ -1,5 +1,5 @@
 import "server-only";
-import { like } from "drizzle-orm";
+import { like, or } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { getSettings } from "./settings";
 
@@ -120,7 +120,16 @@ export type Spend = {
  * with no tokens rather than being dropped, so the call count stays honest.
  */
 export async function spend(days = 90): Promise<Spend> {
-  const rows = await db.query.auditEvents.findMany({ where: like(schema.auditEvents.action, "ai.%") });
+  /*
+   * Contract reads count too. They were audited under "contracts.*" and this looked only at
+   * "ai.*", so the library read on 8 September — the largest AI spend the site has ever made —
+   * never reached the ceiling that exists to bound exactly that, and the ceiling gated each send
+   * against everything except the sends before it. The account's own limit in the Anthropic
+   * console stopped the run instead.
+   */
+  const rows = await db.query.auditEvents.findMany({
+    where: or(like(schema.auditEvents.action, "ai.%"), like(schema.auditEvents.action, "contracts.%")),
+  });
   const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
   const mine = rows.filter((r) => (r.at ?? "") >= cutoff);
   const r = await rates();

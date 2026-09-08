@@ -165,12 +165,11 @@ Needs a read-in-parts path in `contract-extract.ts` (page ranges, one answer per
 citations kept) and a retry of the four small ones. Session 1. Also: three documents were refused
 *whole* because one field, `dirFeeBasis`, came back without a quote — `requireCitations` treats it
 like a rate. A rate without its sentence is unusable; a DIR basis without one is a field to drop,
-not a reason to lose the counterparty, the networks and every contact on the document. Change the
-rule to drop the uncited value and keep the read, with the drop recorded in `unclearOrMissing`.
-And the read stops when the API key's monthly spending limit is reached (8 September, at 177 of
-325) — the limit lives in the owner's Anthropic console, not in the site; the site's own ceiling
-(`ai_monthly_cap`, $50) never saw it because contract runs are not counted into `spend()`.
-Fix that accounting too, so the site's ceiling means what it says.
+not a reason to lose the counterparty, the networks and every contact on the document. **Done 8 September:**
+the uncited value is dropped and named in `unclearOrMissing` (`dropUncited`), a rate without its
+words still refuses the read; and contract runs now count toward the site's own ceiling
+(`spend()` reads `contracts.*` audit rows as well as `ai.*`). Still to do: the read-in-parts path
+for the manuals, and re-reading the three refused documents once the console limit is raised.
 
 ### 2b-iv. Claims with secondary payors: profit by payor, and who owes what (8 September)
 
