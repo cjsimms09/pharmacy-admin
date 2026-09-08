@@ -15,7 +15,8 @@
     "user:create": "tsx scripts/create-user.ts",
     "launch": "node scripts/launch.mjs",
     "test": "tsx --tsconfig tsconfig.test.json --test tests/*.test.ts",
-    "check": "npm run typecheck && npm run test && npm run build"
+    "check": "npm run typecheck && npm run test && npm run build",
+    "claude": "node scripts/claude-here.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.123.0",

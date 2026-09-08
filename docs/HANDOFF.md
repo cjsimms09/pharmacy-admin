@@ -11,6 +11,73 @@ file is how they talk.
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
+### For the session running ON the pharmacy computer — read this first (8 September)
+
+You are the only session that can see the real database. The cloud session cannot: its container
+reaches GitHub and a handful of package registries and nothing else on the internet. Thirteen hosts
+were tested — `github.com`, `api.github.com`, `raw.githubusercontent.com` answer; `www.google.com`,
+`example.com`, `cloudflare.com`, `trycloudflare.com`, ngrok, tailscale, localhost.run and serveo are
+all refused. A tunnel was built, installed and opened before that was established, and it could
+never have worked. Do not propose one again.
+
+So the questions below are yours, and every one of them is blocked on data only you can read.
+
+**1. How much of the catalogue actually has a NADAC benchmark?** This is the first thing to answer
+and it may invalidate a lot. On the cloud session's development copy only **10 of 147,730** supplier
+rows got one — but that copy's NADAC table is synthetic (descriptions read "Drug 27999"), so the
+number means nothing. On the real database it could be fine or it could be near zero, and if it is
+near zero then `over-nadac`, `purchase-ratio`, `under-nadac` and every "buying above the benchmark"
+figure in the site are running blind and saying nothing about it. Count it:
+
+```
+select count(distinct s.ndc11) from supplier_items s;
+select count(distinct s.ndc11) from supplier_items s
+  join nadac_prices n on n.ndc11 = s.ndc11;
+```
+
+If the overlap is small, find out **why** before changing anything — NDC formatting on one side
+(11-digit vs 10-digit, dashes, leading zeros), or the catalogue genuinely being mostly items CMS
+does not price. The two have completely different fixes and guessing between them wastes a day.
+
+**2. Six faults were fixed in the buying logic on 8 September (commit `8d51d73`) and none of them
+could be measured against real data.** Re-measure each on the live database and say what the real
+numbers are:
+
+- `marginOf` used the cheapest *printed* price from any supplier; it now uses the net price at the
+  actual buy (`bestBuy`). Every contract line's margin was understated by the rebate rate. How many
+  rows change, and by how much?
+- `bestBuy` recommended short-dated stock. 258 rows on the development copy. What is it here?
+- The NADAC check compared across pricing units (a per-EA cost against a per-ML benchmark) and
+  reported the row as "100× the national average". How many rows raised that falsely?
+- Supplier rebate rates were matched by first-containment, so one wholesaler could be paid at
+  another's rate. Check `contract.bySupplier` against the real supplier names in `supplier_items`.
+- CMS placeholder rows ("TBD DO NOT DELETE OR RELEASE") were stored as prices. `select count(*) from
+  nadac_prices where description like '%DO NOT DELETE%'` — they are refused at import now but the
+  ones already stored are still there and should be deleted.
+- Offers with no `netUnitMicros` were invisible to both the buy and the margin.
+
+**3. The audit was two modules in when the session ran out of road.** Done: `drug-file.ts`,
+`catalogue-cache.ts`, `catalogue-check.ts`, `product-ledger.ts`, `nadac.ts` parsing. Not yet looked
+at: **`shelf.ts` (895 lines, the largest and least examined)**, `order-plan.ts` beyond its
+documentation, the rebate ladder and band arithmetic (`rebate-rates.ts`, `band-strategy.ts`,
+`ratio-effect.ts`), claim-to-contract matching, and the cash-versus-accrual split. The owner's
+instruction was: *"Double check all logic to make sure it makes sense — ordering logic, NADAC,
+pricing, which supplier to buy from."* That is the standing brief.
+
+**4. What the owner has said, which governs everything above.** *"Everything we do, we need to
+consider the end goal which is finding way to make pharmacy more money — if it doesn't lead to that
+then what we are doing is pointless."* And: *"Take the request I give you and act as me, give me
+what I want and the best tool, not necessarily exactly what I ask for."* He is the pharmacist-in-
+charge and owner, not a programmer; he wants findings in plain sentences with the money attached,
+not a list of function names.
+
+**5. Two things to know about this machine.** Every libsql call blocks the Node event loop
+completely — 200,000 rows read is 1.7 seconds during which the web server answers nothing — so
+anything long-running belongs in a separate process (`scripts/make-claude-copy.ts` is the worked
+example). And the launcher (`scripts/launch.mjs`) now recovers rather than exiting: a failed build
+starts the previous one, a failed migration does not stop a working site, and anything fatal is
+served as a page on the port instead of vanishing into a hidden console window.
+
 ### For the pharmacy session (from the cloud session, PR #4 and after)
 
 - **The first live reads failed as "errored" with the reason thrown away.** Fixed: the API's own
