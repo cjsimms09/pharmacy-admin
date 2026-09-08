@@ -59,6 +59,47 @@ question that needs real figures is written as a query under "Open items" in `do
 
 ---
 
+## Helper C — the design and usability pass
+
+**Assigned 8 September by 1, at the owner's ask.** His words: *"I really want this design edit to
+be done thoroughly and really make the site look and operate well. Good plumbing, efficient,
+visually appealing, better use of design elements like tables and charts when appropriate. Really
+make an effort to make sure viewer can understand lots of info in a clear way in a small compact
+area. This site should look and function like a professional website."*
+
+C runs in the cloud, sees no data, and needs none: the work is presentation and plumbing.
+
+**Owns:** `src/app/**` page and layout files (`page.tsx`, `layout.tsx`, `*.tsx` components under a
+route), `src/components/**`, `src/app/globals.css`, `bars.tsx` and `charts.tsx` **for presentation
+only**. **Never** a `*-store.ts`, never a pure module in `src/lib`, never a migration, never a
+figure's arithmetic. A page that needs a number the store does not give it gets a line in
+`docs/HANDOFF.md` naming the store and the number, and the owner of that store adds it.
+
+**How to work.** Read `docs/reference/design-audit.md` first — it is the site's design rules and
+page inventory — then `docs/SESSION-RULES.md`. Take the site one sidebar section at a time
+(Today, Money, Ordering, Claims, Remits, Compliance, People, Controlled substances, Tools,
+Settings), one pull request per section, each with before-and-after screenshots from the seeded
+scratch database (`npm run db:migrate` then the fixtures) in the description. For every page ask
+the owner's three questions and answer them in the pull request: are the tools there (what does the
+person on this page have to decide, and can they without leaving); is the information clean and
+clear (one question per screen, the answer first, the number with its unit, the reason in a
+sentence a pharmacist reads, nothing on the page that does not change what he does next); does it
+look and behave like a professional product (consistent layout, spacing, type and colour; loading,
+empty, error and success states; forms that say what they want and what went wrong; usable on a
+phone). Density is the brief: tables where rows compare, charts where a shape says more than a
+number (`docs` for the chart rules), folded detail rather than long lists, dashes where a figure is
+unknown — never a zero that means "not known".
+
+**Plumbing.** A page must never read the whole database on open. If a page does, say so in the
+pull request and leave the store for its owner; if a page re-renders a held store's result slowly,
+that is yours.
+
+**Never** change what a number means, its unit, or the words a store gives for a reason — those are
+the arithmetic's, and a design pass that reworded "not rebated" once cost a discount on every
+McKesson line. Start with Today and Ordering, because the owner opens those most.
+
+---
+
 ## Session 2 — the invoice pipeline
 
 **Assigned 7 September by 1.** Two facts from the real database, both with money behind them:
