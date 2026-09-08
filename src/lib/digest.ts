@@ -10,6 +10,8 @@ import { rotations } from "./roster";
 import { register as agreementRegister } from "./business-associates";
 import { getSettings, setSetting } from "./settings";
 import { sendMail } from "./send-mail";
+import { returnWarningNow } from "./return-soon";
+import { formatCents } from "./money";
 
 /**
  * The weekly note to the pharmacist-in-charge.
@@ -38,7 +40,7 @@ export type Digest = {
   quiet: boolean;
   subject: string;
   text: string;
-  counts: { late: number; expiring: number; stalled: number; questions: number };
+  counts: { late: number; expiring: number; stalled: number; questions: number; returns: number };
 };
 
 /** How far ahead a renewal is worth mentioning. Long enough to actually do something about it. */
@@ -46,7 +48,7 @@ const HORIZON_DAYS = 60;
 
 export async function buildDigest(): Promise<Digest> {
   const today = todayIso();
-  const [s, compliance, dated, jobs, cqi, cs, rota, agreements, people] = await Promise.all([
+  const [s, compliance, dated, jobs, cqi, cs, rota, agreements, people, returns] = await Promise.all([
     getSettings(),
     complianceSummary(),
     dueList({ horizonDays: HORIZON_DAYS }),
@@ -56,6 +58,18 @@ export async function buildDigest(): Promise<Digest> {
     rotations(),
     agreementRegister(),
     db.query.people.findMany({ where: eq(schema.people.active, true) }),
+    /*
+     * Money about to stop being refundable, which is the one thing on here that is not compliance.
+     *
+     * It belongs in this email for the same reason everything else does — it is knowable only by
+     * opening the site, and it has a date on it that passes whether or not anybody looked. The
+     * difference is which way the cost runs: a licence lapses and the pharmacy is exposed; a credit
+     * step passes and the pharmacy is simply poorer, by an amount the supplier's own policy states.
+     *
+     * Caught rather than awaited bare. This email is the compliance record's last line of defence,
+     * and it must not fail to go out because the shelf could not be read.
+     */
+    returnWarningNow().catch(() => null),
   ]);
 
   const late: string[] = [];
@@ -105,8 +119,9 @@ export async function buildDigest(): Promise<Digest> {
     expiring: soon.length,
     stalled: stalled.length,
     questions: questions.length,
+    returns: returns?.lines.length ?? 0,
   };
-  const quiet = counts.late === 0 && counts.stalled === 0 && counts.expiring === 0 && counts.questions === 0;
+  const quiet = counts.late === 0 && counts.stalled === 0 && counts.expiring === 0 && counts.questions === 0 && counts.returns === 0;
 
   const pharmacy = (s.pharmacy_name || "the pharmacy").trim();
   const base = (s.public_base_url || "").trim().replace(/\/$/, "");
@@ -129,6 +144,27 @@ export async function buildDigest(): Promise<Digest> {
   }
   section(`LATE (${late.length})`, late.slice(0, 25));
   if (late.length > 25) parts.push(`  … and ${late.length - 25} more.`, "");
+
+  /*
+   * Above the sixty-day list and below what is already late, because that is where it belongs in
+   * time: every line here has a date inside a fortnight, and unlike a renewal it cannot be done
+   * afterwards. A licence renewed a week late is renewed. A credit claimed a week late is gone.
+   *
+   * Only lines a supplier's own returns policy has dated reach this — see `warnableReturns`. The
+   * site's other reasons for sending something back are judgments against however many days of
+   * claims are loaded, and with a fortnight of claims a monthly drug looks dead. Those belong on
+   * a page somebody chose to open, with the caveat printed beside them, not in an email that
+   * says "send this back".
+   */
+  if (returns) {
+    const heading =
+      returns.atRiskCents > 0
+        ? `MONEY YOU CAN STILL GET BACK (${returns.lines.length}) — ${formatCents(returns.atRiskCents)} of credit goes if nothing is done`
+        : `MONEY YOU CAN STILL GET BACK (${returns.lines.length}) — ${formatCents(returns.sendBackWorthCents)} on the shelf, on a clock`;
+    section(heading, returns.lines.slice(0, 15).map((l) => l.says));
+    if (returns.lines.length > 15) parts.push(`  … and ${returns.lines.length - 15} more on ${link("/purchasing/return-soon")}.`, "");
+  }
+
   section(`COMING UP IN THE NEXT ${HORIZON_DAYS} DAYS (${soon.length})`, soon.slice(0, 20));
   section(
     `WAITING ON AN ANSWER FROM YOU (${questions.length})`,
@@ -145,10 +181,19 @@ export async function buildDigest(): Promise<Digest> {
     "Open the desk:",
     `  What needs you    ${link("/")}`,
     `  If they walked in ${link("/inspection")}`,
+    ...(returns ? [`  What to send back ${link("/purchasing/return-soon")}`] : []),
     "",
     "This goes out once a week, and only when there is something in it.",
   );
 
+  /*
+   * The subject says the soonest thing that costs something, and the money is named in dollars.
+   *
+   * A week with nothing late but a credit dropping on Friday used to read "0 things need you
+   * soon", which is both wrong and the sort of subject line that trains somebody to stop opening
+   * the email. It now says the dollars, because the dollars are what get it opened.
+   */
+  const soonCount = soon.length + questions.length;
   return {
     quiet,
     subject: quiet
@@ -156,8 +201,11 @@ export async function buildDigest(): Promise<Digest> {
       : stalled.length > 0
         ? `${pharmacy}: ${stalled.length} automatic ${stalled.length === 1 ? "job has" : "jobs have"} stopped, ${late.length} late`
         : late.length > 0
-          ? `${pharmacy}: ${late.length} thing${late.length === 1 ? "" : "s"} late`
-          : `${pharmacy}: ${soon.length + questions.length} thing${soon.length + questions.length === 1 ? "" : "s"} need you soon`,
+          ? `${pharmacy}: ${late.length} thing${late.length === 1 ? "" : "s"} late` +
+            (returns && returns.atRiskCents > 0 ? `, ${formatCents(returns.atRiskCents)} of credit about to go` : "")
+          : returns
+            ? `${pharmacy}: ${returns.atRiskCents > 0 ? `${formatCents(returns.atRiskCents)} of credit goes` : `${formatCents(returns.sendBackWorthCents)} to send back`} within ${returns.soonestDays} day${returns.soonestDays === 1 ? "" : "s"}`
+            : `${pharmacy}: ${soonCount} thing${soonCount === 1 ? "" : "s"} need you soon`,
     text: parts.join("\n"),
     counts,
   };

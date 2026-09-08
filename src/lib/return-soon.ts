@@ -15,6 +15,8 @@
  * The pure ranking is separate from the loading so it can be tested on made-up shelves.
  */
 
+import { addDays } from "./dates";
+
 export type ReturnTier = { atLeastCents: number; keepDays: number };
 
 /** How long a line may sit, by what is on the shelf. Descending; the first tier that fits wins. */
@@ -248,6 +250,137 @@ export function returnTotals(rows: ReturnSoonRow[]): ReturnSoonView["totals"] {
     thisWeek: rows.filter((r) => r.urgency === "today" || r.urgency === "this week").length,
     withoutSupplier: rows.filter((r) => r.supplier === null).length,
   };
+}
+
+/* ── The part that is allowed to interrupt somebody ───────────────────────── */
+
+/**
+ * How near a credit step has to be before the owner is told rather than shown.
+ *
+ * A page is looked at; a warning arrives. The bar for arriving is higher, and these two numbers
+ * are the bar. Seven days for a credit about to drop, because a return authorisation, a box and a
+ * carrier take most of a week. Fourteen for a window about to shut, because a window that shuts is
+ * the whole credit rather than a step of it, and there is no second chance at it.
+ */
+export const WARN_CREDIT_DAYS = 7;
+export const WARN_WINDOW_DAYS = 14;
+
+/**
+ * The rows a warning may be built from: only the ones a supplier's own policy has dated.
+ *
+ * This is the whole guard, and the reason for it is that the site's other two reasons for
+ * returning something are judgments made against however many days of claims happen to be loaded.
+ * With fifteen days of claims held, a drug dispensed once a month has not been dispensed in the
+ * window — and "not moving" is then a statement about the claims file, not about the bottle. The
+ * page says that out loud in its notes and shows those rows anyway, which is right for a page
+ * somebody chose to open. Emailing it to the owner, or putting it in red on the screen he reads
+ * from the doorway, would be telling him to send back stock he is dispensing.
+ *
+ * A dated clock has no such weakness. The supplier wrote the date on its own returns policy, and
+ * the invoice says what was bought and when. Nothing about it depends on how much claims history
+ * the site happens to hold, so it is safe to interrupt somebody with — and it is the case where
+ * silence actually costs money, because the credit falls on the day it falls whether or not
+ * anybody opened the page.
+ */
+export function warnableReturns(rows: ReturnSoonRow[], creditDays = WARN_CREDIT_DAYS, windowDays = WARN_WINDOW_DAYS): ReturnSoonRow[] {
+  return rows.filter((r) => {
+    if (r.deadlineDays === null) return false;
+    if (r.why === "credit") return r.deadlineDays <= creditDays;
+    if (r.why === "window") return r.deadlineDays <= windowDays;
+    // "idle" and "slow" never warn, however dear they are. They are a list to check, not to ship.
+    return false;
+  });
+}
+
+/** One line of a warning: the bottle, who sold it, the money, and the day it changes. */
+export type ReturnWarningLine = {
+  key: string;
+  ndc11: string;
+  name: string | null;
+  supplier: string | null;
+  sendBackThousandths: number;
+  sendBackWorthCents: number | null;
+  /** What the credit loses at the next step, on the part going back. Null where the policy does not say. */
+  atRiskCents: number | null;
+  deadlineDays: number;
+  /** The day itself, not a countdown, so it can be written in a diary. */
+  changesOn: string;
+  why: "credit" | "window";
+  says: string;
+};
+
+export type ReturnWarning = {
+  lines: ReturnWarningLine[];
+  /** What the whole warning is worth sending back, at cost. */
+  sendBackWorthCents: number;
+  /** What falls away if nothing is done, where the policies say. */
+  atRiskCents: number;
+  /** The soonest day anything on it changes. */
+  soonestDays: number;
+};
+
+/**
+ * The warning itself, or null when there is nothing worth interrupting anybody about.
+ *
+ * Null rather than an empty shape on purpose: the digest's first rule is that nothing goes out
+ * when there is nothing to say, and a caller that has to inspect a count to discover that is a
+ * caller that will one day forget to.
+ */
+export function returnWarning(rows: ReturnSoonRow[], today: string, opts: { creditDays?: number; windowDays?: number } = {}): ReturnWarning | null {
+  const warnable = warnableReturns(rows, opts.creditDays ?? WARN_CREDIT_DAYS, opts.windowDays ?? WARN_WINDOW_DAYS);
+  if (warnable.length === 0) return null;
+  const lines = warnable.map((r) => ({
+    key: `${r.ndc11}|${r.invoiceDate ?? ""}`,
+    ndc11: r.ndc11,
+    name: r.name,
+    supplier: r.supplier,
+    sendBackThousandths: r.sendBackThousandths,
+    sendBackWorthCents: r.sendBackWorthCents,
+    atRiskCents: r.atRiskCents,
+    deadlineDays: r.deadlineDays!,
+    changesOn: addDays(today, r.deadlineDays!),
+    why: r.why as "credit" | "window",
+    says: warningLine(r, addDays(today, r.deadlineDays!)),
+  }));
+  return {
+    lines,
+    sendBackWorthCents: lines.reduce((n, l) => n + (l.sendBackWorthCents ?? 0), 0),
+    atRiskCents: lines.reduce((n, l) => n + (l.atRiskCents ?? 0), 0),
+    soonestDays: Math.min(...lines.map((l) => l.deadlineDays)),
+  };
+}
+
+/**
+ * One row in words, in the order somebody acts in: what it is, who to ring, what it is worth, when.
+ *
+ * The date is said as a date. "In 6 days" is read on the day it is read and is wrong by the time
+ * the email is opened on Thursday; a date is still true on Thursday.
+ */
+function warningLine(r: ReturnSoonRow, changesOn: string): string {
+  const what = r.name ?? r.ndc11;
+  const who = r.supplier ? ` from ${r.supplier}` : " — no invoice on file, so the site cannot say who sold it";
+  const worth = r.sendBackWorthCents !== null ? `, ${money(r.sendBackWorthCents)}` : "";
+  const when =
+    r.why === "credit"
+      ? r.dropsToPercent !== null && r.creditPercentNow !== null
+        ? `credit drops from ${r.creditPercentNow}% to ${r.dropsToPercent}% on ${changesOn}`
+        : `credit drops on ${changesOn}`
+      : `the return window shuts on ${changesOn}`;
+  const risk = r.atRiskCents ? ` — ${money(r.atRiskCents)} of credit goes with it` : "";
+  return `${units(r.sendBackThousandths)} of ${what}${who}${worth}: ${when}${risk}.`;
+}
+
+/**
+ * The warning on the live data: the whole list, then only the part worth interrupting somebody for.
+ *
+ * One function for both the weekly email and the Today page, so the two can never come to disagree
+ * about which returns are urgent — and so the thresholds live in one place when the owner decides
+ * seven days is not long enough.
+ */
+export async function returnWarningNow(today?: string): Promise<ReturnWarning | null> {
+  const view = await returnSoonNow();
+  const { todayIso } = await import("./dates");
+  return returnWarning(view.rows, today ?? todayIso());
 }
 
 /** The list on the live data. Server only; the ranking above is what the tests exercise. */
