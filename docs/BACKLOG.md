@@ -196,6 +196,14 @@ place, and an arithmetic check before anything is stored.
 
 ## Done
 
+- **McKesson's rebate reaches prices (7 September, deployed as `e471895`).** All three ladders were
+  stored without the ratio that drives them, so no band was ever chosen and 7,165 contract generics
+  were compared at printed price. Migration `0084`; verified live at 29% off contract items and
+  0.75% off brand. HANDOFF item 2, the six buying-logic fixes, measured in the same pass.
+- **Invoice lines belong to the supplier the invoice named (session 2, merged in `29f953b`).**
+  `invoice_lines.supplier_id` carried from the invoice, `suppliers.aliases` typed by the pharmacy,
+  equality matching only, unplaced lines counted and named on every supplier card. IPC's two
+  invoice spellings typed as aliases.
 - **The site deploys itself from the pharmacy computer (7 September, 9:34 PM).** `npm run deploy`
   pushes `feature/compliance` and has the launcher rebuild, migrate and restart, and waits until
   the app answers on the new build. "Let Claude run the site.cmd" was run once: the machine-local
