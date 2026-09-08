@@ -61,7 +61,7 @@ describe("filling a minimum with the right generics", () => {
   test("only generics, not controlled, steady, and cheapest here, inside the horizon", () => {
     const [mck, ipc] = fillMinimums(input());
     assert.equal(mck.meets, true);
-    assert.match(mck.says, /no order minimum/);
+    assert.match(mck.says, /is the primary/);
     assert.equal(ipc.shortfallCents, 32_000);
     const ndcs = ipc.picks.map((p) => p.ndc11);
     assert.ok(!ndcs.includes("00000000003"), "McKesson is cheaper on C");
@@ -134,7 +134,12 @@ describe("filling a minimum with the right generics", () => {
     const met = fillMinimums(input({ basketCentsBySupplier: new Map([["IPC", 60_000]]) }))[1];
     assert.equal(met.picks.length, 0);
     assert.ok(met.candidates.length >= 2);
-    assert.equal(fillMinimums(input())[0].candidates.length, 0, "no minimum, no list");
+    assert.equal(fillMinimums(input())[0].candidates.length, 0, "the primary gets no add-on list");
+    // The owner, 8 September: no minimums to type; the list stands on its own, ranked by days left and price.
+    const noMin = fillMinimums(input({ suppliers: [{ supplier: "McKesson", minimumCents: null, primary: true }, { supplier: "IPC", minimumCents: null }] }))[1];
+    assert.ok(noMin.candidates.length >= 2, "a secondary with no minimum still lists the next best to order");
+    assert.equal(noMin.picks.length, 0, "nothing is filled to a target that does not exist");
+    assert.match(noMin.says, /no order minimum on file, so nothing is filled to a target/);
     // The same two shelves but A now 90% cheaper here: price outranks a small difference in need.
     const cheap = fillMinimums(input({ offers: [...input().offers.filter((o) => o.ndc11 !== "00000000001"), offer("00000000001", "IPC", 0.1), offer("00000000001", "McKesson", 1.0)], movement: [move("00000000001", 5, 60), move("00000000002", 10, 20), move("00000000003", 5)] }))[1];
     assert.deepEqual(cheap.candidates.map((c) => c.ndc11), ["00000000001", "00000000002"]);

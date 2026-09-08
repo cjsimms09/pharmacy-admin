@@ -301,7 +301,10 @@ export default async function WhatToBuyPage({ searchParams }: { searchParams: Pr
         sections.map(({ sup, basket, fill, rows, shown, shortCount, needCents, needSavingCents, minimumCents, allAddCents, listCents }) => {
           const key = slug(sup.supplier);
           const says =
-            minimumCents === null ? "No order minimum on file for this wholesaler; put it on the terms page."
+            minimumCents === null
+              ? rows.length === 0
+                ? `Nothing to add here today: nothing the shelf is short of is cheapest here, and nothing this wholesaler is cheapest on runs out inside ${minimums.horizonDays} days.`
+                : "No minimum on file, so nothing is filled to a target. This is the next best to order here: what runs out first, then what this wholesaler is cheapest on. Days left are on each line."
               : rows.length === 0 ? `Nothing qualifies to add here today: nothing the shelf is short of is cheapest here, and no generic this wholesaler is cheapest on runs out inside ${minimums.horizonDays} days.`
                 : `Add from the top until the ${sup.supplier} screen shows ${money(minimumCents)}. One pack of everything here comes to ${money(listCents)}${allAddCents > listCents - needCents ? `; ${money(needCents + allAddCents)} where a line says "up to"` : ""}.`;
           return (
@@ -311,7 +314,7 @@ export default async function WhatToBuyPage({ searchParams }: { searchParams: Pr
               className="mb-4"
               tone={shortCount > 0 ? "ok" : undefined}
               title={sup.supplier}
-              count={minimumCents !== null ? `minimum ${money(minimumCents)}` : "no minimum on file"}
+              count={minimumCents !== null ? `minimum ${money(minimumCents)}` : "ranked by days left"}
               subtitle={says}
               actions={<Link href={sup.supplierId ? `/suppliers/${sup.supplierId}/terms` : "/suppliers"} className="btn btn-sm">Terms</Link>}
             >
@@ -325,8 +328,8 @@ export default async function WhatToBuyPage({ searchParams }: { searchParams: Pr
                         <th className="num">Pack</th>
                         <th className="num">Price</th>
                         <th className="num">vs {primaryName}</th>
-                        <th className="num">On hand</th>
-                        <th className="num">After</th>
+                        <th className="num">Days left</th>
+                        <th className="num">After one pack</th>
                       </tr>
                     </thead>
                     <tbody>

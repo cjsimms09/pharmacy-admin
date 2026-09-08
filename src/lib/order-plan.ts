@@ -545,6 +545,8 @@ export type Candidate = {
  * the question is not which item saves most but which items save most per dollar of the pharmacy's
  * cash that has to sit on a shelf to get there.
  */
+const fold = (s: string) => s.trim().toLowerCase();
+
 export function topUpCandidates(a: {
   supplier: string;
   offers: Offer[];
@@ -561,7 +563,9 @@ export function topUpCandidates(a: {
   for (const m of a.movement) {
     if (a.alreadyOrdered.has(m.ndc11)) continue;
     const priced = offersFor(a.offers, m.ndc11);
-    const ours = priced.find((o) => o.supplier === a.supplier);
+    // Folded: the register says "Parmed", the catalogue "ParMed", and a raw === lists nothing for it.
+    const mine = fold(a.supplier);
+    const ours = priced.find((o) => fold(o.supplier) === mine);
     if (!ours) continue;
     const label = name(m.ndc11, ours.description ?? null);
 
@@ -585,7 +589,7 @@ export function topUpCandidates(a: {
       continue;
     }
 
-    const alternative = priced.find((o) => o.supplier !== a.supplier) ?? null;
+    const alternative = priced.find((o) => fold(o.supplier) !== mine) ?? null;
     if (!alternative) {
       refused.push({ ndc11: m.ndc11, name: label, supplier: a.supplier, why: "Only this supplier prices it, so there is no saving to bank — buy it when it is needed." });
       continue;

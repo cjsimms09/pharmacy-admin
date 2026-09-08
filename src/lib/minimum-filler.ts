@@ -186,11 +186,12 @@ export function fillMinimums(input: FillInput): SupplierFill[] {
       shortfallCents,
       leftOut,
     };
-    if (minimumCents === null) {
-      out.push({ ...base, candidates: [], picks: [], addedCents: 0, overshootCents: 0, meets: true, refused: [], says: `${s.supplier} has no order minimum on file.` });
+
+    // The primary is where everything not cheaper elsewhere is bought; it is never the place to add on.
+    if (s.primary) {
+      out.push({ ...base, candidates: [], picks: [], addedCents: 0, overshootCents: 0, meets: true, refused: [], says: `${s.supplier} is the primary: everything not cheaper elsewhere is bought here, so there is no add-on list.` });
       continue;
     }
-
     const { ranked, refused } = topUpCandidates({
       supplier: s.supplier,
       offers: input.offers,
@@ -216,6 +217,16 @@ export function fillMinimums(input: FillInput): SupplierFill[] {
       .map((c) => candidateOf(c, rate.get(c.ndc11) ?? 0, held.get(c.ndc11) ?? 0))
       .sort((a, b) => score(b) - score(a) || a.daysOnHand - b.daysOnHand || b.perDayThousandths - a.perDayThousandths);
 
+    /*
+     * No minimum on file is not nothing to say. The owner, 8 September: "I don't want to set
+     * minimums.. more want system to decide next best things to order from that supplier based on
+     * days left on hand, price, etc." So the ranked list stands on its own — what runs out first,
+     * what this wholesaler is cheapest on — and nothing is filled to a target.
+     */
+    if (minimumCents === null) {
+      out.push({ ...base, candidates, picks: [], addedCents: 0, overshootCents: 0, meets: true, refused, says: `${s.supplier} has no order minimum on file, so nothing is filled to a target: this is the next best to order here, ranked by days left on the shelf and by price against the field.` });
+      continue;
+    }
     if (shortfallCents === 0) {
       out.push({ ...base, candidates, picks: [], addedCents: 0, overshootCents: basketCents - minimumCents, meets: true, refused, says: `Today's lines of ${dollars(basketCents)} already meet the ${dollars(minimumCents)} minimum.` });
       continue;
