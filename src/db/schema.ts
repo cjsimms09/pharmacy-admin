@@ -2311,6 +2311,17 @@ export const planGroups = sqliteTable(
     /** The employer or plan sponsor, once identified. What a Form 5500 search is run against. */
     sponsorName: text("sponsor_name"),
     classification: text("classification", { enum: PLAN_CLASSES }).notNull().default("unknown"),
+    /**
+     * What the class appears to be, from the BIN listing or the claim, until somebody adopts it.
+     *
+     * Deliberately not . A proposal is not a finding, and nothing downstream may
+     * price a claim on it — the register stays "unknown" until a person confirms, so no figure on
+     * the site moves because a guess was written into it. Only classes that identify themselves
+     * are ever proposed; the four that decide whether the Kansas floor applies need a document.
+     */
+    proposedClassification: text("proposed_classification", { enum: PLAN_CLASSES }),
+    /** The sentence that produced it, quoting the document. A proposal with no source is a guess. */
+    proposedFrom: text("proposed_from"),
     /** How it was established — a Form 5500 filing, the plan document, a call. Required to file. */
     basis: text("basis"),
     sourceUrl: text("source_url"),
