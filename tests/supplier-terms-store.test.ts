@@ -11,10 +11,16 @@ import assert from "node:assert/strict";
  * where there should have been two. These tests run against the real store because that is where
  * the bug was: the shape was right, the key was wrong.
  */
-const tiers = (a: number, b: number) => ({
+/*
+ * `ratioMeasure` is stated because a ratio ladder that does not name its ratio can no longer be
+ * filed — a ladder with no measure selects no band, and three of McKesson's real programmes were
+ * stored exactly like this fixture was, pricing 7,165 contract generics about 30% too high.
+ */
+const tiers = (a: number, b: number, ratioMeasure: "generic_compliance" | "generic_purchase_ratio" = "generic_compliance") => ({
   kind: "tiered_ratio" as const,
   period: "month" as const,
   eligibility: "catalog_rebate_flag" as const,
+  ratioMeasure,
   ratioDefinition: null,
   tiers: [{ thresholdPercent: a, rebatePercent: b }],
   paidAs: null,
@@ -52,7 +58,7 @@ after(async () => {
 describe("more than one rebate programme for one supplier", () => {
   test("two programmes effective the same day both survive", async () => {
     await store.saveRebateProgram(supplierId, { name: "Compliance ladder", effectiveFrom: "2025-05-01" }, tiers(0, 15), { name: "test" });
-    await store.saveRebateProgram(supplierId, { name: "Purchase ratio ladder", effectiveFrom: "2025-05-01" }, tiers(75, 1), { name: "test" });
+    await store.saveRebateProgram(supplierId, { name: "Purchase ratio ladder", effectiveFrom: "2025-05-01" }, tiers(75, 1, "generic_purchase_ratio"), { name: "test" });
 
     const rows = await store.rebateProgramsFor(supplierId);
     assert.equal(rows.length, 2, "the second must not replace the first");

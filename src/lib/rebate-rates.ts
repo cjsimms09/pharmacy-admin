@@ -173,6 +173,23 @@ export async function contractRatesBySupplier(on = todayIso()): Promise<Record<s
  * Keyed the way the catalogue names its suppliers, so a screen holding a catalogue row can look up
  * its own supplier without knowing anything about the registry.
  */
+/**
+ * What to say when a ladder is in force, a ratio is on file, and still nothing is priced.
+ *
+ * Pure so the sentence can be tested without a database — and it is the sentence that matters here,
+ * because the wrong one sent the pharmacist to inspect tiers that were correct while every contract
+ * line was priced at its printed cost.
+ */
+export function unstatedMeasureSays(supplier: string, programmes: string[]): string {
+  const one = programmes.length === 1;
+  return (
+    `${supplier}'s ladder is in force and a ratio is on file, but ${one ? "the programme" : "these programmes"} — ${programmes.join(", ")} — ` +
+    `${one ? "does" : "do"} not say which ratio picks the band, so no band is ever chosen and every contract line is priced at its printed cost. ` +
+    `Open the supplier's terms page, set the measure to the scrubbed generic compliance rate or the generic purchase ratio as the agreement states, ` +
+    `and the rate applies itself.`
+  );
+}
+
 export async function contractRateDiagnosis(on = todayIso()): Promise<Record<string, string>> {
   const rows = await allSuppliers(true);
   const out: Record<string, string> = {};
@@ -206,6 +223,23 @@ export async function contractRateDiagnosis(on = todayIso()): Promise<Record<str
       say(`${s.name}'s ladder is in force but no band can be chosen: it pays by ${measures}, and no such figure is on file. The daily Purchase Drill Down or the monthly rebate statement carries it — file one and the rate applies itself.`);
       continue;
     }
+    /*
+     * A ladder that never said which ratio drives it, which is not the same fault as a band paying
+     * nothing — and used to be reported as one.
+     *
+     * `ratioSource` is computed from whether a scrubbed figure has been read at all, and knows
+     * nothing about `ratioMeasure`. So a supplier with a drill-down on file and no measure stated
+     * passed the check above, fell through every branch, and was told "the band it lands in pays
+     * nothing on contract generics today". Both halves of that were wrong: no band was chosen, and
+     * the ladder had not landed anywhere. It sent the pharmacist to look at tiers that were correct
+     * while 7,165 contract generics were priced about 30% above what he actually pays.
+     */
+    const unstated = inForce.filter((x) => x.terms.kind === "tiered_ratio" && x.terms.ratioMeasure === null);
+    if (unstated.length > 0) {
+      say(unstatedMeasureSays(s.name, unstated.map((x) => x.row.name)));
+      continue;
+    }
+
     const pays = [...new Set(inForce.map((x) => x.terms.eligibility))];
     if (!pays.some((e) => e === "catalog_rebate_flag" || e === "all_generics")) {
       say(`${s.name}'s ladder is in force but pays on ${pays.join(" and ").replace(/_/g, " ")} — nothing that comes off a contract generic's price, so the comparison uses the printed price and is right to.`);

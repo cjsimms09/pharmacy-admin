@@ -256,6 +256,34 @@ export function paysOnShort(terms: RebateTermsT): string {
 }
 
 /** Which measured figure picks the band on this ladder, in words. */
+/**
+ * Why a rebate programme cannot be filed, or null where it can.
+ *
+ * One rule, and it is the one that cost the most: a ladder selected by a ratio has to say **which**
+ * ratio. All three McKesson programmes were stored with no measure, so `figuresFor` had nothing to
+ * read, no band was ever chosen, and 7,165 contract generics were priced at roughly 30% above what
+ * the pharmacy actually pays. The ladders were on file and looked right on the page.
+ *
+ * Refused when a programme is saved rather than when one is read. Stored rows that predate this are
+ * still parsed and still displayed — with the honest "nothing says which band applies" — because a
+ * validator that refuses existing data does not fix a ladder, it takes the supplier's page down.
+ *
+ * `flat_percent` needs no measure: one rate on every eligible purchase, nothing to select.
+ *
+ * Pure.
+ */
+export function whyTermsCannotBeSaved(terms: RebateTermsT): string | null {
+  if (terms.kind === "tiered_ratio" && terms.ratioMeasure === null) {
+    return (
+      "This ladder pays by a ratio, so it has to say which ratio picks the band — the scrubbed generic " +
+      "compliance rate or the generic purchase ratio. Without it no band can ever be chosen, and every " +
+      "contract line is priced at its printed cost. The supplier's agreement names it, usually beside the " +
+      "tiers themselves."
+    );
+  }
+  return null;
+}
+
 export function measuredBy(terms: RebateTermsT): string | null {
   if (terms.ratioMeasure === "generic_compliance") return "your scrubbed generic compliance rate";
   if (terms.ratioMeasure === "generic_purchase_ratio") return "your generic purchase ratio";
