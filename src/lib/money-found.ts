@@ -136,14 +136,15 @@ async function loadMoneyFound(): Promise<MoneyFound> {
       if (groupByNdc.has(r.ndc11)) continue;
       groupByNdc.set(
         r.ndc11,
-        groupKey({ ndc11: r.ndc11, equivalenceKey: directory.get(r.ndc11)?.key ?? null, description: r.description, classification: r.classification, pricingUnit: r.pricingUnit, otc: r.otc }),
+        groupKey({ ndc11: r.ndc11, equivalenceKey: directory.get(r.ndc11)?.key ?? null, description: r.description, classification: r.classification ?? directory.get(r.ndc11)?.classification ?? null, pricingUnit: r.pricingUnit, otc: r.otc ?? directory.get(r.ndc11)?.otc ?? false }),
       );
     }
     groupOf = (ndc) => {
       const held = groupByNdc.get(ndc);
       if (held !== undefined) return held;
       // Placed by the FDA even where NADAC does not price it; see drug-profit-store.
-      const k = groupKey({ ndc11: ndc, equivalenceKey: directory.get(ndc)?.key ?? null, description: null, classification: null, pricingUnit: null });
+      const d = directory.get(ndc);
+      const k = groupKey({ ndc11: ndc, equivalenceKey: d?.key ?? null, description: null, classification: d?.classification ?? null, pricingUnit: null, otc: d?.otc ?? false });
       groupByNdc.set(ndc, k);
       return k;
     };

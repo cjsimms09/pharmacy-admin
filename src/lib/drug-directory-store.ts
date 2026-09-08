@@ -1,7 +1,7 @@
 import "server-only";
 import { db, schema } from "@/db";
 import { readZip } from "./zip-read";
-import { parseDirectoryProducts, parseDirectoryPackages, parseOrangeBook, buildDirectory, packageUnits, type DrugDirectoryRow } from "./drug-directory";
+import { parseDirectoryProducts, parseDirectoryPackages, parseOrangeBook, buildDirectory, packageUnits, fdaClassification, type DrugDirectoryRow } from "./drug-directory";
 import { newId } from "./crypto";
 
 /**
@@ -129,7 +129,7 @@ export async function fetchDrugDirectory(by: { userId: string | null }, fetchImp
 
 /* ── Held between requests: the map every grouping reads ── */
 
-let held: { at: number; count: number; keys: Map<string, { key: string; teCode: string | null; genericName: string; strength: string; form: string; labeler: string }> } | null = null;
+let held: { at: number; count: number; keys: Map<string, { key: string; teCode: string | null; genericName: string; strength: string; form: string; labeler: string; classification: "B" | "G" | null; otc: boolean }> } | null = null;
 const MAX_AGE_MS = 10 * 60_000;
 
 export function forgetDirectory(): void {
@@ -138,10 +138,11 @@ export function forgetDirectory(): void {
 }
 
 /** Every NDC's equivalence key and rating, held for ten minutes. Empty until the files are loaded. */
-export async function directoryKeys(): Promise<Map<string, { key: string; teCode: string | null; genericName: string; strength: string; form: string; labeler: string }>> {
+export async function directoryKeys(): Promise<Map<string, { key: string; teCode: string | null; genericName: string; strength: string; form: string; labeler: string; classification: "B" | "G" | null; otc: boolean }>> {
   if (held && Date.now() - held.at < MAX_AGE_MS) return held.keys;
-  const rows = await db.query.drugDirectory.findMany({ columns: { ndc11: true, equivalenceKey: true, teCode: true, genericName: true, strength: true, form: true, labeler: true } });
-  const keys = new Map(rows.map((r) => [r.ndc11, { key: r.equivalenceKey, teCode: r.teCode, genericName: r.genericName, strength: r.strength, form: r.form, labeler: r.labeler }]));
+  const rows = await db.query.drugDirectory.findMany({ columns: { ndc11: true, equivalenceKey: true, teCode: true, genericName: true, strength: true, form: true, labeler: true, marketingCategory: true } });
+  // Brand or generic from the FDA's marketing category, for the NDCs NADAC does not classify.
+  const keys = new Map(rows.map((r) => [r.ndc11, { key: r.equivalenceKey, teCode: r.teCode, genericName: r.genericName, strength: r.strength, form: r.form, labeler: r.labeler, ...fdaClassification(r.marketingCategory) }]));
   held = { at: Date.now(), count: rows.length, keys };
   return keys;
 }

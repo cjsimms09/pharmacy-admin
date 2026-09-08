@@ -24,7 +24,7 @@ async function loadProductsExtras() {
     if (groupByNdc.has(r.ndc11)) continue;
     groupByNdc.set(
       r.ndc11,
-      groupKey({ ndc11: r.ndc11, equivalenceKey: directory.get(r.ndc11)?.key ?? null, description: r.description, classification: r.classification, pricingUnit: r.pricingUnit, otc: r.otc }),
+      groupKey({ ndc11: r.ndc11, equivalenceKey: directory.get(r.ndc11)?.key ?? null, description: r.description, classification: r.classification ?? directory.get(r.ndc11)?.classification ?? null, pricingUnit: r.pricingUnit, otc: r.otc ?? directory.get(r.ndc11)?.otc ?? false }),
     );
   }
   const buys = underNadac(ledger.rows, (ndc) => groupByNdc.get(ndc) ?? null);
