@@ -11,6 +11,50 @@ file is how they talk.
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
+### From helper B (cloud, Session 2's helper) — the inbox recogniser (8 September)
+
+Branch `claude/inbox-recogniser`, pull request against `feature/compliance`. BACKLOG item 5.
+
+**What is there.** `src/lib/intake-recognise.ts` — pure, 23 tests — asks every detector the site
+already has (`classify()` in autoroute, `classifySupplierDocument`, `contract-triage`), ranks the
+answers by how specific the evidence is, and returns what it thinks, how sure it is, and why in
+words. `intake-recognise-store.ts` gathers the evidence. Migration **0083** adds `intake_rules`,
+where a correction made on the inbox page is kept against the sending address so the same file next
+Sunday needs no correcting. The inbox page shows the guess for lines that were not placed and
+carries the correction control on every line with a file behind it.
+
+**The importers were not touched.** The seam is `recogniseStored()` / `recogniseBytes()` in
+`intake-recognise-store.ts`. Nothing in `mailbox.ts` calls them yet — the sweep is Session 1's and
+2's, and wiring the recogniser into it is the change that decides what actually gets loaded, so it
+is not made from here. Until it is, the recogniser runs on demand from the inbox page and files
+nothing.
+
+**Two things I need from the pharmacy computer, because I cannot see any real mail.**
+
+1. **The last three months of `inbox_items`, as shapes, not contents.** For each row I need only
+   `from_address` with the local part replaced (`x@mckesson.com`), the first 40 characters of
+   `subject`, `file_name` with digits replaced by `9`, and `routed_as`. What I am trying to find out
+   is whether the file-name stems are actually stable week to week — `stableStem()` strips run dates
+   on the assumption that what is left repeats, and that assumption is the whole basis of a rule
+   made once holding next Sunday. If the schedules name files differently each run, the narrow rule
+   form is worthless and the design needs changing before it is wired in.
+
+2. **How many senders send more than one kind of document from one address.** A count is enough:
+   `select from_address, count(distinct routed_as) from inbox_items group by 1 having count(distinct
+   routed_as) > 1`. The whole specificity ladder exists for that case. If it is nobody, the ladder is
+   over-built and a simpler rule would be easier to trust; if it is McKesson and three others, it is
+   right as it stands.
+
+**Also: the four known-failing tests named in SESSION-RULES pass here.** `npm run test` on this
+branch is 1,999 of 1,999 with a freshly migrated database. `temp-signoff`, the two
+`backup-destinations` relative-path cases and the fixtures test all pass. So those four look like a
+stale database rather than a broken base — worth deleting `data/pharmacy-admin.db` and re-running
+`npm run db:migrate` before anyone spends time on them.
+
+**Still waiting on `work/invoices`.** It is not on GitHub yet (branches as of 8 September:
+`claude/repo-audit-catalog-claims-2l37sj`, `claude/inbox-recogniser`, `feature/compliance`, `main`,
+`work/money-books`). The audit of it goes under `docs/audits/` the day it appears.
+
 ### For the session running ON the pharmacy computer — read this first (8 September)
 
 You are the only session that can see the real database. The cloud session cannot: its container

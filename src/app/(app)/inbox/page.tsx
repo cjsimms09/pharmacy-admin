@@ -7,7 +7,10 @@ import { getSettings } from "@/lib/settings";
 import { hasMailPassword } from "@/lib/mailbox";
 import { allSuppliers, addressesOf, type Supplier } from "@/lib/suppliers-registry";
 import { PageHeader, Notice, Empty } from "@/components/ui";
-import { fileInboxItem, deleteInboxItem, sweepNow, rereadItem, sortInboxItem, attributeInboxItem } from "./actions";
+import { CATEGORIES } from "@/lib/intake-recognise";
+import { senderRules, describeRule, recogniseStored } from "@/lib/intake-recognise-store";
+import type { Recognition } from "@/lib/intake-recognise";
+import { fileInboxItem, deleteInboxItem, sweepNow, rereadItem, sortInboxItem, attributeInboxItem, teachInboxItem, forgetIntakeRule } from "./actions";
 
 export const metadata = { title: "Inbox" };
 export const dynamic = "force-dynamic";
@@ -15,13 +18,31 @@ export const dynamic = "force-dynamic";
 export default async function InboxPage({ searchParams }: { searchParams: Promise<{ saved?: string; error?: string; detail?: string; ok?: string }> }) {
   await requireManager();
   const { saved, error, detail, ok } = await searchParams;
-  const [s, configured, items, people, suppliers] = await Promise.all([
+  const [s, configured, items, people, suppliers, rules] = await Promise.all([
     getSettings(),
     hasMailPassword(),
     db.select().from(schema.inboxItems).orderBy(desc(schema.inboxItems.receivedAt)).limit(200),
     db.query.people.findMany({ where: eq(schema.people.active, true), orderBy: (p, { asc }) => [asc(p.lastName)] }),
     allSuppliers(true),
+    senderRules(),
   ]);
+
+  /*
+   * What the site makes of the lines it could not place.
+   *
+   * Only those, and only the twenty most recent of them: working this out means reading the file
+   * behind the line, and two hundred file reads to draw one page is how a page becomes slow enough
+   * that nobody opens it. A line that was placed already says what it is; a line that was not is
+   * exactly where the question "what is this?" is worth answering.
+   */
+  const unplaced = items.filter((i) => i.documentId && (!i.routedAs || i.routedAs === "unrecognised")).slice(0, 20);
+  const guesses = new Map<string, Recognition>();
+  await Promise.all(
+    unplaced.map(async (i) => {
+      const r = await recogniseStored(i.id, rules);
+      if (r) guesses.set(i.id, r);
+    }),
+  );
 
   return (
     <>
@@ -87,6 +108,27 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
                       <div className="mt-1 max-w-md text-xs text-ink-3">Filed only — {i.routeResult}</div>
                     )}
                     {!i.routedAs && i.routeResult && <div className="mt-1 max-w-md text-xs text-ink-3">{i.routeResult}</div>}
+                    {(() => {
+                      const g = guesses.get(i.id);
+                      if (!g) return null;
+                      return (
+                        <div className="mt-1 max-w-md rounded-md border border-line bg-paper-2 px-2 py-1.5 text-xs">
+                          <div className="font-medium text-ink">{g.says}</div>
+                          {g.best && (
+                            <ul className="mt-1 list-disc pl-4 text-ink-3">
+                              {g.best.why.map((w, n) => <li key={n}>{w}</li>)}
+                            </ul>
+                          )}
+                          {g.ranked.length > 1 && (
+                            <div className="mt-1 text-ink-3">
+                              Also considered: {g.ranked.slice(1, 4).map((o) => `${o.label.toLowerCase()} (${o.sure})`).join(", ")}.
+                            </div>
+                          )}
+                          {/* The one thing this must never do is act on a guess it is not sure of. */}
+                          {!g.mayFile && <div className="mt-1 text-ink-3">Nothing was filed on this.</div>}
+                        </div>
+                      );
+                    })()}
                     {(() => {
                       const from = supplierByAddress(suppliers, i.fromAddress);
                       const advice = whatToDo({ ...i, senderIsSupplier: Boolean(from), supplierName: from?.name ?? null });
@@ -171,6 +213,34 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
                         </p>
                       </form>
                     )}
+                    {/*
+                      Saying what it actually is.
+                      
+                      On every line with a file behind it, not only the ones that failed: a document
+                      that loaded as the wrong thing is exactly the case worth correcting, and it is
+                      the case where nothing on the screen suggests anything is wrong. What is kept
+                      is a rule about the sender, so this is asked once and not every Sunday.
+                    */}
+                    {i.documentId && i.fromAddress && (
+                      <details className="mb-2">
+                        <summary className="cursor-pointer text-xs text-accent hover:underline">
+                          {guesses.get(i.id)?.needsOwner ? "Tell it what this is" : "That is not what this is"}
+                        </summary>
+                        <form action={teachInboxItem} className="mt-2 grid gap-2 rounded border border-line bg-paper-2 p-2">
+                          <input type="hidden" name="itemId" value={i.id} />
+                          <select name="category" className="field text-xs" defaultValue="">
+                            <option value="">What is it?</option>
+                            {CATEGORIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+                          </select>
+                          <input name="note" placeholder="Why, in your words (optional)" className="field text-xs" />
+                          <button className="btn btn-sm btn-primary" type="submit">Remember and read it</button>
+                          <p className="text-[11px] text-ink-3">
+                            Kept as a rule about <span className="font-mono">{i.fromAddress}</span>, so the next one places itself.
+                            Where the file&rsquo;s own columns say something different, the rule is narrowed to files named like this one.
+                          </p>
+                        </form>
+                      </details>
+                    )}
                     {i.documentId && i.routedAs !== "invoice" && (
                       <form action={rereadItem.bind(null, i.id)} className="mb-2">
                         <button className="text-xs text-accent hover:underline" type="submit" title="Read this file again with the rules as they are now — after adding a supplier's address, or turning automatic loading on.">
@@ -197,6 +267,41 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
             </tbody>
           </table>
         </div>
+      )}
+
+      {/*
+        What has been taught, in one place.
+
+        A rule that cannot be seen is a rule that cannot be doubted, and the first time one of these
+        files something wrong the only useful question is "what did I tell it?". So they are listed
+        in the same words they were made in, with the owner's own note, and each can be removed.
+      */}
+      {rules.length > 0 && (
+        <section className="mt-6">
+          <h2 className="text-sm font-semibold text-ink">What you have told it</h2>
+          <p className="mt-0.5 text-xs text-ink-3">
+            Each of these was made by correcting a line above. They are tried before the file&rsquo;s own columns
+            only where they name a subject or a file name — a rule about a whole sender never overrules what a
+            file plainly is.
+          </p>
+          <ul className="mt-2 divide-y divide-line rounded-lg border border-line bg-surface">
+            {rules.map((r) => (
+              <li key={r.id} className="flex items-start justify-between gap-3 px-3 py-2 text-xs">
+                <div>
+                  <div className="text-ink">{describeRule(r)}</div>
+                  {r.note && <div className="text-ink-3">&ldquo;{r.note}&rdquo;</div>}
+                  <div className="text-ink-3">
+                    {r.taughtAt.replace("T", " ").slice(0, 16)}
+                    {r.wasGuessedAs ? ` — it had guessed ${r.wasGuessedAs.replace(/_/g, " ")}` : ""}
+                  </div>
+                </div>
+                <form action={forgetIntakeRule.bind(null, r.id)}>
+                  <button className="text-ink-3 hover:text-ink hover:underline" type="submit">Forget this</button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
     </>
   );

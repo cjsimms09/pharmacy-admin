@@ -2961,3 +2961,37 @@ export const drugDirectoryLoads = sqliteTable("drug_directory_loads", {
   loadedBy: text("loaded_by"),
   loadedAt: text("loaded_at").notNull().default(now()),
 });
+
+/**
+ * What the owner has said a sender's mail actually is.
+ *
+ * The inbox guesses; this is what happens when it guesses wrong. A correction on the inbox page is
+ * kept here against the sending address, so the next file from the same place is placed without
+ * anybody being asked twice — which is the whole of the request. A rule is either the whole sender
+ * ("everything from this address is a NADAC file") or a sender narrowed by a fragment of the
+ * subject or the file name ("mail from McKesson whose file is named like 'credits' is a credit
+ * memo"), and the narrow form exists because a supplier sends invoices and catalogues from one
+ * address and a broad rule would file the catalogue as an invoice.
+ *
+ * `note` is the owner's own words at the moment of correcting, kept unedited: months later the
+ * reason a rule exists is worth more than the rule.
+ */
+export const intakeRules = sqliteTable(
+  "intake_rules",
+  {
+    id: text("id").primaryKey(),
+    /** A whole address or a domain, lowercased, matched as a fragment of the sender. */
+    address: text("address").notNull(),
+    /** A key from CATEGORIES in intake-recognise.ts. Text, not an enum: a new category is a row, not a migration. */
+    category: text("category").notNull(),
+    /** Optional fragments that narrow the rule. Null means the rule covers everything from the address. */
+    subjectFragment: text("subject_fragment"),
+    fileNameFragment: text("file_name_fragment"),
+    /** What the recogniser had thought when it was corrected, so a bad rule can be traced back. */
+    wasGuessedAs: text("was_guessed_as"),
+    note: text("note"),
+    taughtBy: text("taught_by"),
+    taughtAt: text("taught_at").notNull().default(now()),
+  },
+  (t) => [index("intake_rules_address_idx").on(t.address)],
+);
