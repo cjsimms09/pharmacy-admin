@@ -1,5 +1,5 @@
 import "server-only";
-import { allSuppliers } from "./suppliers-registry";
+import { allSuppliers, supplierRecordFor } from "./suppliers-registry";
 import { rebateProgramsInForce, rebateProgramsFor } from "./supplier-terms-store";
 import { rebateStatementFor } from "./rebate-report-store";
 import { latestRatio } from "./purchase-ratio";
@@ -252,6 +252,22 @@ export type EarningSoFar = {
   estimatedRebateCents: number | null;
   /** Lines whose contract marking the invoice did not print, so nothing is claimed for them. */
   unmarkedLines: number;
+  /**
+   * Lines in this month that belong to no supplier on the register at all.
+   *
+   * Not this supplier's lines — nobody's. They are counted here because silence was the original
+   * failure: the old name match dropped every line it could not place without a word, and eight
+   * real lines worth $78.50 left the rebate figures with nothing on any screen to say they had.
+   * A figure that is missing purchases must be able to say how many, or it is indistinguishable
+   * from a quiet month.
+   *
+   * The same three numbers appear on every supplier's card for the month, because the unplaced
+   * lines are a property of the month and not of the supplier being looked at.
+   */
+  unplacedLines: number;
+  unplacedCents: number;
+  /** The names those lines were printed under, so the pharmacy knows which alias to type. */
+  unplacedNames: string[];
 };
 
 export async function earningSoFar(supplierId: string, month?: string): Promise<EarningSoFar | null> {
@@ -262,16 +278,51 @@ export async function earningSoFar(supplierId: string, month?: string): Promise<
   if (!supplier) return null;
 
   const m = month ?? todayIso().slice(0, 7);
-  const names = [supplier.name, supplier.catalogName].filter(Boolean).map((x) => x!.trim().toLowerCase());
 
   const lines = await db.query.invoiceLines.findMany({
     where: and(gte(schema.invoiceLines.invoiceDate, `${m}-01`), lte(schema.invoiceLines.invoiceDate, `${m}-31`)),
   });
   void eq;
-  const mine = lines.filter((l) => {
-    const n = (l.supplier ?? "").trim().toLowerCase();
-    return n !== "" && names.some((x) => n === x || n.includes(x) || x.includes(n));
-  });
+
+  /*
+   * Which supplier each line belongs to — the identifier first, the name only where there is none.
+   *
+   * This was a name test that asked whether either string contained the other, and it is unsafe in
+   * both directions. "IPC" neither contains nor is contained by "Independent Pharmacy Cooperative",
+   * the name printed on its own invoices, so all eight invoice lines on the database matched no
+   * supplier and vanished from every rebate figure without a word — the purchase ratio, the tier
+   * progress and this function's own totals were all running on nothing. The other direction has
+   * not fired yet and is worse when it does, because it yields a figure rather than a hole: the
+   * test took the first row whose name contained the printed one, with no tie-break, so a line
+   * printed "IP" would be claimed by whichever of "IPC" and "IPD" the register listed first. A
+   * rebate claimed on somebody else's spend is a number that looks right and is not.
+   *
+   * `supplier_id` is the answer the invoice already reached from the sender address when it was
+   * filed, which is a fact rather than a reading of prose. Where a line predates that column and
+   * the backfill found nothing, the printed name is resolved through the register's own matcher —
+   * catalogue name, register name, then the aliases the pharmacy typed — and every comparison
+   * there is equality. A name that matches none of them places the line nowhere, and it is
+   * counted and named below rather than dropped.
+   */
+  const placed = new Map<string, string>();
+  const unplacedNames = new Set<string>();
+  let unplacedLines = 0;
+  let unplacedCents = 0;
+  for (const l of lines) {
+    const byId = l.supplierId && rows.some((s) => s.id === l.supplierId) ? l.supplierId : null;
+    const byName = byId ? null : supplierRecordFor(rows, l.supplier)?.id ?? null;
+    const owner = byId ?? byName;
+    if (owner) {
+      placed.set(l.id, owner);
+      continue;
+    }
+    unplacedLines++;
+    unplacedCents += l.extendedCents;
+    const printed = (l.supplier ?? "").trim();
+    unplacedNames.add(printed === "" ? "(no supplier printed on the line)" : printed);
+  }
+
+  const mine = lines.filter((l) => placed.get(l.id) === supplierId);
 
   let contract = 0;
   let brand = 0;
@@ -328,5 +379,8 @@ export async function earningSoFar(supplierId: string, month?: string): Promise<
     brandRebateCents: brandRebate,
     estimatedRebateCents: contractRebate === null && brandRebate === null ? null : (contractRebate ?? 0) + (brandRebate ?? 0),
     unmarkedLines,
+    unplacedLines,
+    unplacedCents,
+    unplacedNames: [...unplacedNames].sort(),
   };
 }

@@ -57,7 +57,9 @@ function fail(msg) {
 }
 
 function git(args) {
-  const r = spawnSync("git", args, { encoding: "utf8", shell: isWin, timeout: 5 * 60_000 });
+  // No shell: git is an executable, not a .cmd, and with a shell Node concatenates arguments
+  // unquoted (it warns about exactly that), which would break the day an argument carries a space.
+  const r = spawnSync("git", args, { encoding: "utf8", timeout: 5 * 60_000 });
   if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${(r.stderr || r.stdout || "").trim().split("\n")[0] || `exit ${r.status}`}`);
   return r.stdout.trim();
 }

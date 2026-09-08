@@ -39,9 +39,13 @@ every drug it carries:
   money directly: `reimbursement-fit.ts` takes a median MAC per product key to decide a payer's
   formula, and `product-groups.ts` feeds `drug-profit.ts`'s choice of the most profitable NDC in a
   product. Both are averaging across fragments of one product. **In progress.**
-- **Price from each supplier, including rebates.** Partly there — `supplier_items` carries the
-  price and `contract_flag`, and the buy list nets the rebate through `bestBuy`. Needs proving
-  against the real database rather than assumed: HANDOFF item 2.
+- **Price from each supplier, including rebates.** Proven wrong and fixed 7 September: no rebate
+  rate was in force for any supplier because McKesson's three ladders never said which ratio drives
+  them, so 7,165 contract generics were compared at printed price — about 30% too high. Migration
+  `0084`; McKesson now 29% off contract items. Still to do: the GPR 1% off every generic (A), and
+  **the owner's actions** — forward McKesson invoices to the inbox and give the register McKesson's
+  invoice sender address, because there is not one McKesson invoice in the system and the rebate
+  earned-so-far figures run on invoices.
 - **NADAC of each drug.** Answered 7 September and sound: 26,246 of 45,791 catalogue NDCs, and 652
   of the 681 NDCs actually dispensed, 650 of those current within three months. The misses are CMS
   genuinely not pricing hospital injectables, devices, supplies and repackager labels — not a
@@ -87,7 +91,37 @@ four links, and it is only as good as its weakest:
 **Link 3 and link 4 both depend on item 1 above** — they group by product key, and the product key
 currently fragments. Fixing the key is the prerequisite, which is why it is first.
 
-### 3. Re-measure the six buying-logic fixes against real data (HANDOFF item 2)
+### 2b. Contract ingestion is session 1's own job (7 September)
+
+The owner: *"I want you handling the contract ingestion. All the contracts are in the contract
+folder. The goal is to extract as much info as we can to match claims with a contract. So you
+should be familiar with all the info we get from claims."* Session 1 reads the whole library —
+357 documents, 353 unread, the 2 stale failures re-run — in a separate process, queued by the
+dollars of claims behind each payer, and widens what the reader extracts to every identifier a
+claim carries (BIN, PCN, group, network reimbursement id, chain code, NCPDP, NPI, plan names) and
+to the 835/EFT/EDI enrolment instructions below. The claims side of the join is inventoried first
+so nothing extractable is left unasked.
+
+### 2c. Get the 835s sent here (7 September)
+
+The owner: *"Also want to search contracts for info to request 835 changes. Want to automate request
+to have 835s sent to this site instead of where they currently go!"* Two halves: the extraction
+(session 1, inside 2b — for every contract, where remittance advice is delivered today, who
+changes it, the form or portal or address, the payer ID, the clearinghouse) and **the request
+itself** — one generated, ready-to-send enrolment request per payer, tracked from sent to
+acknowledged to first 835 received, on `/payers/routing` (`era-enrollment.ts`, `era_enrollments`,
+`payment_routing`, `pbm_contacts` already exist). Assigned to B, ahead of the inbox recogniser.
+
+### 2d. Claims data joins the audit list (7 September)
+
+The owner: *"We also need to add claims data to the list of things to audit."* The claims reader
+(`claims.ts` and every column alias it accepts), fills grouping (`fills.ts`), payments
+(`claim-payments.ts`), and the reimbursement inference (`reimbursement-fit.ts`) — audited like the
+buying logic: one meaning and one unit per figure, nothing inferred that the export states, and
+every figure the profit chain uses traced back to the export column it came from. Assigned to A
+after the contract match; session 1 supplies the real-data queries.
+
+### 3. Re-measure the six buying-logic fixes against real data (HANDOFF item 2) — DONE, see Done
 
 Fixed on 8 September in commit `8d51d73`, none measurable at the time. Each needs a real number:
 margin at net rather than printed price, short-dated stock being recommended, the cross-unit NADAC
@@ -192,6 +226,14 @@ place, and an arithmetic check before anything is stored.
 
 ## Done
 
+- **McKesson's rebate reaches prices (7 September, deployed as `e471895`).** All three ladders were
+  stored without the ratio that drives them, so no band was ever chosen and 7,165 contract generics
+  were compared at printed price. Migration `0084`; verified live at 29% off contract items and
+  0.75% off brand. HANDOFF item 2, the six buying-logic fixes, measured in the same pass.
+- **Invoice lines belong to the supplier the invoice named (session 2, merged in `29f953b`).**
+  `invoice_lines.supplier_id` carried from the invoice, `suppliers.aliases` typed by the pharmacy,
+  equality matching only, unplaced lines counted and named on every supplier card. IPC's two
+  invoice spellings typed as aliases.
 - **The site deploys itself from the pharmacy computer (7 September, 9:34 PM).** `npm run deploy`
   pushes `feature/compliance` and has the launcher rebuild, migrate and restart, and waits until
   the app answers on the new build. "Let Claude run the site.cmd" was run once: the machine-local

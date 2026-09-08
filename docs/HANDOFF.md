@@ -111,9 +111,47 @@ Two things were found while answering this, both of which change what the site s
   most profitable NDC in a product — groups on the same `productKey()` function. Both are taking
   medians and comparing candidates across fragments of what should be one product. Not yet costed.
 
-**2. Six faults were fixed in the buying logic on 8 September (commit `8d51d73`) and none of them
-could be measured against real data.** Re-measure each on the live database and say what the real
-numbers are:
+**2. Six faults were fixed in the buying logic on 8 September (commit `8d51d73`) — MEASURED on the
+pharmacy computer, 7 September, and every one of them was moot, for one reason.**
+`contractRatesBySupplier()` returned `{}`: no supplier had a rebate rate in force, so the ledger
+compared **7,165 McKesson contract generics at printed price** (`rebate_unknown` on 7,165 rows) and
+nothing the six fixes changed could show. The cause was one field: all three McKesson programmes
+were stored with `ratioMeasure: null`, and `rebate-view.ts figuresFor()` selects the driving figure
+from that field, so no band could ever be chosen — while the daily report carried a scrubbed
+compliance of 20.32% and the OneStop ladder's bottom tier pays 15% at zero. The diagnosis then said
+"the band it lands in pays nothing on contract generics today", which was false. Migration `0084`
+sets the measure from each programme's own `ratioDefinition` text (they say "compliance" and
+"generic purchase ratio" in words); verified after migrating: McKesson **29% off contract items,
+0.75% off brand**. Every "which supplier" comparison had been overstating McKesson's contract
+generics by about thirty per cent. Still open: the GPR ladder shows `allGenerics: null` because the
+daily report's generic share (79.8%, which would pay 1%) is not passed through as `gprPercent` —
+only a monthly statement fills it; assigned to A.
+
+The six, on the live ledger (45,782 rows, 544 dispensed, **8 with an invoice price**):
+- margin at net vs printed: 0 of 544 rows differ — no rate was in force, so net equalled printed.
+  `margins()` is defined only where an invoice price exists, so "What each drug earns" covers 8 NDCs.
+- short-dated: 0 catalogue rows carry a short-dated availability on this database; nothing to see.
+- NADAC across units: **50 McKesson rows** are priced per one unit while NADAC prices per another;
+  4 of them would have been reported as beyond 3× the benchmark; none beyond 100×.
+- rebate rate by name: with no rates on file, first-containment and the new matcher agree on
+  "none" for all five suppliers. The IPC invoice mismatch is a separate matcher (`earningSoFar`),
+  fixed by session 2 in `0083`.
+- placeholders: 0 in either table (`0082`).
+- offers with no net price: 6 catalogue rows have no unit cost; 0 ledger buys lack an effective
+  price.
+
+**Invoices, measured for session 2:** `supplier_invoices` has 2 rows, both IPC, both `supplier_id`
+null; one with 8 lines ($78.50), one with **no text layer, 0 lines, $1,530.89 and no review flag**.
+There are no McKesson invoices anywhere — not mis-filed, never arrived — and the register's
+McKesson row has **no sender address**, so one could not file as an invoice if it did. Owner
+actions: forward McKesson invoices to the site's inbox, and the register needs McKesson's invoice
+sender address. IPC aliases were typed on the register by session 1 from the two invoices.
+
+**File handed to A (7 September):** `claim-contract.ts` and `src/app/(app)/payers/**` for the
+network-id mapping (ASSIGNMENTS, Helper A, "Second"). 1 does not edit them until A's pull request
+lands.
+
+The original list, for the record:
 
 - `marginOf` used the cheapest *printed* price from any supplier; it now uses the net price at the
   actual buy (`bestBuy`). Every contract line's margin was understated by the rebate rate. How many
