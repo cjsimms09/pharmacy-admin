@@ -3,7 +3,7 @@ import { db, schema } from "@/db";
 import { todayIso } from "./dates";
 import { SPECS, type Measurement } from "./data-health";
 import { comparePack } from "./data-health-packages";
-import { allSuppliers, supplierRecordFor } from "./suppliers-registry";
+import { allSuppliers, supplierRecordFor, aliasesOf } from "./suppliers-registry";
 
 /**
  * Running the data health counts, and keeping the answers.
@@ -141,17 +141,49 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
    *
    * Measured per supplier on the register rather than per file seen, so a wholesaler that has never
    * sent one is counted as missing rather than being absent from the denominator.
+   *
+   * ── When the file ARRIVED, not when it was imported ──
+   *
+   * The first version of this row read 5 of 5 while three wholesalers had sent nothing for two
+   * days, and the reason is the whole point of the row: re-running a stored 6 September file
+   * through the importer on the 8th to fill in item numbers stamps `supplier_imports` with the 8th.
+   * Import time measures our own activity; the question is the supplier's. A row that answers "have
+   * we touched this lately" while appearing to answer "is this current" is worse than no row,
+   * because it is reassuring.
+   *
+   * `inbox_items.received_at` is when the message actually landed, and a re-import creates no inbox
+   * item at all.
    */
-  const imports = await db
-    .select({ supplier: schema.supplierImports.supplier, supplierId: schema.supplierImports.supplierId, createdAt: schema.supplierImports.createdAt })
-    .from(schema.supplierImports);
+  const arrivals = await db
+    .select({
+      receivedAt: schema.inboxItems.receivedAt,
+      fileName: schema.inboxItems.fileName,
+      subject: schema.inboxItems.subject,
+      routedAs: schema.inboxItems.routedAs,
+    })
+    .from(schema.inboxItems);
   await timed("catalogue-currency", async () => {
     const registry = await allSuppliers(true);
     const newest = new Map<string, string>();
-    for (const i of imports) {
-      const key = (i.supplierId ?? supplierRecordFor(registry, i.supplier)?.id ?? i.supplier.trim().toLowerCase());
-      const seen = newest.get(key);
-      if (!seen || i.createdAt > seen) newest.set(key, i.createdAt);
+    for (const a of arrivals) {
+      const name = `${a.fileName ?? ""} ${a.subject ?? ""}`;
+      // A catalogue is recognised by the file the wholesaler sends, not by how the site filed it.
+      const isCatalogue = /catalog/i.test(name) || a.routedAs === "supplier_catalog";
+      if (!isCatalogue) continue;
+      /*
+       * Matched on the names the register already holds for the supplier, squashed the same way
+       * the invoice matcher squashes them — never on a hard-coded list of file-name prefixes.
+       * MCKCatalog and Parmed are today's spellings; a list of them here would be a second place
+       * to keep the register's aliases in step with, and it would go stale silently.
+       */
+      const supplier = registry.find((r) =>
+        [r.name, r.catalogName, ...aliasesOf(r)]
+          .filter((n): n is string => typeof n === "string" && n.trim() !== "")
+          .some((n) => squashName(name).includes(squashName(n))),
+      );
+      if (!supplier) continue;
+      const seen = newest.get(supplier.id);
+      if (!seen || a.receivedAt > seen) newest.set(supplier.id, a.receivedAt);
     }
     const expected = registry.filter((r) => r.active);
     const days = (iso: string) => (Date.parse(today) - Date.parse(iso.slice(0, 10))) / 86_400_000;
@@ -169,7 +201,7 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
       note:
         expected.length === 0
           ? "No supplier is on the register, so nothing is expected."
-          : "A catalogue that stops arriving leaves last week's prices in place, and they look exactly like prices that have not changed.",
+          : "Measured on when the file arrived in the inbox, not when it was imported — re-running a stored file makes a supplier look current when nothing new has come. A catalogue that stops arriving leaves last week's prices in place, and they look exactly like prices that have not changed.",
     };
   });
 
@@ -182,7 +214,8 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
    * progress towards the thing that fixes it rather than as an abstract percentage.
    */
   await timed("claims-window", async () => {
-    const dates = [...fills.values()].map((f) => f.dateFilled).filter(Boolean).sort();
+    // Over every paid claim, cash included: the archive is the archive.
+    const dates = claimRows.filter((r) => r.status === "paid").map((r) => r.dateFilled).filter(Boolean).sort();
     if (dates.length === 0) {
       /*
        * No claims is "nothing to measure", not "a window of zero days".
@@ -195,15 +228,40 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
     }
     const from = dates[0];
     const to = dates[dates.length - 1];
+    /*
+     * The span, and separately the days inside it that carry a claim. Both are true and they answer
+     * different questions.
+     *
+     * The span is how far back the archive reaches, and it is the one the percentage uses, because
+     * "twelve months" is a span. The count of days with a claim is how much is actually in it — a
+     * pharmacy that shuts on Sundays has fewer, and a gap of a fortnight in the middle shows up here
+     * and nowhere else.
+     *
+     * The first version measured the span over insured fills alone and read 15 where a count over
+     * all paid claims reads 21, because the cash fills reach further back. The archive is the
+     * archive: cash business is history the site holds, so the span is over everything paid.
+     */
     const covered = Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000) + 1;
+    const daysWithAClaim = new Set(dates).size;
+    const insured = [...fills.values()].map((f) => f.dateFilled).filter(Boolean).sort();
+    const insuredSpan =
+      insured.length === 0
+        ? 0
+        : Math.round((Date.parse(insured[insured.length - 1]) - Date.parse(insured[0])) / 86_400_000) + 1;
+
+    const gaps = [`${daysWithAClaim} day${daysWithAClaim === 1 ? "" : "s"} carry a claim, across a span of ${covered} — ${from} to ${to}.`];
+    if (insuredSpan > 0 && insuredSpan !== covered) {
+      gaps.push(`Insured fills span ${insuredSpan} of those days; the rest is cash business, which reaches further back.`);
+    }
+
     return {
       numerator: Math.min(covered, 365),
       denominator: 365,
-      gaps: [`The claims run from ${from} to ${to}.`],
+      gaps,
       note:
         covered >= 365
           ? "A full year is held, so a seasonal drug can be told from a dying one."
-          : `${covered} day${covered === 1 ? "" : "s"} of history. A twelve-month export is what closes this, and until it lands every rate on the site is judged on this window.`,
+          : `${covered} day${covered === 1 ? "" : "s"} of history. Every rate, steadiness test and trend on this site is judged on that window, and it cannot tell a slow seller from a new one. A twelve-month export is what closes it.`,
     };
   });
 
@@ -671,6 +729,16 @@ export async function lastRun(): Promise<{ measuredAt: string | null; tookMs: nu
   };
 }
 
+/**
+ * A name with everything but its letters and digits taken out, for comparing a file name to a
+ * register name.
+ *
+ * "MCKCatalog_9_6_2026.txt" against "Mckesson" is not an equality question — the file name carries
+ * a date, an extension and a spelling nobody controls. Squashed, one contains the other. This is
+ * the only place in the module that matches loosely, and it decides nothing but which supplier a
+ * date belongs to.
+ */
+const squashName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 /** "IPD 412, McKesson 88" — which supplier's rows are short of something, worst first. */
 function gapsBySupplier(rows: { supplier: string | null }[], what: string): string[] {
   if (rows.length === 0) return [];
