@@ -441,6 +441,10 @@ export async function acceptProposals(docId: string, picks: Picks, user: { name:
     );
     out.links++;
   }
+  // A read that printed a network id, or listed a BIN, may decide a network: let the site link what the documents now settle.
+  const { deduceNetworkLinks } = await import("./claim-networks-store");
+  const deduced = await deduceNetworkLinks({ name: "the site (deduced from the documents)" });
+  out.links += deduced.linked.length;
   if (out.links > 0) out.claims = (await applyLinksToClaims()).claims;
   return out;
 }

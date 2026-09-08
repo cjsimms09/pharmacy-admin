@@ -97,6 +97,7 @@ export async function importClaimsFile(a: {
 }): Promise<ImportOutcome> {
   if (a.buf.length <= APART_ABOVE_BYTES) {
     const report = await importRxTransactions(a.buf, a.fileName, a.user.id);
+    await linkNewNetworks();
     if (a.after) await a.after();
     return { apart: false, report };
   }
@@ -181,6 +182,7 @@ export async function runClaimsImport(user: { id: string; name: string }, runId:
       const report = await importRxTransactions(await fs.promises.readFile(file), fileName, user.id);
       result = { text: describeTransactionImport(report), claimsAdded: report.claimsAdded, problems: report.problems };
     }
+    if (result) await linkNewNetworks();
     if (!(await ours())) return;
     if (error || !result) {
       await finish({ state: "failed", step: error ?? "The import ended without a report.", error: error ?? "no report" });
@@ -194,5 +196,25 @@ export async function runClaimsImport(user: { id: string; name: string }, runId:
     await finish({ state: "failed", step: e instanceof Error ? e.message : String(e), error: e instanceof Error ? e.message : String(e) });
   } finally {
     await fs.promises.rm(file, { force: true }).catch(() => undefined);
+  }
+}
+
+/**
+ * The networks a fresh import brought in: link what the documents settle, then apply every link.
+ *
+ * The owner, 8 September: "the lists that are useful need to be kept so we can continue to match
+ * as we get more claims." The lists are kept — the guide's crosswalks and BINs are library
+ * documents, the links are rows — and this is the step that uses them on each day's claims without
+ * anybody opening the page. An import stands whether or not this succeeds; it is tried again on
+ * the next one.
+ */
+async function linkNewNetworks(): Promise<void> {
+  try {
+    const { deduceNetworkLinks } = await import("./claim-networks-store");
+    await deduceNetworkLinks({ name: "the site (deduced from the documents)" });
+    const { applyLinksToClaims } = await import("./payer-links");
+    await applyLinksToClaims();
+  } catch {
+    // The import stands; the links are tried again on the next one.
   }
 }
