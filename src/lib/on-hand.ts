@@ -78,7 +78,10 @@ export type OnHandParse = {
 };
 
 /** Column meanings, matched against a header cell folded to lower case with punctuation dropped. */
-const ALIASES: Record<keyof Pick<OnHandRow, "ndc11" | "description" | "itemNumber" | "quantityThousandths" | "unit" | "unitCostMicros" | "valueCents">, RegExp> = {
+const ALIASES: Record<
+  keyof Pick<OnHandRow, "ndc11" | "description" | "itemNumber" | "quantityThousandths" | "unit" | "unitCostMicros" | "valueCents" | "inventoryGroup">,
+  RegExp
+> = {
   ndc11: /^(ndc|ndc ?11|ndc ?number|ndc ?code|item ?ndc|dispensed ?ndc)$/,
   description: /^(description|item ?description|item ?name|drug ?name|product|product ?name|item)$/,
   itemNumber: /^(item ?number|item ?no|item ?#|supplier ?item ?number|sku)$/,
@@ -86,6 +89,14 @@ const ALIASES: Record<keyof Pick<OnHandRow, "ndc11" | "description" | "itemNumbe
   unit: /^(unit|uom|unit ?of ?measure|dispensing ?unit|pricing ?unit)$/,
   unitCostMicros: /^(unit ?cost|cost ?per ?unit|acquisition ?cost|acq ?cost|average ?cost|avg ?cost|cost ?each|last ?cost)$/,
   valueCents: /^(extended ?cost|extended ?value|total ?cost|inventory ?value|on ?hand ?value|value|extended|ext ?cost)$/,
+  /*
+   * Which shelf the item sits on, which the four-line report reads and the column export dropped.
+   *
+   * fileOnHand splits the dispensing shelf from the front shop with it, so the accounts can check
+   * drug cost against a drug shelf. Without it that split falls back to guessing from the NDC alone
+   * and a front-shop line with an eleven-digit code is counted as stock on the pharmacy shelf.
+   */
+  inventoryGroup: /^(inventory ?group|inv ?group|group|department|dept|category|shelf|location)$/,
 };
 
 const fold = (s: string) => s.replace(/^﻿/, "").trim().toLowerCase().replace(/[._\-/]+/g, " ").replace(/\s+/g, " ").replace(/[:*]+$/, "");
@@ -164,6 +175,62 @@ function findHeader(lines: string[]): { index: number; sep: string; mapping: Map
   return null;
 }
 
+/**
+ * The line that came closest to being a header, and what it was missing.
+ *
+ * Only used to explain a refusal, and the explanation is the point. "No header row carrying both an
+ * NDC column and a quantity-on-hand column" is true and useless: it does not say whether the file
+ * was unreadable or one heading away from working, and the pharmacist cannot tell which column to
+ * rename. A PioneerRx export configured with "Qty On Hand (Units)" instead of "Qty On Hand" fails
+ * exactly the same way as a photograph of a shelf.
+ *
+ * So this finds the row that mapped the most columns, names the one it could not find, and prints
+ * the headings it actually read — which turns "it did not work" into a thing somebody can fix in
+ * the report designer in a minute.
+ */
+function nearestHeader(lines: string[]): { headings: string[]; hasNdc: boolean; hasQuantity: boolean } | null {
+  let best: { headings: string[]; hasNdc: boolean; hasQuantity: boolean; score: number } | null = null;
+  for (let i = 0; i < Math.min(lines.length, 60); i++) {
+    const sep = separatorFor(lines[i]);
+    if (!sep) continue;
+    const cells = splitRow(lines[i], sep);
+    const { mapping } = mapHeader(cells);
+    const score = Object.keys(mapping).length;
+    if (score === 0) continue;
+    if (!best || score > best.score) {
+      best = {
+        headings: cells.map((c) => c.trim()).filter(Boolean),
+        hasNdc: mapping.ndc11 !== undefined,
+        hasQuantity: mapping.quantityThousandths !== undefined,
+        score,
+      };
+    }
+  }
+  return best ? { headings: best.headings, hasNdc: best.hasNdc, hasQuantity: best.hasQuantity } : null;
+}
+
+/** What the reader needs, in the words a PioneerRx report designer would show. */
+const WANTED = {
+  ndc11: 'a column named "NDC" (or NDC Number, NDC Code, Item NDC)',
+  quantity: 'a column named "Quantity On Hand" (or Qty On Hand, On Hand, QOH, Quantity)',
+};
+
+/** Why this file could not be read as a count, in a sentence naming the column that is missing. */
+export function whyNotAnOnHandFile(lines: string[]): string {
+  const near = nearestHeader(lines);
+  if (!near) {
+    return (
+      "Nothing in this file reads as a table of columns. An on-hand count has to be the report exported as " +
+      "text or CSV rather than a PDF or a picture, with one row per item."
+    );
+  }
+  const missing: string[] = [];
+  if (!near.hasNdc) missing.push(WANTED.ndc11);
+  if (!near.hasQuantity) missing.push(WANTED.quantity);
+  const seen = near.headings.slice(0, 12).join(", ") + (near.headings.length > 12 ? ", …" : "");
+  return `This file has columns but not the ones a count needs: it is missing ${missing.join(" and ")}. The headings it does carry are: ${seen}. Add the missing column to the report and export it again.`;
+}
+
 /** True for either shape of count: the four-line PioneerRx report, or a column export. */
 export function looksLikeOnHand(text: string): boolean {
   const head = text.slice(0, 20_000);
@@ -185,7 +252,7 @@ export function parseOnHand(text: string): OnHandParse {
   if (!header) {
     return {
       rows: [], countedOn: countDate(clean), unmappedColumns: [], rowsRead: 0, skipped: {},
-      problems: ["No header row carrying both an NDC column and a quantity-on-hand column."],
+      problems: [whyNotAnOnHandFile(lines)],
     };
   }
   const { sep, mapping } = header;
@@ -216,9 +283,20 @@ export function parseOnHand(text: string): OnHandParse {
       skip("no NDC");
       continue;
     }
-    const ndc = normalizeNdc(rawNdc);
-    if (!ndc.ok) {
-      skip("NDC unreadable");
+    /*
+     * The same test the four-line report uses, so one shelf does not value differently by export.
+     *
+     * This asked for an NDC and nothing else, so a front-shop line with a twelve-digit barcode was
+     * dropped as unreadable — while parsePioneerOnHand, reading the very same stock out of the
+     * other report shape, keeps it as a UPC. Two readers of one thing disagreeing is the fault this
+     * project keeps finding, and here it decides whether the inventory is worth what the shelf says.
+     *
+     * A UPC still carries no NDC, so nothing prices it against NADAC; it is counted and valued at
+     * what the report says it cost, which is what a front-shop item can honestly be.
+     */
+    const identified = codeOf(rawNdc);
+    if (!identified) {
+      skip("code is neither an NDC nor a barcode");
       continue;
     }
 
@@ -240,13 +318,14 @@ export function parseOnHand(text: string): OnHandParse {
           : null;
 
     const row: OnHandRow = {
-      code: ndc.ndc11,
-      codeKind: "ndc11",
-      ndc11: ndc.ndc11,
+      code: identified.code,
+      codeKind: identified.codeKind,
+      ndc11: identified.ndc11,
       description: at(cells, "description") || null,
       itemNumber: at(cells, "itemNumber") || null,
       quantityThousandths: qty,
       unit: at(cells, "unit") || null,
+      inventoryGroup: at(cells, "inventoryGroup") || null,
       unitCostMicros,
       valueCents,
     };
@@ -262,6 +341,7 @@ export function parseOnHand(text: string): OnHandParse {
       if (prev.valueCents !== null && row.valueCents !== null) prev.valueCents += row.valueCents;
       else if (row.valueCents !== null) prev.valueCents = row.valueCents;
       if (!prev.description && row.description) prev.description = row.description;
+      if (!prev.inventoryGroup && row.inventoryGroup) prev.inventoryGroup = row.inventoryGroup;
       continue;
     }
     seen.set(row.code, rows.length);
