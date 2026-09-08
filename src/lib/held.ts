@@ -1,5 +1,6 @@
 import "server-only";
 import { db } from "@/db";
+import { evictions, MAX_HELD } from "./held-evict";
 
 /**
  * Results held between requests, and shared between callers inside one.
@@ -19,11 +20,35 @@ import { db } from "@/db";
  * callers arriving together share one computation. A held value is shared by reference, so a
  * reader never sorts or writes into what it is given.
  */
-type Entry = { at: number; fp: string; value: unknown; has: boolean; pending: Promise<unknown> | null; compute: () => Promise<unknown> };
+/*
+ * `at` is when the value was computed and `readAt` when a reader was last handed it, and they are
+ * different questions. `refreshStale` recomputes on every idle tick, so a reading nobody has opened
+ * since Tuesday looks brand new by `at`; the one somebody opens every morning is the one worth
+ * keeping. Freshness is decided by `at`, and what to let go of by `readAt`.
+ */
+type Entry = { at: number; readAt: number; fp: string; value: unknown; has: boolean; pending: Promise<unknown> | null; compute: () => Promise<unknown> };
 
 const holds = new Map<string, Entry>();
 const FRESH_MS = 10 * 60_000;
 const STALE_OK_MS = 6 * 60 * 60_000;
+
+/**
+ * Drop the least recently read once there are more held readings than the ceiling.
+ *
+ * There was a ceiling on how *old* a value could be and none on how *many* there could be, and
+ * nothing here ever removed an entry — `refreshStale` recomputes rather than drops, and
+ * `forgetHeld` only fires when an import knows what it invalidated. Several keys carry a date or a
+ * range somebody browsed (`books:2026-09:2026-09-08`, `recent:6:2026-09-08`), so the cache gained
+ * an entry a day, each holding a whole period's object graph, none of it ever read again. Invisible
+ * on a cold start and obvious after a fortnight — and this machine is left running for weeks.
+ *
+ * The policy is in `held-evict.ts` so it can be checked without a cache.
+ */
+function evictExcess(): void {
+  if (holds.size <= MAX_HELD) return;
+  const entries = [...holds.entries()].map(([key, e]) => ({ key, readAt: e.readAt, pending: e.pending !== null, has: e.has }));
+  for (const key of evictions(entries, MAX_HELD)) holds.delete(key);
+}
 
 let fpCache: { at: number; fp: string } | null = null;
 
@@ -66,9 +91,13 @@ export async function held<T>(key: string, compute: () => Promise<T>): Promise<T
   const now = Date.now();
   const e = holds.get(key);
   if (e && e.has && e.fp === fp) {
-    if (now - e.at < FRESH_MS) return e.value as T;
+    if (now - e.at < FRESH_MS) {
+      e.readAt = now;
+      return e.value as T;
+    }
     if (now - e.at < STALE_OK_MS) {
       // Stale but unchanged underneath: serve it, and refresh behind.
+      e.readAt = now;
       if (!e.pending) e.pending = run(key, fp, compute);
       return e.value as T;
     }
@@ -81,7 +110,10 @@ function run<T>(key: string, fp: string, compute: () => Promise<T>): Promise<T> 
   const prev = holds.get(key);
   const p = compute()
     .then((value) => {
-      holds.set(key, { at: Date.now(), fp, value, has: true, pending: null, compute });
+      // A refresh does not count as a read: `refreshStale` recomputes everything on an idle tick,
+      // and a value nobody asked for must not look recently wanted because of it.
+      holds.set(key, { at: Date.now(), readAt: prev?.readAt ?? Date.now(), fp, value, has: true, pending: null, compute });
+      evictExcess();
       return value;
     })
     .catch((err) => {
@@ -89,7 +121,7 @@ function run<T>(key: string, fp: string, compute: () => Promise<T>): Promise<T> 
       else holds.delete(key);
       throw err;
     });
-  holds.set(key, { at: prev?.at ?? 0, fp: prev?.fp ?? fp, value: prev?.value, has: prev?.has ?? false, pending: p, compute });
+  holds.set(key, { at: prev?.at ?? 0, readAt: prev?.readAt ?? Date.now(), fp: prev?.fp ?? fp, value: prev?.value, has: prev?.has ?? false, pending: p, compute });
   return p;
 }
 
@@ -123,8 +155,21 @@ export function forgetHeld(prefix?: string): void {
   fpCache = null;
 }
 
-/** What is held and how old, for the feeds page. */
-export function heldStatus(): { key: string; ageSeconds: number; refreshing: boolean }[] {
+/** What is held, how old, and how long since anybody read it — for the feeds page. */
+export function heldStatus(): { key: string; ageSeconds: number; unreadSeconds: number; refreshing: boolean }[] {
   const now = Date.now();
-  return [...holds.entries()].filter(([, e]) => e.has).map(([key, e]) => ({ key, ageSeconds: Math.round((now - e.at) / 1000), refreshing: e.pending !== null }));
+  return [...holds.entries()]
+    .filter(([, e]) => e.has)
+    .map(([key, e]) => ({ key, ageSeconds: Math.round((now - e.at) / 1000), unreadSeconds: Math.round((now - e.readAt) / 1000), refreshing: e.pending !== null }));
+}
+
+/**
+ * How full the cache is, for the page that reports what this process is using.
+ *
+ * Said out loud because the alternative was measuring it with a profiler on the pharmacy's own
+ * computer while somebody waited at the counter. A site that has cost this pharmacy its counter
+ * twice should be able to answer "how much are you holding" by itself.
+ */
+export function heldSize(): { entries: number; ceiling: number } {
+  return { entries: holds.size, ceiling: MAX_HELD };
 }
