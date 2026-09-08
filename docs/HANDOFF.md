@@ -121,6 +121,19 @@ type, service type, DAW or quantity unit — those are PioneerRx export columns 
 remit + copay − dispensing fee. `networkId` is filled on 95% of rows across 82 values and is the
 axis contracts are written on.
 
+**Secondary payors, measured for A's audit (8 September, BACKLOG 2b-iv).** Of 1,054 insured paid
+fills, **22 have more than one payor** (2.1%), carrying $8,456.07 of remit between them. The
+fill grouping is sound on cost: on every one of the 22 the acquisition cost sits on exactly one
+row (0 fills with it on two rows, 0 with it on none). The attribution problem is in anything
+built per row or per payor: PioneerRx's own printed gross profit puts the whole cost on the
+primary's row and none on the secondary's, so the primary reads as a loss and the secondary as
+pure profit — BIN 610011 across 4 secondary-involved rows: remit $462.50, acquisition $1,306.23,
+gross profit −$843.73; BIN 024284 (RxRescue) 5 rows: remit $458.29, acquisition $0, gross profit
+$458.29; BIN 610524 5 rows: remit $245.81, cost $0, profit $265.81. Pairs seen: 021825+024284,
+004336+024284, 003858+610494, 003858+610011 (2 fills each), then singles. Query: group `claims`
+(status paid, not cash plan) by rx, fill, date, NDC; count distinct BIN. A: audit every page that
+states profit by payor against this — the fill owns the profit, each payor owns its own receivable.
+
 **File handed to A (7 September):** `claim-contract.ts` and `src/app/(app)/payers/**` for the
 network-id mapping (ASSIGNMENTS, Helper A, "Second"). 1 does not edit them until A's pull request
 lands.

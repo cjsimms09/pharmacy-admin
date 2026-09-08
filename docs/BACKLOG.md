@@ -151,6 +151,52 @@ rather than the document being long). Manuals carry appeal windows, DIR and audi
 Needs a read-in-parts path in `contract-extract.ts` (page ranges, one answer per part, merged with
 citations kept) and a retry of the four small ones. Session 1.
 
+### 2b-iv. Claims with secondary payors: profit by payor, and who owes what (8 September)
+
+The owner: *"We need a deep audit of how we handle claims with secondary payors! We need to make
+sure the profit and loss of these claims are correct, we need to make sure we know how much money
+we are expecting from each payor. I've noticed we tend to assert all the profit to one payor which
+doesn't make sense. We need to really think this through from a profit perspective as well as what
+to expect when we start receiving remit payments (who owes us what) so that we can reconcile
+properly."*
+
+One fill, several transmissions, each to a different BIN: the primary adjudicates, the secondary
+picks up some of the patient's share, sometimes a third. Today `fills.ts` groups the transmissions
+into one fill and sums their revenue, which is right for the fill's margin — but anything that
+reports *by payor* then hangs the whole fill's profit on one of them. Two things have to be true
+at once and are not the same figure:
+
+- **Profit belongs to the fill**, not to a payor. The fill has one acquisition cost and one total
+  revenue (every payor's remit plus what the patient finally paid). It is a whole or it is nothing.
+- **Money owed belongs to each payor separately.** Each transmission is its own receivable: this
+  BIN owes this remit for this claim, and it is settled by that payor's 835, not by anyone else's.
+  A secondary's remit is a residual after the primary, and a coordination-of-benefits row can carry
+  a zero acquisition cost on purpose (the drug was costed on the primary row).
+
+So the audit has to answer, on the real claims: how many fills have more than one payor; how the
+site attributes their revenue and profit today, page by page; whether any figure double-counts the
+acquisition cost or the patient's share across rows; and what "expected from payor X" should be
+defined as so it reconciles line by line when the 835s arrive. Assigned to A (audit, first item on
+the claims audit) with session 1 supplying the counts. The fix follows the audit.
+
+### 2b-v. Fees on 835s have to be classified, and the contracts hold the key (8 September)
+
+The owner: *"We also need to start thinking about how we are going to handle and classify fees that
+come over with 835s. These will need to be accounted for properly. Fees often come over with a code,
+we might need to get codes from contracts in order to decipher what that fee is."*
+
+An 835 carries adjustments at two levels: on the claim (CAS segments, with a group code and a Claim
+Adjustment Reason Code — CO-45 contractual, PR-3 copay, and so on) and on the provider (PLB
+segments, with a reason code such as WO, FB, L6, 72, and a reference the payor chooses). The
+standard code sets say the *kind* of adjustment; what a given PBM's "L6 — TRANSACTION FEE" or
+"DIR-Q2" actually is comes from the contract, where `transactionFees[]`, `postPointOfSaleDiscounts[]`
+and `dirFeeBasis` are already extracted. Deliverable: a fee dictionary — standard CARC/RARC and PLB
+codes with their meaning, joined to each PBM's contract-named fees — so every adjustment on an 835
+lands in the books under the right heading (contractual write-off, patient share, DIR, transaction
+fee, recoupment, interest) and none lands as "other". Assigned to B with the ERA work; the
+extraction side (making sure the reader captures every fee a contract names, with its code where
+printed) is session 1's.
+
 ### 2c. Get the 835s sent here (7 September)
 
 The owner: *"Also want to search contracts for info to request 835 changes. Want to automate request

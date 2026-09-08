@@ -52,7 +52,7 @@ question that needs real figures is written as a query under "Open items" in `do
 | Session | Files |
 | --- | --- |
 | **1** | `product-groups.ts`, `product-key.ts`, `drug-profit*.ts`, `products-store.ts`, `money-found.ts`, `replay-store.ts`, `suppliers.ts` (catalogue import), `nadac*.ts`, `catalogue-*.ts`, `drug-directory*.ts`, `shelf.ts`, `order-plan.ts`, `scripts/**`, migrations, these docs |
-| **2** | `invoices.ts`, `invoice-lines.ts`, `suppliers-registry.ts`, `rebate-rates.ts` (supplier matching), `purchase-ratio.ts`, `src/app/(app)/suppliers/**`, `src/app/(app)/invoices/**` |
+| **2** | `invoices.ts`, `invoice-lines.ts`, `suppliers-registry.ts`, `rebate-rates.ts` (supplier matching), `purchase-ratio.ts`, `src/app/(app)/suppliers/**`, `src/app/(app)/inventory/invoices/**` (the `/invoices` path is a redirect to it), `data-health*.ts`, `src/app/(app)/tools/data-health/**` |
 | **A** | `ledger.ts`, `ledger-store.ts`, `period-account.ts`, `profit-and-loss.ts`, `src/app/(app)/money/**`, `bars.tsx`, `charts.tsx`, `expense-categories.ts`; audit files under `docs/audits/` |
 | **B** | `mailbox.ts` (routing and recognition only), `src/app/(app)/inbox/**`, `labels.ts`, `autoroute.ts`, `intake-*`, `era-enrollment.ts`, `src/app/(app)/payers/routing/**`; audit files under `docs/audits/` |
 | **1, contracts** | `contract-*.ts`, `src/app/(app)/payers/sort/**`, `payers/contracts/**`, `payers/[pbm]/**` — the contract ingestion is session 1's own job; nobody else edits the extraction |
