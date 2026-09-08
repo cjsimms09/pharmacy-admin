@@ -646,9 +646,21 @@ export async function fileInvoice(
     needsReview: !confident,
     receivedFrom: meta.from,
   });
+  /*
+   * One path to the lines, not two.
+   *
+   * This called writeInvoiceLines and then storeInvoiceLines on the same text — the second
+   * re-parsing what the first had just stored and deleting the rows to write them again. Besides
+   * doing the work twice, it meant a model read obtained by the first call could be replaced by the
+   * second call's rule read, and the only thing preventing that was the rule reader returning
+   * before the delete when it read nothing.
+   *
+   * writeInvoiceLines is the whole path already: the rule reader first because it is free and
+   * deterministic, the model only where the rule read nothing at all, and linesRead / linesUnread
+   * recorded at the end. It reads the invoice row back, so it sees the supplierId resolved above
+   * rather than being told it a second time.
+   */
   const written = text ? await writeInvoiceLines(id, text) : null;
-
-  const byRule = await storeInvoiceLines(id, { supplier, supplierId, invoiceDate, text: text ?? "", printedTotalCents: totalCents });
 
   /*
    * An invoice carrying money and no lines under it is not a quiet success.
@@ -664,7 +676,7 @@ export async function fileInvoice(
    * a total with nothing under it is a document somebody has to open, not a number to be trusted.
    */
   const why = emptyInvoiceWarning({
-    linesStored: Math.max(written?.read ?? 0, byRule.stored),
+    linesStored: written?.read ?? 0,
     totalCents,
     hasTextLayer: text !== null,
   });
@@ -944,6 +956,13 @@ export type InvoiceQuery = {
   maxAmount?: number;
   /** Only ones with no amount read, so they can be filled in. */
   noAmount?: boolean;
+  /**
+   * Only ones carrying a total with no item lines under them.
+   *
+   * Kept apart from `noAmount`, which is the opposite complaint. These have the money and are
+   * missing the goods, so every per-NDC cost and every rebate figure is short by them.
+   */
+  noLines?: boolean;
 };
 
 /**
@@ -982,14 +1001,27 @@ export async function invoices(q: InvoiceQuery = {}): Promise<SupplierInvoice[]>
    * typed has to appear somewhere, which is what makes "oxycodone march" behave the way
    * somebody expects rather than returning everything with either.
    */
+  // Asked of the lines rather than of `lines_read`, because that column records what one reading
+  // managed and this question is about what is on the invoice now.
+  const withLines = q.noLines ? await invoiceIdsWithLines() : null;
+
   return rows
     .filter((r) => matchesText(r, q.text))
     .filter((r) => {
+      if (withLines && !((r.totalCents ?? 0) > 0 && !withLines.has(r.id))) return false;
       if (q.noAmount) return r.totalCents === null;
       if (q.minAmount !== undefined && (r.totalCents === null || r.totalCents < q.minAmount * 100)) return false;
       if (q.maxAmount !== undefined && (r.totalCents === null || r.totalCents > q.maxAmount * 100)) return false;
       return true;
     });
+}
+
+/** The invoices that have at least one item line stored against them. */
+async function invoiceIdsWithLines(): Promise<Set<string>> {
+  const rows = await db
+    .selectDistinct({ invoiceId: schema.invoiceLines.invoiceId })
+    .from(schema.invoiceLines);
+  return new Set(rows.map((r) => r.invoiceId));
 }
 
 /** What the shown invoices come to, so a filtered list answers "how much was that month". */
@@ -1161,6 +1193,39 @@ export async function invoiceIssues(): Promise<InvoiceIssue[]> {
           : `The oldest arrived ${days === 0 ? "today" : `${days} day${days === 1 ? "" : "s"} ago`}.`),
       href: "/inventory/invoices?unconfirmed=1",
       action: "Say what they carry",
+    });
+  }
+
+  /*
+   * ── A total with nothing under it ────────────────────────────────
+   *
+   * Derived from the lines every time this is asked, not from a flag written when the invoice was
+   * filed. That matters for the ones already on the database: the invoice that prompted this was
+   * filed before anything checked, so its `needs_review` is clear and no flag will ever be set on
+   * it retrospectively. Asking the question of the data catches it and every future one alike, and
+   * it also catches an invoice whose lines were removed after the fact.
+   *
+   * The money is the point. A scanned PDF files perfectly and reads nothing, so the invoice is in
+   * the archive, the total is on the screen, and not one item line reaches the cost of any drug —
+   * which means every per-NDC cost, the rebate ladder and the purchase ratio are all short by
+   * exactly this much while looking complete.
+   */
+  const withLines = await invoiceIdsWithLines();
+  const empty = rows.filter((r) => (r.totalCents ?? 0) > 0 && !withLines.has(r.id));
+  if (empty.length > 0) {
+    const cents = empty.reduce((n, r) => n + (r.totalCents ?? 0), 0);
+    const money = `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    out.push({
+      key: "no-lines",
+      severity: "blocking",
+      title: `${empty.length} invoice${empty.length === 1 ? "" : "s"} worth ${money} with no item lines read`,
+      detail:
+        `The total was read off the page and not one line under it was. Usually a scan: a PDF with no text layer files ` +
+        `perfectly and reads nothing. Until the lines are entered or a readable copy replaces ${empty.length === 1 ? "it" : "them"}, ` +
+        `nothing on ${empty.length === 1 ? "this invoice" : "these invoices"} reaches the cost of any drug — so what the pharmacy ` +
+        `paid per NDC, the rebate ladder and the purchase ratio are every one of them short by ${money} and look complete.`,
+      href: "/inventory/invoices?nolines=1",
+      action: "Show me which",
     });
   }
 
@@ -1824,6 +1889,40 @@ export async function storeInvoiceLines(
   if (parsed.lines.length === 0) return { stored: 0, unread: parsed.unreadable.length, reconciles: parsed.reconciles, readCents: 0 };
   if (parsed.reconciles === false) return { stored: 0, unread: parsed.lines.length + parsed.unreadable.length, reconciles: false, readCents: parsed.totalCents };
 
+  /*
+   * What is already on this invoice, and whether this read has earned the right to replace it.
+   *
+   * The delete below is unconditional once a read produces lines, and that was safe only by the
+   * order of the early returns above: a model read that succeeded survived a later rule read
+   * because the rule read nothing and returned before reaching the delete. Luck, not design, and
+   * one refactor from wiping figures a person had already been shown.
+   *
+   * The hole it left is real. `reconciles` is null — not false — when the invoice printed no total
+   * to check against, so an unverified read fell straight through to the delete and could replace
+   * lines that had been proved against a printed total. `replacesStoredLines` settles it by
+   * arithmetic instead: lines that add up to what the invoice says it came to are not given up for
+   * a read that cannot prove the same.
+   */
+  const existing = await db.query.invoiceLines.findMany({
+    where: eq(schema.invoiceLines.invoiceId, invoiceId),
+    columns: { extendedCents: true },
+  });
+  if (
+    !replacesStoredLines({
+      storedLines: existing.length,
+      storedCents: existing.reduce((n, l) => n + l.extendedCents, 0),
+      readReconciles: parsed.reconciles,
+      printedTotalCents: meta.printedTotalCents,
+    })
+  ) {
+    return {
+      stored: existing.length,
+      unread: parsed.unreadable.length,
+      reconciles: true,
+      readCents: existing.reduce((n, l) => n + l.extendedCents, 0),
+    };
+  }
+
   await db.delete(schema.invoiceLines).where(eq(schema.invoiceLines.invoiceId, invoiceId));
   const rows = parsed.lines.map((l) => ({
     id: newId(),
@@ -1844,6 +1943,38 @@ export async function storeInvoiceLines(
   }));
   for (let i = 0; i < rows.length; i += 200) await db.insert(schema.invoiceLines).values(rows.slice(i, i + 200));
   return { stored: rows.length, unread: parsed.unreadable.length, reconciles: parsed.reconciles, readCents: parsed.totalCents };
+}
+
+/**
+ * Whether a fresh read may replace the lines already stored against an invoice.
+ *
+ * The question only arises because an invoice is read more than once: on filing, again from the
+ * inbox with today's rules, and again when somebody presses the button on the page. Each of those
+ * is a legitimate re-read and each is entitled to improve on the last. None of them is entitled to
+ * make it worse.
+ *
+ * "Better" here means one thing, and it is arithmetic rather than judgement: lines that add up to
+ * the total printed on the invoice have been proved against the document, and lines that do not
+ * have not. So proved lines are never given up for unproved ones. Where nothing is stored there is
+ * nothing to lose and the read goes in; where the invoice printed no total, nothing can be proved
+ * either way and the newer read stands, which is the behaviour that was already there.
+ *
+ * `readReconciles` is the parse's own verdict: true where it adds to the printed total, false where
+ * it does not, null where there was no total to check. Null is the case that mattered — it is not
+ * a failure, so it fell straight through to the delete and could replace proved lines with
+ * unproved ones.
+ */
+export function replacesStoredLines(a: {
+  storedLines: number;
+  storedCents: number;
+  readReconciles: boolean | null;
+  printedTotalCents: number | null;
+}): boolean {
+  if (a.storedLines === 0) return true;
+  if (a.printedTotalCents === null) return true;
+  const storedWasProved = a.storedCents === a.printedTotalCents;
+  if (!storedWasProved) return true;
+  return a.readReconciles === true;
 }
 
 

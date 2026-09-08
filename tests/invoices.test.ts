@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { looksLikeInvoice, filingFor, emptyInvoiceWarning, looksLikeInvoiceFromUnknownSender } from "../src/lib/invoices";
+import { looksLikeInvoice, filingFor, emptyInvoiceWarning, looksLikeInvoiceFromUnknownSender, replacesStoredLines } from "../src/lib/invoices";
 import { INVOICE_SCHEDULES } from "../src/db/schema";
 
 /**
@@ -172,5 +172,60 @@ describe("a supplier invoice whose sender is not on the register", () => {
 
   test("anything that is not a PDF is not an invoice here", () => {
     assert.equal(ask({ fileName: "invoice.xlsx", mimeType: "application/vnd.ms-excel" }), false);
+  });
+});
+
+/**
+ * Reading an invoice again must never make it worse.
+ *
+ * An invoice is read more than once — on filing, again from the inbox with today's rules, again
+ * when somebody presses the button on the page — and each re-read is entitled to improve on the
+ * last. None is entitled to replace figures that were proved against the printed total with
+ * figures that were not. The delete inside storeInvoiceLines used to be unconditional once a read
+ * produced any lines; model-read lines survived a later rule read only because the rule read
+ * nothing and returned before reaching it. That is ordering, not a guarantee.
+ *
+ * "Better" is arithmetic, not judgement: lines adding to the total the invoice printed have been
+ * proved against the document.
+ */
+describe("whether a fresh read may replace the lines already stored", () => {
+  const may = (a: Partial<Parameters<typeof replacesStoredLines>[0]> = {}) =>
+    replacesStoredLines({ storedLines: 0, storedCents: 0, readReconciles: null, printedTotalCents: null, ...a });
+
+  test("nothing stored means nothing to lose", () => {
+    assert.equal(may({ storedLines: 0, readReconciles: true, printedTotalCents: 7_850 }), true);
+    assert.equal(may({ storedLines: 0, readReconciles: null, printedTotalCents: 7_850 }), true);
+  });
+
+  test("lines proved against the printed total are not given up for a read that proves nothing", () => {
+    // The hole that mattered: reconciles is null, not false, when the invoice printed no total for
+    // THIS read to check against — so an unproved read fell straight through to the delete.
+    const proved = { storedLines: 8, storedCents: 7_850, printedTotalCents: 7_850 };
+    assert.equal(may({ ...proved, readReconciles: null }), false);
+    assert.equal(may({ ...proved, readReconciles: false }), false);
+  });
+
+  test("a read that proves itself may replace one that also did", () => {
+    assert.equal(may({ storedLines: 8, storedCents: 7_850, printedTotalCents: 7_850, readReconciles: true }), true);
+  });
+
+  test("lines that never added up are replaceable by anything", () => {
+    // Nothing is being protected here — the stored lines are short of the printed total, so a
+    // re-read is the only way they ever get better.
+    assert.equal(may({ storedLines: 4, storedCents: 5_000, printedTotalCents: 7_850, readReconciles: null }), true);
+    assert.equal(may({ storedLines: 4, storedCents: 5_000, printedTotalCents: 7_850, readReconciles: true }), true);
+  });
+
+  test("with no printed total nothing can be proved either way, and the newer read stands", () => {
+    // Deliberately the behaviour that was already there: refusing every re-read on an invoice with
+    // no total would freeze the first guess in place permanently.
+    assert.equal(may({ storedLines: 8, storedCents: 7_850, printedTotalCents: null, readReconciles: null }), true);
+  });
+
+  test("the McKesson case the reconciliation was built for: a short read cannot quietly win", () => {
+    // A line worth $83 was once dropped by a pattern anchored to the end of the line; the four
+    // remaining lines looked perfect. Stored proved lines, re-read comes back $83 short and so
+    // does not reconcile — the good rows stay.
+    assert.equal(may({ storedLines: 5, storedCents: 100_000, printedTotalCents: 100_000, readReconciles: false }), false);
   });
 });

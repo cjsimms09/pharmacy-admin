@@ -98,6 +98,7 @@ export default async function InvoicesPage({
     min?: string;
     max?: string;
     noamount?: string;
+    nolines?: string;
     unconfirmed?: string;
     undated?: string;
     unreceipted?: string;
@@ -112,6 +113,8 @@ export default async function InvoicesPage({
   const onlyUnconfirmed = sp.unconfirmed === "1";
   const onlyUndated = sp.undated === "1";
   const onlyNoAmount = sp.noamount === "1";
+  // The opposite complaint to noamount: these have the money and are missing the goods.
+  const onlyNoLines = sp.nolines === "1";
   // An empty box and a zero are different answers, so a blank never becomes a filter.
   const dollars = (v: string | undefined) => (v && v.trim() !== "" && Number.isFinite(Number(v)) ? Number(v) : undefined);
 
@@ -127,6 +130,7 @@ export default async function InvoicesPage({
       minAmount: dollars(sp.min),
       maxAmount: dollars(sp.max),
       noAmount: onlyNoAmount || undefined,
+      noLines: onlyNoLines || undefined,
       unconfirmed: onlyUnconfirmed || undefined,
     }),
     awaitingReview(),
@@ -179,7 +183,7 @@ export default async function InvoicesPage({
   const noSenders = withSenders.length === 0;
   const missingSenders = registered.filter((x) => addressesOf(x).length === 0);
   const filtered = Boolean(
-    sp.q || sp.month || sp.supplier || sp.from || sp.to || sp.on || sp.min || sp.max || onlyUnconfirmed || onlyUndated || onlyNoAmount,
+    sp.q || sp.month || sp.supplier || sp.from || sp.to || sp.on || sp.min || sp.max || onlyUnconfirmed || onlyUndated || onlyNoAmount || onlyNoLines,
   );
   const totals = sumOf(shown);
   const expectations = parseExpected(s.supplier_expected_schedule ?? "");
@@ -1300,6 +1304,16 @@ export default async function InvoicesPage({
                             {filingFor(i.schedule).label}
                           </span>
                           {i.needsReview && !i.reviewedAt && <span className="badge badge-warn ml-1">unconfirmed</span>}
+                          {/* A total with nothing under it, said on the row itself.
+                              The money is in the archive and none of it reaches the cost of a drug,
+                              so this must not read as an ordinary filed invoice. Null and zero are
+                              the same answer here: one means nothing ever read the lines, the other
+                              that a reading found none, and neither put a figure against an NDC. */}
+                          {(i.totalCents ?? 0) > 0 && !i.linesRead && (
+                            <span className="badge badge-crit ml-1" title="The total was read off the page and no item line under it was. Until the lines are entered or a readable copy replaces it, nothing on this invoice reaches the cost of any drug.">
+                              no item lines
+                            </span>
+                          )}
                           {/* How much of the invoice is held as numbers, so a blank total on a
                               product-by-product page traces back to this row. */}
                           {i.linesRead !== null && (
