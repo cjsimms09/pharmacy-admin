@@ -586,6 +586,19 @@ every one without a supplier, because only IPC's one invoice is on file; and wit
 claims "not moving" is a list to check, not to ship, and the page says so. Item 20's three
 pieces are what make it real: every wholesaler's invoices, IPD's and ParMed's policies, and a
 warning in the digest and on Today.
+### 22. The add-on lists are only as right as the prices and equivalents under them (8 September)
+
+The owner's words: "For this list we really need to make sure our equivalents and drug pricing per
+supplier is correct or these recommendations will be wrong!" What holds today, from Data health on
+8 September: 48,852 of 51,502 comparable catalogue rows agree with the FDA on the package; 630
+rows are a whole multiple out (the expensive kind — a per-unit cost wrong by that factor) and
+those are exactly what the pack-sizes page and the majority rule (item 18) work down; 485 of 486
+dispensed NDCs carry a per-unit cost. The add-on rule compares the *same NDC* across suppliers,
+so an equivalent under another NDC never enters it — safe, and narrow: a cheaper equivalent at a
+secondary is never offered. Two pieces: (1) a pack-mismatch guard on the add-on list itself — a
+line whose package the FDA and the wholesaler disagree on by a whole multiple is not offered until
+settled, and the row says so; (2) add-ons by product (`equivalence_key`), offering the cheapest
+equivalent NDC the pharmacy already dispenses under, never a brand for a generic or the reverse.
 ## The data the site has to ingest
 
 Named by the owner on 7 September as what is still being connected. Each one needs a reader, a
