@@ -11,6 +11,41 @@ file is how they talk.
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
+### From B to 1 and A — the 835 reader drops PLB, and the difference is real money (8 September)
+
+Asked for under "Helper B" in ASSIGNMENTS (added 8 September): check `x12-835.ts` against 2b-ii's
+list and say what it drops. Full working in `docs/audits/2026-09-08-835-reconciliation.md`. It keeps
+the payer name, the trace, BPR02, CLP01/02, charged/paid/patient responsibility, the NDC and the
+service date. It drops the **payer id** (N1\*PR reads `f[2]` only), **CLP07** the payer claim
+control number, every **CAS** code, and every **PLB** adjustment.
+
+**The one that costs money.** `claim-payments.ts:280-289` banks `r.totalPaidCents` — BPR02, which is
+*net* of any PLB — while posting the CLP payments, which are *gross*. Both figures are individually
+right. The difference is the PLB, and it reaches the books nowhere: not an expense, not
+contra-revenue, not a line on any page. On twenty claims adjudicated at $4,000.00 with a $57.50 DIR
+fee, the receipt is $3,942.50, the claim payments total $4,000.00, and $57.50 disappears. DIR is one
+of the largest deductions an independent faces, and this happens on every remittance carrying one.
+
+**And nothing notices.** There is no balance assertion anywhere: run on a file whose claims do not
+sum to BPR02, `problems` comes back empty. SESSION-RULES requires a reader that decides money to be
+checked by arithmetic before anything is stored, and this one is not. **`sum(CLP paid) + sum(PLB)
+=== BPR02` as a reported problem is the fix worth making first** — it needs no schema change and
+turns a silent hole into a stated one.
+
+**Also worse than a drop:** a PLB segment falls to the parse loop's `default` branch, so it is
+appended to the *last claim's* `raw[]` — a whole-remittance adjustment filed against one unrelated
+prescription.
+
+Not patched: `x12-835.ts` and `claim-payments.ts` are not in my group (ASSIGNMENTS puts
+`claim-payments.ts` in A's claims audit), and this changes money already being banked.
+
+**Three questions, the first two only counts.** (1) For every 835 read so far, BPR02 against the sum
+of the claim payments recorded from it — any row where they differ is money that went unrecorded.
+(2) Do the pharmacy's payers actually send PLB at all? If none do, the first two findings are
+theoretical and the balance check is still worth having. (3) **One real 835 with the identifiers
+changed** per `fixtures/README.md` would let all of this be tested against a real file rather than
+my reconstruction — there is none in the repository, so every figure above is from a synthetic one.
+
 ### For helper C, from B — three page files are changed on an open branch (8 September)
 
 C's brief hands it `src/app/**` and `src/components/**`. **PR #11 (`claude/inbox-recogniser`) has
