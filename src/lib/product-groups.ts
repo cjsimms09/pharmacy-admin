@@ -19,13 +19,39 @@
  * It errs towards too many groups rather than too few: a product split in two loses a comparison,
  * a product wrongly merged recommends a switch that cannot be dispensed.
  *
- * Pure. Everything comes in as arguments.
+ * ── Why the description is now the fallback and not the source ──
+ *
+ * Reading the product out of a description was always the weak link, and on the real database it
+ * fails in the direction this file says it must never fail in. Measured against the FDA's own
+ * directory across the 23,494 catalogue NDCs where both have an answer, keying on NADAC's
+ * description merged 1,092 keys covering **10,427 NDCs** that the FDA says are different products,
+ * and split 19.6% of the products that are the same one. The cause is that NADAC's house style
+ * often states no dosage form, so the key falls back to "unspecified-form" and everything under
+ * that name collapses together: lithium carbonate 300mg arrives as one product covering the
+ * capsule, the tablet and the gelatin-coated capsule. "Which NDC pays best in this product" then
+ * answers across dosage forms, which is exactly the substitution that cannot be dispensed.
+ *
+ * So identity comes from the NDC where it can. `drug_directory` is the FDA's NDC directory joined
+ * to the Orange Book, and its `equivalence_key` is built from substances, strength, form and route
+ * — none of it prose, none of it a wholesaler's typing. It covers 96.9% of the NDCs this pharmacy
+ * dispenses and 77.5% of the catalogue. The description key stays for the rest, because a worse
+ * answer on a tenth of the catalogue beats no answer, and because splitting a product across the
+ * two schemes only ever costs a comparison — the safe direction.
+ *
+ * Pure. Everything comes in as arguments, the FDA key included.
  */
 
 import { productKey } from "./product-key";
 
 export type GroupSource = {
   ndc11: string;
+  /**
+   * The FDA directory's equivalence key for this NDC — substances, strength, form and route.
+   *
+   * The identity, where the directory has the NDC. Null where it does not, and then the
+   * description is read instead. Callers fill this from `drug_directory.equivalence_key`.
+   */
+  equivalenceKey?: string | null;
   /** NADAC's description for the NDC. Null where the NDC has no NADAC row, which is its own answer. */
   description: string | null;
   /** NADAC's classification for rate setting: "G" or "B". */
@@ -36,7 +62,16 @@ export type GroupSource = {
 
 /** The key two NDCs must share to be one product here, or null where the NDC cannot be placed safely. */
 export function groupKey(src: GroupSource): string | null {
-  const k = productKey(src.description).key;
+  /*
+   * The FDA's answer first, the description only where there is none.
+   *
+   * The two are deliberately never mixed into one key and never compared against each other. A
+   * product whose NDCs are split between the schemes simply forms two groups, which costs a
+   * comparison and cannot recommend a switch that should not happen. The prefix keeps them apart
+   * even in the unlikely event that a description key and an FDA key spell the same string.
+   */
+  const fda = (src.equivalenceKey ?? "").trim();
+  const k = fda ? `fda:${fda}` : productKey(src.description).key;
   if (!k) return null;
   const cls = (src.classification ?? "").trim().toUpperCase() || "?";
   const unit = (src.pricingUnit ?? "").trim().toUpperCase() || "?";

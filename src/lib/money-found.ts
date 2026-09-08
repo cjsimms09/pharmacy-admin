@@ -130,12 +130,23 @@ async function loadMoneyFound(): Promise<MoneyFound> {
     // One row per drug, newest first, rather than every price ever published to keep the first of
     // each. On a year of weekly files that was over a million rows read to build this map.
     const nadacRows = await (await import("./nadac-latest")).nadacNow();
+    const directory = await (await import("./drug-directory-store")).directoryKeys();
     const groupByNdc = new Map<string, string | null>();
     for (const r of nadacRows) {
       if (groupByNdc.has(r.ndc11)) continue;
-      groupByNdc.set(r.ndc11, groupKey({ ndc11: r.ndc11, description: r.description, classification: r.classification, pricingUnit: r.pricingUnit }));
+      groupByNdc.set(
+        r.ndc11,
+        groupKey({ ndc11: r.ndc11, equivalenceKey: directory.get(r.ndc11)?.key ?? null, description: r.description, classification: r.classification, pricingUnit: r.pricingUnit }),
+      );
     }
-    groupOf = (ndc) => groupByNdc.get(ndc) ?? null;
+    groupOf = (ndc) => {
+      const held = groupByNdc.get(ndc);
+      if (held !== undefined) return held;
+      // Placed by the FDA even where NADAC does not price it; see drug-profit-store.
+      const k = groupKey({ ndc11: ndc, equivalenceKey: directory.get(ndc)?.key ?? null, description: null, classification: null, pricingUnit: null });
+      groupByNdc.set(ndc, k);
+      return k;
+    };
   } catch {
     /* No NADAC held: products cannot be grouped, so no switch between NDCs can be named. */
   }

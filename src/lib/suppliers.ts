@@ -10,6 +10,7 @@ import { readNdc } from "./ndc";
 import { heldNdcs } from "./ndc-held";
 import { allSuppliers, supplierRecordFor } from "./suppliers-registry";
 import { productKey } from "./product-key";
+import { isPlaceholderRow } from "./catalogue-check";
 import { parsePioneerCatalog, supplierFromFileName, dateFromFileName, type CatalogSection } from "./pioneer-catalog";
 
 /**
@@ -221,7 +222,11 @@ async function writeSection(
    * is visible but never wins by default.
    */
   const byNdc = new Map<string, typeof rows>();
-  for (const r of rows) byNdc.set(r.ndc11, [...(byNdc.get(r.ndc11) ?? []), r]);
+  let placeholders = 0;
+  for (const r of rows) {
+    if (isPlaceholderRow(r.description)) { placeholders++; continue; }
+    byNdc.set(r.ndc11, [...(byNdc.get(r.ndc11) ?? []), r]);
+  }
 
   const rows2: (typeof schema.supplierItems.$inferInsert)[] = [];
   let added = 0, updated = 0, shortDated = 0;
@@ -298,8 +303,8 @@ async function writeSection(
   (await import("./drug-names")).forgetDrugNames();
 
   await db.update(schema.supplierImports).set({
-    itemsAdded: added, itemsUpdated: updated, skipped: 0,
-    skipReasons: JSON.stringify({}),
+    itemsAdded: added, itemsUpdated: updated, skipped: placeholders,
+    skipReasons: JSON.stringify(placeholders ? { "reserved placeholder row, not a product": placeholders } : {}),
     unmappedColumns: JSON.stringify([]),
     pricedOn,
   }).where(eq(schema.supplierImports.id, importId));
@@ -347,6 +352,7 @@ export async function importSupplierCatalog(
     if (unitCostMicros === null && packCostCents === null) { skip("no readable price"); continue; }
 
     const description = (g("description") ?? "").trim() || null;
+    if (isPlaceholderRow(description)) { skip("reserved placeholder row, not a product"); continue; }
     const key = productKey(description).key;
     if (!key) unkeyable++;
 

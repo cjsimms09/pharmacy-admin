@@ -2,6 +2,7 @@ import "server-only";
 import { productLedger, opportunities, margins, losers } from "./product-ledger";
 import { underNadac, switchNdc, notYetBought } from "./under-nadac";
 import { groupKey } from "./product-groups";
+import { directoryKeys } from "./drug-directory-store";
 import { nadacNow } from "./nadac-latest";
 
 /**
@@ -17,11 +18,14 @@ export async function productsExtrasNow() {
 }
 
 async function loadProductsExtras() {
-  const [ledger, nadac] = await Promise.all([productLedger(), nadacNow()]);
+  const [ledger, nadac, directory] = await Promise.all([productLedger(), nadacNow(), directoryKeys()]);
   const groupByNdc = new Map<string, string | null>();
   for (const r of nadac) {
     if (groupByNdc.has(r.ndc11)) continue;
-    groupByNdc.set(r.ndc11, groupKey({ ndc11: r.ndc11, description: r.description, classification: r.classification, pricingUnit: r.pricingUnit }));
+    groupByNdc.set(
+      r.ndc11,
+      groupKey({ ndc11: r.ndc11, equivalenceKey: directory.get(r.ndc11)?.key ?? null, description: r.description, classification: r.classification, pricingUnit: r.pricingUnit }),
+    );
   }
   const buys = underNadac(ledger.rows, (ndc) => groupByNdc.get(ndc) ?? null);
   const earned = margins(ledger.rows);
