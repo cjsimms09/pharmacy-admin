@@ -407,11 +407,43 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
 
   // ── On-hand ──────────────────────────────────────────────────────
   const onHand = await db.select({ code: schema.onHand.code, codeKind: schema.onHand.codeKind }).from(schema.onHand);
-  await timed("on-hand", async () => ({
-    numerator: onHand.length,
-    denominator: onHand.length,
-    note: onHand.length === 0 ? "No on-hand count has ever been received. Nothing can value the shelf until one is." : null,
-  }));
+  const counts = await db
+    .select({ countedOn: schema.onHandImports.countedOn, datedBy: schema.onHandImports.datedBy })
+    .from(schema.onHandImports);
+
+  await timed("on-hand", async () => {
+    /*
+     * How the newest count came to be dated, because the answers are not equally good.
+     *
+     * "Counted on 8 September, dated by the report itself" is the report speaking. "Dated by hand"
+     * is only as good as the memory of whoever typed it, and a shelf dated a day wrong misplaces a
+     * day of dispensing against it. The row exists to say what is known, so it should say which of
+     * those this is rather than presenting both as settled.
+     */
+    const newest = [...counts].sort((a, b) => b.countedOn.localeCompare(a.countedOn))[0] ?? null;
+    const said: Record<string, string> = {
+      typed: "dated by hand on the Add tool",
+      labelled: "dated by a line in the report naming the count date",
+      head: "dated by a date printed at the top of the report",
+      footer: "dated by the date the report printed on itself",
+    };
+    const how = newest?.datedBy ? said[newest.datedBy] ?? `dated by ${newest.datedBy}` : null;
+    return {
+      numerator: onHand.length,
+      denominator: onHand.length,
+      gaps:
+        counts.length > 1
+          ? [`${counts.length} counts held; this row measures the shelf as it stands across all of them.`]
+          : [],
+      note:
+        onHand.length === 0
+          ? "No on-hand count has ever been received. Nothing can value the shelf until one is."
+          : newest
+            ? `Counted on ${newest.countedOn}` +
+              (how ? `, ${how}.` : ". Where the date came from was not recorded — the count predates that being kept.")
+            : null,
+    };
+  });
 
   await timed("onhand-catalogue", async () => ({
     numerator: onHand.filter((r) => r.codeKind === "ndc11" && catalogueNdcSet.has(r.code)).length,
