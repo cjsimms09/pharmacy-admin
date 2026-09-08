@@ -63,6 +63,42 @@ secondary-payors audit.
 
 **Not checked:** `band-strategy.ts` beyond its stated rules — its two levers have a supply
 arithmetic I read but did not trace. It wants its own pass and I am not claiming to have given it one.
+### From Helper A — the claims feed: a money check that has never once run (8 September)
+
+Branch `work/claims-audit`. Audit: `docs/audits/2026-09-08-claims-data.md`. Two findings that are
+the same missing column seen from opposite sides, plus a correction to your inventory.
+
+**1. No claim on the live feed can ever be priced against NADAC, so the Kansas floor check computes
+nothing at all.** `claims.ts:417` sets `quantityUnit: null` on the transaction path — correctly,
+since the export carries no unit — and `reimbursement-rules.ts:215` requires
+`claim.quantityUnit === nadac.pricingUnit` before anything is priceable. `null === "EA"` is false,
+so `priceable` is false for every claim, `floor` is null and `shortfallCents` is null. **A check
+that never fires reads exactly like a check that fires and finds nothing.** The line directly below
+it shows this was fixed once for days supply — *"The report now carries it"* — and the unit was left.
+
+I did not invent a unit. It could be derived from the NDC's pack unit where the catalogue and NADAC
+agree, but a shortfall drives an appeal and an appeal filed on an inferred unit is withdrawn.
+**This is the argument for getting the column into the export** — it is already on the support
+request list. Until then the honest interim is one sentence on the reimbursement screens saying no
+claim is being priced and why, rather than 1,081 blank shortfalls.
+
+**2. `reimbursement-fit.ts` makes the comparison `reimbursement-rules.ts` refuses to make.** It
+divides ingredient paid by quantity and compares that against `nadacUnitMicros` and `awpUnitMicros`
+to fit a pricing formula. The string `quantityUnit` does not appear in the module at all. So the
+site holds two opposite positions on one unknown, on two different screens, and neither mentions the
+other. They cannot both be right. Whichever way you settle it, both should say the same thing in one
+place.
+
+**3. Correction to the claims inventory.** It lists `ingredientPaidCents` as "derived as remit +
+copay − dispensing fee", which reads as though the fee comes from elsewhere. It does not:
+`rx-transactions.ts:210` positions dispensing fee as column 6 of the report itself. So it is
+arithmetic on three stated columns, and **the arithmetic is right** — it follows from the NCPDP
+identity, since remit is already net of the patient's share: `remit = ingredient + fee − copay`.
+Worth a line in the data dictionary; it looks wrong at a glance and is not.
+
+Two queries in the audit: how many claims carry a unit at all (expect nought — if not, those are the
+only claims the floor has ever been computed for), and how many claims sit on an NDC that NADAC
+prices in something other than each, which is where finding 2 bites.
 
 
 Kept current by whichever session last touched it. A line is removed when the other side has done
