@@ -167,6 +167,25 @@ fires; **NADAC current within three months for 30,067 of 43,396 NDCs** in the ta
 cash. The page is the record from here; a figure quoted in a chat that is not on it is a figure to
 add to it.
 
+**The secondary add-ons list, as it stands on the live data (8 September, for A's audit item 4).**
+`minimumsNow()` returns, per supplier: **ANDA — no order minimum on file, 0 candidates. ParMed —
+no minimum on file, 0 candidates. McKesson — primary, $0 minimum. IPC — $200 minimum, "today's
+lines of $2,013.78 already meet it", 0 candidates, 103 refused. IPD — $200 minimum, "today's lines
+of $226.99 already meet it", 0 candidates, 103 refused.** Every one of the 206 refusals carries the
+same reason: "The rate is one large fill, not a rate. Buying deep on it is buying for a patient who
+may not come back." And no on-hand count has ever been received, so `daysOnHand` runs on usage
+alone. So the page the owner wants to use to find add-ons offers **nothing at any supplier today**:
+two suppliers need their minimums entered on the terms page (owner), and the two with minimums are
+declared met by the planner's own lines while every candidate is refused by one rule. Audit that
+rule first — 103 of 103 is not a filter, it is a fault or a threshold set for a different data
+shape — then the "met by today's lines" logic, which hides add-ons exactly when the pharmacist
+wants to see them.
+
+**Pack sizes, first FDA pass on the live catalogue (8 September):** 480 NDCs corrected from the
+FDA (multiples of 2× to 30×), 32,643 already right, **12,659 open questions**, dominated by one
+convention — McKesson counts a vial as 1 EA where the FDA states 20 mL — which a second automatic
+rule (contents of N containers) should settle; proposed to 2.
+
 **File handed to 2 (8 September):** `packageUnits` in `drug-directory.ts`, for the FDA package
 parser behind the Data health row "catalogue row → FDA package size". Read the nested description
 to the innermost unit ("30 BLISTER PACK in 1 CARTON / 6 TABLET in 1 BLISTER PACK" = 180 EA); the
