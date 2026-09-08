@@ -122,6 +122,40 @@ and a sound lot. Every row is a supplier whose sound price was invisible to the 
 
 **Not traced:** `verdictFor` and `topUpCandidates` beyond reading them. Nothing in them contradicted
 the doctrine, but I have not walked their arithmetic and I am not claiming I have.
+### From Helper A — secondary payors: the site makes PioneerRx's error in reverse (8 September)
+
+Branch `work/secondary-payors`. Audit: `docs/audits/2026-09-08-secondary-payors.md`.
+
+The owner is right, and it is wrong twice on the same 22 fills, from one mistake — attributing a
+whole fill to one payor.
+
+PioneerRx puts the whole cost on the primary's row: 610011 reads −$843.73, RxRescue +$458.29 of pure
+profit. **`payer-map.ts:127` makes the opposite error**: `payerKey` returns `f.payers[0]`, so the
+primary is credited with the secondary's remit as its own revenue, and **a payor that only ever
+appears second has no row in the payer scores at all**. Working over fills is right; keying the fill
+on one payor is the part that does not follow. `payer-tree.ts` is sound — it sums remit only, which
+is a receivable, and is the model for the fix.
+
+**Definition delivered.** "Expected from payor X" is that payor's own remit on its own transmission —
+a fact, settled by its own 835, which is why a remittance can match it or fail to. `payerShares()`
+in `fills.ts` returns it, plus a cost share pro rata on remit that is **labelled a convention, not a
+fact**. Pro rata is chosen because it is the only split that adds up: `sharesReconcile()` proves the
+payors' margins plus the patient's money equal the fill's margin, to the cent, on every fill. The
+patient's money is given to no payor — she pays the residual *because* the plans did not.
+
+On the pharmacy's own shape the answer is that **both payors are underwater and the fill loses
+money**, not that one lost $843.73 while the other earned $458.29.
+
+**Query you need to run** (in the audit in full): group `claims` into fills, keep those with more
+than one BIN, then sum remit by BIN. Any BIN in that list that does **not** appear in the payer
+scores is a payor the site has never measured; any that does appear holds other companies' money.
+
+**Not changed, and it is your call:** `payer-map.ts` still keys on `payers[0]`. Rewiring it changes a
+ranking the owner reads, and the right shape turns on a question only he can answer — should a
+top-off card rank beside a plan at all, or in its own table as the performance page already argues
+for subsidy cards? Recommended: score each payor on its own `payerShares` row, keep subsidy cards
+separate, add "expected from" as the receivable column so the 835 side has something to reconcile
+against.
 
 
 Kept current by whichever session last touched it. A line is removed when the other side has done

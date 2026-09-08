@@ -252,6 +252,96 @@ export type LaterPayment = {
   receivedCents?: number;
 };
 
+/** One payor's part of a fill: what it owes, and its share of what the bottle cost. */
+export type PayerShare = {
+  bin: string | null;
+  name: string | null;
+  /**
+   * What this payor said it would pay, on its own transmission.
+   *
+   * A fact rather than an allocation, and the only figure here an 835 can settle: a remittance
+   * arrives against this payor's own claim and either matches this number or does not. "Expected
+   * from payor X" is this and nothing else.
+   */
+  receivableCents: number;
+  /**
+   * This payor's share of the acquisition cost, pro rata on remit.
+   *
+   * A stated convention, not a fact — the bottle was bought once and no payor bought a share of it.
+   * Pro rata on remit is chosen because it is the only split that reconciles: the shares sum to the
+   * whole cost, so the payors' margins sum to the fill's margin less what the patient paid.
+   *
+   * Null where the payors together paid nothing, because nought divided by nought is not a share
+   * and a made-up one would put the whole cost on whichever payor happened to be first — which is
+   * the error this exists to end.
+   */
+  costShareCents: number | null;
+  /** Receivable less cost share, where a share can be worked out. */
+  marginCents: number | null;
+};
+
+/**
+ * What each payor on a fill is owed, and what it costs the pharmacy to serve it.
+ *
+ * The owner: *"I've noticed we tend to assert all the profit to one payor which doesn't make
+ * sense."* He is right, and it is wrong twice over on the same 22 fills.
+ *
+ * PioneerRx's printed per-row gross profit puts the whole acquisition cost on the primary's row and
+ * none on the secondary's. On this pharmacy's coordinated fills that reads as BIN 610011 losing
+ * $843.73 and RxRescue earning $458.29 of pure profit on the same bottles. Neither number is about
+ * anything real.
+ *
+ * The site's own payer scores make the opposite error from the same mistake: `payer-map.ts` keys
+ * every fill on `payers[0]`, so the primary is credited with the secondary's remit as its own
+ * revenue and a payor that only ever appears second never appears at all.
+ *
+ * Both come of attributing a whole fill to one payor. Two statements hold instead, and they are
+ * different figures that must not be added together:
+ *
+ *   - **The fill owns the profit.** One cost, one revenue across every payor and the patient.
+ *     `Fill.marginCents` is that figure and it is already right.
+ *   - **Each payor owns its receivable.** Its own remit on its own transmission, settled only by its
+ *     own 835. That is what this returns, and it reconciles line by line when the remittance lands.
+ *
+ * The cost share is the only invented number here and it is labelled as one. Pro rata on remit is
+ * chosen because it is the only split that adds up: sum the payors' margins and add what the
+ * patient paid, and you have the fill's margin exactly. `sharesReconcile` proves it.
+ *
+ * The patient's money is deliberately given to no payor. It is the residual after the last plan —
+ * the patient pays it *because* the plans did not — so crediting it to a plan would reward a payor
+ * for covering less.
+ *
+ * Pure.
+ */
+export function payerShares(fill: Fill): PayerShare[] {
+  const totalRemit = fill.payers.reduce((n, p) => n + p.remitCents, 0);
+  const cost = fill.acquisitionCents;
+  return fill.payers.map((p) => {
+    const costShareCents =
+      cost === null || totalRemit <= 0 ? null : Math.round((cost * p.remitCents) / totalRemit);
+    return {
+      bin: p.bin,
+      name: p.name ?? null,
+      receivableCents: p.remitCents,
+      costShareCents,
+      marginCents: costShareCents === null ? null : p.remitCents - costShareCents,
+    };
+  });
+}
+
+/**
+ * Whether the shares add back up to the fill, which is the whole test of the convention.
+ *
+ * Rounding a pro-rata split can lose a cent, so the last share carries the remainder rather than
+ * the arithmetic being allowed to drift. Returns the difference in cents; nought is what it should
+ * always be.
+ */
+export function sharesReconcile(fill: Fill, shares: PayerShare[] = payerShares(fill)): number {
+  if (fill.marginCents === null || shares.some((s) => s.marginCents === null)) return 0;
+  const payors = shares.reduce((n, s) => n + (s.marginCents ?? 0), 0);
+  return fill.marginCents - (payors + fill.patientPaidCents);
+}
+
 export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): Fill[] {
   const by = new Map<string, ClaimRow[]>();
   for (const c of claims) {
