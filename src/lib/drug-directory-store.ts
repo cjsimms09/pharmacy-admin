@@ -5,6 +5,7 @@ import { parseDirectoryProducts, parseDirectoryPackages, parseOrangeBook, buildD
 import { newId } from "./crypto";
 import fsSync from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 
 /**
  * The drug directory, fetched, loaded and held.
@@ -121,8 +122,73 @@ export async function loadDrugDirectory(
     if (orangeBook) await tx.insert(schema.drugDirectoryLoads).values({ id: newId(), source: "orange_book", origin: by.origin, rows: orangeBook.length, fileAsOf: null, loadedBy: by.userId });
   });
   forgetDirectory();
-  return { ok: true, rows: rows.length, products: products?.length ?? 0, packages: packages?.length ?? 0, orangeBook: orangeBook?.length ?? 0, rated: rows.filter((r) => r.teCode).length };
+  const rated = rows.filter((r) => r.teCode).length;
+
+  /*
+   * ── The proof, written here because here is the only place it is free ──
+   *
+   * BACKLOG 30 wants every dataset set against the file behind it. For the directory the obvious
+   * way — re-read the two zips nightly and count — is the most expensive thing on the machine: it
+   * is the 430 MB peak, on 7.3 GB that ran out twice on 8 September, every night, to prove a file
+   * the FDA changes once a week.
+   *
+   * At this point in the load, all of it is already in hand. The parsed counts, the joined rows,
+   * the bytes of both zips: nothing has to be read again, and the measurement is closer to the
+   * source than any later re-read could be, because it is the source. So the loader says what it
+   * parsed and what it wrote, and the row sets that against what the table holds today.
+   *
+   * The date is the load's, which is the second half of it. A weekly fetch that silently stops
+   * leaves this proof ageing where somebody can see it, and an old proof over a directory that
+   * still counts correctly is exactly the failure a nightly re-read would hide by refreshing.
+   *
+   * `sha256` and the byte counts identify the files themselves, so two loads of the same zip are
+   * distinguishable from two loads of different ones — which is what says whether an unchanged row
+   * count means "nothing changed" or "the same file was loaded twice".
+   */
+  await writeDirectoryProof({
+    parsed: { products: products?.length ?? null, packages: packages?.length ?? null, orangeBook: orangeBook?.length ?? null },
+    wrote: { rows: rows.length, rated },
+    origin: by.origin,
+    files: {
+      ndcDirectory: files.ndcDirectoryZip ? fileMark(files.ndcDirectoryZip) : null,
+      orangeBook: files.orangeBookZip ? fileMark(files.orangeBookZip) : null,
+    },
+  });
+
+  return { ok: true, rows: rows.length, products: products?.length ?? 0, packages: packages?.length ?? 0, orangeBook: orangeBook?.length ?? 0, rated };
 }
+
+/** A file's identity without keeping the file: how big it was and what it hashed to. */
+function fileMark(buf: Buffer): { bytes: number; sha256: string } {
+  return { bytes: buf.length, sha256: createHash("sha256").update(buf).digest("hex") };
+}
+
+/**
+ * Records what this load parsed and wrote, for the Data health row to set against the table.
+ *
+ * Never allowed to fail the load. A directory that loaded and could not write its own proof is a
+ * directory that loaded; refusing it because the bookkeeping failed would be the tail wagging the
+ * dog, and the row says "not proved" which is true and visible.
+ */
+async function writeDirectoryProof(p: Omit<DirectoryProof, "provedOn">): Promise<void> {
+  try {
+    const { setSetting } = await import("./settings");
+    await setSetting("drug_directory_proof", JSON.stringify({ ...p, provedOn: new Date().toISOString() } satisfies DirectoryProof));
+  } catch {
+    // The load stands. The row will say it is unproved, which is the honest answer.
+  }
+}
+
+/** What the loader knew at the moment it wrote. The shape `data-health-directory-proof.ts` reads. */
+export type DirectoryProof = {
+  /** ISO datetime of the load. Its age is the age of the last successful fetch or hand-load. */
+  provedOn: string;
+  /** Null where that file was not part of this load, which is not the same as it having no rows. */
+  parsed: { products: number | null; packages: number | null; orangeBook: number | null };
+  wrote: { rows: number; rated: number };
+  origin: string;
+  files: { ndcDirectory: { bytes: number; sha256: string } | null; orangeBook: { bytes: number; sha256: string } | null };
+};
 
 /** Rebuild the pieces of a held directory so one file can be refreshed without the other. */
 function heldProducts(held: (typeof schema.drugDirectory.$inferSelect)[]) {
