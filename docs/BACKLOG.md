@@ -188,6 +188,14 @@ place, and an arithmetic check before anything is stored.
 
 ## Done
 
+- **The site deploys itself from the pharmacy computer (7 September, 9:34 PM).** `npm run deploy`
+  pushes `feature/compliance` and has the launcher rebuild, migrate and restart, and waits until
+  the app answers on the new build. "Let Claude run the site.cmd" was run once: the machine-local
+  permissions are in, the session starts at sign-in with `--continue` and Remote Control, and
+  migrations are at 83. Verified on the live database after the restart: zero placeholder rows in
+  either table. Nobody needs to walk to that computer for the site.
+- **Product identity comes from the FDA directory** (commit `1c8591d`, live since 9:34 PM):
+  96.9% of dispensed NDCs placed by `equivalence_key`; the 10,427-NDC cross-form merge is gone.
 - **The nine reserved placeholder rows** ("TBD DO NOT DELETE OR RELEASE") are refused by both
   catalogue importers and cleared by migration `0082`. They were McKesson rows priced at $110.25 a
   unit on NDCs nobody can order, flagged "not rebated" — the flag the buy list reads as a reason to

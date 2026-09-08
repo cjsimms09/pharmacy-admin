@@ -79,9 +79,14 @@ numbers are:
   reported the row as "100× the national average". How many rows raised that falsely?
 - Supplier rebate rates were matched by first-containment, so one wholesaler could be paid at
   another's rate. Check `contract.bySupplier` against the real supplier names in `supplier_items`.
-- CMS placeholder rows ("TBD DO NOT DELETE OR RELEASE") were stored as prices. `select count(*) from
-  nadac_prices where description like '%DO NOT DELETE%'` — they are refused at import now but the
-  ones already stored are still there and should be deleted.
+- ~~CMS placeholder rows ("TBD DO NOT DELETE OR RELEASE") were stored as prices.~~ **Done, 7
+  September.** They were never in `nadac_prices` (count 0); the nine were McKesson rows in
+  `supplier_items`. Both catalogue importers and NADAC now share `isPlaceholderRow`, migration
+  `0082` cleared them, and the live database holds zero in either table after the restart.
+
+**Since 7 September the pharmacy session merges and deploys.** Workers open pull requests against
+`feature/compliance`; `docs/SESSION-RULES.md` and `docs/ASSIGNMENTS.md` say how and who owns what.
+A merged pull request reaches the site by `npm run deploy` on the pharmacy computer.
 - Offers with no `netUnitMicros` were invisible to both the buy and the margin.
 
 **3. The audit was two modules in when the session ran out of road.** Done: `drug-file.ts`,
