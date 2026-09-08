@@ -136,7 +136,7 @@ async function loadMoneyFound(): Promise<MoneyFound> {
       if (groupByNdc.has(r.ndc11)) continue;
       groupByNdc.set(
         r.ndc11,
-        groupKey({ ndc11: r.ndc11, equivalenceKey: directory.get(r.ndc11)?.key ?? null, description: r.description, classification: r.classification, pricingUnit: r.pricingUnit }),
+        groupKey({ ndc11: r.ndc11, equivalenceKey: directory.get(r.ndc11)?.key ?? null, description: r.description, classification: r.classification, pricingUnit: r.pricingUnit, otc: r.otc }),
       );
     }
     groupOf = (ndc) => {
