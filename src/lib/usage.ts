@@ -114,6 +114,44 @@ export const STEADY = {
   maxConcentration: 0.6,
 };
 
+/**
+ * Which of the three steadiness tests a drug failed, in the words of the thing that failed.
+ *
+ * `steady` is three tests wearing one boolean — dispensed on enough separate days, by enough
+ * separate prescriptions, and not dominated by a single fill — and every refusal downstream printed
+ * the same sentence: "The rate is one large fill, not a rate."
+ *
+ * On the pharmacy's own data that sentence was printed 103 times out of 103, and it was usually the
+ * wrong one. "One large fill" describes the concentration test. The test that actually fails on a
+ * thin archive is the count of days or of prescriptions — *we have only seen this twice* — which is
+ * a different fact with a different remedy: one says the demand is an outlier to be ignored, the
+ * other says there is not yet enough history to judge it. A hundred and three identical sentences
+ * hide that difference completely.
+ *
+ * Null where the drug is steady. Pure.
+ */
+export function whyNotSteady(v: Pick<Velocity, "activeDays" | "prescriptions" | "concentration" | "windowDays">): string | null {
+  if (v.activeDays < STEADY.minActiveDays) {
+    return (
+      `Dispensed on ${v.activeDays} day${v.activeDays === 1 ? "" : "s"} in the ${Math.round(v.windowDays)} days held, ` +
+      `and ${STEADY.minActiveDays} are wanted before a rate is trusted. Not enough history yet rather than a bad drug.`
+    );
+  }
+  if (v.prescriptions < STEADY.minPrescriptions) {
+    return (
+      `Only ${v.prescriptions} prescription${v.prescriptions === 1 ? "" : "s"} in the ${Math.round(v.windowDays)} days held. ` +
+      `One patient's repeat is not a rate the shelf can be bought against.`
+    );
+  }
+  if (v.concentration > STEADY.maxConcentration) {
+    return (
+      `One fill is ${Math.round(v.concentration * 100)}% of everything dispensed, so the rate is that fill rather than a rate. ` +
+      `Buying deep on it is buying for a patient who may not return.`
+    );
+  }
+  return null;
+}
+
 export type WindowInput = {
   /** The first and last claim day held. Every rate is divided by this span, not by the drug's own. */
   from: string;
