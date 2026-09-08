@@ -133,6 +133,7 @@ export const NAV: NavGroup[] = [
     items: [
       { href: "/settings", label: "Pharmacy details", blurb: "Name, registration numbers, address" },
       { href: "/settings/connections", label: "Connections", blurb: "Keys for Claude, iMonnit and the rest, and whether every report is arriving" },
+      { href: "/tools/data-health", label: "Data health", blurb: "How complete each feed is, and how much of it links where it must — counted on the real data, with the gaps named" },
       { href: "/settings/email", label: "Email", blurb: "Reading reports in and sending training out" },
       { href: "/inbox", label: "What arrived", blurb: "Reports that came by email, documents dropped in by hand, and what was made of each" },
       { href: "/nadac", label: "NADAC", blurb: "The federal benchmark price, fetched weekly", hidden: true },

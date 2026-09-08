@@ -158,6 +158,19 @@ $458.29; BIN 610524 5 rows: remit $245.81, cost $0, profit $265.81. Pairs seen: 
 (status paid, not cash plan) by rx, fill, date, NDC; count distinct BIN. A: audit every page that
 states profit by payor against this — the fill owns the profit, each payor owns its own receivable.
 
+**File handed to 2 (8 September):** `packageUnits` in `drug-directory.ts`, for the FDA package
+parser behind the Data health row "catalogue row → FDA package size". Read the nested description
+to the innermost unit ("30 BLISTER PACK in 1 CARTON / 6 TABLET in 1 BLISTER PACK" = 180 EA); the
+current reading takes the outer count. Measured 8 September on the levelled catalogue: ~95% agree
+at every supplier; 0.5–1% the FDA is a whole multiple; 2.5% the unit differs; 1.5% other, many of
+them the FDA reading, not the catalogue.
+
+**For A's audit list (8 September, from 2's observation):** the test suite shows an intermittent
+file-level failure marker that moves between runs (`ai-spend.test.ts` once,
+`supplier-terms-store.test.ts` once); both pass alone and the count stays at the known four.
+`node:test` appears to run database-touching files in parallel against one SQLite file. A real
+failure could hide behind a marker everyone has learned to ignore — worth settling.
+
 **File handed to A (7 September):** `claim-contract.ts` and `src/app/(app)/payers/**` for the
 network-id mapping (ASSIGNMENTS, Helper A, "Second"). 1 does not edit them until A's pull request
 lands.
