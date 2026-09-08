@@ -68,6 +68,7 @@ export const NAV: NavGroup[] = [
       { href: "/purchasing", label: "What to add, what to watch", blurb: "Add-ons per secondary, ranked; which NDC pays; what was bought over NADAC", gated: true },
       { href: "/suppliers", label: "Suppliers and rebates", blurb: "Each wholesaler's minimum, ladder and ratio, and what this month's buying is earning" },
       { href: "/inventory/invoices", label: "Supplier invoices", blurb: "Filed by schedule, with the C2s kept apart" },
+      { href: "/inventory/pack-sizes", label: "Pack sizes", blurb: "What each package holds, settled by the FDA where it can be and by you where it cannot — the divisor under every unit cost" },
       { href: "/purchasing/replay", label: "Which contract", blurb: "A year of dispensing replayed through each wholesaler's catalogue and ladder", gated: true, hidden: true },
       { href: "/inventory/returns", label: "What to send back", blurb: "Return deadlines counted from the invoice, and what each is worth", hidden: true },
       { href: "/purchasing/supplies", label: "Supplies", blurb: "Vials, bags and labels: what is low and what to order", hidden: true },
