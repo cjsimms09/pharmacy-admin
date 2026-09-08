@@ -207,6 +207,8 @@ export type PlanInput = {
   maxDaysOfStock: number;
   /** Below this a saving is not a reason to split an order across suppliers. */
   materialityCents: number;
+  /** See topUpCandidates: the product an NDC belongs to, so an add-on may be an equivalent. */
+  groupOf?: (ndc11: string) => string | null;
   /**
    * What moving this basket off the primary does to the rebate band, in cents. Negative is a cost.
    * Supplied by the caller from ratio-effect.ts so there is one such calculation in the site.
@@ -238,6 +240,23 @@ export function packsFor(thousandths: number, packQty: number): number {
 }
 
 /** The cheapest offer per supplier for one NDC, cheapest supplier first. Short-dated last, never first. */
+/**
+ * The cheapest sound lot per supplier across every NDC of the dispensed product, where a group is
+ * known; the dispensed NDC alone where it is not. A supplier's row is its cheapest equivalent, so a
+ * dearer NDC it also carries never hides the cheaper one.
+ */
+export function offersForProduct(offers: Offer[], ndc11: string, groupOf?: (ndc11: string) => string | null): Offer[] {
+  const group = groupOf?.(ndc11) ?? null;
+  if (!group) return offersFor(offers, ndc11);
+  const ndcs = [...new Set(offers.filter((o) => o.ndc11 === ndc11 || groupOf!(o.ndc11) === group).map((o) => o.ndc11))];
+  const best = new Map<string, Offer>();
+  for (const n of ndcs) for (const o of offersFor(offers, n)) {
+    const held = best.get(o.supplier);
+    if (!held || o.effectiveUnitMicros < held.effectiveUnitMicros) best.set(o.supplier, o);
+  }
+  return [...best.values()];
+}
+
 export function offersFor(offers: Offer[], ndc11: string): Offer[] {
   const best = new Map<string, Offer>();
   for (const o of offers) {
@@ -418,6 +437,7 @@ export function planOrder(input: PlanInput): Plan {
         alreadyOrdered: new Set(draft.lines.map((l) => l.ndc11)),
         maxDaysOfStock: input.maxDaysOfStock,
         materialityCents: input.materialityCents,
+        groupOf: input.groupOf,
       });
       draft.refusals.push(...candidates.refused);
 
@@ -524,7 +544,10 @@ export function verdictFor(a: {
 }
 
 export type Candidate = {
+  /** The NDC to buy — an AB-rated equivalent of the dispensed one where that is cheaper, else the same. */
   ndc11: string;
+  /** The NDC the pharmacy dispenses, whose rate this add-on is sized on. */
+  dispensedNdc11: string;
   name: string | null;
   offer: Offer;
   alternative: Offer | null;
@@ -555,6 +578,13 @@ export function topUpCandidates(a: {
   alreadyOrdered: Set<string>;
   maxDaysOfStock: number;
   materialityCents: number;
+  /**
+   * The product an NDC belongs to, for generics: every AB-rated equivalent the pharmacy could buy
+   * instead. The owner, 8 September: the page told him to buy the $38 Sun cipro/dex bottle when ANDA
+   * and McKesson sell equivalents at $19.93 and $19.75 and Kansas Medicaid pays the same NADAC on
+   * all of them. Null (or a null answer) keeps the comparison to the same NDC.
+   */
+  groupOf?: (ndc11: string) => string | null;
 }): { ranked: Candidate[]; refused: Refusal[] } {
   const ranked: Candidate[] = [];
   const refused: Refusal[] = [];
@@ -562,7 +592,7 @@ export function topUpCandidates(a: {
 
   for (const m of a.movement) {
     if (a.alreadyOrdered.has(m.ndc11)) continue;
-    const priced = offersFor(a.offers, m.ndc11);
+    const priced = offersForProduct(a.offers, m.ndc11, a.groupOf);
     // Folded: the register says "Parmed", the catalogue "ParMed", and a raw === lists nothing for it.
     const mine = fold(a.supplier);
     const ours = priced.find((o) => fold(o.supplier) === mine);
@@ -634,7 +664,7 @@ export function topUpCandidates(a: {
     if (savingCents < 0) continue;
 
     ranked.push({
-      ndc11: m.ndc11, name: label, offer: ours, alternative,
+      ndc11: ours.ndc11, dispensedNdc11: m.ndc11, name: label, offer: ours, alternative,
       capThousandths: unitsThousandths, savingCents, costCents,
       savingPerDollar: costCents > 0 ? savingCents / costCents : 0,
     });

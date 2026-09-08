@@ -777,6 +777,12 @@ async function loadBuyList(): Promise<BuyListView> {
       needs.push({ ndc11: v.ndc11, name: v.name, needThousandths: need });
   }
 
+  const { directoryKeys: dirKeys } = await import("./drug-directory-store");
+  const planKeys = await dirKeys();
+  const planGroupOf = (n: string) => {
+    const k = planKeys.get(n);
+    return k && k.classification === "G" && k.key ? k.key : null;
+  };
   const plan = planOrder({
     needs,
     offers,
@@ -786,6 +792,7 @@ async function loadBuyList(): Promise<BuyListView> {
     materialityCents: SHELF_POLICY.materialityCents,
     // Priced after the plan is built: the cost depends on the basket, which does not exist yet.
     bandDelta: () => null,
+    groupOf: planGroupOf,
   });
 
   /*

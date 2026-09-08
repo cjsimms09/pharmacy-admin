@@ -242,6 +242,25 @@ shelf.ts, order-plan.ts (short-dated lots), the band arithmetic, the claims feed
 claim-to-contract resolver with the networks page. Next in order: the Money books fold; the
 payer-model audit once 1 drafts `docs/reference/payer-model.md`; plan-class proposals (BACKLOG 10).
 
+### Audit the buying recommendation from its premise (8 September, from 1, the owner's words)
+
+The owner, on the What to add page: "we need to really audit the logic here. it needs to start with
+the right premise of what the goal is and figure out how to best do that with math.. it needs to be
+airtight." Yours, as the auditor. State the premise first, in one paragraph the owner would sign:
+the pharmacy earns the reimbursement the plan pays for the product dispensed, less what the bottle
+cost net of rebate, so the goal of every buying recommendation is the largest net over the claims
+the pharmacy actually gets — not the cheapest bottle, not the largest saving on the invoice. Then
+audit, on the real fills where you can and on fixtures where you cannot, every rung the site uses:
+`order-plan.ts` (needs, top-ups, the days-of-stock cap, the equal-price rule, the shortfall sizing),
+`minimum-filler.ts` (the ranked add-ons, the generic-only rule, the 60-day horizon), `band-share.ts`
+and `bandCostOfMoving` (the McKesson band), `catalogue-cache.ts` (the levelled unit price, the
+pack rules, the majority rule), and the equivalents change of 8 September (`offersForProduct`: an
+add-on may be the cheapest AB-rated equivalent). For each: what it assumes, where the assumption
+fails on this pharmacy's data (the cipro/dex case: the page chose the $38 Sun bottle over $19.93
+equivalents; Kansas Medicaid pays the same NADAC on all), and what the airtight rule is — including
+what reimbursement basis (NADAC-plus, MAC, AWP-minus) does to the choice, per BACKLOG 29. Deliver a
+finding list with money attached and the rule you would write, as a PR against `docs/audits/`.
+
 ### Audit first (7 September, from 1)
 
 The owner's standing instruction: *"Double check all logic to make sure it makes sense — ordering
@@ -490,6 +509,15 @@ in your pull request what you could not verify.
 **Questions needing real figures** go in `docs/HANDOFF.md` under "Open items" addressed to 2. I
 run them here and write the number back. Do not ask the owner to send you a file; your container
 cannot reach this machine.
+### Two recognisers, both by content (8 September, from 1)
+
+(1) BACKLOG 27: an 835 arriving by email under any name — recognise an ISA envelope with ST*835
+(and a zip holding one) and route it to `importRemittance`, the same reader the Add tool uses. (2)
+BACKLOG 24: RedSail's "Remittance Advice — RAS Copay Voucher Reimbursement" (PDF; page 2 carries a
+text layer with those words) recognised as a copay-card remittance and routed to 2's reader
+(`copay-remit.ts`, merged). Also the intake kind names for both on the Add tool's list. Yours is
+the recogniser (`intake-recognise*.ts`, `autoroute.ts`); the readers are A's and 2's.
+
 ### Build: an inbox that knows what arrived, and can always be corrected
 
 The owner: *"The inbox should eventually be able to know what's coming in based off name, email,

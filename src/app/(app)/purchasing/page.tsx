@@ -62,6 +62,8 @@ type Row = {
   why: string | null;
   overCap: { days: number; cap: number; smallerPack: { supplier: string; packQty: number; days: number; costCents: number } | null } | null;
   alternative: { supplier: string; unitMicros: number } | null;
+  /** The NDC the pharmacy dispenses that this offer would replace, where it is an equivalent. */
+  insteadOfNdc11?: string | null;
 };
 
 /** A supplier's name as an anchor. */
@@ -160,7 +162,7 @@ export default async function WhatToBuyPage({ searchParams }: { searchParams: Pr
         rows.push({
           kind: "next", itemNumber: c.itemNumber, ndc11: c.ndc11, name: c.name, packs: 1, packQty: c.packQty, units: c.packQty, unitMicros: c.unitMicros,
           costCents: c.packCostCents, savingCents: c.savingPerPackCents, daysOnHand: c.daysOnHand, perDayThousandths: c.perDayThousandths,
-          daysAfter: c.daysAfterOnePack, maxPacks: c.maxPacks, why: null, overCap: null, alternative: c.alternative,
+          daysAfter: c.daysAfterOnePack, maxPacks: c.maxPacks, why: null, overCap: null, alternative: c.alternative, insteadOfNdc11: c.insteadOfNdc11 ?? null,
         });
       }
       // Every short line, then the add-ons; enough of them to reach the minimum from nothing, and a few past.
@@ -343,6 +345,7 @@ export default async function WhatToBuyPage({ searchParams }: { searchParams: Pr
                               {r.overCap && <span className="badge badge-muted ml-1" title={`${Math.round(r.overCap.days)} days of stock, past the ${r.overCap.cap}-day shelf.${r.overCap.smallerPack ? ` ${r.overCap.smallerPack.supplier} ships packs of ${r.overCap.smallerPack.packQty}.` : " No supplier ships it smaller."}`}>big pack</span>}
                             </span>
                             <span className="block font-mono text-[11px] text-ink-3">{r.ndc11} · {perUnit(r.unitMicros)} a unit{r.alternative ? `, ${perUnit(r.alternative.unitMicros)} at ${r.alternative.supplier}` : ""}</span>
+                            {r.insteadOfNdc11 && <span className="block text-[11px] text-ink-3">an AB-rated equivalent of the {r.insteadOfNdc11} you dispense — the plan pays the same on either where it pays by MAC or NADAC</span>}
                           </td>
                           <td className="num whitespace-nowrap">
                             {r.packs} × {r.packQty.toLocaleString()}

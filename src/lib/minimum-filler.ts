@@ -95,6 +95,8 @@ export type FillCandidate = {
   savingPerPackCents: number;
   /** Whole packs that fit inside the horizon after what is on the shelf and on order. At least one. */
   maxPacks: number;
+  /** The NDC the pharmacy dispenses that this offer would replace, where the offer is an equivalent. */
+  insteadOfNdc11?: string | null;
   perDayThousandths: number;
   /** Days the shelf holds today, counting what is on order. */
   daysOnHand: number;
@@ -139,6 +141,8 @@ export type FillInput = {
   /** Days of usage a pick may cover at most, on-hand and on-order included. */
   horizonDays?: number;
   materialityCents?: number;
+  /** The product an NDC belongs to, so an add-on may be a cheaper AB-rated equivalent (order-plan.ts topUpCandidates). */
+  groupOf?: (ndc11: string) => string | null;
 };
 
 const dollars = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -200,6 +204,7 @@ export function fillMinimums(input: FillInput): SupplierFill[] {
       alreadyOrdered: input.orderedBySupplier.get(s.supplier) ?? new Set(),
       maxDaysOfStock: horizon,
       materialityCents: materiality,
+      groupOf: input.groupOf,
     });
     const rate = new Map(withCover.map((m) => [m.ndc11, m.perDayThousandths]));
     const held = new Map(withCover.map((m) => [m.ndc11, m.onHandThousandths]));
@@ -290,6 +295,7 @@ function candidateOf(c: Candidate, perDay: number, onHand: number): FillCandidat
     daysOnHand: daysOfStock(onHand, perDay),
     daysAfterOnePack: daysOfStock(onHand + packUnits, perDay),
     unitMicros: c.offer.effectiveUnitMicros,
+    insteadOfNdc11: c.dispensedNdc11 !== c.ndc11 ? c.dispensedNdc11 : null,
     alternative: c.alternative ? { supplier: c.alternative.supplier, unitMicros: c.alternative.effectiveUnitMicros } : null,
   };
 }

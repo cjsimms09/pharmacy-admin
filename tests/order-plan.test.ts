@@ -414,6 +414,24 @@ describe("add-ons to reach a minimum, on what the pharmacy uses", () => {
     assert.equal(topUpCandidates({ ...base, offers: dearer, movement: [moves("D", 2_000)] }).ranked.length, 0);
   });
 
+  test("an add-on may be a cheaper AB-rated equivalent of the dispensed NDC, and says which it replaces", () => {
+    // The pharmacy dispenses SUN; IPC sells ARMAS, the same product, at half the price; McKesson sells SUN.
+    const groupOf = (n: string) => (n === "SUN" || n === "ARMAS" ? "cipro-dex" : null);
+    const offers = [
+      offer2({ ndc11: "SUN", supplier: "McKesson", effectiveUnitMicros: 8_900_000, packQty: 1 }),
+      offer2({ ndc11: "SUN", supplier: "IPC", effectiveUnitMicros: 5_888_000, packQty: 1 }),
+      offer2({ ndc11: "ARMAS", supplier: "IPC", effectiveUnitMicros: 2_657_000, packQty: 1 }),
+    ];
+    const r = topUpCandidates({ ...base, offers, movement: [moves("SUN", 1_000)] , groupOf });
+    assert.equal(r.ranked.length, 1);
+    assert.equal(r.ranked[0].ndc11, "ARMAS", "the cheaper equivalent is what to buy");
+    assert.equal(r.ranked[0].dispensedNdc11, "SUN");
+    assert.equal(r.ranked[0].alternative?.supplier, "McKesson");
+    // Without a group the comparison stays on the dispensed NDC.
+    const same = topUpCandidates({ ...base, offers, movement: [moves("SUN", 1_000)] });
+    assert.equal(same.ranked[0].ndc11, "SUN");
+  });
+
   test("a top-up buys the packs the shortfall needs, not the whole cap", () => {
     // IPC is $200 short. The pod is $300 a pack and the shelf could take seven: one pack is the answer.
     const plan = planOrder({
