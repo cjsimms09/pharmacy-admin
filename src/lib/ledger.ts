@@ -51,8 +51,12 @@ export function parsePeriod(key: string): Period | null {
   if ((m = k.match(/^(\d{4})-Q([1-4])$/i))) {
     const y = Number(m[1]);
     const q = Number(m[2]);
-    const months = [0, 1, 2].map((i) => `${y}-${pad((q - 1) * 3 + i + 1)}`);
-    return { kind: "quarter", key: `${y}-Q${q}`, label: `Q${q} ${y}`, months, from: `${months[0]}-01`, to: `${months[2]}-${pad(daysInMonth(months[2]))}` };
+    const first = (q - 1) * 3 + 1;
+    const months = [0, 1, 2].map((i) => `${y}-${pad(first + i)}`);
+    // Named the long way — "Q3 2026 — July to September" — because a quarter key is the one period
+    // label a reader has to translate before they know which months they are looking at.
+    const label = `Q${q} ${y} — ${MONTHS[first - 1]} to ${MONTHS[first + 1]}`;
+    return { kind: "quarter", key: `${y}-Q${q}`, label, months, from: `${months[0]}-01`, to: `${months[2]}-${pad(daysInMonth(months[2]))}` };
   }
   if ((m = k.match(/^(\d{4})$/))) {
     const y = Number(m[1]);
@@ -92,6 +96,32 @@ export function nextMonth(month: string): string {
   return m === 12 ? `${y + 1}-01` : `${y}-${pad(m + 1)}`;
 }
 
+/** The quarter a month falls in, as a period key. Null where the string is not a month. */
+export function quarterOf(month: string): string | null {
+  const m = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(month.trim());
+  return m ? `${m[1]}-Q${Math.floor((Number(m[2]) - 1) / 3) + 1}` : null;
+}
+
+/**
+ * The periods worth offering, from the months there is anything to report on.
+ *
+ * Only periods with at least one recorded month, so the picker never offers a quarter that comes
+ * back empty — an empty report reads as a broken one.
+ */
+export function periodsFor(months: string[]): { months: string[]; quarters: string[]; years: string[] } {
+  const clean = [...new Set(months.filter((m) => /^\d{4}-(0[1-9]|1[0-2])$/.test(m)))].sort().reverse();
+  return {
+    months: clean,
+    quarters: [...new Set(clean.map(quarterOf).filter((x): x is string => x !== null))].sort().reverse(),
+    years: [...new Set(clean.map((m) => m.slice(0, 4)))].sort().reverse(),
+  };
+}
+
+/** The period immediately before this one, for the comparison beside each figure. */
+export function previousPeriod(p: Period): Period {
+  return periodOf(p.kind, previousMonth(p.months[0]));
+}
+
 /** The period one step earlier and one later, for the page's arrows. */
 export function neighbours(p: Period): { before: Period; after: Period } {
   return { before: periodOf(p.kind, previousMonth(p.months[0])), after: periodOf(p.kind, nextMonth(p.months[p.months.length - 1])) };
@@ -119,6 +149,16 @@ export type PeriodPL = {
   stockMovementCents: number | null;
   /** Each month's account, so the period can be taken apart again. */
   months: MonthlyPL[];
+  /**
+   * Months in the period with nothing recorded at all, named rather than computed as zeroes.
+   *
+   * A month nobody has loaded anything for is not a month the pharmacy took nothing in. Running it
+   * through the account produces a full set of noughts and a page of "this is missing", which
+   * drowns the months that really are short of a line — and on a year it produces eleven of them.
+   * So an unrecorded month is left out of the arithmetic and said by name, which is the same rule
+   * `periodTotals` follows, so the books and the reports agree on what a quarter contains.
+   */
+  emptyMonths: string[];
   /** What is missing, named with the month it is missing from. */
   missing: string[];
   /**
@@ -186,6 +226,7 @@ export function combineMonths(period: Period, months: MonthlyPL[]): PeriodPL {
     cashChangeCents: basis === "cash" ? grossProfitCents - operatingCents - otherCashOutCents : null,
     stockMovementCents: stock.length > 0 && stock.every((s) => s !== null) ? stock.reduce((n, s) => n + (s ?? 0), 0) : null,
     months: sorted,
+    emptyMonths: period.months.filter((m) => !sorted.some((x) => x.month === m)),
     missing: sorted.flatMap((m) => m.missing.map((s) => (sorted.length > 1 ? `${monthLabel(m.month)}: ${s}` : s))),
     caveats: sorted.flatMap((m) => (m.caveats ?? []).map((s) => (sorted.length > 1 ? `${monthLabel(m.month)}: ${s}` : s))),
     usable: sorted.length > 0 && sorted.every((m) => m.usable),

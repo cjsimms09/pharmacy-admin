@@ -183,3 +183,29 @@ describe("the change from the period before", () => {
     assert.equal(changeFrom(20_000, -10_000).deltaCents, 30_000, "the money still moved, and that is a fact");
   });
 });
+
+describe("one period, named in one place", () => {
+  /*
+   * Two modules used to define `Period` and `parsePeriod` — this one and `ledger.ts` — with the
+   * same keys and nearly the same labels, and no way for either to know the other had drifted.
+   * Two definitions of "Q3 2026" is exactly how a quarter comes to disagree with the three months
+   * printed inside it. This fails the moment anybody writes a second one.
+   */
+  test("the reporting module and the books module name a period with the same code", async () => {
+    const ledger = await import("../src/lib/ledger");
+    const report = await import("../src/lib/period-account");
+    assert.equal(report.parsePeriod, ledger.parsePeriod);
+    assert.equal(report.previousPeriod, ledger.previousPeriod);
+    assert.equal(report.periodsFor, ledger.periodsFor);
+    assert.equal(report.quarterOf, ledger.quarterOf);
+  });
+
+  test("a period carries the dates its own rows are filtered by, which the reporting one never did", () => {
+    // The books read claims between `from` and `to`; the reports only ever asked for month keys.
+    // Folding onto the richer definition means one Period answers both questions.
+    assert.equal(parsePeriod("2026-Q3")?.from, "2026-07-01");
+    assert.equal(parsePeriod("2026-Q3")?.to, "2026-09-30");
+    assert.equal(parsePeriod("2026")?.from, "2026-01-01");
+    assert.equal(parsePeriod("2026")?.to, "2026-12-31");
+  });
+});

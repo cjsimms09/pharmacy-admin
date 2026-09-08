@@ -1,4 +1,5 @@
 import type { MonthlyPL } from "./profit-and-loss";
+import { parsePeriod, quarterOf, periodsFor, previousPeriod, periodOf, type Period, type PeriodKind } from "./ledger";
 
 /**
  * A quarter or a year, added up from the months that make it.
@@ -22,71 +23,23 @@ import type { MonthlyPL } from "./profit-and-loss";
  * badly, and listed by name so the total is read for what it is.
  */
 
-export type PeriodKind = "month" | "quarter" | "year";
-
-export type Period = {
-  kind: PeriodKind;
-  /** "2026-09", "2026-Q3", "2026". */
-  key: string;
-  label: string;
-  /** Every calendar month in it, in order, whether or not anything was recorded in them. */
-  months: string[];
-};
+/*
+ * A period is named in one place, and this is not it.
+ *
+ * Two modules used to define `Period` and `parsePeriod` — this one and `ledger.ts` — with the same
+ * keys, nearly the same labels, and no way for either to know the other had drifted. Two
+ * definitions of "Q3 2026" is exactly how a quarter comes to disagree with the three months
+ * printed inside it, which is the failure this file's own doc comment promises never happens. So
+ * the naming lives in `ledger.ts`, which was the richer of the two — its periods carry `from` and
+ * `to` as well — and is re-exported here so every reader of this module keeps working.
+ */
+export { parsePeriod, quarterOf, periodsFor, previousPeriod, periodOf };
+export type { Period, PeriodKind };
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
-
-const pad = (n: number) => String(n).padStart(2, "0");
-
-/** "2026-09" → September 2026, "2026-Q3" → July to September, "2026" → the year. Null if neither. */
-export function parsePeriod(key: string): Period | null {
-  const trimmed = key.trim();
-  const month = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(trimmed);
-  if (month) {
-    const [, y, m] = month;
-    return { kind: "month", key: trimmed, label: `${MONTH_NAMES[Number(m) - 1]} ${y}`, months: [trimmed] };
-  }
-  const quarter = /^(\d{4})-Q([1-4])$/i.exec(trimmed);
-  if (quarter) {
-    const y = Number(quarter[1]);
-    const q = Number(quarter[2]);
-    const first = (q - 1) * 3 + 1;
-    return {
-      kind: "quarter",
-      key: `${y}-Q${q}`,
-      label: `Q${q} ${y} — ${MONTH_NAMES[first - 1]} to ${MONTH_NAMES[first + 1]}`,
-      months: [0, 1, 2].map((i) => `${y}-${pad(first + i)}`),
-    };
-  }
-  const year = /^(\d{4})$/.exec(trimmed);
-  if (year) {
-    const y = Number(year[1]);
-    return { kind: "year", key: trimmed, label: `${y}`, months: Array.from({ length: 12 }, (_, i) => `${y}-${pad(i + 1)}`) };
-  }
-  return null;
-}
-
-/** The quarter a month falls in, as a period key. */
-export function quarterOf(month: string): string | null {
-  const m = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(month.trim());
-  if (!m) return null;
-  return `${m[1]}-Q${Math.floor((Number(m[2]) - 1) / 3) + 1}`;
-}
-
-/**
- * The periods worth offering, from the months there is anything to report on.
- *
- * Only periods with at least one recorded month, so the picker never offers a quarter that would
- * come back empty — an empty report reads as a broken one.
- */
-export function periodsFor(months: string[]): { months: string[]; quarters: string[]; years: string[] } {
-  const clean = [...new Set(months.filter((m) => /^\d{4}-(0[1-9]|1[0-2])$/.test(m)))].sort().reverse();
-  const quarters = [...new Set(clean.map(quarterOf).filter((x): x is string => x !== null))].sort().reverse();
-  const years = [...new Set(clean.map((m) => m.slice(0, 4)))].sort().reverse();
-  return { months: clean, quarters, years };
-}
 
 export type PeriodTotals = {
   period: Period;
@@ -204,15 +157,4 @@ export function trend(months: MonthlyPL[]): TrendPoint[] {
 export function changeFrom(now: number, before: number): { deltaCents: number; percent: number | null } {
   const deltaCents = now - before;
   return { deltaCents, percent: before > 0 ? Math.round((deltaCents / before) * 1000) / 10 : null };
-}
-
-/** The period immediately before this one, for the comparison. */
-export function previousPeriod(p: Period): Period | null {
-  if (p.kind === "year") return parsePeriod(String(Number(p.key) - 1));
-  if (p.kind === "quarter") {
-    const [y, q] = p.key.split("-Q").map(Number);
-    return q === 1 ? parsePeriod(`${y - 1}-Q4`) : parsePeriod(`${y}-Q${q - 1}`);
-  }
-  const [y, m] = p.key.split("-").map(Number);
-  return m === 1 ? parsePeriod(`${y - 1}-12`) : parsePeriod(`${y}-${pad(m - 1)}`);
 }
