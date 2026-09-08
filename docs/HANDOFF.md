@@ -579,9 +579,10 @@ the order the audits asked:
   row on this database carries a short-dated availability at all, so the first finding costs
   nothing today and the fix is insurance. Merged anyway.
 - *add-ons — which steadiness test fails:* **449 of 553 NDCs fail "dispensed on fewer than 3
-  days"; 0 fail prescriptions; 0 fail concentration; 104 are steady; the claims window is 21
-  days.** The refusal sentence was wrong (now fixed) *and* the archive is three weeks long. The
-  site holds claims from 18 August. **Owner action: load the claims history** — a PioneerRx export
+  days"; 0 fail prescriptions; 0 fail concentration; 104 are steady.** The refusal sentence was
+  wrong (now fixed) *and* the archive is two weeks long: **paid claims run from 24 August, a
+  15-day span** (the "21 days" first written here counted one reversed cash row dated 18 August;
+  session 2's Data health row is the right figure). **Owner action: load the claims history** — a PioneerRx export
   of the past twelve months, or the SQL read — because every rate, every add-on, every "which
   NDC pays" is being judged on 21 days.
 - *claims 1 — `quantity_unit` filled:* 0 of 1,669. As expected; on the export list.
