@@ -151,6 +151,22 @@ route is decided most-specific-first (a printed form's address, then a portal, t
 post), the letter names a clearinghouse or a trading partner only where the contract did, and where
 the route is a portal the page lists the fields to type instead of pretending it can drive it.
 
+**Two deliberate departures from the spec's item 2, so they are not mistaken for oversights.** It
+asked for a state per payer of *"not requested, request ready, sent (date, how, by whom),
+acknowledged, first 835 received"*.
+
+- **"Request ready" is derived, not stored.** `request.ready` and the next-action sentence are
+  computed from the route and the missing list each time the page is drawn. A stored "ready" would
+  go stale the moment an identifier changed in Settings or a contract was re-read, and a payer would
+  sit there marked ready with a blank NPI behind it. If you want it stored anyway, say so and I will
+  add it.
+- **"How" it was sent is not its own column.** The date is `requestedOn`, the person is `updatedBy`,
+  the destination is `requestedTo` — but the method lives in the free-text `notes` (`Sent via …`),
+  and only on the email path. Where the route is a form or a portal the person did it by hand
+  outside the site, so "how" is whatever they typed in the note, or nothing. If the method needs to
+  be reportable rather than readable, it wants a column and a migration; I did not add one
+  speculatively.
+
 **Two things I need from the pharmacy computer for it, once the library read finishes.**
 
 3. **How many payers actually got each route?** For every PBM with a completed extraction:
