@@ -151,6 +151,7 @@ export async function fileOnHand(
     countedOn,
     fileName,
     rowsRead: parsed.rowsRead,
+    reportedCount: parsed.reportedCount ?? null,
     itemsKept: parsed.rows.length,
     skipReasons: JSON.stringify(parsed.skipped),
     unmappedColumns: JSON.stringify(parsed.unmappedColumns),

@@ -645,6 +645,13 @@
       "when": 1788807268029,
       "tag": "0091_claims_dispensed_export",
       "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "6",
+      "when": 1788807328029,
+      "tag": "0092_import_proof_columns",
+      "breakpoints": true
     }
   ]
 }

@@ -2368,6 +2368,8 @@ export const supplierImports = sqliteTable("supplier_imports", {
   skipReasons: text("skip_reasons").notNull().default("{}"),
   unmappedColumns: text("unmapped_columns").notNull().default("[]"),
   pricedOn: text("priced_on"),
+  /** The stored document this import read, so the nightly proof can re-read the same file. Migration 0092. */
+  documentId: text("document_id"),
   createdBy: text("created_by").notNull(),
   createdAt: text("created_at").notNull().default(now()),
 });
@@ -2691,6 +2693,8 @@ export const onHandImports = sqliteTable(
     countedOn: text("counted_on").notNull(),
     fileName: text("file_name").notNull(),
     rowsRead: integer("rows_read").notNull().default(0),
+    /** The record count the report prints about itself, where it prints one. Migration 0092. */
+    reportedCount: integer("reported_count"),
     itemsKept: integer("items_kept").notNull().default(0),
     /** Reasons rows were dropped, as JSON, so a short read is visible rather than silent. */
     skipReasons: text("skip_reasons").notNull().default("{}"),
