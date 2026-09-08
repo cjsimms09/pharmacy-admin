@@ -5,6 +5,7 @@ import { SPECS, type Measurement } from "./data-health";
 import { comparePack } from "./data-health-packages";
 import { allSuppliers, supplierRecordFor } from "./suppliers-registry";
 import { supplierFromFileName } from "./pioneer-catalog";
+import { getSettings } from "./settings";
 
 /**
  * Running the data health counts, and keeping the answers.
@@ -59,11 +60,59 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
   const out: (Measurement & { tookMs: number })[] = [];
   const skipped: string[] = [];
 
-  const timed = async (key: string, run: () => Promise<Omit<Measurement, "key" | "measuredAt">>) => {
+  /*
+   * `measuredAt` is today unless the measurement carries its own, and one of them has to.
+   *
+   * The claims proof is not measured by this sweep — it is read back from what a nightly script
+   * left behind, and its age is the age of that run. Stamping it with today would print "measured
+   * today" over a proof that last ran three weeks ago, which is precisely the blind spot the row
+   * exists to show. An explicit null still means never measured and is not overwritten either.
+   */
+  const timed = async (key: string, run: () => Promise<Omit<Measurement, "key" | "measuredAt"> & { measuredAt?: string | null }>) => {
     const t = Date.now();
-    const m = await run();
-    out.push({ key, measuredAt: today, tookMs: Date.now() - t, ...m });
+    const { measuredAt, ...m } = await run();
+    out.push({ key, measuredAt: measuredAt === undefined ? today : measuredAt, tookMs: Date.now() - t, ...m });
   };
+
+  /*
+   * ── The claims, proved against the reports they were read from ───
+   *
+   * The owner: "these things need to be right!! we need to make sure claims are matching their
+   * info properly and continue to … this is the most important thing." Every other row here asks
+   * whether the site's tables agree with one another, which they can do perfectly while all of
+   * them disagree with the file behind them. `scripts/prove-claims.ts` re-reads the stored daily
+   * reports each night and leaves its answer in a setting; this row is that answer, and it is read
+   * rather than recomputed so that the page and the proof can never differ about it.
+   */
+  await timed("claims-proof", async () => {
+    const { parseClaimsProof, claimsProofFraction, claimsProofGaps, claimsProofNote } = await import("./data-health-claims-proof");
+    const { SETTING_KEYS } = await import("./settings");
+    /*
+     * The row says so when it cannot see the proof, rather than reading it as nothing.
+     *
+     * `getSettings` builds its answer from `SETTING_KEYS` and drops every key not on that list, so
+     * a proof written to an unregistered key reads as the empty string here — for ever, quietly,
+     * looking exactly like a proof that has never run. The two need different actions from
+     * different people, so the row distinguishes them by name.
+     */
+    const registered = (SETTING_KEYS as readonly string[]).includes("claims_proof");
+    const raw = registered ? (await getSettings())["claims_proof" as keyof Awaited<ReturnType<typeof getSettings>>] : undefined;
+    const proof = parseClaimsProof(raw);
+    if (!proof) {
+      return {
+        numerator: 0,
+        denominator: 0,
+        // Never measured, which is not a measurement of zero and must not be stamped with today.
+        measuredAt: null,
+        gaps: registered ? [] : ["`claims_proof` is not in SETTING_KEYS, so the site cannot read what the nightly proof writes."],
+        note: registered
+          ? "The nightly proof has not run, so no claim on this site has been set against the report it came from."
+          : "The nightly proof writes to a setting this site does not read: `claims_proof` is missing from SETTING_KEYS in settings.ts. Until it is added, this row cannot see the proof however often it runs.",
+      };
+    }
+    const { numerator, denominator } = claimsProofFraction(proof);
+    return { numerator, denominator, measuredAt: proof.provedOn, gaps: claimsProofGaps(proof), note: claimsProofNote(proof) };
+  });
 
   // ── The rows every claim question is asked of ────────────────────
   // Counted by prescription, fill number, date and NDC rather than by claim row: one dispensing
