@@ -396,6 +396,29 @@ business (`payer_bins.linesOfBusiness`, Medicare Part D BINs are published), the
 class with its source and the owner confirms — proposed, never assumed. Assigned to A after the
 contract match; owner action for the top plans now.
 
+### 11. Pack sizes: fix every one we can, and a place to look up and correct the rest (8 September)
+
+The owner: *"We need to fix correctly all the package sizes that we can. For those we can't, I need
+a way to lookup and correct. These corrections need to stick."*
+
+Data health measures 48,852 of 51,502 catalogue rows agreeing with the FDA's package (94.9%);
+2,650 disagree, split between clean multiples (a catalogue counting inner packs — IPD's "30 EA" for
+30 blisters of 6) and the rest. A pack size is a divisor under every per-unit cost, so each wrong
+one is a drug that looks several times cheaper or dearer than it is. Three parts:
+
+- **Fix automatically what the FDA settles.** Where the FDA's description reads cleanly to a
+  dispensing unit and the catalogue's count is a whole multiple or fraction of it, the FDA's size
+  is written as the correction, marked as the FDA's, with the arithmetic that justified it.
+- **A page to look up and correct the rest** — every disagreement the FDA cannot settle (unit
+  differs, description stops at a container, no FDA row), showing the FDA text, every supplier's
+  pack size for the NDC, and the cost per unit under each reading, with one control to say which is
+  right or type the truth. Searchable by NDC and name.
+- **Corrections stick.** `ndc_pack_fixes` (per NDC) and `supplier_item_fixes` (per supplier and
+  NDC) already exist for this and are laid over every import; the levelling reads the pharmacy's
+  answer first, then the FDA's, then the wholesaler's. A correction records who, when and why.
+
+Assigned to session 2.
+
 ## The data the site has to ingest
 
 Named by the owner on 7 September as what is still being connected. Each one needs a reader, a

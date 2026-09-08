@@ -80,7 +80,14 @@ question that needs real figures is written as a query under "Open items" in `do
 Works in its own worktree, never in 1's folder (a deploy runs `git checkout -- .` there). Hands the
 branch to 1 by message when `npm run check` passes. **B audits this branch** — see B below.
 
-**Next, after the invoice follow-ups (8 September, from 1): the Data health page** — `docs/BACKLOG.md`
+**Then (8 September, from 1, the owner's ask): pack sizes fixed and correctable** — `docs/BACKLOG.md`
+item 11. Auto-correct from the FDA where its description reads to a dispensing unit and the
+catalogue is a clean multiple; a lookup-and-correct page for the rest; corrections in
+`ndc_pack_fixes` / `supplier_item_fixes` so they survive every import. Yours: `data-health-packages.ts`,
+a new `pack-fixes*.ts` and `src/app/(app)/inventory/pack-sizes/**`; the levelling in
+`catalogue-cache.ts` stays 1's — if its read order needs to change, say so in HANDOFF first.
+
+**Data health page (8 September, from 1)** — `docs/BACKLOG.md`
 item 9, the owner's own words. One page that measures the site against itself on the real
 database: for each dataset its completeness and currency, and for each link in the table there
 its coverage as numerator, denominator, percent, the date measured, and the worst gaps in words.

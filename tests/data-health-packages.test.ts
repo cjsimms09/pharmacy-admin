@@ -1,0 +1,140 @@
+import { test, describe } from "node:test";
+import assert from "node:assert/strict";
+import { fdaPackageUnits, cataloguePackUnits, comparePack } from "../src/lib/data-health-packages";
+
+/**
+ * A pack size is a divisor. Every per-unit cost on this site is a pack cost over the units in the
+ * pack, so a pack size wrong by six makes a drug look six times cheaper than it is and the buy list
+ * recommends it. The failure this file guards is not "a number is slightly off" — it is a
+ * purchasing recommendation built on one.
+ */
+
+describe("reading the FDA package description down to the dispensing unit", () => {
+  test("a plain bottle", () => {
+    assert.deepEqual(fdaPackageUnits("100 CAPSULE, DELAYED RELEASE in 1 BOTTLE (0093-0073-01)"), {
+      ok: true,
+      units: 100,
+      uom: "EA",
+    });
+  });
+
+  test("a nested blister pack multiplies out to the tablets", () => {
+    // The case the whole module exists for: 3 cards of 28 is 84 tablets, not 3 of anything.
+    assert.deepEqual(fdaPackageUnits("3 BLISTER PACK in 1 CARTON (0555-9043-58) / 28 TABLET in 1 BLISTER PACK"), {
+      ok: true,
+      units: 84,
+      uom: "EA",
+    });
+  });
+
+  test("a volume keeps its own unit rather than becoming a count", () => {
+    assert.deepEqual(fdaPackageUnits("1 BOTTLE in 1 CARTON (0069-0069-01) / 30 mL in 1 BOTTLE"), {
+      ok: true,
+      units: 30,
+      uom: "ML",
+    });
+  });
+
+  test("a description that stops at a container is refused, not counted as containers", () => {
+    // This is the bug that produced "84 EA vs FDA 3 EA". Three blister packs is not three
+    // dispensing units, and reporting it as one manufactures a 28-fold disagreement out of a
+    // description that simply never said what was inside.
+    const r = fdaPackageUnits("3 BLISTER PACK in 1 CARTON (0555-9043-58)");
+    assert.equal(r.ok, false);
+    assert.match((r as { why: string }).why, /never says what is inside/);
+  });
+
+  test("every outer container is refused the same way, so none of them scores as a unit", () => {
+    for (const noun of ["CARTON", "BOX", "CASE", "BLISTER PACK", "PACKAGE", "TRAY", "BOTTLE", "POUCH", "BAG"]) {
+      const r = fdaPackageUnits(`4 ${noun} in 1 CASE (1234-5678-90)`);
+      assert.equal(r.ok, false, `${noun} must not be read as a dispensing unit`);
+    }
+  });
+
+  test("a kit has no single dispensing unit and says so", () => {
+    const r = fdaPackageUnits("1 KIT in 1 CARTON (12345-678-90) * 1 TABLET in 1 BLISTER PACK");
+    assert.equal(r.ok, false);
+    assert.match((r as { why: string }).why, /kit/i);
+  });
+
+  test("hours are not things: the patch that became six hundred and seventy-two", () => {
+    // "4 POUCH in 1 CARTON / 168 h in 1 POUCH" is four seven-day patches. Multiplied through as a
+    // count it is 672, and a $124.99 patch reads as $0.74.
+    const r = fdaPackageUnits("4 POUCH in 1 CARTON (0378-1234-56) / 168 h in 1 POUCH");
+    assert.equal(r.ok, false);
+  });
+
+  test("nothing at all is not a package of zero", () => {
+    assert.equal(fdaPackageUnits("").ok, false);
+    assert.equal(fdaPackageUnits(null).ok, false);
+    assert.equal(fdaPackageUnits("something the FDA never wrote").ok, false);
+  });
+});
+
+describe("reading a wholesaler's pack size", () => {
+  test("the plain forms", () => {
+    assert.deepEqual(cataloguePackUnits("84 EA"), { ok: true, units: 84, uom: "EA" });
+    assert.deepEqual(cataloguePackUnits("473 ML"), { ok: true, units: 473, uom: "ML" });
+    assert.deepEqual(cataloguePackUnits("30"), { ok: true, units: 30, uom: "EA" });
+  });
+
+  test("McKesson's inner-pack notation multiplies out", () => {
+    // "(3) 28 EA" is three inner packs of twenty-eight. It is 84, and it is neither 3 nor 28 —
+    // priced against IPD's "84 EA" one of them looked like a third of the other.
+    assert.deepEqual(cataloguePackUnits("(3) 28 EA"), { ok: true, units: 84, uom: "EA" });
+  });
+
+  test("a unit nobody can compare is refused rather than assumed to be tablets", () => {
+    assert.equal(cataloguePackUnits("6 LB").ok, false);
+    assert.equal(cataloguePackUnits("").ok, false);
+    assert.equal(cataloguePackUnits(null).ok, false);
+  });
+});
+
+describe("comparing the two", () => {
+  test("the ordinary case: they agree", () => {
+    assert.deepEqual(comparePack("100 EA", "100 CAPSULE in 1 BOTTLE (0093-0073-01)"), {
+      verdict: "agree",
+      units: 100,
+      uom: "EA",
+    });
+  });
+
+  test("a whole multiple is called out as one, because that is the expensive kind", () => {
+    // IPD "30 EA" against an FDA 180 — thirty blister packs of six. A per-unit cost from the
+    // catalogue is six times too high.
+    const v = comparePack("30 EA", "30 BLISTER PACK in 1 CARTON (1234-5678-90) / 6 TABLET in 1 BLISTER PACK");
+    assert.deepEqual(v, { verdict: "multiple", factor: 6, catalogue: 30, fda: 180, uom: "EA" });
+  });
+
+  test("counted in different things is its own answer, never a quantity disagreement", () => {
+    // Grams against tablets cannot be reconciled by any factor, and a per-EA cost against a per-GM
+    // benchmark is the error that once read as 100 times NADAC.
+    const v = comparePack("60 GM", "60 TABLET in 1 BOTTLE (1234-5678-90)");
+    assert.equal(v.verdict, "unit-differs");
+  });
+
+  test("an unreadable FDA description is not a disagreement", () => {
+    // The heart of it. Scoring these as disagreements would put a false alarm beside every real
+    // one, on the page built to find the real ones.
+    const v = comparePack("84 EA", "3 BLISTER PACK in 1 CARTON (0555-9043-58)");
+    assert.equal(v.verdict, "cannot-compare");
+    assert.match((v as { why: string }).why, /never says what is inside/);
+  });
+
+  test("an unreadable catalogue pack size is not a disagreement either", () => {
+    assert.equal(comparePack(null, "100 CAPSULE in 1 BOTTLE (0093-0073-01)").verdict, "cannot-compare");
+    assert.equal(comparePack("", "100 CAPSULE in 1 BOTTLE (0093-0073-01)").verdict, "cannot-compare");
+  });
+
+  test("a genuine mismatch that is not a clean multiple is reported as itself", () => {
+    const v = comparePack("90 EA", "100 CAPSULE in 1 BOTTLE (0093-0073-01)");
+    assert.deepEqual(v, { verdict: "differs", catalogue: 90, fda: 100, uom: "EA" });
+  });
+
+  test("the nested case both sides read correctly comes out as agreement", () => {
+    // McKesson "(3) 28 EA" against the FDA's 3 × 28. Both reach 84 and there is nothing wrong.
+    const v = comparePack("(3) 28 EA", "3 BLISTER PACK in 1 CARTON (0555-9043-58) / 28 TABLET in 1 BLISTER PACK");
+    assert.deepEqual(v, { verdict: "agree", units: 84, uom: "EA" });
+  });
+});

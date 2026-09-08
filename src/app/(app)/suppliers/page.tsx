@@ -184,6 +184,41 @@ export default async function SuppliersPage({
         </Notice>
       )}
 
+      {/*
+        Invoice lines this month that belong to no supplier on the register.
+
+        Shown once, above the cards, and not inside them — it is a property of the month rather
+        than of any one supplier, so the same figure appears on every earning and repeating it per
+        card would read as each supplier having its own problem.
+
+        It is here at all because silence is what this whole area got wrong once already: the old
+        name match dropped eight lines worth $78.50 without a word, and every rebate figure went on
+        looking complete. Counting them was half the fix; a figure nobody displays is the same bug
+        wearing a different coat.
+      */}
+      {(() => {
+        const m = positions.find((p) => p.earning && p.earning.unplacedLines > 0)?.earning;
+        if (!m) return null;
+        return (
+          <Notice kind="crit">
+            <b>
+              {m.unplacedLines} invoice line{m.unplacedLines === 1 ? "" : "s"} worth {money(m.unplacedCents)} in{" "}
+              {m.month} belong to no supplier on the register.
+            </b>{" "}
+            Nothing below counts {m.unplacedLines === 1 ? "it" : "them"} — not the purchases, not the ratio, not the
+            rebate. {m.unplacedLines === 1 ? "It was" : "They were"} printed as{" "}
+            {m.unplacedNames.slice(0, 4).map((n, i) => (
+              <span key={n}>
+                {i > 0 ? ", " : ""}
+                <span className="font-mono">{n}</span>
+              </span>
+            ))}
+            {m.unplacedNames.length > 4 ? ` and ${m.unplacedNames.length - 4} more` : ""}. Add the printed name to
+            that supplier under &ldquo;Other names they go by&rdquo; and the lines rejoin the figures.
+          </Notice>
+        );
+      })()}
+
       {positions.map(({ rates, earning, ratio }) => (
         <Card
           key={rates.supplierId}

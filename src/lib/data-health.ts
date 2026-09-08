@@ -266,21 +266,21 @@ export const SPECS: LinkSpec[] = [
     key: "claim-fda",
     group: "Links that must hold",
     title: "Claim NDC → FDA directory",
-    of: "dispensed NDCs the FDA directory places, out of all dispensed NDCs",
+    of: "distinct NDCs dispensed on insured paid fills that the FDA directory places, out of all NDCs dispensed on insured paid fills",
     why: "Equivalence. Without it a product cannot be compared with the alternatives to it.",
   },
   {
     key: "claim-nadac",
     group: "Links that must hold",
     title: "Claim NDC → NADAC, current within three months",
-    of: "dispensed NDCs carrying a NADAC row within three months, out of all dispensed NDCs",
+    of: "distinct NDCs dispensed on insured paid fills with a NADAC row within three months, out of all NDCs dispensed on insured paid fills",
     why: "The benchmark every over- and under-payment figure uses.",
   },
   {
     key: "claim-catalogue",
     group: "Links that must hold",
     title: "Claim NDC → catalogue row with a pack size",
-    of: "dispensed NDCs with a catalogue row carrying a usable pack size, out of all dispensed NDCs",
+    of: "distinct NDCs dispensed on insured paid fills with a catalogue row carrying a pack size, out of all NDCs dispensed on insured paid fills",
     why: "A per-unit cost. Without a pack size there is no margin on the fill, only a pack price.",
   },
   {
@@ -322,7 +322,7 @@ export const SPECS: LinkSpec[] = [
     key: "catalogue-package",
     group: "Links that must hold",
     title: "Catalogue row → FDA package size",
-    of: "catalogue rows whose pack size agrees with the FDA package description, out of catalogue rows the directory places",
+    of: "catalogue rows whose pack size agrees with the FDA package description, out of catalogue rows where both sides could be read",
     why: "Unit arithmetic that does not cross units. A per-EA cost against a per-ML benchmark once read as 100 times NADAC.",
   },
   {
