@@ -25,8 +25,10 @@ counts:
 | A → 1, B → 2 | **A branch and a pull request against `feature/compliance`**, plus a line under "Open items" in `docs/HANDOFF.md`. An audit is a file `docs/audits/YYYY-MM-DD-<topic>.md` on that branch. |
 | Anyone → the owner | Findings in plain sentences with the money attached, in the pull request description. |
 
-A and B cannot reach the pharmacy computer, cannot be messaged by it, and **cannot see the
-database, the real screens or the real files.** That was established by measurement (thirteen
+A and B cannot reach the pharmacy computer and **cannot see the database, the real screens or the
+real files.** A runs on the owner's account, so session 1 can send it a one-way message; **B runs on
+a different Claude account**, so nothing reaches B except this repository and what the owner pastes
+— the git channel above is B's only channel, in both directions. That was established by measurement (thirteen
 hosts tested; every tunnel refused). Do not propose a tunnel, a hosted copy or emailed files. A
 question that needs real figures is written as a query under "Open items" in `docs/HANDOFF.md`, and
 1 or 2 runs it and writes the number back.
