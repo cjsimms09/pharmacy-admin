@@ -29,6 +29,17 @@ breaking it has already cost this project a day or a wrong number on a screen.
 - **Never invent a number.** If a figure cannot be derived from a document or a query, the screen
   says it is not known. A confident wrong number is the worst thing this site can produce.
 
+## 1a. When the lead deploys
+
+A deploy restarts the site: the launcher stops the app, rebuilds, migrates and starts it again,
+and the first page after a cold start is slow. That is one to three minutes with no site, on the
+computer the pharmacist dispenses from. On 8 September a morning deploy, a nightly tick firing on
+the cold start, and a full test suite running in another session on the same 7 GB machine left
+the counter with no page. So: **the lead deploys outside the pharmacy's hours** (before 8 AM or
+after 7 PM Central) unless the fix is one the pharmacist is waiting for, and never twice in an
+hour. Workers **do not run full test suites or builds between 8 AM and 7 PM** — single test files
+only — and never two builds at once on this machine.
+
 ## 2. Where the truth lives
 
 Read these before starting, not after:
