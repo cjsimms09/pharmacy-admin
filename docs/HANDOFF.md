@@ -8,6 +8,88 @@ file is how they talk.
 
 ## Open items
 
+### From Helper A — the Money books fold, and three things only you can measure (8 September)
+
+Branch `work/money-fold`, pull request against `feature/compliance`. The write-up is
+`docs/audits/2026-09-08-money-books-fold.md`. The fold is done and `npm run check` is green (2,233
+tests). Three questions are stated as findings there because I cannot see the data; these are the
+queries.
+
+**1. How much cash revenue is missing today.** The cash account's only feed is `cash_receipts`, and
+all of it is typed by hand. Two parts:
+
+```sql
+-- Copays collected at the register, by the month they were collected. This is money the cash
+-- account could place by itself and does not: `completed_at` is the pickup date.
+select substr(completed_at, 1, 7) as banked_month,
+       count(*)                   as fills,
+       sum(coalesce(patient_total_cents, copay_cents, 0)) as patient_cents
+  from claims
+ where completed_at is not null
+   and coalesce(patient_total_cents, copay_cents, 0) > 0
+ group by 1 order by 1 desc;
+
+-- Against what has actually been typed as patient money reaching the bank.
+select month, sum(amount_cents) from cash_receipts where kind = 'patient' group by 1 order by 1 desc;
+
+-- And plan deposits the site already holds that no receipt mirrors.
+select substr(received_on, 1, 7) as banked_month, source, count(*), sum(amount_cents)
+  from claim_payments
+ where received_on is not null
+ group by 1, 2 order by 1 desc;
+select month, kind, sum(amount_cents) from cash_receipts group by 1, 2 order by 1 desc;
+```
+
+If the first pair differ by much, the cash basis is not usable yet and the fix needs no new feed —
+only the fills already loaded. That is the largest single gap in the books and I would put it above
+the 835 work.
+
+**2. The one double count I could not rule out by reading.** On the accrual basis, revenue is the
+System Sales Summary's prescription lines **plus** a separate "Facilitator and top-off payments"
+line from `claim_payments`. If the summary's third-party figure already contains the facilitator
+top-off for fills in that month, that money is counted twice. I believe it does not — the summary is
+drawn at the point of sale and the top-off lands weeks later — but it is a belief, not a
+measurement. One month settles it:
+
+```sql
+-- The claims' own prescription revenue for a month, excluding later money.
+select sum(coalesce(remit_cents,0) + coalesce(patient_total_cents, copay_cents, 0))
+  from claims where date_filled like '2026-08%';
+-- The later money that reached fills in the same month.
+select sum(coalesce(p.revenue_cents, p.amount_cents))
+  from claim_payments p join claims c on c.id = p.claim_id
+ where c.date_filled like '2026-08%' and p.source = 'mtf';
+-- What the System Sales Summary says for the same month.
+select rx_remit_cents, rx_patient_cents, retail_cents, total_cents from sales_months where month = '2026-08';
+```
+
+If `rx_remit_cents` is close to the first figure, the summary excludes the top-off and the account
+is right. If it is close to the first plus the second, we are double counting and the top-off line
+must be dropped whenever a summary exists.
+
+**3. Whether any month has only banked money.** `accountMonths()` was drawn from sales, bills and
+claims — three accrual feeds — so a month whose only record was a deposit had nothing to report on
+and was invisible on both surfaces. Cash receipts are now in the gate, which means figures for such
+a month changed on this branch.
+
+```sql
+select month from cash_receipts
+except
+select distinct substr(date_filled,1,7) from claims
+union select distinct substr(invoice_date,1,7) from expenses
+union select month from sales_months;
+```
+
+**Behaviour that changed, so you are not surprised by it on the real data:**
+
+- `/money` now leaves months with nothing on file out of the arithmetic and names them, as
+  `/money/report` always did. A quarter with one recorded month is that one month, not three, and
+  the page says which are missing.
+- Quarter labels are now the long form everywhere: `Q3 2026 — July to September`.
+- `/money/report` for a quarter with a 12-month chart went from 18 full passes over the claims to 3.
+
+---
+
 ### From Helper A to session 1 — shelf.ts, two queries (8 September)
 
 Audit in `docs/audits/2026-09-08-shelf.md`, branch `work/audit-shelf`. Findings only, no fix — both
