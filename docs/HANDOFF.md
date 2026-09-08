@@ -217,6 +217,38 @@ type, service type, DAW or quantity unit — those are PioneerRx export columns 
 remit + copay − dispensing fee. `networkId` is filled on 95% of rows across 82 values and is the
 axis contracts are written on.
 
+**The contract library read, 8 September (session 1, `scripts/read-contracts.ts`).** Of 357
+documents: **177 read** (698 pages), **25 failed** — 18 ran past the 32,000-token answer limit
+(every provider manual, and a few small ones that looped), 3 did not match the shape, 3 were
+refused whole for a `dirFeeBasis` value with no quote, 1 hit the limit below — **126 unread and
+worth reading** (4,731 pages; the page-heavy ones are what is left), 29 ruled out by the sort.
+**The run stopped because the Anthropic API key reached the monthly spending limit set in the
+owner's console** — "You will regain access on 2026-10-01" — which also blocks every other AI
+feature on the site (triage, inbox reads, the proving read) until the limit is raised there.
+Spent on the read so far: roughly $15 at batch pricing. To resume once raised:
+`node node_modules/tsx/dist/cli.mjs --tsconfig tsconfig.script.json scripts/read-contracts.ts read --scans`
+(never-read documents only; `--retry` adds the failures on purpose, after reading their reasons).
+Of the 177 read: 63+ name a network, 39+ a chain code, 5 a BIN, 0 a network reimbursement id.
+`applyAllReads` **run at 03:38 on the 177**: 74 documents applied — 65 rate lines into
+`network_rates`, 10 appeal terms, 194 contacts, 21 payment routings, 36 payer links, and **18
+claims now linked to a contract**. Deferred, not refused: every document that governs by chain
+code (605, 630, 841, A605 recur) is held because **the pharmacy's own chain code is not in
+Settings** — `governs()` cannot say whether it is ours. Owner action: enter the pharmacy's chain
+code (and confirm NCPDP and NPI) on the Settings page, then re-run `apply`.
+
+**Secondary payors, measured for A's audit (8 September, BACKLOG 2b-iv).** Of 1,054 insured paid
+fills, **22 have more than one payor** (2.1%), carrying $8,456.07 of remit between them. The
+fill grouping is sound on cost: on every one of the 22 the acquisition cost sits on exactly one
+row (0 fills with it on two rows, 0 with it on none). The attribution problem is in anything
+built per row or per payor: PioneerRx's own printed gross profit puts the whole cost on the
+primary's row and none on the secondary's, so the primary reads as a loss and the secondary as
+pure profit — BIN 610011 across 4 secondary-involved rows: remit $462.50, acquisition $1,306.23,
+gross profit −$843.73; BIN 024284 (RxRescue) 5 rows: remit $458.29, acquisition $0, gross profit
+$458.29; BIN 610524 5 rows: remit $245.81, cost $0, profit $265.81. Pairs seen: 021825+024284,
+004336+024284, 003858+610494, 003858+610011 (2 fills each), then singles. Query: group `claims`
+(status paid, not cash plan) by rx, fill, date, NDC; count distinct BIN. A: audit every page that
+states profit by payor against this — the fill owns the profit, each payor owns its own receivable.
+
 **File handed to A (7 September):** `claim-contract.ts` and `src/app/(app)/payers/**` for the
 network-id mapping (ASSIGNMENTS, Helper A, "Second"). 1 does not edit them until A's pull request
 lands.

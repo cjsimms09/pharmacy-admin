@@ -102,6 +102,109 @@ claim carries (BIN, PCN, group, network reimbursement id, chain code, NCPDP, NPI
 to the 835/EFT/EDI enrolment instructions below. The claims side of the join is inventoried first
 so nothing extractable is left unasked.
 
+### 2b-ii. The payer model: payor → contract → plan → claim → payment (7 September)
+
+The owner: *"Once contract ingestion is done, you need to make sure the contract info (plans,
+groups, bins, payors) are organized in best way possible to not only match claims to contract and
+reimbursement but also to payors. To know the reimbursement of a claim we need to know the specific
+contract id (group #, etc) but payments come from the payor (ie Caremark, Blue Cross, Optum, etc).
+Payors will have many different BINs and groups under them. We also need to be thinking of data we
+will need to completely reconcile payments to claim when we start getting 835s."*
+
+Two different questions, which today are muddled into one `pbmName` string:
+
+- **Who priced it** — the contract. Reached from the claim through its routing (BIN, PCN, group,
+  network reimbursement id, days supply, line of business) to a rate line with a formula.
+- **Who pays it** — the payor. Reached from the 835 through the payer name on the remittance
+  (N1*PR) and payer id, and from the bank through the deposit descriptor. One payor has many BINs,
+  PCNs and groups under it, and one contract (a PSAO's, say) can price claims that several payors
+  then pay.
+
+The read so far confirms what the data has to look like: of 86 contracts read, 63 identify
+themselves by network name, 39 by chain code, 5 by BIN, 0 by network reimbursement id — so the
+contract side is named by network, the claim side is coded by BIN/PCN/group/network id, and the
+join between them is a table the pharmacy fills once per network id, not a string match.
+
+**Deliverable, session 1 after ingestion, audited by A:** `docs/reference/payer-model.md` defining
+the entities and their keys — payor, processor/PBM, contract document, rate schedule, network,
+plan (BIN/PCN/group), claim, remittance, deposit — with one canonical name per payor, the
+existing tables (`payer_bins`, `plan_groups`, `payer_links`, `network_rates`, `payment_routing`,
+`era_enrollments`) mapped onto it, and the migrations that make it so. Then the payers page shows a
+payor as a tree: its BINs and groups, its contracts, its enrolment state, its receivable.
+
+**What a claim must carry to be reconciled against an 835 later** (for B's ERA work and the
+PioneerRx export ask): the pharmacy's claim reference that will come back in CLP01 (the Rx number
+and fill as submitted), the PBM's authorization number (NCPDP 503-F3), the payer claim control
+number if returned, date of service, NDC, quantity, submitted and adjudicated amounts by component
+(ingredient, fee, tax, copay), and the BIN/PCN/group. From the 835: N1*PR payer name and id, the
+TRN trace (check/EFT number and amount), each CLP with its CAS adjustment codes, PLB provider-level
+adjustments (DIR, recoupment, fees) — which are money that belongs to no single claim and must
+still reach the books.
+
+### 2b-iii. Provider manuals do not fit one read (8 September)
+
+Twelve documents ran past the reader's 32,000-token answer limit — every provider manual in the
+library (CVS Caremark 2025 state addenda 256 pp, ESI 2026 state 182 pp, Capital Rx 2025 151 pp,
+ESI 2026 federal 142 pp, CVS Caremark 2026 114 pp, Liviniti 2025 66 pp) and five smaller ones that
+should not have (Aetna 2015 Medicare D 51 pp; four of 1–18 pages, which suggests the answer looped
+rather than the document being long). Manuals carry appeal windows, DIR and audit terms, not rates.
+Needs a read-in-parts path in `contract-extract.ts` (page ranges, one answer per part, merged with
+citations kept) and a retry of the four small ones. Session 1. Also: three documents were refused
+*whole* because one field, `dirFeeBasis`, came back without a quote — `requireCitations` treats it
+like a rate. A rate without its sentence is unusable; a DIR basis without one is a field to drop,
+not a reason to lose the counterparty, the networks and every contact on the document. Change the
+rule to drop the uncited value and keep the read, with the drop recorded in `unclearOrMissing`.
+And the read stops when the API key's monthly spending limit is reached (8 September, at 177 of
+325) — the limit lives in the owner's Anthropic console, not in the site; the site's own ceiling
+(`ai_monthly_cap`, $50) never saw it because contract runs are not counted into `spend()`.
+Fix that accounting too, so the site's ceiling means what it says.
+
+### 2b-iv. Claims with secondary payors: profit by payor, and who owes what (8 September)
+
+The owner: *"We need a deep audit of how we handle claims with secondary payors! We need to make
+sure the profit and loss of these claims are correct, we need to make sure we know how much money
+we are expecting from each payor. I've noticed we tend to assert all the profit to one payor which
+doesn't make sense. We need to really think this through from a profit perspective as well as what
+to expect when we start receiving remit payments (who owes us what) so that we can reconcile
+properly."*
+
+One fill, several transmissions, each to a different BIN: the primary adjudicates, the secondary
+picks up some of the patient's share, sometimes a third. Today `fills.ts` groups the transmissions
+into one fill and sums their revenue, which is right for the fill's margin — but anything that
+reports *by payor* then hangs the whole fill's profit on one of them. Two things have to be true
+at once and are not the same figure:
+
+- **Profit belongs to the fill**, not to a payor. The fill has one acquisition cost and one total
+  revenue (every payor's remit plus what the patient finally paid). It is a whole or it is nothing.
+- **Money owed belongs to each payor separately.** Each transmission is its own receivable: this
+  BIN owes this remit for this claim, and it is settled by that payor's 835, not by anyone else's.
+  A secondary's remit is a residual after the primary, and a coordination-of-benefits row can carry
+  a zero acquisition cost on purpose (the drug was costed on the primary row).
+
+So the audit has to answer, on the real claims: how many fills have more than one payor; how the
+site attributes their revenue and profit today, page by page; whether any figure double-counts the
+acquisition cost or the patient's share across rows; and what "expected from payor X" should be
+defined as so it reconciles line by line when the 835s arrive. Assigned to A (audit, first item on
+the claims audit) with session 1 supplying the counts. The fix follows the audit.
+
+### 2b-v. Fees on 835s have to be classified, and the contracts hold the key (8 September)
+
+The owner: *"We also need to start thinking about how we are going to handle and classify fees that
+come over with 835s. These will need to be accounted for properly. Fees often come over with a code,
+we might need to get codes from contracts in order to decipher what that fee is."*
+
+An 835 carries adjustments at two levels: on the claim (CAS segments, with a group code and a Claim
+Adjustment Reason Code — CO-45 contractual, PR-3 copay, and so on) and on the provider (PLB
+segments, with a reason code such as WO, FB, L6, 72, and a reference the payor chooses). The
+standard code sets say the *kind* of adjustment; what a given PBM's "L6 — TRANSACTION FEE" or
+"DIR-Q2" actually is comes from the contract, where `transactionFees[]`, `postPointOfSaleDiscounts[]`
+and `dirFeeBasis` are already extracted. Deliverable: a fee dictionary — standard CARC/RARC and PLB
+codes with their meaning, joined to each PBM's contract-named fees — so every adjustment on an 835
+lands in the books under the right heading (contractual write-off, patient share, DIR, transaction
+fee, recoupment, interest) and none lands as "other". Assigned to B with the ERA work; the
+extraction side (making sure the reader captures every fee a contract names, with its code where
+printed) is session 1's.
+
 ### 2c. Get the 835s sent here (7 September)
 
 The owner: *"Also want to search contracts for info to request 835 changes. Want to automate request
@@ -210,6 +313,64 @@ claims to a specific contract."* Drug file first, then claim-to-contract matchin
 Not yet looked at: `shelf.ts` (895 lines, the largest and least examined), `order-plan.ts` beyond
 its documentation, the rebate ladder and band arithmetic (`rebate-rates.ts`, `band-strategy.ts`,
 `ratio-effect.ts`), claim-to-contract matching, and the cash-versus-accrual split.
+
+### 8. The site has to look and work like a professional product (7 September)
+
+The owner: *"Site needs a lot of work in terms of design and usability functions! Are all the tools
+there that are needed? Are we presenting info in clean, clear way? This site should look and
+function like a professional website."*
+
+Three questions, each answerable page by page against `docs/reference/design-audit.md` (the site's
+design rules and page inventory), and none of them needing the database:
+
+- **Are the tools there?** For every page: what decision does the person on it have to make, and
+  can they make it without leaving? The test is the owner's own workflow, not a feature list.
+- **Is the information clean and clear?** One question per screen, the answer first, the number
+  with its unit, the reason in a sentence a pharmacist reads, and nothing on the page that does not
+  change what he does next. Folded detail rather than long lists; dashes where a figure is unknown,
+  never a zero that means "not known".
+- **Does it look and behave like a professional product?** Consistent layout, spacing, type and
+  colour across every page; states for loading, empty, error and success; forms that say what they
+  want and what went wrong; works on the phone he actually uses it from.
+
+This is a full pass over the page inventory and belongs to a cloud session, because it needs no
+data — it needs eyes and the design rules. Not yet assigned: A and B are on the money chain,
+which the owner ordered first. Assign when one frees, or to a fifth session.
+
+### 9. Data health: complete, linked, and it says what is missing (7 September)
+
+The owner: *"The logic and data in this site needs to be correct, full, and cleanly organized. If we
+are missing data, I need to know and we need to fix it. Data needs to link when it should! This
+system needs to be incredibly organized and complete from many ends or we will get bad numbers.
+Main pieces are data from claims, data from supplier catalogs, data from third party sources
+(NADAC, AWP, package sizes, equivalents) — all these things HAVE to be correct or what we are
+building will not only fail but lead us astray."*
+
+So the site gets one page that measures itself: **Data health**. For each dataset, how complete it
+is, how current, and how many of its rows link where they must — counted on the real database,
+with the gap named as an action. Tonight's answers by hand were exactly this kind of figure (NADAC
+covers 96.9% of what we dispense; the FDA directory 96.9%; 0 of 1,081 claims match a contract; not
+one McKesson invoice; no on-hand count ever). They should be on a screen, every day, not in a chat.
+
+The links that must hold, each a row on that page with its coverage and its worst gaps:
+
+| Link | Why it matters |
+| --- | --- |
+| claim NDC → FDA directory | equivalence; without it a product cannot be compared |
+| claim NDC → NADAC (current within 3 months) | the benchmark every "over/under" figure uses |
+| claim NDC → a catalogue row with a pack size | a per-unit cost; without it no margin |
+| catalogue row → AWP | needed where a plan pays a discount off AWP (ParMed and IPD carry none) |
+| claim → payer (BIN/PCN/group resolved) → plan class | who paid, and under what law |
+| claim → contract (network id → contract) | the reimbursement formula |
+| claim → 835 line → bank deposit | cash actually received |
+| invoice → supplier register row → rebate ladder | what was really paid, after rebate |
+| catalogue row → FDA package size | unit arithmetic that does not cross units |
+| on-hand count → catalogue row | what is on the shelf, valued |
+
+Each row: numerator, denominator, percent, the date it was last measured, and the top gaps in
+words ("29 dispensed NDCs have no NADAC — 2 are devices, 27 are repackager labels"). Pure counting
+in a module, a store that runs it, a page that shows it. **Assigned to session 2** after its invoice
+follow-ups, because it runs on the pharmacy computer and can see the real database.
 
 ## The data the site has to ingest
 
