@@ -180,6 +180,13 @@ export default async function NetworkPage({ searchParams }: { searchParams: Prom
           In the pharmacy-admin folder, double-click <b>Work on this with Claude.cmd</b>. The first time it installs
           Claude and asks you to sign in with the same account you use on claude.ai. After that it opens straight away.
         </p>
+        <p className="mt-2 text-sm text-ink-2">
+          <b>From the counter, or from home.</b> It starts with Remote Control on and shows a QR code — scan it with
+          the Claude app on your phone and the same conversation carries on from anywhere. The work still happens on
+          this computer against the real database; the phone is a keyboard, not a copy, and nothing about the pharmacy
+          is published. That is the difference between this and an outside address, and it is the whole reason this is
+          the better arrangement.
+        </p>
       </Card>
 
       {!best ? (

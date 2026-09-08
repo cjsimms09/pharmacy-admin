@@ -80,20 +80,37 @@ function main() {
 
   say(`Claude ${version} is ready, in ${root}`);
   say();
-  say("It can read the pharmacy's real database and change this site directly. Nothing is exposed to");
-  say("the internet — this runs entirely on this computer.");
+  say("It can read the pharmacy's real database and change this site directly. The work happens on");
+  say("this computer — nothing about the pharmacy is published to the internet.");
   say();
   say("The first time, it will ask you to sign in with the same account you use on claude.ai.");
+  say();
+  say("A QR CODE will appear. Scan it with the Claude app on your phone and you can carry on the");
+  say("same conversation from anywhere — the work still runs here, on this computer, against the");
+  say("real data. If you do not have the app yet, type  /mobile  for a link to it.");
   say();
   say("Type what you want done and press enter. Type /exit when you are finished.");
   say("-----------------------------------------------------------------------------");
   say();
 
   /*
+   * Started with Remote Control on, so the phone works without anybody having to know it exists.
+   *
+   * The pharmacist is not at this desk most of the day — he is at the counter, or not in the
+   * building. A tool that can only be reached by walking to one computer is a tool that gets used
+   * on the days somebody remembers to walk to it. With this flag the session is reachable from the
+   * Claude app the moment it starts, and the work still happens here, on this machine, against the
+   * real database. Nothing is published: the phone is a keyboard, not a copy.
+   *
+   * `--remote-control` rather than the `remote-control` sub-command deliberately. The sub-command
+   * refuses to start at all on an account that cannot use it; the flag starts the session anyway
+   * and simply says Remote Control is unavailable. Losing the phone is a disappointment. Losing
+   * the session is the thing that makes somebody give up.
+   *
    * Handed the terminal outright rather than run and reported on: this is a conversation, not a
    * job with an outcome, and every key the pharmacist presses has to reach it.
    */
-  const child = spawn(isWin ? "claude.cmd" : "claude", [], { stdio: "inherit", shell: isWin, cwd: root });
+  const child = spawn(isWin ? "claude.cmd" : "claude", ["--remote-control", "Pharmacy Admin"], { stdio: "inherit", shell: isWin, cwd: root });
   child.on("exit", (code) => process.exit(code ?? 0));
 }
 
