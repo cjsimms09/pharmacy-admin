@@ -258,6 +258,14 @@ export const SPECS: LinkSpec[] = [
       "Every other row on this page measures whether the site's tables agree with each other, which they can do perfectly while all of them disagree with the file they were read from. This one re-reads the stored reports each night and sets them against the claims. Both directions count: a paid row in a report that reached no claim, and a claim no report explains, are the same failure seen from opposite ends, and a denominator that could only see one of them would read a hundred per cent with four hundred strays in the table.",
   },
   {
+    key: "invoices-proof",
+    group: "Datasets",
+    title: "Invoices proved against their own printed total",
+    of: "invoices whose stored lines add to the total printed on the invoice's face, out of invoices carrying a total",
+    why:
+      "The invoice states what it came to and the lines say what was bought; if they do not agree, one of the drugs on that invoice has the wrong cost against it and every margin, rebate and purchase figure that uses it is wrong by an amount nobody can see. A partial read is the dangerous outcome, not a failed one — the lines that were read look perfectly sound and only the product whose line was dropped appears cheaper than the pharmacy paid.",
+  },
+  {
     key: "supplier-invoices",
     group: "Datasets",
     title: "Which wholesalers have sent an invoice",
