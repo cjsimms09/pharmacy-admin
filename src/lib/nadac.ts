@@ -8,6 +8,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "./crypto";
 import { parseCsv, referenceDir } from "./reference";
+import { isPlaceholderRow } from "./catalogue-check";
 import { splitRow } from "./pioneer-catalog";
 import { isPricingUnit, parseUnitMicros } from "./money";
 import type { NadacRecord } from "./reimbursement-rules";
@@ -125,7 +126,10 @@ function readNadacRow(r: Record<string, string>, ctx: RowCtx): ParsedNadacRow | 
    * with one of those NDCs would be measured against a number nobody meant.
    */
   const described = (pick(r, "ndc description") ?? "").trim();
-  if (/do not delete or release/i.test(described)) return skip("CMS placeholder row, not a price");
+  // The wholesalers use the same convention, so the test lives in one place (catalogue-check.ts)
+  // and both importers ask it. It was written here first, on the path where the rows turned out
+  // not to be: nadac_prices held none of them and supplier_items held nine, every one McKesson.
+  if (isPlaceholderRow(described)) return skip("CMS placeholder row, not a price");
 
   if (!ndc11) return skip("NDC missing or not 11 digits");
   if (unitMicros === null) return skip("no readable NADAC per unit");

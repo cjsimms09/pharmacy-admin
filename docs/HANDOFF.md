@@ -22,26 +22,92 @@ never have worked. Do not propose one again.
 
 So the questions below are yours, and every one of them is blocked on data only you can read.
 
-**1. How much of the catalogue actually has a NADAC benchmark?** This is the first thing to answer
-and it may invalidate a lot. On the cloud session's development copy only **10 of 147,730** supplier
-rows got one — but that copy's NADAC table is synthetic (descriptions read "Drug 27999"), so the
-number means nothing. On the real database it could be fine or it could be near zero, and if it is
-near zero then `over-nadac`, `purchase-ratio`, `under-nadac` and every "buying above the benchmark"
-figure in the site are running blind and saying nothing about it. Count it:
+**1. How much of the catalogue has a NADAC benchmark — ANSWERED on the pharmacy computer, 7
+September.** The site is not blind, and the development copy's "10 of 147,730" was entirely an
+artefact of the synthetic table. On the real database:
 
-```
-select count(distinct s.ndc11) from supplier_items s;
-select count(distinct s.ndc11) from supplier_items s
-  join nadac_prices n on n.ndc11 = s.ndc11;
-```
+- **26,246 of 45,791 catalogue NDCs (57.3%) carry a NADAC row.**
+- **652 of the 681 NDCs actually dispensed (95.7%) carry one, and 650 of those are current within
+  three months.** That is the figure that governs, because every reimbursement question is asked
+  about a drug the pharmacy dispenses, not about McKesson's whole warehouse.
+- By supplier: IPC 97.2%, IPD 88.2%, ParMed 87.5%, ANDA 78.2%, McKesson 58.7%. McKesson drags the
+  average because it lists the hospital and supply catalogue; the secondaries, which are where the
+  buying decisions are made, are well covered.
 
-If the overlap is small, find out **why** before changing anything — NDC formatting on one side
-(11-digit vs 10-digit, dashes, leading zeros), or the catalogue genuinely being mostly items CMS
-does not price. The two have completely different fixes and guessing between them wastes a day.
+**The cause of the 43% miss is not NDC formatting, and this was checked rather than assumed.** Both
+sides are clean 11-digit, all-digit, no dashes: catalogue 45,791 of 45,791 at length 11 with zero
+non-digit characters, NADAC 43,396 of 43,396 the same. Normalising to digits-only changes the match
+by **exactly zero** rows, and matching on the first nine digits (labeler and product, ignoring
+package) gains 553. There is no formatting fix to make.
 
-**2. Six faults were fixed in the buying logic on 8 September (commit `8d51d73`) and none of them
-could be measured against real data.** Re-measure each on the live database and say what the real
-numbers are:
+**The miss is CMS genuinely not pricing those items.** The unmatched are hospital injectables
+(cefepime, meropenem, milrinone, dexmedetomidine, Naropin single-dose vials), devices and supplies
+(dispensing tip caps, Dispill label sheets, a rollator), supplements (glucosamine, VSL#3), and
+repackager labels (Bryant Ranch, Proficient Rx, Reliable 1) which CMS does not carry. **15,332 NDCs
+have no NADAC anywhere in their product**, not merely none of their own.
+
+**A product-level proxy was measured and is not worth building.** Falling back to a sibling NDC's
+NADAC — same drug, strength and form from a labeler CMS does price — would rescue **197 NDCs,
+0.4%**. The idea sounds good and the number kills it.
+
+Two things were found while answering this, both of which change what the site should do:
+
+- **The "TBD DO NOT DELETE OR RELEASE" placeholders were being looked for in the wrong table.**
+  `nadac_prices` holds **zero** of them. `supplier_items` holds **nine**, all McKesson, all priced
+  at $110.25 a unit ($110.25 a pack, so a pack of one), all flagged `not rebated`, all with no
+  availability. They are catalogue rows, not CMS rows, so the import refusal added on 8 September
+  sits on the NADAC path where they never were. They need refusing on the **catalogue** path in
+  `suppliers.ts`, and the nine deleting.
+- **10,429 NDCs carry more than one `product_key`.** The key is derived from each supplier's own
+  description text, so pack codes and manufacturer abbreviations land inside the product name and
+  the same drug fragments. Mounjaro 12.5mg is three products (`mounjaro 0 5mlx4pend am|12.5mg`,
+  `mounjaro|12.5mg/0.5ml`, `mounjaro sy 4 ppn|12.5mg/0.5ml`); Trulicity 0.75mg is three; Emgality
+  120mg is three. This reaches money: `reimbursement-fit.ts` takes a **median MAC per product key**
+  to decide a payer's formula, and `product-groups.ts` — which `drug-profit.ts` uses to pick the
+  most profitable NDC in a product — groups on the same `productKey()` function. Both are taking
+  medians and comparing candidates across fragments of what should be one product. Not yet costed.
+
+**2. Six faults were fixed in the buying logic on 8 September (commit `8d51d73`) — MEASURED on the
+pharmacy computer, 7 September, and every one of them was moot, for one reason.**
+`contractRatesBySupplier()` returned `{}`: no supplier had a rebate rate in force, so the ledger
+compared **7,165 McKesson contract generics at printed price** (`rebate_unknown` on 7,165 rows) and
+nothing the six fixes changed could show. The cause was one field: all three McKesson programmes
+were stored with `ratioMeasure: null`, and `rebate-view.ts figuresFor()` selects the driving figure
+from that field, so no band could ever be chosen — while the daily report carried a scrubbed
+compliance of 20.32% and the OneStop ladder's bottom tier pays 15% at zero. The diagnosis then said
+"the band it lands in pays nothing on contract generics today", which was false. Migration `0084`
+sets the measure from each programme's own `ratioDefinition` text (they say "compliance" and
+"generic purchase ratio" in words); verified after migrating: McKesson **29% off contract items,
+0.75% off brand**. Every "which supplier" comparison had been overstating McKesson's contract
+generics by about thirty per cent. Still open: the GPR ladder shows `allGenerics: null` because the
+daily report's generic share (79.8%, which would pay 1%) is not passed through as `gprPercent` —
+only a monthly statement fills it; assigned to A.
+
+The six, on the live ledger (45,782 rows, 544 dispensed, **8 with an invoice price**):
+- margin at net vs printed: 0 of 544 rows differ — no rate was in force, so net equalled printed.
+  `margins()` is defined only where an invoice price exists, so "What each drug earns" covers 8 NDCs.
+- short-dated: 0 catalogue rows carry a short-dated availability on this database; nothing to see.
+- NADAC across units: **50 McKesson rows** are priced per one unit while NADAC prices per another;
+  4 of them would have been reported as beyond 3× the benchmark; none beyond 100×.
+- rebate rate by name: with no rates on file, first-containment and the new matcher agree on
+  "none" for all five suppliers. The IPC invoice mismatch is a separate matcher (`earningSoFar`),
+  fixed by session 2 in `0083`.
+- placeholders: 0 in either table (`0082`).
+- offers with no net price: 6 catalogue rows have no unit cost; 0 ledger buys lack an effective
+  price.
+
+**Invoices, measured for session 2:** `supplier_invoices` has 2 rows, both IPC, both `supplier_id`
+null; one with 8 lines ($78.50), one with **no text layer, 0 lines, $1,530.89 and no review flag**.
+There are no McKesson invoices anywhere — not mis-filed, never arrived — and the register's
+McKesson row has **no sender address**, so one could not file as an invoice if it did. Owner
+actions: forward McKesson invoices to the site's inbox, and the register needs McKesson's invoice
+sender address. IPC aliases were typed on the register by session 1 from the two invoices.
+
+**File handed to A (7 September):** `claim-contract.ts` and `src/app/(app)/payers/**` for the
+network-id mapping (ASSIGNMENTS, Helper A, "Second"). 1 does not edit them until A's pull request
+lands.
+
+The original list, for the record:
 
 - `marginOf` used the cheapest *printed* price from any supplier; it now uses the net price at the
   actual buy (`bestBuy`). Every contract line's margin was understated by the rebate rate. How many
@@ -51,9 +117,32 @@ numbers are:
   reported the row as "100× the national average". How many rows raised that falsely?
 - Supplier rebate rates were matched by first-containment, so one wholesaler could be paid at
   another's rate. Check `contract.bySupplier` against the real supplier names in `supplier_items`.
-- CMS placeholder rows ("TBD DO NOT DELETE OR RELEASE") were stored as prices. `select count(*) from
-  nadac_prices where description like '%DO NOT DELETE%'` — they are refused at import now but the
-  ones already stored are still there and should be deleted.
+- ~~CMS placeholder rows ("TBD DO NOT DELETE OR RELEASE") were stored as prices.~~ **Done, 7
+  September.** They were never in `nadac_prices` (count 0); the nine were McKesson rows in
+  `supplier_items`. Both catalogue importers and NADAC now share `isPlaceholderRow`, migration
+  `0082` cleared them, and the live database holds zero in either table after the restart.
+
+**Measured on the real database by session 2, 7 September — claim-to-contract matching (BACKLOG
+item 2, link 2).** **0 of 1,081 insured claims (paid, non-cash) match a contract.** Not the
+matcher's arithmetic: `contract_docs` holds 357 documents, all on disk, extraction state none 353 /
+done 2 / failed 2, and both documents that read name no BIN, PCN or group, so `governs()` returns
+null by construction. Nothing calls `contractFor` in the app except the diagnostic tree. The
+structural point: **claims speak in codes and contracts speak in names.** Claims carry bin 99.8%,
+pcn 94.4%, group 95.1%, and PioneerRx's `networkId` 95.3% across 82 distinct values (BIDBRODCBR
+149, EN45 73, MRRETM 62, IRX9TP 56, BMPN 43); `planId` is always null. The two read contracts carry
+network names ("Prime AccessOne Network", "BCBS Federal Employee Program National Network") and
+chain codes ("00605", "00630"), empty bins/pcns/groups. `claim-contract.ts governs()` matches on
+bins/pcns/groupIds only and ignores `networkNames`, `networkReimbursementIds` and `chainCodes`, so
+a rate exhibit identified by network — which is how they identify themselves — can never match a
+claim however many are read. The missing piece is a mapping from the 82 network ids on claims to
+the network names in contracts; `payer_links.contract_id` exists for exactly this and is unused on
+the path. Caveat: n = 2 read documents. Also: the 2 failed reads carry the old union-type schema
+refusal (fixed since; re-run to prove it), and 249 of the 353 unread were never triaged, priority
+false on all 357, so nothing is queued.
+
+**Since 7 September the pharmacy session merges and deploys.** Workers open pull requests against
+`feature/compliance`; `docs/SESSION-RULES.md` and `docs/ASSIGNMENTS.md` say how and who owns what.
+A merged pull request reaches the site by `npm run deploy` on the pharmacy computer.
 - Offers with no `netUnitMicros` were invisible to both the buy and the margin.
 
 **3. The audit was two modules in when the session ran out of road.** Done: `drug-file.ts`,

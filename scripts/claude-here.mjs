@@ -110,7 +110,9 @@ function main() {
    * Handed the terminal outright rather than run and reported on: this is a conversation, not a
    * job with an outcome, and every key the pharmacist presses has to reach it.
    */
-  const child = spawn(isWin ? "claude.cmd" : "claude", ["--remote-control", "Pharmacy Admin"], { stdio: "inherit", shell: isWin, cwd: root });
+  // Anything after the .cmd's name goes straight to Claude. The sign-in task passes `--continue`,
+  // so a restart of the computer picks the conversation up rather than starting a new one.
+  const child = spawn(isWin ? "claude.cmd" : "claude", ["--remote-control", "Pharmacy Admin", ...process.argv.slice(2)], { stdio: "inherit", shell: isWin, cwd: root });
   child.on("exit", (code) => process.exit(code ?? 0));
 }
 

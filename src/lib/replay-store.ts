@@ -5,6 +5,7 @@ import { allFills } from "./claims";
 import { allSuppliers } from "./suppliers-registry";
 import { rebateProgramsInForce } from "./supplier-terms-store";
 import { groupKey } from "./product-groups";
+import { directoryKeys } from "./drug-directory-store";
 import { replayContracts, type Replay, type ReplayContract, type ReplayOffer, type ReplayProduct } from "./contract-replay";
 import { todayIso } from "./dates";
 
@@ -27,7 +28,7 @@ export async function replayNow(monthsBack = 12): Promise<ReplayView> {
 async function loadReplay(monthsBack: number): Promise<ReplayView> {
   const today = todayIso();
   const { nadacNow } = await import("./nadac-latest");
-  const [fills, nadac, items, suppliers] = await Promise.all([
+  const [fills, nadac, items, suppliers, directory] = await Promise.all([
     allFills(),
     // The newest row per NDC: a product key needs the description, the class and the unit, and
     // those do not change between files. Every row ever held was a million and a half.
@@ -38,6 +39,8 @@ async function loadReplay(monthsBack: number): Promise<ReplayView> {
     // notation, not price.
     catalogueRows(),
     allSuppliers(true),
+    // The FDA's answer to "which NDCs are one product", which the description cannot give reliably.
+    directoryKeys(),
   ]);
   const missing: string[] = [];
 
@@ -56,7 +59,11 @@ async function loadReplay(monthsBack: number): Promise<ReplayView> {
   for (const n of [...nadac].sort((a, b) => a.effectiveOn.localeCompare(b.effectiveOn))) {
     if (seen.has(n.ndc11)) continue;
     const cls = n.classification === "B" || n.classification === "G" ? n.classification : null;
-    seen.set(n.ndc11, { ndc11: n.ndc11, groupKey: groupKey({ ndc11: n.ndc11, description: n.description, classification: n.classification, pricingUnit: n.pricingUnit, otc: n.otc }), classification: cls });
+    seen.set(n.ndc11, {
+      ndc11: n.ndc11,
+      groupKey: groupKey({ ndc11: n.ndc11, equivalenceKey: directory.get(n.ndc11)?.key ?? null, description: n.description, classification: n.classification, pricingUnit: n.pricingUnit, otc: n.otc }),
+      classification: cls,
+    });
   }
   if (seen.size === 0) missing.push("No NADAC file is loaded, so no two NDCs can be told to be the same product.");
 

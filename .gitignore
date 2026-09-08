@@ -57,3 +57,6 @@ Thumbs.db
 # ── Generated ────────────────────────────────────────────────────────
 next-env.d.ts
 tsconfig.tsbuildinfo
+
+# This machine's own Claude Code permissions - never shared
+.claude/settings.local.json

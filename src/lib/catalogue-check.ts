@@ -308,3 +308,22 @@ export function quarantineWrongPrices<T extends ComparableRow>(rows: T[]): { row
     taken,
   };
 }
+
+/**
+ * A row that is a placeholder rather than a product, on any file that carries descriptions.
+ *
+ * Both CMS and the wholesalers reserve identifiers ahead of a product existing, and they park them
+ * on a row described "TBD DO NOT DELETE OR RELEASE". The description is an instruction to their own
+ * staff, not a drug. NADAC has refused them at import since 8 September, but the refusal was put on
+ * the NADAC path and the rows were never there: `nadac_prices` holds none and `supplier_items` held
+ * nine, every one McKesson, every one priced at $110.25 a unit against a pack of one, every one
+ * flagged "not rebated" and carrying no availability.
+ *
+ * That combination is what makes them worth refusing rather than tolerating. A $110.25 unit cost on
+ * a reserved NDC is a plausible-looking price on an item nobody can buy, it has no NADAC to
+ * contradict it, and "not rebated" is exactly the flag the buy list reads as a reason to source
+ * elsewhere. It is a recommendation with nothing behind it.
+ */
+export function isPlaceholderRow(description: string | null | undefined): boolean {
+  return /do not delete or release/i.test(description ?? "");
+}

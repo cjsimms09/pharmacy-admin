@@ -575,6 +575,27 @@
       "when": 1788806668029,
       "tag": "0081_payer_payments",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "6",
+      "when": 1788806728029,
+      "tag": "0082_placeholder_catalogue_rows",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "6",
+      "when": 1788806788029,
+      "tag": "0083_supplier_aliases_invoice_line_supplier",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "6",
+      "when": 1788806848029,
+      "tag": "0084_rebate_ratio_measure",
+      "breakpoints": true
     }
   ]
 }

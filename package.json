@@ -14,6 +14,7 @@
     "setup": "npm install && npm run db:migrate && tsx scripts/create-user.ts",
     "user:create": "tsx scripts/create-user.ts",
     "launch": "node scripts/launch.mjs",
+    "deploy": "node scripts/deploy.mjs",
     "test": "tsx --tsconfig tsconfig.test.json --test tests/*.test.ts",
     "check": "npm run typecheck && npm run test && npm run build",
     "claude": "node scripts/claude-here.mjs"

@@ -2,7 +2,7 @@ import "server-only";
 import { db } from "@/db";
 import { drugProfitReport, type DrugProfit, type ProfitSummary, type ClaimLeg, type Price, type Bench } from "./drug-profit";
 import { groupKey } from "./product-groups";
-import { groupResolver, directoryKeys } from "./drug-directory-store";
+import { directoryKeys } from "./drug-directory-store";
 import { planLookup, planScopeOf } from "./plans";
 import type { PlanClass } from "@/db/schema";
 import { SB20_EFFECTIVE_FROM, SB20_MIN_DISPENSING_FEE_CENTS } from "./reimbursement-rules";
@@ -106,7 +106,17 @@ async function loadDrugProfit(): Promise<DrugProfitView> {
   const groupByNdc = new Map<string, string | null>();
   const nadacByNdc = new Map<string, { micros: number; description: string | null }>();
   for (const r of nadac) {
-    if (!groupByNdc.has(r.ndc11)) groupByNdc.set(r.ndc11, groupKey({ ndc11: r.ndc11, description: r.description, classification: r.classification, pricingUnit: r.pricingUnit }));
+    if (!groupByNdc.has(r.ndc11))
+      groupByNdc.set(
+        r.ndc11,
+        groupKey({
+          ndc11: r.ndc11,
+          equivalenceKey: directory.get(r.ndc11)?.key ?? null,
+          description: r.description,
+          classification: r.classification,
+          pricingUnit: r.pricingUnit,
+        }),
+      );
     if (!nadacByNdc.has(r.ndc11)) nadacByNdc.set(r.ndc11, { micros: r.unitMicros, description: r.description });
   }
   const catalogueAwp = new Map<string, number>();
@@ -143,7 +153,28 @@ async function loadDrugProfit(): Promise<DrugProfitView> {
   const days = legs.map((l) => l.dateFilled).sort();
   const months = Math.max(0.25, (daysBetween(days[0], days[days.length - 1]) + 1) / 30.4);
   // The FDA directory's product first; NADAC's description where the directory does not carry the NDC.
-  const groupOf = await groupResolver((ndc) => groupByNdc.get(ndc) ?? null);
+  /*
+   * One grouping rule, not two.
+   *
+   * This used to read the directory through `groupResolver`, which returned a bare "fda:<key>" for
+   * every NDC the directory carried and the full `groupKey` string for the rest. The bare key drops
+   * the three things `groupKey` deliberately appends — NADAC's brand/generic classification, the
+   * pricing unit, and OTC — so a brand and its generic, which share an FDA equivalence key by
+   * definition, were one product here and two products everywhere else. On this database that was
+   * the rule in force for 96.9% of the NDCs dispensed. The key now comes from `groupKey` alone,
+   * with the directory's answer passed into it, so every screen groups the same way.
+   */
+  const groupOf = (ndc: string): string | null => {
+    const held = groupByNdc.get(ndc);
+    if (held !== undefined) return held;
+    // The loop above only visits NDCs NADAC prices. The directory carries 77.5% of the catalogue
+    // against NADAC's 57.3%, so an NDC can be perfectly well placed by the FDA and never appear
+    // there; without this it would fall out of every product group for want of a benchmark it does
+    // not need to be grouped. Classification and pricing unit are NADAC's to give and stay unknown.
+    const k = groupKey({ ndc11: ndc, equivalenceKey: directory.get(ndc)?.key ?? null, description: null, classification: null, pricingUnit: null });
+    groupByNdc.set(ndc, k);
+    return k;
+  };
   const grouping = { directory: 0, description: 0 };
   for (const ndc of new Set(legs.map((l) => l.ndc11))) {
     if (directory.has(ndc)) grouping.directory++;
