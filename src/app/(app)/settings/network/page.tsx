@@ -3,7 +3,7 @@ import { revalidatePath } from "next/cache";
 import { requireManager } from "@/lib/auth";
 import { lanAddresses } from "@/lib/network";
 import { audit } from "@/lib/audit";
-import { readAccess, writeAccess, clearAccess, isOpen, minutesLeft, expiryFor, MAX_HOURS } from "@/lib/public-access";
+import { readAccess, writeAccess, clearAccess, isOpen, timeLeft, expiryFor, MAX_HOURS } from "@/lib/public-access";
 import { PageHeader, BackLink, Notice, Card } from "@/components/ui";
 
 export const metadata = { title: "Use from another computer" };
@@ -75,8 +75,8 @@ export default async function NetworkPage({ searchParams }: { searchParams: Prom
           <>
             <p className="text-sm">
               <b>The site is open to the internet right now.</b> It closes on its own in{" "}
-              <b className="tabular-nums">{minutesLeft(access)} minutes</b>, and the computer coming up in the morning
-              always comes up private.
+              <b className="tabular-nums">{timeLeft(access)}</b> — on{" "}
+              <b>{access ? new Date(access.expiresAt).toLocaleString() : ""}</b> — whether or not anybody remembers.
             </p>
             <dl className="mt-3 grid gap-1 text-xs text-ink-2 sm:grid-cols-[7rem_1fr]">
               <dt className="font-medium text-ink">Address</dt>
@@ -85,6 +85,11 @@ export default async function NetworkPage({ searchParams }: { searchParams: Prom
               <dd>{access?.reason}</dd>
               <dt className="font-medium text-ink">Opened by</dt>
               <dd>{access?.requestedBy}</dd>
+              <dt className="font-medium text-ink">While it is open</dt>
+              <dd>
+                The pharmacist-in-charge is emailed once a day that it is still open, again if the address changes,
+                and straight away if somebody starts trying passwords against it.
+              </dd>
             </dl>
             <form action={closeDown} className="mt-3">
               <button className="btn btn-danger">Close it now</button>
@@ -95,9 +100,10 @@ export default async function NetworkPage({ searchParams }: { searchParams: Prom
             <p className="text-sm text-ink-2">
               This puts the pharmacy&rsquo;s <b>real records</b> — every contract, every claim, the prescription
               numbers and the registration numbers — behind nothing but the login, reachable by anyone who has the
-              address. That is sometimes the right trade for an afternoon and it is never the right one to forget
-              about, so it is capped at {MAX_HOURS} hours, it ends by itself, and it does not come back after a
-              restart. While it is open every page in the site says so.
+              address. That is sometimes the right trade and it is never the right one to forget about, so every run
+              ends by itself on a date you pick, {MAX_HOURS / 24} days at the very most. While it is open every page
+              in the site says so, and the pharmacist-in-charge is emailed once a day that it is still open, again if
+              the address changes, and straight away if somebody starts guessing at the login.
             </p>
             <p className="mt-2 text-xs text-ink-3">
               Needs <code>cloudflared</code> on this computer. Nothing is installed for you: a program whose job is to
@@ -110,11 +116,13 @@ export default async function NetworkPage({ searchParams }: { searchParams: Prom
               </label>
               <label>
                 <span className="label">For how long?</span>
-                <select name="hours" className="field" defaultValue="2">
-                  <option value="1">1 hour</option>
+                <select name="hours" className="field" defaultValue="336">
                   <option value="2">2 hours</option>
-                  <option value="4">4 hours</option>
                   <option value="8">8 hours</option>
+                  <option value="24">1 day</option>
+                  <option value="168">1 week</option>
+                  <option value="336">2 weeks</option>
+                  <option value="504">3 weeks — the most allowed</option>
                 </select>
               </label>
               <button className="btn btn-danger">Open it</button>

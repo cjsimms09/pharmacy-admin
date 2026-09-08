@@ -1,4 +1,4 @@
-import { readAccess, isOpen, minutesLeft, clearAccess } from "@/lib/public-access";
+import { readAccess, isOpen, timeLeft, clearAccess } from "@/lib/public-access";
 import { requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { revalidatePath } from "next/cache";
@@ -12,14 +12,14 @@ import { redirect } from "next/navigation";
  * once thinking about it. The exposure is deliberate and brief and that is fine; what is not fine
  * is it being invisible.
  *
- * So it is loud, it is on every page, it carries the minutes remaining rather than a vague
+ * So it is loud, it is on every page, it carries the time remaining rather than a vague
  * reassurance, and stopping it is one press from wherever you happen to be standing — because the
  * moment you want it off is never the moment you want to go and find the setting.
  */
 export async function PublicAccessBanner() {
   const access = readAccess();
   if (!isOpen(access)) return null;
-  const left = minutesLeft(access);
+  const left = timeLeft(access);
 
   async function stop() {
     "use server";
@@ -42,9 +42,7 @@ export async function PublicAccessBanner() {
         <span className="font-semibold uppercase tracking-wide">Open to the internet</span>
         <span className="opacity-90">
           Anyone with the address can reach this pharmacy&rsquo;s real records. Closes on its own in{" "}
-          <b className="tabular-nums">
-            {left} minute{left === 1 ? "" : "s"}
-          </b>
+          <b className="tabular-nums">{left}</b>
           {access?.reason ? ` — opened for: ${access.reason}` : ""}.
         </span>
         {access?.url ? <code className="rounded bg-white/15 px-1.5 py-0.5">{access.url}</code> : null}

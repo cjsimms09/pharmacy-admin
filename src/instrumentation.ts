@@ -197,7 +197,24 @@ export async function register() {
     }
   };
 
+  /**
+   * While the site is open to the internet, says so — and says when somebody is guessing at it.
+   *
+   * Deliberately not behind whenIdle. Every other job here waits for a gap because it is heavy and
+   * nothing bad happens if it waits an hour; this one sends a short email and the thing it reports
+   * is somebody attacking the login. A busy site is exactly when that must not be postponed.
+   */
+  const publicAccessTick = async () => {
+    try {
+      const { publicAccessNotices } = await import("./lib/public-access-notice");
+      await publicAccessNotices();
+    } catch {
+      // A notice that cannot be sent must never stop the site. The red stripe is on every page regardless.
+    }
+  };
+
   const runAll = async () => {
+    await publicAccessTick();
     await whenIdle("warm", warmTick);
     await whenIdle("mail", tick);
     await whenIdle("backup", backupTick);

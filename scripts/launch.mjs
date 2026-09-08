@@ -588,10 +588,34 @@ async function main() {
      */
     let closing = null;
     if (tunnel && access) {
+      /*
+       * A quick tunnel does not last a fortnight, and when it comes back it is not the same address.
+       *
+       * Cloudflare hands out these addresses freely and takes them back the same way: the process is
+       * dropped on their side, on a network blip, on a laptop lid. That matters more than it sounds,
+       * because the address is baked into the running app — it is what Next checks a button press
+       * against — so a tunnel that reconnects on a new address leaves a site that loads perfectly
+       * and whose every button silently fails. Over an afternoon nobody would meet this. Over two
+       * weeks it is a certainty.
+       *
+       * So the tunnel dying is treated as the app needing to restart, not as the exposure ending.
+       * The loop above brings both back together, on whatever address the new tunnel is given, and
+       * writes it where the page can show it.
+       */
+      let replacing = false;
+      tunnel.on("exit", () => {
+        if (replacing) return;
+        if (!accessOpen(readAccess())) return; // It is simply over; the interval below is closing up.
+        replacing = true;
+        log("The tunnel dropped. Restarting so it can come back up on a new address.");
+        try { child.kill(); } catch { /* it is on its way out anyway */ }
+      });
+
       closing = setInterval(() => {
         const still = readAccess();
         if (accessOpen(still) && still?.expiresAt === access.expiresAt) return;
         log("Public access has ended. Closing the tunnel and restarting privately.");
+        replacing = true; // Not a drop to recover from — this is the end of the run.
         try { tunnel.kill(); } catch { /* already gone */ }
         try { fs.rmSync(accessFile, { force: true }); } catch { /* the expiry has already closed it */ }
         try { child.kill(); } catch { /* it is on its way out anyway */ }
