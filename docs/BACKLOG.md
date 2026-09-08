@@ -547,6 +547,20 @@ a HANDOFF paragraph: claims matched, by which route (network id, BIN, chain code
 unmatched grouped by BIN/PCN with the fills and dollars behind each, and for every unmatched group
 the one thing that would close it — a document not yet in the folder, a link the owner can make,
 a plan class. Waits on the read finishing, which waits on the Settings → Claude ceiling.
+### 20. Returns: the site has to tell the owner before a credit drops, and today it cannot (8 September)
+
+The owner's question: "is our system setup to make sure I am returning things when I need to? if
+we still have a bottle ordered from them we need to send it back before credit dips." Measured 8
+September: the arithmetic exists (`returns-due.ts`: credit now, the day it drops and to what, the
+day the window shuts, per invoice line against the supplier's own steps; surfaced on What to send
+back, the shelf's surplus list and Money found on Today), **and it has one invoice to work on** —
+IPC, 4 September, 8 lines. No ANDA, IPD, ParMed or McKesson invoice has ever been loaded, so no
+bottle from them can be timed; and IPD and ParMed have no returns policy on file. Nothing pushes
+a warning either: it waits on the page. Three pieces: (1) invoices from every wholesaler have to
+arrive — each one's invoice email to the mailbox, a fixture per shape, 2's pipeline; (2) IPD's and
+ParMed's policies, pasted by the owner as ANDA's was; (3) a warning that reaches him — a line in
+the daily digest and on Today whenever a credit step drops within 7 days or a window shuts within
+14, naming the bottle, the supplier and the dollars.
 ## The data the site has to ingest
 
 Named by the owner on 7 September as what is still being connected. Each one needs a reader, a
