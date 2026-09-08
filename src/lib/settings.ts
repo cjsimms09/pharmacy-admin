@@ -270,6 +270,9 @@ export const SETTING_KEYS = [
   // The weekly note to the PIC. Everything this site knows was otherwise only knowable by
   // opening it, which is the wrong way round for a licence that expires.
   "digest_last_sent",
+  // While the site is reachable from outside: the address last announced, and when an attack was last reported.
+  "public_access_last_url",
+  "public_access_attack_told",
   "digest_last_result",
   "digest_enabled",
   // Which version of the site-maintained appendix is in the filed policy manual, so drift between

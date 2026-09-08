@@ -12,6 +12,24 @@ const securityHeaders = [
   },
 ];
 
+/*
+ * The address the site is answering on when it has been deliberately opened to the outside.
+ *
+ * Read from the environment rather than the record on disk because the launcher knows the tunnel's
+ * address before this process starts, and a config file is read once at boot. Empty in every
+ * ordinary run, which is the point: nothing about the private case changes.
+ */
+const publicOrigin = process.env.PUBLIC_ORIGIN ?? "";
+const publicHosts = (() => {
+  if (!publicOrigin) return [] as string[];
+  try {
+    const u = new URL(publicOrigin);
+    return u.port ? [u.host, u.hostname] : [u.host];
+  } catch {
+    return [] as string[];
+  }
+})();
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
@@ -32,7 +50,17 @@ const nextConfig: NextConfig = {
   typescript: { ignoreBuildErrors: true },
   serverExternalPackages: ["@libsql/client", "imapflow", "mailparser"],
   experimental: {
-    serverActions: { bodySizeLimit: "25mb" },
+    /*
+     * Server actions are refused when the browser's Origin does not match the host the app thinks
+     * it is serving, and a tunnel makes those two different things: the browser says the tunnel's
+     * address, the app behind it sees localhost. Without naming the tunnel here every page renders
+     * perfectly and every button does nothing at all — the exact shape of fault that has already
+     * cost this pharmacy two days, so it is settled rather than discovered.
+     *
+     * Only ever the one address currently being tunnelled to, and only while it is. Nothing is
+     * broadened for the ordinary case.
+     */
+    serverActions: { bodySizeLimit: "25mb", ...(publicHosts.length ? { allowedOrigins: publicHosts } : {}) },
     /*
      * Build in this process rather than in a worker of its own.
      *

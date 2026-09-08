@@ -173,6 +173,75 @@ function startProblemServer() {
   };
 }
 
+/* ── Reaching the site from outside the pharmacy, deliberately and briefly ── */
+
+const accessFile = path.join(root, "data", "public-access.json");
+
+/** What was asked for, or null. An unreadable record means not exposed; there is no benefit of the doubt. */
+function readAccess() {
+  try {
+    const a = JSON.parse(fs.readFileSync(accessFile, "utf8"));
+    return a && typeof a.expiresAt === "string" ? a : null;
+  } catch {
+    return null;
+  }
+}
+
+function accessOpen(a) {
+  if (!a) return false;
+  const ends = Date.parse(a.expiresAt);
+  return Number.isFinite(ends) && ends > Date.now();
+}
+
+/**
+ * Where cloudflared is, or null if it is not on this computer.
+ *
+ * Not installed for the pharmacy automatically and not downloaded behind their back: a program that
+ * opens a machine to the internet is one somebody should have put there on purpose.
+ */
+function cloudflaredPath() {
+  const candidates = [
+    path.join(root, "bin", isWin ? "cloudflared.exe" : "cloudflared"),
+    isWin ? "C:\\Program Files (x86)\\cloudflared\\cloudflared.exe" : "/usr/local/bin/cloudflared",
+    isWin ? "C:\\Program Files\\cloudflared\\cloudflared.exe" : "/usr/bin/cloudflared",
+  ];
+  for (const c of candidates) if (fs.existsSync(c)) return c;
+  const which = spawnSync(isWin ? "where" : "which", ["cloudflared"], { encoding: "utf8", shell: isWin });
+  const found = (which.stdout || "").split(/\r?\n/)[0].trim();
+  return found && fs.existsSync(found) ? found : null;
+}
+
+/**
+ * Opens the tunnel and waits for it to say what address it got.
+ *
+ * The address is random and only exists once the tunnel is up, which is why this has to happen
+ * before the app starts rather than after: the app has to be told the address it is answering on,
+ * or every button on every page fails the origin check silently.
+ */
+function startTunnel(bin) {
+  return new Promise((resolve) => {
+    const child = spawn(bin, ["tunnel", "--no-autoupdate", "--url", `http://localhost:${PORT}`], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let settled = false;
+    const finish = (url) => {
+      if (settled) return;
+      settled = true;
+      resolve({ child, url });
+    };
+    const look = (chunk) => {
+      const m = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/i.exec(chunk.toString());
+      if (m) finish(m[0]);
+    };
+    child.stdout.on("data", look);
+    child.stderr.on("data", look);
+    child.on("error", () => finish(null));
+    child.on("exit", () => finish(null));
+    // It normally answers in seconds. If it has not by now, it is not going to.
+    setTimeout(() => finish(null), 60_000);
+  });
+}
+
 function ensureEnv() {
   const envPath = path.join(root, ".env");
   if (fs.existsSync(envPath)) {
@@ -461,11 +530,125 @@ async function main() {
     }
     if (!fs.existsSync(buildId)) await buildUntilItWorks("There is no built site — the last build did not finish.");
     await clearProblem();
+
+    /*
+     * If somebody has asked for the site to be reachable from outside, the tunnel comes up first.
+     *
+     * First, because the app has to be told the address before it starts: Next refuses a server
+     * action whose Origin does not match the host it believes it is serving, and a tunnel makes
+     * those two different things. Told afterwards, every page would render and every button would
+     * quietly fail.
+     *
+     * A record whose time has passed is not a request. Nothing here reopens on its own after a
+     * restart either — a computer switched on in the morning comes up private, which is the
+     * behaviour somebody would want if they had thought about it the night before and did not.
+     */
+    let access = readAccess();
+    let tunnel = null;
+    if (accessOpen(access)) {
+      /*
+       * However this turns out, the answer is written where the pharmacist can see it.
+       *
+       * Both failures below used to log to this console window — which is hidden by design — and
+       * leave the record on disk saying nothing at all. The page then showed "still coming up"
+       * forever, waiting for an address that was never coming, while the banner claimed the site
+       * was open to the internet when it was not. A failure nobody can see is the same as no
+       * failure handling.
+       */
+      const record = (patch) => {
+        access = { ...access, ...patch };
+        try { fs.writeFileSync(accessFile, JSON.stringify(access, null, 2)); } catch { /* the page reads it; the run is unaffected */ }
+      };
+
+      const bin = cloudflaredPath();
+      if (!bin) {
+        log("Public access was asked for, but cloudflared is not installed on this computer. Starting privately.");
+        record({
+          status: "failed",
+          url: null,
+          problem:
+            "cloudflared is not installed on this computer, so there is nothing to make the outside address with. " +
+            "Install it in PowerShell with:  winget install --id Cloudflare.cloudflared  — then close the app and start it again.",
+        });
+        access = null;
+      } else {
+        step(`Opening the site to the outside until ${new Date(access.expiresAt).toLocaleTimeString()}\u2026`);
+        const t = await startTunnel(bin);
+        if (!t.url) {
+          try { t.child?.kill(); } catch { /* it may already be gone */ }
+          log("The tunnel did not come up. Starting privately, which is the safe way to fail.");
+          record({
+            status: "failed",
+            url: null,
+            problem:
+              "cloudflared is installed but did not produce an address within a minute. That is usually the pharmacy's " +
+              "network blocking it, or Cloudflare being busy. Close the app and start it again to try once more.",
+          });
+          access = null;
+        } else {
+          tunnel = t.child;
+          record({ status: "open", url: t.url, problem: null });
+          log(`The site is reachable at ${t.url} until ${new Date(access.expiresAt).toLocaleTimeString()}.`);
+        }
+      }
+    }
+
     log(`Starting on http://localhost:${PORT}`);
     const child = spawn(process.execPath, [path.join(root, "node_modules", "next", "dist", "bin", "next"), "start", "-p", PORT, "-H", "0.0.0.0"], {
       stdio: "inherit",
-      env: { ...process.env, PHARMACY_LAUNCHER: "1", PORT },
+      env: {
+        ...process.env,
+        PHARMACY_LAUNCHER: "1",
+        PORT,
+        // Both only ever set while a tunnel is actually up, and gone the moment it is not.
+        ...(tunnel && access?.url ? { PUBLIC_ORIGIN: access.url, COOKIE_SECURE: "1" } : {}),
+      },
     });
+
+    /*
+     * The clock that closes it, which is the whole safety of this feature.
+     *
+     * Exposure that depends on somebody remembering to end it is exposure that lasts until the
+     * next person notices, and nobody notices a website that is working. So the launcher watches
+     * the expiry itself and takes the site down and back up privately when it passes — and does
+     * the same the moment the record is deleted, which is how the stop button works.
+     */
+    let closing = null;
+    if (tunnel && access) {
+      /*
+       * A quick tunnel does not last a fortnight, and when it comes back it is not the same address.
+       *
+       * Cloudflare hands out these addresses freely and takes them back the same way: the process is
+       * dropped on their side, on a network blip, on a laptop lid. That matters more than it sounds,
+       * because the address is baked into the running app — it is what Next checks a button press
+       * against — so a tunnel that reconnects on a new address leaves a site that loads perfectly
+       * and whose every button silently fails. Over an afternoon nobody would meet this. Over two
+       * weeks it is a certainty.
+       *
+       * So the tunnel dying is treated as the app needing to restart, not as the exposure ending.
+       * The loop above brings both back together, on whatever address the new tunnel is given, and
+       * writes it where the page can show it.
+       */
+      let replacing = false;
+      tunnel.on("exit", () => {
+        if (replacing) return;
+        if (!accessOpen(readAccess())) return; // It is simply over; the interval below is closing up.
+        replacing = true;
+        log("The tunnel dropped. Restarting so it can come back up on a new address.");
+        try { child.kill(); } catch { /* it is on its way out anyway */ }
+      });
+
+      closing = setInterval(() => {
+        const still = readAccess();
+        if (accessOpen(still) && still?.expiresAt === access.expiresAt) return;
+        log("Public access has ended. Closing the tunnel and restarting privately.");
+        replacing = true; // Not a drop to recover from — this is the end of the run.
+        try { tunnel.kill(); } catch { /* already gone */ }
+        try { fs.rmSync(accessFile, { force: true }); } catch { /* the expiry has already closed it */ }
+        try { child.kill(); } catch { /* it is on its way out anyway */ }
+      }, 15_000);
+      closing.unref?.();
+    }
     if (first) {
       first = false;
       waitForServer().then((ok) => ok && (process.env.NO_BROWSER ? null : openBrowser()));
@@ -475,6 +658,12 @@ async function main() {
       if (ok) consecutiveFailures = 0;
     });
     const code = await new Promise((resolve) => child.on("exit", resolve));
+    // A tunnel must never outlive the app it points at: that is a door onto a machine with nothing
+    // behind it, and the next thing to bind the port inherits the address.
+    if (closing) clearInterval(closing);
+    if (tunnel) {
+      try { tunnel.kill(); } catch { /* already gone */ }
+    }
     if (code === UPDATE_EXIT_CODE || fs.existsSync(flagFile)) {
       const status = startStatusServer();
       try {

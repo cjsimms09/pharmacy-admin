@@ -1,14 +1,59 @@
+import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 import { requireManager } from "@/lib/auth";
 import { lanAddresses } from "@/lib/network";
-import { PageHeader, BackLink, Notice } from "@/components/ui";
+import { audit } from "@/lib/audit";
+import { readAccess, writeAccess, clearAccess, isOpen, isReachable, timeLeft, expiryFor, MAX_HOURS } from "@/lib/public-access";
+import { PageHeader, BackLink, Notice, Card } from "@/components/ui";
 
 export const metadata = { title: "Use from another computer" };
 export const dynamic = "force-dynamic";
 
-export default async function NetworkPage() {
-  await requireManager();
+export default async function NetworkPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
+  const me = await requireManager();
   const addresses = lanAddresses();
   const best = addresses[0];
+  const notice = await searchParams;
+  const access = readAccess();
+  const open = isOpen(access);
+  const live = isReachable(access);
+
+  /*
+   * Opening the pharmacy to the internet, for a stated reason and a stated length of time.
+   *
+   * The reason is required rather than polite. A record that says only "opened at 14:12" answers
+   * nothing six weeks later when somebody asks why the pharmacy's records were reachable from
+   * outside that afternoon; one that says "so Claude can see the ordering screens" answers it
+   * completely. It goes in the audit log and on the banner.
+   */
+  async function openUp(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const reason = String(fd.get("reason") ?? "").trim();
+    const hours = Number(fd.get("hours")) || 1;
+    if (reason.length < 4) {
+      redirect("/settings/network?error=" + encodeURIComponent("Say what it is being opened for. It goes in the record."));
+    }
+    const record = { url: null, status: "requested" as const, problem: null, requestedAt: new Date().toISOString(), expiresAt: expiryFor(hours), requestedBy: u.name, reason };
+    writeAccess(record);
+    await audit({ action: "public_access.opened", userId: u.id, userName: u.name, details: `${reason} — until ${record.expiresAt}` });
+    revalidatePath("/", "layout");
+    redirect(
+      "/settings/network?ok=" +
+        encodeURIComponent(
+          "Asked for. Close the app and start it again — the tunnel has to come up before the site does, or every button on every page would stop working. The address appears here once it is up.",
+        ),
+    );
+  }
+
+  async function closeDown() {
+    "use server";
+    const u = await requireManager();
+    clearAccess();
+    await audit({ action: "public_access.stopped", userId: u.id, userName: u.name });
+    revalidatePath("/", "layout");
+    redirect("/settings/network?ok=" + encodeURIComponent("Closing the tunnel. The site restarts on its own within a few seconds and comes back private."));
+  }
 
   return (
     <>
@@ -17,6 +62,99 @@ export default async function NetworkPage() {
         title="Use from another computer"
         subtitle="Any computer on the pharmacy's own network can open this app. Nothing is exposed to the internet — the address below only works inside the pharmacy."
       />
+
+      {notice.ok ? <Notice kind="ok">{notice.ok}</Notice> : null}
+      {notice.error ? <Notice kind="crit">{notice.error}</Notice> : null}
+
+      <Card
+        className="mb-6"
+        tone={open ? "crit" : undefined}
+        title="Reach it from outside the pharmacy"
+        subtitle="A temporary address on the internet, for working with somebody who is not in the building."
+      >
+        {open ? (
+          <>
+            {!live ? (
+              <Notice kind={access?.status === "failed" ? "crit" : "warn"}>
+                {access?.status === "failed" ? (
+                  <>
+                    <b>The outside address could not be made, so nothing is exposed.</b> {access.problem}
+                  </>
+                ) : (
+                  <>
+                    <b>Asked for, but not started yet.</b> The tunnel comes up when the site starts, so close the app
+                    and start it again. Until then nothing is reachable from outside and this page will keep saying so
+                    rather than showing an address.
+                  </>
+                )}
+              </Notice>
+            ) : null}
+            <p className="text-sm">
+              <b>{live ? "The site is open to the internet right now." : "This is asked for but not running."}</b> It{" "}
+              {live ? "closes" : "would close"} on its own in{" "}
+              <b className="tabular-nums">{timeLeft(access)}</b> — on{" "}
+              <b>{access ? new Date(access.expiresAt).toLocaleString() : ""}</b> — whether or not anybody remembers.
+            </p>
+            <dl className="mt-3 grid gap-1 text-xs text-ink-2 sm:grid-cols-[7rem_1fr]">
+              <dt className="font-medium text-ink">Address</dt>
+              <dd>
+                {access?.url ? (
+                  <code className="rounded bg-ground px-1.5 py-0.5 select-all">{access.url}</code>
+                ) : (
+                  <span className="text-ink-3">
+                    {access?.status === "failed" ? "none — it could not be made" : "none yet — it appears here once the site has been restarted"}
+                  </span>
+                )}
+              </dd>
+              <dt className="font-medium text-ink">Opened for</dt>
+              <dd>{access?.reason}</dd>
+              <dt className="font-medium text-ink">Opened by</dt>
+              <dd>{access?.requestedBy}</dd>
+              <dt className="font-medium text-ink">While it is open</dt>
+              <dd>
+                The pharmacist-in-charge is emailed once a day that it is still open, again if the address changes,
+                and straight away if somebody starts trying passwords against it.
+              </dd>
+            </dl>
+            <form action={closeDown} className="mt-3">
+              <button className="btn btn-danger">{live ? "Close it now" : "Cancel it"}</button>
+            </form>
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-ink-2">
+              This puts the pharmacy&rsquo;s <b>real records</b> — every contract, every claim, the prescription
+              numbers and the registration numbers — behind nothing but the login, reachable by anyone who has the
+              address. That is sometimes the right trade and it is never the right one to forget about, so every run
+              ends by itself on a date you pick, {MAX_HOURS / 24} days at the very most. While it is open every page
+              in the site says so, and the pharmacist-in-charge is emailed once a day that it is still open, again if
+              the address changes, and straight away if somebody starts guessing at the login.
+            </p>
+            <p className="mt-2 text-xs text-ink-3">
+              Needs <code>cloudflared</code> on this computer. Nothing is installed for you: a program whose job is to
+              open this machine to the internet is one somebody should have put there deliberately.
+            </p>
+            <form action={openUp} className="mt-3 flex flex-wrap items-end gap-3">
+              <label className="grow">
+                <span className="label">What is it being opened for?</span>
+                <input name="reason" className="field" required minLength={4} placeholder="e.g. working through the ordering screens with Claude" />
+              </label>
+              <label>
+                <span className="label">For how long?</span>
+                <select name="hours" className="field" defaultValue="336">
+                  <option value="2">2 hours</option>
+                  <option value="8">8 hours</option>
+                  <option value="24">1 day</option>
+                  <option value="168">1 week</option>
+                  <option value="336">2 weeks</option>
+                  <option value="504">3 weeks — the most allowed</option>
+                </select>
+              </label>
+              <button className="btn btn-danger">Open it</button>
+            </form>
+          </>
+        )}
+      </Card>
 
       {!best ? (
         <Notice kind="crit">
