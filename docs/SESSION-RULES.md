@@ -13,7 +13,9 @@ breaking it has already cost this project a day or a wrong number on a screen.
 ## 1. What you may never do
 
 - **Never push to `feature/compliance`.** That is the branch the pharmacy's site actually runs
-  from. Work on your own branch and open a pull request against it. The lead merges.
+  from. Work on your own branch and open a pull request against it. The lead merges, and the lead
+  alone deploys — `npm run deploy` on the pharmacy computer pushes the branch and has the launcher
+  rebuild and restart the site (`scripts/deploy.mjs` says how, and what it refuses to do).
 - **Never commit data.** No PioneerRx reports, invoices, remittances, statements, contracts,
   credentials, database files, or anything with a patient in it. A feed's *shape* goes in
   `fixtures/` with every identifier changed. If you are unsure whether a file is data, it is data.
