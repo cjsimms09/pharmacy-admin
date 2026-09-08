@@ -589,6 +589,13 @@
       "when": 1788806788029,
       "tag": "0083_supplier_aliases_invoice_line_supplier",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "6",
+      "when": 1788806848029,
+      "tag": "0084_rebate_ratio_measure",
+      "breakpoints": true
     }
   ]
 }

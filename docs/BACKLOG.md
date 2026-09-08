@@ -39,9 +39,13 @@ every drug it carries:
   money directly: `reimbursement-fit.ts` takes a median MAC per product key to decide a payer's
   formula, and `product-groups.ts` feeds `drug-profit.ts`'s choice of the most profitable NDC in a
   product. Both are averaging across fragments of one product. **In progress.**
-- **Price from each supplier, including rebates.** Partly there — `supplier_items` carries the
-  price and `contract_flag`, and the buy list nets the rebate through `bestBuy`. Needs proving
-  against the real database rather than assumed: HANDOFF item 2.
+- **Price from each supplier, including rebates.** Proven wrong and fixed 7 September: no rebate
+  rate was in force for any supplier because McKesson's three ladders never said which ratio drives
+  them, so 7,165 contract generics were compared at printed price — about 30% too high. Migration
+  `0084`; McKesson now 29% off contract items. Still to do: the GPR 1% off every generic (A), and
+  **the owner's actions** — forward McKesson invoices to the inbox and give the register McKesson's
+  invoice sender address, because there is not one McKesson invoice in the system and the rebate
+  earned-so-far figures run on invoices.
 - **NADAC of each drug.** Answered 7 September and sound: 26,246 of 45,791 catalogue NDCs, and 652
   of the 681 NDCs actually dispensed, 650 of those current within three months. The misses are CMS
   genuinely not pricing hospital injectables, devices, supplies and repackager labels — not a
@@ -66,9 +70,13 @@ four links, and it is only as good as its weakest:
    (`/payers/sort`), `proposeFromContract` with `governs` and `quoteFound` so a document that is
    not ours, or a rate whose quote is not in the text, is refused rather than applied.
 2. **Match a claim to the contract that governs it.** Partly built — `claim-contract.ts`,
-   `payer_links`, `plan_groups`, BIN/PCN/group. **Not yet measured: what fraction of real claims
-   land on a contract, and what the unmatched ones have in common.** That number is the first thing
-   to get, because every figure downstream is only defined on the matched share.
+   `payer_links`, `plan_groups`, BIN/PCN/group. **Measured 7 September: 0 of 1,081 insured claims
+   match a contract.** Only 2 of 357 contract documents have been read, and the matcher looks for
+   BIN/PCN/group while rate exhibits identify themselves by network name and chain code; claims
+   carry PioneerRx's network id (82 distinct values). Two jobs follow: read the library (re-run the
+   2 stale failures, triage the 249 never triaged, queue by dollars of claims behind each payer),
+   and teach the matcher the network id → network name mapping that `payer_links.contract_id` was
+   made for. Full numbers in `docs/HANDOFF.md`.
 3. **Name the formula that priced the claim.** Two readers exist and they should agree:
    `reimbursement-fit.ts` infers the formula from what was actually paid, and the contract reader
    takes it from the document. Where the export carries the PBM's 522-FM basis code
@@ -188,6 +196,14 @@ place, and an arithmetic check before anything is stored.
 
 ## Done
 
+- **McKesson's rebate reaches prices (7 September, deployed as `e471895`).** All three ladders were
+  stored without the ratio that drives them, so no band was ever chosen and 7,165 contract generics
+  were compared at printed price. Migration `0084`; verified live at 29% off contract items and
+  0.75% off brand. HANDOFF item 2, the six buying-logic fixes, measured in the same pass.
+- **Invoice lines belong to the supplier the invoice named (session 2, merged in `29f953b`).**
+  `invoice_lines.supplier_id` carried from the invoice, `suppliers.aliases` typed by the pharmacy,
+  equality matching only, unplaced lines counted and named on every supplier card. IPC's two
+  invoice spellings typed as aliases.
 - **The site deploys itself from the pharmacy computer (7 September, 9:34 PM).** `npm run deploy`
   pushes `feature/compliance` and has the launcher rebuild, migrate and restart, and waits until
   the app answers on the new build. "Let Claude run the site.cmd" was run once: the machine-local
