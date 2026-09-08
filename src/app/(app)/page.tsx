@@ -5,7 +5,8 @@ import { complianceSummary, type OpenItem } from "@/lib/compliance-status";
 import { staffMatrix } from "@/lib/staff-matrix";
 import { StaffBoard } from "@/components/staff-board";
 import { invoiceIssues } from "@/lib/invoices";
-import { alerts, SOON_DAYS } from "@/lib/alerts";
+import { alerts, SOON_DAYS, type Alert } from "@/lib/alerts";
+import { returnWarningNow, WARN_CREDIT_DAYS } from "@/lib/return-soon";
 import { automationStatus, type JobStatus } from "@/lib/automation-status";
 import { feedsNow } from "@/lib/feeds";
 import { openFindings } from "@/lib/self-inspection";
@@ -90,7 +91,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const { ok, error } = await searchParams;
   // The signer's own name, to fill in the attestation form without asking them to remember it.
   const user = await requireUser();
-  const [compliance, dated, matrix, cqi, cs, jobs, selfFindings, settings, mail, updates, invoiceProblems, alertList, money, found, books, clocks] =
+  const [compliance, dated, matrix, cqi, cs, jobs, selfFindings, settings, mail, updates, invoiceProblems, alertList, money, found, books, clocks, returns] =
     await Promise.all([
     complianceSummary(),
     dueList({ horizonDays: 60 }),
@@ -114,6 +115,19 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     booksFor(parsePeriod(todayIso().slice(0, 7))!).catch(() => null),
     // Contract deadlines with a date on them, so a renewal window is on the same list as a licence.
     contractClocksDue(90).catch(() => [] as Awaited<ReturnType<typeof contractClocksDue>>),
+    /*
+     * Stock whose credit is about to drop, which is the only money on this page that expires.
+     *
+     * Everything else in the scoreboard is a measurement of how the month is going and is as true
+     * tomorrow as today. This is the one figure that stops being available: on the day the
+     * supplier's policy says, the credit steps down or the window shuts, and what was refundable
+     * money becomes stock. That makes it an alert rather than a figure.
+     *
+     * Caught, because the shelf is the heaviest read on the page and this screen has to render
+     * even when it fails. A missing warning is a page without one row; a thrown error is a
+     * pharmacist-in-charge who cannot see whether a licence has lapsed.
+     */
+    returnWarningNow().catch(() => null),
   ]);
 
   /*
@@ -634,8 +648,45 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       </div>
 
       {(() => {
-        const now = alertList.filter((a) => a.level === "now");
-        const soon = alertList.filter((a) => a.level === "soon");
+        /*
+          One row, on the list everything else that needs doing is on.
+
+          Not a figure in the scoreboard above, because a figure is a measurement and this is a
+          deadline — and not a page of its own on this screen, because the pharmacist reads this
+          list from the doorway and a fourth place to look is a place nobody looks. It says the
+          same four things the Return soon page says, in the same words: the bottle, who sold it,
+          the dollars, and the day the credit changes.
+
+          "Now" only when something changes inside a week, which is about how long a return
+          authorisation, a box and a carrier take. Anything further out sits in the folded list
+          with the renewals, which is exactly what it is.
+
+          Nothing here is judged by whether a drug is moving. Only a date a supplier's own returns
+          policy put on it reaches this row — `warnableReturns` in return-soon.ts is the guard, and
+          the reason is that a fortnight of claims makes a monthly drug look dead. A screen may
+          show that with the caveat printed beside it. A red row on the doorway screen may not.
+        */
+        const returnAlert: Alert[] =
+          returns === null
+            ? []
+            : [
+                {
+                  key: "returns-on-a-clock",
+                  level: returns.soonestDays <= WARN_CREDIT_DAYS ? "now" : "soon",
+                  title:
+                    returns.atRiskCents > 0
+                      ? `${formatCents(returns.atRiskCents)} of return credit goes in ${returns.soonestDays} day${returns.soonestDays === 1 ? "" : "s"}`
+                      : `${formatCents(returns.sendBackWorthCents)} of stock is on a return clock`,
+                  why:
+                    returns.lines.length === 1
+                      ? returns.lines[0].says
+                      : `${returns.lines[0].says} And ${returns.lines.length - 1} more on a supplier's clock, ${formatCents(returns.sendBackWorthCents)} in all.`,
+                  href: "/purchasing/return-soon",
+                  action: "Send it back",
+                },
+              ];
+        const now = [...alertList, ...returnAlert].filter((a) => a.level === "now");
+        const soon = [...alertList, ...returnAlert].filter((a) => a.level === "soon");
         if (now.length === 0 && soon.length === 0) {
           return (
             <Card tone="ok" title="Nothing needs you today" className="mb-6">
