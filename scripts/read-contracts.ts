@@ -32,7 +32,11 @@ import { eq } from "drizzle-orm";
 import { adoptUnattached, contractLibrary, applyAllReads } from "../src/lib/contract-docs";
 import { indexContracts, contractIndexState } from "../src/lib/contract-search";
 import { queueExtraction, collectExtraction, recoverFailures, queueTriage, collectTriage } from "../src/lib/contract-extract";
-import { shouldRead } from "../src/lib/contract-triage";
+import { shouldRead, type TriageKind } from "../src/lib/contract-triage";
+
+/** The column is text; the sort's answer is one of six words. Anything else reads as "not sorted". */
+const TRIAGE_KINDS = new Set<string>(["contract", "rate_sheet", "notice", "manual", "not_relevant", "unsure"]);
+const triageOf = (raw: string | null): TriageKind | null => (raw && TRIAGE_KINDS.has(raw) ? (raw as TriageKind) : null);
 import { estimateCost } from "../src/lib/contract-run";
 import { monthlyCap, rates as priceRates } from "../src/lib/ai-spend";
 import { getSettings } from "../src/lib/settings";
@@ -151,7 +155,7 @@ async function read(scans: boolean, retry: boolean) {
      * `retry`, after somebody has read the reason.
      */
     const docs = (await db.query.contractDocs.findMany()).filter(
-      (d) => d.fileName && (d.extractionState === "none" || d.extractionState === null || (retry && d.extractionState === "failed")) && shouldRead(d.triage) && (d.pages ?? 0) <= 300,
+      (d) => d.fileName && (d.extractionState === "none" || d.extractionState === null || (retry && d.extractionState === "failed")) && shouldRead(triageOf(d.triage)) && (d.pages ?? 0) <= 300,
     );
     // Sorted so the document that has waited longest (a failure, then never-read) goes first; the
     // page count decides the chunking, not the order.

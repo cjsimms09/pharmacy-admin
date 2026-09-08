@@ -133,7 +133,12 @@ Spent on the read so far: roughly $15 at batch pricing. To resume once raised:
 `node node_modules/tsx/dist/cli.mjs --tsconfig tsconfig.script.json scripts/read-contracts.ts read --scans`
 (never-read documents only; `--retry` adds the failures on purpose, after reading their reasons).
 Of the 177 read: 63+ name a network, 39+ a chain code, 5 a BIN, 0 a network reimbursement id.
-`applyAllReads` has **not** been run yet; 1 runs it after reviewing the proposals.
+`applyAllReads` **run at 03:38 on the 177**: 74 documents applied — 65 rate lines into
+`network_rates`, 10 appeal terms, 194 contacts, 21 payment routings, 36 payer links, and **18
+claims now linked to a contract**. Deferred, not refused: every document that governs by chain
+code (605, 630, 841, A605 recur) is held because **the pharmacy's own chain code is not in
+Settings** — `governs()` cannot say whether it is ours. Owner action: enter the pharmacy's chain
+code (and confirm NCPDP and NPI) on the Settings page, then re-run `apply`.
 
 **Secondary payors, measured for A's audit (8 September, BACKLOG 2b-iv).** Of 1,054 insured paid
 fills, **22 have more than one payor** (2.1%), carrying $8,456.07 of remit between them. The
