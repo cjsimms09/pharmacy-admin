@@ -1,4 +1,5 @@
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { planCandidates, refreshProposals, confirmProposal } from "@/lib/plan-proposals-store";
@@ -28,7 +29,7 @@ import { PageHeader, Card, Figure, Notice, Empty } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
-export default async function PlansPage({ searchParams }: { searchParams: Promise<{ all?: string }> }) {
+export default async function PlansPage({ searchParams }: { searchParams: Promise<{ all?: string; error?: string }> }) {
   const sp = await searchParams;
   const user = await requireUser();
   const canConfirm = user.role !== "staff";
@@ -47,9 +48,18 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
     const u = await requireManager();
     const id = String(fd.get("id") ?? "");
     const r = await confirmProposal(id, u);
-    if (r.ok) {
-      await audit({ action: "plan.classified", userId: u.id, userName: u.name, entity: "plan", entityId: id, details: `confirmed as ${r.classification}` });
+    if (!r.ok) {
+      /*
+       * A refusal has to reach the screen.
+       *
+       * This used to be thrown away: the action ran, the page re-rendered unchanged, and the
+       * pharmacist saw a button that did nothing and no reason why. Silence is the failure this
+       * whole site is built to remove, and it is worse on a button than anywhere else, because he
+       * will press it again.
+       */
+      redirect(`/payers/plans?error=${encodeURIComponent(r.why)}`);
     }
+    await audit({ action: "plan.classified", userId: u.id, userName: u.name, entity: "plan", entityId: id, details: `confirmed as ${r.classification}` });
     revalidatePath("/payers/plans");
   }
 
@@ -87,6 +97,8 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
           ) : undefined
         }
       />
+
+      {sp.error && <Notice kind="crit">{sp.error}</Notice>}
 
       <div className="mb-4 grid gap-3 sm:grid-cols-3">
         <Figure value={offered.length.toLocaleString("en-US")} label="Ready to confirm" sub="Read from a document" tone={offered.length ? "warn" : "ok"} />
