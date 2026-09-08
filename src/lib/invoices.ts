@@ -10,7 +10,7 @@ import { getSettings } from "./settings";
 import { pdfText } from "./pdf-text";
 import { looksLikeRebateReport } from "./rebate-report";
 import { isDrillDownText } from "./drill-down-read";
-import { allSuppliers, supplierForSender } from "./suppliers-registry";
+import { allSuppliers, supplierForSender, supplierRecordFor } from "./suppliers-registry";
 import { scheduleFromNames, linesMatching } from "./controlled-names";
 import { audit } from "./audit";
 import type { InvoiceSchedule, DocumentCategory } from "@/db/schema";
@@ -611,6 +611,23 @@ export async function fileInvoice(
     }
   }
 
+  /*
+   * The register row, from the sender first and from the printed name second.
+   *
+   * The sender address is the better answer and stays first: it is the part a wholesaler's billing
+   * system controls. But it is not always available — an invoice forwarded by hand arrives from the
+   * person who forwarded it, and an invoice filed from a document already in the vault has no
+   * sender at all — and when it was missing this simply stored null and never looked again. Both
+   * IPC invoices on the live database sit at supplier_id NULL for that reason, with "Independent
+   * Pharmacy Cooperative" printed on them the whole time and IPC's address registered.
+   *
+   * The fallback is the register's own matcher, so it is equality against the register name, the
+   * catalogue name and the aliases the pharmacy typed — never a substring. A name it cannot place
+   * stays null, which is the state the invoices page is meant to show rather than paper over.
+   */
+  const fromSender = meta.supplierId ?? null;
+  const supplierId = fromSender ?? supplierRecordFor(await allSuppliers(true), supplier)?.id ?? null;
+
   const id = newId();
   await db.insert(schema.supplierInvoices).values({
     id,
@@ -625,15 +642,69 @@ export async function fileInvoice(
     // should not push anything else out of the page it is shown on.
     itemsText: items.join("\n").slice(0, 20000),
     totalCents,
-    supplierId: meta.supplierId ?? null,
+    supplierId,
     needsReview: !confident,
     receivedFrom: meta.from,
   });
-  if (text) await writeInvoiceLines(id, text);
+  const written = text ? await writeInvoiceLines(id, text) : null;
 
-  await storeInvoiceLines(id, { supplier, supplierId: meta.supplierId ?? null, invoiceDate, text: text ?? "", printedTotalCents: totalCents });
+  const byRule = await storeInvoiceLines(id, { supplier, supplierId, invoiceDate, text: text ?? "", printedTotalCents: totalCents });
 
-  return { id, documentId, schedule, needsReview: !confident };
+  /*
+   * An invoice carrying money and no lines under it is not a quiet success.
+   *
+   * A PDF with no text layer — a scan, which is how some wholesalers send — produces exactly this:
+   * the total is read off the front page, the row is filed, `text` is null, no line reader is ever
+   * called, and nothing anywhere says so. One is sitting on the live database now: $1,530.89, zero
+   * lines, zero unread, and needs_review already cleared. Every figure built on invoice lines — what
+   * the pharmacy paid for an NDC, the rebate ladder, the purchase ratio — is short by that invoice
+   * and looks complete.
+   *
+   * So the row says it. `needsReview` goes back on and the reason is written into `basis`, because
+   * a total with nothing under it is a document somebody has to open, not a number to be trusted.
+   */
+  const why = emptyInvoiceWarning({
+    linesStored: Math.max(written?.read ?? 0, byRule.stored),
+    totalCents,
+    hasTextLayer: text !== null,
+  });
+  if (why) {
+    await db
+      .update(schema.supplierInvoices)
+      .set({ needsReview: true, basis: `${basis} ${why}`.trim() })
+      .where(eq(schema.supplierInvoices.id, id));
+  }
+
+  return { id, documentId, schedule, needsReview: !confident || why !== null };
+}
+
+/**
+ * What to say about an invoice that carries money and has no lines under it.
+ *
+ * Returns the sentence to put on the row, or null where there is nothing wrong.
+ *
+ * A PDF with no text layer — a scan, which is how some wholesalers send — produces exactly this
+ * shape: the total is read off the front page, the row is filed, no line reader is ever called,
+ * and nothing anywhere says so. One is sitting on the live database now at $1,530.89 with zero
+ * lines, zero unread, and needs_review already cleared. Every figure built on invoice lines — what
+ * the pharmacy paid for an NDC, the rebate ladder, the purchase ratio — is short by that invoice
+ * and looks complete, which is the same failure mode as the supplier match that dropped eight
+ * lines without a word.
+ *
+ * A zero total with no lines is not this: an invoice for nothing has nothing to be missing.
+ */
+export function emptyInvoiceWarning(a: {
+  linesStored: number;
+  totalCents: number | null;
+  /** False for a scan. It changes the advice, because there is nothing on the page to re-read. */
+  hasTextLayer: boolean;
+}): string | null {
+  if (a.linesStored > 0) return null;
+  if (a.totalCents === null || a.totalCents <= 0) return null;
+  const total = `$${(a.totalCents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return a.hasTextLayer
+    ? `The total of ${total} was read off the page, but no item line could be read from it. Nothing on this invoice reaches the cost of any drug until somebody looks.`
+    : `The total of ${total} was read off the page, but this PDF carries no text layer, so not one item line could be read. Nothing on this invoice reaches the cost of any drug until somebody enters it or a readable copy replaces it.`;
 }
 
 /** The invoice as text, or null for a scan with no text layer. Short text is treated as none. */
@@ -927,6 +998,49 @@ export function sumOf(rows: SupplierInvoice[]): { total: number; missing: number
     total: rows.reduce((n, r) => n + (r.totalCents ?? 0), 0),
     missing: rows.filter((r) => r.totalCents === null).length,
   };
+}
+
+/**
+ * A PDF that reads as a supplier invoice from a sender nobody has registered.
+ *
+ * `looksLikeInvoice` refuses these outright — `if (!opts.supplier) return false` — and that guard
+ * is right for what it does: a rule that filed PDFs from strangers under the heading an inspector
+ * reads first would sweep up the wrong things. But refusing is not the same as noticing, and at the
+ * moment nothing notices. The document falls through to the general vault as "other", and the only
+ * sign that a wholesaler's invoice was ever received is a row in a list of miscellany.
+ *
+ * That is how McKesson stands today. Its register row has no sender address at all, so
+ * `supplierForSender` returns null, `supplierName` is null, and a McKesson invoice arriving this
+ * afternoon could not be filed as an invoice however plainly it said so on the page. There are no
+ * McKesson invoices on the database and no McKesson document in the vault, so nothing has been lost
+ * yet — but the pharmacy would go on believing its purchase records were complete, and every figure
+ * built on invoice lines would be short without saying so. A supplier invoice commingled with
+ * ordinary documents is also the outcome 21 CFR 1304.04(h)(1) does not allow, which is the same
+ * reason `suppliers-registry.ts` treats the sender addresses as the load-bearing part.
+ *
+ * So this is the seam: it answers "this is an invoice and we do not know whose", and the caller
+ * raises it for a person instead of filing it or dropping it. It never files anything itself.
+ *
+ * Deliberately narrower than `looksLikeInvoice`, because there is no known sender to lean on:
+ * the document's own words have to say it. A subject line and a file name are written by whoever
+ * sent the email and are not evidence here, so a scan with no text layer answers false — unknown
+ * sender and unreadable page is not something to guess about. `classifySupplierDocument` returns
+ * "invoice" only for two or more lines each carrying an NDC and a price, which a newsletter, a
+ * statement, a credit memo and the daily purchase report all fail.
+ */
+export function looksLikeInvoiceFromUnknownSender(opts: {
+  fileName: string;
+  mimeType: string;
+  subject: string;
+  /** Null is the whole point: this asks about documents the sender match could not place. */
+  supplier: string | null;
+  text?: string | null;
+}): boolean {
+  if (opts.supplier) return false;
+  const isPdf = /\.pdf$/i.test(opts.fileName) || opts.mimeType === "application/pdf";
+  if (!isPdf) return false;
+  if (!opts.text) return false;
+  return classifySupplierDocument(opts.text, opts.fileName, opts.subject).kind === "invoice";
 }
 
 /**

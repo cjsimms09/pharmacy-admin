@@ -152,8 +152,12 @@ means concretely:
   rebates. Each one needs to be traceable from the statement back to the document it came from.
   Rebates in particular are a reduction in cost of goods, never revenue (`expense-categories.ts`) —
   putting them in revenue overstates both sales and cost.
-- **Cash and accrual both, and the difference explained.** The split exists but is on the audit list
-  as unexamined (item 5). A cash change has no accrual side and must print as a dash rather than a
+- **Cash and accrual both, and the difference explained.** The owner's rule (7 September): *"System
+  total accrual shows how much we collected in copays, this should be received on cash side, but
+  third party payments shouldn't until we get the 835 or remit. For accrual side, both should be
+  accounted for that month."* Copays are cash when collected; payer money is cash only when the 835
+  or remit arrives and a receivable until then; accrual books both in the fill month. Assigned to A
+  with a required fixture. A cash change has no accrual side and must print as a dash rather than a
   number — that was already caught once on the books page.
 - **Checked by arithmetic, not by eye.** Per CLAUDE.md: every reader that decides money is checked
   by arithmetic before anything is stored. The books should be able to prove they balance.
@@ -218,7 +222,7 @@ place, and an arithmetic check before anything is stored.
 | Supplier invoices | daily | ingesting |
 | NADAC | weekly | ingesting, coverage measured 7 Sep |
 | MTF / facilitator payments | as they arrive | page exists (`/remits/mtf`) |
-| On-hand counts | weekly | ingesting |
+| On-hand counts | weekly | **owner asked 7 September: "Did we receive a balance on hand report yet? Didn't come in right?"** — checked on the live database that night; see Done/HANDOFF for the answer |
 | Supplier catalogues with pricing | weekly | ingesting, 5 suppliers |
 | Other expense invoices | as they arrive | ingesting |
 | Third-party reimbursement contracts | as signed | reader built, first live runs done |
