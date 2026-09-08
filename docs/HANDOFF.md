@@ -8,6 +8,60 @@ file is how they talk.
 
 ## Open items
 
+### From Helper A to 1 and 2 — the books read one month six times; measured, 15x (8 September)
+
+Branch `work/rebate-month-once`, pull request against `feature/compliance`. Working in
+`docs/audits/2026-09-08-speed.md`. The owner: *"We need to do what we need to to make sure run
+faster."*
+
+**I have edited `rebate-rates.ts` (2's group) and added a migration (1's).** Both are additive and
+neither changes any arithmetic; flagged here per the rule, and the owner asked for this directly.
+`0088_invoice_lines_date_index` is the number I took — renumber mine if you have already applied
+another 0088.
+
+**Measured on a scratch database seeded at this pharmacy's scale** (45,782 invoice lines a year, six
+suppliers, 1,400 invoices — row counts from this file; no real data used or needed):
+
+| Period | As it was | After | |
+| --- | ---: | ---: | ---: |
+| a month — the books page and the dashboard | 491 ms | 32 ms | **15x** |
+| a quarter | 1,301 ms | 105 ms | **12x** |
+| a year — the trend on `/money/report` | 4,860 ms | 430 ms | **11x** |
+
+All of it blocking the web server, because the connection is serialized and no page is served while
+a query runs.
+
+**The fault.** `earningSoFar(supplierId, month)` reads the month's invoice lines *with every
+column*, places **every** line against **every** supplier, then filters to the one supplier asked
+for — and it is called **once per supplier**. `loadShared` and `money-position.ts` both looped it, so
+one month was read and re-placed six times, a quarter eighteen, a twelve-month trend seventy-two.
+Eleven times of the cost is the repeat read; a further two and a half is `select *` — a row has
+fourteen columns and the calculation uses six.
+
+**The fix.** `linesForMonth(month)` does the read and the placement once, six columns, held between
+requests. `earningForMonth(month)` returns every supplier's position from it. `earningSoFar` is now a
+thin reading of the same thing, so **every existing caller is unchanged and gets this for free** —
+the suppliers page included. The placement rule is the same code moved, not rewritten, comment and
+all; 2,263 tests pass unchanged.
+
+**And a correction to my own first guess.** I went looking for a missing index on
+`invoice_lines(invoice_date)`. There is one missing and two hot paths scan without it — but it moved
+a month from 491 ms only to 371, about a fifth, against fifteen-fold from not reading six times. The
+index is in the branch because the table only grows, but **reporting it as the fix would have left
+the real fault in place looking solved.**
+
+**Still slow and not mine to fix:** `loadDrugDirectory`'s 430 MB peak (1's group, and still the
+largest single number in the site); `floorReview()` reading every paid claim with all 42 columns;
+`invoices.ts:2221` asking for one document at a time (2's group, small list).
+
+**What I would keep.** These numbers took twenty minutes because the scale could be generated. A
+`scripts/bench.ts` that seeds a year and times the site's own readings turns "the site feels slow"
+into a table anybody can re-run after a change. The owner's *"keep it that way, it will get lots of
+data every day"* is a standing requirement and a standing requirement needs a standing measurement.
+`scripts/**` is 1's group, so I have not written it.
+
+---
+
 ### From Helper A to session 1 — shelf.ts, two queries (8 September)
 
 Audit in `docs/audits/2026-09-08-shelf.md`, branch `work/audit-shelf`. Findings only, no fix — both

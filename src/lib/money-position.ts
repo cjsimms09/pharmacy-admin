@@ -2,7 +2,7 @@ import "server-only";
 import { todayIso } from "./dates";
 import { allSuppliers } from "./suppliers-registry";
 import { latestRatio } from "./purchase-ratio";
-import { ratesFor, earningSoFar, type EarningSoFar } from "./rebate-rates";
+import { ratesFor, earningForMonth, type EarningSoFar } from "./rebate-rates";
 import { facilitatorMoney } from "./claim-payments";
 import { allFills } from "./claims";
 
@@ -231,7 +231,9 @@ async function loadMoneyPosition(today: Date): Promise<MoneyPosition> {
    * that matter. A supplier bought from whose ladder cannot price the buying is not silently
    * dropped — it is what makes the total incomplete, and the screen says so.
    */
-  const earnings = await Promise.all(suppliers.map((s) => earningSoFar(s.id, month)));
+  // One read of the month's invoice lines for every supplier, rather than one each. The dashboard
+  // is the first page of the morning, so this is the one that must not ask six times.
+  const earnings = await earningForMonth(month);
   const rebates = summariseEarnings(earnings, month);
 
   const [mtf, fills] = await Promise.all([facilitatorMoney("mtf", today), allFills()]);

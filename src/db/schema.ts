@@ -902,6 +902,8 @@ export const invoiceLines = sqliteTable(
   (t) => [
     index("invoice_lines_invoice_idx").on(t.invoiceId),
     index("invoice_lines_ndc_idx").on(t.ndc11),
+    /* Ranged over by date on every books page, every dashboard and every report. */
+    index("invoice_lines_date_idx").on(t.invoiceDate),
     index("invoice_lines_supplier_idx").on(t.supplier),
     index("invoice_lines_supplier_id_idx").on(t.supplierId),
   ],
