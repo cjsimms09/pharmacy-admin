@@ -131,6 +131,82 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
     };
   });
 
+  /*
+   * ── Which catalogues are still arriving ──────────────────────────
+   *
+   * On 7 September ANDA and ParMed sent a file and McKesson, IPC and IPD did not, and nothing on any
+   * screen said so. A wholesaler whose catalogue stops arriving does not leave a gap — it leaves
+   * last week's prices, which look exactly like prices that have not changed. The buy list goes on
+   * recommending from them.
+   *
+   * Measured per supplier on the register rather than per file seen, so a wholesaler that has never
+   * sent one is counted as missing rather than being absent from the denominator.
+   */
+  const imports = await db
+    .select({ supplier: schema.supplierImports.supplier, supplierId: schema.supplierImports.supplierId, createdAt: schema.supplierImports.createdAt })
+    .from(schema.supplierImports);
+  await timed("catalogue-currency", async () => {
+    const registry = await allSuppliers(true);
+    const newest = new Map<string, string>();
+    for (const i of imports) {
+      const key = (i.supplierId ?? supplierRecordFor(registry, i.supplier)?.id ?? i.supplier.trim().toLowerCase());
+      const seen = newest.get(key);
+      if (!seen || i.createdAt > seen) newest.set(key, i.createdAt);
+    }
+    const expected = registry.filter((r) => r.active);
+    const days = (iso: string) => (Date.parse(today) - Date.parse(iso.slice(0, 10))) / 86_400_000;
+    const fresh: string[] = [];
+    const stale: string[] = [];
+    for (const r of expected) {
+      const at = newest.get(r.id);
+      if (at && Number.isFinite(days(at)) && days(at) <= 7) fresh.push(r.name);
+      else stale.push(at ? `${r.name} (last ${at.slice(0, 10)})` : `${r.name} (never)`);
+    }
+    return {
+      numerator: fresh.length,
+      denominator: expected.length,
+      gaps: stale.length === 0 ? [] : [`No catalogue in the last week from: ${stale.join(", ")}`],
+      note:
+        expected.length === 0
+          ? "No supplier is on the register, so nothing is expected."
+          : "A catalogue that stops arriving leaves last week's prices in place, and they look exactly like prices that have not changed.",
+    };
+  });
+
+  /*
+   * ── How much history the claims cover ────────────────────────────
+   *
+   * The archive is three weeks. Every rate, every steadiness test and every trend on this site is
+   * judged on whatever window exists, and three weeks cannot tell a slow seller from a new one. The
+   * denominator is a year because a year is what has been asked of PioneerRx — so the row reads as
+   * progress towards the thing that fixes it rather than as an abstract percentage.
+   */
+  await timed("claims-window", async () => {
+    const dates = [...fills.values()].map((f) => f.dateFilled).filter(Boolean).sort();
+    if (dates.length === 0) {
+      /*
+       * No claims is "nothing to measure", not "a window of zero days".
+       *
+       * A denominator of 365 here would print 0% and read as broken, which is a different
+       * statement from the claims row's "nothing has been imported" — and two rows describing one
+       * absence in two ways is the confusion this page exists to remove.
+       */
+      return { numerator: 0, denominator: 0, note: "No claims have been imported, so there is no window to measure." };
+    }
+    const from = dates[0];
+    const to = dates[dates.length - 1];
+    const covered = Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000) + 1;
+    return {
+      numerator: Math.min(covered, 365),
+      denominator: 365,
+      gaps: [`The claims run from ${from} to ${to}.`],
+      note:
+        covered >= 365
+          ? "A full year is held, so a seasonal drug can be told from a dying one."
+          : `${covered} day${covered === 1 ? "" : "s"} of history. A twelve-month export is what closes this, and until it lands every rate on the site is judged on this window.`,
+    };
+  });
+
   // ── NADAC, and how current it is ─────────────────────────────────
   const nadac = await db
     .select({ ndc11: schema.nadacPrices.ndc11, effectiveOn: schema.nadacPrices.effectiveOn })
