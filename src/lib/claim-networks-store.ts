@@ -32,15 +32,23 @@ export type NetworkToLink = {
 };
 
 /** The contracts, in the shape the matcher wants, with the names the owner recognises them by. */
-async function contractsForLinking(): Promise<(ContractForMatch & { networkNames: string[] })[]> {
+async function contractsForLinking(): Promise<(ContractForMatch & { networkNames: string[]; governsHere: boolean | null })[]> {
   const { parseTerms } = await import("./contract-extract");
+  const { governsPharmacy } = await import("./contract-apply");
+  const { getSettings } = await import("./settings");
+  const st = await getSettings();
+  const pharmacy = { chainCode: st.pharmacy_chain_code || null, ncpdp: st.pharmacy_ncpdp || null, npi: st.pharmacy_npi || null };
   const docs = await db.query.contractDocs.findMany();
-  const out: (ContractForMatch & { networkNames: string[] })[] = [];
+  const out: (ContractForMatch & { networkNames: string[]; governsHere: boolean | null })[] = [];
   for (const d of docs) {
     if (d.extractionState !== "done") continue;
     const terms = parseTerms(d.extractionJson);
     if (!terms) continue;
+    const g = governsPharmacy(terms, pharmacy);
+    // Only a document that names a chain code or an NCPDP can be said to be written for this pharmacy; silence is null, not yes.
+    const governsHere = terms.chainCodes.length === 0 && terms.pharmacyNcpdps.length === 0 ? null : g.ok;
     out.push({
+      governsHere,
       documentId: d.id,
       documentName: d.documentName,
       counterparty: terms.counterparty ?? d.pbmName,
@@ -79,6 +87,13 @@ export async function networksToLink(): Promise<NetworkToLink[]> {
 
   const links = await allPayerLinks();
   const contracts = await contractsForLinking();
+  // The BIN listing's other names for a payer: the PBM behind a plan's own name, as the owner states it there.
+  const binRows = await db.query.payerBins.findMany({ columns: { bin: true, pbmName: true, aliases: true } });
+  const aliasesByBin = new Map<string, string[]>();
+  for (const b of binRows) {
+    const names = [b.pbmName, ...(b.aliases ?? "").split(/[\n,;]+/)].map((x) => (x ?? "").trim()).filter(Boolean);
+    aliasesByBin.set(b.bin.trim().toUpperCase(), names);
+  }
   const nameOf = new Map(contracts.map((c) => [c.documentId, c.documentName]));
 
   /*
@@ -134,7 +149,15 @@ export async function networksToLink(): Promise<NetworkToLink[]> {
       payerName,
       bins,
       linkedTo,
-      candidates: linkedTo ? [] : withLearned(networkId, Number(r.claims), learned.get(networkId.toUpperCase()) ?? null, candidatesFor({ networkId, payerName, contracts }), contracts),
+      candidates: linkedTo
+        ? []
+        : withLearned(
+            networkId,
+            Number(r.claims),
+            learned.get(networkId.toUpperCase()) ?? null,
+            candidatesFor({ networkId, payerName, payerAliases: bins.flatMap((b) => aliasesByBin.get(b.toUpperCase()) ?? []), contracts }),
+            contracts,
+          ),
     };
   });
 }
@@ -162,4 +185,46 @@ function withLearned(
     });
   const seen = new Set(first.map((c) => c.documentId));
   return [...first, ...ranked.filter((c) => !seen.has(c.documentId))];
+}
+
+/**
+ * Links a network on its own where the documents leave one answer, and says so.
+ *
+ * The owner, 8 September: "Why do I have to do clicks per network??" He does not, where the paper
+ * decides. Two cases decide: a document that prints the network reimbursement id itself; and a
+ * payer with exactly one document written for this pharmacy's chain code. A payer with several
+ * such documents is not decided here — that is what the PSAO's listing and the backtest are for —
+ * and the page still shows the ranking. Every link made here names its reason on the link, and
+ * the owner can replace it.
+ */
+export async function deduceNetworkLinks(user: { name: string }): Promise<{ linked: { networkId: string; documentName: string; why: string; claims: number }[]; undecided: number }> {
+  const { savePayerLink } = await import("./payer-links");
+  const rows = await networksToLink();
+  const linked: { networkId: string; documentName: string; why: string; claims: number }[] = [];
+  let undecided = 0;
+  for (const r of rows) {
+    if (r.linkedTo) continue;
+    const top = r.candidates[0];
+    if (!top) {
+      undecided++;
+      continue;
+    }
+    const prints = /prints .* as one of its network reimbursement ids/.test(top.why);
+    const here = r.candidates.filter((c) => /written for this pharmacy's chain code/.test(c.why));
+    const decided = prints ? top : here.length === 1 ? here[0] : null;
+    if (!decided) {
+      undecided++;
+      continue;
+    }
+    const why = prints
+      ? `Linked by the site: ${decided.documentName} prints ${r.networkId} as one of its network reimbursement ids.`
+      : `Linked by the site: the only ${decided.counterparty ?? r.payerName ?? "payer"} document written for this pharmacy's chain code. Replace it if the PSAO's listing says otherwise.`;
+    await savePayerLink(
+      { bin: null, pcn: null, groupNumber: null, contractId: r.networkId },
+      { pbmName: decided.counterparty ?? r.payerName ?? "unknown", contractDocId: decided.documentId, contractFileName: decided.documentName, basis: why },
+      user,
+    );
+    linked.push({ networkId: r.networkId, documentName: decided.documentName, why, claims: r.claims });
+  }
+  return { linked, undecided };
 }
