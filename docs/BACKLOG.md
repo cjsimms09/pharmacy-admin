@@ -346,9 +346,40 @@ design rules and page inventory), and none of them needing the database:
   colour across every page; states for loading, empty, error and success; forms that say what they
   want and what went wrong; works on the phone he actually uses it from.
 
-This is a full pass over the page inventory and belongs to a cloud session, because it needs no
-data — it needs eyes and the design rules. Not yet assigned: A and B are on the money chain,
-which the owner ordered first. Assign when one frees, or to a fifth session.
+The owner again, 8 September: *"I really want this design edit to be done thoroughly and really
+make the site look and operate well. Good plumbing, efficient, visually appealing, better use of
+design elements like tables and charts when appropriate. Really make an effort to make sure viewer
+can understand lots of info in a clear way in a small compact area."* So: density without clutter
+— tables where rows compare, charts where a shape says more than a number, one screen answering
+one question, and the plumbing behind it fast (no page reading the whole database on open; the
+stores are held between requests and the page reads the store). This is a full pass over the page
+inventory and needs no data, so it is **a fifth session, C, in the cloud**, working from
+`docs/reference/design-audit.md` and `docs/ASSIGNMENTS.md` (Helper C), one section of the site per
+pull request, screenshots of before and after in the description.
+
+### 12. The secondary add-ons list has to make sense (8 September)
+
+The owner: *"Let's also add an audit of the secondary supplier add-ons. This part of the site is to
+give us things we could add on to an existing secondary supplier to hit the minimum. The things it
+recommends from each supplier should make sense based on BOH, price, usage. The site will not know
+what's already in order so it should list multiple options. We will use this list to find things we
+could add on for that supplier to hit minimums."*
+
+That is `/purchasing` — one card per non-primary wholesaler: "Order these" and "Next best to add,
+soonest needed first" (`minimum-filler.ts`, `minimum-store.ts`, `shelf.ts buyListNow`). The audit
+question is whether each recommended line is defensible on its three facts: **on hand** (from the
+latest count — and no count has ever arrived, so today it runs on claims-derived usage alone and
+must say so), **price** (the levelled, rebate-netted unit cost, this supplier against the best),
+**usage** (units per day from the fills, over a window that is stated). A line the pharmacist would
+not order — a slow mover with months on hand, a drug cheaper at the primary after rebate, a pack
+larger than a season's use — is the failure. Multiple options, ranked, running total to the
+minimum, never a single answer. Assigned to A (audit); session 1 supplies the live list and the
+facts behind each of its top lines.
+
+### 13. The design pass is a fifth session (8 September)
+
+See item 8. Session C: cloud, no data, owns `src/app/**` presentation and `src/components/**`
+only — never a `*-store.ts`, never a pure module — and hands back one section per pull request.
 
 ### 9. Data health: complete, linked, and it says what is missing (7 September)
 
