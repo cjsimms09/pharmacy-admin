@@ -133,6 +133,19 @@ file. Fixture, test, and a refusal that names the column it wanted rather than f
 the first real file lands first time. Then the reconcile store and page once the remittance tables
 exist, and the McKesson invoice when it arrives.
 
+**Then (8 September, from 1): two more, both on the pharmacy computer's side of the data.**
+(1) **Plan classification proposals** — BACKLOG item 10, moved from A to 2. 6 of 1,054 fills sit
+on a classified plan, so the law-first pricing rung never fires. Where `payer_bins.linesOfBusiness`
+(and the published Medicare Part D BIN/PCN list in `reference.ts`) state the line of business for
+a BIN/PCN, propose the class on the plan row with its source, never assume it; the owner confirms
+with one click per plan, biggest first (fills behind each triple, which Data health already
+counts). Files: `plan-*.ts`, `src/app/(app)/payers/plans/**` (new). `plan_groups` gains
+`proposedClassification` and `proposedFrom` (additive, next migration number).
+(2) **Data health measures itself** — a daily run without a button: the launcher already runs
+scheduled work (`scripts/launch.mjs` and the nightly mailbox sweep); wire `measureDataHealth()` in
+after the nightly sweep in a separate process (the make-claude-copy pattern), so the page is
+never more than a day old and the "measured at" date says so.
+
 **Then (8 September, from 1, the owner's ask): pack sizes fixed and correctable** — `docs/BACKLOG.md`
 item 11. Auto-correct from the FDA where its description reads to a dispensing unit and the
 catalogue is a clean multiple; a lookup-and-correct page for the rest; corrections in
