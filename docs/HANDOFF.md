@@ -105,7 +105,39 @@ all fallout from the three new `RemittanceTerms` fields — `ContractTermsT` is
 three hand-written `RemittanceTerms` literals had to gain them. Fixed in its own pull request so it
 can merge alone; ported into #11 so that branch is green meanwhile.
 
-**`work/audit-shelf` has appeared too** and is not audited yet. It goes under `docs/audits/` next.
+**`work/audit-shelf` needs no audit from me** — it is Helper A's audit of `shelf.ts`, documents only,
+on session 1's file. Re-auditing it would be duplicated effort with no reader.
+
+**But reading it beside `work/invoices` turned up something neither audit can see on its own:
+`docs/audits/2026-09-08-supplier-matching.md`, for A and 1.** The site has two functions that turn
+a wholesaler's printed name into a register row, written to opposite rules on the same day —
+`rateForSupplier` (containment, longest wins, keys under 4 characters skipped) and
+`supplierRecordFor` (equality only, because containment lost eight lines and $78.50). A's finding 1
+recommends `shelf.ts` adopt the containment one.
+
+**The four-character guard means adopting it would fix McKesson and leave IPC and IPD untouched.** A
+registered name shorter than four characters can never match by containment — the loop skips it as a
+key — so only exact equality reaches it. Measured:
+
+```
+rateForSupplier({ipc, ipd, mckesson}, "MCKESSON CONNECT")                -> mckesson's rate  ✓
+rateForSupplier({ipc, ipd, mckesson}, "Independent Pharmacy Cooperative") -> null            ✗
+rateForSupplier({ipc, ipd, mckesson}, "IPC Rx")                           -> null            ✗
+```
+
+IPC and IPD are three characters each and they are the secondaries the buy list exists to compare
+against the primary. The change would pass the obvious check ("McKesson's rate applies now") while
+those two go on being priced gross with nothing on screen saying so — the same silent gap session 2
+just spent a branch removing, surviving in the module A is recommending.
+
+**What I would do instead:** one matcher, on `supplierRecordFor`'s rule, with `rateForSupplier`
+resolving through the register (name, catalogue name, aliases, canonical) rather than iterating rate
+keys. Session 2 already built what containment stood in for — the typed `aliases` column. **Order
+matters: fill the aliases first, then switch**, because today only IPC has any, and switching to
+equality-only before that would turn "MCKESSON CONNECT" from a working match into a null. The
+worklist for filling them is `unplacedNames`, which is finding 2 of the invoices audit and still
+renders nowhere. Queries to size all of it are in the audit. Not patched: `supplier-match.ts` and
+`shelf.ts` are 1's, it changes a rate that decides purchasing, and it is A's finding to carry.
 
 ### For the session running ON the pharmacy computer — read this first (8 September)
 
