@@ -303,3 +303,37 @@ describe("what is missing is counted per wholesaler, not per document", () => {
     }
   });
 });
+
+/*
+ * The proof rows, which ask a different question from every other row on the page.
+ *
+ * The rest of Data health asks whether the site's tables agree with one another. A proof asks
+ * whether they agree with the document they were read from — the owner's "these things need to be
+ * right!! … and continue to". The invoice one is the case where the two questions visibly differ:
+ * an invoice can be filed, linked to a supplier, carry a rebate ladder and sit on every screen
+ * looking complete, while the lines under it add to eighty-three dollars less than its own face.
+ */
+describe("proving a dataset against the document behind it", () => {
+  test("the invoice proof exists and says its denominator is invoices that print a total", () => {
+    const s = SPECS.find((x) => x.key === "invoices-proof");
+    assert.ok(s);
+    assert.match(s.of, /out of invoices carrying a total/);
+  });
+
+  test("an invoice whose lines do not add to its face stops the row reading complete", () => {
+    const rows = buildHealth(
+      [{ key: "invoices-proof", numerator: 6, denominator: 7, gaps: ["IPC invoice 11490216: 14 lines add to less than the printed total, by $128.79."], measuredAt: "2026-09-08", note: null }],
+      "2026-09-08",
+    );
+    const r = rows.find((x) => x.key === "invoices-proof")!;
+    assert.equal(r.fractionText, "6 of 7");
+    assert.notEqual(r.health, "complete");
+    assert.match(r.gaps[0], /by \$128\.79/, "the amount is the row's value: it says how much cost is wrong");
+  });
+
+  test("no invoice printing a total is nothing to measure, not a failure", () => {
+    const rows = buildHealth([{ key: "invoices-proof", numerator: 0, denominator: 0, gaps: [], measuredAt: "2026-09-08", note: null }], "2026-09-08");
+    const r = rows.find((x) => x.key === "invoices-proof")!;
+    assert.equal(r.health, "empty", "an unanswerable question is not a failed one");
+  });
+});

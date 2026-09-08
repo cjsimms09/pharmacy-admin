@@ -370,13 +370,20 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
 
   // ── Invoices ─────────────────────────────────────────────────────
   const invoiceRows = await db
-    .select({ id: schema.supplierInvoices.id, supplier: schema.supplierInvoices.supplier, totalCents: schema.supplierInvoices.totalCents })
+    .select({
+      id: schema.supplierInvoices.id,
+      supplier: schema.supplierInvoices.supplier,
+      totalCents: schema.supplierInvoices.totalCents,
+      // Named on the proof row's gaps: "an invoice does not add up" is unactionable without it.
+      invoiceNumber: schema.supplierInvoices.invoiceNumber,
+    })
     .from(schema.supplierInvoices);
   const lineRows = await db
     .select({
       invoiceId: schema.invoiceLines.invoiceId,
       supplierId: schema.invoiceLines.supplierId,
       supplier: schema.invoiceLines.supplier,
+      extendedCents: schema.invoiceLines.extendedCents,
     })
     .from(schema.invoiceLines);
   const invoicesWithLines = new Set(lineRows.map((l) => l.invoiceId));
@@ -395,6 +402,71 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
               `${owing.length} invoice${owing.length === 1 ? "" : "s"} worth $${(owingCents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} carry a total and no item lines — usually a scan with no text layer`,
             ],
       note: invoiceRows.length === 0 ? "No supplier invoice has been filed." : null,
+    };
+  });
+
+  /*
+   * ── Every invoice against the total printed on its own face ──────
+   *
+   * The proof of the invoice family, and it needs no file: the invoice's printed total was captured
+   * when it was filed, and the lines are stored beside it, so the two can be set against each other
+   * whenever anybody asks.
+   *
+   * That makes this narrower than a re-read and worth saying so. It proves the storing, not the
+   * reading — a total that was itself misread off the page would agree with lines read from the
+   * same misreading, and this row would show nothing. What it does catch is the failure that has
+   * actually happened here: lines dropped between the page and the table, where every line that
+   * survived looks perfectly sound and only the missing one's drug appears cheaper than it was.
+   */
+  await timed("invoices-proof", async () => {
+    const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const linesBy = new Map<string, { n: number; cents: number }>();
+    for (const l of lineRows) {
+      const held = linesBy.get(l.invoiceId) ?? { n: 0, cents: 0 };
+      held.n++;
+      held.cents += l.extendedCents ?? 0;
+      linesBy.set(l.invoiceId, held);
+    }
+    // Only invoices that print a total can be proved against one. An invoice without one is not a
+    // failure here; it is outside the question, and counting it as either answer would be a lie.
+    const provable = invoiceRows.filter((i) => (i.totalCents ?? 0) > 0);
+    const agree: typeof provable = [];
+    const differ: { supplier: string | null; number: string | null; byCents: number; lines: number }[] = [];
+    const empty: typeof provable = [];
+    for (const i of provable) {
+      const l = linesBy.get(i.id);
+      if (!l || l.n === 0) {
+        empty.push(i);
+        continue;
+      }
+      const by = l.cents - (i.totalCents ?? 0);
+      if (by === 0) agree.push(i);
+      else differ.push({ supplier: i.supplier, number: i.invoiceNumber, byCents: by, lines: l.n });
+    }
+    const gaps: string[] = [];
+    for (const d of differ.slice(0, 12)) {
+      gaps.push(
+        `${d.supplier ?? "an unnamed supplier"} invoice ${d.number ?? "with no number"}: ${d.lines} lines add to ${d.byCents > 0 ? "more" : "less"} than the printed total, by ${money(Math.abs(d.byCents))}.`,
+      );
+    }
+    if (differ.length > 12) gaps.push(`… and ${differ.length - 12} more that do not add up.`);
+    if (empty.length > 0) {
+      const owed = empty.reduce((n, i) => n + (i.totalCents ?? 0), 0);
+      gaps.push(
+        `${empty.length} invoice${empty.length === 1 ? "" : "s"} worth ${money(owed)} carry a total and not one line, so nothing on ${empty.length === 1 ? "it" : "them"} reaches the cost of any drug.`,
+      );
+    }
+    const withoutTotal = invoiceRows.length - provable.length;
+    return {
+      numerator: agree.length,
+      denominator: provable.length,
+      gaps,
+      note:
+        provable.length === 0
+          ? "No invoice on file prints a total, so none can be proved against one."
+          : `${agree.length.toLocaleString("en-US")} of ${provable.length.toLocaleString("en-US")} invoices carrying a total have lines that add to it exactly.` +
+            (withoutTotal > 0 ? ` ${withoutTotal.toLocaleString("en-US")} more print no total and are outside this count.` : "") +
+            " This proves what was stored against what the invoice said it came to; it cannot catch a total that was itself misread.",
     };
   });
 
