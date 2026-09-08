@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { looksLikeInvoice, filingFor, emptyInvoiceWarning } from "../src/lib/invoices";
+import { looksLikeInvoice, filingFor, emptyInvoiceWarning, looksLikeInvoiceFromUnknownSender } from "../src/lib/invoices";
 import { INVOICE_SCHEDULES } from "../src/db/schema";
 
 /**
@@ -114,5 +114,63 @@ describe("an invoice that carries a total and no lines", () => {
 
   test("a negative total — a credit memo — is not treated as money owing with lines missing", () => {
     assert.equal(warn(0, -5_000), null);
+  });
+});
+
+/**
+ * An invoice from a sender nobody registered.
+ *
+ * looksLikeInvoice refuses these, and should: filing PDFs from strangers under the heading an
+ * inspector reads first would sweep up the wrong things. But refusing is not noticing, and today
+ * nothing notices — the document lands in the general vault as "other". McKesson's register row
+ * has no sender address at all, so a McKesson invoice arriving this afternoon could not be filed
+ * as an invoice however plainly it said so on the page, and the pharmacy would go on believing its
+ * purchase records were complete. Commingling a supplier invoice with ordinary documents is also
+ * what 21 CFR 1304.04(h)(1) does not allow.
+ */
+describe("a supplier invoice whose sender is not on the register", () => {
+  // Two lines each carrying an NDC and a price, which is what an invoice is. Identifiers invented.
+  const invoiceWords = [
+    "REMIT TO: A WHOLESALER",
+    "00002143611 EMGALITY INJ PEN 120MG/ML 1 R $739.11 $739.11",
+    "00169633910 NOVOLOG FLEXPEN 100UNIT/ML 2 R $131.02 $262.04",
+    "TOTAL DUE $1,001.15",
+  ].join("\n");
+  const ask = (a: Partial<Parameters<typeof looksLikeInvoiceFromUnknownSender>[0]> = {}) =>
+    looksLikeInvoiceFromUnknownSender({
+      fileName: "invoice.pdf",
+      mimeType: "application/pdf",
+      subject: "Invoice 12345",
+      supplier: null,
+      text: invoiceWords,
+      ...a,
+    });
+
+  test("the McKesson case: an invoice arrives, no sender address is registered, and it is noticed", () => {
+    assert.equal(ask(), true);
+  });
+
+  test("a sender we do know is somebody else's job, not this one", () => {
+    // looksLikeInvoice already handles those. Answering true here would double-file them.
+    assert.equal(ask({ supplier: "IPC" }), false);
+  });
+
+  test("the words have to say it — a subject line is written by whoever sent the email", () => {
+    assert.equal(ask({ text: "Our new fall catalogue is attached. No purchase necessary." }), false);
+    assert.equal(ask({ text: null }), false, "a scan tells us nothing, and a stranger's scan is not a guess to make");
+    assert.equal(ask({ text: "" }), false);
+  });
+
+  test("a statement, a credit memo and the daily purchase report are all still not invoices", () => {
+    assert.equal(ask({ text: "STATEMENT OF ACCOUNT\nBalance forward $500.00\n31-60 days $120.00" }), false);
+    assert.equal(ask({ text: `CREDIT MEMO RGA 88\n${invoiceWords}` }), false);
+  });
+
+  test("one item line is not enough, because one number and an NDC is not a bill", () => {
+    assert.equal(ask({ text: "00002143611 EMGALITY INJ PEN 120MG/ML 1 R $739.11 $739.11" }), false);
+  });
+
+  test("anything that is not a PDF is not an invoice here", () => {
+    assert.equal(ask({ fileName: "invoice.xlsx", mimeType: "application/vnd.ms-excel" }), false);
   });
 });

@@ -179,6 +179,62 @@ unit it is in, is anything inferred that the invoice states. Write `docs/audits/
 with findings and the queries 2 should run, and open a pull request. **Session 2 owns this section
 from here and will write its own instructions to you under this heading.**
 
+### From 2 (8 September) — what the invoice side needs from you
+
+Branch `work/invoices` is on GitHub and merged once already. Two commits to audit: `e78a7d0`
+(supplier resolution) and `c87ff57` (empty invoices). Findings to `docs/audits/`, as above.
+
+**Audit these three things in particular, because each is a number that looked right.**
+
+1. `supplierRecordFor` in `suppliers-registry.ts` must resolve a supplier by equality only —
+   register name, catalogue name, aliases, then canonical spellings. If you can find any input
+   where it resolves on a partial match, that is a finding. The bug it replaced put eight invoice
+   lines and $78.50 outside every rebate figure, silently.
+2. `earningSoFar` in `rebate-rates.ts` now reports `unplacedLines`, `unplacedCents` and
+   `unplacedNames`. Check that no caller drops them on the floor: an unplaced line that nothing
+   displays is the original bug wearing a different coat. I have not yet put them on a screen.
+3. `emptyInvoiceWarning` in `invoices.ts` decides whether an invoice with a total and no lines is
+   flagged. Check the boundaries — a zero total, a null total, a negative total (a credit memo).
+   Flagging a credit memo as a missing invoice would be a new wrong number.
+
+**The seam for McKesson routing is on my side and it is already there. Do not edit the importers.**
+
+`invoices.ts` now exports `looksLikeInvoiceFromUnknownSender({ fileName, mimeType, subject,
+supplier, text })`. It answers one question: *this PDF reads as a supplier invoice and we do not
+know whose*. It files nothing and changes no existing routing.
+
+Why it exists. `looksLikeInvoice` begins `if (!opts.supplier) return false`, so a PDF from a
+sender nobody has registered can never be filed as an invoice. McKesson's register row has no
+sender address at all — `sender_emails` is empty — so a McKesson invoice arriving this afternoon
+would fall through to the general vault as "other" however plainly the page said INVOICE. The
+pharmacy would go on believing its purchase records were complete, every figure built on invoice
+lines would be short without saying so, and a supplier invoice sitting among ordinary documents is
+the outcome 21 CFR 1304.04(h)(1) does not allow.
+
+What I would like you to build in `mailbox.ts`, which is yours and which I have not touched:
+where the sender match returns nothing and this predicate returns true, raise the item as
+**"an invoice from a sender we do not know"** with the supplier's name as printed on the page if
+you can offer one, and a control to attach it to a register row. Attaching should write the
+sender address onto that supplier so the next one files itself — that is the "correction kept as a
+rule on the sender" in your own brief. Do not file it as an invoice on the strength of the
+predicate alone; an unknown sender is exactly when a person should decide.
+
+It is deliberately narrow: the document's own words must classify as an invoice
+(`classifySupplierDocument` → two or more lines each carrying an NDC and a price). A subject line
+is written by whoever sent the email and is not evidence when the sender is unknown, and a scan
+with no text layer answers false rather than guessing. Tests are in `tests/invoices.test.ts` under
+"a supplier invoice whose sender is not on the register".
+
+**What you cannot do and should not try.** There is no McKesson invoice anywhere to test against:
+`fixtures/invoice-mckesson.txt` has been wanted since before this branch and `git log --all`
+confirms it has never been committed, so the McKesson reader in `invoice-lines.ts` has only ever
+run against a hand-built string in `tests/invoice-lines.test.ts`. 1 has asked the owner to forward
+a real one. Until it exists, build against `fixtures/invoice-ipc.txt` and synthetic text, and say
+in your pull request what you could not verify.
+
+**Questions needing real figures** go in `docs/HANDOFF.md` under "Open items" addressed to 2. I
+run them here and write the number back. Do not ask the owner to send you a file; your container
+cannot reach this machine.
 ### Build: an inbox that knows what arrived, and can always be corrected
 
 The owner: *"The inbox should eventually be able to know what's coming in based off name, email,

@@ -1001,6 +1001,49 @@ export function sumOf(rows: SupplierInvoice[]): { total: number; missing: number
 }
 
 /**
+ * A PDF that reads as a supplier invoice from a sender nobody has registered.
+ *
+ * `looksLikeInvoice` refuses these outright — `if (!opts.supplier) return false` — and that guard
+ * is right for what it does: a rule that filed PDFs from strangers under the heading an inspector
+ * reads first would sweep up the wrong things. But refusing is not the same as noticing, and at the
+ * moment nothing notices. The document falls through to the general vault as "other", and the only
+ * sign that a wholesaler's invoice was ever received is a row in a list of miscellany.
+ *
+ * That is how McKesson stands today. Its register row has no sender address at all, so
+ * `supplierForSender` returns null, `supplierName` is null, and a McKesson invoice arriving this
+ * afternoon could not be filed as an invoice however plainly it said so on the page. There are no
+ * McKesson invoices on the database and no McKesson document in the vault, so nothing has been lost
+ * yet — but the pharmacy would go on believing its purchase records were complete, and every figure
+ * built on invoice lines would be short without saying so. A supplier invoice commingled with
+ * ordinary documents is also the outcome 21 CFR 1304.04(h)(1) does not allow, which is the same
+ * reason `suppliers-registry.ts` treats the sender addresses as the load-bearing part.
+ *
+ * So this is the seam: it answers "this is an invoice and we do not know whose", and the caller
+ * raises it for a person instead of filing it or dropping it. It never files anything itself.
+ *
+ * Deliberately narrower than `looksLikeInvoice`, because there is no known sender to lean on:
+ * the document's own words have to say it. A subject line and a file name are written by whoever
+ * sent the email and are not evidence here, so a scan with no text layer answers false — unknown
+ * sender and unreadable page is not something to guess about. `classifySupplierDocument` returns
+ * "invoice" only for two or more lines each carrying an NDC and a price, which a newsletter, a
+ * statement, a credit memo and the daily purchase report all fail.
+ */
+export function looksLikeInvoiceFromUnknownSender(opts: {
+  fileName: string;
+  mimeType: string;
+  subject: string;
+  /** Null is the whole point: this asks about documents the sender match could not place. */
+  supplier: string | null;
+  text?: string | null;
+}): boolean {
+  if (opts.supplier) return false;
+  const isPdf = /\.pdf$/i.test(opts.fileName) || opts.mimeType === "application/pdf";
+  if (!isPdf) return false;
+  if (!opts.text) return false;
+  return classifySupplierDocument(opts.text, opts.fileName, opts.subject).kind === "invoice";
+}
+
+/**
  * Whether one invoice answers a free-text search.
  *
  * Everything a person might have in their hand is searched: the supplier, the invoice number as
