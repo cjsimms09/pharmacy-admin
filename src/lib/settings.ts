@@ -255,6 +255,8 @@ export const SETTING_KEYS = [
   // When Data health last measured itself. Read by the daily tick so a machine switched off
   // for a week measures on the morning it comes back rather than on a fixed hour it never sees.
   "data_health_last",
+  // The nightly claims proof (scripts/prove-claims.ts) keeps its JSON result here for Data health to show.
+  "claims_proof",
   "backup_restore_result",
   "mail_last_sweep",
   /**

@@ -770,6 +770,24 @@ judgment carries the window it was made on, and the window grows from 1 Septembe
 "short window" caveats on Return soon, the add-on lists and item 29 stand until the months
 accrue, and the pages print the number of days held. The claims of 24–31 August already on file
 stay (they are real and proved) but are outside the start.
+### 32. PioneerRx's dispensed export is the second claims feed: it enriches, it never duplicates (8 September)
+
+The owner uploaded `daily_0901_to_0907.xlsx` — "this is the correct info" — one row per
+prescription sold, 51 columns, with what the transaction report never prints: AWP, WAC and NADAC
+for the dispensed quantity, DAW, days supply, dispensing fee, basis of reimbursement, the plan's
+own contract id, DIR fee, e-voucher, the sold date, and the secondary payer beside the primary.
+Compared row for row the same day: 916 of 943 prescriptions in both agreed on the remit to the
+cent; every difference had a reason (the export prints the primary's copay, the transaction
+report what was left after a secondary paid; a $0 primary here is the paying secondary there).
+Built the same hour: `dispensed-export.ts` — pure parse, tested; `enrichClaimsFromDispensedExport`
+writes the export's columns onto the claims the transaction report proved, keyed by prescription,
+fill and BIN, and names what it cannot place (303 rows on the first file: fills processed before
+the site's records, per item 31). Migration 0091. First run: 940 primaries and 28 secondaries
+enriched; September's paid claims now carry AWP on 957, days supply on 1,035, NADAC on 914, the
+sold date on 952. Left to do: the export as a daily feed through the mailbox and the Add tool
+(its own kind; 2 and B), a nightly proof row that re-reads the stored file against the enriched
+columns (item 30), and the transaction report's `Rx Transaction Details` stays the source of the
+claim itself — the export enriches, it never creates.
 ## The data the site has to ingest
 
 Named by the owner on 7 September as what is still being connected. Each one needs a reader, a

@@ -2094,6 +2094,17 @@ export const claims = sqliteTable(
      * knowing this column exists; only the cash side has to ask.
      */
     onAccount: integer("on_account", { mode: "boolean" }).notNull().default(false),
+    /** From PioneerRx's dispensed export (migration 0091): the report's own figures for the dispensed quantity, in cents. */
+    wacCents: integer("wac_cents"),
+    nadacDispensedCents: integer("nadac_dispensed_cents"),
+    dirFeeCents: integer("dir_fee_cents"),
+    evoucherCents: integer("evoucher_cents"),
+    /** The contract id the plan returned on the claim, as the export prints it. */
+    contractId: text("contract_id"),
+    gcn: text("gcn"),
+    /** The day the prescription was completed (sold), from the export. */
+    soldOn: text("sold_on"),
+    enrichedFrom: text("enriched_from"),
     reversedOn: text("reversed_on"),
     /**
      * The day the fill was sold, as the transaction report had it.
