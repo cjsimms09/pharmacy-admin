@@ -286,20 +286,38 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
 
   // ── Money that actually arrived ──────────────────────────────────
   const payments = await db
-    .select({ rxNumber: schema.claimPayments.rxNumber, fillNumber: schema.claimPayments.fillNumber, dateFilled: schema.claimPayments.dateFilled })
+    .select({ rxNumber: schema.claimPayments.rxNumber, fillNumber: schema.claimPayments.fillNumber, dateFilled: schema.claimPayments.dateFilled, source: schema.claimPayments.source })
     .from(schema.claimPayments);
   const bank = await db.select({ id: schema.bankLines.id }).from(schema.bankLines);
 
+  const facilitator = payments.filter((p) => (p.source ?? "").trim().toLowerCase() === "mtf").length;
   await timed("remits", async () => ({
     numerator: payments.length,
     denominator: payments.length,
-    note: payments.length === 0 ? "No 835 remittance line has been loaded, so nothing says what a plan actually paid." : null,
+    gaps:
+      payments.length > 0 && facilitator === payments.length
+        ? [`All ${payments.length} are facilitator payments. Not one 835 remittance has been received, so no plan has yet said what it actually paid on a claim.`]
+        : [],
+    note:
+      payments.length === 0
+        ? "No later payment has been loaded, so nothing says what a plan actually paid."
+        : null,
   }));
 
   await timed("bank", async () => ({
     numerator: bank.length,
     denominator: bank.length,
-    note: bank.length === 0 ? "No bank line has been loaded, so no payment can be traced to cash in the account." : null,
+    /*
+     * A zero here is a waiting task and not a fault, and the note has to say so.
+     *
+     * The reader, the importer and the page all exist and work — bank-statement.ts parses the CSV,
+     * /money places every line. Nothing has been uploaded, which is a thing somebody does rather
+     * than something to fix, and "0" with no explanation reads as broken software.
+     */
+    note:
+      bank.length === 0
+        ? "Nothing is wrong here: no bank statement has been uploaded yet. Export the month-end CSV from the bank and load it on the Money page, and this fills in."
+        : null,
   }));
 
   await timed("claim-remit-deposit", async () => {
@@ -313,7 +331,7 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
       denominator: fillCount,
       note:
         bank.length === 0
-          ? "No bank line has been loaded, so no fill can be traced to cash actually received, whatever the remittances say."
+          ? `No bank statement has been uploaded, so no fill can be traced to cash actually received. ${payments.length} later payment${payments.length === 1 ? " is" : "s are"} on file waiting to be tied to a deposit${facilitator === payments.length && payments.length > 0 ? ", all of them facilitator money rather than 835 remittances" : ""}.`
           : null,
     };
   });

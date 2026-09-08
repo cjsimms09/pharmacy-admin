@@ -113,12 +113,13 @@ async function loadDrugProfit(): Promise<DrugProfitView> {
           ndc11: r.ndc11,
           equivalenceKey: directory.get(r.ndc11)?.key ?? null,
           description: r.description,
-          classification: r.classification,
+          // NADAC's brand/generic flag where it has one; the FDA's marketing category where not.
+          classification: r.classification ?? directory.get(r.ndc11)?.classification ?? null,
           pricingUnit: r.pricingUnit,
           // An OTC row is reimbursed differently or not at all, so it is not the same buying
           // decision. Dropped here, it merged with its prescription counterpart — and keyed
           // differently from replay-store, which passes it, so two stores disagreed about one NDC.
-          otc: r.otc,
+          otc: r.otc ?? directory.get(r.ndc11)?.otc ?? false,
         }),
       );
     if (!nadacByNdc.has(r.ndc11)) nadacByNdc.set(r.ndc11, { micros: r.unitMicros, description: r.description });
@@ -175,7 +176,10 @@ async function loadDrugProfit(): Promise<DrugProfitView> {
     // against NADAC's 57.3%, so an NDC can be perfectly well placed by the FDA and never appear
     // there; without this it would fall out of every product group for want of a benchmark it does
     // not need to be grouped. Classification and pricing unit are NADAC's to give and stay unknown.
-    const k = groupKey({ ndc11: ndc, equivalenceKey: directory.get(ndc)?.key ?? null, description: null, classification: null, pricingUnit: null });
+    // Classification from the FDA here, because NADAC has no row to give one: on the live database
+    // 383 FDA-keyed groups with no NADAC row held a brand and a generic under one key without it.
+    const d = directory.get(ndc);
+    const k = groupKey({ ndc11: ndc, equivalenceKey: d?.key ?? null, description: null, classification: d?.classification ?? null, pricingUnit: null, otc: d?.otc ?? false });
     groupByNdc.set(ndc, k);
     return k;
   };

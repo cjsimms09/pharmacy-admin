@@ -121,6 +121,31 @@ McKesson line. Start with Today and Ordering, because the owner opens those most
 Works in its own worktree, never in 1's folder (a deploy runs `git checkout -- .` there). Hands the
 branch to 1 by message when `npm run check` passes. **B audits this branch** — see B below.
 
+**Then (8 September, from 1, after the bank module): two ingestion jobs on the critical path.**
+(1) **The claims history** — the archive is 21 days long and every rate is judged on it; the
+owner is exporting twelve months of "Rx Transaction Details By Submission Type". Prove the reader
+(`rx-transactions.ts`, `importRxTransactions`) on a multi-month file: fixed columns across page
+breaks and month boundaries, `transactionKey` de-duplication on a re-sent day, a tens-of-thousands
+row import in a separate process so the site keeps answering, and an import report that says what
+it read and skipped. Fixture extended across a month boundary from `fixtures/rx-transactions.txt`.
+(2) **The on-hand count** — none has ever arrived; `shelf.ts fileOnHand` has never seen a real
+file. Fixture, test, and a refusal that names the column it wanted rather than filing zeros, so
+the first real file lands first time. Then the reconcile store and page once the remittance tables
+exist, and the McKesson invoice when it arrives.
+
+**Then (8 September, from 1): two more, both on the pharmacy computer's side of the data.**
+(1) **Plan classification proposals** — BACKLOG item 10, moved from A to 2. 6 of 1,054 fills sit
+on a classified plan, so the law-first pricing rung never fires. Where `payer_bins.linesOfBusiness`
+(and the published Medicare Part D BIN/PCN list in `reference.ts`) state the line of business for
+a BIN/PCN, propose the class on the plan row with its source, never assume it; the owner confirms
+with one click per plan, biggest first (fills behind each triple, which Data health already
+counts). Files: `plan-*.ts`, `src/app/(app)/payers/plans/**` (new). `plan_groups` gains
+`proposedClassification` and `proposedFrom` (additive, next migration number).
+(2) **Data health measures itself** — a daily run without a button: the launcher already runs
+scheduled work (`scripts/launch.mjs` and the nightly mailbox sweep); wire `measureDataHealth()` in
+after the nightly sweep in a separate process (the make-claude-copy pattern), so the page is
+never more than a day old and the "measured at" date says so.
+
 **Then (8 September, from 1, the owner's ask): pack sizes fixed and correctable** — `docs/BACKLOG.md`
 item 11. Auto-correct from the FDA where its description reads to a dispensing unit and the
 catalogue is a clean multiple; a lookup-and-correct page for the rest; corrections in
@@ -138,9 +163,70 @@ separate process or held between requests (every libsql call blocks the server; 
 `src/app/(app)/tools/data-health/**` are yours. Start from tonight's hand-measured figures in
 HANDOFF so the first version already shows the real numbers.
 
+### The bank feed — plan from 2 (8 September), for 1 to confirm before I build
+
+**Read the code first, as asked, and the headline is that most of this exists. Please do not have
+me rebuild it.**
+
+`bank-statement.ts` parses a bank CSV: it finds the date, description and amount columns by their
+headings, handles separate debit and credit columns, and gives every line a stable key.
+`src/app/(app)/money/bank.ts` takes that, drops lines already held by key, places each one, writes
+`bank_lines`, creates a cash receipt for a deposit, marks an expense or a supplier invoice paid,
+audits, and redirects with a sentence saying what happened. `/money` already lists placed lines and
+names the unplaced ones. The placement rule is properly conservative — one open item, the exact
+amount, the right name, or it is left unplaced rather than guessed.
+
+So **`bank` reads 0 of 0 on Data health because no statement has ever been uploaded, not because
+the feed is missing.** That is an owner action, not a build: he exports the month-end CSV and
+presses the button on /money. Worth telling him plainly, because a page that says "0 bank lines"
+looks like broken software rather than a waiting task.
+
+**What is genuinely missing is the reconciliation, and it is one link, not a feed.**
+
+A deposit becomes a cash receipt attributed to a payer *by name from the description*. Nothing ties
+it to the 835 lines that make it up. So "claim → 835 line → deposit" on Data health cannot rise
+above zero however many statements are loaded, and the owner cannot answer the question the row
+exists for: *did this payer actually pay me what the remittances said they would?*
+
+`claim_payments` holds the 835 lines. `bank_lines` has `receipt_id`, `expense_id` and
+`invoice_id` but nothing pointing at the payments a deposit settles. That is the gap.
+
+**What I propose to own**
+
+1. `bank-reconcile.ts`, pure and tested: given a deposit (date, amount, payer) and the 835 lines
+   outstanding for that payer, find the set that sums to it. Exact sums only, within a stated date
+   window, and where more than one set matches it reports the ambiguity rather than choosing —
+   a deposit tied to the wrong remittances is worse than one left untied.
+2. Migration 0087, additive: a join table `bank_line_payments` (bank_line_id, claim_payment_id,
+   matched_by, matched_at). A join table rather than a column on either side, because one deposit
+   settles many 835 lines and one remittance can be split across two deposits.
+3. `bank-reconcile-store.ts` and a page under Remits — the deposit, the remittances behind it, and
+   what is left over on either side.
+4. The two Data health rows then measure something: `bank` from the statements loaded, and
+   `claim → 835 line → deposit` from this join rather than from the strict rx-key guess it uses now.
+
+**Scope I need you to settle before I start.** `src/app/(app)/money/**` is A's in the ownership
+table, and `money/bank.ts` is where the import lives. My plan touches none of it — the
+reconciliation is a new module, a new table and a new page — but the natural home for a "reconcile
+this deposit" button is the /money page A owns, and A is on the books right now. Either I put the
+page under Remits and link it from Data health only, or you and A agree a seam on /money. I would
+rather be told than guess, because two sessions in the cash side of the books at once is exactly
+what the ownership table exists to stop.
+
+**One question of fact I cannot answer from here:** do the 22 `claim_payments` rows carry a payer
+and a date that would let them be matched to a deposit at all, and are they MTF facilitator
+payments rather than PBM remittances? If they are all facilitator money, this link measures
+something much narrower than the row's title claims and the title should change.
+
 ---
 
 ## Helper A — auditor for 1, and the Money books
+
+**Merged and live 8 September (579150b):** the 1c8591d product-identity audit and its OTC fix,
+shelf.ts, order-plan.ts (short-dated lots), the band arithmetic, the claims feed, secondary payors
+(`payerShares`), the add-ons list (`whyNotSteady`), the ratio-measure form rule, and the
+claim-to-contract resolver with the networks page. Next in order: the Money books fold; the
+payer-model audit once 1 drafts `docs/reference/payer-model.md`; plan-class proposals (BACKLOG 10).
 
 ### Audit first (7 September, from 1)
 

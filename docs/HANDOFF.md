@@ -599,6 +599,70 @@ worklist for filling them is `unplacedNames`, which is finding 2 of the invoices
 renders nowhere. Queries to size all of it are in the audit. Not patched: `supplier-match.ts` and
 `shelf.ts` are 1's, it changes a rate that decides purchasing, and it is A's finding to carry.
 
+**For A (8 September, from 1): audit `docs/reference/payer-model.md`** — the draft of the entities
+and keys behind "who priced a claim" and "who pays it" (payor, processor, contract document, rate
+schedule, network, plan, claim and fill, remittance, deposit), what a claim must carry to be
+reconciled to an 835, and the order of change. Nothing is migrated until you have read it. The two
+things to press hardest: whether the remittance tables carry everything reconciliation needs (CLP,
+CAS, PLB, TRN) and nothing it does not; and whether the payor/processor split survives every case
+you can think of (FEP, PSAO pay-on-behalf, the MTF, discount cards, a plan sponsor paying direct).
+
+**Later payments and the bank, measured for 2's bank plan (8 September).** All 22 `claim_payments`
+rows are Medicare Transaction Facilitator payments (source `mtf`, payer "MEDICARE TRANSACTION
+FACILITATOR", dated 2026-08-18 to 2026-09-01, $5,735.15). **No 835 has ever been received and no
+bank statement has ever been uploaded** (`bank_lines` empty). So Data health's "claim → 835 →
+deposit" is retitled "claim → later payment → deposit" and says so. Scope decided: the
+reconciliation lives at `/remits/reconcile` (2's `bank-reconcile*.ts`), `/money` stays A's, the
+seam is `depositExplanation(bankLineId)`, and the join table waits for the remittance tables in
+`docs/reference/payer-model.md` after A's audit. **Owner action: upload a bank statement at month
+end** — until one exists the cash side of the books has nothing to reconcile to.
+
+**The audits' queries, run on the live database (8 September, session 1).** One answer each, in
+the order the audits asked:
+
+- *shelf 1 — catalogue names vs register names:* identical at all five (anda, ipc, ipd, mckesson,
+  parmed). No supplier is priced gross on the order screen for want of a name. Closed.
+- *shelf 2 — contract flag by supplier:* every secondary is 100% "not rebated" (ANDA 7,947, IPC
+  2,485, IPD 4,449, ParMed 4,686); McKesson 7,165 rebated of 44,242. So the band guard charging a
+  whole secondary basket against the compliance ratio is charging it on lines that never earned
+  the rebate — **the finding stands and the overrule is firing on fiction.** A: the fix is yours to
+  propose; 1 will take it into `shelf.ts`.
+- *order-plan — a supplier with both a short-dated and a sound lot on one NDC:* **0.** No catalogue
+  row on this database carries a short-dated availability at all, so the first finding costs
+  nothing today and the fix is insurance. Merged anyway.
+- *add-ons — which steadiness test fails:* **449 of 553 NDCs fail "dispensed on fewer than 3
+  days"; 0 fail prescriptions; 0 fail concentration; 104 are steady; the claims window is 21
+  days.** The refusal sentence was wrong (now fixed) *and* the archive is three weeks long. The
+  site holds claims from 18 August. **Owner action: load the claims history** — a PioneerRx export
+  of the past twelve months, or the SQL read — because every rate, every add-on, every "which
+  NDC pays" is being judged on 21 days.
+- *claims 1 — `quantity_unit` filled:* 0 of 1,669. As expected; on the export list.
+- *claims 2 — claims by NADAC pricing unit:* EA 23,882 rows, ML 1,837, GM 1,326 (rows are
+  claim×NADAC-date joins, so read as shares: roughly 11% of claim pricing is per ML or GM). That is
+  the share on which `reimbursement-fit.ts`'s per-unit ratio can be incommensurate.
+- *secondary payors — remit on multi-payor rows by BIN:* 19 BINs; the largest 610455 $1,550.13 on
+  3 rows, 004336 $1,096.43, 021825 $962.93, 020099 $925.15, 015581 $730.29, 610239 $627.81,
+  610011 $462.50, 024284 (RxRescue) $458.29 on 5 rows, 610524 $245.81 on 5 rows.
+- *product identity 1 — FDA-keyed groups with no NADAC that hold both brand and generic:* **383.**
+  Real: an FDA-keyed NDC with no NADAC row has classification "?", so its brand and generic merge.
+  **Fixed the same night:** brand/generic now comes from the FDA's marketing category where NADAC
+  has no row (`fdaClassification`: ANDA and authorized generics are generic, NDA and BLA brand,
+  OTC monograph is OTC, unapproved stays unclassified). Re-measured through the real grouping:
+  of 11,001 catalogue NDCs with an FDA row and no NADAC row, **0 groups hold both a brand and a
+  generic (was 383)**; 391 NDCs remain unclassified because the FDA lists them as unapproved or
+  homeopathic.
+- *product identity 2 — OTC:* 80,200 NADAC rows are OTC; 1,536 catalogue NDCs. The OTC fix is
+  merged.
+- *product identity 3 — FDA products split by NADAC coverage:* **1,921.** The safe direction, and
+  the fix above (FDA classification) lets the two schemes share the classification and unit
+  suffix, so most of these rejoin.
+- *invoices — filed with a total and no lines:* 1, $1,530.89, `needs_review` 0 (it predates the
+  fix; the invoices page now derives it). Closed once re-filed.
+- *band arithmetic and ratio-measure — drill-down months against statements:* **there are no
+  `drill_down_months` or `rebate_statements` tables**; the drill-down is read from the stored
+  document (`drill-down-read.ts`) and the statement likewise. A: restate the query against
+  `latestRatio().months` and `rebateStatementFor()` and 1 will run it as a script.
+
 ### The merge round of 8 September (session 1)
 
 Helper A said the uncomfortable thing plainly: nine pull requests open, none merged, findings that
@@ -802,6 +866,20 @@ unit (NCPDP 600-28).
 FDA (multiples of 2× to 30×), 32,643 already right, **12,659 open questions**, dominated by one
 convention — McKesson counts a vial as 1 EA where the FDA states 20 mL — which a second automatic
 rule (contents of N containers) should settle; proposed to 2.
+
+**1 edited two files outside its group (8 September), each in one place, for the background claims
+import:** `mailbox.ts` (B's — the `rx_transactions` branch of the route now calls
+`importClaimsFile`, which imports inline under 256 KB and in a process of its own above it) and
+`src/app/(app)/claims/page.tsx` (C's — the upload action does the same, and the page shows the
+job's state beside its notices). `claims-import-job.ts` and `scripts/import-claims.ts` are 1's.
+
+**Handed to 2 (8 September, from 1): the on-hand reader.** `fileOnHand` and everything it calls in
+`shelf.ts`, plus `on-hand.ts` — for the fixture, the reader test, and a refusal that names the
+column it wanted rather than filing zeros. Lift the reading out of `shelf.ts` into its own module
+(`on-hand-read.ts`, pure, tested) and leave `shelf.ts` calling it, so the 895-line module A audited
+stays 1's and the reader is 2's from here. Also 2's: batching the three per-row update loops in
+`importRxTransactions` (`plan.reverseExisting`, `plan.markSold`, `plan.refresh`) into grouped
+statements — 1 moves the whole import into a separate process under `scripts/**` after that lands.
 
 **File handed to 2 (8 September):** `packageUnits` in `drug-directory.ts`, for the FDA package
 parser behind the Data health row "catalogue row → FDA package size". Read the nested description

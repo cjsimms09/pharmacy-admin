@@ -4,7 +4,8 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { importClaims, importRxTransactions, describeTransactionImport, claimFlags, claimsByPayer, claimImports } from "@/lib/claims";
+import { importClaims, describeTransactionImport, claimFlags, claimsByPayer, claimImports } from "@/lib/claims";
+import { claimsImportJob, claimsImportRunning } from "@/lib/claims-import-job";
 import { looksLikeRxTransactions } from "@/lib/rx-transactions";
 import { getSettings } from "@/lib/settings";
 import { hasMailPassword } from "@/lib/mailbox";
@@ -25,6 +26,8 @@ export default async function ClaimsPage({
   await requireReimbursement();
   await requireUser();
   const { ok, error, from, to, rx, payer } = await searchParams;
+  // A large file importing in its own process, so the page can say so rather than go quiet.
+  const importJob = await claimsImportJob();
 
   /*
    * One day, unless somebody asks for more.
@@ -155,11 +158,22 @@ export default async function ClaimsPage({
     try {
       const buf = Buffer.from(await file.arrayBuffer());
       if (looksLikeRxTransactions(buf.subarray(0, 8192).toString("utf8"))) {
-        const t = await importRxTransactions(buf, file.name, u.id);
         // A remittance can beat the daily report. Anything waiting for this prescription attaches now.
         const { matchOrphanPayments } = await import("@/lib/claim-payments");
-        const attached = await matchOrphanPayments();
-        const text = describeTransactionImport(t) + (attached.matched ? ` ${attached.matched} payment${attached.matched === 1 ? "" : "s"} that arrived before the claim ${attached.matched === 1 ? "was" : "were"} attached.` : "");
+        let attachedNote = "";
+        const attach = async () => {
+          const attached = await matchOrphanPayments();
+          attachedNote = attached.matched ? ` ${attached.matched} payment${attached.matched === 1 ? "" : "s"} that arrived before the claim ${attached.matched === 1 ? "was" : "were"} attached.` : "";
+        };
+        // The twelve-month history imports in a process of its own; the daily file inline.
+        const { importClaimsFile } = await import("@/lib/claims-import-job");
+        const outcome = await importClaimsFile({ buf, fileName: file.name, user: { id: u.id, name: u.name }, after: attach });
+        if (outcome.apart) {
+          revalidatePath("/claims");
+          redirect(`/claims?${outcome.started ? "ok" : "error"}=` + encodeURIComponent(outcome.message));
+        }
+        const t = outcome.report;
+        const text = describeTransactionImport(t) + attachedNote;
         await audit({ action: "claims.import", userId: u.id, userName: u.name, details: `${file.name}: ${text.slice(0, 200)}` });
         revalidatePath("/claims");
         redirect(`/claims?${t.problems.length && !t.claimsAdded ? "error" : "ok"}=` + encodeURIComponent(text));
@@ -474,6 +488,21 @@ export default async function ClaimsPage({
 
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
+      {importJob && claimsImportRunning(importJob) && (
+        <Notice kind="ok">
+          Importing {importJob.fileName} in the background — {importJob.step}. Refresh to see where it has got to.
+        </Notice>
+      )}
+      {importJob && importJob.state === "failed" && (
+        <Notice kind="crit">
+          The background import of {importJob.fileName} did not finish: {importJob.error ?? importJob.step}
+        </Notice>
+      )}
+      {importJob && importJob.state === "done" && importJob.finishedAt && Date.now() - Date.parse(importJob.finishedAt) < 6 * 3_600_000 && (
+        <Notice kind="ok">
+          {importJob.fileName} imported in the background: {importJob.result ?? importJob.step}
+        </Notice>
+      )}
 
       {flags.total === 0 ? (
         <Empty>No claims loaded yet.</Empty>

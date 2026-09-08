@@ -121,9 +121,15 @@ export default async function PackSizesPage({
         }
       />
 
-      <div className="mb-4 grid gap-3 sm:grid-cols-3">
+      <div className="mb-4 grid gap-3 sm:grid-cols-4">
         <Figure value={summary.settledByPerson.toLocaleString("en-US")} label="Settled by the pharmacy" sub="Your answer, on every import" />
         <Figure value={summary.settledByFda.toLocaleString("en-US")} label="Settled from the FDA file" sub="Whole-factor corrections" />
+        {/* Not work done and not work outstanding: questions that turned out not to be questions. */}
+        <Figure
+          value={summary.closedByNadac.toLocaleString("en-US")}
+          label="Answered by NADAC"
+          sub="Counted, as NADAC counts them — nothing was wrong"
+        />
         <Figure
           value={summary.needsPerson.toLocaleString("en-US")}
           label="Need a person"

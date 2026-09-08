@@ -311,6 +311,41 @@ export type TransactionImportReport = ImportReport & {
  * The drug name is not in the report. It is filled in from the supplier catalogues, then from
  * NADAC, by NDC — so a claim reads as "ATORVASTATIN 40MG TAB" on every page rather than an NDC.
  */
+/**
+ * Per-row updates as one statement per batch, rather than one round trip per row.
+ *
+ * Every libsql call blocks the Node event loop, and these loops run inside the web request and
+ * inside the mailbox sweep. On the daily feed that is a few dozen updates and nobody notices; on
+ * the twelve-month history the pharmacy is asking PioneerRx for it is potentially thousands of
+ * sequential blocking calls with the site answering nothing throughout.
+ *
+ * The values travel as one JSON parameter and are joined with `json_each`, which keeps the
+ * statement the same shape whatever the batch holds and stays well clear of SQLite's limit on bound
+ * variables. `UPDATE … FROM (VALUES …) AS v(cols)` is the obvious form and SQLite rejects it —
+ * a column list on a VALUES alias is not allowed — so this was measured against the real driver
+ * before it was written rather than assumed.
+ *
+ * Batches are two hundred so that a failure names the rows it was carrying. A statement that fails
+ * having swallowed the whole import tells nobody which claim was wrong.
+ */
+async function inBatches<T extends { id: string }>(
+  rows: T[],
+  what: string,
+  apply: (chunk: T[]) => Promise<unknown>,
+  size = 200,
+): Promise<void> {
+  for (let i = 0; i < rows.length; i += size) {
+    const chunk = rows.slice(i, i + size);
+    try {
+      await apply(chunk);
+    } catch (e) {
+      const named = chunk.slice(0, 5).map((r) => r.id).join(", ");
+      const rest = chunk.length > 5 ? `, and ${chunk.length - 5} more` : "";
+      throw new Error(`Failed ${what} for ${chunk.length} claim${chunk.length === 1 ? "" : "s"} (${named}${rest}): ${(e as Error).message}`);
+    }
+  }
+}
+
 export async function importRxTransactions(file: Buffer, fileName: string, userId: string): Promise<TransactionImportReport> {
   const { parseRxTransactions, planTransactions, mdyToIso } = await import("./rx-transactions");
   const parsed = parseRxTransactions(file.toString("utf8"));
@@ -436,12 +471,28 @@ export async function importRxTransactions(file: Buffer, fileName: string, userI
     ...plan.insertUnmatchedReversal.map((t) => toClaim(t, "reversed")),
   ];
   for (let i = 0; i < inserts.length; i += 300) await db.insert(schema.claims).values(inserts.slice(i, i + 300));
-  for (const r of plan.reverseExisting) {
-    await db.update(schema.claims).set({ status: "reversed", reversedOn, reversalKey: r.reversal.transactionKey }).where(eq(schema.claims.id, r.claimId));
-  }
-  for (const s of plan.markSold) {
-    await db.update(schema.claims).set({ completedAt: mdyToIso(s.completedAt) }).where(eq(schema.claims.id, s.claimId));
-  }
+  await inBatches(
+    plan.reverseExisting.map((r) => ({ id: r.claimId, key: r.reversal.transactionKey })),
+    "marking claims reversed",
+    (chunk) =>
+      db.run(sql`
+        update claims
+        set status = 'reversed', reversed_on = ${reversedOn}, reversal_key = json_extract(j.value, '$.key')
+        from json_each(${JSON.stringify(chunk)}) as j
+        where claims.id = json_extract(j.value, '$.id')
+      `),
+  );
+  await inBatches(
+    plan.markSold.map((s) => ({ id: s.claimId, at: mdyToIso(s.completedAt) })),
+    "recording claims as sold",
+    (chunk) =>
+      db.run(sql`
+        update claims
+        set completed_at = json_extract(j.value, '$.at')
+        from json_each(${JSON.stringify(chunk)}) as j
+        where claims.id = json_extract(j.value, '$.id')
+      `),
+  );
   /*
    * What the report now says about a claim already held, written over what it used to say.
    *
@@ -450,30 +501,43 @@ export async function importRxTransactions(file: Buffer, fileName: string, userI
    * column reach rows that were loaded before either existed, and without this the pharmacy would
    * have had to delete its claims and start again to get the truth in.
    */
-  let restated = 0;
-  for (const r of plan.refresh) {
-    const changed =
-      r.txn.grossProfitCents !== null || r.txn.expectedFacilitatorCents !== null || r.txn.patientTotalCents !== null;
-    if (!changed) continue;
-    await db
-      .update(schema.claims)
-      .set({
-        remitCents: r.txn.remitCents,
-        copayCents: r.txn.copayCents,
-        patientTotalCents: r.txn.patientTotalCents,
-        acquisitionCents: r.txn.acquisitionCents,
-        grossProfitCents: r.txn.grossProfitCents,
-        expectedFacilitatorCents: r.txn.expectedFacilitatorCents ?? null,
-        dispensingFeePaidCents: r.txn.dispensingFeeCents,
-        ingredientPaidCents: r.txn.ingredientPaidCents,
-        quantityThousandths: r.txn.quantityThousandths,
-        cashPlan: r.txn.cashPlan === true,
-        onAccount: r.txn.onAccount === true,
-        rawJson: JSON.stringify(r.txn.raw),
-      })
-      .where(eq(schema.claims.id, r.claimId));
-    restated++;
-  }
+  const restatements = plan.refresh
+    .filter((r) => r.txn.grossProfitCents !== null || r.txn.expectedFacilitatorCents !== null || r.txn.patientTotalCents !== null)
+    .map((r) => ({
+      id: r.claimId,
+      remit: r.txn.remitCents,
+      copay: r.txn.copayCents,
+      patientTotal: r.txn.patientTotalCents,
+      acquisition: r.txn.acquisitionCents,
+      grossProfit: r.txn.grossProfitCents,
+      facilitator: r.txn.expectedFacilitatorCents ?? null,
+      fee: r.txn.dispensingFeeCents,
+      ingredient: r.txn.ingredientPaidCents,
+      quantity: r.txn.quantityThousandths,
+      cash: r.txn.cashPlan === true ? 1 : 0,
+      onAccount: r.txn.onAccount === true ? 1 : 0,
+      raw: JSON.stringify(r.txn.raw),
+    }));
+  const restated = restatements.length;
+  await inBatches(restatements, "restating claims from a re-sent report", (chunk) =>
+    db.run(sql`
+      update claims
+      set remit_cents = json_extract(j.value, '$.remit'),
+          copay_cents = json_extract(j.value, '$.copay'),
+          patient_total_cents = json_extract(j.value, '$.patientTotal'),
+          acquisition_cents = json_extract(j.value, '$.acquisition'),
+          gross_profit_cents = json_extract(j.value, '$.grossProfit'),
+          expected_facilitator_cents = json_extract(j.value, '$.facilitator'),
+          dispensing_fee_paid_cents = json_extract(j.value, '$.fee'),
+          ingredient_paid_cents = json_extract(j.value, '$.ingredient'),
+          quantity_thousandths = json_extract(j.value, '$.quantity'),
+          cash_plan = json_extract(j.value, '$.cash'),
+          on_account = json_extract(j.value, '$.onAccount'),
+          raw_json = json_extract(j.value, '$.raw')
+      from json_each(${JSON.stringify(chunk)}) as j
+      where claims.id = json_extract(j.value, '$.id')
+    `),
+  );
 
   /*
    * Reversals that could not be paired as they arrived, paired now against everything held.

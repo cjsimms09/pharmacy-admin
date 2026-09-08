@@ -1,6 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { parseOnHand, looksLikeOnHand, countDate, mapHeader, onHandTotals, looksLikePioneerOnHand, readOnHand, packFrom } from "../src/lib/on-hand";
+import { readFileSync } from "node:fs";
+import { parseOnHand, looksLikeOnHand, countDate, mapHeader, onHandTotals, looksLikePioneerOnHand, readOnHand, packFrom, whyNotAnOnHandFile } from "../src/lib/on-hand";
 
 const tabbed = [
   "West Wichita Family Pharmacy — Inventory On Hand",
@@ -86,7 +87,10 @@ describe("reading a daily on-hand export", () => {
   test("a file with no quantity column is refused with a reason, not read as empty", () => {
     const p = parseOnHand("Inventory On Hand\nNDC\tDescription\n0093-1056-01\tLisinopril");
     assert.equal(p.rows.length, 0);
-    assert.match(p.problems[0], /quantity-on-hand/);
+    // The reason now names the column and lists the headings it did read, so a report one
+    // heading away from working can be told from a file that was never a count at all.
+    assert.match(p.problems[0], /missing a column named "Quantity On Hand"/);
+    assert.match(p.problems[0], /NDC, Description/);
   });
 
   test("page furniture and repeated headers are not rows", () => {
@@ -292,5 +296,97 @@ describe("reading PioneerRx's Inventory Search Results", () => {
     const p = readOnHand(broken);
     assert.equal(p.rows.some((r) => r.code === "307660801559"), false);
     assert.equal(p.skipped["counted in packages with no readable pack size"], 1);
+  });
+});
+
+/**
+ * The first real count, made to land on the first try.
+ *
+ * Data health says no on-hand count has ever arrived, and nobody has seen a real file — so this
+ * fixture is built from what PioneerRx's report designer offers rather than cut from something the
+ * pharmacy sent. The point is that the day the owner exports one, it works, rather than being
+ * debugged while he waits.
+ */
+describe("a PioneerRx inventory export", () => {
+  const text = readFileSync(new URL("../fixtures/on-hand.txt", import.meta.url), "utf8");
+
+  test("it is recognised as a count, so the inbox files it as one", () => {
+    // "No on-hand count has ever arrived" may partly be "arrived and was filed as other".
+    assert.equal(looksLikeOnHand(text), true);
+  });
+
+  test("the count date comes off the report, not off the clock", () => {
+    assert.equal(readOnHand(text).countedOn, "2026-09-30");
+  });
+
+  test("every column the report prints is understood", () => {
+    // An unmapped column is a column whose meaning was thrown away. Inventory Group was one until
+    // now: the reader dropped it, so fileOnHand's split of the dispensing shelf from the front shop
+    // fell back to guessing from the NDC alone.
+    assert.deepEqual(readOnHand(text).unmappedColumns, []);
+    assert.equal(readOnHand(text).rows.find((r) => r.code === "00093505698")?.inventoryGroup, "Rx");
+    assert.equal(readOnHand(text).rows.find((r) => r.codeKind === "upc")?.inventoryGroup, "Front Shop");
+  });
+
+  test("a front-shop barcode is kept, as the other report shape keeps it", () => {
+    // parsePioneerOnHand reads the same stock out of the four-line report and keeps a UPC. This
+    // path asked for an NDC and dropped it, so one shelf valued differently depending on which
+    // export was sent — two readers of one thing disagreeing, which is the fault that keeps
+    // recurring here.
+    const upc = readOnHand(text).rows.find((r) => r.codeKind === "upc");
+    assert.ok(upc, "a twelve-digit barcode is a real front-shop item, not an unreadable NDC");
+    assert.equal(upc!.ndc11, null, "and it still carries no NDC, so nothing prices it against NADAC");
+  });
+
+  test("a partial bottle keeps its decimals", () => {
+    // 3.5 mL of a suspension is three and a half millilitres, not three and not four.
+    assert.equal(readOnHand(text).rows.find((r) => r.code === "00093416073")?.quantityThousandths, 3_500);
+  });
+
+  test("A ROW WITH NO QUANTITY IS SKIPPED, NEVER FILED AS ZERO", () => {
+    // The whole point. A zero says the shelf is empty and the buy list acts on it; a skip says
+    // nobody knows, which is the truth.
+    const parsed = readOnHand(text);
+    assert.equal(parsed.rowsRead, 7);
+    assert.equal(parsed.rows.length, 6);
+    assert.equal(parsed.skipped["quantity unreadable"], 1);
+    assert.ok(!parsed.rows.some((r) => r.quantityThousandths === 0));
+    assert.ok(!parsed.rows.some((r) => r.code === "00093145306"), "the row with no quantity must not be stored at all");
+  });
+});
+
+describe("a file that is not a count says which column it wanted", () => {
+  const lines = (s: string) => s.split(/\r?\n/);
+
+  test("the missing column is named, and so are the headings it did read", () => {
+    // "No header row carrying both an NDC column and a quantity-on-hand column" is true and
+    // useless: a report one heading away from working fails identically to a photograph of a shelf,
+    // and the pharmacist cannot tell which it is.
+    const why = whyNotAnOnHandFile(lines("Inventory Search Results\nItem Number\tDescription\tNDC\tUnit\n1\tX\t00093505698\tEA"));
+    assert.match(why, /missing a column named "Quantity On Hand"/);
+    assert.match(why, /Item Number, Description, NDC, Unit/);
+  });
+
+  test("a missing NDC column is named just as plainly", () => {
+    const why = whyNotAnOnHandFile(lines("Stock\nItem Number\tDescription\tQuantity On Hand\n1\tX\t5"));
+    assert.match(why, /missing a column named "NDC"/);
+  });
+
+  test("both missing is said as both", () => {
+    const why = whyNotAnOnHandFile(lines("Report\nItem Number\tDescription\tUnit\n1\tX\tEA"));
+    assert.match(why, /"NDC".*and.*"Quantity On Hand"/s);
+  });
+
+  test("a file with no table at all is told that, not given a column list", () => {
+    const why = whyNotAnOnHandFile(lines("Inventory as of today\nnothing here is a table"));
+    assert.match(why, /exported as text or CSV rather than a PDF or a picture/);
+  });
+
+  test("the refusal reaches the caller rather than an empty count", () => {
+    // fileOnHand returns { ok: false, why } from problems[0], so this sentence is what the
+    // pharmacist sees on the page.
+    const parsed = readOnHand("Inventory Search Results\nItem Number\tDescription\tNDC\tUnit\n1\tX\t00093505698\tEA");
+    assert.equal(parsed.rows.length, 0);
+    assert.match(parsed.problems[0], /missing a column named "Quantity On Hand"/);
   });
 });
