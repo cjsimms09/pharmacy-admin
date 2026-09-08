@@ -1,5 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import path from "node:path";
 import { splitCommand, spawnPlan, cliDownloadArg } from "../src/lib/mtf";
 
 /**
@@ -63,6 +64,16 @@ describe("starting it on Windows", () => {
   });
 });
 
+/*
+ * The separator is the platform's, and the expectations here are built with `path.join` rather than
+ * written out.
+ *
+ * Two of these read `"data/remits/mtf"` and failed on the only machine that matters: `path.relative`
+ * answers `data\remits\mtf` on Windows, and this site runs on a Windows computer behind the
+ * pharmacy counter. Writing the separator into the expectation was asserting that the site runs on
+ * Linux. The tool is given whatever its own platform uses, which is what it wants, so the test now
+ * asks the same question the code answers rather than a different one.
+ */
 describe("telling the tool where to put its downloads", () => {
   test("a folder inside the site's own is given relatively, because the tool joins rather than resolves", () => {
     /*
@@ -71,12 +82,14 @@ describe("telling the tool where to put its downloads", () => {
      * "C:\Users\wwfprx\pharmacy-admin\C:\Users\wwfprx\pharmacy-admin\data\remits\mtf".
      */
     const arg = cliDownloadArg("/home/user/pharmacy-admin/data/remits/mtf", "/home/user/pharmacy-admin");
-    assert.equal(arg, "data/remits/mtf");
+    assert.equal(arg, path.join("data", "remits", "mtf"));
+    // Relative is the whole point: an absolute path is what the tool doubles.
+    assert.ok(!path.isAbsolute(arg));
   });
 
   test("a folder outside it still gets a relative form, because joining handles the way back up", () => {
     const arg = cliDownloadArg("/home/user/remits", "/home/user/pharmacy-admin");
-    assert.equal(arg, "../remits");
+    assert.equal(arg, path.join("..", "remits"));
   });
 
   test("the folder it is already in needs no path at all", () => {
