@@ -73,6 +73,28 @@ export type OnHandRow = {
   valueCents: number | null;
 };
 
+/**
+ * The reasons a row is dropped, as the exact strings that go into `skipped` and into the database.
+ *
+ * Named rather than typed inline because Data health reads them back out of stored JSON to say how
+ * much real stock the shelf is missing. Two copies of a string in two files is a coupling nothing
+ * enforces: change the wording here and the proof row silently stops recognising the reason, keeps
+ * counting, and reports a shelf in better health than it is. Shared constants make that a compile
+ * error instead.
+ *
+ * Changing a value here is a change to data already stored under the old wording. Add a new reason
+ * rather than reword an old one, or the counts in every filing before today stop being readable.
+ */
+export const ON_HAND_SKIP = {
+  noNdc: "no NDC",
+  badCode: "code is neither an NDC nor a barcode",
+  noQuantity: "quantity unreadable",
+  noPackSize: "counted in packages with no readable pack size",
+} as const;
+
+/** The reasons that mean real stock was dropped: the row had a quantity and no usable code. */
+export const ON_HAND_UNCODED_REASONS: readonly string[] = [ON_HAND_SKIP.noNdc, ON_HAND_SKIP.badCode];
+
 export type OnHandParse = {
   rows: OnHandRow[];
   /** The date the count represents, ISO, from the file. Null where it prints none. */
@@ -519,7 +541,7 @@ export function parseOnHand(text: string): OnHandParse {
     rowsRead++;
 
     if (!rawNdc) {
-      skip("no NDC");
+      skip(ON_HAND_SKIP.noNdc);
       continue;
     }
     /*
@@ -534,13 +556,13 @@ export function parseOnHand(text: string): OnHandParse {
      * what the report says it cost, which is what a front-shop item can honestly be.
      */
     if (!identified) {
-      skip("code is neither an NDC nor a barcode");
+      skip(ON_HAND_SKIP.badCode);
       continue;
     }
 
     if (qty === null) {
       // Refused rather than defaulted: an unreadable quantity is not an empty shelf.
-      skip("quantity unreadable");
+      skip(ON_HAND_SKIP.noQuantity);
       continue;
     }
 
@@ -776,14 +798,14 @@ export function parsePioneerOnHand(text: string): OnHandParse {
     const counted = parseQuantityThousandths(a.get("on hand"));
     if (counted === null) {
       // Refused rather than defaulted: an unreadable quantity is not an empty shelf.
-      skip("quantity unreadable");
+      skip(ON_HAND_SKIP.noQuantity);
       continue;
     }
 
     const pack = packFrom(b.get("package info") ?? "");
     if (pack.countsPackages && pack.packQty === null) {
       // "2" of an unknown package is not a number of anything.
-      skip("counted in packages with no readable pack size");
+      skip(ON_HAND_SKIP.noPackSize);
       continue;
     }
     // Package counts become dispensing units, so one unit of measure leaves this reader.

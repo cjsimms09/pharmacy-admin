@@ -1,6 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { onHandProofFraction, onHandProofGaps, onHandProofNote, skippedTotal, type OnHandImportProof } from "../src/lib/data-health-onhand-proof";
+import { ON_HAND_SKIP } from "../src/lib/on-hand";
 
 /*
  * The shelf count against the record count the report prints about itself.
@@ -20,7 +21,7 @@ const sept8 = (over: Partial<OnHandImportProof> = {}): OnHandImportProof => ({
   reportedCount: 1_772,
   rowsRead: 1_774,
   itemsKept: 1_771,
-  skipped: { "with no NDC": 2, "with a code that is not an NDC": 1 },
+  skipped: { [ON_HAND_SKIP.noNdc]: 2, [ON_HAND_SKIP.badCode]: 1 },
   storedRows: 1_771,
   ...over,
 });
@@ -32,21 +33,39 @@ describe("the real count, which does not reconcile cleanly", () => {
     assert.match(gaps.join(" "), /says it holds 1,772 records and 1,771 are on the shelf — 1 of the report's own records reached no row/);
   });
 
-  test("more lines were read than the report has records, which is a separate fact and is said separately", () => {
+  test("three items of real stock are missing, which the record counts forgive and the shelf does not", () => {
     /*
-     * The number nobody would think to compare. Two more lines than records is what a wrapped row
-     * looks like, and also what a line that is not a record looks like — either way the reader's
-     * idea of a row and the report's idea of a record have come apart.
+     * The finding, and the one the fraction cannot show. All three dropped rows carried a quantity
+     * — that is what made them records rather than wrapped tails — so all three are bottles on a
+     * shelf that the table valuing the inventory does not have. The report itself does not count
+     * two of them, which is exactly how three missing items hide behind "1,771 of 1,772".
      */
-    assert.match(gaps.join(" "), /read as 1,774 lines against 1,772 records the report claims — 2 more lines than records/);
+    assert.match(gaps.join(" "), /holds 3 items with a quantity and no usable NDC, so they are real stock the shelf does not carry/);
+    assert.match(gaps.join(" "), /The report does not count them as records either, which is why the totals can still appear to agree/);
+  });
+
+  test("more lines than records is not flagged, because the uncoded items explain it exactly", () => {
+    /*
+     * The first wrong answer, held so it cannot come back. 1,774 against 1,772 looked like two
+     * wrapped rows and was not: PioneerRx does not count an item with no NDC as a record, so a file
+     * with three such items has more lines than records by arithmetic rather than by fault. Crying
+     * wolf here would be crying it on every count this pharmacy ever files.
+     */
+    assert.doesNotMatch(gaps.join(" "), /unaccounted for/);
+  });
+
+  test("an excess the uncoded items do not explain is still flagged, and says how much is left over", () => {
+    const odd = sept8({ rowsRead: 1_776 });
+    assert.match(onHandProofGaps([odd]).join(" "), /only 3 of the 4 extra are items with no usable code\. 1 line is unaccounted for/);
   });
 
   test("the dropped rows are named with their reasons, worst first", () => {
-    assert.match(gaps.join(" "), /dropped 3 rows: 2 with no NDC, 1 with a code that is not an NDC/);
+    assert.match(gaps.join(" "), /dropped 3 rows: 2 no NDC, 1 code is neither an NDC nor a barcode/);
     assert.equal(skippedTotal(sept8()), 3);
   });
 
-  test("all three facts appear, so no one of them can stand for the count being right", () => {
+  test("three facts appear, and none of them can stand for the count being right", () => {
+    // Short by one record; three items of real stock gone; three rows dropped and why.
     assert.equal(gaps.length, 3);
   });
 
@@ -63,13 +82,24 @@ describe("a count that agrees with its report", () => {
     assert.deepEqual(onHandProofFraction([clean]), { numerator: 1_771, denominator: 1_771 });
   });
 
-  test("but a wrapped row is still called out even when the stored total happens to agree", () => {
-    // Two lines read for one record, one of them dropped: stored lands on the reported figure by
-    // luck. The count is right and the reader is not, and the second is worth knowing.
-    const lucky = sept8({ reportedCount: 1_771, rowsRead: 1_773, itemsKept: 1_771, skipped: { "with no NDC": 2 }, storedRows: 1_771 });
-    const g = onHandProofGaps([lucky]).join(" ");
-    assert.match(g, /2 more lines than records/);
+  test("stock dropped for want of a code is named even when every total agrees", () => {
+    /*
+     * The case the fraction is blind to by construction. Two items with no NDC: the report does not
+     * count them, so reported, read and stored all agree perfectly and the row reads complete —
+     * while two bottles sit on the shelf that the inventory is not valued at.
+     */
+    const hidden = sept8({ reportedCount: 1_771, rowsRead: 1_773, itemsKept: 1_771, skipped: { [ON_HAND_SKIP.noNdc]: 2 }, storedRows: 1_771 });
+    const g = onHandProofGaps([hidden]).join(" ");
+    assert.deepEqual(onHandProofFraction([hidden]), { numerator: 1_771, denominator: 1_771 }, "the fraction is complete");
+    assert.match(g, /holds 2 items with a quantity and no usable NDC/);
     assert.doesNotMatch(g, /reached no row/, "the stored total does agree, and the row must not claim otherwise");
+    assert.doesNotMatch(g, /unaccounted for/, "two uncoded items explain two extra lines exactly");
+  });
+
+  test("one such item reads as one, in every clause", () => {
+    const one = sept8({ reportedCount: 1_771, rowsRead: 1_772, itemsKept: 1_771, skipped: { [ON_HAND_SKIP.badCode]: 1 }, storedRows: 1_771 });
+    assert.match(onHandProofGaps([one]).join(" "), /holds 1 item with a quantity and no usable NDC, so it is real stock/);
+    assert.match(onHandProofGaps([one]).join(" "), /The report does not count it as a record either/);
   });
 });
 
@@ -111,7 +141,7 @@ describe("a filing that did not finish", () => {
 describe("more than one count", () => {
   test("each is proved against its own report rather than rolled into one total", () => {
     // A complete count must not cover a short one; the fraction adds per document.
-    const rows = [sept8(), sept8({ countedOn: "2026-10-01", reportedCount: 1_000, rowsRead: 1_000, itemsKept: 900, storedRows: 900, skipped: { "with no NDC": 100 } })];
+    const rows = [sept8(), sept8({ countedOn: "2026-10-01", reportedCount: 1_000, rowsRead: 1_000, itemsKept: 900, storedRows: 900, skipped: { [ON_HAND_SKIP.noNdc]: 100 } })];
     assert.deepEqual(onHandProofFraction(rows), { numerator: 2_671, denominator: 2_772 });
     const g = onHandProofGaps(rows).join(" ");
     assert.match(g, /The 2026-09-08 count/);
