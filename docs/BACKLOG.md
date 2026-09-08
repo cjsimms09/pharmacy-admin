@@ -376,6 +376,17 @@ larger than a season's use — is the failure. Multiple options, ranked, running
 minimum, never a single answer. Assigned to A (audit); session 1 supplies the live list and the
 facts behind each of its top lines.
 
+**Re-evaluated 8 September afternoon (1), at the owner's word** — "it lists very little options
+for each supplier… I dont want to order things we dont use but we need options of things we can
+add on to hit minimums." Measured first: every list empty; 442 of 545 dispensed drugs failed the
+three-test `steady` bar on fifteen days of claims; a saving under $5 was dropped; an equal price
+was dropped; and the planner's top-up took the whole days-of-stock cap (seven pods, $2,129, for a
+$169 gap). Changed: an add-on needs only to be *used* (two days or two prescriptions in the
+window; one fill is still refused), the cap on the observed rate bounds what it can cost; the same
+price as the primary is an option; a top-up buys the packs the shortfall needs. After: IPC 0 → 11
+options ($125.90 toward $200), IPD 0 → 3, the pod ×1. ANDA and ParMed still list nothing because
+**no minimum is on file for either** — the owner's to give. McKesson's price in every comparison is
+net of the ladder rebate at the band in force, and each basket prices its band cost.
 ### 13. The design pass is a fifth session (8 September)
 
 See item 8. Session C: cloud, no data, owns `src/app/**` presentation and `src/components/**`

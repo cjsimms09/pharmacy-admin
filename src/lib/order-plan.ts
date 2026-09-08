@@ -100,6 +100,12 @@ export type Movement = {
    * this boundary. Null where the drug is steady, or where the caller has not worked it out.
    */
   whyNotSteady?: string | null;
+  /**
+   * Used enough to be an add-on: two days or two prescriptions in the window (usage.ts). Where
+   * the caller has not worked it out, `steady` stands in. The days-of-stock cap bounds the cost.
+   */
+  usedEnough?: boolean;
+  whyNotUsed?: string | null;
   /** Units on the shelf now, in thousandths. Zero where no count is held. */
   onHandThousandths: number;
 };
@@ -418,9 +424,17 @@ export function planOrder(input: PlanInput): Plan {
       let filled = 0;
       for (const c of candidates.ranked) {
         if (filled >= shortfall) break;
-        const line = lineFor(c.ndc11, nameOf.get(c.ndc11) ?? c.name, c.offer, c.alternative, c.capThousandths, "top_up");
-        // A pack that alone overshoots the whole shortfall is still allowed — the alternative is
-        // not ordering at all — but only because the days-of-stock cap already passed on it.
+        /*
+         * Only as many packs as the shortfall needs, never the whole cap. The cap is what the shelf
+         * could absorb; the shortfall is what the order needs — seven packs of a $300 pod to cover a
+         * $169 gap was the cap standing in for the need. One pack that alone overshoots is still
+         * allowed: the alternative is not reaching the minimum at all.
+         */
+        const perPack = packCostCents(c.offer, 1);
+        const packUnits = (c.offer.packQty as number) * 1000;
+        const capPacks = Math.max(1, Math.floor(c.capThousandths / packUnits));
+        const packs = Math.max(1, Math.min(capPacks, Math.ceil((shortfall - filled) / Math.max(1, perPack))));
+        const line = lineFor(c.ndc11, nameOf.get(c.ndc11) ?? c.name, c.offer, c.alternative, packs * packUnits, "top_up");
         draft.lines.push(line);
         filled += line.costCents;
       }
@@ -559,14 +573,14 @@ export function topUpCandidates(a: {
       refused.push({ ndc11: m.ndc11, name: label, supplier: a.supplier, why: "Nothing dispensed in the window. Stock with no velocity is a write-off with a delay." });
       continue;
     }
-    if (!m.steady) {
+    if (!(m.usedEnough ?? m.steady)) {
       // The reason names the test that actually failed. One sentence for three tests printed the
       // wrong one 103 times out of 103 on this pharmacy's data.
       refused.push({
         ndc11: m.ndc11,
         name: label,
         supplier: a.supplier,
-        why: m.whyNotSteady ?? "The rate is one large fill, not a rate. Buying deep on it is buying for a patient who may not return.",
+        why: m.whyNotUsed ?? m.whyNotSteady ?? "The rate is one large fill, not a rate. Buying deep on it is buying for a patient who may not return.",
       });
       continue;
     }
@@ -576,7 +590,8 @@ export function topUpCandidates(a: {
       refused.push({ ndc11: m.ndc11, name: label, supplier: a.supplier, why: "Only this supplier prices it, so there is no saving to bank — buy it when it is needed." });
       continue;
     }
-    if (ours.effectiveUnitMicros >= alternative.effectiveUnitMicros) {
+    // The same price is allowed: reaching a minimum on it costs nothing. Dearer is not.
+    if (ours.effectiveUnitMicros > alternative.effectiveUnitMicros) {
       continue; // Not cheaper here. Silent: this is most of the catalogue.
     }
 
@@ -610,7 +625,9 @@ export function topUpCandidates(a: {
     const costCents = packCostCents(ours, packs);
     const alternativeCents = Math.round((alternative.effectiveUnitMicros * unitsThousandths) / 1000 / MICROS_PER_CENT);
     const savingCents = alternativeCents - costCents;
-    if (savingCents < a.materialityCents) continue;
+    // An add-on exists to reach a minimum, so a saving of nothing is allowed; a loss is not. The
+    // ranking below still puts the real savings first.
+    if (savingCents < 0) continue;
 
     ranked.push({
       ndc11: m.ndc11, name: label, offer: ours, alternative,

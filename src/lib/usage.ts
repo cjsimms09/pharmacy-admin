@@ -130,6 +130,25 @@ export const STEADY = {
  *
  * Null where the drug is steady. Pure.
  */
+/**
+ * Whether a drug is used enough to be added to an order to reach a minimum.
+ *
+ * The owner's rule, 8 September: "I dont want to order things we dont use but we need options of
+ * things we can add on to hit minimums." `steady` is the right bar for buying on a rate, and
+ * under fifteen days of claims it passes 103 drugs of 545, so every add-on list was empty. For an
+ * add-on the risk is already bounded by the days-of-stock cap on the observed rate — one 30-tablet
+ * fill in a fortnight caps the buy at a pack — so the bar here is only that the drug is used:
+ * dispensed on two or more days, or to two or more prescriptions, in the window held. A single
+ * fill is still refused: that is one patient, not use.
+ */
+export function usedEnoughForTopUp(v: Pick<Velocity, "steady" | "activeDays" | "prescriptions">): boolean {
+  return v.steady || v.activeDays >= 2 || v.prescriptions >= 2;
+}
+
+export function whyNotUsedEnough(v: Pick<Velocity, "steady" | "activeDays" | "prescriptions" | "windowDays">): string | null {
+  if (usedEnoughForTopUp(v)) return null;
+  return `Dispensed once, to one prescription, in the ${Math.round(v.windowDays)} days held. One fill is a patient, not use; it is ordered when it is prescribed.`;
+}
 export function whyNotSteady(v: Pick<Velocity, "activeDays" | "prescriptions" | "concentration" | "windowDays">): string | null {
   if (v.activeDays < STEADY.minActiveDays) {
     return (
