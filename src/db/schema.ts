@@ -753,6 +753,23 @@ export const suppliers = sqliteTable(
      */
     catalogName: text("catalog_name"),
     /**
+     * The other spellings this supplier's own paperwork uses for itself, one per line.
+     *
+     * `catalogName` is the name the PioneerRx catalogue export prints; this is everything else —
+     * chiefly the name on the invoice, which is a different document produced by a different
+     * system. The register calls one wholesaler "IPC" and its invoices say "Independent Pharmacy
+     * Cooperative", and the rebate arithmetic used to bridge that gap by testing whether either
+     * string contained the other. It does not, so eight lines and $78.50 of real purchases matched
+     * no supplier and left the figures silently. Containment is unsafe the other way too: it took
+     * the first register row whose name contained the printed one, so a line printed "IP" would go
+     * to whichever of "IPC" and "IPD" happened to be listed first — a wholesaler's spend on another
+     * wholesaler's ladder, which reads as a perfectly ordinary figure.
+     *
+     * Typed by the pharmacy, never inferred. An alias is a fact about a trading relationship, and
+     * a guessed one puts another supplier's purchases into this one's rebate ladder.
+     */
+    aliases: text("aliases").notNull().default(""),
+    /**
      * What they are expected to ship, as the pharmacy states it.
      *
      * Never used to classify anything — used the other way round, to notice when a supplier sends
@@ -848,6 +865,16 @@ export const invoiceLines = sqliteTable(
     id: text("id").primaryKey(),
     invoiceId: text("invoice_id").notNull().references(() => supplierInvoices.id, { onDelete: "cascade" }),
     supplier: text("supplier"),
+    /**
+     * The register row this line belongs to, copied from the invoice that carries it.
+     *
+     * `supplier` above is the name as printed. This is the answer `supplier_invoices` already
+     * reached from the sender address when the invoice was filed — the part a wholesaler's billing
+     * system controls, rather than the part it restyles. Held on the line, no reader downstream has
+     * to re-derive from text what was already settled. Null where the parent invoice resolved to no
+     * register row: a gap to be shown, not a name to be guessed at.
+     */
+    supplierId: text("supplier_id"),
     /** The date on the invoice, copied here so a price can be placed in time without a join. */
     invoiceDate: text("invoice_date"),
     ndc11: text("ndc11").notNull(),
@@ -876,6 +903,7 @@ export const invoiceLines = sqliteTable(
     index("invoice_lines_invoice_idx").on(t.invoiceId),
     index("invoice_lines_ndc_idx").on(t.ndc11),
     index("invoice_lines_supplier_idx").on(t.supplier),
+    index("invoice_lines_supplier_id_idx").on(t.supplierId),
   ],
 );
 
