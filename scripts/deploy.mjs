@@ -148,6 +148,19 @@ async function main() {
   const head = git(["rev-parse", "--short", "HEAD"]);
   const subject = git(["log", "-1", "--format=%s"]);
 
+  /*
+   * The typecheck is this script's gate, because nothing after it checks types at all.
+   *
+   * next.config.ts builds with `typescript: { ignoreBuildErrors: true }` on purpose — the pharmacy
+   * computer compiles, it does not check, so a build there cannot die on a type error while
+   * somebody is trying to dispense. That leaves `npm run check` as the only place types are
+   * enforced, and a commit that skipped it went to the site with four type errors in it on
+   * 8 September; the launcher built it without a word. So the deploy refuses first.
+   */
+  say("Typechecking…");
+  const tc = spawnSync(isWin ? "npx.cmd" : "npx", ["tsc", "--noEmit"], { encoding: "utf8", shell: isWin, timeout: 10 * 60_000 });
+  if (tc.status !== 0) fail(`The tree does not typecheck; nothing was pushed or deployed.\n${(tc.stdout || tc.stderr || "").trim().split("\n").slice(0, 12).join("\n")}`);
+
   // ── Push ────────────────────────────────────────────────────────────
   say(`Pushing ${head} "${subject}" to origin/${BRANCH}…`);
   try {
