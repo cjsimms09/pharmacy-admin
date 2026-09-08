@@ -653,6 +653,30 @@ a "Discount Card Listing" of BIN/PCN/group per card, and drug lists (Apollo Care
 manufacturer, ConnectiveRx programmes, Visory specialty). Read it the way the networks guide is
 read (`psao-guide.ts`), one document per programme, with the BIN/PCN/group as the rate's routing;
 the drug lists are what says a claim on those BINs is a copay-card claim rather than a plan's.
+### 26. When the PSAO's guides roll to a new year, the site has to ask for the new ones (8 September)
+
+The owner's words: "also need a way ie 2027 for when they change to alert me to get new list." The
+guides are dated documents in the library now — the 2025 networks guide (42 documents), the 2026
+PBM listing, the 2026 and 2027 Medicare D guides. Rule: from 15 November of a guide's year, and
+again each month, if no guide for the coming year is on file for that family (networks, PBM
+listing, Medicare D, discount card), a line on Today and in the weekly email says which guide is
+missing and where it comes from (Atlas, pbmrelations.hmatlas@mckesson.com). And when a newer guide
+is loaded, the older year's rate lines are marked superseded from the newer one's effective date,
+never deleted: last year's claims still price on last year's guide. Lives with the contract clocks
+(`contractClocksDue`).
+
+### 27. Remittance advices (835s) emailed to the site have to be recognised and applied (8 September)
+
+The owner's words: "dont forget about remittance advice. going to have those emailed into site as
+well, system needs to know how to correctly handle them." Today an 835 is handled only when
+dropped through the Add tool (`intake/actions.ts` → `importRemittance`); the mailbox sweep
+(`autoroute.ts`, `mailbox.ts`) does not recognise one, whatever its extension. Wanted: recognise an
+835 by its content — an ISA envelope with ST*835 — under any name (.835, .edi, .txt, .dat, or a
+zip holding one), route it to `importRemittance` with the same balance check the reader already
+enforces (refuse a file whose CLP, PLB and BPR do not balance), post the payments onto the claims
+by prescription and fill, and file the payer's 835 as the receipt the cash books read. Unmatched
+lines are held and named, never dropped. Recogniser side B's; route and post 2's; the reader is
+A's and already tested. The facilitator's files already arrive this way through the MTF tool.
 ## The data the site has to ingest
 
 Named by the owner on 7 September as what is still being connected. Each one needs a reader, a
