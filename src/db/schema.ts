@@ -2990,6 +2990,42 @@ export const drugDirectoryLoads = sqliteTable("drug_directory_loads", {
   loadedAt: text("loaded_at").notNull().default(now()),
 });
 
+// ── Data health ──────────────────────────────────────────────────────
+// What the site last measured about its own completeness. One row per measurement key defined in
+// `data-health.ts`; the page reads these rather than counting, because every libsql call blocks the
+// event loop and a page that recounted on every view would take the site down while reporting its
+// own health. See `drizzle/0085_data_health_counts.sql` for the reasoning in full.
+export const dataHealthCounts = sqliteTable(
+  "data_health_counts",
+  {
+    /** The measurement key from `SPECS` in `data-health.ts`. */
+    key: text("key").primaryKey(),
+    /**
+     * How many linked, and how many there were to link.
+     *
+     * Two numbers rather than a percentage. The percentage is how a row is scanned; the count is
+     * what somebody acts on, and a stored percentage could not be turned back into "29 NDCs to
+     * chase".
+     */
+    numerator: integer("numerator").notNull(),
+    denominator: integer("denominator").notNull(),
+    /** The worst gaps, already in words, one per line. */
+    gaps: text("gaps").notNull().default(""),
+    /** Why the figure is what it is, where the number alone would mislead. */
+    note: text("note"),
+    /**
+     * When this count was taken.
+     *
+     * Not nullable, because a row exists only once it has been measured. "Never measured" is the
+     * absence of the row, so a measurement nobody took can never be read as a measurement of zero.
+     */
+    measuredAt: text("measured_at").notNull(),
+    /** How long it took, so a count that is becoming expensive says so before it blocks the site. */
+    tookMs: integer("took_ms"),
+  },
+  (t) => [index("data_health_counts_measured_idx").on(t.measuredAt)],
+);
+
 /**
  * What the owner has said a sender's mail actually is.
  *

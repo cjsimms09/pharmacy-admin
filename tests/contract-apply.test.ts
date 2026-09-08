@@ -216,6 +216,16 @@ describe("what is checked before a figure is applied", () => {
     assert.deepEqual(governsPharmacy(d, { chainCode: "630", ncpdp: null, npi: null }).ok, true);
     assert.equal(governsPharmacy(d, { chainCode: "717", ncpdp: null, npi: null }).ok, false);
     assert.equal(governsPharmacy(d, { chainCode: null, ncpdp: null, npi: null }).ok, null, "not known until Settings says the code");
+    // A PSAO goes by several codes, and each PBM formats them its own way. Health Mart Atlas signs for
+    // pharmacies "bearing 605, 630 and 841"; Caremark prints A605, Prime 00605, ESI 0000630.
+    assert.equal(governsPharmacy(d, { chainCode: "605, 630, 841", ncpdp: null, npi: null }).ok, true, "any one of the pharmacy's codes governs");
+    d.chainCodes = ["A605"];
+    assert.equal(governsPharmacy(d, { chainCode: "605, 630, 841", ncpdp: null, npi: null }).ok, true, "a PBM's letter prefix is formatting, not a different code");
+    d.chainCodes = ["0000630"];
+    assert.equal(governsPharmacy(d, { chainCode: "630", ncpdp: null, npi: null }).ok, true, "leading zeros are formatting");
+    d.chainCodes = ["717"];
+    assert.equal(governsPharmacy(d, { chainCode: "605, 630, 841", ncpdp: null, npi: null }).ok, false, "a code the pharmacy is not under is somebody else's contract");
+    d.chainCodes = ["605", "630"];
     d.pharmacyNcpdps = ["1712345"];
     assert.equal(governsPharmacy(d, { chainCode: "630", ncpdp: "1799999", npi: null }).ok, false);
     assert.equal(governsPharmacy(d, { chainCode: "630", ncpdp: "17-12345", npi: null }).ok, true);

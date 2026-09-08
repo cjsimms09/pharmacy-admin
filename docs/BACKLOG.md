@@ -50,10 +50,22 @@ every drug it carries:
   of the 681 NDCs actually dispensed, 650 of those current within three months. The misses are CMS
   genuinely not pricing hospital injectables, devices, supplies and repackager labels — not a
   formatting fault, and not fixable by a product-level proxy (that would rescue 197 NDCs, 0.4%).
-- **The supplier's own item number, per supplier.** The column exists (`supplier_items.item_number`,
-  migration 0078) and both importers read it. It fills in on the next catalogue import; until then
-  rows show a dash. **Needs confirming after the next import that it is actually populated**, per
-  supplier, and not just present as a column.
+- **The supplier's own item number, per supplier.** Measured 8 September after the nightly
+  imports: ANDA, ParMed, IPD and IPC **100%**; **McKesson 0 of 44,242**. The McKesson file carries
+  the column ("Supplier Item Number" is its first field) but its rows wrap onto two lines and the
+  PioneerRx parser is not picking the number up for that layout. Session 1, `pioneer-catalog.ts`,
+  with a McKesson-shaped fixture.
+- **Pack sizes, against the FDA (8 September).** The levelled catalogue agrees with the FDA
+  package on about 95% of rows at every supplier. The rest: 0.5–1% where the FDA is a whole
+  multiple of the catalogue (IPD "30 EA" for 30 blister packs of 6 = 180, a sixfold unit-cost
+  error), 2.5% where the unit differs (GM against EA), 1.5% other — and many of those are the
+  FDA *reading* being wrong, because `packageUnits` takes the outer count ("3 BLISTER PACK") and
+  ignores the inner ("28 TABLET in 1 BLISTER PACK"). The parser has to read the nested description
+  to the innermost unit. Assigned to session 2 as the Data health row it belongs to.
+- **AWP where a supplier prints none (8 September).** ParMed and IPD print no AWP; 7,551 NDCs
+  have no AWP on one supplier's row and a printed AWP on another's. AWP is a property of the
+  NDC, not the seller, so the levelled catalogue should carry the newest printed AWP for the NDC
+  onto every row, marked as borrowed. Session 1, `catalogue-cache.ts`.
 
 ### 2. Every claim matched to its contract, and to the formula that priced it (7 September)
 
@@ -371,6 +383,18 @@ Each row: numerator, denominator, percent, the date it was last measured, and th
 words ("29 dispensed NDCs have no NADAC — 2 are devices, 27 are repackager labels"). Pure counting
 in a module, a store that runs it, a page that shows it. **Assigned to session 2** after its invoice
 follow-ups, because it runs on the pharmacy computer and can see the real database.
+
+### 10. Plans have to be classified, or the law-first pricing never fires (8 September)
+
+Data health's first run: **6 of 1,054 fills sit on a plan the register has classified.** The site
+decides which law governs a fill — and so whether the Kansas floor (NADAC + the greater of $10.50
+and the Medicaid fee) applies — from `plan_groups.classification`, which the owner sets per
+BIN/PCN/group. With 99% unclassified, `drug-profit.ts`'s law-first rung is a rule with nothing to
+act on. Two halves: the owner classifies the plans behind the most fills (the payers page; the Data
+health row should name the top unclassified triples); and where the BIN listing states the line of
+business (`payer_bins.linesOfBusiness`, Medicare Part D BINs are published), the site proposes the
+class with its source and the owner confirms — proposed, never assumed. Assigned to A after the
+contract match; owner action for the top plans now.
 
 ## The data the site has to ingest
 

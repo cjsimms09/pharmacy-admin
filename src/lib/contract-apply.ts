@@ -176,8 +176,31 @@ export function quoteInText(quote: string | null | undefined, text: string | nul
 }
 
 /** Whether the document governs this pharmacy, from the chain codes and NCPDPs it names. */
+/**
+ * A chain code as one PBM prints it against the same code as another prints it.
+ *
+ * An independent pharmacy has no chain code of its own; the code on its contracts is its PSAO's.
+ * This pharmacy's library is signed by Health Mart Atlas "as attorney-in-fact on behalf of its
+ * participating pharmacies (Chain Code: 605, 630)", and the same PSAO appears as 841 at Capital
+ * Rx and ESI, as A605 at Caremark, as 00605 and 00630 at Prime, as 0000630 at ESI. The letter and
+ * the zeros are the PBM's formatting of one code, so comparison is on the digits with the leading
+ * zeros gone. Settings holds every code the PSAO goes by, comma-separated.
+ */
+export function chainCodeKey(raw: string | null | undefined): string | null {
+  const digits = (raw ?? "").replace(/\D/g, "").replace(/^0+/, "");
+  return digits || null;
+}
+
+/** Every chain code the pharmacy answers to, from the comma- or space-separated setting. */
+export function pharmacyChainCodes(setting: string | null | undefined): string[] {
+  return (setting ?? "")
+    .split(/[,;\s]+/)
+    .map(chainCodeKey)
+    .filter((c): c is string => c !== null);
+}
+
 export function governsPharmacy(t: ContractTermsT, pharmacy: Pharmacy | undefined): { ok: boolean | null; why: string | null } {
-  const codes = t.chainCodes.map((c) => norm(c)).filter(Boolean) as string[];
+  const codes = t.chainCodes.map((c) => chainCodeKey(c)).filter((c): c is string => c !== null);
   const ncpdps = t.pharmacyNcpdps.map((c) => (c ?? "").replace(/\D/g, "")).filter(Boolean);
   if (ncpdps.length > 0) {
     const mine = (pharmacy?.ncpdp ?? "").replace(/\D/g, "");
@@ -185,9 +208,9 @@ export function governsPharmacy(t: ContractTermsT, pharmacy: Pharmacy | undefine
     if (!ncpdps.includes(mine)) return { ok: false, why: `Names NCPDP ${ncpdps.join(", ")}, not this pharmacy's ${mine}.` };
   }
   if (codes.length > 0) {
-    const mine = norm(pharmacy?.chainCode);
-    if (!mine) return { ok: null, why: `Governs chain code${codes.length === 1 ? "" : "s"} ${codes.join(", ")}; the pharmacy's chain code is not in Settings, so whether this applies is not known.` };
-    if (!codes.includes(mine)) return { ok: false, why: `Governs chain code${codes.length === 1 ? "" : "s"} ${codes.join(", ")}, not this pharmacy's ${mine}.` };
+    const mine = pharmacyChainCodes(pharmacy?.chainCode);
+    if (mine.length === 0) return { ok: null, why: `Governs chain code${codes.length === 1 ? "" : "s"} ${codes.join(", ")}; the pharmacy's chain codes are not in Settings, so whether this applies is not known.` };
+    if (!codes.some((c) => mine.includes(c))) return { ok: false, why: `Governs chain code${codes.length === 1 ? "" : "s"} ${codes.join(", ")}, not this pharmacy's ${mine.join(", ")}.` };
   }
   return { ok: true, why: null };
 }
