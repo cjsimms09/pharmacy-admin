@@ -1,16 +1,15 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { looksLikeCopayRemittance } from "../src/lib/copay-remittance";
 
 /**
  * Recognising RedSail's copay voucher remittance (BACKLOG item 24, recogniser side).
  *
- * The real statement is a scan and is not in this repository — a fixture with its identifiers
- * changed has to be made on the pharmacy computer. So the text below is built from session 1's
- * reading of the document's own text layer on 8 September: the heading, the header fields, the row
- * columns and the footer labels, in the order that review names them. What it cannot prove is how
- * that page comes out of `pdfText`, which is why the heading is matched loosely and why a
- * corroborating footer label is required rather than assumed.
+ * The text below is synthetic: built from session 1's reading of the document's own text layer on
+ * 8 September, because that was all there was when this was written. The real fixture arrived
+ * afterwards and is exercised in the second block; these cases stay because each one names a rule
+ * — a shredded heading, a scan, a lying file name — that no single real document exhibits.
  */
 const statement = [
   "RedSail Technologies",
@@ -56,5 +55,57 @@ describe("a copay voucher remittance", () => {
   test("the footer's accounting words alone are not a remittance", () => {
     // Any statement of account carries these. Without the programme's own name they mean nothing.
     assert.equal(looksLikeCopayRemittance("Total Claims 12   Balance Forward 0.00   Total Amount Paid 431.10"), false);
+  });
+});
+
+/**
+ * And against the real thing, at last.
+ *
+ * `fixtures/copay-remit-redsail.txt` is the text layer of page 2 of the actual statement, with the
+ * prescription numbers, the check number, the NPI and the pharmacy's own details invented and every
+ * amount kept. It arrived after this detector was written, so until now the rules above were built
+ * from a description of the document rather than from the document — which is exactly the gap this
+ * closes. Two artifacts of the real text layer are preserved in it on purpose: a prescription
+ * number and an NDC each broken across two runs by a space.
+ */
+describe("the real statement's text layer", () => {
+  const real = readFileSync(new URL("../fixtures/copay-remit-redsail.txt", import.meta.url), "utf8");
+
+  test("is recognised", () => {
+    assert.equal(looksLikeCopayRemittance(real, "5171c9d9-Image_001.pdf"), true);
+  });
+
+  test("with the heading and the issuer both gone, it refuses rather than reading the table", () => {
+    /*
+     * Everything above "Payment Date:" is the title and the issuer, so this slice is the statement
+     * with both names removed: a payment amount, an NPI, fourteen priced rows and the footer.
+     *
+     * It is refused, and that is the design rather than a shortfall. A table of prescriptions with
+     * money beside them is the shape of half the documents this pharmacy receives, and "Total
+     * Amount Paid" is on all of them. Recognising this would mean recognising a supplier statement
+     * as a copay remittance, and a payment filed against the wrong programme is worse than a line
+     * on the inbox asking what the document is.
+     */
+    const rowsOnly = real.split("Payment Date:").slice(1).join("Payment Date:");
+    assert.equal(/copay|voucher|redsail/i.test(rowsOnly), false, "the slice really has lost both names");
+    assert.equal(looksLikeCopayRemittance(rowsOnly), false);
+  });
+
+  test("but the issuer alone carries it when only the title is lost", () => {
+    // The likelier damage: an extractor that drops a styled heading and keeps the body text.
+    const noTitle = real.replace("Remittance Advice - RAS Copay Voucher Reimbursement", "");
+    assert.equal(/copay voucher reimbursement/i.test(noTitle), false, "the title really is gone");
+    assert.equal(looksLikeCopayRemittance(noTitle), true);
+  });
+
+  test("and the rows net to the total the statement prints", () => {
+    // Not this module's job — the reader is 2's — but a fixture whose arithmetic does not close
+    // would make every test written against it worthless, so it is checked once, here.
+    const paid = real
+      .split("\n")
+      .filter((l) => /^\s*\d[\d\s]{6,}\s+202\d{5}\s/.test(l))
+      .map((l) => Number(l.trim().split(/\s+/).pop()));
+    assert.equal(paid.length, 14);
+    assert.equal(Math.round(paid.reduce((n, c) => n + c, 0) * 100), 17725);
   });
 });

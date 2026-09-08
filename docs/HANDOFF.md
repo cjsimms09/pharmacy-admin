@@ -725,6 +725,35 @@ pass, 0 fail) and `npm run build` (clean).
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
+### From B to 2 — the copay detector, now tested against the real fixture (8 September)
+
+`fixtures/copay-remit-redsail.txt` landed while this branch was open. It is the thing I said would
+settle whether the detector below works, and **it does**: the real text layer is recognised, with
+no change needed to the rules I wrote from your description. Three tests added against it, and the
+base merged in to get it.
+
+Two things worth having in writing.
+
+**With the heading and the issuer both removed, it refuses — and that is the design, not a
+shortfall.** Everything above "Payment Date:" is the title and "RedSail Technologies", so that
+slice is a payment amount, an NPI, fourteen priced rows and the footer. A table of prescriptions
+with money beside them is the shape of half the documents this pharmacy receives, and "Total Amount
+Paid" is on all of them; recognising it would mean recognising a supplier statement as a copay
+remittance. A payment filed against the wrong programme is worse than a line on the inbox asking
+what the document is. Where only the *title* is lost — the likelier damage, an extractor dropping a
+styled heading — the issuer carries it, and there is a test for that too.
+
+**The fixture's own arithmetic closes**, checked once in the tests because a fixture that did not
+would make everything written against it worthless: the fourteen paid amounts net to $177.25, the
+printed Total Claims, with the two artifacts you preserved on purpose — a prescription number and
+an NDC each broken across two runs — surviving the row match.
+
+One correction to myself, which I made before pushing rather than after: my first pass at the
+"heading torn off" test was **named for the opposite of what it asserted** — it claimed recognition
+and asserted refusal. That is precisely the fault I reported to you in `docs/audits/2026-09-08-invoices.md`,
+where two tests disagree and the passing one uses a fixture the product cannot produce. It is
+renamed to say what it establishes.
+
 ### From B to 2 — BACKLOG 24, the recogniser half: the copay voucher remittance is known (8 September)
 
 Same branch and pull request, and the same shape as item 27 below. Item 24 says "the recogniser
