@@ -32,7 +32,7 @@ import { eq } from "drizzle-orm";
 import { adoptUnattached, contractLibrary, applyAllReads } from "../src/lib/contract-docs";
 import { indexContracts, contractIndexState } from "../src/lib/contract-search";
 import { queueExtraction, collectExtraction, recoverFailures, queueTriage, collectTriage } from "../src/lib/contract-extract";
-import { shouldRead } from "../src/lib/contract-triage";
+import { shouldRead, type TriageKind } from "../src/lib/contract-triage";
 import { estimateCost } from "../src/lib/contract-run";
 import { monthlyCap, rates as priceRates } from "../src/lib/ai-spend";
 import { getSettings } from "../src/lib/settings";
@@ -144,7 +144,7 @@ async function read(scans: boolean) {
 
   for (let round = 1; ; round++) {
     const docs = (await db.query.contractDocs.findMany()).filter(
-      (d) => d.fileName && d.extractionState !== "done" && d.extractionState !== "queued" && shouldRead(d.triage) && (d.pages ?? 0) <= 300,
+      (d) => d.fileName && d.extractionState !== "done" && d.extractionState !== "queued" && shouldRead(d.triage as TriageKind | null) && (d.pages ?? 0) <= 300,
     );
     // Sorted so the document that has waited longest (a failure, then never-read) goes first; the
     // page count decides the chunking, not the order.
