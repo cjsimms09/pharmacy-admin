@@ -330,7 +330,7 @@ export function planOrder(input: PlanInput): Plan {
         ? `Added to reach ${offer.supplier}'s minimum: it is cheaper here and it moves.`
         : overage <= 0
           ? `Short ${round(neededThousandths)} and the pack is ${packQty}, so this is exactly the need.${dated}`
-          : `Short ${round(neededThousandths)} + dated; the smallest pack here is ${packQty}, so ${packs} pack${packs === 1 ? "" : "s"} is ${round(unitsThousandths)} — ${round(overage)} more than the need.` + dated;
+          : `Short ${round(neededThousandths)}; the smallest pack here is ${packQty}, so ${packs} pack${packs === 1 ? "" : "s"} is ${round(unitsThousandths)} — ${round(overage)} more than the need.${dated}`;
 
     return {
       ndc11,
