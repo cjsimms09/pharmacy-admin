@@ -22,22 +22,50 @@ never have worked. Do not propose one again.
 
 So the questions below are yours, and every one of them is blocked on data only you can read.
 
-**1. How much of the catalogue actually has a NADAC benchmark?** This is the first thing to answer
-and it may invalidate a lot. On the cloud session's development copy only **10 of 147,730** supplier
-rows got one — but that copy's NADAC table is synthetic (descriptions read "Drug 27999"), so the
-number means nothing. On the real database it could be fine or it could be near zero, and if it is
-near zero then `over-nadac`, `purchase-ratio`, `under-nadac` and every "buying above the benchmark"
-figure in the site are running blind and saying nothing about it. Count it:
+**1. How much of the catalogue has a NADAC benchmark — ANSWERED on the pharmacy computer, 7
+September.** The site is not blind, and the development copy's "10 of 147,730" was entirely an
+artefact of the synthetic table. On the real database:
 
-```
-select count(distinct s.ndc11) from supplier_items s;
-select count(distinct s.ndc11) from supplier_items s
-  join nadac_prices n on n.ndc11 = s.ndc11;
-```
+- **26,246 of 45,791 catalogue NDCs (57.3%) carry a NADAC row.**
+- **652 of the 681 NDCs actually dispensed (95.7%) carry one, and 650 of those are current within
+  three months.** That is the figure that governs, because every reimbursement question is asked
+  about a drug the pharmacy dispenses, not about McKesson's whole warehouse.
+- By supplier: IPC 97.2%, IPD 88.2%, ParMed 87.5%, ANDA 78.2%, McKesson 58.7%. McKesson drags the
+  average because it lists the hospital and supply catalogue; the secondaries, which are where the
+  buying decisions are made, are well covered.
 
-If the overlap is small, find out **why** before changing anything — NDC formatting on one side
-(11-digit vs 10-digit, dashes, leading zeros), or the catalogue genuinely being mostly items CMS
-does not price. The two have completely different fixes and guessing between them wastes a day.
+**The cause of the 43% miss is not NDC formatting, and this was checked rather than assumed.** Both
+sides are clean 11-digit, all-digit, no dashes: catalogue 45,791 of 45,791 at length 11 with zero
+non-digit characters, NADAC 43,396 of 43,396 the same. Normalising to digits-only changes the match
+by **exactly zero** rows, and matching on the first nine digits (labeler and product, ignoring
+package) gains 553. There is no formatting fix to make.
+
+**The miss is CMS genuinely not pricing those items.** The unmatched are hospital injectables
+(cefepime, meropenem, milrinone, dexmedetomidine, Naropin single-dose vials), devices and supplies
+(dispensing tip caps, Dispill label sheets, a rollator), supplements (glucosamine, VSL#3), and
+repackager labels (Bryant Ranch, Proficient Rx, Reliable 1) which CMS does not carry. **15,332 NDCs
+have no NADAC anywhere in their product**, not merely none of their own.
+
+**A product-level proxy was measured and is not worth building.** Falling back to a sibling NDC's
+NADAC — same drug, strength and form from a labeler CMS does price — would rescue **197 NDCs,
+0.4%**. The idea sounds good and the number kills it.
+
+Two things were found while answering this, both of which change what the site should do:
+
+- **The "TBD DO NOT DELETE OR RELEASE" placeholders were being looked for in the wrong table.**
+  `nadac_prices` holds **zero** of them. `supplier_items` holds **nine**, all McKesson, all priced
+  at $110.25 a unit ($110.25 a pack, so a pack of one), all flagged `not rebated`, all with no
+  availability. They are catalogue rows, not CMS rows, so the import refusal added on 8 September
+  sits on the NADAC path where they never were. They need refusing on the **catalogue** path in
+  `suppliers.ts`, and the nine deleting.
+- **10,429 NDCs carry more than one `product_key`.** The key is derived from each supplier's own
+  description text, so pack codes and manufacturer abbreviations land inside the product name and
+  the same drug fragments. Mounjaro 12.5mg is three products (`mounjaro 0 5mlx4pend am|12.5mg`,
+  `mounjaro|12.5mg/0.5ml`, `mounjaro sy 4 ppn|12.5mg/0.5ml`); Trulicity 0.75mg is three; Emgality
+  120mg is three. This reaches money: `reimbursement-fit.ts` takes a **median MAC per product key**
+  to decide a payer's formula, and `product-groups.ts` — which `drug-profit.ts` uses to pick the
+  most profitable NDC in a product — groups on the same `productKey()` function. Both are taking
+  medians and comparing candidates across fragments of what should be one product. Not yet costed.
 
 **2. Six faults were fixed in the buying logic on 8 September (commit `8d51d73`) and none of them
 could be measured against real data.** Re-measure each on the live database and say what the real
