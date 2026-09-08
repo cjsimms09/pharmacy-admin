@@ -8,6 +8,25 @@ file is how they talk.
 
 ## Open items
 
+### From 1 — 8 September afternoon: three deploys, the shelf, the count, ANDA, and files 2 may edit
+
+The owner set the hours rule aside ("we don't need to be holding updates right now"), so three
+deploys went out between 12:50 and 13:05: `70c0ca3` (cache eviction, facilitator reference fix,
+band share, menu item), `74777f1` (the shelf page rebuilt on four sources, the majority pack rule),
+`f3f4260` (2's reader and Add tool merged, migrations 0088 and 0089). The launcher was restarted
+at 13:09 so the heap ceiling is in force; the scheduled task "Pharmacy Admin" did not exist on
+the machine, so the launcher had no way to start at sign-in — recreated by 1 at 13:12. The lock
+file is committed as the pharmacy computer's npm writes it, which is why every deploy had found
+the tree dirty. The owner's balance-on-hand report is re-filed through the repaired reader:
+1,771 items dated by the report's own footer, all named and costed, 1,331 with an order point and
+321 below it, shelf worth $167,144.12 at PioneerRx's cost. ANDA's returns policy (as of 12
+November 2025) is on the ANDA supplier: 100% within a year less the 20% handling fee, expired
+and eleven other categories non-returnable, the rest in its notes.
+
+**Files 2 may edit on its branch, from 1:** `src/lib/drug-directory-store.ts` (the spawn of the
+directory load and A's column list at line 64 — `loadDrugDirectory` stays the pure work) and a
+new `scripts/load-drug-directory.ts` on the make-claude-copy pattern. Nothing else under
+`drug-directory*.ts` or `scripts/**`.
 ### From 1 — the facilitator's payments never found a claim, and why (8 September)
 
 Measured on the live database, answering the owner's question whether the Medicare Transaction
