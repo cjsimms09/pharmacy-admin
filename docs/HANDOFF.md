@@ -137,8 +137,13 @@ Of the 177 read: 63+ name a network, 39+ a chain code, 5 a BIN, 0 a network reim
 `network_rates`, 10 appeal terms, 194 contacts, 21 payment routings, 36 payer links, and **18
 claims now linked to a contract**. Deferred, not refused: every document that governs by chain
 code (605, 630, 841, A605 recur) is held because **the pharmacy's own chain code is not in
-Settings** — `governs()` cannot say whether it is ours. Owner action: enter the pharmacy's chain
-code (and confirm NCPDP and NPI) on the Settings page, then re-run `apply`.
+Settings** — `governs()` cannot say whether it is ours. **Settled 8 September without the owner:** the pharmacy has no chain code of its own; the codes are
+its PSAO's. Health Mart Atlas signs the library "as attorney-in-fact on behalf of its participating
+pharmacies (Chain Code: 605, 630)", Capital Rx and ESI add 841, Caremark writes A605, Prime 00605,
+ESI 0000630. Settings now holds "605, 630, 841" and `governsPharmacy` compares on the digits with
+leading zeros gone (`chainCodeKey`). **Re-applied: 176 documents, 369 rate lines, 18 appeal terms,
+380 contacts, 76 routings, 40 payer links; 1 not ours; 30 held only for rates whose quote is not
+in the text (scans).** NCPDP 1722734 and NPI 1548737182 were already in Settings.
 
 **Secondary payors, measured for A's audit (8 September, BACKLOG 2b-iv).** Of 1,054 insured paid
 fills, **22 have more than one payor** (2.1%), carrying $8,456.07 of remit between them. The
