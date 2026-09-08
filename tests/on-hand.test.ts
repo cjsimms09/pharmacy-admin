@@ -390,3 +390,79 @@ describe("a file that is not a count says which column it wanted", () => {
     assert.match(parsed.problems[0], /missing a column named "Quantity On Hand"/);
   });
 });
+
+/*
+ * The wrapped line that arrives at full width, and the real loss it must not be confused with.
+ *
+ * The 8 September count read 1,774 lines against the 1,772 records the report says it holds, with
+ * exactly two rows skipped for "no NDC". The narrow-line test could not have caught those two: a
+ * manufacturer that wraps can still fill the row's whole width, and such a line was counted as a
+ * record and then dropped as a product whose NDC had gone missing.
+ *
+ * That is the reader's own warning coming true in the direction nobody looked for. Not products
+ * lost — products invented and then mourned. The shelf was never short by two; the count of what
+ * was read was long by two, and the skip list named two losses that never happened, which is the
+ * worse half because somebody would go looking for them.
+ *
+ * The distinction these hold is the only one that matters: a record carries a code or a quantity.
+ * A line with neither is a tail wherever its text landed. A line with one of them is a record, and
+ * a record missing its NDC is a genuine loss that must still be counted and named.
+ */
+describe("a wrapped manufacturer that fills the whole row", () => {
+  const header = "Item Number\tDescription\tNDC\tInventory Group\tQuantity On Hand\tUnit\tUnit Cost\tExtended Cost";
+  const good = "100234\tATORVASTATIN 20MG TAB 90\t00093505698\tRx\t270.000\tEA\t$0.0241\t$6.51";
+  const read = (...rows: string[]) => parseOnHand(["Inventory Search Results", "Count Date:\t9/30/2026", header, ...rows].join("\n"));
+
+  test("a tail whose text lands in the description column is not a record", () => {
+    const p = read(good, "\tAMNEAL PHARMACEUTICALS, LLC\t\t\t\t\t\t");
+    assert.equal(p.rowsRead, 1, "one record was read, not two");
+    assert.equal(p.continuations, 1);
+    assert.equal(p.rows.length, 1);
+    assert.equal(p.skipped["no NDC"], undefined, "a loss that never happened must not be reported as one");
+  });
+
+  test("a tail whose text lands in the NDC column is not a record either", () => {
+    // The first guard asked whether the NDC cell was empty, and this is the line that defeated it:
+    // same tail, different column, counted and then dropped as an unreadable code.
+    const p = read(good, "\t\tAMNEAL PHARMACEUTICALS, LLC\t\t\t\t\t");
+    assert.equal(p.rowsRead, 1);
+    assert.equal(p.continuations, 1);
+    assert.equal(p.skipped["code is neither an NDC nor a barcode"], undefined);
+  });
+
+  test("a real product whose NDC cell is empty is still a record, and still a reported loss", () => {
+    // It carries a quantity, which is what says a shelf item is behind it. This one is genuinely
+    // missing and the count must go on saying so.
+    const p = read(good, "100241\tCEFDINIR 300MG CAP 20\t\tRx\t40.000\tEA\t$0.1900\t$7.60");
+    assert.equal(p.rowsRead, 2);
+    assert.equal(p.continuations, 0);
+    assert.equal(p.skipped["no NDC"], 1);
+    assert.equal(p.rows.length, 1);
+  });
+
+  test("a real product with an unreadable code is still a record, because it has a quantity", () => {
+    const p = read(good, "100242\tSHELF TALKER\tNOT-A-CODE\tRx\t3.000\tEA\t$1.0000\t$3.00");
+    assert.equal(p.rowsRead, 2);
+    assert.equal(p.skipped["code is neither an NDC nor a barcode"], 1);
+  });
+
+  test("the report's own record count and the lines read now agree, which is the whole point", () => {
+    /*
+     * Two tails among four records: the arithmetic that was 1,774 against 1,772 in miniature.
+     * Before this, rowsRead was 6 and the report said 4.
+     */
+    const p = read(
+      "Total Record Count: 4",
+      good,
+      "100235\tMETFORMIN HCL ER 500MG TAB 100\t00093105301\tRx\t1400.000\tEA\t$0.0189\t$26.46",
+      "\tAMNEAL PHARMACEUTICALS, LLC\t\t\t\t\t\t",
+      "100236\tGABAPENTIN 300MG CAP 100\t00093571401\tRx\t820.000\tEA\t$0.0402\t$32.96",
+      "\t\tINC/GNP\t\t\t\t\t",
+      "100237\tMOUNJARO 12.5MG/0.5ML PEN\t00002150680\tRx\t4.000\tEA\t$212.4400\t$849.76",
+    );
+    assert.equal(p.reportedCount, 4);
+    assert.equal(p.rowsRead, 4, "the lines read now equal the records the report claims");
+    assert.equal(p.continuations, 2);
+    assert.equal(p.rows.length, 4);
+  });
+});

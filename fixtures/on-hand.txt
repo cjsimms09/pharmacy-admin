@@ -14,7 +14,10 @@
 #   - a UPC rather than an NDC on a front-shop line, which is a code the reader keeps but cannot
 #     price against NADAC;
 #   - a row with no quantity at all, which must be skipped rather than filed as zero;
-#   - an inventory group, so the dispensing shelf can be told from the front shop.
+#   - an inventory group, so the dispensing shelf can be told from the front shop;
+#   - a manufacturer that wrapped onto a line of its own and still arrived at the full column
+#     width, which is the tail the narrow-line test cannot catch. It carries no code and no
+#     quantity, so it is a tail and not a record whose NDC went missing.
 Inventory Search Results
 West Wichita Family Pharmacy
 Count Date:	9/30/2026
@@ -26,3 +29,4 @@ Item Number	Description	NDC	Inventory Group	Quantity On Hand	Unit	Unit Cost	Exte
 100238	IBUPROFEN 200MG TAB 100CT	305730164016	Front Shop	24.000	EA	$0.0150	$0.36
 100239	LEVOTHYROXINE 50MCG TAB 90	00093145306	Rx		EA	$0.0355
 100240	MOUNJARO 12.5MG/0.5ML PEN	00002150680	Rx	4.000	EA	$212.4400	$849.76
+		AMNEAL PHARMACEUTICALS, LLC					

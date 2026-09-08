@@ -480,9 +480,44 @@ export function parseOnHand(text: string): OnHandParse {
     }
     // A repeat of the header, printed at the top of each page.
     if (fold(cells[mapping.ndc11 as number] ?? "") && ALIASES.ndc11.test(fold(cells[mapping.ndc11 as number]))) continue;
+
+    /*
+     * A wide line that is still not a record.
+     *
+     * The width test above catches a tail that wrapped onto a short line. It cannot catch one that
+     * wrapped wide — a manufacturer carrying enough separators to split into half the header's
+     * columns — and such a line reaches here, is counted as a record, and is then dropped as a
+     * product whose NDC is missing. Two of them are why the 8 September count read 1,774 lines
+     * against the 1,772 records the report claims, with exactly two rows skipped for "no NDC".
+     *
+     * That is the false alarm this reader's own comment warns about, in the direction nobody looked
+     * for: not products lost, but products invented and then mourned. The shelf was never short —
+     * the count of what was read was long, and the skip list named two losses that never happened,
+     * which is the worse half, because somebody would go looking for them.
+     *
+     * A record has a code or a quantity. Neither means it is not one, whatever its width, so it is
+     * a tail like the others rather than a record with a hole in it. Both must be absent: a genuine
+     * product line whose NDC cell is empty still carries a quantity, and that is a real loss and is
+     * still counted and reported as one.
+     */
+    const rawNdc = at(cells, "ndc11");
+    const identified = rawNdc ? codeOf(rawNdc) : null;
+    const qty = parseQuantityThousandths(at(cells, "quantityThousandths"));
+    if (!identified && qty === null) {
+      /*
+       * Which column the wrapped text lands in is not knowable in advance, so it is not asked.
+       *
+       * The first version of this guard tested for an empty NDC cell, and the manufacturer landed
+       * in the NDC cell instead — the line was counted, then dropped as a code that is neither an
+       * NDC nor a barcode. Same false alarm, different sentence. Asking whether the line carries a
+       * usable code or a quantity settles it wherever the text fell: a record has one or the other,
+       * and a line with neither is a tail however wide it is and whatever column it filled.
+       */
+      continuations++;
+      continue;
+    }
     rowsRead++;
 
-    const rawNdc = at(cells, "ndc11");
     if (!rawNdc) {
       skip("no NDC");
       continue;
@@ -498,14 +533,11 @@ export function parseOnHand(text: string): OnHandParse {
      * A UPC still carries no NDC, so nothing prices it against NADAC; it is counted and valued at
      * what the report says it cost, which is what a front-shop item can honestly be.
      */
-    const identified = codeOf(rawNdc);
     if (!identified) {
       skip("code is neither an NDC nor a barcode");
       continue;
     }
 
-    const rawQty = at(cells, "quantityThousandths");
-    const qty = parseQuantityThousandths(rawQty);
     if (qty === null) {
       // Refused rather than defaulted: an unreadable quantity is not an empty shelf.
       skip("quantity unreadable");
