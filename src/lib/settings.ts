@@ -246,6 +246,7 @@ export const SETTING_KEYS = [
   "drug_directory_job",
   // Making the scrubbed copy: minutes of work, so the press claims a job rather than blocking.
   "claude_copy_job",
+  "claims_import_job", // a large claims file importing in a process of its own; claims-import-job.ts
   "backup_last_result",
   "backup_last_failure",
   // The rehearsal: an archive already on disk, opened and restored to a scratch database, to prove
