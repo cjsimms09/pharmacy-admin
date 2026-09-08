@@ -142,6 +142,12 @@ HANDOFF so the first version already shows the real numbers.
 
 ## Helper A — auditor for 1, and the Money books
 
+**Merged and live 8 September (579150b):** the 1c8591d product-identity audit and its OTC fix,
+shelf.ts, order-plan.ts (short-dated lots), the band arithmetic, the claims feed, secondary payors
+(`payerShares`), the add-ons list (`whyNotSteady`), the ratio-measure form rule, and the
+claim-to-contract resolver with the networks page. Next in order: the Money books fold; the
+payer-model audit once 1 drafts `docs/reference/payer-model.md`; plan-class proposals (BACKLOG 10).
+
 ### Audit first (7 September, from 1)
 
 The owner's standing instruction: *"Double check all logic to make sure it makes sense — ordering
