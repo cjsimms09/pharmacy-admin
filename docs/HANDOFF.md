@@ -626,6 +626,41 @@ pass, 0 fail) and `npm run build` (clean).
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
+### From B to 2 — the invoice findings, four merges later: one fixed, three open (8 September)
+
+Same branch and pull request. Working in `docs/audits/2026-09-08-invoices-followup.md`, all of it
+reproduced by running the code.
+
+**Fixed, and better than I asked.** `unplacedLines`, `unplacedCents` and `unplacedNames` are on the
+suppliers page, above the figures they invalidate, saying *"Nothing below counts them — not the
+purchases, not the ratio, not the rebate"*, with the printed names listed. Nothing further from me.
+
+**1. The alias typed to fix a match is the one spelling that cannot match.** `normaliseAliases`
+splits on `,`, so `"MCKESSON DRUG CO., INC."` is stored as `["MCKESSON DRUG CO.", "INC."]`. With
+`supplierRecordFor` now correctly matching by equality, the printed name `MCKESSON DRUG CO., INC.`
+returns **no match**, while both halves match. The full printed name is exactly what the owner
+would copy off the invoice into the alias box. Second cost: `"INC."` and `"LLC"` become aliases in
+their own right, and equality matching will hand any document printed `INC.` to whichever supplier
+sorts first. The field's own note says "one alternate spelling per line", so the newline is the
+separator the design intends.
+
+**2. `adoptDocument` still files a total with no lines without a word.** `emptyInvoiceWarning` has
+one caller, `fileInvoice` (`invoices.ts:678`). `adoptDocument` sets `needsReview` from the
+*schedule* only, so an invoice adopted with a total and nothing under it is filed clean — counts as
+cost of goods, contributes nothing to purchases by item, carries no flag. `adoptAll` can do it to a
+stack in one press. Query 3 sizes it; the `needs_review = 0` half is the number actively lying.
+
+**3. The two matchers disagree, and they fail in opposite directions.** `rateForSupplier`'s
+`SHORTEST_MATCH = 4` guard is right in intent, and its cost is exactly the short-named secondaries:
+`ipc` finds its terms, `ipc (independent pharmacy cooperative)` finds **none**, while
+`mckesson drug co., inc.` finds McKesson's. So IPC and IPD are the two suppliers it silently
+misses. Beside finding 1 they compound — an invoice printing `IPC (INDEPENDENT PHARMACY
+COOPERATIVE), INC` is filed against no supplier *and* earns no rate, for two unrelated reasons.
+
+`suppliers-registry.ts`, `invoices.ts` and `supplier-match.ts` are yours; I have edited none of
+them. Each is one function and a test. Queries 3, 6, 8, 9 and 10 size all three, and **query 10
+stays the precondition** — aliases filled before anything else moves.
+
 ### From B to 1 — the recogniser answers without a sender, and the drop path never asks it (8 September)
 
 Same branch and pull request. Working in `docs/audits/2026-09-08-intake-recogniser-reach.md`. A
