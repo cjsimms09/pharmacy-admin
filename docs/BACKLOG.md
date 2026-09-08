@@ -627,6 +627,19 @@ written for this pharmacy's chain code; the reason is written on the link. Ran o
 document read so far, so provisional until the rest are read; Capital Rx, MedOne, two Navitus).
 Left: 47 networks with several documents written for us (590 claims: Optum 10, ESI 12, Caremark
 9–10) — the PSAO listing or the backtest; 21 with nothing written for us (135 claims: Humana, Argus).
+**8 September, 17:00 (1) — RXADV, from PioneerRx's own screen.** The owner sent the EDI response for
+Rx 333913: Ventegra (BIN 012528, group VRX0071) returned Network Reimbursement ID (2F) RXADV with the
+message "RXADV-AC: NOVO NORDISK HAS PROVIDED A $1027.03 VOUCHER TOWARDS THE PATIENT COPAY. ORIGINAL
+COPAY: $1376. NEW COPAY: $348.97", after the plan rejected the drug (reject 70, plan exclusion). So
+RXADV is the id a plan returns when an automatic manufacturer voucher was applied at the point of
+sale — it rides on whichever plan adjudicated, which is why it sits under five payers — and the
+"remit" on such a row is voucher money toward the copay, not a plan payment. Marked a programme;
+Ventegra's BIN annotated on the register; the money belongs with item 24's reconciliation. The site's
+row for 333913 was faithful to the report; the owner's memory that a voucher was involved was also
+right; the report's "Amount" simply does not say which kind of money it is. That is the lesson for
+item 30: a proof against the source file is necessary and not sufficient — the kind of money is a
+fact the response carries and the transaction report does not.
+
 **8 September, 16:00 (1) — the 148 open claims, and what the web says (hints, never links).**
 Web findings carry a source and stay proposals until a document on file says the same. NET=400
 (5 claims, $3,960) is the **CMS Medicare GLP-1 Bridge**, BIN 028918 / PCN MEDDGLP1BR, paid by CMS's
