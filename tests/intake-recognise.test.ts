@@ -380,3 +380,29 @@ describe("a remittance advice arriving by email", () => {
     assert.notEqual(r.best?.sure, "certain");
   });
 });
+
+/**
+ * The copay voucher remittance, once the detector has spoken (BACKLOG item 24, recogniser side).
+ *
+ * It is its own category rather than a second kind of `remittance` because what becomes of it
+ * differs: an 835 is posted against the claims it names, and a voucher line settles what the claim
+ * was already promised, so the handling sentence the inbox shows would be wrong for one of them.
+ */
+describe("a copay voucher remittance", () => {
+  test("the statement's own words place it, with no sender or subject", () => {
+    const r = recognise({ content: { verdict: "copay:remittance", why: "RedSail's RAS reimbursement statement." } });
+    assert.equal(r.best?.category, "copay_remittance");
+    assert.equal(r.best?.sure, "certain");
+  });
+
+  test("and it is not confused with a plan's remittance", () => {
+    const era = recognise({ content: { verdict: "x12:remittance", why: "An X12 envelope carrying an 835." } });
+    assert.equal(era.best?.category, "remittance");
+    assert.notEqual(era.best?.category, "copay_remittance");
+  });
+
+  test("a file merely named for a voucher is only a suggestion", () => {
+    const r = recognise({ fileName: "RAS_copay_voucher_082026.pdf", content: null });
+    assert.notEqual(r.best?.sure, "certain");
+  });
+});

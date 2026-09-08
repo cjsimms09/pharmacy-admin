@@ -119,6 +119,14 @@ export const CATEGORIES: Category[] = [
     subjectHints: /remittance|remit advice|\b835\b/i,
   },
   {
+    key: "copay_remittance",
+    label: "A copay voucher remittance",
+    handling: "Posted against the claims it names as money the voucher already promised them, so it settles what is owed rather than adding revenue.",
+    fromContent: ["copay:remittance"],
+    fileNameHints: /copay|voucher|\bras\b/i,
+    subjectHints: /copay|voucher reimbursement/i,
+  },
+  {
     key: "nadac",
     label: "A NADAC price file",
     handling: "Loaded as the national average acquisition cost for the week it covers — the floor every Kansas commercial claim is measured against.",

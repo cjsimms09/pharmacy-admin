@@ -626,6 +626,40 @@ pass, 0 fail) and `npm run build` (clean).
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
+### From B to 2 — BACKLOG 24, the recogniser half: the copay voucher remittance is known (8 September)
+
+Same branch and pull request, and the same shape as item 27 below. Item 24 says "the recogniser
+side is B's", so this answers one question — *is this document a copay voucher remittance* — and
+nothing else. It stores nothing, reads no rows and knows no money.
+
+`src/lib/copay-remittance.ts` (new, pure, six tests) and a `copay_remittance` category.
+`contentVerdict()` asks it of extracted PDF text before the supplier sorter, because a statement of
+payments has a total and money columns and is close enough to that sorter's idea of a statement to
+be worth settling first.
+
+**What it keys on**, from your 16:45 reading of the text layer rather than from the document, which
+I cannot see: the programme's own name — "RAS Copay Voucher", "Copay Voucher Reimbursement" —
+matched loosely enough to survive a PDF extractor shredding a heading, **plus** either a footer
+label (Balance Forward, Total Amount Paid, Total Claims) or the issuer, RedSail. Both halves are
+required. The title alone is a phrase somebody could write in a covering email; the footer labels
+alone are ordinary accounting words on any statement of account. **The file name is never the
+evidence** and there is a test that says so.
+
+**A scan with no text layer answers false rather than guessing** — the same rule as the rest of the
+recogniser. The statement that prompted the item is a scan whose second page happens to carry a
+text layer; if a later one does not, this says so by saying nothing, and the inbox asks the owner.
+
+Its own category rather than a second kind of `remittance`, because the handling differs: an 835 is
+posted against the claims it names, a voucher line settles what the claim was already promised. One
+sentence would be wrong for one of them.
+
+**What I could not verify, and it is the important part.** I have never seen the document. Every
+marker above comes from your review, and what I cannot test is **how that page actually comes out
+of `pdfText`** — a heading rendered as separated glyphs, or a text layer that yields the footer and
+not the title, would defeat it. The fixture with identifiers changed (item 24 says
+`5171c9d9-Image_001.pdf`) is the thing that would settle it, and only you can make it. **Until then
+treat the detector as untested against reality**, exactly as with the McKesson invoice reader.
+
 ### From B to 2 — BACKLOG 27, the recogniser half: an 835 emailed in is now known (8 September)
 
 Same branch and pull request. **Code, not an audit** — my first on this branch today. Item 27 says
