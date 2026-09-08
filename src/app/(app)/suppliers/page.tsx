@@ -82,6 +82,7 @@ export default async function SuppliersPage({
       name: String(fd.get("name") ?? ""),
       senderEmails: String(fd.get("senderEmails") ?? ""),
       catalogName: String(fd.get("catalogName") ?? ""),
+      aliases: String(fd.get("aliases") ?? ""),
       accountNumber: String(fd.get("accountNumber") ?? ""),
       deaNumber: String(fd.get("deaNumber") ?? ""),
       phone: String(fd.get("phone") ?? ""),
@@ -482,6 +483,18 @@ export default async function SuppliersPage({
               hint='What the PioneerRx catalogue calls them inside the file — McKesson, IPD, IPC, ParMed. Ties Monday&apos;s prices to this supplier. Leave blank if it is the same as the name.'
             >
               <input name="catalogName" defaultValue={editing?.catalogName ?? ""} className="field" placeholder="McKesson" />
+            </Field>
+            <Field
+              label="Other names they go by"
+              hint="One per line. The name printed on their invoices, which is often the long legal one — the register says IPC and the invoice says Independent Pharmacy Cooperative. Without it those lines belong to no supplier and drop out of the rebate figures. Only names you have actually seen on their paperwork."
+            >
+              <textarea
+                name="aliases"
+                defaultValue={editing?.aliases ?? ""}
+                rows={2}
+                className="field font-mono text-xs"
+                placeholder={"Independent Pharmacy Cooperative"}
+              />
             </Field>
             <Field label="Their DEA registration">
               <input name="deaNumber" defaultValue={editing?.deaNumber ?? ""} className="field font-mono" />

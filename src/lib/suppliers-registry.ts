@@ -36,6 +36,19 @@ export function addressesOf(supplier: Supplier): string[] {
 }
 
 /**
+ * The other names this supplier's own paperwork uses for itself, as the pharmacy typed them.
+ *
+ * Empty for a supplier nobody has had to spell twice, which is the common case and means the
+ * register name and the catalogue name stand alone.
+ */
+export function aliasesOf(supplier: Supplier): string[] {
+  return (supplier.aliases ?? "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+}
+
+/**
  * Which supplier a message came from.
  *
  * Matched on the sender address rather than on the subject, because the address is the part a
@@ -62,9 +75,27 @@ export function supplierForSender(suppliers: Supplier[], from: string): Supplier
  * page uses, which is not obliged to be the name the register uses.
  *
  * Matched on the catalogue name the pharmacy recorded, then on the register name, then on the
- * canonical spelling the catalogue reader produces for it, all case- and punctuation-blind. One
- * hit is the answer; none is null; two is a register that names the same wholesaler twice, and
- * the first by name wins so the result is at least stable.
+ * aliases it typed, then on the canonical spelling the catalogue reader produces for it, all case-
+ * and punctuation-blind. One hit is the answer; none is null; two is a register that names the same
+ * wholesaler twice, and the first by name wins so the result is at least stable.
+ *
+ * ── Every comparison here is equality, and that is the point ──
+ *
+ * The rebate arithmetic used to reach a supplier from an invoice line by asking whether either
+ * name contained the other. That is unsafe in both directions.
+ *
+ * The direction that has already cost money leaves a gap: the row named "IPC" neither contains nor
+ * is contained by "Independent Pharmacy Cooperative", the name printed on its own invoices, so all
+ * eight invoice lines on the database matched nothing and left the rebate figures without a word.
+ *
+ * The direction that has not fired yet is worse, because it produces a figure rather than a hole.
+ * The test also asked whether the register's name contained the printed one, took the first hit and
+ * had no tie-break. A line printed "IP" is contained in both "IPC" and "IPD", so which wholesaler's
+ * ladder it lands on would be settled by the order of the register rather than by anything on the
+ * invoice — and a rebate claimed on another supplier's spend is a wrong number that looks right.
+ *
+ * So a name that is not the register's, not the catalogue's and not an alias the pharmacy typed
+ * returns null, and the caller says the line is unplaced rather than guessing at it.
  */
 export function supplierRecordFor(suppliers: Supplier[], name: string | null | undefined): Supplier | null {
   const key = squash(name);
@@ -74,7 +105,9 @@ export function supplierRecordFor(suppliers: Supplier[], name: string | null | u
   return (
     ranked.find((s) => squash(s.catalogName) === key) ??
     ranked.find((s) => squash(s.name) === key) ??
+    ranked.find((s) => aliasesOf(s).some((a) => squash(a) === key)) ??
     ranked.find((s) => squash(s.catalogName) === canonical || squash(s.name) === canonical) ??
+    ranked.find((s) => aliasesOf(s).some((a) => squash(canonicalSupplier(a)) === canonical)) ??
     ranked.find((s) => squash(canonicalSupplier(s.name)) === canonical) ??
     null
   );
@@ -86,6 +119,8 @@ export type SupplierInput = {
   name: string;
   senderEmails: string;
   catalogName?: string | null;
+  /** One alternate spelling per line; see `aliasesOf`. */
+  aliases?: string | null;
   accountNumber?: string | null;
   deaNumber?: string | null;
   phone?: string | null;
@@ -103,6 +138,7 @@ export async function addSupplier(input: SupplierInput): Promise<string> {
     name,
     senderEmails: normaliseAddresses(input.senderEmails),
     catalogName: input.catalogName?.trim() || null,
+    aliases: normaliseAliases(input.aliases ?? ""),
     accountNumber: input.accountNumber?.trim() || null,
     deaNumber: input.deaNumber?.trim() || null,
     phone: input.phone?.trim() || null,
@@ -122,6 +158,7 @@ export async function updateSupplier(id: string, input: SupplierInput): Promise<
       name,
       senderEmails: normaliseAddresses(input.senderEmails),
       catalogName: input.catalogName?.trim() || null,
+      aliases: normaliseAliases(input.aliases ?? ""),
       accountNumber: input.accountNumber?.trim() || null,
       deaNumber: input.deaNumber?.trim() || null,
       phone: input.phone?.trim() || null,
@@ -141,6 +178,26 @@ export async function updateSupplier(id: string, input: SupplierInput): Promise<
  */
 export async function retireSupplier(id: string, active: boolean): Promise<void> {
   await db.update(schema.suppliers).set({ active, updatedAt: new Date().toISOString() }).where(eq(schema.suppliers.id, id));
+}
+
+/**
+ * One alias per line, trimmed, de-duplicated, and never the empty string.
+ *
+ * Case and punctuation are left exactly as typed: the matcher squashes both sides before it
+ * compares, and the pharmacy should see on the screen the name it actually reads on the invoice.
+ */
+export function normaliseAliases(raw: string): string {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const line of (raw ?? "").split(/[\n,;]/)) {
+    const t = line.trim();
+    if (!t) continue;
+    const k = t.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push(t);
+  }
+  return out.join("\n");
 }
 
 /** One address per line, trimmed and lowercased, with the obvious mistakes taken out. */

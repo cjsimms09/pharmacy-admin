@@ -631,7 +631,7 @@ export async function fileInvoice(
   });
   if (text) await writeInvoiceLines(id, text);
 
-  await storeInvoiceLines(id, { supplier, invoiceDate, text: text ?? "", printedTotalCents: totalCents });
+  await storeInvoiceLines(id, { supplier, supplierId: meta.supplierId ?? null, invoiceDate, text: text ?? "", printedTotalCents: totalCents });
 
   return { id, documentId, schedule, needsReview: !confident };
 }
@@ -665,6 +665,7 @@ export async function writeInvoiceLines(
   const inv = await db.query.supplierInvoices.findFirst({ where: eq(schema.supplierInvoices.id, invoiceId) });
   const r = await storeInvoiceLines(invoiceId, {
     supplier: inv?.supplier ?? null,
+    supplierId: inv?.supplierId ?? null,
     invoiceDate: inv?.invoiceDate ?? null,
     text,
     printedTotalCents: inv?.totalCents ?? null,
@@ -749,6 +750,10 @@ async function storeModelInvoiceLines(
     id: newId(),
     invoiceId,
     supplier: inv.supplier,
+    // The register row the invoice already resolved to from the sender address. Carried onto the
+    // line so no reader downstream has to re-derive it from the printed name — which is how eight
+    // real lines fell out of the rebate figures.
+    supplierId: inv.supplierId,
     invoiceDate: inv.invoiceDate ?? read.invoiceDate,
     ndc11: l.ndc11,
     description: l.description,
@@ -1534,7 +1539,7 @@ export async function adoptDocument(documentId: string, ctx: { userId: string; u
   });
   if (text) await writeInvoiceLines(id, text);
 
-  await storeInvoiceLines(id, { supplier, invoiceDate, text: text ?? "", printedTotalCents: totalCents });
+  await storeInvoiceLines(id, { supplier, supplierId: matched?.id ?? null, invoiceDate, text: text ?? "", printedTotalCents: totalCents });
 
   return { id, documentId, schedule, needsReview: schedule === "unknown" };
 }
@@ -1690,7 +1695,14 @@ export async function awaitingReceipt(): Promise<SupplierInvoice[]> {
  */
 export async function storeInvoiceLines(
   invoiceId: string,
-  meta: { supplier: string | null; invoiceDate: string | null; text: string; printedTotalCents: number | null },
+  meta: {
+    supplier: string | null;
+    /** The register row the invoice resolved to, carried onto every line it produces. */
+    supplierId?: string | null;
+    invoiceDate: string | null;
+    text: string;
+    printedTotalCents: number | null;
+  },
 ): Promise<{ stored: number; unread: number; reconciles: boolean | null; readCents: number }> {
   const { parseInvoiceLines } = await import("./invoice-lines");
   if (!meta.text || meta.text.length < 200) return { stored: 0, unread: 0, reconciles: null, readCents: 0 };
@@ -1703,6 +1715,7 @@ export async function storeInvoiceLines(
     id: newId(),
     invoiceId,
     supplier: meta.supplier,
+    supplierId: meta.supplierId ?? null,
     invoiceDate: meta.invoiceDate,
     ndc11: l.ndc11,
     description: l.description,
