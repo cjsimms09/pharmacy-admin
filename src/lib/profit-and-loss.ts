@@ -520,8 +520,8 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
  * themselves.
  */
 export async function monthlyAccount(month: string, basis: "accrual" | "cash" = "accrual"): Promise<MonthlyPL> {
-  const { months, shared } = await accountsFor([month], basis);
-  return months[0] ?? monthlyPL(monthInputs(month, basis, shared));
+  // One month in, one account out: `accountsFor` computes every month it is given.
+  return (await accountsFor([month], basis)).months[0];
 }
 
 /**
@@ -540,23 +540,39 @@ export async function monthlyAccount(month: string, basis: "accrual" | "cash" = 
  * now come through here, so a quarter on one page and a quarter on the other are the same
  * arithmetic over the same read, and cannot drift apart.
  *
- * The shared read is handed back as well as the accounts, because the books page needs it for the
- * script counts and the month's pace and re-reading it would put the second pass straight back. So
- * are the inputs each account was built from, in the same order: the double-count register reads
- * them to say which of two routes to a figure the account took, and slicing them a second time
- * would be the extra pass this exists to remove.
+ * The inputs each account was built from come back too, in the same order: the double-count
+ * register reads them to say which of two routes to a figure the account took, and slicing them a
+ * second time would be the extra pass this exists to remove.
+ *
+ * What does **not** come back is the shared read itself, and that is a correction rather than a
+ * choice. This result is held between requests, so everything in it is pinned for as long as the
+ * key lives — and `SharedInputs` carries every fill, every supplier invoice, every invoice line,
+ * every stock count and every payment across the whole span. Handing it back put a year of claims
+ * into the cache under three separate keys at once (the month's books, the six-month strip, the
+ * twelve-month trend), on a machine that shares 7.3 GB with the dispensing system and where the
+ * counter has already lost its page for ninety seconds.
+ *
+ * What the books actually want from that read is three fields per fill. So three fields per fill is
+ * what they get, projected inside the held computation so the rows behind it can be collected the
+ * moment this returns rather than living as long as the cache entry.
  */
+export type FillForScripts = { dateFilled: string; cashPlan: boolean; revenueCents: number };
+
 export async function accountsFor(
   months: string[],
   basis: "accrual" | "cash",
-): Promise<{ months: MonthlyPL[]; inputs: PLInputs[]; shared: SharedInputs }> {
+): Promise<{ months: MonthlyPL[]; inputs: PLInputs[]; fills: FillForScripts[] }> {
   const wanted = [...new Set(months)].sort();
   if (wanted.length === 0) throw new Error("accountsFor needs at least one month; an empty period is answered without a read.");
   const { held } = await import("./held");
   return held(`accounts:${basis}:${wanted.join(",")}`, async () => {
     const shared = await loadShared(wanted, basis);
     const inputs = wanted.map((m) => monthInputs(m, basis, shared));
-    return { months: inputs.map(monthlyPL), inputs, shared };
+    return {
+      months: inputs.map(monthlyPL),
+      inputs,
+      fills: shared.fills.map((f) => ({ dateFilled: f.dateFilled, cashPlan: f.cashPlan, revenueCents: f.revenueCents })),
+    };
   });
 }
 

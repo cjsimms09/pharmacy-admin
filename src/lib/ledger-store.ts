@@ -65,14 +65,14 @@ async function loadBooks(period: Period, today: string): Promise<Books> {
   const accrualMonths: MonthlyPL[] = a.months;
   const accrual = combineMonths(period, accrualMonths);
   const cash = combineMonths(period, c.months);
-  const scripts = scriptCounts(a.shared.fills.map((f) => ({ dateFilled: f.dateFilled, cashPlan: f.cashPlan, revenueCents: f.revenueCents })), period);
+  const scripts = scriptCounts(a.fills, period);
 
   const thisMonth = today.slice(0, 7);
   let paced: Pace | null = null;
   const current = accrualMonths.find((m) => m.month === thisMonth);
   if (period.kind === "month" && period.key === thisMonth && current) {
     // Days elapsed is the days with a fill in them, which is the pharmacy's own calendar rather than the wall's.
-    const daysWithFills = new Set(a.shared.fills.filter((f) => f.dateFilled.startsWith(thisMonth)).map((f) => f.dateFilled)).size;
+    const daysWithFills = new Set(a.fills.filter((f) => f.dateFilled.startsWith(thisMonth)).map((f) => f.dateFilled)).size;
     paced = pace(current, Math.max(daysWithFills, Number(today.slice(8, 10))));
   }
 
@@ -134,8 +134,8 @@ export async function recentMonths(n: number, today = todayIso()): Promise<{ mon
 
 async function loadRecentMonths(n: number, today: string): Promise<{ month: string; pl: MonthlyPL; scripts: number }[]> {
   const months = periodsBack("month", today.slice(0, 7), n).map((p) => p.key);
-  const { months: accounts, shared } = await accountsFor(months, "accrual");
-  return accounts.map((pl) => ({ month: pl.month, pl, scripts: shared.fills.filter((f) => f.dateFilled.startsWith(pl.month)).length }));
+  const { months: accounts, fills } = await accountsFor(months, "accrual");
+  return accounts.map((pl) => ({ month: pl.month, pl, scripts: fills.filter((f) => f.dateFilled.startsWith(pl.month)).length }));
 }
 
 export { periodOf };
