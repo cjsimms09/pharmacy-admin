@@ -815,6 +815,12 @@ FDA (multiples of 2× to 30×), 32,643 already right, **12,659 open questions**,
 convention — McKesson counts a vial as 1 EA where the FDA states 20 mL — which a second automatic
 rule (contents of N containers) should settle; proposed to 2.
 
+**1 edited two files outside its group (8 September), each in one place, for the background claims
+import:** `mailbox.ts` (B's — the `rx_transactions` branch of the route now calls
+`importClaimsFile`, which imports inline under 256 KB and in a process of its own above it) and
+`src/app/(app)/claims/page.tsx` (C's — the upload action does the same, and the page shows the
+job's state beside its notices). `claims-import-job.ts` and `scripts/import-claims.ts` are 1's.
+
 **Handed to 2 (8 September, from 1): the on-hand reader.** `fileOnHand` and everything it calls in
 `shelf.ts`, plus `on-hand.ts` — for the fixture, the reader test, and a refusal that names the
 column it wanted rather than filing zeros. Lift the reading out of `shelf.ts` into its own module

@@ -691,9 +691,17 @@ async function importRecognised(
     } else if (cls.kind === "rx_transactions") {
       // The daily claims feed. Paid rows become claims, reversals cancel the claims they name,
       // unsold rows wait for the day they sell.
-      const r = await importRxTransactions(buf, fileName, ctx.userId ?? "mailbox-sweep");
-      routeResult = describeTransactionImport(r);
-      if (r.claimsAdded || r.reversed) imported = true;
+      // A file over the threshold — the twelve-month history — imports in a process of its own so
+      // the sweep, and the site, keep answering; the daily file imports inline as before.
+      const { importClaimsFile } = await import("./claims-import-job");
+      const outcome = await importClaimsFile({ buf, fileName, user: { id: ctx.userId ?? "mailbox-sweep", name: ctx.userName ?? "Automatic check" } });
+      if (outcome.apart) {
+        routeResult = outcome.message;
+        imported = outcome.started;
+      } else {
+        routeResult = describeTransactionImport(outcome.report);
+        if (outcome.report.claimsAdded || outcome.report.reversed) imported = true;
+      }
     } else if (await vendorBill(from)) {
       /*
        * A bill from somebody the pharmacy has told us about.
