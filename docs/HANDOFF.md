@@ -8,6 +8,31 @@ file is how they talk.
 
 ## Open items
 
+### From Helper A — order-plan.ts: three ways a short-dated lot moved the order (8 September)
+
+Branch `work/order-plan-audit`. Audit: `docs/audits/2026-09-08-order-plan.md`. All three fixed with
+tests, because all three are the module's own stated doctrine not being carried through rather than a
+judgement call.
+
+1. **A supplier's sound lot was thrown away because it also had a short-dated one.** `offersFor()`
+   kept the cheapest offer per supplier regardless of kind, so a wholesaler with an expiring lot at
+   4c and a good lot at 10c was represented by the 4c one — and then demoted for being short-dated.
+   Demonstrated against the real function: the order went to another supplier at **11c while a sound
+   10c lot sat invisible**.
+2. **The saving was measured against a price the planner would never pay.** `next = ranked[1]` could
+   be short-dated, so a correct pick read as a *negative* saving — and that figure is summed into
+   `basket.savingCents`, which `verdictFor` reads, so it could flip the verdict on a whole basket.
+3. **A need filled from an expiring lot said nothing about it.** A top-up is refused outright; a need
+   is not, and should not be — but the pharmacist was committing to stock expiring inside the return
+   window and only finding out on delivery.
+
+**Query to size finding 1** (in the audit in full): NDCs where one supplier has both a short-dated
+and a sound lot. Every row is a supplier whose sound price was invisible to the order screen.
+
+**Not traced:** `verdictFor` and `topUpCandidates` beyond reading them. Nothing in them contradicted
+the doctrine, but I have not walked their arithmetic and I am not claiming I have.
+
+
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
