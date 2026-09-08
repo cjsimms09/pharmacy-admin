@@ -66,9 +66,13 @@ four links, and it is only as good as its weakest:
    (`/payers/sort`), `proposeFromContract` with `governs` and `quoteFound` so a document that is
    not ours, or a rate whose quote is not in the text, is refused rather than applied.
 2. **Match a claim to the contract that governs it.** Partly built — `claim-contract.ts`,
-   `payer_links`, `plan_groups`, BIN/PCN/group. **Not yet measured: what fraction of real claims
-   land on a contract, and what the unmatched ones have in common.** That number is the first thing
-   to get, because every figure downstream is only defined on the matched share.
+   `payer_links`, `plan_groups`, BIN/PCN/group. **Measured 7 September: 0 of 1,081 insured claims
+   match a contract.** Only 2 of 357 contract documents have been read, and the matcher looks for
+   BIN/PCN/group while rate exhibits identify themselves by network name and chain code; claims
+   carry PioneerRx's network id (82 distinct values). Two jobs follow: read the library (re-run the
+   2 stale failures, triage the 249 never triaged, queue by dollars of claims behind each payer),
+   and teach the matcher the network id → network name mapping that `payer_links.contract_id` was
+   made for. Full numbers in `docs/HANDOFF.md`.
 3. **Name the formula that priced the claim.** Two readers exist and they should agree:
    `reimbursement-fit.ts` infers the formula from what was actually paid, and the contract reader
    takes it from the document. Where the export carries the PBM's 522-FM basis code

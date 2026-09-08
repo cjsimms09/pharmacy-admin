@@ -84,6 +84,24 @@ numbers are:
   `supplier_items`. Both catalogue importers and NADAC now share `isPlaceholderRow`, migration
   `0082` cleared them, and the live database holds zero in either table after the restart.
 
+**Measured on the real database by session 2, 7 September — claim-to-contract matching (BACKLOG
+item 2, link 2).** **0 of 1,081 insured claims (paid, non-cash) match a contract.** Not the
+matcher's arithmetic: `contract_docs` holds 357 documents, all on disk, extraction state none 353 /
+done 2 / failed 2, and both documents that read name no BIN, PCN or group, so `governs()` returns
+null by construction. Nothing calls `contractFor` in the app except the diagnostic tree. The
+structural point: **claims speak in codes and contracts speak in names.** Claims carry bin 99.8%,
+pcn 94.4%, group 95.1%, and PioneerRx's `networkId` 95.3% across 82 distinct values (BIDBRODCBR
+149, EN45 73, MRRETM 62, IRX9TP 56, BMPN 43); `planId` is always null. The two read contracts carry
+network names ("Prime AccessOne Network", "BCBS Federal Employee Program National Network") and
+chain codes ("00605", "00630"), empty bins/pcns/groups. `claim-contract.ts governs()` matches on
+bins/pcns/groupIds only and ignores `networkNames`, `networkReimbursementIds` and `chainCodes`, so
+a rate exhibit identified by network — which is how they identify themselves — can never match a
+claim however many are read. The missing piece is a mapping from the 82 network ids on claims to
+the network names in contracts; `payer_links.contract_id` exists for exactly this and is unused on
+the path. Caveat: n = 2 read documents. Also: the 2 failed reads carry the old union-type schema
+refusal (fixed since; re-run to prove it), and 249 of the 353 unread were never triaged, priority
+false on all 357, so nothing is queued.
+
 **Since 7 September the pharmacy session merges and deploys.** Workers open pull requests against
 `feature/compliance`; `docs/SESSION-RULES.md` and `docs/ASSIGNMENTS.md` say how and who owns what.
 A merged pull request reaches the site by `npm run deploy` on the pharmacy computer.
