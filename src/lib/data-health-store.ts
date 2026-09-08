@@ -1,0 +1,590 @@
+import "server-only";
+import { db, schema } from "@/db";
+import { todayIso } from "./dates";
+import { SPECS, type Measurement } from "./data-health";
+import { comparePack } from "./data-health-packages";
+import { allSuppliers, supplierRecordFor } from "./suppliers-registry";
+
+/**
+ * Running the data health counts, and keeping the answers.
+ *
+ * The arithmetic and the wording are in `data-health.ts`, which is pure. This is the half that
+ * touches the database, and it is deliberately the half nobody calls on a page view.
+ *
+ * ── Why the counts are stored rather than computed on view ──
+ *
+ * Every libsql call blocks the Node event loop. Reading 200,000 rows takes one and three-quarter
+ * seconds and, measured with a heartbeat every twenty milliseconds, lets not one of the eighty-four
+ * possible beats through — the web server answers nothing for the duration. Several of the counts
+ * below read the whole catalogue and the whole NADAC table. A page that recounted on every view
+ * would take the site down while telling somebody how healthy it is, which would be a joke at the
+ * pharmacy's expense.
+ *
+ * So measuring is an explicit act with a button behind it, the answers go in `data_health_counts`,
+ * and the page reads that table — nineteen rows, instant. `tookMs` is stored so a count that is
+ * becoming expensive says so before anybody notices it as a hang.
+ *
+ * ── What is not measured, and why that is a state and not a bug ──
+ *
+ * A measurement this cannot take soundly is not taken. There is no row, the page shows "not
+ * measured", and that is honest. Writing a plausible number would be the exact failure the page
+ * exists to remove — worse than a gap, because a gap invites somebody to look.
+ */
+
+/** One page of rows read at a time, so a large table does not arrive as one allocation. */
+const isNdc = (s: string | null | undefined): s is string => typeof s === "string" && /^\d{11}$/.test(s);
+
+/** A fill, as the pharmacy means it: one dispensing, however many payors adjudicated it. */
+function fillKey(r: { rxNumber: string; fillNumber: number | null; dateFilled: string; ndc11: string | null }): string {
+  return [r.rxNumber, r.fillNumber ?? "", r.dateFilled, r.ndc11 ?? ""].join("|");
+}
+
+/** Months between two ISO dates, positive where the second is later. */
+function monthsBetween(from: string, to: string): number {
+  const a = Date.parse(`${from.slice(0, 10)}T00:00:00Z`);
+  const b = Date.parse(`${to.slice(0, 10)}T00:00:00Z`);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return Number.POSITIVE_INFINITY;
+  return (b - a) / (86_400_000 * 30.437);
+}
+
+/**
+ * Counts everything it can count soundly, and stores the answers.
+ *
+ * Returns what it measured and what it deliberately did not, so the caller can say both.
+ */
+export async function measureDataHealth(): Promise<{ measured: number; skipped: string[]; tookMs: number }> {
+  const startedAll = Date.now();
+  const today = todayIso();
+  const out: (Measurement & { tookMs: number })[] = [];
+  const skipped: string[] = [];
+
+  const timed = async (key: string, run: () => Promise<Omit<Measurement, "key" | "measuredAt">>) => {
+    const t = Date.now();
+    const m = await run();
+    out.push({ key, measuredAt: today, tookMs: Date.now() - t, ...m });
+  };
+
+  // ── The rows every claim question is asked of ────────────────────
+  // Counted by prescription, fill number, date and NDC rather than by claim row: one dispensing
+  // can carry a second payor, and of 1,054 insured paid fills 22 do. Counting rows would inflate
+  // every denominator on this page by exactly those coordinations.
+  const claimRows = await db
+    .select({
+      rxNumber: schema.claims.rxNumber,
+      fillNumber: schema.claims.fillNumber,
+      dateFilled: schema.claims.dateFilled,
+      ndc11: schema.claims.ndc11,
+      bin: schema.claims.bin,
+      pcn: schema.claims.pcn,
+      groupNumber: schema.claims.groupNumber,
+      cashPlan: schema.claims.cashPlan,
+      status: schema.claims.status,
+    })
+    .from(schema.claims);
+
+  const insuredRows = claimRows.filter((r) => !r.cashPlan && r.status === "paid");
+  const fills = new Map<string, (typeof insuredRows)[number]>();
+  for (const r of insuredRows) if (!fills.has(fillKey(r))) fills.set(fillKey(r), r);
+  const fillCount = fills.size;
+  const dispensedNdcs = new Set([...fills.values()].map((r) => r.ndc11).filter(isNdc));
+
+  await timed("claims", async () => ({
+    numerator: fillCount,
+    denominator: fillCount,
+    gaps:
+      claimRows.length === insuredRows.length
+        ? []
+        : [`${(claimRows.length - insuredRows.length).toLocaleString("en-US")} claim rows are cash-plan or reversed and are not counted here`],
+    note:
+      fillCount === 0
+        ? "No claims have been imported."
+        : `${insuredRows.length.toLocaleString("en-US")} insured paid claim rows became ${fillCount.toLocaleString("en-US")} fills; the difference is second payors on the same dispensing.`,
+  }));
+
+  // ── The catalogue ────────────────────────────────────────────────
+  const catalogue = await db
+    .select({
+      ndc11: schema.supplierItems.ndc11,
+      supplier: schema.supplierItems.supplier,
+      unitCostMicros: schema.supplierItems.unitCostMicros,
+      packSize: schema.supplierItems.packSize,
+      awpCents: schema.supplierItems.awpCents,
+    })
+    .from(schema.supplierItems);
+
+  await timed("catalogue", async () => {
+    const priced = catalogue.filter((r) => r.unitCostMicros !== null && r.unitCostMicros > 0).length;
+    return {
+      numerator: priced,
+      denominator: catalogue.length,
+      gaps: gapsBySupplier(catalogue.filter((r) => !(r.unitCostMicros !== null && r.unitCostMicros > 0)), "carry no unit price"),
+    };
+  });
+
+  await timed("catalogue-awp", async () => {
+    const withAwp = catalogue.filter((r) => r.awpCents !== null && r.awpCents > 0).length;
+    return {
+      numerator: withAwp,
+      denominator: catalogue.length,
+      gaps: gapsBySupplier(catalogue.filter((r) => !(r.awpCents !== null && r.awpCents > 0)), "carry no AWP"),
+      note: "A plan paying a discount off AWP cannot be checked on a row with none.",
+    };
+  });
+
+  // ── NADAC, and how current it is ─────────────────────────────────
+  const nadac = await db
+    .select({ ndc11: schema.nadacPrices.ndc11, effectiveOn: schema.nadacPrices.effectiveOn })
+    .from(schema.nadacPrices);
+  const newestNadac = new Map<string, string>();
+  for (const r of nadac) {
+    const seen = newestNadac.get(r.ndc11);
+    if (!seen || r.effectiveOn > seen) newestNadac.set(r.ndc11, r.effectiveOn);
+  }
+
+  await timed("nadac", async () => {
+    const current = [...newestNadac.values()].filter((d) => monthsBetween(d, today) <= 3).length;
+    return {
+      numerator: current,
+      denominator: newestNadac.size,
+      note:
+        newestNadac.size === 0
+          ? "No NADAC file has been loaded."
+          : "A NADAC row older than three months is not the figure in force on a recent fill, and the Kansas floor is measured against the figure in force.",
+    };
+  });
+
+  // ── The FDA directory ────────────────────────────────────────────
+  // The package description is kept only for NDCs the catalogue actually carries. The directory is
+  // 217,773 rows and holding every description would be tens of megabytes to answer a question
+  // asked of 63,809 of them.
+  const catalogueNdcSet = new Set(catalogue.map((r) => r.ndc11).filter(isNdc));
+  const directory = await db
+    .select({ ndc11: schema.drugDirectory.ndc11, packageDescription: schema.drugDirectory.packageDescription })
+    .from(schema.drugDirectory);
+  const directoryNdcs = new Set(directory.map((r) => r.ndc11));
+  const packageOf = new Map<string, string>();
+  for (const r of directory) if (catalogueNdcSet.has(r.ndc11)) packageOf.set(r.ndc11, r.packageDescription);
+  await timed("fda-directory", async () => ({
+    numerator: directoryNdcs.size,
+    denominator: directoryNdcs.size,
+    note: directoryNdcs.size === 0 ? "The FDA NDC directory has never been loaded." : null,
+  }));
+
+  // ── Invoices ─────────────────────────────────────────────────────
+  const invoiceRows = await db
+    .select({ id: schema.supplierInvoices.id, supplier: schema.supplierInvoices.supplier, totalCents: schema.supplierInvoices.totalCents })
+    .from(schema.supplierInvoices);
+  const lineRows = await db
+    .select({
+      invoiceId: schema.invoiceLines.invoiceId,
+      supplierId: schema.invoiceLines.supplierId,
+      supplier: schema.invoiceLines.supplier,
+    })
+    .from(schema.invoiceLines);
+  const invoicesWithLines = new Set(lineRows.map((l) => l.invoiceId));
+
+  await timed("invoices", async () => {
+    const empty = invoiceRows.filter((i) => !invoicesWithLines.has(i.id));
+    const owing = empty.filter((i) => (i.totalCents ?? 0) > 0);
+    const owingCents = owing.reduce((n, i) => n + (i.totalCents ?? 0), 0);
+    return {
+      numerator: invoiceRows.length - empty.length,
+      denominator: invoiceRows.length,
+      gaps:
+        owing.length === 0
+          ? []
+          : [
+              `${owing.length} invoice${owing.length === 1 ? "" : "s"} worth $${(owingCents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} carry a total and no item lines — usually a scan with no text layer`,
+            ],
+      note: invoiceRows.length === 0 ? "No supplier invoice has been filed." : null,
+    };
+  });
+
+  // ── Invoice line → supplier → rebate ladder ──────────────────────
+  const suppliers = await db.select({ id: schema.suppliers.id, name: schema.suppliers.name }).from(schema.suppliers);
+  const programs = await db.select({ supplierId: schema.supplierRebatePrograms.supplierId }).from(schema.supplierRebatePrograms);
+  const withLadder = new Set(programs.map((p) => p.supplierId));
+  const supplierName = new Map(suppliers.map((s) => [s.id, s.name]));
+
+  await timed("invoice-supplier-ladder", async () => {
+    /*
+     * Resolved exactly as earningSoFar resolves it: supplier_id first, then the register's own
+     * matcher on the printed name.
+     *
+     * Asking only for supplier_id read 0 of 8 on the live database and put "these lines resolve to
+     * no supplier" on the screen — while the supplier card, going through supplierRecordFor and the
+     * IPC aliases, placed all eight. Two screens disagreeing about the same eight lines is worse
+     * than either being wrong on its own, because it leaves nobody knowing which to believe. This
+     * page measures what the rest of the site does, or it measures nothing.
+     */
+    const registry = await allSuppliers(true);
+    const ownerOf = (l: { supplierId: string | null; supplier: string | null }): string | null =>
+      (l.supplierId && registry.some((s) => s.id === l.supplierId) ? l.supplierId : null) ??
+      supplierRecordFor(registry, l.supplier)?.id ??
+      null;
+
+    const owners = lineRows.map((l) => ({ line: l, owner: ownerOf(l) }));
+    const placed = owners.filter((o) => o.owner !== null && withLadder.has(o.owner)).length;
+    const unplaced = owners.filter((o) => o.owner === null);
+    const noLadder = owners.filter((o) => o.owner !== null && !withLadder.has(o.owner));
+
+    const gaps: string[] = [];
+    if (unplaced.length > 0) {
+      const names = [...new Set(unplaced.map((o) => (o.line.supplier ?? "").trim() || "(no supplier printed)"))];
+      gaps.push(
+        `${unplaced.length} line${unplaced.length === 1 ? "" : "s"} match no supplier on the register, by id or by any name it holds — printed as ${names.slice(0, 3).join(", ")}. Add the printed name to that supplier's "Other names they go by".`,
+      );
+    }
+    if (noLadder.length > 0) {
+      const names = [...new Set(noLadder.map((o) => supplierName.get(o.owner!) ?? "?"))];
+      gaps.push(
+        `${noLadder.length} line${noLadder.length === 1 ? "" : "s"} belong to a supplier with no rebate ladder on file — ${names.slice(0, 3).join(", ")}. Nothing is being claimed on ${noLadder.length === 1 ? "it" : "them"}.`,
+      );
+    }
+    return {
+      numerator: placed,
+      denominator: lineRows.length,
+      gaps,
+      // The two halves of this figure fail differently and want different actions, so the note says
+      // which one is in play rather than describing both every time.
+      note:
+        unplaced.length > 0
+          ? "A line matching no supplier leaves the rebate arithmetic without a word, which is how eight lines and $78.50 went missing."
+          : noLadder.length > 0
+            ? "Every line is placed on a supplier; what is missing is the ladder itself, which is a document to obtain rather than a matching fault."
+            : null,
+    };
+  });
+
+  // ── On-hand ──────────────────────────────────────────────────────
+  const onHand = await db.select({ code: schema.onHand.code, codeKind: schema.onHand.codeKind }).from(schema.onHand);
+  await timed("on-hand", async () => ({
+    numerator: onHand.length,
+    denominator: onHand.length,
+    note: onHand.length === 0 ? "No on-hand count has ever been received. Nothing can value the shelf until one is." : null,
+  }));
+
+  await timed("onhand-catalogue", async () => ({
+    numerator: onHand.filter((r) => r.codeKind === "ndc11" && catalogueNdcSet.has(r.code)).length,
+    denominator: onHand.length,
+    note: onHand.length === 0 ? "Nothing to match: no on-hand count has been received." : null,
+  }));
+
+  // ── Contracts ────────────────────────────────────────────────────
+  const docs = await db
+    .select({ id: schema.contractDocs.id, extractionState: schema.contractDocs.extractionState, triage: schema.contractDocs.triage })
+    .from(schema.contractDocs);
+  await timed("contracts", async () => {
+    const done = docs.filter((d) => d.extractionState === "done").length;
+    const untriaged = docs.filter((d) => !d.triage).length;
+    const gaps: string[] = [];
+    if (untriaged > 0) gaps.push(`${untriaged} document${untriaged === 1 ? " has" : "s have"} never been sorted, so the expensive reader has no list to work from`);
+    const failed = docs.filter((d) => d.extractionState === "failed").length;
+    if (failed > 0) gaps.push(`${failed} read${failed === 1 ? "" : "s"} failed and the stored error is shown with its date`);
+    return { numerator: done, denominator: docs.length, gaps };
+  });
+
+  // ── Money that actually arrived ──────────────────────────────────
+  const payments = await db
+    .select({ rxNumber: schema.claimPayments.rxNumber, fillNumber: schema.claimPayments.fillNumber, dateFilled: schema.claimPayments.dateFilled })
+    .from(schema.claimPayments);
+  const bank = await db.select({ id: schema.bankLines.id }).from(schema.bankLines);
+
+  await timed("remits", async () => ({
+    numerator: payments.length,
+    denominator: payments.length,
+    note: payments.length === 0 ? "No 835 remittance line has been loaded, so nothing says what a plan actually paid." : null,
+  }));
+
+  await timed("bank", async () => ({
+    numerator: bank.length,
+    denominator: bank.length,
+    note: bank.length === 0 ? "No bank line has been loaded, so no payment can be traced to cash in the account." : null,
+  }));
+
+  await timed("claim-remit-deposit", async () => {
+    // Deliberately strict: a fill counts only where a payment row names it AND that payment could
+    // be tied to a bank line. Anything looser would report money as received on the strength of a
+    // promise, which is the distinction this row exists to draw.
+    const paid = new Set(payments.map((p) => [p.rxNumber, p.fillNumber ?? "", p.dateFilled ?? ""].join("|")));
+    const traced = bank.length === 0 ? 0 : [...fills.values()].filter((f) => paid.has([f.rxNumber, f.fillNumber ?? "", f.dateFilled].join("|"))).length;
+    return {
+      numerator: traced,
+      denominator: fillCount,
+      note:
+        bank.length === 0
+          ? "No bank line has been loaded, so no fill can be traced to cash actually received, whatever the remittances say."
+          : null,
+    };
+  });
+
+  // ── The links from a dispensed NDC ───────────────────────────────
+  await timed("claim-fda", async () => ({
+    numerator: [...dispensedNdcs].filter((n) => directoryNdcs.has(n)).length,
+    denominator: dispensedNdcs.size,
+  }));
+
+  await timed("claim-nadac", async () => {
+    const withCurrent = [...dispensedNdcs].filter((n) => {
+      const d = newestNadac.get(n);
+      return d !== undefined && monthsBetween(d, today) <= 3;
+    }).length;
+    const none = [...dispensedNdcs].filter((n) => !newestNadac.has(n));
+    return {
+      numerator: withCurrent,
+      denominator: dispensedNdcs.size,
+      gaps: none.length === 0 ? [] : [`${none.length} dispensed NDC${none.length === 1 ? " has" : "s have"} no NADAC row at all — CMS does not price hospital injectables, devices, supplements or repackager labels`],
+    };
+  });
+
+  await timed("claim-catalogue", async () => {
+    const withPack = new Set(catalogue.filter((r) => (r.packSize ?? "").trim() !== "").map((r) => r.ndc11).filter(isNdc));
+    const missing = [...dispensedNdcs].filter((n) => !withPack.has(n));
+    return {
+      numerator: [...dispensedNdcs].filter((n) => withPack.has(n)).length,
+      denominator: dispensedNdcs.size,
+      gaps: missing.length === 0 ? [] : [`${missing.length} dispensed NDC${missing.length === 1 ? " is" : "s are"} in no catalogue with a pack size, so no per-unit cost can be worked out for ${missing.length === 1 ? "it" : "them"}`],
+      note: "Without a pack size there is no margin on the fill, only a pack price.",
+    };
+  });
+
+  // ── Claim → payer → plan class ───────────────────────────────────
+  const plans = await db
+    .select({
+      bin: schema.planGroups.bin,
+      pcn: schema.planGroups.pcn,
+      groupNumber: schema.planGroups.groupNumber,
+      classification: schema.planGroups.classification,
+    })
+    .from(schema.planGroups);
+  const classed = new Set(
+    plans
+      .filter((p) => p.classification && p.classification !== "unknown")
+      .map((p) => [p.bin ?? "", p.pcn ?? "", p.groupNumber ?? ""].join("|").toUpperCase()),
+  );
+  await timed("claim-plan", async () => {
+    const tripleOf = (f: { bin: string | null; pcn: string | null; groupNumber: string | null }) =>
+      [f.bin ?? "", f.pcn ?? "", f.groupNumber ?? ""].join("|").toUpperCase();
+    const hit = [...fills.values()].filter((f) => classed.has(tripleOf(f))).length;
+
+    /*
+     * The unclassified plans, biggest first, so the work can start where the money is.
+     *
+     * This row came back 6 of 1,054 on the live database, which means the law-first rung in
+     * drug-profit — Medicaid pays NADAC plus a fee, and the Kansas floor binds or does not — never
+     * fires on 99% of fills. Classifying plans is the owner's work and it is a plan at a time, so a
+     * bare percentage is not actionable and a list is: three or four triples cover most of it.
+     */
+    const byTriple = new Map<string, { n: number; label: string }>();
+    for (const f of fills.values()) {
+      const key = tripleOf(f);
+      if (classed.has(key)) continue;
+      const label = [f.bin ?? "no BIN", f.pcn ?? "no PCN", f.groupNumber ?? "no group"].join(" / ");
+      const seen = byTriple.get(key);
+      if (seen) seen.n += 1;
+      else byTriple.set(key, { n: 1, label });
+    }
+    const worst = [...byTriple.values()].sort((a, b) => b.n - a.n).slice(0, 5);
+
+    return {
+      numerator: hit,
+      denominator: fillCount,
+      gaps:
+        worst.length === 0
+          ? []
+          : [
+              `${byTriple.size} plan${byTriple.size === 1 ? " has" : "s have"} no class on the register. The biggest by fills: ${worst.map((w) => `${w.label} (${w.n})`).join("; ")}`,
+            ],
+      note:
+        hit === 0 || hit / Math.max(fillCount, 1) < 0.5
+          ? "Which law applies — and so whether the Kansas floor binds at all — is decided by the plan's class. Until a plan is classified, the law-first rung in the profit engine cannot fire for its fills."
+          : "Which law applies — and so whether the Kansas floor applies at all — is decided by the plan's class.",
+    };
+  });
+
+  /*
+   * ── Claim → contract ─────────────────────────────────────────────
+   *
+   * Measured through the payer links, which is where a document actually reaches a claim: a link
+   * carries the BIN, PCN and group it was confirmed on, and `contract_doc_id` when the document
+   * that governs it is known. A link naming only a BIN stands for every fill on that BIN, which is
+   * how the register is written; a link naming more must match all of it.
+   *
+   * The note is as important as the number and is written whatever the number turns out to be. The
+   * contracts name networks and chain codes, and the claims carry network reimbursement ids; until
+   * that mapping exists, only a plan a document names by BIN, PCN or group can match at all. A bare
+   * percentage here would send somebody off to file more contracts, which is not the work.
+   */
+  const links = await db
+    .select({
+      bin: schema.payerLinks.bin,
+      pcn: schema.payerLinks.pcn,
+      groupNumber: schema.payerLinks.groupNumber,
+      contractDocId: schema.payerLinks.contractDocId,
+      contractFileName: schema.payerLinks.contractFileName,
+    })
+    .from(schema.payerLinks);
+
+  await timed("claim-contract", async () => {
+    const toContract = links.filter((l) => (l.contractDocId ?? l.contractFileName) !== null);
+    const up = (s: string | null) => (s ?? "").trim().toUpperCase();
+    const governed = (f: { bin: string | null; pcn: string | null; groupNumber: string | null }) =>
+      toContract.some((l) => {
+        if (up(l.bin) !== "" && up(l.bin) !== up(f.bin)) return false;
+        if (up(l.pcn) !== "" && up(l.pcn) !== up(f.pcn)) return false;
+        if (up(l.groupNumber) !== "" && up(l.groupNumber) !== up(f.groupNumber)) return false;
+        // A link naming nothing routable governs nothing; it is a note, not a match.
+        return up(l.bin) !== "" || up(l.pcn) !== "" || up(l.groupNumber) !== "";
+      });
+    const matched = [...fills.values()].filter(governed).length;
+    const linked = links.length;
+    return {
+      numerator: matched,
+      denominator: fillCount,
+      gaps:
+        linked === 0
+          ? []
+          : [
+              `${linked} payer link${linked === 1 ? "" : "s"} on the register, ${toContract.length} of them naming a contract document`,
+            ],
+      note:
+        "Contracts name networks; claims carry network reimbursement ids. The mapping between them is being built; until then only a fill whose BIN, PCN or group a document names can match at all.",
+    };
+  });
+
+  /*
+   * ── Catalogue row → FDA package size ─────────────────────────────
+   *
+   * The row that finds cross-unit errors, so it must not manufacture any. `comparePack` returns
+   * "cannot compare" wherever either side fails to reach a dispensing unit — chiefly an FDA
+   * description that stops at a container ("3 BLISTER PACK in 1 CARTON" and never says what is in
+   * the blister pack). Those are excluded from the denominator and reported as their own line,
+   * because scoring them as disagreements would bury the real ones among false alarms.
+   *
+   * A whole multiple is called out separately because it is the expensive kind and the commonest
+   * real fault: "30 EA" against an FDA 180 is thirty blister packs of six, and a per-unit cost
+   * taken from the catalogue is six times wrong in a figure the buy list acts on.
+   */
+  await timed("catalogue-package", async () => {
+    const placed = catalogue.filter((r) => isNdc(r.ndc11) && packageOf.has(r.ndc11));
+    let agree = 0;
+    let unreadable = 0;
+    const multiples: string[] = [];
+    let unitDiffers = 0;
+    let differs = 0;
+
+    let multipleCount = 0;
+    for (const row of placed) {
+      const v = comparePack(row.packSize, packageOf.get(row.ndc11!));
+      if (v.verdict === "agree") agree++;
+      else if (v.verdict === "cannot-compare") unreadable++;
+      else if (v.verdict === "unit-differs") unitDiffers++;
+      else if (v.verdict === "multiple") {
+        multipleCount++;
+        if (multiples.length < 3) multiples.push(`${row.supplier} "${row.packSize}" against the FDA's ${v.fda} ${v.uom} — ${v.factor}× out`);
+      } else differs++;
+    }
+
+    const comparable = placed.length - unreadable;
+    const gaps: string[] = [];
+    /*
+     * The count first, then the examples.
+     *
+     * Three worked examples with no total behind them is an anecdote: it says these exist without
+     * saying whether they are three rows or three thousand, and the answer decides whether this is
+     * an afternoon's work or a footnote. The multiples are the expensive kind — a pack size wrong
+     * by a whole factor is a per-unit cost wrong by that factor, in a figure the buy list acts on —
+     * so they are counted apart from the rows that merely disagree.
+     */
+    if (multipleCount > 0) {
+      gaps.push(
+        `${multipleCount.toLocaleString("en-US")} row${multipleCount === 1 ? " is" : "s are"} a whole multiple out, which is the expensive kind: the per-unit cost is wrong by that factor. For example ${multiples.join("; ")}`,
+      );
+    }
+    if (differs > 0) {
+      gaps.push(
+        `${differs.toLocaleString("en-US")} row${differs === 1 ? "" : "s"} disagree by something other than a whole factor, which usually means one side is describing a different package rather than counting it differently`,
+      );
+    }
+    if (unitDiffers > 0) {
+      gaps.push(`${unitDiffers.toLocaleString("en-US")} rows are counted in a different unit from the FDA's — grams against tablets cannot be reconciled by any factor`);
+    }
+    if (unreadable > 0) {
+      gaps.push(
+        `${unreadable.toLocaleString("en-US")} rows could not be compared at all, most often because the FDA description stops at a container and never says what is inside. Not counted as disagreements.`,
+      );
+    }
+    return {
+      numerator: agree,
+      denominator: comparable,
+      gaps,
+      note:
+        "A pack size is a divisor: every per-unit cost is the pack cost over the units in the pack, so one wrong by a factor of six makes a drug look six times cheaper and the buy list recommends it.",
+    };
+  });
+
+  const known = new Set(SPECS.map((s) => s.key));
+  const rows = out.filter((m) => known.has(m.key));
+
+  for (const m of rows) {
+    await db
+      .insert(schema.dataHealthCounts)
+      .values({
+        key: m.key,
+        numerator: m.numerator,
+        denominator: m.denominator,
+        gaps: (m.gaps ?? []).join("\n"),
+        note: m.note ?? null,
+        measuredAt: m.measuredAt!,
+        tookMs: m.tookMs,
+      })
+      .onConflictDoUpdate({
+        target: schema.dataHealthCounts.key,
+        set: {
+          numerator: m.numerator,
+          denominator: m.denominator,
+          gaps: (m.gaps ?? []).join("\n"),
+          note: m.note ?? null,
+          measuredAt: m.measuredAt!,
+          tookMs: m.tookMs,
+        },
+      });
+  }
+
+  return { measured: rows.length, skipped, tookMs: Date.now() - startedAll };
+}
+
+/** The stored counts, for the page. Reads one small table and nothing else. */
+export async function storedHealth(): Promise<Measurement[]> {
+  const rows = await db.select().from(schema.dataHealthCounts);
+  return rows.map((r) => ({
+    key: r.key,
+    numerator: r.numerator,
+    denominator: r.denominator,
+    measuredAt: r.measuredAt,
+    gaps: r.gaps ? r.gaps.split("\n").filter(Boolean) : [],
+    note: r.note,
+  }));
+}
+
+/** How long the last full measurement took, so the page can warn before somebody presses it again. */
+export async function lastRun(): Promise<{ measuredAt: string | null; tookMs: number }> {
+  const rows = await db.select().from(schema.dataHealthCounts);
+  if (rows.length === 0) return { measuredAt: null, tookMs: 0 };
+  return {
+    measuredAt: rows.map((r) => r.measuredAt).sort().reverse()[0] ?? null,
+    tookMs: rows.reduce((n, r) => n + (r.tookMs ?? 0), 0),
+  };
+}
+
+/** "IPD 412, McKesson 88" — which supplier's rows are short of something, worst first. */
+function gapsBySupplier(rows: { supplier: string | null }[], what: string): string[] {
+  if (rows.length === 0) return [];
+  const by = new Map<string, number>();
+  for (const r of rows) {
+    const k = (r.supplier ?? "").trim() || "(no supplier)";
+    by.set(k, (by.get(k) ?? 0) + 1);
+  }
+  const worst = [...by].sort((a, b) => b[1] - a[1]).slice(0, 4);
+  return [`${rows.length.toLocaleString("en-US")} rows ${what} — ${worst.map(([k, n]) => `${k} ${n.toLocaleString("en-US")}`).join(", ")}`];
+}

@@ -137,8 +137,13 @@ Of the 177 read: 63+ name a network, 39+ a chain code, 5 a BIN, 0 a network reim
 `network_rates`, 10 appeal terms, 194 contacts, 21 payment routings, 36 payer links, and **18
 claims now linked to a contract**. Deferred, not refused: every document that governs by chain
 code (605, 630, 841, A605 recur) is held because **the pharmacy's own chain code is not in
-Settings** — `governs()` cannot say whether it is ours. Owner action: enter the pharmacy's chain
-code (and confirm NCPDP and NPI) on the Settings page, then re-run `apply`.
+Settings** — `governs()` cannot say whether it is ours. **Settled 8 September without the owner:** the pharmacy has no chain code of its own; the codes are
+its PSAO's. Health Mart Atlas signs the library "as attorney-in-fact on behalf of its participating
+pharmacies (Chain Code: 605, 630)", Capital Rx and ESI add 841, Caremark writes A605, Prime 00605,
+ESI 0000630. Settings now holds "605, 630, 841" and `governsPharmacy` compares on the digits with
+leading zeros gone (`chainCodeKey`). **Re-applied: 176 documents, 369 rate lines, 18 appeal terms,
+380 contacts, 76 routings, 40 payer links; 1 not ours; 30 held only for rates whose quote is not
+in the text (scans).** NCPDP 1722734 and NPI 1548737182 were already in Settings.
 
 **Secondary payors, measured for A's audit (8 September, BACKLOG 2b-iv).** Of 1,054 insured paid
 fills, **22 have more than one payor** (2.1%), carrying $8,456.07 of remit between them. The
@@ -152,6 +157,28 @@ $458.29; BIN 610524 5 rows: remit $245.81, cost $0, profit $265.81. Pairs seen: 
 004336+024284, 003858+610494, 003858+610011 (2 fills each), then singles. Query: group `claims`
 (status paid, not cash plan) by rx, fill, date, NDC; count distinct BIN. A: audit every page that
 states profit by payor against this — the fill owns the profit, each payor owns its own receivable.
+
+**Data health is live (8 September, session 2, `/tools/data-health`) and the hand counts move
+there.** First run on the live database: 17 rows in 9.9 s. Of note beyond what is above:
+**claim → plan class 6 of 1,054 fills (0.6%)** — the plan register (`plan_groups`) has classified
+almost nothing, so the law-first pricing rung (Medicaid = NADAC + fee, the Kansas floor) never
+fires; **NADAC current within three months for 30,067 of 43,396 NDCs** in the table (69.3%);
+**catalogue rows with an AWP 50,870 of 63,809** (79.7%); bank lines none, so no fill traces to
+cash. The page is the record from here; a figure quoted in a chat that is not on it is a figure to
+add to it.
+
+**File handed to 2 (8 September):** `packageUnits` in `drug-directory.ts`, for the FDA package
+parser behind the Data health row "catalogue row → FDA package size". Read the nested description
+to the innermost unit ("30 BLISTER PACK in 1 CARTON / 6 TABLET in 1 BLISTER PACK" = 180 EA); the
+current reading takes the outer count. Measured 8 September on the levelled catalogue: ~95% agree
+at every supplier; 0.5–1% the FDA is a whole multiple; 2.5% the unit differs; 1.5% other, many of
+them the FDA reading, not the catalogue.
+
+**For A's audit list (8 September, from 2's observation):** the test suite shows an intermittent
+file-level failure marker that moves between runs (`ai-spend.test.ts` once,
+`supplier-terms-store.test.ts` once); both pass alone and the count stays at the known four.
+`node:test` appears to run database-touching files in parallel against one SQLite file. A real
+failure could hide behind a marker everyone has learned to ignore — worth settling.
 
 **File handed to A (7 September):** `claim-contract.ts` and `src/app/(app)/payers/**` for the
 network-id mapping (ASSIGNMENTS, Helper A, "Second"). 1 does not edit them until A's pull request

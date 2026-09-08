@@ -209,8 +209,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <Field label="NCPDP / NABP number"><input name="pharmacy_ncpdp" className="field font-mono" defaultValue={s.pharmacy_ncpdp} /></Field>
         <Field label="DEA registration"><input name="pharmacy_dea" className="field font-mono" defaultValue={s.pharmacy_dea} /></Field>
         <Field
-          label="Chain code"
-          hint="The code your PSAO contracts under with each PBM — not your own number. Nearly every rate exhibit covers both 605 and 630, so it rarely changes a rate; a few networks are split by code, and those are the ones where it matters. Leave blank if your PSAO has not told you."
+          label="Chain codes"
+          hint="The codes your PSAO contracts under, comma-separated — not your own number. Health Mart Atlas signs its agreements for pharmacies bearing 605, 630 and 841, and PBMs print the same code as A605, 00605 or 0000630; those all read as one. A rate exhibit that names a code you are not under is not yours, and this is how the site knows."
         >
           <input name="pharmacy_chain_code" className="field font-mono" defaultValue={s.pharmacy_chain_code} />
         </Field>

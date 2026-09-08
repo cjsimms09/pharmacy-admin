@@ -1,3 +1,4 @@
+import { fdaPackageUnits } from "./data-health-packages";
 import { normalizeNdc } from "./ndc";
 
 /**
@@ -342,67 +343,17 @@ export function substitutable(a: Pick<DrugDirectoryRow, "equivalenceKey" | "teCo
  * than an absent one, because the whole point of this is to be the party nobody argues with.
  */
 export function packageUnits(packageDescription: string): { units: number; uom: "EA" | "ML" | "GM" } | null {
-  const text = packageDescription.trim();
-  if (!text) return null;
   /*
-   * A kit is not one package of one thing.
+   * One reader of the FDA's package text, not two.
    *
-   * "*" separates a kit's components — fifty different remedies in one box, or a starter pack of
-   * two tablet strengths. There is no single dispensing unit to state, and inventing one would put
-   * a wrong number where the whole point is to be the party nobody argues with.
+   * This used to read the nest itself and treated any alphabetic noun at the innermost level as a
+   * thing the pharmacy counts. Containers are alphabetic nouns too, so "3 BLISTER PACK in 1 CARTON"
+   * — where the FDA never says what is inside — came back as three, and against a catalogue saying
+   * eighty-four that read as a twenty-eight-fold disagreement that was not one. The reader in
+   * data-health-packages.ts refuses a description that stops at a container and says why; this
+   * keeps its shape for the callers that only want a size or nothing.
    */
-  if (text.includes("*")) return null;
-
-  const levels = text.split("/").map((s) => s.trim()).filter(Boolean);
-  if (levels.length === 0) return null;
-
-  let product = 1;
-  let innermost: string | null = null;
-  for (const level of levels) {
-    // "6 BLISTER PACK in 1 CARTON (0555-9043-58)" → count 6, noun "BLISTER PACK".
-    const m = /^(\d*\.?\d+)\s+(.+?)\s+in\s+1\s+/i.exec(level);
-    if (!m) return null;
-    const n = Number(m[1]);
-    if (!Number.isFinite(n) || n <= 0) return null;
-    product *= n;
-    innermost = m[2].trim();
-  }
-  if (innermost === null) return null;
-
-  const measure = unitOfMeasure(innermost);
-  if (measure === null) return null;
-  const units = product * measure.factor;
-  // Guard against a nest that multiplies out to something no package could be.
-  if (!Number.isFinite(units) || units <= 0 || units > 1_000_000) return null;
-  return { units: Math.round(units * 1000) / 1000, uom: measure.uom };
+  const r = fdaPackageUnits(packageDescription);
+  return r.ok ? { units: r.units, uom: r.uom } : null;
 }
 
-/**
- * A dispensing unit from the FDA's noun for it.
- *
- * Anything counted is EA — the pharmacy dispenses tablets, patches and syringes one at a time and
- * every file in this site counts them that way. Only a volume or a mass keeps its own measure, and
- * litres and kilograms are converted rather than refused, because a package stated in litres is
- * still a package.
- */
-function unitOfMeasure(noun: string): { uom: "EA" | "ML" | "GM"; factor: number } | null {
-  const n = noun.trim().toLowerCase();
-  /*
-   * Hours are not a dispensing unit, and reading them as one is how a box of four patches became
-   * six hundred and seventy-two.
-   *
-   * The FDA states a transdermal system's contents by how long it is worn — "4 POUCH in 1 CARTON /
-   * 168 h in 1 POUCH" for four seven-day patches. Multiplied through as though hours were things,
-   * that is 672, and a $124.99 patch reads as $0.74. A duration is refused outright.
-   */
-  if (/^h$|^hr$|^hour|^d$|^day|^wk$|^week|^min|^sec/.test(n)) return null;
-  if (/^ml$|^milliliter|^millilitre/.test(n)) return { uom: "ML", factor: 1 };
-  if (/^l$|^liter|^litre/.test(n)) return { uom: "ML", factor: 1000 };
-  if (/^g$|^gm$|^gram/.test(n)) return { uom: "GM", factor: 1 };
-  if (/^kg$|^kilogram/.test(n)) return { uom: "GM", factor: 1000 };
-  if (/^mg$|^milligram/.test(n)) return { uom: "GM", factor: 0.001 };
-  if (/^u?g$|^mcg$|^microgram/.test(n)) return { uom: "GM", factor: 0.000001 };
-  // Everything the FDA counts rather than measures: TABLET, CAPSULE, PATCH, SYRINGE, VIAL…
-  if (/^[a-z][a-z ,()\-.]*$/.test(n)) return { uom: "EA", factor: 1 };
-  return null;
-}
