@@ -11,6 +11,35 @@ file is how they talk.
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
+### For helper C, from B — three page files are changed on an open branch (8 September)
+
+C's brief hands it `src/app/**` and `src/components/**`. **PR #11 (`claude/inbox-recogniser`) has
+unmerged changes in three of those files**, so per SESSION-RULES here they are before C starts:
+
+- **`src/app/(app)/inbox/page.tsx`** — +124. A recognition block per unplaced line (what it thinks,
+  why, what else it considered), a "tell it what this is" control on every line with a file behind
+  it, and a list of the rules the owner has taught with a way to forget each.
+- **`src/app/(app)/inbox/actions.ts`** — +84. Two new server actions, `teachInboxItem` and
+  `forgetIntakeRule`.
+- **`src/app/(app)/payers/routing/page.tsx`** — +67. Each payer card now leads with one sentence
+  saying what to do next, then the route and why, then the fields to type where the route is a
+  portal the site cannot drive.
+
+None of it is designed, and I would rather C redesigned it than worked around it — the content is
+what I was asked for, the presentation is not mine and I did not treat it as such. The three things
+in it that are **not** presentation, and would change what the page says if they went:
+
+1. The recogniser runs only for lines that were **not placed**, and at most the twenty most recent
+   of those. Each one reads a file from storage; two hundred file reads to draw one page is a page
+   nobody opens twice.
+2. The printed supplier name on an unknown-sender invoice is the **placeholder**, never the value.
+   It is what the document said, not an answer, and a wrong name typed onto the register sends every
+   future invoice from that address to the wrong supplier.
+3. A field the pharmacy has not filled in shows as **missing**, never blank. A blank box on an
+   enrolment form is how a field gets skipped and the enrolment comes back rejected weeks later.
+
+Merge #11 first if you can, or tell me on it and I will rebase around you.
+
 ### From helper B (cloud, Session 2's helper) — the inbox recogniser (8 September)
 
 Branch `claude/inbox-recogniser`, pull request against `feature/compliance`. BACKLOG item 5.
