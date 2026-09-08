@@ -565,6 +565,13 @@ seam is `depositExplanation(bankLineId)`, and the join table waits for the remit
 `docs/reference/payer-model.md` after A's audit. **Owner action: upload a bank statement at month
 end** — until one exists the cash side of the books has nothing to reconcile to.
 
+**The site's process is 1.6 GB (8 September, 9:02 AM, measured after the counter lost the
+page).** `next start` at 1,606 MB working set, 1,812 MB private, stable after the warm tick loads
+every held reading on a cold start; free memory on the machine 1.3 GB with two Claude sessions,
+Defender and Chrome beside it. Not a leak on the evidence so far — one sample stable across 30 s —
+but a footprint the machine cannot spare. A has the audit (ASSIGNMENTS, Helper A item 5); the
+launcher gets a 2.5 GB heap ceiling tonight so the app restarts rather than starving everything.
+
 **The audits' queries, run on the live database (8 September, session 1).** One answer each, in
 the order the audits asked:
 
