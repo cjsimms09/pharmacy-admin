@@ -67,7 +67,7 @@ export async function saveTin(tin: string): Promise<void> {
  * not supersede terms it never mentions — and never two documents merged, because a merged answer
  * is a third answer no document gave.
  */
-async function enrolmentFactsByPbm(): Promise<Map<string, EnrolmentFacts>> {
+export async function enrolmentFactsByPbm(): Promise<Map<string, EnrolmentFacts>> {
   const { parseTerms } = await import("./contract-extract");
   const { inArray } = await import("drizzle-orm");
   /*
