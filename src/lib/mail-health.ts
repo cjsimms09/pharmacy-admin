@@ -83,6 +83,24 @@ export type LinkHealth = {
   /** A bare IP address, a non-standard port, or plain HTTP: all three read as malware to a filter. */
   spamShaped: boolean;
   reasons: string[];
+  /**
+   * Where the written courses are hosted instead, when no address is set: the email's button opens
+   * these, so a missing address is no longer a link nobody can open. Null where nothing is hosted.
+   */
+  hostedAt?: string | null;
+  /** Training types with no hosted page that would still be sent a localhost link. */
+  unhosted?: string[];
+};
+
+/**
+ * What the pharmacy has hosted elsewhere, per training type: the address from Settings → Training.
+ * Passed in rather than read here, so the check stays pure.
+ */
+export type HostedMaterials = {
+  /** Training type → https address of the course page. */
+  hosted: Record<string, string>;
+  /** Every training type that is a written course, and so needs a page or a link. */
+  written: string[];
 };
 
 /**
@@ -98,17 +116,41 @@ export type LinkHealth = {
  * So the fix for "it went to junk" and the fix for "the link does not work" are one fix, and it is
  * worth saying that plainly rather than letting the pharmacy chase them as two problems.
  */
-export function linkHealth(publicBaseUrl: string | undefined | null): LinkHealth {
+export function linkHealth(publicBaseUrl: string | undefined | null, materials?: HostedMaterials): LinkHealth {
   const base = (publicBaseUrl ?? "").trim() || null;
   const reasons: string[] = [];
   if (!base) {
+    /*
+     * No address for this site — but the courses may be hosted on the pharmacy's own website,
+     * in which case the email's button opens those (linkForItem) and never mentions localhost.
+     * The alert then has nothing to alert about, and saying otherwise sent the pharmacist to
+     * Settings → Network to fix a link that had already been fixed somewhere else.
+     */
+    const hostedTypes = Object.entries(materials?.hosted ?? {})
+      .filter(([, u]) => /^https:\/\//i.test(u))
+      .map(([t]) => t);
+    const written = materials?.written ?? [];
+    const unhosted = written.filter((t) => !hostedTypes.includes(t));
+    if (hostedTypes.length > 0 && unhosted.length === 0) {
+      let origin: string | null = null;
+      try {
+        origin = new URL(materials!.hosted[hostedTypes[0]]).origin;
+      } catch {
+        origin = null;
+      }
+      return { base: null, privateOnly: false, spamShaped: false, reasons: [], hostedAt: origin, unhosted: [] };
+    }
     return {
       base: null,
       privateOnly: true,
       spamShaped: true,
       reasons: [
-        "No address is set, so links point at localhost and work on this computer only.",
+        hostedTypes.length > 0
+          ? `No address is set for this site, and ${unhosted.length} written course${unhosted.length === 1 ? " has" : "s have"} no hosted page, so ${unhosted.length === 1 ? "its link points" : "their links point"} at localhost and work on this computer only.`
+          : "No address is set, so links point at localhost and work on this computer only.",
       ],
+      hostedAt: null,
+      unhosted,
     };
   }
 

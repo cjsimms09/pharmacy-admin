@@ -565,6 +565,19 @@ seam is `depositExplanation(bankLineId)`, and the join table waits for the remit
 `docs/reference/payer-model.md` after A's audit. **Owner action: upload a bank statement at month
 end** — until one exists the cash side of the books has nothing to reconcile to.
 
+**The heap ceiling is not in force until the launcher itself restarts.** The 2.5 GB
+`--max-old-space-size` (commit `d4f1faa`) is set by `scripts/launch.mjs` when it spawns the app, and
+the launcher running since 7 September (pid 7296) is the old code — a deploy replaces the app, not
+the launcher. It takes effect at the next sign-in or the next "Start Pharmacy Admin.cmd". Owner
+action, or the next reboot.
+
+**The site's process is 1.6 GB (8 September, 9:02 AM, measured after the counter lost the
+page).** `next start` at 1,606 MB working set, 1,812 MB private, stable after the warm tick loads
+every held reading on a cold start; free memory on the machine 1.3 GB with two Claude sessions,
+Defender and Chrome beside it. Not a leak on the evidence so far — one sample stable across 30 s —
+but a footprint the machine cannot spare. A has the audit (ASSIGNMENTS, Helper A item 5); the
+launcher gets a 2.5 GB heap ceiling tonight so the app restarts rather than starving everything.
+
 **The audits' queries, run on the live database (8 September, session 1).** One answer each, in
 the order the audits asked:
 
@@ -579,9 +592,10 @@ the order the audits asked:
   row on this database carries a short-dated availability at all, so the first finding costs
   nothing today and the fix is insurance. Merged anyway.
 - *add-ons — which steadiness test fails:* **449 of 553 NDCs fail "dispensed on fewer than 3
-  days"; 0 fail prescriptions; 0 fail concentration; 104 are steady; the claims window is 21
-  days.** The refusal sentence was wrong (now fixed) *and* the archive is three weeks long. The
-  site holds claims from 18 August. **Owner action: load the claims history** — a PioneerRx export
+  days"; 0 fail prescriptions; 0 fail concentration; 104 are steady.** The refusal sentence was
+  wrong (now fixed) *and* the archive is two weeks long: **paid claims run from 24 August, a
+  15-day span** (the "21 days" first written here counted one reversed cash row dated 18 August;
+  session 2's Data health row is the right figure). **Owner action: load the claims history** — a PioneerRx export
   of the past twelve months, or the SQL read — because every rate, every add-on, every "which
   NDC pays" is being judged on 21 days.
 - *claims 1 — `quantity_unit` filled:* 0 of 1,669. As expected; on the export list.

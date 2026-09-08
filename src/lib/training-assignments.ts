@@ -305,7 +305,7 @@ async function emailPerson(
           title: course?.title ?? material?.title ?? TRAINING_LABEL[i.type],
           minutes: course?.minutes ?? null,
           dueOn: i.dueOn,
-          url: await linkFor(i.token),
+          url: await linkForItem(i.type, i.token),
           replyCode: i.replyCode,
           attachment: attach ? (material?.filename ?? null) : null,
         };
@@ -372,6 +372,24 @@ export async function linkFor(token: string): Promise<string> {
   const s = await getSettings();
   const base = (s.public_base_url || "").trim().replace(/\/$/, "");
   return `${base || "http://localhost:3000"}/t/${token}`;
+}
+
+/**
+ * The link the email's button carries for one training.
+ *
+ * With no public address set, the token link points at localhost: a link nobody can open, and a
+ * reason for the message to be filed as junk. Where the pharmacy has put the course on its own
+ * website (Settings → Training, one line per training: the type, "=", the address), that address
+ * is what the button opens instead — the same course text, readable anywhere, with the reply code
+ * in the email as the attestation. The moment a public address is set, the token link comes back,
+ * because that page also records the answers and the attestation itself.
+ */
+export async function linkForItem(type: TrainingType, token: string): Promise<string> {
+  const s = await getSettings();
+  const base = (s.public_base_url || "").trim();
+  if (base) return linkFor(token);
+  const hosted = parseMaterials(s.training_materials ?? "")[type];
+  return hosted ?? linkFor(token);
 }
 
 /**

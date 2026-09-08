@@ -19,9 +19,11 @@ import {
   openAssignments,
   recordGroupTraining,
   linkFor,
+  linkForItem,
+  parseMaterials,
 } from "@/lib/training-assignments";
 import { REPLY_PHRASE, awaitingQuestionsAndAnswers, attestQuestionsAndAnswers } from "@/lib/training-replies";
-import { courseFor } from "@/lib/courses";
+import { courseFor, COURSES } from "@/lib/courses";
 import { canSend, sendTestEmail } from "@/lib/send-mail";
 import { mailHealth, linkHealth } from "@/lib/mail-health";
 import { PickControls, PickGroup } from "@/components/pick-controls";
@@ -68,7 +70,8 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
   const outstanding = assignments.filter((a) => !a.completedAt);
   // Resolved up front: linkFor reads a setting, and awaiting inside the table would mean one
   // lookup per row inside JSX, which is not allowed and would be wasteful if it were.
-  const links = new Map(await Promise.all(outstanding.map(async (a) => [a.id, await linkFor(a.token)] as const)));
+  // The same link the email carries: the hosted course where no address is set, the token page otherwise.
+  const links = new Map(await Promise.all(outstanding.map(async (a) => [a.id, await linkForItem(a.type, a.token)] as const)));
   const done = assignments.filter((a) => a.completedAt && a.trainingId);
   const today = todayIso();
 
@@ -372,8 +375,19 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
         /*
          * Why it went to junk, and why the link did not work: one cause, two symptoms.
          */
-        const lh = linkHealth(settings.public_base_url);
-        if (!lh.privateOnly && !lh.spamShaped) return null;
+        const lh = linkHealth(settings.public_base_url, {
+          hosted: parseMaterials(settings.training_materials ?? ""),
+          written: Object.keys(COURSES),
+        });
+        if (!lh.privateOnly && !lh.spamShaped) {
+          return lh.hostedAt ? (
+            <Notice kind="ok">
+              The training email links each written course to its page on <code>{lh.hostedAt}</code>, which opens
+              anywhere; the reply code in the email is the attestation. No address is set for this site, and none is
+              needed for that.
+            </Notice>
+          ) : null;
+        }
         return (
           <Notice kind="crit">
             <b>The links in the training email are the reason it lands in junk, and the reason nobody can open it.</b>{" "}
