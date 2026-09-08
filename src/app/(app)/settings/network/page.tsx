@@ -156,6 +156,32 @@ export default async function NetworkPage({ searchParams }: { searchParams: Prom
         )}
       </Card>
 
+      {/*
+        Put here, directly under the outside-access card, because this is the question that card
+        gets opened to answer — and opening the pharmacy to the internet is the wrong answer to it.
+      */}
+      <Card
+        className="mb-6"
+        title="Working on this site with Claude"
+        subtitle="On this computer, with the real database in front of it, and nothing exposed to anyone."
+      >
+        <p className="text-sm text-ink-2">
+          Claude working on this site from a browser runs on Anthropic&rsquo;s machines, and those machines are only
+          allowed to reach a short list of addresses — GitHub and a few software registries. Every other address on
+          the internet is refused. So an outside address for this site, however it is made, can never be reached from
+          there. That is not a setting anybody here can change.
+        </p>
+        <p className="mt-2 text-sm text-ink-2">
+          The way round it is the better arrangement anyway: rather than opening the pharmacy to Claude, put Claude in
+          the pharmacy. Running here it reads the real database directly, opens the real screens, runs the tests, and
+          changes the code in place — with no address, no tunnel, and nothing for anybody to remember to close.
+        </p>
+        <p className="mt-3 rounded-md border border-line bg-ground px-3 py-2 text-sm">
+          In the pharmacy-admin folder, double-click <b>Work on this with Claude.cmd</b>. The first time it installs
+          Claude and asks you to sign in with the same account you use on claude.ai. After that it opens straight away.
+        </p>
+      </Card>
+
       {!best ? (
         <Notice kind="crit">
           This computer doesn't appear to be on a network right now, so there's no address to share. Connect it to the pharmacy's Wi-Fi or network cable and reload this page.
