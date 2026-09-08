@@ -52,10 +52,33 @@ export function looksLikeDrillDown(text: string, fileName = ""): boolean {
   return isDrillDownText(text, fileName);
 }
 
-/** Reads just the header row, whatever the format. Returns [] for anything unreadable. */
+/**
+ * Reads just the header row, whatever the format. Returns [] for anything unreadable.
+ *
+ * A file with **no extension at all** is read as delimited text, because the pharmacy's feeds
+ * arrive that way and the site already knows it: `acceptableAttachment` below has a whole branch
+ * for extensionless attachments, written after PioneerRx sent the catalogue without one and the
+ * first Sunday's files were filed as unrecognised for want of four letters.
+ *
+ * The same thing was still true of every other header-read report. A NADAC file named
+ * "nadac_2026-08-26" — no extension, which is what an entry unpacked from a zip or forwarded from
+ * a phone looks like — read as unrecognised here while `looksLikeNadacHeader` in `nadac.ts`
+ * recognised the identical bytes, because that one reads the first line and this one asked the
+ * name first.
+ *
+ * This only ever *adds* recognition: a name with a known extension takes the branch it always
+ * took, and every rule that consumes these headers requires a specific combination of columns to
+ * be present, so a file that matched nothing before cannot start matching the wrong thing now.
+ *
+ * The extensionless branch is gated on the bytes looking like text, because without a name to go
+ * on there is nothing else stopping a twenty-megabyte binary from being decoded and parsed as a
+ * spreadsheet on the sweep's thread. A NUL byte in the first chunk is the cheap, certain tell.
+ */
 export function headersOf(fileName: string, buf: Buffer): string[] {
+  const named = /\.(csv|txt)$/i.test(fileName);
+  const unnamed = !/\.[A-Za-z0-9]{1,5}$/.test(fileName) && !buf.subarray(0, 8192).includes(0);
   try {
-    if (/\.(csv|txt)$/i.test(fileName)) {
+    if (named || unnamed) {
       // Read the header row itself rather than going through the object parser: a report whose
       // period happened to be empty still has to be recognised, and the object parser has no
       // rows to take keys from.

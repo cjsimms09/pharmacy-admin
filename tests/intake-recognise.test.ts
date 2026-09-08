@@ -1,6 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { recognise, ruleFromCorrection, stableStem, CATEGORIES, categoryFor } from "../src/lib/intake-recognise";
+import { classify, headersOf } from "../src/lib/autoroute";
 import {
   isUnknownSenderInvoice,
   unknownSenderInvoiceReason,
@@ -291,5 +292,63 @@ describe("an invoice whose sender nobody has registered", () => {
     assert.equal(printedSupplierSuggestion("M"), null);
     assert.equal(printedSupplierSuggestion("  McKesson   Drug  Company "), "McKesson Drug Company");
     assert.equal(printedNameInReason(unknownSenderInvoiceReason("a@b.test", long)), null);
+  });
+});
+
+/*
+ * A report the site can read, arriving without a file extension.
+ *
+ * `acceptableAttachment` already has a branch for extensionless attachments, written after
+ * PioneerRx sent the catalogue without one and the first Sunday's files were filed as unrecognised
+ * for want of four letters. The header reader had not learned the same lesson: it asked the name
+ * before it read the bytes, so a NADAC file named "nadac_2026-08-26" — which is what an entry
+ * unpacked from a zip, or forwarded from a phone, looks like — read as unrecognised while
+ * `looksLikeNadacHeader` in nadac.ts recognised the identical bytes.
+ *
+ * That mattered here because Helper B's brief names `looksLikeNadacHeader` as one of the detectors
+ * the recogniser must ask, and asking it through `classify()` meant not asking it at all for those
+ * names.
+ */
+describe("a report with no file extension is still a report", () => {
+  const nadac = Buffer.from(
+    ["NDC Description,NDC,NADAC Per Unit,Effective Date,Pricing Unit,OTC", "AMOXICILLIN 500MG CAP,00093310501,0.09287,2026-08-26,EA,N"].join("\n"),
+    "utf8",
+  );
+
+  test("the same bytes are the same report, named with an extension or without one", () => {
+    assert.equal(classify("nadac_2026-08-26.csv", nadac).kind, "nadac");
+    assert.equal(classify("nadac_2026-08-26", nadac).kind, "nadac");
+    assert.equal(classify("NADAC weekly", nadac).kind, "nadac");
+  });
+
+  test("headers are read from the bytes, not guessed from the name", () => {
+    assert.deepEqual(headersOf("nadac_2026-08-26", nadac).slice(0, 4), ["NDC Description", "NDC", "NADAC Per Unit", "Effective Date"]);
+  });
+
+  test("this only ever adds recognition: what was not a report still is not", () => {
+    // Every rule consuming these headers wants a specific combination of columns, so a file that
+    // matched nothing before cannot begin matching the wrong thing now.
+    assert.equal(classify("blob", Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe])).kind, "unrecognised");
+    assert.equal(classify("notes", Buffer.from("just some words, nothing tabular\n", "utf8")).kind, "unrecognised");
+    assert.equal(classify("scan0021.pdf", nadac).kind, "unrecognised");
+  });
+
+  test("a binary without a name is refused on its bytes, not decoded to find out", () => {
+    // Without an extension there is nothing else stopping a twenty-megabyte binary from being
+    // decoded and parsed as a spreadsheet on the sweep's own thread. A NUL in the first chunk is
+    // the cheap, certain tell, and it has to come before the parse rather than after it.
+    const binary = Buffer.concat([Buffer.from("NDC,NADAC Per Unit,Effective Date\n"), Buffer.from([0x00]), Buffer.alloc(4096, 0x41)]);
+    assert.deepEqual(headersOf("blob", binary), []);
+    assert.equal(classify("blob", binary).kind, "unrecognised");
+  });
+
+  test("and the recogniser now reaches it, so an unnamed NADAC file files itself", () => {
+    const r = recognise({
+      fromAddress: "data@cms.test",
+      fileName: "nadac_2026-08-26",
+      content: { verdict: classify("nadac_2026-08-26", nadac).kind, why: "Carries a NADAC Per Unit column alongside NDC and Effective Date." },
+    });
+    assert.equal(r.best?.category, "nadac");
+    assert.equal(r.mayFile, true);
   });
 });
