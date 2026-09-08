@@ -11,11 +11,19 @@
  *
  * A line is added only when all of this is true: it is a generic (CMS's own flag, never a guess
  * from the name); it is not a controlled substance (the supplier's class letter on an invoice, or
- * the name lists, either one suffices to exclude); it moves at a steady rate rather than in one
- * large fill; this supplier's effective price — after the rebate where the line earns one — is the
- * lowest of every supplier who prices it, so buying it here is the best way to buy it and not just
- * a way to reach a number; and the quantity fits inside the days-of-stock cap after what is on the
- * shelf and on order.
+ * the name lists, either one suffices to exclude); the pharmacy actually uses it (`order-plan.ts`
+ * owns that test, and since 54e11ad it is two days or two prescriptions in the window rather than
+ * a steady rate); this supplier's effective price — after the rebate where the line earns one — is
+ * no higher than that of any other supplier who prices it; and the quantity fits inside the
+ * days-of-stock cap after what is on the shelf and on order.
+ *
+ * "No higher" rather than "lowest", also since 54e11ad, and that distinction has to survive into
+ * the words this module prints. An add-on exists to reach a minimum: reaching it on a line that
+ * costs the same here as anywhere else costs the pharmacy nothing, so it is allowed; reaching it
+ * on a dearer line is paying for the privilege of hitting a number, so it is not. But a line at
+ * the same price is not a saving, and every sentence below has to say which it is holding. An
+ * equal price told as a saving is the kind of small lie that makes an owner stop believing the
+ * arithmetic, and the arithmetic is all this site has.
  *
  * ── What "projected usage" means here ──
  *
@@ -230,10 +238,23 @@ export function fillMinimums(input: FillInput): SupplierFill[] {
     }
     const meets = basketCents + added >= minimumCents;
     const overshoot = basketCents + added - minimumCents;
+    /*
+     * The saving is stated, not implied, and it is stated as what it is.
+     *
+     * "Each cheapest here" was true when a top-up had to beat the alternative. Since 54e11ad an
+     * equal price qualifies, so the sentence has to distinguish a fill that saves money from one
+     * that merely costs nothing extra — otherwise the first list the owner reads under the new
+     * rule tells him he saved something he did not.
+     */
+    const saved = picks.reduce((n, p) => n + p.savingCents, 0);
+    const priced =
+      saved > 0
+        ? `each no dearer here than anywhere else and ${dollars(saved)} cheaper in all`
+        : `each at the best price anywhere, though none of them cheaper here than elsewhere`;
     const says = meets
-      ? `${picks.length} generic${picks.length === 1 ? "" : "s"} for ${dollars(added)} reach the ${dollars(minimumCents)} minimum from ${dollars(basketCents)}, each cheapest here and inside ${horizon} days of use${overshoot > 0 ? `; ${dollars(overshoot)} over, the last pack being whole` : ""}.`
+      ? `${picks.length} generic${picks.length === 1 ? "" : "s"} for ${dollars(added)} reach the ${dollars(minimumCents)} minimum from ${dollars(basketCents)}, ${priced}, and all inside ${horizon} days of use${overshoot > 0 ? `; ${dollars(overshoot)} over, the last pack being whole` : ""}.`
       : picks.length === 0
-        ? `Nothing qualifies: no generic this supplier is cheapest on moves steadily enough to buy ${horizon} days of. ${dollars(shortfallCents)} short of the minimum; buy the basket at the primary or wait.`
+        ? `Nothing qualifies: no generic this supplier prices as well as anybody else is used often enough to buy ${horizon} days of. ${dollars(shortfallCents)} short of the minimum; buy the basket at the primary or wait.`
         : `${picks.length} generic${picks.length === 1 ? "" : "s"} for ${dollars(added)} still leave the order ${dollars(-overshoot)} short of the ${dollars(minimumCents)} minimum. Buy the basket at the primary or wait for more need.`;
     out.push({ ...base, candidates, picks, addedCents: added, overshootCents: overshoot, meets, refused: refused.slice(0, 40), says });
   }
@@ -267,6 +288,25 @@ function candidateOf(c: Candidate, perDay: number, onHand: number): FillCandidat
  * the cap allows, and at least one — a whole pack may overshoot the minimum, which is said rather
  * than avoided, because an order $3 over a minimum is an order and one $3 under is not.
  */
+/**
+ * What this supplier's price actually is against the next best, in the words for the case in hand.
+ *
+ * Three cases and three sentences, because there are three. Cheaper is a saving and says so.
+ * The same price is not a saving and must not be dressed as one — it read "Cheapest here at
+ * 0.1234 against 0.1234 at IPC", which is a sentence that contradicts itself in the space of
+ * eleven words. And no alternative at all cannot be reached from here (`topUpCandidates` refuses
+ * it before this is called) but is written out anyway, because the day somebody relaxes that rule
+ * is not the day to discover this function assumed it.
+ */
+function priceWords(c: Candidate): string {
+  const unit = (micros: number) => (micros / 10_000 / 100).toFixed(4);
+  if (!c.alternative) return `Only this supplier prices it, at ${unit(c.offer.effectiveUnitMicros)}/unit`;
+  if (c.offer.effectiveUnitMicros === c.alternative.effectiveUnitMicros) {
+    return `The same price here as at ${c.alternative.supplier}, ${unit(c.offer.effectiveUnitMicros)}/unit — no saving, but nothing lost by reaching the minimum on it`;
+  }
+  return `Cheapest here at ${unit(c.offer.effectiveUnitMicros)}/unit against ${unit(c.alternative.effectiveUnitMicros)} at ${c.alternative.supplier}`;
+}
+
 function pickFrom(c: Candidate, remainingCents: number, perDay: number, onHand: number, horizon: number): FillPick | null {
   const packQty = c.offer.packQty;
   if (!packQty || packQty <= 0) return null;
@@ -293,6 +333,6 @@ function pickFrom(c: Candidate, remainingCents: number, perDay: number, onHand: 
     perDayThousandths: perDay,
     daysOfStockAfter: Math.round(daysOfStock(onHand + units, perDay)),
     projectedThousandths: Math.round(perDay * horizon),
-    why: `Cheapest here at ${(c.offer.effectiveUnitMicros / 10_000 / 100).toFixed(4)}/unit${c.alternative ? ` against ${(c.alternative.effectiveUnitMicros / 10_000 / 100).toFixed(4)} at ${c.alternative.supplier}` : ""}; ${perDay > 0 ? (perDay / 1000).toFixed(2) : "0"} units a day leaves ${Math.round(daysOfStock(onHand + units, perDay))} days on the shelf after this.`,
+    why: `${priceWords(c)}; ${perDay > 0 ? (perDay / 1000).toFixed(2) : "0"} units a day leaves ${Math.round(daysOfStock(onHand + units, perDay))} days on the shelf after this.`,
   };
 }

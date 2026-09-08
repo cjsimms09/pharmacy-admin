@@ -158,3 +158,72 @@ describe("filling a minimum with the right generics", () => {
     assert.match(none.says, /\$320\.00 short/);
   });
 });
+
+/*
+ * A line the supplier prices no better than anybody else.
+ *
+ * Since 54e11ad an equal price qualifies as an add-on: reaching a minimum on it costs the pharmacy
+ * nothing, and refusing it can mean paying a primary's price on the whole basket for want of $40.
+ * The arithmetic is right. The danger is the words — the sentence the owner reads said "Cheapest
+ * here at 0.1000 against 0.1000 at McKesson", which asserts a saving that does not exist. He is
+ * being asked to spend money on the strength of these sentences, so they have to hold.
+ */
+describe("an add-on at the same price", () => {
+  const sameInput = () =>
+    input({
+      suppliers: [{ supplier: "IPC", minimumCents: 50_000 }],
+      basketCentsBySupplier: new Map([["IPC", 47_000]]),
+      orderedBySupplier: new Map(),
+      offers: [offer("00000000001", "IPC", 0.1), offer("00000000001", "McKesson", 0.1)],
+      movement: [move("00000000001", 5)],
+      eligibility: { generic: new Map([["00000000001", "G"]]), controlled: new Set() },
+    });
+
+  test("qualifies, because reaching the minimum on it costs nothing", () => {
+    const [fill] = fillMinimums(sameInput());
+    assert.equal(fill.picks.length, 1);
+    assert.equal(fill.picks[0].ndc11, "00000000001");
+    assert.equal(fill.picks[0].savingCents, 0, "no saving, and none claimed");
+    assert.ok(fill.meets);
+  });
+
+  test("and says so, rather than calling an equal price the cheapest", () => {
+    const [fill] = fillMinimums(sameInput());
+    assert.match(fill.picks[0].why, /The same price here as at McKesson/);
+    assert.doesNotMatch(fill.picks[0].why, /Cheapest here/);
+    // The summary must not book a saving either.
+    assert.match(fill.says, /none of them cheaper here than elsewhere/);
+    assert.doesNotMatch(fill.says, /cheaper in all/);
+  });
+
+  test("a genuinely cheaper line still says it is cheaper, and by how much in all", () => {
+    const [fill] = fillMinimums(
+      input({
+        suppliers: [{ supplier: "IPC", minimumCents: 50_000 }],
+        basketCentsBySupplier: new Map([["IPC", 47_000]]),
+        orderedBySupplier: new Map(),
+        offers: [offer("00000000001", "IPC", 0.1), offer("00000000001", "McKesson", 0.14)],
+        movement: [move("00000000001", 5)],
+        eligibility: { generic: new Map([["00000000001", "G"]]), controlled: new Set() },
+      }),
+    );
+    assert.match(fill.picks[0].why, /Cheapest here at 0\.1000\/unit against 0\.1400 at McKesson/);
+    assert.ok(fill.picks[0].savingCents > 0);
+    assert.match(fill.says, /cheaper in all/);
+  });
+
+  test("a dearer line is still refused, because paying more to reach a number is the thing this prevents", () => {
+    const [fill] = fillMinimums(
+      input({
+        suppliers: [{ supplier: "IPC", minimumCents: 50_000 }],
+        basketCentsBySupplier: new Map([["IPC", 47_000]]),
+        orderedBySupplier: new Map(),
+        offers: [offer("00000000001", "IPC", 0.11), offer("00000000001", "McKesson", 0.1)],
+        movement: [move("00000000001", 5)],
+        eligibility: { generic: new Map([["00000000001", "G"]]), controlled: new Set() },
+      }),
+    );
+    assert.equal(fill.picks.length, 0);
+    assert.equal(fill.meets, false);
+  });
+});
