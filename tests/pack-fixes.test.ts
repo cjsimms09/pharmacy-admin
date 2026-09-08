@@ -150,17 +150,18 @@ describe("containers counted against contents stated", () => {
   const vial20 = "1 VIAL in 1 CARTON (0002-7501-01) / 20 mL in 1 VIAL";
 
   test("one vial against twenty millilitres settles at the millilitres", () => {
-    const p = proposeContainerContents({ catalogue: "1 EA", packageDescription: vial20 });
+    const p = proposeContainerContents({ catalogue: "1 EA", packageDescription: vial20, nadacUnit: "ML" });
     assert.equal(p.apply, true);
     if (!p.apply) return;
     assert.equal(p.packSize, "20 ML");
-    assert.match(p.note, /NADAC prices this per millilitre/);
+    assert.match(p.note, /NADAC prices this NDC per millilitre/);
   });
 
   test("twenty-five syringes of three millilitres", () => {
     const p = proposeContainerContents({
       catalogue: "25 EA",
       packageDescription: "25 SYRINGE in 1 CARTON (0002-7501-25) / 3 mL in 1 SYRINGE",
+      nadacUnit: "ML",
     });
     assert.equal(p.apply, true);
     if (!p.apply) return;
@@ -170,7 +171,7 @@ describe("containers counted against contents stated", () => {
   test("THE GUARD: the wholesaler's count must equal the number of containers", () => {
     // Without this the rule would settle "4 EA" at the contents of one vial and make the per-unit
     // cost wrong by four. A mismatch is not two conventions, it is two different numbers.
-    const p = proposeContainerContents({ catalogue: "4 EA", packageDescription: vial20 });
+    const p = proposeContainerContents({ catalogue: "4 EA", packageDescription: vial20, nadacUnit: "ML" });
     assert.equal(p.apply, false);
     assert.equal((p as { verdict: string }).verdict, "differs");
     assert.match((p as { why: string }).why, /not the same package by two conventions/);
@@ -180,6 +181,7 @@ describe("containers counted against contents stated", () => {
     const p = proposeContainerContents({
       catalogue: "1 EA",
       packageDescription: "1 CARTON in 1 CASE (0002-7501-99) / 20 mL in 1 CARTON",
+      nadacUnit: "ML",
     });
     assert.equal(p.apply, false);
   });
@@ -188,13 +190,14 @@ describe("containers counted against contents stated", () => {
     const p = proposeContainerContents({
       catalogue: "100 EA",
       packageDescription: "100 CAPSULE in 1 BOTTLE (0093-0073-01)",
+      nadacUnit: "ML",
     });
     assert.equal(p.apply, false);
     assert.match((p as { why: string }).why, /does not describe this as containers/);
   });
 
   test("a catalogue already counting millilitres is not counting containers", () => {
-    const p = proposeContainerContents({ catalogue: "20 ML", packageDescription: vial20 });
+    const p = proposeContainerContents({ catalogue: "20 ML", packageDescription: vial20, nadacUnit: "ML" });
     assert.equal(p.apply, false);
     assert.match((p as { why: string }).why, /already counts ML/);
   });
@@ -203,6 +206,7 @@ describe("containers counted against contents stated", () => {
     const p = proposeContainerContents({
       catalogue: "4 EA",
       packageDescription: "4 POUCH in 1 CARTON (0378-1234-56) / 168 h in 1 POUCH",
+      nadacUnit: "ML",
     });
     assert.equal(p.apply, false);
   });
@@ -213,7 +217,7 @@ describe("the two automatic rules do not fight each other", () => {
 
   test("neither rule may touch a package a person signed", () => {
     const person = { packSize: "1 EA", correctedBy: "Cory Simms" };
-    assert.equal(proposeContainerContents({ catalogue: "1 EA", packageDescription: vial20, existing: person }).apply, false);
+    assert.equal(proposeContainerContents({ catalogue: "1 EA", packageDescription: vial20, nadacUnit: "ML", existing: person }).apply, false);
     assert.equal(
       proposeFdaCorrection({
         catalogue: "30 EA",
@@ -241,5 +245,74 @@ describe("the two automatic rules do not fight each other", () => {
     assert.equal(isFromPerson(FDA_CONTENTS_SOURCE), false);
     assert.equal(isFromPerson("Cory Simms"), true);
     assert.equal(isFromPerson(""), false);
+  });
+});
+
+/**
+ * NADAC decides the unit; the FDA only decides the quantity.
+ *
+ * The first version of the contents rule would have been wrong, and the claims proved it. Of the
+ * dispensed NDCs it would have touched, not one is billed in millilitres: Restasis is billed 60
+ * against an FDA package of 24 mL — sixty 0.4 mL vials, billed per vial; an EpiPen is billed 2
+ * against 0.6 mL; clindamycin pledgets are billed 60 against "60 mL", where the number matches by
+ * coincidence and the things are pledgets. Rewriting those to millilitres would have made an
+ * injectable look enormously profitable.
+ *
+ * claims.quantity_unit cannot arbitrate — the daily report never carries it and it is null on every
+ * row — so the document that states the unit is NADAC.
+ */
+describe("the unit comes from NADAC, not from the FDA", () => {
+  const vial20 = "1 VIAL in 1 CARTON (0002-7501-01) / 20 mL in 1 VIAL";
+
+  test("NADAC counting in EA closes the question without a correction", () => {
+    // Nothing was wrong. The wholesaler's count is the right divisor, and this is a different
+    // answer from "somebody must look at it" — the page counts the two apart.
+    const p = proposeContainerContents({ catalogue: "1 EA", packageDescription: vial20, nadacUnit: "EA" });
+    assert.equal(p.apply, false);
+    assert.equal((p as { verdict: string }).verdict, "counted-as-nadac-counts");
+    assert.match((p as { why: string }).why, /nothing needs correcting/);
+  });
+
+  test("no NADAC row means no document states the unit, so a person does", () => {
+    const p = proposeContainerContents({ catalogue: "1 EA", packageDescription: vial20, nadacUnit: null });
+    assert.equal(p.apply, false);
+    assert.equal((p as { verdict: string }).verdict, "no-nadac");
+  });
+
+  test("NADAC counting in millilitres is what lets the FDA's contents stand", () => {
+    const p = proposeContainerContents({ catalogue: "1 EA", packageDescription: vial20, nadacUnit: "ML" });
+    assert.equal(p.apply, true);
+    if (!p.apply) return;
+    assert.equal(p.packSize, "20 ML");
+    assert.match(p.note, /NADAC prices this NDC per millilitre/);
+  });
+
+  test("two documents disagreeing about the kind of thing goes to a person", () => {
+    // NADAC says grams, the FDA measured millilitres. Neither is arithmetic away from the other.
+    const p = proposeContainerContents({ catalogue: "1 EA", packageDescription: vial20, nadacUnit: "GM" });
+    assert.equal(p.apply, false);
+    assert.equal((p as { verdict: string }).verdict, "unit-differs");
+  });
+
+  test("the real fills: Restasis is billed per vial, and the rule must not touch it", () => {
+    // Sixty 0.4 mL vials in a 24 mL package, billed 60. NADAC prices it per EA, so the catalogue's
+    // count is right and the FDA's 24 mL is the wrong divisor for margin.
+    const p = proposeContainerContents({
+      catalogue: "60 EA",
+      packageDescription: "60 VIAL in 1 CARTON (0023-9163-60) / 0.4 mL in 1 VIAL",
+      nadacUnit: "EA",
+    });
+    assert.equal(p.apply, false);
+    assert.equal((p as { verdict: string }).verdict, "counted-as-nadac-counts");
+  });
+
+  test("the real fills: an EpiPen is two auto-injectors, not 0.6 millilitres", () => {
+    const p = proposeContainerContents({
+      catalogue: "2 EA",
+      packageDescription: "2 SYRINGE in 1 CARTON (49502-0102-02) / 0.3 mL in 1 SYRINGE",
+      nadacUnit: "EA",
+    });
+    assert.equal(p.apply, false);
+    assert.equal((p as { verdict: string }).verdict, "counted-as-nadac-counts");
   });
 });
