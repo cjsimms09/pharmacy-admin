@@ -7,7 +7,7 @@ import { eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { audit } from "./audit";
 import { contractsDir } from "./reference";
-import { ContractTerms, ContractTermsWire, EXTRACT_SYSTEM, shapeForPrompt, requireCitations, fillNulls, fromWire, termsFromObject, termsFromAnswer, type ContractTermsT } from "./contract-terms";
+import { ContractTerms, ContractTermsWire, EXTRACT_SYSTEM, shapeForPrompt, requireCitations, dropUncited, fillNulls, fromWire, termsFromObject, termsFromAnswer, type ContractTermsT } from "./contract-terms";
 
 /**
  * Reading the contract library.
@@ -268,7 +268,8 @@ async function absorb(
     await fail(doc.id, why);
     return { outcome: "failed", why, tokensIn, tokensOut };
   }
-  // A figure without the contract's words behind it does not get stored.
+  // A single figure without its words is dropped and named; a rate without its words refuses the read.
+  terms = dropUncited(terms);
   const missing = requireCitations(terms);
   if (missing.length > 0) {
     const why = `No supporting quote for ${missing.map((m) => m.field).join(", ")}`;
@@ -796,6 +797,7 @@ export async function testReader(docId: string, userId: string, userName: string
     } catch (e) {
       return { ok: false, documentName: doc.documentName, reason: "The answer did not match the expected shape", detail: `${e instanceof Error ? e.message.slice(0, 300) : String(e)} · first words: ${text.slice(0, 200)}` };
     }
+    terms = dropUncited(terms);
     const missing = requireCitations(terms);
     if (missing.length > 0) {
       await fail(doc.id, `No supporting quote for ${missing.map((m) => m.field).join(", ")}. Nothing was saved.`);

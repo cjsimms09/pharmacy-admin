@@ -1,7 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
-import { ContractTerms, fillNulls, shapeForPrompt, fromWire } from "../src/lib/contract-terms";
+import { ContractTerms, fillNulls, shapeForPrompt, fromWire, termsFromObject, dropUncited, requireCitations } from "../src/lib/contract-terms";
 import { z } from "zod";
 
 /** Every place the generated JSON Schema gives a parameter more than one type. */
@@ -107,5 +107,40 @@ describe("the shape the model is asked for, now that it is words and not a gramm
     assert.deepEqual(fromWire(z.object({ terminationNoticeDays: z.number().int().optional() }), { terminationNoticeDays: "30" }), {
       terminationNoticeDays: 30,
     });
+  });
+});
+
+/**
+ * Three documents were refused whole on 8 September — Capital Rx's base agreement, IQVIA's service
+ * agreement, Navitus's Medicare D network — because the reader stated a DIR basis and gave no
+ * quote. That lost the counterparty, the networks, the chain codes and every contact on each, for
+ * one field. A rate without its words still refuses the read; a single side-figure without its
+ * words is dropped and named instead.
+ */
+describe("an uncited side-figure is dropped, not fatal", () => {
+  const base = { counterparty: "Example PBM", documentTitle: "Example Agreement", confidence: 0.9, contractType: "payer_network", documentRole: "base" };
+
+  test("a DIR basis with no quote is removed and the drop is written into unclearOrMissing", () => {
+    const t = dropUncited(termsFromObject({ ...base, dirFeeBasis: { value: "2% of ingredient cost" } }));
+    assert.equal(t.dirFeeBasis.value, null);
+    assert.ok(t.unclearOrMissing.some((s) => /DIR basis/.test(s) && /no quote/.test(s)));
+    assert.equal(requireCitations(t).length, 0, "and the read is no longer refused for it");
+  });
+
+  test("a MAC appeal window with no quote is treated the same way", () => {
+    const t = dropUncited(termsFromObject({ ...base, macAppealWindowDays: { value: 30 } }));
+    assert.equal(t.macAppealWindowDays.value, null);
+    assert.ok(t.unclearOrMissing.some((s) => /MAC appeal window/.test(s)));
+  });
+
+  test("a cited figure is left exactly as it was", () => {
+    const t = dropUncited(termsFromObject({ ...base, dirFeeBasis: { value: "2% of ingredient cost", citation: { quote: "A DIR fee of 2% of ingredient cost applies." } } }));
+    assert.equal(t.dirFeeBasis.value, "2% of ingredient cost");
+    assert.equal(t.unclearOrMissing.length, 0);
+  });
+
+  test("a rate without its words still refuses the whole read", () => {
+    const t = dropUncited(termsFromObject({ ...base, rates: [{ costSharingTier: "unknown", bins: [], pcns: [], groupIds: [], brandFormula: "AWP-15%" }] }));
+    assert.equal(requireCitations(t).length, 1);
   });
 });

@@ -8,6 +8,302 @@ file is how they talk.
 
 ## Open items
 
+### From Helper A to session 1 — shelf.ts, two queries (8 September)
+
+Audit in `docs/audits/2026-09-08-shelf.md`, branch `work/audit-shelf`. Findings only, no fix — both
+of the ones that matter change what the order screen recommends, so the numbers should decide them.
+All three findings push the order back to the primary when a secondary was genuinely cheaper.
+
+1. **Does any supplier's catalogue spelling differ from its register name?**
+   `select distinct lower(trim(supplier)) from supplier_items order by 1;` against
+   `select id, lower(trim(name)) from suppliers;`
+   The buy list (`shelf.ts:603`) looks the rebate rate up by exact key, where every other module uses
+   `rateForSupplier`. Any name that is not character-for-character identical is a supplier whose
+   whole catalogue is priced **gross on the order screen and net everywhere else** — so its contract
+   lines look dearer than they are and the order leaves the contract.
+2. **What share of each secondary's catalogue is actually a contract item?**
+   `select supplier, contract_flag, count(*) from supplier_items group by supplier, contract_flag;`
+   `bandCostOfMoving` is called with the basket subtotal only, so every cent is charged against the
+   compliance ratio as a contract generic. Lines flagged "not rebated" cannot move the band. That
+   inflated cost is designed to overrule the invoice saving, so it flips baskets back to the primary
+   and understates the headline saving.
+
+Write the numbers back here. If query 1 returns any mismatch, I would import `effectiveMicros` and
+route the rate through `rateForSupplier` in one commit — it closes findings 1 and 3 together.
+### From Helper A — the band arithmetic is right; two things fall outside it (8 September)
+
+Branch `work/band-arithmetic`. Audit: `docs/audits/2026-09-08-band-arithmetic.md`. This is the
+module I said in the shelf audit I had not traced. **I have now re-derived every formula in it and
+they are all correct** — `counts()` against all three ratio definitions, the next-band spend
+`x = (tD − N)/(1 − t)`, the headroom `r = N/t − D`, `withScrub`'s inversion, `bandAt`. Worth saying
+plainly, because this arithmetic decides whether the pharmacy pays a premium to chase a band.
+
+**1. `withScrub` will apply any factor, however implausible.** Guarded against zero and the wrong
+definition, nothing else. A drill-down GCR misread as 0.5% against a statement of 20% gives a factor
+of 40 — asserting the scrub removes 97.5% of the denominator, with every band decision downstream
+running on it. I did not add a bound because any threshold would be a number nobody chose;
+**recommended instead: carry the factor so a screen can say "this assumes the scrub removes 97% of
+the denominator"**, which is self-evidently wrong to a reader in a way a silent number is not.
+Query in the audit: the factor each month implies. Stable near 2 is a real scrub; swinging is a
+reading problem.
+
+**2. The band uplift on the spend that causes it is counted nowhere — please check my reasoning.**
+`tierEffect` deliberately excludes the line's own rebate ("not counted again here"), and
+`effectiveMicros` prices that line at the rate **currently** in force. Both are sound alone. But the
+marginal generic bought to lift the ratio earns the **new** band's rate once crossed, and neither
+module counts it. On a $100k base moving 20%→24% for $10k of spend, the site says the band is worth
+$4,000 where $2,400 more is earned on the new spend and only $2,000 of it is priced in.
+
+Direction is lost revenue: `nextTierNow` divides worth by spend to get the break-even premium, so an
+understated worth tells the owner to decline a switch that pays — the exact decision he asked for
+this feature. **Not changed:** the fix makes a line's price depend on the whole order, which could
+reintroduce the double count both modules avoid. The shape I would suggest is in the audit, and it
+needs the contract share of the marginal spend, which is the same split I could not settle in the
+secondary-payors audit.
+
+**Not checked:** `band-strategy.ts` beyond its stated rules — its two levers have a supply
+arithmetic I read but did not trace. It wants its own pass and I am not claiming to have given it one.
+### From Helper A — the claims feed: a money check that has never once run (8 September)
+
+Branch `work/claims-audit`. Audit: `docs/audits/2026-09-08-claims-data.md`. Two findings that are
+the same missing column seen from opposite sides, plus a correction to your inventory.
+
+**1. No claim on the live feed can ever be priced against NADAC, so the Kansas floor check computes
+nothing at all.** `claims.ts:417` sets `quantityUnit: null` on the transaction path — correctly,
+since the export carries no unit — and `reimbursement-rules.ts:215` requires
+`claim.quantityUnit === nadac.pricingUnit` before anything is priceable. `null === "EA"` is false,
+so `priceable` is false for every claim, `floor` is null and `shortfallCents` is null. **A check
+that never fires reads exactly like a check that fires and finds nothing.** The line directly below
+it shows this was fixed once for days supply — *"The report now carries it"* — and the unit was left.
+
+I did not invent a unit. It could be derived from the NDC's pack unit where the catalogue and NADAC
+agree, but a shortfall drives an appeal and an appeal filed on an inferred unit is withdrawn.
+**This is the argument for getting the column into the export** — it is already on the support
+request list. Until then the honest interim is one sentence on the reimbursement screens saying no
+claim is being priced and why, rather than 1,081 blank shortfalls.
+
+**2. `reimbursement-fit.ts` makes the comparison `reimbursement-rules.ts` refuses to make.** It
+divides ingredient paid by quantity and compares that against `nadacUnitMicros` and `awpUnitMicros`
+to fit a pricing formula. The string `quantityUnit` does not appear in the module at all. So the
+site holds two opposite positions on one unknown, on two different screens, and neither mentions the
+other. They cannot both be right. Whichever way you settle it, both should say the same thing in one
+place.
+
+**3. Correction to the claims inventory.** It lists `ingredientPaidCents` as "derived as remit +
+copay − dispensing fee", which reads as though the fee comes from elsewhere. It does not:
+`rx-transactions.ts:210` positions dispensing fee as column 6 of the report itself. So it is
+arithmetic on three stated columns, and **the arithmetic is right** — it follows from the NCPDP
+identity, since remit is already net of the patient's share: `remit = ingredient + fee − copay`.
+Worth a line in the data dictionary; it looks wrong at a glance and is not.
+
+Two queries in the audit: how many claims carry a unit at all (expect nought — if not, those are the
+only claims the floor has ever been computed for), and how many claims sit on an NDC that NADAC
+prices in something other than each, which is where finding 2 bites.
+### From Helper A — order-plan.ts: three ways a short-dated lot moved the order (8 September)
+
+Branch `work/order-plan-audit`. Audit: `docs/audits/2026-09-08-order-plan.md`. All three fixed with
+tests, because all three are the module's own stated doctrine not being carried through rather than a
+judgement call.
+
+1. **A supplier's sound lot was thrown away because it also had a short-dated one.** `offersFor()`
+   kept the cheapest offer per supplier regardless of kind, so a wholesaler with an expiring lot at
+   4c and a good lot at 10c was represented by the 4c one — and then demoted for being short-dated.
+   Demonstrated against the real function: the order went to another supplier at **11c while a sound
+   10c lot sat invisible**.
+2. **The saving was measured against a price the planner would never pay.** `next = ranked[1]` could
+   be short-dated, so a correct pick read as a *negative* saving — and that figure is summed into
+   `basket.savingCents`, which `verdictFor` reads, so it could flip the verdict on a whole basket.
+3. **A need filled from an expiring lot said nothing about it.** A top-up is refused outright; a need
+   is not, and should not be — but the pharmacist was committing to stock expiring inside the return
+   window and only finding out on delivery.
+
+**Query to size finding 1** (in the audit in full): NDCs where one supplier has both a short-dated
+and a sound lot. Every row is a supplier whose sound price was invisible to the order screen.
+
+**Not traced:** `verdictFor` and `topUpCandidates` beyond reading them. Nothing in them contradicted
+the doctrine, but I have not walked their arithmetic and I am not claiming I have.
+### From Helper A — secondary payors: the site makes PioneerRx's error in reverse (8 September)
+
+Branch `work/secondary-payors`. Audit: `docs/audits/2026-09-08-secondary-payors.md`.
+
+The owner is right, and it is wrong twice on the same 22 fills, from one mistake — attributing a
+whole fill to one payor.
+
+PioneerRx puts the whole cost on the primary's row: 610011 reads −$843.73, RxRescue +$458.29 of pure
+profit. **`payer-map.ts:127` makes the opposite error**: `payerKey` returns `f.payers[0]`, so the
+primary is credited with the secondary's remit as its own revenue, and **a payor that only ever
+appears second has no row in the payer scores at all**. Working over fills is right; keying the fill
+on one payor is the part that does not follow. `payer-tree.ts` is sound — it sums remit only, which
+is a receivable, and is the model for the fix.
+
+**Definition delivered.** "Expected from payor X" is that payor's own remit on its own transmission —
+a fact, settled by its own 835, which is why a remittance can match it or fail to. `payerShares()`
+in `fills.ts` returns it, plus a cost share pro rata on remit that is **labelled a convention, not a
+fact**. Pro rata is chosen because it is the only split that adds up: `sharesReconcile()` proves the
+payors' margins plus the patient's money equal the fill's margin, to the cent, on every fill. The
+patient's money is given to no payor — she pays the residual *because* the plans did not.
+
+On the pharmacy's own shape the answer is that **both payors are underwater and the fill loses
+money**, not that one lost $843.73 while the other earned $458.29.
+
+**Query you need to run** (in the audit in full): group `claims` into fills, keep those with more
+than one BIN, then sum remit by BIN. Any BIN in that list that does **not** appear in the payer
+scores is a payor the site has never measured; any that does appear holds other companies' money.
+
+**Not changed, and it is your call:** `payer-map.ts` still keys on `payers[0]`. Rewiring it changes a
+ranking the owner reads, and the right shape turns on a question only he can answer — should a
+top-off card rank beside a plan at all, or in its own table as the performance page already argues
+for subsidy cards? Recommended: score each payor on its own `payerShares` row, keep subsidy cards
+separate, add "expected from" as the receivable column so the 835 side has something to reconcile
+against.
+### From Helper A — the add-ons list: 103 identical refusals were a filter with nothing to say (8 September)
+
+Branch `work/addons-audit`. Audit: `docs/audits/2026-09-08-secondary-addons.md`.
+
+**Fixed:** `steady` is three tests wearing one boolean — enough separate days, enough separate
+prescriptions, no single fill dominating — and `order-plan.ts:502` printed one sentence for all
+three: *"The rate is one large fill, not a rate."* That describes the **third** test only. On a thin
+archive the failure is almost always the first or second — *we have only seen this twice* — which is
+a different fact with a different remedy. The message could not have been right: the three figures
+live on `Velocity` and were **discarded at the `Movement` boundary**, which carried only
+`steady: boolean`. `whyNotSteady()` now names the test that failed with its numbers and `Movement`
+carries it through.
+
+**The query that settles rule-or-data** is in the audit: it counts how many NDCs fail on days, on
+prescriptions, and on concentration. **If most fail on days, the rule is not wrong — the archive is
+short**, and the thresholds want scaling to the window. If most fail on concentration, the original
+sentence was right and the rule is working. Nobody can tell today, which was the whole problem.
+
+**Three findings not fixed, because each is a decision rather than a defect:**
+1. `minActiveDays: 3` and `minPrescriptions: 2` are absolute counts where everything around them is
+   a rate — `usage.ts` says every rate shares a denominator "which is what makes two drugs
+   comparable". These two do not. The query above decides whether that matters here.
+2. **"Met by today's lines" answers a question the owner is not asking.** `candidates` *is* carried
+   through, so nothing is hidden — but `picks` is empty and the sentence closes the subject. His
+   question is not "must I add anything to ship?" but "what else is worth adding while I am here?"
+   Recommended: keep the sentence, still offer the ranked candidates as "worth adding anyway", with
+   the running total (the page must supply it — the site cannot see the cart).
+3. **No on-hand count has ever arrived**, so every `daysOnHand` assumes an empty shelf and the
+   ranking reads as uniformly urgent. Not wrong, and the safe direction — but a pharmacist told "2
+   days left" about a full bottle stops trusting the column and then the list. The page should say so
+   in one sentence until the first count lands.
+### From Helper A — the ladder-measure item, and the GPR question answered (8 September)
+
+Branch `work/ratio-measure`, pull request against `feature/compliance`. Done: (a) a ratio ladder can
+no longer be filed without saying which ratio picks its band, (b) the diagnosis no longer blames the
+band when the real fault is an unstated measure, (c) tests for both.
+
+**(d) — the GPR question. The answer is no, and it should be settled by a query rather than by
+either of us.** Full reasoning in `docs/audits/2026-09-08-ratio-measure.md`. In short: the drill-down
+carries three ratios and none of them is GPR — `gcrPercent` (generic Rx ex-MPB ÷ total Rx less
+exclusions), `osRxPercent` (OneStop ÷ total Rx) and `osGxPercent` (OneStop ÷ total generic). GPR is
+parsed only from the statement. Three ratios, three denominators; substituting one selects a band on
+the wrong ladder.
+
+It *could* be computed — the drill-down carries `totalGenericCents` and `netPurchasesCents` — and
+that is the trap. McKesson's GPR denominator is stated nowhere in this repository, and the
+drill-down's own GCR line proves these denominators carry exclusions that are never printed.
+
+**The query that settles it**, in this repository's own style of making the money reproduce the
+ratio: for every month where a statement GPR and a drill-down month both exist, does
+`total_generic_cents ÷ net_purchases_cents` reproduce the printed GPR to the hundredth? If it does
+across several months they are the same measure, the drill-down can fill `gprPercent`, and the GPR
+ladder prices the day a drill-down lands instead of a month later. If it does not, the answer stays
+no. One month agreeing is not enough.
+
+**A file outside my group.** I changed `tests/supplier-terms-store.test.ts` — its `tiers()` fixture
+built a `tiered_ratio` programme with no measure, which the new guard refuses. The fixture creates
+two ladders literally named "Compliance ladder" and "Purchase ratio ladder", so each now states the
+measure its name implies. Worth noting that the fixture was wrong in exactly the way the real
+McKesson rows were.
+
+**SESSION-RULES §6 again.** Before my change, 1,978 tests passed here with zero failures. My guard
+made four fail, all in `supplier-terms-store.test.ts` and all mine; the fixture fix cleared them.
+`npm run check` is now clean at 1,981. The four §6 names have still never appeared in this
+environment across three branches — worth settling before that paragraph is relied on.
+
+**Next**, per the two additions: the claim-to-contract match, then the claims-data audit (waiting on
+your claims inventory under this heading), then shelf.ts (already delivered, PR #10), then Money.
+### From Helper A to session 1 — three queries only you can run (8 September)
+
+The audit of `1c8591d` is `docs/audits/2026-09-08-product-identity.md`, on branch
+`work/money-books`, pull request against `feature/compliance`. Two commits: the findings, then one
+marked fix. Nothing in it was measured against real data — this session cannot reach the database —
+so each finding carries the query that sizes it. The queries are in the audit file in full; what
+they answer:
+
+1. **How many brand/generic merges the new grouping has actually created.** Where the directory
+   places an NDC and NADAC has no row, the classification is `?`, and it is `?` for every such NDC —
+   so a brand and its generic, which share an FDA equivalence key by definition, become one product.
+   `drug-profit-store` answers "which NDC pays best" off these groups. The query counts FDA-keyed
+   groups with no NADAC row holding more than one marketing category. **If that count is not zero,
+   this is a wrong merge on live buying advice and wants fixing before anything else in my queue.**
+   The fix is `drug_directory.marketing_category`, already loaded — but it changes grouping for
+   about a fifth of the catalogue, so the number should decide it and not my reading.
+2. **How many OTC NDCs the pharmacy stocks**, which sizes what the marked fix was doing wrong in
+   three stores before it.
+3. **How many products the FDA calls one thing that NADAC coverage splits in two.** Costs
+   comparisons rather than causing a wrong one, so it is the lowest of the three.
+
+Write the three numbers back under this heading and I will take them from there.
+
+**A note on §6 of SESSION-RULES.** It says four tests fail on `feature/compliance` and are not mine.
+On this branch, after `npm run db:migrate`, **all 1,978 pass** — `npm run check` is clean end to
+end. So either those four are specific to the pharmacy computer, or something has already fixed
+them. Worth knowing which before that paragraph is relied on again.
+### From Helper A — the claim-to-contract match is built; one query and one caution (8 September)
+
+Branch `work/claim-contract`, pull request against `feature/compliance`.
+
+**Built:** `resolveContract()` in `claim-contract.ts` — three rungs in order of authority (the
+owner's `payer_links` row, then a network reimbursement id the document states, then BIN/PCN/group
+as before), with an unmatched answer that names the id so it can be settled. Fourteen tests, one per
+rung and one per way of failing. `candidatesFor()` ranks the documents worth offering for an id.
+`claim-networks-store.ts` counts the ids by claims and dollars. A new page,
+`/payers/networks`, offers one choice per id, largest money first.
+
+**Your n=86 measurement changed the design, and is now recorded in the code.** With 0 of 86
+documents carrying a network reimbursement id and 5 carrying a BIN, rungs 2 and 3 will almost never
+fire — so rung 1 is the mechanism rather than a fallback, and the page is built around making those
+82 choices one click each rather than around a clever matcher. Thank you for sending it before I had
+finished; it would have been a worse design.
+
+**The query I owe you, for the page's own ordering** — the store computes this itself now, so this
+is only to confirm my SQL against the real table before anyone trusts the page's figures:
+
+```sql
+select network_id, count(*) as claims, coalesce(sum(remit_cents), 0) as remit_cents,
+       group_concat(distinct bin) as bins
+from claims
+where network_id is not null and trim(network_id) <> ''
+  and (status is null or status <> 'reversed')
+group by network_id
+order by remit_cents desc, claims desc;
+```
+
+Two things to check: that `status <> 'reversed'` is the right exclusion (I copied it from
+`product-ledger`), and that no id is split by case or padding — if `BIDBRODCBR` and `bidbrodcbr`
+both appear, the resolver compares them as codes but this query would list them twice.
+
+**A caution about `payer_links`.** `savePayerLink` refuses a link with no BIN, group *or* contract
+id, and mine passes only the contract id, which is allowed. But `linkFor`/`matchScore` were written
+for the BIN-shaped links; a link that carries only a network id scores differently there. I have not
+changed either — they are not mine and nothing I added calls them — **but check that a network-only
+link does not now win a match it should not on the pages that use `linkFor`.**
+
+**A file outside my group:** `src/lib/families.ts`, one line, to make the new page reachable. And
+`src/app/(app)/payers/**` per the brief, which said I may.
+
+**`feature/compliance` HEAD does not typecheck.** Four errors, none mine, all pre-existing at
+`0f47f0f` — `contract-extract.ts:547`, `tests/contract-apply.test.ts:75`,
+`tests/contract-digest.test.ts:45` (a terms type gained `enrollmentFormUrl`, `clearinghouse` and
+`tradingPartnerId`; three construction sites were not updated) and `scripts/read-contracts.ts:147`
+(a triage value typed as `string`). **So `npm run check` fails for every worker before they touch
+anything**, since it runs typecheck first. I have not fixed them: `contract-extract.ts` is
+explicitly not mine. Verified instead by typechecking my own files (clean), the full suite (2,012
+pass, 0 fail) and `npm run build` (clean).
+
+
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
@@ -302,6 +598,24 @@ equality-only before that would turn "MCKESSON CONNECT" from a working match int
 worklist for filling them is `unplacedNames`, which is finding 2 of the invoices audit and still
 renders nowhere. Queries to size all of it are in the audit. Not patched: `supplier-match.ts` and
 `shelf.ts` are 1's, it changes a rate that decides purchasing, and it is A's finding to carry.
+
+### The merge round of 8 September (session 1)
+
+Helper A said the uncomfortable thing plainly: nine pull requests open, none merged, findings that
+do not land change nothing. Right. Twelve branches were merged into `feature/compliance` in one
+sitting, in this order, each reviewed on its code diff: `work/audit-shelf`, `work/band-arithmetic`,
+`work/claims-audit`, `work/order-plan-audit` (short-dated lots no longer represent a supplier or
+measure a saving), `work/secondary-payors` (`payerShares` and `sharesReconcile` in `fills.ts`),
+`work/addons-audit` (`whyNotSteady`: the refusal names the test that failed), `work/ratio-measure`
+(a ladder cannot be saved without its measure; the diagnosis says so), `work/money-books` (the
+product-identity audit and its OTC fix), `work/invoices` (the NADAC-gated contents rule),
+`work/claim-contract` (`resolveContract` and the networks page), `claude/inbox-recogniser` (B: the
+recogniser, corrections kept as rules, the ERA request builder, migration `0086`), and the old
+`claude/repo-audit-catalog-claims-2l37sj` (the six-group sidebar, the setup checklist, Add on every
+page, and the pack-size search that ranked the first 150 rows instead of ranking all and cutting).
+`claude/fix-base-typecheck` is superseded by `1aef21d` and not merged. `docs/audits/` now exists on
+the branch. HANDOFF merges with the union driver, so both sides' additions survive; if a line reads
+twice, that is why.
 
 ### For the session running ON the pharmacy computer — read this first (8 September)
 
@@ -721,6 +1035,35 @@ served as a page on the port instead of vanishing into a hidden console window.
   `src/instrumentation.ts` are next on my side unless you want them; a "Drug directory" row on
   `/settings/feeds` too. Until a load runs, every grouping falls back to NADAC's description and
   the products page says "0 of N dispensed" are on the directory.
+- **"Finish setting up" (`/settings/setup`, `setup-checklist.ts` pure with tests, `setup-store.ts`;
+  listed first under Settings and a button on Today).** The owner: "I'm getting overwhelmed about
+  what I need to do to get the site complete and accurate." One ranked list of everything the site
+  can *check* is missing — the Claude key, the mailbox, each feed not arriving, each job never run,
+  the plan register, the Kansas fee, the four report columns, the contracts unread, the shelf
+  count, each secondary without a minimum, each supplier without a ladder, NADAC, the directory,
+  standing costs, bills, the pharmacy's own details. Three ranks: **stops** (a figure is wrong or
+  missing until it is done), **sharpens** (works, but on an estimate), **later**. Each item carries
+  what breaks, where it stands now, a minute estimate and one button. **Nothing is ticked by hand:
+  an item is done because a table, a setting or a feed says so, and it un-ticks itself.** Add an
+  item by adding a check to `setupItems`; it takes an input, never a query, so it stays testable.
+- **"Add" in the head of every page** (`components/add-anything.tsx`, posting to your
+  `intake/actions.ts` `dropFiles`). Drop a photograph, a PDF, an 835 or a spreadsheet from wherever
+  you are; it lands on the intake review card with what Claude read, every field editable. The
+  Inbox button sits beside it. Nothing about the intake pipeline changed.
+- **The drug catalogue ranked the wrong hundred and fifty.** `searchDrugs` took the first `limit`
+  matches *in file order* and ranked those, so on fifty thousand items the package mismatch worth
+  the most money was usually never on the screen — which is why the owner said he could not find
+  the packages he needed to settle. Every match is now ranked and then cut to the page. Also:
+  `ndc_pack_fixes` (count and newest `corrected_at`) is named in the `held.ts` fingerprint, so a
+  settled package invalidates every held reading at once rather than relying on the audit row.
+- **Edit / delete / sort, as it stands** (audited 7 September; yours to close the gaps you own):
+  edit and delete are present where a wrong entry costs money — bills, cash receipts, supplier
+  invoices, licences, agreements, staff, CQI, supplier terms, standing costs, vendor rules,
+  settled packages. **Sorting is the gap:** only `payers/performance` and `purchasing/products`
+  use `components/data-table.tsx`, which gives sort-by-column, a filter box and paging for free.
+  The lists a person works down and cannot yet re-order are the drug catalogue, supplier invoices,
+  bills, claims, the shelf, returns, the plan register and the appeal queue. `DataTable` takes
+  server-rendered cells plus a sort value per column, so converting one is mechanical.
 - **The efficiency pass, 7 September evening** (the owner: "site is so painfully slow; make it
   as efficient as possible and keep it that way, it will get lots of data every day"). Measured
   on a scratch database at a year's scale — 30,000 claims, 1.5 million NADAC rows, 4,000

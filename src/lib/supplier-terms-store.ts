@@ -11,6 +11,7 @@ import {
   readReturnTerms,
   type RebateTermsT,
   type ReturnTermsT,
+  whyTermsCannotBeSaved,
 } from "./supplier-terms";
 
 /**
@@ -108,6 +109,12 @@ export type SaveTermsInput = { name: string; effectiveFrom: string; notes?: stri
 export async function saveRebateProgram(supplierId: string, input: SaveTermsInput, terms: unknown, user: { name: string }): Promise<string> {
   const parsed = RebateTerms.safeParse(terms);
   if (!parsed.success) throw new Error(`The rebate terms do not fit the shape: ${parsed.error.issues.map((i) => `${i.path.join(".")} ${i.message}`).join("; ")}`);
+  /*
+   * The shape is not enough: a ratio ladder that does not say which ratio is a ladder that prices
+   * nothing. Refused here rather than in the shape, so rows filed before this rule still read.
+   */
+  const cannot = whyTermsCannotBeSaved(parsed.data);
+  if (cannot) throw new Error(cannot);
   const name = input.name.trim();
   if (!name) throw new Error("Give the programme the name the supplier uses for it.");
   if (!isIsoDate(input.effectiveFrom)) throw new Error("Give the date the schedule takes effect.");

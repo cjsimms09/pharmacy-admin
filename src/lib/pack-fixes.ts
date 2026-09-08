@@ -78,7 +78,17 @@ export type Proposal =
       note: string;
       factor: number;
     }
-  | { apply: false; why: string; verdict: PackVerdict["verdict"] | "already-settled" };
+  | {
+      apply: false;
+      why: string;
+      verdict:
+        | PackVerdict["verdict"]
+        | "already-settled"
+        /** NADAC prices this NDC per EA, so the wholesaler's count is the right divisor. */
+        | "counted-as-nadac-counts"
+        /** No NADAC row, so no document states the unit and a person has to. */
+        | "no-nadac";
+    };
 
 /**
  * Whether the FDA settles this row on its own, and the correction if it does.
@@ -174,10 +184,36 @@ export function proposeFdaCorrection(a: {
  * The outer levels must also be things a pharmacy dispenses one at a time — vial, syringe, ampule,
  * pen, cartridge — never a carton or a case, so "1 EA" against a carton of unknown contents is
  * still refused rather than settled at the carton's volume.
+ *
+ * ── And the FDA's say-so is not enough, which was measured rather than assumed ──
+ *
+ * The first version of this rule would have been wrong, and the claims said so. Of the dispensed
+ * NDCs it would have touched, not one is billed in millilitres: Restasis is billed 60 against an
+ * FDA package of 24 mL — sixty 0.4 mL vials, billed per vial; an EpiPen is billed 2 against 0.6 mL;
+ * clindamycin pledgets are billed 60 against "60 mL", where the match is a coincidence and the
+ * things are pledgets. PioneerRx bills these per unit dispensed, exactly as the wholesaler counts
+ * them, so the FDA's volume is the wrong divisor for margin on every one of them. Rewriting those
+ * packages to millilitres would have made an injectable look enormously profitable — the same
+ * cross-unit fault as before, arriving from the other side.
+ *
+ * `claims.quantity_unit` cannot arbitrate: the daily report never carries it and it is null on
+ * every row. The document that does state the unit per NDC is NADAC, whose `pricing_unit` is EA,
+ * ML or GM, and which is the unit the benchmark comparison and the Kansas floor both use.
+ *
+ * So the rule is gated on NADAC and has three outcomes, each traceable to a document:
+ *
+ *   - NADAC prices it per ML or GM — settle at the FDA's contents, because the benchmark, the floor
+ *     and the file all mean the same thing by this package.
+ *   - NADAC prices it per EA — the wholesaler's count is the right divisor and the question closes
+ *     without a correction. Nothing was wrong.
+ *   - NADAC has no row — no document states the unit, so a person does, with both readings and the
+ *     cost per unit under each in front of him.
  */
 export function proposeContainerContents(a: {
   catalogue: string | null | undefined;
   packageDescription: string | null | undefined;
+  /** NADAC's pricing unit for this NDC, which is the document that settles which unit is meant. */
+  nadacUnit: "EA" | "ML" | "GM" | null;
   existing?: ExistingFix;
 }): Proposal {
   if (a.existing && isFromPerson(a.existing.correctedBy)) {
@@ -193,6 +229,28 @@ export function proposeContainerContents(a: {
   // Only a wholesaler counting things, against a file measuring them. Anything else is not this.
   if (cat.uom !== "EA") {
     return { apply: false, verdict: "unit-differs", why: `The catalogue already counts ${cat.uom}, so it is not counting containers.` };
+  }
+
+  /*
+   * NADAC decides the unit before the FDA decides the quantity.
+   *
+   * Checked here rather than after the arithmetic, so that an NDC NADAC prices per EA is closed as
+   * "nothing was wrong" instead of being computed and then discarded — the two are different
+   * answers and the page counts them separately.
+   */
+  if (a.nadacUnit === "EA") {
+    return {
+      apply: false,
+      verdict: "counted-as-nadac-counts",
+      why: "NADAC prices this per EA, which is how the catalogue counts it. The wholesaler's count is the right divisor and nothing needs correcting.",
+    };
+  }
+  if (a.nadacUnit === null) {
+    return {
+      apply: false,
+      verdict: "no-nadac",
+      why: "NADAC does not price this NDC, so no document states whether the package is counted or measured. Somebody has to say which.",
+    };
   }
 
   const contents = fdaContainerContents(a.packageDescription);
@@ -211,12 +269,22 @@ export function proposeContainerContents(a: {
     };
   }
 
+  if (contents.uom !== a.nadacUnit) {
+    // NADAC says millilitres and the FDA measured grams, or the reverse. Two documents disagreeing
+    // about the kind of thing is exactly what a person is for.
+    return {
+      apply: false,
+      verdict: "unit-differs",
+      why: `NADAC prices this per ${a.nadacUnit} and the FDA states the contents in ${contents.uom}.`,
+    };
+  }
+
   const packSize = `${contents.units} ${contents.uom}`;
   const note =
     `The catalogue counts ${cat.units} ${contents.containerNoun}${cat.units === 1 ? "" : "s"} and the FDA states what is in ` +
     `${cat.units === 1 ? "it" : "them"}: ${contents.units} ${contents.uom} in total. Both describe the same package. ` +
-    `Recorded in ${contents.uom} because NADAC prices this per ${contents.uom === "ML" ? "millilitre" : "gram"}, and a per-unit ` +
-    `cost has to be in the same unit as the benchmark it is compared against.`;
+    `Recorded in ${contents.uom} because NADAC prices this NDC per ${contents.uom === "ML" ? "millilitre" : "gram"}, and a ` +
+    `per-unit cost has to be in the same unit as the benchmark, the floor and the claim all use.`;
 
   return { apply: true, packSize, note, factor: contents.units / cat.units };
 }
