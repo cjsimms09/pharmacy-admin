@@ -3,7 +3,8 @@ import { db, schema } from "@/db";
 import { todayIso } from "./dates";
 import { SPECS, type Measurement } from "./data-health";
 import { comparePack } from "./data-health-packages";
-import { allSuppliers, supplierRecordFor, aliasesOf } from "./suppliers-registry";
+import { allSuppliers, supplierRecordFor } from "./suppliers-registry";
+import { supplierFromFileName } from "./pioneer-catalog";
 
 /**
  * Running the data health counts, and keeping the answers.
@@ -171,16 +172,21 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
       const isCatalogue = /catalog/i.test(name) || a.routedAs === "supplier_catalog";
       if (!isCatalogue) continue;
       /*
-       * Matched on the names the register already holds for the supplier, squashed the same way
-       * the invoice matcher squashes them — never on a hard-coded list of file-name prefixes.
-       * MCKCatalog and Parmed are today's spellings; a list of them here would be a second place
-       * to keep the register's aliases in step with, and it would go stale silently.
+       * Whose file this is, answered by the reader the import itself uses.
+       *
+       * I first matched the register's own names against the file name, which was the right
+       * instinct and the wrong reader: PioneerRx writes "MCKCatalog9_6_2026.txt" and the register
+       * says "Mckesson", so squashed they never meet — the row read 4 of 5 and called McKesson
+       * "never". The fix is not a "MCKCatalog" alias on the register either, because that is
+       * PioneerRx's file prefix wearing the costume of a name the wholesaler goes by, and the
+       * register is what the invoice matcher reads.
+       *
+       * `supplierFromFileName` already holds those prefixes, because deciding whose file this is
+       * is exactly what the catalogue import does with it. One place knows them, and it is the
+       * place that has to be right anyway.
        */
-      const supplier = registry.find((r) =>
-        [r.name, r.catalogName, ...aliasesOf(r)]
-          .filter((n): n is string => typeof n === "string" && n.trim() !== "")
-          .some((n) => squashName(name).includes(squashName(n))),
-      );
+      const catalogueName = a.fileName ? supplierFromFileName(a.fileName) : null;
+      const supplier = catalogueName ? supplierRecordFor(registry, catalogueName) : null;
       if (!supplier) continue;
       const seen = newest.get(supplier.id);
       if (!seen || a.receivedAt > seen) newest.set(supplier.id, a.receivedAt);
@@ -191,13 +197,21 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
     const stale: string[] = [];
     for (const r of expected) {
       const at = newest.get(r.id);
-      if (at && Number.isFinite(days(at)) && days(at) <= 7) fresh.push(r.name);
+      /*
+       * Two days, not a week.
+       *
+       * These are scheduled nightly deliveries, so "current" means last night or the night before —
+       * one missed night can be a mail delay, two is a feed that has stopped. A seven-day window
+       * called a 6 September file current on the 8th, which is how IPC and IPD passed while having
+       * sent nothing for two days. The window has to match the cadence of the thing it judges.
+       */
+      if (at && Number.isFinite(days(at)) && days(at) <= 2) fresh.push(r.name);
       else stale.push(at ? `${r.name} (last ${at.slice(0, 10)})` : `${r.name} (never)`);
     }
     return {
       numerator: fresh.length,
       denominator: expected.length,
-      gaps: stale.length === 0 ? [] : [`No catalogue in the last week from: ${stale.join(", ")}`],
+      gaps: stale.length === 0 ? [] : [`No catalogue in the last two nights from: ${stale.join(", ")}`],
       note:
         expected.length === 0
           ? "No supplier is on the register, so nothing is expected."

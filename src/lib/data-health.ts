@@ -216,7 +216,7 @@ export const SPECS: LinkSpec[] = [
     key: "catalogue-currency",
     group: "Datasets",
     title: "Catalogue files arriving",
-    of: "supplier catalogues whose newest file arrived within the last week, out of the suppliers the site expects a catalogue from",
+    of: "supplier catalogues whose newest file arrived in the last two days, out of the suppliers the site expects a nightly catalogue from",
     why:
       "A wholesaler whose file stopped arriving still shows prices — last week's. Nothing else on the site says a catalogue went quiet, so a price that has not moved in a month looks exactly like a price that has not changed.",
   },
