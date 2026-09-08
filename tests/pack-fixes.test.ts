@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { proposeFdaCorrection, unitCostMicros, isFromFda, FDA_SOURCE } from "../src/lib/pack-fixes";
+import { proposeFdaCorrection, proposeContainerContents, unitCostMicros, isFromFda, isFromPerson, FDA_SOURCE, FDA_CONTENTS_SOURCE } from "../src/lib/pack-fixes";
 
 /**
  * Applying the FDA's package figure blind has already broken this site once: 69 rows, and a
@@ -135,5 +135,111 @@ describe("the cost per unit under a reading, which is what makes the choice deci
     // drug look worth avoiding.
     assert.equal(unitCostMicros(8_400, "(3) 28 EA"), 1_000_000);
     assert.equal(unitCostMicros(8_400, "28 EA"), 3_000_000);
+  });
+});
+
+/**
+ * A wholesaler counting containers where the FDA states what is in them.
+ *
+ * "McKesson counts 1 EA where the FDA counts 20 ML" is not a disagreement about the package — it is
+ * two conventions describing one box truthfully, and it is every single-dose vial in the catalogue.
+ * The FDA's reading is the one to keep because NADAC prices injectables per millilitre, and a
+ * per-EA cost held against a per-ML benchmark is the fault that once read as 100 times NADAC.
+ */
+describe("containers counted against contents stated", () => {
+  const vial20 = "1 VIAL in 1 CARTON (0002-7501-01) / 20 mL in 1 VIAL";
+
+  test("one vial against twenty millilitres settles at the millilitres", () => {
+    const p = proposeContainerContents({ catalogue: "1 EA", packageDescription: vial20 });
+    assert.equal(p.apply, true);
+    if (!p.apply) return;
+    assert.equal(p.packSize, "20 ML");
+    assert.match(p.note, /NADAC prices this per millilitre/);
+  });
+
+  test("twenty-five syringes of three millilitres", () => {
+    const p = proposeContainerContents({
+      catalogue: "25 EA",
+      packageDescription: "25 SYRINGE in 1 CARTON (0002-7501-25) / 3 mL in 1 SYRINGE",
+    });
+    assert.equal(p.apply, true);
+    if (!p.apply) return;
+    assert.equal(p.packSize, "75 ML");
+  });
+
+  test("THE GUARD: the wholesaler's count must equal the number of containers", () => {
+    // Without this the rule would settle "4 EA" at the contents of one vial and make the per-unit
+    // cost wrong by four. A mismatch is not two conventions, it is two different numbers.
+    const p = proposeContainerContents({ catalogue: "4 EA", packageDescription: vial20 });
+    assert.equal(p.apply, false);
+    assert.equal((p as { verdict: string }).verdict, "differs");
+    assert.match((p as { why: string }).why, /not the same package by two conventions/);
+  });
+
+  test("a carton is not a container anybody dispenses, so it is still refused", () => {
+    const p = proposeContainerContents({
+      catalogue: "1 EA",
+      packageDescription: "1 CARTON in 1 CASE (0002-7501-99) / 20 mL in 1 CARTON",
+    });
+    assert.equal(p.apply, false);
+  });
+
+  test("a package counted in tablets is not this shape at all", () => {
+    const p = proposeContainerContents({
+      catalogue: "100 EA",
+      packageDescription: "100 CAPSULE in 1 BOTTLE (0093-0073-01)",
+    });
+    assert.equal(p.apply, false);
+    assert.match((p as { why: string }).why, /does not describe this as containers/);
+  });
+
+  test("a catalogue already counting millilitres is not counting containers", () => {
+    const p = proposeContainerContents({ catalogue: "20 ML", packageDescription: vial20 });
+    assert.equal(p.apply, false);
+    assert.match((p as { why: string }).why, /already counts ML/);
+  });
+
+  test("the patch is refused here too, because hours are not a volume", () => {
+    const p = proposeContainerContents({
+      catalogue: "4 EA",
+      packageDescription: "4 POUCH in 1 CARTON (0378-1234-56) / 168 h in 1 POUCH",
+    });
+    assert.equal(p.apply, false);
+  });
+});
+
+describe("the two automatic rules do not fight each other", () => {
+  const vial20 = "1 VIAL in 1 CARTON (0002-7501-01) / 20 mL in 1 VIAL";
+
+  test("neither rule may touch a package a person signed", () => {
+    const person = { packSize: "1 EA", correctedBy: "Cory Simms" };
+    assert.equal(proposeContainerContents({ catalogue: "1 EA", packageDescription: vial20, existing: person }).apply, false);
+    assert.equal(
+      proposeFdaCorrection({
+        catalogue: "30 EA",
+        packageDescription: "30 BLISTER PACK in 1 CARTON (1234-5678-90) / 6 TABLET in 1 BLISTER PACK",
+        existing: person,
+      }).apply,
+      false,
+    );
+  });
+
+  test("the multiple rule does not overwrite a contents correction, which is the more specific one", () => {
+    const p = proposeFdaCorrection({
+      catalogue: "30 EA",
+      packageDescription: "30 BLISTER PACK in 1 CARTON (1234-5678-90) / 6 TABLET in 1 BLISTER PACK",
+      existing: { packSize: "20 ML", correctedBy: FDA_CONTENTS_SOURCE },
+    });
+    assert.equal(p.apply, false);
+    assert.equal((p as { verdict: string }).verdict, "already-settled");
+  });
+
+  test("both automatic authors are counted as the file, not as a person", () => {
+    // Getting this wrong is a quiet miscount: rows the file settled would be reported as work
+    // somebody did by hand.
+    assert.equal(isFromFda(FDA_CONTENTS_SOURCE), true);
+    assert.equal(isFromPerson(FDA_CONTENTS_SOURCE), false);
+    assert.equal(isFromPerson("Cory Simms"), true);
+    assert.equal(isFromPerson(""), false);
   });
 });

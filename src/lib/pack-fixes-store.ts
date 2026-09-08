@@ -3,7 +3,15 @@ import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "./crypto";
 import { comparePack, fdaPackageUnits, cataloguePackUnits } from "./data-health-packages";
-import { proposeFdaCorrection, isFromFda, unitCostMicros, FDA_SOURCE, type NeedsPersonReason } from "./pack-fixes";
+import {
+  proposeFdaCorrection,
+  proposeContainerContents,
+  isFromFda,
+  isFromPerson,
+  unitCostMicros,
+  FDA_SOURCE,
+  type NeedsPersonReason,
+} from "./pack-fixes";
 
 /**
  * Reading the catalogue against the FDA, correcting what the file settles, and queueing the rest.
@@ -54,6 +62,15 @@ export type PackQuestion = {
   fdaUnitCostMicros: number | null;
   /** The correction already on file, if any. */
   settled: { packSize: string; note: string | null; by: string; at: string } | null;
+  /**
+   * How much the pharmacy actually deals in this package, which is what orders the queue.
+   *
+   * A list of twelve thousand packages sorted by NDC is not a work queue, it is a phone book. The
+   * owner settles what he sells before what he might: fills first, because a package he dispenses
+   * is one he has held, and spend second.
+   */
+  fills: number;
+  spentCents: number;
 };
 
 type Row = {
@@ -129,7 +146,7 @@ export async function applyFdaCorrections(user: { name: string }): Promise<{
     if (!description) continue;
     const existing = fixes.get(ndc11);
 
-    if (existing && !isFromFda(existing.correctedBy)) {
+    if (existing && isFromPerson(existing.correctedBy)) {
       settledByPerson++;
       continue;
     }
@@ -199,6 +216,59 @@ export async function applyFdaCorrections(user: { name: string }): Promise<{
 }
 
 /**
+ * How many of the open questions the container-contents rule would settle, without settling any.
+ *
+ * Counted before it is ever applied, deliberately. The rule is new, it rewrites a pack size from a
+ * count of vials to a volume, and that changes every per-unit cost on those NDCs — so the size of
+ * what it would do is worth knowing before it does it, not after.
+ */
+export async function countContainerContents(): Promise<{
+  wouldSettle: number;
+  blockedByCount: number;
+  notThisShape: number;
+  examples: string[];
+}> {
+  const { byNdc, packageOf, fixes } = await load();
+  let wouldSettle = 0;
+  let blockedByCount = 0;
+  let notThisShape = 0;
+  const examples: string[] = [];
+
+  for (const [ndc11, rows] of byNdc) {
+    const description = packageOf.get(ndc11);
+    if (!description) continue;
+    const existing = fixes.get(ndc11);
+    if (existing && isFromPerson(existing.correctedBy)) continue;
+
+    // Only NDCs that are open questions today: settled or agreeing ones are not this rule's work.
+    const open = rows.some((r) => ["unit-differs", "differs", "cannot-compare"].includes(comparePack(r.packSize, description).verdict));
+    if (!open) continue;
+
+    const proposals = rows.map((r) => ({
+      row: r,
+      p: proposeContainerContents({
+        catalogue: r.packSize,
+        packageDescription: description,
+        existing: existing ? { packSize: existing.packSize, correctedBy: existing.correctedBy } : null,
+      }),
+    }));
+
+    const settles = proposals.find((x) => x.p.apply);
+    if (settles && settles.p.apply) {
+      wouldSettle++;
+      if (examples.length < 5) {
+        examples.push(`${ndc11}: ${settles.row.supplier} counts ${settles.row.packSize} → ${settles.p.packSize}`);
+      }
+      continue;
+    }
+    if (proposals.some((x) => !x.p.apply && x.p.verdict === "differs")) blockedByCount++;
+    else notThisShape++;
+  }
+
+  return { wouldSettle, blockedByCount, notThisShape, examples };
+}
+
+/**
  * Every NDC the file cannot settle, with each supplier's reading and what a unit costs under each.
  *
  * `text` searches the NDC and the description, because a pharmacist looking one of these up has
@@ -209,13 +279,14 @@ export async function packQuestions(opts: { text?: string; limit?: number; inclu
   total: number;
 }> {
   const { byNdc, packageOf, fixes } = await load();
+  const { fillsBy, spentBy } = await dealings();
   const wanted = (opts.text ?? "").trim().toLowerCase();
   const out: PackQuestion[] = [];
 
   for (const [ndc11, rows] of byNdc) {
     const description = packageOf.get(ndc11) ?? null;
     const existing = fixes.get(ndc11) ?? null;
-    const settledByPerson = existing !== null && !isFromFda(existing.correctedBy);
+    const settledByPerson = existing !== null && isFromPerson(existing.correctedBy);
 
     // Settled by a person is done, unless somebody asked to see the settled ones too.
     if (settledByPerson && !opts.includeSettled) continue;
@@ -264,12 +335,68 @@ export async function packQuestions(opts: { text?: string; limit?: number; inclu
       })),
       fdaUnitCostMicros: fdaPackSize ? unitCostMicros(cheapestPack, fdaPackSize) : null,
       settled: existing ? { packSize: existing.packSize, note: existing.note, by: existing.correctedBy, at: existing.correctedAt } : null,
+      fills: fillsBy.get(ndc11) ?? 0,
+      spentCents: spentBy.get(ndc11) ?? 0,
     });
   }
 
+  /*
+   * Ordered by what the pharmacy actually dispenses, then by what it spends, then by the kind of
+   * question.
+   *
+   * Twelve thousand packages sorted by NDC is a phone book, not a work queue. A package the
+   * pharmacy has dispensed is one somebody has held, so it can be settled from memory and its
+   * per-unit cost is already being used in anger; a package nobody has bought is a question that
+   * can wait forever without costing anything.
+   */
   const order: Record<NeedsPersonReason, number> = { "unit-differs": 0, differs: 1, "cannot-compare": 2 };
-  out.sort((a, b) => order[a.reason] - order[b.reason] || a.ndc11.localeCompare(b.ndc11));
+  out.sort(
+    (a, b) =>
+      b.fills - a.fills ||
+      b.spentCents - a.spentCents ||
+      order[a.reason] - order[b.reason] ||
+      a.ndc11.localeCompare(b.ndc11),
+  );
   return { questions: out.slice(0, opts.limit ?? 200), total: out.length };
+}
+
+/**
+ * How many fills and how much spend each NDC carries, for ordering the queue.
+ *
+ * Fills are counted by prescription, fill number and date rather than by claim row, because a
+ * second payor on one dispensing is one fill and counting rows would rank a coordinated claim
+ * above a busier drug.
+ */
+async function dealings(): Promise<{ fillsBy: Map<string, number>; spentBy: Map<string, number> }> {
+  const claims = await db
+    .select({
+      ndc11: schema.claims.ndc11,
+      rxNumber: schema.claims.rxNumber,
+      fillNumber: schema.claims.fillNumber,
+      dateFilled: schema.claims.dateFilled,
+      status: schema.claims.status,
+    })
+    .from(schema.claims);
+  const seen = new Set<string>();
+  const fillsBy = new Map<string, number>();
+  for (const c of claims) {
+    if (c.status !== "paid" || !isNdc(c.ndc11)) continue;
+    const key = [c.rxNumber, c.fillNumber ?? "", c.dateFilled, c.ndc11].join("|");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    fillsBy.set(c.ndc11, (fillsBy.get(c.ndc11) ?? 0) + 1);
+  }
+
+  const lines = await db
+    .select({ ndc11: schema.invoiceLines.ndc11, extendedCents: schema.invoiceLines.extendedCents })
+    .from(schema.invoiceLines);
+  const spentBy = new Map<string, number>();
+  for (const l of lines) {
+    if (!isNdc(l.ndc11)) continue;
+    spentBy.set(l.ndc11, (spentBy.get(l.ndc11) ?? 0) + l.extendedCents);
+  }
+
+  return { fillsBy, spentBy };
 }
 
 /**
