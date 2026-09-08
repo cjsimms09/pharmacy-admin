@@ -8,6 +8,31 @@ file is how they talk.
 
 ## Open items
 
+### From 1 — the facilitator's payments never found a claim, and why (8 September)
+
+Measured on the live database, answering the owner's question whether the Medicare Transaction
+Facilitator is working: the download works (last pull 8 September 08:34, 23 payments held,
+$5,740.51, 18 August to 8 September), and **none of the 23 was tied to a claim.** Two reasons.
+(1) The facilitator writes the prescription as `000000318553FILL1`; `x12-835.ts splitReference`
+only knew `318553-1`, so the whole string was filed as the prescription number. Fixed: the
+splitter reads both spellings and drops leading zeros; test added; `scripts/rekey-payments.ts`
+re-keyed the 23 held rows (original reference kept on `reference`). Re-run it after tonight's
+deploy for anything that arrived under the old parser in between. (2) Every payment is for a fill
+dated 26 January to 17 August, and the claims on file start 24 August, so nothing could match yet
+even with the fix. The twelve-month claims export closes that; the first matches on their own will
+be the September fills' payments, due from mid-September. Books: cash counts the payments in the
+month received (standing in for a typed facilitator receipt); accrual counts them on the fill's
+month only once matched, so today accrual holds $0 of this money and cash holds $5,740.51. The
+plan's promise at adjudication (`expected_facilitator_cents`, 10 September fills, $2,549.36) is
+shown as outstanding and not booked — A's blocking finding on the payer model stands.
+
+Also from 1 today: the site's own monthly Claude ceiling (Settings → Claude, default $50 when
+blank) is what stopped the contract read, not the console; the owner has to raise it there.
+`month-plan.ts` compares supplier names raw and has no caller (found by 2): delete it or wire it
+with folded names, never as it is. The band-share wiring is verified live: every secondary basket
+shows its contract share with the unknown share at zero. The first on-hand count is filed (1,770
+items as of 8 September, by hand through `fileOnHand`); the machine had 765 MB free at noon and
+the site 1.3 GB — BACKLOG item 16 for what is being done about it.
 ### From Helper A to 1 — the memory audit: 128 MB of readings, and where the rest is (8 September)
 
 Branch `work/memory-audit`, pull request against `feature/compliance`. Working in

@@ -669,9 +669,40 @@ async function loadBuyList(): Promise<BuyListView> {
    * rather than patched, so the sentence and the number can never disagree.
    */
   const { verdictFor } = await import("./order-plan");
+  /*
+   * Only the contract part of a basket can move the band.
+   *
+   * The guard used to be handed the whole basket and, given no contract share, charged all of it
+   * against the compliance ratio. Helper A's audit, confirmed on the live catalogue: every secondary
+   * is 100% "not rebated", so the penalty was being charged on lines that never earned the rebate,
+   * and it is designed to overrule the invoice saving — baskets flipped back to the primary that
+   * were genuinely cheaper elsewhere. The share is read off the primary's own catalogue flags for
+   * the same NDCs (band-share.ts says why it must be the primary's flag and not the secondary's),
+   * and what could not be answered either way is carried on the basket for the page to say.
+   */
+  const { contractShareAtPrimary } = await import("./band-share");
+  /*
+   * Names compared folded, never raw. The register says "Mckesson" and the catalogue says
+   * "McKesson"; compared character for character they are two wholesalers, the primary's own
+   * basket was never recognised as the primary's, and its offers matched nothing — so every
+   * basket read as 100% "not stocked at the primary" and the guard had nothing to price. The
+   * shelf audit's query lowercased both sides and so could not see this.
+   */
+  const fold = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
+  const primaryKey = fold(suppliers.find((x) => x.primary)?.supplier);
+  const primaryOffers = new Map(
+    offers
+      .filter((o) => primaryKey !== "" && fold(o.supplier) === primaryKey)
+      .map((o) => [o.ndc11, { ndc11: o.ndc11, supplier: o.supplier, unitCostMicros: o.unitCostMicros, rebated: o.rebated ?? null }] as const),
+  );
   for (const b of plan.baskets) {
-    if (b.supplier === suppliers.find((x) => x.primary)?.supplier) continue;
-    const cost = await bandCostOfMoving(b.subtotalCents);
+    if (fold(b.supplier) === primaryKey) continue;
+    const share = contractShareAtPrimary(
+      b.lines.map((l) => ({ ndc11: l.ndc11, unitsThousandths: l.unitsThousandths, costCents: l.costCents })),
+      primaryOffers,
+    );
+    b.contractShare = share;
+    const cost = await bandCostOfMoving(b.subtotalCents, share.contractCents);
     if (!cost) continue;
     b.bandDeltaCents = cost.deltaCents;
     Object.assign(

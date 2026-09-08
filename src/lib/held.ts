@@ -19,11 +19,20 @@ import { db } from "@/db";
  * callers arriving together share one computation. A held value is shared by reference, so a
  * reader never sorts or writes into what it is given.
  */
-type Entry = { at: number; fp: string; value: unknown; has: boolean; pending: Promise<unknown> | null; compute: () => Promise<unknown> };
+type Entry = { at: number; read: number; fp: string; value: unknown; has: boolean; pending: Promise<unknown> | null; compute: () => Promise<unknown> };
 
 const holds = new Map<string, Entry>();
 const FRESH_MS = 10 * 60_000;
 const STALE_OK_MS = 6 * 60 * 60_000;
+/*
+ * What nobody has asked for in six hours is dropped, and only what somebody asked for in the last
+ * hour is refreshed behind. Several keys carry today's date or a period — `books:<period>:<day>`,
+ * `recent:<n>:<day>` — so every day added entries that nothing would ever read again, and the idle
+ * refresh recomputed all of them, every five minutes, for as long as the site had been up. That is
+ * the shape of a process that is 1.3 GB an hour after it starts on a machine with 765 MB free.
+ */
+const RECENT_MS = 60 * 60_000;
+const MOST_HELD = 48;
 
 let fpCache: { at: number; fp: string } | null = null;
 
@@ -65,6 +74,7 @@ export async function held<T>(key: string, compute: () => Promise<T>): Promise<T
   const fp = await fingerprint();
   const now = Date.now();
   const e = holds.get(key);
+  if (e) e.read = now;
   if (e && e.has && e.fp === fp) {
     if (now - e.at < FRESH_MS) return e.value as T;
     if (now - e.at < STALE_OK_MS) {
@@ -79,9 +89,11 @@ export async function held<T>(key: string, compute: () => Promise<T>): Promise<T
 
 function run<T>(key: string, fp: string, compute: () => Promise<T>): Promise<T> {
   const prev = holds.get(key);
+  const read = prev?.read ?? Date.now();
   const p = compute()
     .then((value) => {
-      holds.set(key, { at: Date.now(), fp, value, has: true, pending: null, compute });
+      holds.set(key, { at: Date.now(), read: holds.get(key)?.read ?? read, fp, value, has: true, pending: null, compute });
+      evict();
       return value;
     })
     .catch((err) => {
@@ -89,8 +101,28 @@ function run<T>(key: string, fp: string, compute: () => Promise<T>): Promise<T> 
       else holds.delete(key);
       throw err;
     });
-  holds.set(key, { at: prev?.at ?? 0, fp: prev?.fp ?? fp, value: prev?.value, has: prev?.has ?? false, pending: p, compute });
+  holds.set(key, { at: prev?.at ?? 0, read, fp: prev?.fp ?? fp, value: prev?.value, has: prev?.has ?? false, pending: p, compute });
   return p;
+}
+
+/** Drops what nobody has read in six hours, then the least recently read past the cap. Never what is computing. */
+function evict(now = Date.now()): number {
+  let n = 0;
+  for (const [key, e] of [...holds.entries()]) {
+    if (e.pending) continue;
+    if (now - e.read > STALE_OK_MS) {
+      holds.delete(key);
+      n++;
+    }
+  }
+  if (holds.size > MOST_HELD) {
+    const idle = [...holds.entries()].filter(([, e]) => !e.pending).sort((a, b) => a[1].read - b[1].read);
+    for (const [key] of idle.slice(0, holds.size - MOST_HELD)) {
+      holds.delete(key);
+      n++;
+    }
+  }
+  return n;
 }
 
 /**
@@ -102,9 +134,12 @@ function run<T>(key: string, fp: string, compute: () => Promise<T>): Promise<T> 
  */
 export async function refreshStale(maxAgeMs = FRESH_MS): Promise<number> {
   const fp = await fingerprint();
+  evict();
   let n = 0;
   for (const [key, e] of [...holds.entries()]) {
     if (!e.has || e.pending) continue;
+    // Only what somebody has actually opened lately: a reading nobody wants fresh is not recomputed.
+    if (Date.now() - e.read > RECENT_MS) continue;
     if (e.fp === fp && Date.now() - e.at < maxAgeMs) continue;
     try {
       await run(key, fp, e.compute);

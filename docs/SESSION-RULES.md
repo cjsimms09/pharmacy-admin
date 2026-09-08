@@ -38,7 +38,11 @@ the cold start, and a full test suite running in another session on the same 7 G
 the counter with no page. So: **the lead deploys outside the pharmacy's hours** (before 8 AM or
 after 7 PM Central) unless the fix is one the pharmacist is waiting for, and never twice in an
 hour. Workers **do not run full test suites or builds between 8 AM and 7 PM** — single test files
-only — and never two builds at once on this machine.
+only — and never two builds at once on this machine. And **nothing that loads the catalogue or the drug directory runs in
+a second process in those hours** — no type check, no scratch script importing `shelf`,
+`catalogue-cache` or `drug-directory`. Measured 8 September at noon: 765 MB free of 7.1 GB with
+the site at 1.3 GB, so one such process is the difference between a site and paging. A fact is
+checked with a SQL query in a short-lived script, not by importing the module.
 
 ## 2. Where the truth lives
 

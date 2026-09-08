@@ -461,6 +461,60 @@ one is a drug that looks several times cheaper or dearer than it is. Three parts
 
 Assigned to session 2.
 
+### 14. Audit the P&P manual: compliant, and true to what the site actually does (8 September)
+
+The owner: *"We need to audit P&P manual, make sure it is compliant and matches what we do in the
+site."* The manual is one document, read and edited by chapter (`/manual`, its text in
+`src/app/(app)/manual/page.tsx` and `manual_sections`), printed from the live copy, and every
+procedure it promises has a form or a page somewhere in the site (`documents/manual` appendix A
+lists them). Two audits in one, and a cloud helper can do both because the text is in the repo:
+
+- **Compliant.** Chapter by chapter against what governs an independent pharmacy in Kansas: the
+  Kansas Board of Pharmacy regulations (K.A.R. 68), K.S.A. 65-16xx, DEA 21 CFR 1300–1321 for
+  controlled substances, HIPAA 45 CFR 164, OSHA bloodborne pathogens and hazard communication, and
+  the immunization protocol statute (K.S.A. 65-1635a). Each finding names the section, the rule,
+  what the manual says, what it must say, and a proposed sentence — never a rewrite the owner has
+  not read. Inherited text that describes a chain (a Human Resources Manager, a Chief
+  Administrator) is a known kind of finding.
+- **True to the site.** Every procedure the manual describes must be the procedure the site
+  performs: the training cadence and attestation, the CQI incident and summary path, the annual
+  controlled substance inventory and Form C-250, the temperature log, the self-inspection, the
+  document retention periods, the invoice and receipt records. Where the manual says one thing and
+  the site does another, the finding says which should change, because the site is what the
+  inspector will be shown running.
+
+Assigned to **helper B after the inbox recogniser**, or to a sixth session if the owner wants it
+sooner; session 1 answers questions of what the site does in practice from the real data.
+
+### 15. The Add tool has to let the owner say what a document is (8 September)
+
+The owner's words, uploading the balance-on-hand report: "no way to tell system that's what this
+is in the add tool. need many more options!!!" The page offers a person and a credential type and
+nothing else; every report goes through the recogniser's guess. Wanted: a "what is this" choice
+listing every kind the site can read — Rx Transaction Details, Drug File Print (balance on hand,
+with the count date asked for, because the report carries none), each wholesaler's invoice, a
+supplier catalogue, an 835, a contract or provider manual, a bank statement, a staff document —
+with "let the site work it out" as the default, and a named kind skipping the guess. **Assigned
+to 2.** The report itself was filed by 1 by hand on 8 September: 1,770 items counted as of that
+day, 36 lines without an NDC skipped, the first on-hand count the site has ever held.
+
+### 16. The site has to be fast, and stay fast (8 September)
+
+The owner's words: "site is still incredibly slow! we need to fix this and make sure it stays fast
+and efficient." Measured 8 September at 12:10: free memory **765 MB of 7,105 MB**; the site
+**1,300 MB** one hour after its restart; the two Claude sessions 930 MB; Chrome 660 MB; Defender
+328 MB. Anything else that starts — a type check, a test run, a script that loads the catalogue —
+pushes the machine into paging, and that is what "incredibly slow" is. Three causes and their
+fixes: (1) `held.ts` never evicts and `refreshStale` recomputes every entry ever held on every
+tick, including yesterday's books under yesterday's date key — fixed by 1 on 8 September (evict
+what nobody has read for six hours; refresh only what was read in the last hour; cap the map);
+(2) the heap ceiling in `launch.mjs` is not in force until the launcher itself restarts —
+tonight; (3) Helper A's memory audit (`docs/audits/2026-09-08-memory.md`): `loadDrugDirectory`
+peaks at 430 MB inside the web process and four readers pull 42 columns where they use nine —
+the directory load moves to a script (2), the column lists are 1's. Rule for every session on this
+machine, added to SESSION-RULES §1a: nothing that loads the catalogue or the directory runs in a
+second process during pharmacy hours; measure with a query, not by importing the module.
+
 ## The data the site has to ingest
 
 Named by the owner on 7 September as what is still being connected. Each one needs a reader, a

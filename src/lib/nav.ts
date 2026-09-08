@@ -138,6 +138,9 @@ export const NAV: NavGroup[] = [
       { href: "/tools/data-health", label: "Data health", blurb: "How complete each feed is, and how much of it links where it must — counted on the real data, with the gaps named" },
       { href: "/settings/email", label: "Email", blurb: "Reading reports in and sending training out" },
       { href: "/inbox", label: "What arrived", blurb: "Reports that came by email, documents dropped in by hand, and what was made of each" },
+      // Listed, though the Add button in the top bar opens the same thing: the owner asked where the
+      // upload tool had gone, and a page nobody can find in the menu is a page that does not exist.
+      { href: "/intake", label: "Add a document", blurb: "Upload anything — a photograph, a PDF, an 835, a spreadsheet — and say what it is, or let the site work it out" },
       { href: "/nadac", label: "NADAC", blurb: "The federal benchmark price, fetched weekly", hidden: true },
       { href: "/reports", label: "Report check", blurb: "What a PioneerRx report can and cannot support, field by field", gated: true, hidden: true },
       { href: "/audit", label: "Activity log", blurb: "Who did what in this system, and when", hidden: true },

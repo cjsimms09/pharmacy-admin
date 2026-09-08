@@ -219,11 +219,24 @@ export function providerAdjustmentsFrom(fields: string[], component: string, raw
   return out;
 }
 
-/** "1234567-02" or "1234567" to the prescription and its fill. */
+/**
+ * The pharmacy's own reference, back to the prescription and its fill.
+ *
+ * Two spellings arrive. A plan's 835 carries what was submitted, "332359-1" or "332359". The
+ * Medicare Transaction Facilitator carries the number padded to twelve digits with the fill
+ * spelled out, "000000332359FILL1" — and every one of its payments sat unmatched for three weeks
+ * because that string was filed whole, so no claim could ever equal it. Leading zeros are dropped:
+ * the claims report prints the number bare.
+ */
 export function splitReference(reference: string): { rxNumber: string; fillNumber: number | null } {
-  const m = /^(\d+)\s*-\s*(\d+)$/.exec(reference.trim());
-  if (m) return { rxNumber: m[1], fillNumber: Number(m[2]) };
-  return { rxNumber: reference.trim(), fillNumber: null };
+  const r = reference.trim();
+  const dash = /^0*(\d+)\s*-\s*(\d+)$/.exec(r);
+  if (dash) return { rxNumber: dash[1], fillNumber: Number(dash[2]) };
+  const fill = /^0*(\d+)\s*FILL\s*(\d+)$/i.exec(r);
+  if (fill) return { rxNumber: fill[1], fillNumber: Number(fill[2]) };
+  const bare = /^0*(\d+)$/.exec(r);
+  if (bare) return { rxNumber: bare[1], fillNumber: null };
+  return { rxNumber: r, fillNumber: null };
 }
 
 /**

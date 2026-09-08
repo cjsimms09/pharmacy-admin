@@ -163,6 +163,20 @@ separate process or held between requests (every libsql call blocks the server; 
 `src/app/(app)/tools/data-health/**` are yours. Start from tonight's hand-measured figures in
 HANDOFF so the first version already shows the real numbers.
 
+**Then (8 September, from 1, the owner's ask, before anything else): the Add tool says what a
+document is** — `docs/BACKLOG.md` item 15. The on-hand reader exists (`on-hand.ts`,
+`shelf.ts fileOnHand`; the real file lands, 1 filed it by hand) — the missing piece is the page:
+a choice of every kind the site reads, the count date asked for on a balance-on-hand file, and a
+named kind routed straight to its reader through the same path `importDropped` uses. B's
+`intake-recognise*.ts` stays B's; say on the PR if you had to touch it.
+
+**Then (8 September, from 1): the drug directory loads outside the web process** — Helper A's
+memory audit, `docs/audits/2026-09-08-memory.md`: `loadDrugDirectory` peaks at 430 MB in the
+site's own process, the single largest thing on a machine with 765 MB free. Move it to a script
+on the `make-claude-copy` / `measure-data-health` pattern (spawned detached, the site reads the
+result), with the line-64 read given a column list. `held.ts` and the column trims in
+`floor-review.ts`, `appeals.ts`, `claims.ts` and `money-found.ts` are 1's.
+
 ### The bank feed — plan from 2 (8 September), for 1 to confirm before I build
 
 **Read the code first, as asked, and the headline is that most of this exists. Please do not have

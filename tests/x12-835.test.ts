@@ -104,6 +104,10 @@ describe("the small readings underneath", () => {
   test("a reference with a fill on it splits; one without does not invent a fill", () => {
     assert.deepEqual(splitReference("332359-1"), { rxNumber: "332359", fillNumber: 1 });
     assert.deepEqual(splitReference("332359"), { rxNumber: "332359", fillNumber: null });
+    // The facilitator's spelling: padded to twelve digits, the fill spelled out.
+    assert.deepEqual(splitReference("000000318553FILL1"), { rxNumber: "318553", fillNumber: 1 });
+    assert.deepEqual(splitReference("000000285719FILL10"), { rxNumber: "285719", fillNumber: 10 });
+    assert.deepEqual(splitReference("000000332359"), { rxNumber: "332359", fillNumber: null });
   });
 });
 

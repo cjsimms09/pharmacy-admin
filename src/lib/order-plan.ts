@@ -104,6 +104,21 @@ export type Movement = {
   onHandThousandths: number;
 };
 
+/**
+ * How much of a basket the primary would have invoiced as a contract generic, and how much could
+ * not be answered either way — read off the primary's own catalogue by band-share.ts. Set by the
+ * buy list after the baskets exist; the band guard prices only the contract part.
+ */
+export type BasketContractShare = {
+  contractCents: number;
+  nonContractCents: number;
+  unflaggedCents: number;
+  notStockedCents: number;
+  atPrimaryCents: number;
+  unknownShare: number;
+  says: string;
+};
+
 export type PlannedLine = {
   ndc11: string;
   name: string | null;
@@ -157,6 +172,8 @@ export type Basket = {
   needCents: number;
   /** Everything in the basket, top-ups included. */
   subtotalCents: number;
+  /** The contract part of this basket at the primary, set by the buy list; the band guard prices only that. */
+  contractShare?: BasketContractShare;
   minimumCents: number | null;
   /** How far the needed lines fall short of the minimum. Zero where they meet it. */
   shortfallCents: number;

@@ -117,7 +117,8 @@ describe("a page listed only through its family", () => {
     assert.equal(itemFor("/plans")?.item.href, "/claims/floor");
     assert.equal(itemFor("/plans")?.tab?.label, "Which plans it reaches");
     assert.equal(itemFor("/purchasing/minimums")?.item.href, "/purchasing");
-    assert.equal(itemFor("/intake")?.item.href, "/inbox");
+    // /intake was family-only; the owner asked where the upload tool had gone, so it is listed.
+    assert.equal(itemFor("/intake")?.item.href, "/intake");
     assert.equal(itemFor("/payers/sort")?.item.href, "/payers");
     assert.equal(itemFor("/settings/feeds")?.item.href, "/settings/connections");
     assert.equal(itemFor("/claims/floor")?.tab, undefined);
