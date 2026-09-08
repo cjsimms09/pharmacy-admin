@@ -1,4 +1,5 @@
 import "server-only";
+import { rateForSupplier } from "./supplier-match";
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "./crypto";
@@ -64,15 +65,8 @@ export async function drugFile(): Promise<DrugRow[]> {
    * alone loses rebates — and a lost rebate makes a cheap supplier look dear, which sends the
    * order elsewhere. A contained match settles it, the same way the purchasing ledger does.
    */
-  const rateFor = (supplier: string): number | null => {
-    const a = supplier.trim().toLowerCase();
-    const exact = rebateRates[a];
-    if (typeof exact === "number") return exact;
-    for (const [name, r] of Object.entries(rebateRates)) {
-      if (a.includes(name) || name.includes(a)) return r;
-    }
-    return null;
-  };
+  // One matcher for the whole site; see supplier-match.ts for why the first hit is the wrong answer.
+  const rateFor = (supplier: string): number | null => rateForSupplier(rebateRates, supplier);
 
   // What the catalogue withheld from every comparison, so this screen can say so rather than show a gap.
   const withheldBy = (await import("./catalogue-cache")).withheldPrices();
@@ -124,8 +118,7 @@ export async function drugFile(): Promise<DrugRow[]> {
             rebateApplied: apply,
             rebateWhy:
               rebated === true && !apply
-                ? rebateWhyBy[supplierKey] ??
-                  Object.entries(rebateWhyBy).find(([n]) => supplierKey.includes(n) || n.includes(supplierKey))?.[1] ??
+                ? rateForSupplier(rebateWhyBy, supplierKey) ??
                   `${it.supplier} is not on the supplier list, so the site holds no agreement for them and cannot take anything off their price. Add them on the Suppliers page.`
                 : null,
           };
@@ -143,6 +136,7 @@ export async function drugFile(): Promise<DrugRow[]> {
             unitCostMicros: it.unitCostMicros, packCostCents: it.packCostCents, awpCents: it.awpCents, contractFlag: it.contractFlag,
           },
           benchmark.get(it.ndc11)?.unitMicros ?? null,
+          benchmark.get(it.ndc11)?.pricingUnit ?? null,
         ),
       }))
       .sort((a, b) => (a.packCostCents ?? Infinity) - (b.packCostCents ?? Infinity));

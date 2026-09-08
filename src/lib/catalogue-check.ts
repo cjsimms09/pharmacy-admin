@@ -35,6 +35,7 @@ export type ProblemKind =
   | "pack_size_unreadable"
   | "pack_cost_disagrees"
   | "price_far_from_nadac"
+  | "nadac_unit_differs"
   | "awp_below_cost"
   | "no_price";
 
@@ -63,6 +64,19 @@ export function packUnits(packSize: string | null): number | null {
   const m = /(?:\(\d+\)\s*)?([\d.]+)\s*(EA|ML|GM)\b/i.exec(packSize);
   const n = m ? Number(m[1]) : NaN;
   return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * What the pack is measured in — each, millilitres or grams.
+ *
+ * Needed because a price per millilitre and a price per each are not comparable numbers, and the
+ * benchmark below is published per one of them. Null where the pack size names no unit, which is
+ * the only honest answer and is treated as "do not compare".
+ */
+export function packUom(packSize: string | null): "EA" | "ML" | "GM" | null {
+  if (!packSize) return null;
+  const m = /(?:\(\d+\)\s*)?[\d.]+\s*(EA|ML|GM)\b/i.exec(packSize);
+  return m ? (m[1].toUpperCase() as "EA" | "ML" | "GM") : null;
 }
 
 const money = (cents: number) => `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -100,7 +114,7 @@ const NADAC_LOW = 1 / 3;
 const AWP_GAP_FRACTION = 0.02;
 const AWP_GAP_CENTS = 100;
 
-export function problemsWith(item: CatalogueItem, nadacUnitMicros?: number | null): Problem[] {
+export function problemsWith(item: CatalogueItem, nadacUnitMicros?: number | null, nadacPricingUnit?: string | null): Problem[] {
   const out: Problem[] = [];
   const units = packUnits(item.packSize);
 
@@ -138,7 +152,35 @@ export function problemsWith(item: CatalogueItem, nadacUnitMicros?: number | nul
     }
   }
 
-  if (item.unitCostMicros !== null && nadacUnitMicros !== null && nadacUnitMicros !== undefined && nadacUnitMicros > 0) {
+  /*
+   * The benchmark, and only where the two are counting the same thing.
+   *
+   * NADAC publishes a price per each, per millilitre or per gram, and says which. A supplier
+   * prices whatever its pack size names. Put a per-each cost beside a per-millilitre benchmark and
+   * the ratio is out by however many millilitres are in the bottle — hundreds, on a liquid — so the
+   * row is reported as a hundred times the national average and the remedy offered ("a pack price
+   * sitting in a unit column") sends somebody to check a pack size that was right all along.
+   *
+   * The site already refuses this comparison when pricing a claim, in as many words:
+   * "Pricing across units would be wrong by orders of magnitude" (reimbursement-rules.ts). The
+   * same refusal belongs here, where it decides what the purchasing screen calls a fault.
+   */
+  const mine = packUom(item.packSize);
+  const theirs = (nadacPricingUnit ?? "").trim().toUpperCase() || null;
+  // Compared unless the two are known to be counting different things. An unknown unit on either
+  // side is not evidence of a mismatch, so the benchmark keeps working exactly as it always did.
+  const unitsDiffer = mine !== null && theirs !== null && mine !== theirs;
+  if (unitsDiffer) {
+    // Said out loud rather than passed over: a benchmark that cannot be used is worth knowing about.
+    out.push({
+      kind: "nadac_unit_differs",
+      says: `This is priced per ${mine} and NADAC prices it per ${theirs}, so the two are not comparable.`,
+      todo: "No benchmark is applied to this row. If the pack size is wrong, correcting it below brings the benchmark back.",
+      level: "check",
+      costCents: 0,
+    });
+  }
+  if (!unitsDiffer && item.unitCostMicros !== null && nadacUnitMicros !== null && nadacUnitMicros !== undefined && nadacUnitMicros > 0) {
     const ratio = item.unitCostMicros / nadacUnitMicros;
     if (ratio > NADAC_HIGH || ratio < NADAC_LOW) {
       const times = ratio >= 1 ? `${ratio.toFixed(1)} times` : `${(1 / ratio).toFixed(1)} times under`;

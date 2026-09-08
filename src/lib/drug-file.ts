@@ -347,8 +347,18 @@ export function buildDrugRow(a: {
   reimbursement: Reimbursement | null;
   packFix: DrugRow["packFix"];
 }): DrugRow {
-  const disagreement = packDisagreement(a.offers, a.shelf);
-  const costs = a.offers.map((o) => o.packCostCents).filter((c): c is number => c !== null);
+  /*
+   * Every offer carries a net price, even where nothing was taken off it.
+   *
+   * The buy and the margin are both drawn from the net price, so an offer that arrived without one
+   * is invisible to them — the drug reads as having no supplier and no margin, which is a silence
+   * rather than an error and so goes unnoticed. "Net of a rebate this line does not earn" is just
+   * the printed price, and settling that here means no caller can leave it out.
+   */
+  const offers = a.offers.map((o) => (o.netUnitMicros === null || o.netUnitMicros === undefined ? { ...o, netUnitMicros: o.unitCostMicros } : o));
+
+  const disagreement = packDisagreement(offers, a.shelf);
+  const costs = offers.map((o) => o.packCostCents).filter((c): c is number => c !== null);
   const bestPackCostCents = costs.length > 0 ? Math.min(...costs) : null;
 
   /*
@@ -360,19 +370,19 @@ export function buildDrugRow(a: {
   const problems: Problem[] = [];
   if (disagreement && !a.packFix) problems.push(disagreementProblem(disagreement, bestPackCostCents));
   const seen = new Set<string>();
-  for (const o of a.offers) {
+  for (const o of offers) {
     for (const p of o.problems) {
       const key = `${p.kind}|${p.says}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      problems.push(a.offers.length > 1 ? { ...p, says: `${o.supplier}: ${p.says}` } : p);
+      problems.push(offers.length > 1 ? { ...p, says: `${o.supplier}: ${p.says}` } : p);
     }
   }
 
   return {
     ndc11: a.ndc11,
     name: a.name,
-    offers: a.offers,
+    offers,
     shelf: a.shelf,
     nadacUnitMicros: a.nadacUnitMicros,
     nadacPricingUnit: a.nadacPricingUnit,
@@ -395,12 +405,21 @@ export function buildDrugRow(a: {
 export function marginOf(row: DrugRow): { perUnitCents: number; percent: number | null } | null {
   const reimb = row.reimbursement?.perUnitCents ?? null;
   if (reimb === null) return null;
-  const cheapest = row.offers
-    .map((o) => o.unitCostMicros)
-    .filter((m): m is number => m !== null)
-    .sort((a, b) => a - b)[0];
-  if (cheapest === undefined) return null;
-  const costCents = cheapest / 10_000;
+  /*
+   * Costed at the buy, not at the cheapest printed number on the row.
+   *
+   * Two things were wrong with taking the lowest gross price. It ignored the rebate, so every
+   * contract line's margin was understated by exactly the rate the pharmacy is paid — the drugs
+   * with the best terms looked like the worst earners. And it took that price from whichever
+   * supplier printed it, which need not be the supplier this same file says to buy from, so the
+   * margin on screen belonged to an order nobody was going to place.
+   *
+   * It is now the same figure bestBuy() returns: net of the rebate, off a price the site trusts,
+   * from a lot that is not expiring. One cost, one buy, one margin.
+   */
+  const buy = bestBuy(row);
+  if (buy === null) return null;
+  const costCents = buy.netUnitMicros / 10_000;
   const margin = reimb - costCents;
   return { perUnitCents: margin, percent: reimb > 0 ? margin / reimb : null };
 }
@@ -419,10 +438,20 @@ export type DirectoryFact = { key: string; teCode: string | null; genericName: s
  * and paired with the supplier's own item number, because a switch nobody can order is not an
  * answer.
  */
-function bestBuy(r: DrugRow): { netUnitMicros: number; supplier: string; itemNumber: string | null; packSize: string | null } | null {
+export function bestBuy(r: DrugRow): { netUnitMicros: number; supplier: string; itemNumber: string | null; packSize: string | null } | null {
   let best: { netUnitMicros: number; supplier: string; itemNumber: string | null; packSize: string | null } | null = null;
   for (const o of r.offers) {
     if (o.netUnitMicros === null || o.netUnitMicros <= 0) continue;
+    /*
+     * A short-dated lot is a real price and never the recommendation.
+     *
+     * It is stock expiring inside the return window, priced low for exactly that reason, so a
+     * comparison that does not know the difference picks it every time — and picks it hardest on
+     * the slow movers, which are the ones least able to get through it before it expires. The
+     * ordering side of the site has always refused it (product-ledger.ts, over-nadac.ts); this is
+     * the screen that names the drug to switch to, and it was still offering it.
+     */
+    if (o.availability && /short-?dated/i.test(o.availability)) continue;
     if (best === null || o.netUnitMicros < best.netUnitMicros)
       best = { netUnitMicros: o.netUnitMicros, supplier: o.supplier, itemNumber: o.itemNumber, packSize: o.packSize };
   }
