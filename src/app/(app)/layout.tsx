@@ -8,6 +8,7 @@ import { SendToClaude } from "@/components/send-to-claude";
 import { Crumbs } from "@/components/crumbs";
 import { logo } from "@/lib/branding";
 import { getSettings } from "@/lib/settings";
+import { PublicAccessBanner } from "@/components/public-access-banner";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   noteRequest();
@@ -23,6 +24,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="min-h-screen">
+      {/* Above everything, including the pharmacy's own name: nothing on this page matters more. */}
+      <PublicAccessBanner />
       {/*
         The head of the site: the pharmacy's own mark, six words, the search, and the person.
 
