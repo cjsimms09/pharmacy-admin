@@ -8,11 +8,36 @@
  *
  * ── What is read, and what is deliberately not ──
  *
- * An 835 carries far more than this needs: adjustment reason codes, provider-level adjustments,
- * forwarding balances, an entire remittance's worth of accounting. This reads the part that answers
- * one question — which prescription was paid how much, by whom, and when — because that is what can
- * be matched to a fill and checked. Everything else is kept as the raw segment against the payment
- * so nothing is lost, and none of it is interpreted into a number this site will act on.
+ * An 835 carries far more than this needs: forwarding balances, an entire remittance's worth of
+ * accounting. This reads the part that answers one question — which prescription was paid how much,
+ * by whom, and when — plus the three things that decide whether the answer is *complete*: the
+ * adjustments taken off each claim (CAS), the money taken off the whole remittance (PLB), and the
+ * arithmetic that ties them to the payment. Everything else is kept as the raw segment against the
+ * payment so nothing is lost, and none of it is interpreted into a number this site will act on.
+ *
+ * ── Why the adjustments are read rather than skipped ──
+ *
+ * Helper B found the hole and it is money: `claim-payments.ts` banks BPR02, which is *net* of any
+ * provider-level adjustment, while posting the claim payments, which are *gross*. Both figures are
+ * individually right; the difference is the PLB, and it reached the books nowhere. Twenty claims
+ * adjudicated at $4,000.00 with a $57.50 DIR fee bank $3,942.50, post $4,000.00, and lose $57.50
+ * in silence. DIR is one of the largest deductions an independent faces and this happened on every
+ * remittance carrying one.
+ *
+ * Worse than dropped: a PLB segment fell to the parse loop's default branch, which appends to the
+ * open claim — so whole-remittance money was filed as raw text against whichever prescription
+ * happened to be last in the file.
+ *
+ * So the file is now checked by arithmetic before anything can be stored from it, which is what
+ * CLAUDE.md requires of every reader that decides money. Two identities close on a well-formed
+ * remittance:
+ *
+ *     per claim:  CLP03 charged − CLP04 paid − CLP05 patient responsibility = the CAS amounts
+ *     per file:   BPR02 paid = the CLP payments less the PLB adjustments
+ *
+ * The second is the one that matters: it proves the file was read completely. A remittance whose
+ * file identity does not close is read and shown and reported as a problem, never posted — the
+ * same rule the books follow when their own totals do not add up.
  *
  * ── Pharmacy 835s in particular ──
  *
@@ -38,8 +63,61 @@ export type RemittancePayment = {
   ndc11: string | null;
   /** DTM 472, the date the prescription was dispensed. */
   serviceDate: string | null;
+  /**
+   * CLP07, the payer's own claim control number.
+   *
+   * Kept because it is the handle the payer answers to. Chasing an underpayment, appealing a MAC or
+   * asking why a claim was denied, this is the number the help desk asks for — and it is the only
+   * identifier on the remittance that the pharmacy did not supply itself.
+   */
+  controlNumber: string | null;
+  /** Every CAS adjustment against this claim, one row per triplet. */
+  adjustments: Adjustment[];
   /** The segments this payment was read from, kept verbatim. */
   raw: string[];
+};
+
+/**
+ * One adjustment: a reason, an amount, and where it was taken.
+ *
+ * A CAS segment carries up to six of these, not one — CAS01 is the group code, and then
+ * reason/amount/quantity repeats through CAS17/18/19. Read one per segment and five in six are
+ * lost, which is the standard way this file format is got wrong.
+ *
+ * `loop` matters as much as the codes. A CAS in the claim loop and a CAS in the service loop for
+ * the same reason are different money, and a reader that flattens them adds the same deduction
+ * twice on exactly the files where a deduction is large enough to notice.
+ */
+export type Adjustment = {
+  /** CAS01: CO contractual, PR patient responsibility, OA other, PI payer initiated. */
+  groupCode: string;
+  /** The reason code, as the payer prints it. Never interpreted here. */
+  reasonCode: string;
+  amountCents: number;
+  /** The units the adjustment applies to, where one is given. */
+  quantity: number | null;
+  loop: "claim" | "service";
+};
+
+/**
+ * One PLB: money taken off the whole remittance that belongs to no single claim.
+ *
+ * DIR fees, recoupments, transaction fees, interest, an overpayment being clawed back. It is real
+ * money and it is the difference between what the claims say and what the bank receives, so it is
+ * never allowed to disappear into a raw segment.
+ *
+ * The sign is the format's, not arithmetic's: a positive PLB amount *reduces* the payment. Kept as
+ * printed, and `balance` below does the subtracting, so nothing here has to remember which way
+ * round it goes.
+ */
+export type ProviderAdjustment = {
+  /** PLB03-1: the reason code, such as "72" for an authorised return or "CS" for an adjustment. */
+  reasonCode: string;
+  /** PLB03-2: the payer's own reference for it — an invoice or recoupment number. */
+  reference: string | null;
+  /** As printed. Positive reduces what the payer sends. */
+  amountCents: number;
+  raw: string;
 };
 
 export type Remittance = {
@@ -49,9 +127,24 @@ export type Remittance = {
   paidOn: string | null;
   /** TRN02, the trace or cheque number — how the pharmacy finds it on a bank statement. */
   traceNumber: string | null;
+  /** N1*PR: the payer as it prints its own name. Never matched to a payor by similarity. */
   payer: string | null;
+  /** N1*PR's identification code — the payer id a claim was routed to, which the name is not. */
+  payerId: string | null;
   payee: string | null;
+  /** DTM*405 at the header: the day the remittance was produced, which is not the day it pays. */
+  producedOn: string | null;
   payments: RemittancePayment[];
+  /** Provider-level money, belonging to no claim and still owed an explanation. */
+  providerAdjustments: ProviderAdjustment[];
+  /**
+   * Whether the file's own arithmetic closes, and by how much where it does not.
+   *
+   * Null where there is not enough to check — no BPR02, or no payment carried an amount. A
+   * difference here is not a rounding: it is a segment that was not read, and nothing from this
+   * file should be posted until it is nought.
+   */
+  balance: { paidCents: number; claimsCents: number; adjustmentsCents: number; differenceCents: number } | null;
   /** Anything that looked like a payment but could not be read into one, quoted. */
   problems: string[];
 };
@@ -85,6 +178,47 @@ export function ndcFromServiceId(svc01: string | undefined, sub = ":"): string |
   return digits.length === 11 ? digits : null;
 }
 
+/**
+ * Every adjustment in one CAS segment.
+ *
+ * The format repeats reason/amount/quantity after the group code — CAS02/03/04, CAS05/06/07, and
+ * so on through CAS17/18/19 — up to six times. A triplet with no reason or no amount is the end of
+ * the list rather than a nought, so reading stops there.
+ */
+export function adjustmentsFrom(fields: string[], loop: "claim" | "service"): Adjustment[] {
+  const groupCode = (fields[1] ?? "").trim().toUpperCase();
+  if (!groupCode) return [];
+  const out: Adjustment[] = [];
+  for (let i = 2; i + 1 < fields.length && out.length < 6; i += 3) {
+    const reasonCode = (fields[i] ?? "").trim();
+    const amountCents = x12Cents(fields[i + 1]);
+    if (!reasonCode || amountCents === null) break;
+    const q = (fields[i + 2] ?? "").trim();
+    out.push({ groupCode, reasonCode, amountCents, quantity: q && /^-?\d+(\.\d+)?$/.test(q) ? Number(q) : null, loop });
+  }
+  return out;
+}
+
+/**
+ * One PLB segment's adjustments.
+ *
+ * PLB01 is the provider, PLB02 the fiscal period end, and then reason/amount repeats: PLB03 is a
+ * composite of `<reason><component><reference>` and PLB04 its amount, through PLB13/PLB14. The
+ * reference half is the payer's own handle for the deduction and is what a person quotes when they
+ * ring up to ask what it was.
+ */
+export function providerAdjustmentsFrom(fields: string[], component: string, raw: string): ProviderAdjustment[] {
+  const out: ProviderAdjustment[] = [];
+  for (let i = 3; i + 1 < fields.length && out.length < 6; i += 2) {
+    const parts = (fields[i] ?? "").split(component);
+    const reasonCode = (parts[0] ?? "").trim();
+    const amountCents = x12Cents(fields[i + 1]);
+    if (!reasonCode || amountCents === null) break;
+    out.push({ reasonCode, reference: (parts[1] ?? "").trim() || null, amountCents, raw });
+  }
+  return out;
+}
+
 /** "1234567-02" or "1234567" to the prescription and its fill. */
 export function splitReference(reference: string): { rxNumber: string; fillNumber: number | null } {
   const m = /^(\d+)\s*-\s*(\d+)$/.exec(reference.trim());
@@ -100,7 +234,19 @@ export function splitReference(reference: string): { rxNumber: string; fillNumbe
  * ISA — the CLI writes files that begin at ST — the common defaults are used and that is stated.
  */
 export function parse835(text: string): Remittance {
-  const out: Remittance = { totalPaidCents: null, paidOn: null, traceNumber: null, payer: null, payee: null, payments: [], problems: [] };
+  const out: Remittance = {
+    totalPaidCents: null,
+    paidOn: null,
+    traceNumber: null,
+    payer: null,
+    payerId: null,
+    payee: null,
+    producedOn: null,
+    payments: [],
+    providerAdjustments: [],
+    balance: null,
+    problems: [],
+  };
   const body = text.replace(/^﻿/, "");
   if (!body.trim()) {
     out.problems.push("The file is empty.");
@@ -129,9 +275,17 @@ export function parse835(text: string): Remittance {
   }
 
   let current: RemittancePayment | null = null;
+  /*
+   * Whether the service loop has opened for the claim in hand, which is what tells a service-level
+   * CAS from a claim-level one. Tracked rather than inferred from the fields already read: the
+   * service date arrives on a DTM that sits *before* SVC in most files, so using it as the proxy
+   * would file every claim-level adjustment as a service-level one.
+   */
+  let inService = false;
   const push = () => {
     if (current) out.payments.push(current);
     current = null;
+    inService = false;
   };
 
   for (const seg of segments) {
@@ -148,7 +302,11 @@ export function parse835(text: string): Remittance {
         break;
       case "N1":
         // PR is the payer, PE the payee. Anything else on an 835 is not one of the two parties.
-        if ((f[1] ?? "").toUpperCase() === "PR") out.payer = (f[2] ?? "").trim() || null;
+        if ((f[1] ?? "").toUpperCase() === "PR") {
+          out.payer = (f[2] ?? "").trim() || null;
+          // N1*PR*<name>*XV*<id>. The id is the join; the name is four companies' typing.
+          out.payerId = (f[4] ?? "").trim() || null;
+        }
         if ((f[1] ?? "").toUpperCase() === "PE") out.payee = (f[2] ?? "").trim() || null;
         break;
       case "CLP": {
@@ -169,12 +327,15 @@ export function parse835(text: string): Remittance {
           patientResponsibilityCents: x12Cents(f[5]),
           ndc11: null,
           serviceDate: null,
+          controlNumber: (f[7] ?? "").trim() || null,
+          adjustments: [],
           raw: [seg],
         };
         break;
       }
       case "SVC":
         if (current) {
+          inService = true;
           current.raw.push(seg);
           current.ndc11 = current.ndc11 ?? ndcFromServiceId(f[1], component);
           // A single-line pharmacy claim repeats its money at service level; the claim total wins,
@@ -182,12 +343,42 @@ export function parse835(text: string): Remittance {
           if (current.paidCents === null) current.paidCents = x12Cents(f[3]);
         }
         break;
+      case "CAS":
+        /*
+         * The adjustments, in the loop they were taken in.
+         *
+         * A CAS reached before any CLP is not a claim's; there is nowhere for it to belong and
+         * inventing one would attach a deduction to the wrong prescription, so it is reported.
+         */
+        if (current) {
+          current.raw.push(seg);
+          current.adjustments.push(...adjustmentsFrom(f, inService ? "service" : "claim"));
+        } else {
+          out.problems.push(`An adjustment appears before any claim payment, so there is nothing for it to belong to: ${seg.slice(0, 120)}`);
+        }
+        break;
+      case "PLB":
+        /*
+         * Provider-level money, and the segment that used to be filed against a stranger.
+         *
+         * PLB comes after the last claim loop, and the open payment was still open — so the
+         * default branch appended a whole remittance's DIR fee to whichever prescription happened
+         * to be last in the file. Closing the payment first is the fix; keeping the amounts is the
+         * point.
+         */
+        push();
+        out.providerAdjustments.push(...providerAdjustmentsFrom(f, component, seg));
+        break;
       case "DTM":
         if (current) {
           current.raw.push(seg);
           // 472 is the service date; 232 and 233 bracket a period and are not one date.
           if ((f[1] ?? "").trim() === "472") current.serviceDate = x12Date(f[2]);
           else if (!current.serviceDate && (f[1] ?? "").trim() === "232") current.serviceDate = x12Date(f[2]);
+        } else if ((f[1] ?? "").trim() === "405") {
+          // The header's production date, which arrives before the first claim and was dropped by
+          // the guard above. It is not the day the money moves — BPR16 is that — and the two differ.
+          out.producedOn = x12Date(f[2]);
         }
         break;
       case "SE":
@@ -201,6 +392,34 @@ export function parse835(text: string): Remittance {
 
   if (out.payments.length === 0 && out.problems.length === 0) {
     out.problems.push("No claim payments were found in this file. It may be an acknowledgement rather than a remittance.");
+  }
+
+  /*
+   * The arithmetic that says the file was read completely.
+   *
+   * BPR02 is what the payer is sending. The claim payments are gross; the provider-level
+   * adjustments are what it kept back. If those three do not close, a segment was not read — and
+   * the difference is money, because banking BPR02 while posting the claims gross is exactly how
+   * $57.50 of DIR fee disappears without anything noticing.
+   *
+   * Reported rather than thrown. The remittance is still worth showing; it is only not worth
+   * posting, and the difference names itself so somebody can see what is missing.
+   */
+  const amounts = out.payments.map((p) => p.paidCents).filter((c): c is number => c !== null);
+  if (out.totalPaidCents !== null && amounts.length > 0) {
+    const claimsCents = amounts.reduce((n, c) => n + c, 0);
+    const adjustmentsCents = out.providerAdjustments.reduce((n, a) => n + a.amountCents, 0);
+    const differenceCents = out.totalPaidCents - (claimsCents - adjustmentsCents);
+    out.balance = { paidCents: out.totalPaidCents, claimsCents, adjustmentsCents, differenceCents };
+    if (differenceCents !== 0) {
+      out.problems.push(
+        `This remittance does not add up and nothing from it should be posted: it pays $${(out.totalPaidCents / 100).toFixed(2)}, ` +
+          `its ${amounts.length} claim payment${amounts.length === 1 ? "" : "s"} come to $${(claimsCents / 100).toFixed(2)}, ` +
+          `and the provider-level adjustments take off $${(adjustmentsCents / 100).toFixed(2)} — ` +
+          `leaving $${(Math.abs(differenceCents) / 100).toFixed(2)} ${differenceCents > 0 ? "more paid than the claims explain" : "unaccounted for"}. ` +
+          "A segment was not read, and the difference is money.",
+      );
+    }
   }
   return out;
 }

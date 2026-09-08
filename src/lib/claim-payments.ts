@@ -4,6 +4,7 @@ import { db, schema } from "@/db";
 import { eq, isNull } from "drizzle-orm";
 import { newId } from "./crypto";
 import type { LaterPayment } from "./fills";
+import { formatCents } from "./money";
 
 /**
  * Money that reaches a claim after it was adjudicated.
@@ -228,7 +229,28 @@ export async function importRemittance(
     /** The file behind it, for the receipt's record. */
     documentId?: string | null;
   } = {},
-): Promise<{ payments: number; alreadyHeld: number; matched: number; unmatched: number; amountCents: number; skipped: number; problems: string[]; payer: string | null; paidOn: string | null; settles: boolean; banked: boolean }> {
+): Promise<{
+  payments: number;
+  alreadyHeld: number;
+  matched: number;
+  unmatched: number;
+  amountCents: number;
+  skipped: number;
+  problems: string[];
+  payer: string | null;
+  paidOn: string | null;
+  settles: boolean;
+  banked: boolean;
+  /**
+   * Money the payer kept back from the whole remittance, and which no account yet carries.
+   *
+   * DIR fees, recoupments, transaction fees. It is the difference between what the claims say and
+   * what the bank receives, and both of those figures are individually right — which is why it was
+   * invisible until somebody subtracted them. Reported here so the difference is stated at the
+   * moment it arrives, rather than discovered later as a hole in the cash account.
+   */
+  providerAdjustmentCents: number;
+}> {
   const { parse835, payableOnly } = await import("./x12-835");
   const r = parse835(text);
   const { keep, skipped } = payableOnly(r);
@@ -243,7 +265,31 @@ export async function importRemittance(
    */
   const facilitator = /transaction facilitator|\bmtf\b/i.test(r.payer ?? "");
   const settles = !facilitator;
-  const out = { payments: 0, alreadyHeld: 0, matched: 0, unmatched: 0, amountCents: 0, skipped: skipped.length, problems: [...r.problems], payer: r.payer, paidOn: r.paidOn, settles, banked: false };
+  const providerAdjustmentCents = r.providerAdjustments.reduce((n, a) => n + a.amountCents, 0);
+  const out = {
+    payments: 0,
+    alreadyHeld: 0,
+    matched: 0,
+    unmatched: 0,
+    amountCents: 0,
+    skipped: skipped.length,
+    problems: [...r.problems],
+    payer: r.payer,
+    paidOn: r.paidOn,
+    settles,
+    banked: false,
+    providerAdjustmentCents,
+  };
+  /*
+   * A remittance the reader could not make add up posts nothing.
+   *
+   * The claims and the total are each individually believable; what is not believable is their
+   * relationship, and that relationship is the whole reason to read an 835 rather than take the
+   * deposit at face value. CLAUDE.md: every reader that decides money is checked by arithmetic
+   * before anything is stored. So this stops here, keeps the reader's own account of the
+   * difference, and leaves the file to be looked at.
+   */
+  if (r.balance && r.balance.differenceCents !== 0) return out;
 
   const held = await db.query.claimPayments.findMany({ columns: { reference: true, rxNumber: true, amountCents: true } });
   const seen = new Set(held.map((h) => `${h.reference ?? ""}|${h.rxNumber}|${h.amountCents}`));
@@ -284,7 +330,20 @@ export async function importRemittance(
       kind: facilitator ? "facilitator" : "third_party",
       amountCents: r.totalPaidCents ?? out.amountCents,
       payer: r.payer ?? null,
-      notes: `From ${fileName}${r.traceNumber ? `, trace ${r.traceNumber}` : ""}, ${out.payments} claims.`,
+      /*
+       * The deposit and what stands behind it, in one sentence on the receipt.
+       *
+       * The amount banked is BPR02, which is what actually landed — net of anything the payer held
+       * back. The claim payments posted above are gross. Both are right and they differ, and the
+       * difference is provider-level money that no account in this site yet carries. Saying so on
+       * the receipt puts it where somebody reconciling the bank line will read it, instead of
+       * leaving a hole they have to derive.
+       */
+      notes:
+        `From ${fileName}${r.traceNumber ? `, trace ${r.traceNumber}` : ""}, ${out.payments} claims.` +
+        (providerAdjustmentCents !== 0
+          ? ` The payer held back ${formatCents(providerAdjustmentCents)} at remittance level (${r.providerAdjustments.map((a) => `${a.reasonCode}${a.reference ? ` ${a.reference}` : ""}`).join(", ")}), which is why this deposit is smaller than the claims it settles. That money is not yet on either account.`
+          : ""),
       createdBy: user.id ?? user.name,
     });
     out.banked = true;
