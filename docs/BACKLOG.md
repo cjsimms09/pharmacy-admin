@@ -638,6 +638,20 @@ written for this pharmacy's chain code; the reason is written on the link. Ran o
 document read so far, so provisional until the rest are read; Capital Rx, MedOne, two Navitus).
 Left: 47 networks with several documents written for us (590 claims: Optum 10, ESI 12, Caremark
 9–10) — the PSAO listing or the backtest; 21 with nothing written for us (135 claims: Humana, Argus).
+**8 September, 17:10 (1) — the last 21 claims, read off their own arithmetic.** With AWP and NADAC on
+the rows (item 32), each open network's formula can be read from the claims: CNCKSNPN (Express
+Scripts, BIN 003858, PCN A4 and MA, group 2ELA) paid **NADAC + $10.50** on every priced claim, basis
+of reimbursement 20 (NADAC) — the Kansas Medicaid rate, so it is Sunflower Health Plan's KanCare
+network under ESI; deduced and linked with the state's own fee as the document. Caremark's Part D
+ids: MDR1S100S7 (retail, 30-day) and MDE1S100S7 (extended, 90-day) pay generics at MAC with a
+$0.05 fee (basis 07) and the one brand at **AWP − 25.00% + $0.05** (basis 03); MDR0S02025 pays
+Breztri at **AWP − 20.00% + $0.10** and its BIN 020115 / PCN IS rows carry Medicare contract H6316
+with a $0.25 fee — all to be confirmed by the Medicare D guides when read, not linked yet. PAR001
+(Caremark, PCN ADV, plan DTC_CMK_) is a **direct-to-consumer discount programme**: the patient pays
+the whole discounted price, basis 6 (MAC), and the plan's "remit" is a −$5.00 programme fee —
+marked a programme. The transaction report's basis-of-reimbursement code (NCPDP 522-FM: 03 AWP
+less a percentage, 06/07 MAC, 20 NADAC) is what makes this reading safe; it is now on every row.
+
 **8 September, 17:00 (1) — RXADV, from PioneerRx's own screen.** The owner sent the EDI response for
 Rx 333913: Ventegra (BIN 012528, group VRX0071) returned Network Reimbursement ID (2F) RXADV with the
 message "RXADV-AC: NOVO NORDISK HAS PROVIDED A $1027.03 VOUCHER TOWARDS THE PATIENT COPAY. ORIGINAL

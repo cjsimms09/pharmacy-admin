@@ -139,13 +139,15 @@ export async function networksToLink(): Promise<NetworkToLink[]> {
      * finding: the ranking says "is who this network's BIN resolves to", and the owner still links.
      */
     const payerName = bins.map((b) => payerByBin.get(b.toUpperCase())).find(Boolean) ?? (r.pbm ? r.pbm.trim() || null : null);
-    const link = links.find((l) => (l.contractId ?? "").trim().toUpperCase() === networkId.toUpperCase() && (l.contractDocId || /^Programme:/.test(l.basis ?? "")));
+    const link = links.find((l) => (l.contractId ?? "").trim().toUpperCase() === networkId.toUpperCase() && (l.contractDocId || /^(Programme|Deduced):/.test(l.basis ?? "")));
     /*
      * A settled id is one tied to a document — or one the owner has said is a programme, not a network:
      * "these are loyalty/discount cards.. isn't a formula on loyalty or discount cards" (8 September). A
      * programme has no rate to link to; its money is reconciled as a payment on the claim (BACKLOG 24).
      */
-    const programme = link && !link.contractDocId && /^Programme:/.test(link.basis ?? "") ? link.basis! : null;
+    // "Deduced:" is the same shape with a rate read off the claims themselves — every one of them paying the
+    // same formula to the cent — and a public document for the rate named in the basis.
+    const programme = link && !link.contractDocId && /^(Programme|Deduced):/.test(link.basis ?? "") ? link.basis! : null;
     const linkedTo = link?.contractDocId
       ? { documentId: link.contractDocId, documentName: nameOf.get(link.contractDocId) ?? "a document no longer on file" }
       : programme
