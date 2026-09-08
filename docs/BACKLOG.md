@@ -738,6 +738,24 @@ across the mix, with the dollars a month, the fills behind it, and a confidence 
 the months of claims (thin until the twelve-month export lands). A very high-dollar item may be
 judged per claim; everything else in aggregate. `drug-profit.ts` is the start of it. Depends on
 23 (proved rates), the catalogue's AWP and NADAC per NDC, and the equivalence keys.
+### 30. Proof rows: every dataset re-proved against its own source file, every night (8 September) — the most important thing
+
+The owner's words: "these things need to be right!! we need to make sure claims are matching
+their info properly and continue to. we need to do the same with drug info (pricing, nadac, awp,
+equivalents, etc).. this is the most important thing." SESSION-RULES §1c is the rule. What holds
+today: the claims reader checks three totals against the report at import and refused nothing
+wrongly (the 4 September rows re-read from the stored file matched field for field); Data health
+measures completeness and linkage on twenty rows. What is missing is the nightly re-proof from
+the stored files. Build, in this order: **claims** — every stored report file re-read each night,
+rows and the report's own totals set against the claims table per day, any row that differs
+named; **catalogues** — each supplier's last file's row count and price sums against the stored
+rows; **NADAC** — the CMS file's rows and as-of date against the table; **FDA directory** — the
+zip's product and package counts against the table, and the equivalence keys re-derived; **on-hand**
+— the report's own count against stored (2 built the gate); **invoices** — total against lines;
+**remittances** — the 835's CLP and PLB against the payments posted; **the guides** — the
+workbook's rows against the documents. Each a Data health row with the file's date, each
+disagreement a red row on Today. Data health is 2's: the rows and the nightly script; the claims
+re-read is 1's. Ahead of item 24 in 2's order, by the owner's word.
 ## The data the site has to ingest
 
 Named by the owner on 7 September as what is still being connected. Each one needs a reader, a
