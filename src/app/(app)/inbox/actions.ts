@@ -371,3 +371,87 @@ export async function attributeInboxItem(fd: FormData) {
     fail("/inbox", `${from} is recorded as ${supplierName}, but the file still would not read: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
+
+/**
+ * "That is not what this is." Said once, on the line that has the problem, and never asked again.
+ *
+ * BACKLOG item 5 in the owner's words: the inbox should work out what arrived, *and* he has to be
+ * able to tell it what arrived. The second half is the important one. A guess that cannot be
+ * overridden is worse than no guess, because the document goes somewhere wrong and goes there
+ * silently — so the override lives here, on the page, on the line, in a sentence.
+ *
+ * What is kept is a rule about the sender rather than a fact about this file, which is the whole
+ * point: next Sunday's file from the same address places itself. The rule is narrowed to a
+ * fragment of the file name when the file's own columns said something different, because a
+ * supplier who sends invoices and catalogues from one address must not have their catalogue filed
+ * as an invoice by a rule made in good faith about an invoice.
+ */
+export async function teachInboxItem(fd: FormData) {
+  const user = await requireManager();
+  const itemId = String(fd.get("itemId") ?? "");
+  const category = String(fd.get("category") ?? "").trim();
+  const note = String(fd.get("note") ?? "").trim() || null;
+  if (!category) fail("/inbox", "Pick what this document is.");
+
+  const item = await db.query.inboxItems.findFirst({ where: eq(schema.inboxItems.id, itemId) });
+  if (!item) fail("/inbox", "That line is no longer here.");
+  const from = (item.fromAddress ?? "").trim().toLowerCase();
+  if (!from) fail("/inbox", "That line carries no sending address, so there is nothing to remember it by.");
+
+  const { teachSender, recogniseStored } = await import("@/lib/intake-recognise-store");
+  const { categoryFor } = await import("@/lib/intake-recognise");
+  if (!categoryFor(category)) fail("/inbox", "That is not something the site knows how to keep.");
+
+  /*
+   * Whether the file's own contents pointed somewhere else, which decides the shape of the rule.
+   * Read now rather than remembered, so the rule is written against what is true today.
+   */
+  const before = await recogniseStored(itemId);
+  const contentDisagreed = Boolean(before?.ranked.some((g) => g.category !== category && g.sure === "certain"));
+
+  const kept = await teachSender({
+    fromAddress: from,
+    category,
+    fileName: item.fileName,
+    subject: item.subject,
+    wasGuessedAs: before?.best?.category ?? item.routedAs ?? null,
+    contentDisagreed,
+    note,
+    taughtBy: user.id,
+  });
+  if (!kept) fail("/inbox", "That could not be remembered as a rule.");
+
+  await audit({
+    action: "inbox.taught",
+    userId: user.id,
+    userName: user.name,
+    entity: "inbox_item",
+    entityId: itemId,
+    details: `${from} → ${category}${kept.rule.fileName ? ` (files named like “${kept.rule.fileName}”)` : ""}${note ? `: ${note}` : ""}`,
+  });
+
+  /*
+   * And read it again now, with the rule that was just made, so the answer is on screen rather
+   * than promised. The same principle as naming a supplier from this page.
+   */
+  let text = "";
+  try {
+    text = await rereadInboxItem(itemId, { userId: user.id, userName: user.name });
+  } catch (e) {
+    if (e && typeof e === "object" && "digest" in e) throw e;
+    text = `It still would not read: ${e instanceof Error ? e.message : String(e)}`;
+  }
+  const { describeRule } = await import("@/lib/intake-recognise-store");
+  revalidatePath("/inbox");
+  redirect(`/inbox?ok=${encodeURIComponent(`${describeRule(kept.rule)}${kept.replaced ? " (replacing what was there before.)" : ""} ${text}`)}`);
+}
+
+/** Undoing a rule, from the same page that lists them. A rule nobody can remove is a rule nobody dares write. */
+export async function forgetIntakeRule(id: string) {
+  const user = await requireManager();
+  const { forgetRule } = await import("@/lib/intake-recognise-store");
+  await forgetRule(id);
+  await audit({ action: "inbox.rule.forget", userId: user.id, userName: user.name, entity: "intake_rule", entityId: id, details: "Rule removed from the inbox" });
+  revalidatePath("/inbox");
+  redirect("/inbox?ok=" + encodeURIComponent("Forgotten. Mail from that sender will be worked out from scratch again."));
+}

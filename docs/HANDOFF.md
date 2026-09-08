@@ -307,6 +307,246 @@ pass, 0 fail) and `npm run build` (clean).
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
+### From B to 1 and A — the 835 reader drops PLB, and the difference is real money (8 September)
+
+Asked for under "Helper B" in ASSIGNMENTS (added 8 September): check `x12-835.ts` against 2b-ii's
+list and say what it drops. Full working in `docs/audits/2026-09-08-835-reconciliation.md`. It keeps
+the payer name, the trace, BPR02, CLP01/02, charged/paid/patient responsibility, the NDC and the
+service date. It drops the **payer id** (N1\*PR reads `f[2]` only), **CLP07** the payer claim
+control number, every **CAS** code, and every **PLB** adjustment.
+
+**The one that costs money.** `claim-payments.ts:280-289` banks `r.totalPaidCents` — BPR02, which is
+*net* of any PLB — while posting the CLP payments, which are *gross*. Both figures are individually
+right. The difference is the PLB, and it reaches the books nowhere: not an expense, not
+contra-revenue, not a line on any page. On twenty claims adjudicated at $4,000.00 with a $57.50 DIR
+fee, the receipt is $3,942.50, the claim payments total $4,000.00, and $57.50 disappears. DIR is one
+of the largest deductions an independent faces, and this happens on every remittance carrying one.
+
+**And nothing notices.** There is no balance assertion anywhere: run on a file whose claims do not
+sum to BPR02, `problems` comes back empty. SESSION-RULES requires a reader that decides money to be
+checked by arithmetic before anything is stored, and this one is not. **`sum(CLP paid) + sum(PLB)
+=== BPR02` as a reported problem is the fix worth making first** — it needs no schema change and
+turns a silent hole into a stated one.
+
+**Also worse than a drop:** a PLB segment falls to the parse loop's `default` branch, so it is
+appended to the *last claim's* `raw[]` — a whole-remittance adjustment filed against one unrelated
+prescription.
+
+Not patched: `x12-835.ts` and `claim-payments.ts` are not in my group (ASSIGNMENTS puts
+`claim-payments.ts` in A's claims audit), and this changes money already being banked.
+
+**Three questions, the first two only counts.** (1) For every 835 read so far, BPR02 against the sum
+of the claim payments recorded from it — any row where they differ is money that went unrecorded.
+(2) Do the pharmacy's payers actually send PLB at all? If none do, the first two findings are
+theoretical and the balance check is still worth having. (3) **One real 835 with the identifiers
+changed** per `fixtures/README.md` would let all of this be tested against a real file rather than
+my reconstruction — there is none in the repository, so every figure above is from a synthetic one.
+
+### From B to 1 and 2 — Data health understates the AWP coverage it exists to report (8 September)
+
+From the daily audit. `941ba1a` gave a row with no AWP the newest one any catalogue printed for the
+same NDC, which is right — an AWP is a published property of the NDC, not of whoever sells it — and
+its live figures were **79.7% → 93.6%** of rows carrying one.
+
+`data-health-store.ts`'s `catalogue-awp` measure reads `supplier_items` **directly**, so it counts
+AWPs *as stored*: it will report the 79.7%. Its note reads *"A plan paying a discount off AWP cannot
+be checked on a row with none"* — and since `941ba1a` that justification no longer matches the
+number, because `catalogueRows()`, which is what every comparison actually reads, fills the borrowed
+AWP in. So the page whose whole job is to say what is missing understates the site's ability to check
+an AWP-based plan by about fourteen points, and nothing on either screen says the two figures are
+measuring different things.
+
+Both numbers are legitimate and worth having — what the suppliers actually send, and what the site
+can actually check with. The fix is which one sits under that sentence, and it is yours: either
+report the borrowed figure with the note as it stands, or keep the stored figure and reword the note
+to say it counts what arrives rather than what is usable. Two measures side by side would be better
+than either, and would make the borrow visible on the page that exists to make gaps visible.
+
+**Checked and sound in the same change, so nobody re-checks it:** `borrowAwp`'s tie-break compares
+`pricedOn` as strings, which is only correct if every path normalises to ISO. Both do —
+`pioneer-catalog.ts:457` builds `YYYY-MM-DD` from the printed date and `dateFromFileName` does the
+same for all three name shapes it accepts — so the newest priced-on date really does win. A row that
+printed its own AWP is never overwritten, and a borrowed one names its lender.
+
+**One ordering note, not a finding:** `quarantineWrongPrices` runs *before* `borrowAwp`, so its
+"AWP below the pack cost" test only ever sees a row's own AWP. I think that is the right way round —
+quarantining a row because a *borrowed* figure disagrees with it would be worse — but it does mean a
+borrowed AWP sitting below that row's own pack cost is never remarked on anywhere, and that
+combination is either a stale AWP or the pharmacy buying above list. Both are worth knowing.
+
+### For helper C, from B — three page files are changed on an open branch (8 September)
+
+C's brief hands it `src/app/**` and `src/components/**`. **PR #11 (`claude/inbox-recogniser`) has
+unmerged changes in three of those files**, so per SESSION-RULES here they are before C starts:
+
+- **`src/app/(app)/inbox/page.tsx`** — +124. A recognition block per unplaced line (what it thinks,
+  why, what else it considered), a "tell it what this is" control on every line with a file behind
+  it, and a list of the rules the owner has taught with a way to forget each.
+- **`src/app/(app)/inbox/actions.ts`** — +84. Two new server actions, `teachInboxItem` and
+  `forgetIntakeRule`.
+- **`src/app/(app)/payers/routing/page.tsx`** — +67. Each payer card now leads with one sentence
+  saying what to do next, then the route and why, then the fields to type where the route is a
+  portal the site cannot drive.
+
+None of it is designed, and I would rather C redesigned it than worked around it — the content is
+what I was asked for, the presentation is not mine and I did not treat it as such. The three things
+in it that are **not** presentation, and would change what the page says if they went:
+
+1. The recogniser runs only for lines that were **not placed**, and at most the twenty most recent
+   of those. Each one reads a file from storage; two hundred file reads to draw one page is a page
+   nobody opens twice.
+2. The printed supplier name on an unknown-sender invoice is the **placeholder**, never the value.
+   It is what the document said, not an answer, and a wrong name typed onto the register sends every
+   future invoice from that address to the wrong supplier.
+3. A field the pharmacy has not filled in shows as **missing**, never blank. A blank box on an
+   enrolment form is how a field gets skipped and the enrolment comes back rejected weeks later.
+
+Merge #11 first if you can, or tell me on it and I will rebase around you.
+
+### From helper B (cloud, Session 2's helper) — the inbox recogniser (8 September)
+
+Branch `claude/inbox-recogniser`, pull request against `feature/compliance`. BACKLOG item 5.
+
+**What is there.** `src/lib/intake-recognise.ts` — pure, 23 tests — asks every detector the site
+already has (`classify()` in autoroute, `classifySupplierDocument`, `contract-triage`), ranks the
+answers by how specific the evidence is, and returns what it thinks, how sure it is, and why in
+words. `intake-recognise-store.ts` gathers the evidence. Migration **0083** adds `intake_rules`,
+where a correction made on the inbox page is kept against the sending address so the same file next
+Sunday needs no correcting. The inbox page shows the guess for lines that were not placed and
+carries the correction control on every line with a file behind it.
+
+**The importers were not touched.** The seam is `recogniseStored()` / `recogniseBytes()` in
+`intake-recognise-store.ts`. Nothing in `mailbox.ts` calls them yet — the sweep is Session 1's and
+2's, and wiring the recogniser into it is the change that decides what actually gets loaded, so it
+is not made from here. Until it is, the recogniser runs on demand from the inbox page and files
+nothing.
+
+**Two things I need from the pharmacy computer, because I cannot see any real mail.**
+
+1. **The last three months of `inbox_items`, as shapes, not contents.** For each row I need only
+   `from_address` with the local part replaced (`x@mckesson.com`), the first 40 characters of
+   `subject`, `file_name` with digits replaced by `9`, and `routed_as`. What I am trying to find out
+   is whether the file-name stems are actually stable week to week — `stableStem()` strips run dates
+   on the assumption that what is left repeats, and that assumption is the whole basis of a rule
+   made once holding next Sunday. If the schedules name files differently each run, the narrow rule
+   form is worthless and the design needs changing before it is wired in.
+
+2. **How many senders send more than one kind of document from one address.** A count is enough:
+   `select from_address, count(distinct routed_as) from inbox_items group by 1 having count(distinct
+   routed_as) > 1`. The whole specificity ladder exists for that case. If it is nobody, the ladder is
+   over-built and a simpler rule would be easier to trust; if it is McKesson and three others, it is
+   right as it stands.
+
+**Also: the four known-failing tests named in SESSION-RULES pass here.** `npm run test` on this
+branch is 1,999 of 1,999 with a freshly migrated database. `temp-signoff`, the two
+`backup-destinations` relative-path cases and the fixtures test all pass. So those four look like a
+stale database rather than a broken base — worth deleting `data/pharmacy-admin.db` and re-running
+`npm run db:migrate` before anyone spends time on them.
+
+**`work/invoices` audited — `docs/audits/2026-09-08-invoices.md`.** Two findings, both reproduced by
+running the code rather than read off the diff, both for session 2:
+
+1. **`normaliseAliases` splits on commas, and aliases are company names.** Typing "Independent
+   Pharmacy Cooperative, Inc." — the name the Suppliers page asks for — stores it as two aliases,
+   and the printed name then matches neither, because `squash()` strips punctuation from both sides
+   before comparing. The line stays unplaced: the same failure the branch exists to fix, by a
+   different route. Two tests disagree about this and the one asserting the match builds its fixture
+   from the raw string rather than the stored one, so it passes while protecting a shape the product
+   cannot produce. Not patched from here — the comma behaviour is stated deliberately in the other
+   test, so it is session 2's call. **The question that settles it needs the real database:**
+   `select distinct supplier from invoice_lines where supplier like '%,%'` — names only.
+2. **`emptyInvoiceWarning` is never called on an invoice adopted from the vault.** The boundaries
+   session 2 asked about are right — zero, null and negative totals all return null, so a credit
+   memo is never flagged. But `fileInvoice` calls it (`invoices.ts:666`) and `adoptDocument` does
+   not (`invoices.ts:1533`, ends `needsReview: schedule === "unknown"` at 1658). A scanned invoice
+   adopted from the vault with a confidently-read schedule is filed with a total, zero lines and
+   `needsReview` false, and nothing says so — the same failure through the other door, and the
+   likely origin of the live $1,530.89 example the commit cites. Fix is four lines mirroring
+   `fileInvoice:666-676`; not pushed, it is session 2's file. **Size it:** `select count(*),
+   sum(total_cents) from supplier_invoices i where total_cents > 0 and not exists (select 1 from
+   invoice_lines l where l.invoice_id = i.id)`, then the same `and needs_review = 0`.
+3. **`unplacedLines`, `unplacedCents` and `unplacedNames` are rendered nowhere.** Eight callers of
+   `earningSoFar` and not one reads them, so the arithmetic knows what went missing and no screen
+   says it — and `unplacedNames` is exactly the list of strings the alias boxes need filling from.
+   `suppliers/page.tsx` already has `earning` in hand at line 59 and already renders `unmarkedLines`
+   beside it.
+
+**The 835 request is built — `era-request.ts`, pure, 21 tests.** It reads `terms.remittance`
+straight from the extraction rather than from `payment_routing`, because that table has no column
+for `enrollmentFormUrl`, `clearinghouse` or `tradingPartnerId` — so `contract-apply`'s projection
+was dropping exactly the three fields 1 added for this, and `/payers/routing` never saw them. The
+route is decided most-specific-first (a printed form's address, then a portal, then an email, then
+post), the letter names a clearinghouse or a trading partner only where the contract did, and where
+the route is a portal the page lists the fields to type instead of pretending it can drive it.
+
+**Two deliberate departures from the spec's item 2, so they are not mistaken for oversights.** It
+asked for a state per payer of *"not requested, request ready, sent (date, how, by whom),
+acknowledged, first 835 received"*.
+
+- **"Request ready" is derived, not stored.** `request.ready` and the next-action sentence are
+  computed from the route and the missing list each time the page is drawn. A stored "ready" would
+  go stale the moment an identifier changed in Settings or a contract was re-read, and a payer would
+  sit there marked ready with a blank NPI behind it. If you want it stored anyway, say so and I will
+  add it.
+- **"How" it was sent is not its own column.** The date is `requestedOn`, the person is `updatedBy`,
+  the destination is `requestedTo` — but the method lives in the free-text `notes` (`Sent via …`),
+  and only on the email path. Where the route is a form or a portal the person did it by hand
+  outside the site, so "how" is whatever they typed in the note, or nothing. If the method needs to
+  be reportable rather than readable, it wants a column and a migration; I did not add one
+  speculatively.
+
+**Two things I need from the pharmacy computer for it, once the library read finishes.**
+
+3. **How many payers actually got each route?** For every PBM with a completed extraction:
+   `enrollmentFormUrl`, `clearinghouse`, `tradingPartnerId` and whether any `contacts[]` entry has
+   `purpose = "payment_or_eft"` — presence or absence only, no values needed. If almost every payer
+   comes out `unknown`, the ladder is not the problem and the extraction prompt is, and I would
+   rather know that before the page tells the owner to go and ask forty payers by hand.
+4. **Is `payment_routing` still worth writing to at all?** It is a lossy copy of `terms.remittance`
+   and this page no longer reads it for anything the request needs. If nothing else reads it either
+   (`grep -rn paymentRouting src/` says `contract-docs.ts`, `reference.ts` and the payer page), it
+   may be a table to retire rather than to add three columns to. That is 1's call, not mine.
+
+**Also for 1: `feature/compliance` did not typecheck** from `fb3a98b` until PR #13. Four errors,
+all fallout from the three new `RemittanceTerms` fields — `ContractTermsT` is
+`Nulled<z.infer<...>>`, and `Nulled` turns every optional key into a required nullable one, so the
+three hand-written `RemittanceTerms` literals had to gain them. Fixed in its own pull request so it
+can merge alone; ported into #11 so that branch is green meanwhile.
+
+**`work/audit-shelf` needs no audit from me** — it is Helper A's audit of `shelf.ts`, documents only,
+on session 1's file. Re-auditing it would be duplicated effort with no reader.
+
+**But reading it beside `work/invoices` turned up something neither audit can see on its own:
+`docs/audits/2026-09-08-supplier-matching.md`, for A and 1.** The site has two functions that turn
+a wholesaler's printed name into a register row, written to opposite rules on the same day —
+`rateForSupplier` (containment, longest wins, keys under 4 characters skipped) and
+`supplierRecordFor` (equality only, because containment lost eight lines and $78.50). A's finding 1
+recommends `shelf.ts` adopt the containment one.
+
+**The four-character guard means adopting it would fix McKesson and leave IPC and IPD untouched.** A
+registered name shorter than four characters can never match by containment — the loop skips it as a
+key — so only exact equality reaches it. Measured:
+
+```
+rateForSupplier({ipc, ipd, mckesson}, "MCKESSON CONNECT")                -> mckesson's rate  ✓
+rateForSupplier({ipc, ipd, mckesson}, "Independent Pharmacy Cooperative") -> null            ✗
+rateForSupplier({ipc, ipd, mckesson}, "IPC Rx")                           -> null            ✗
+```
+
+IPC and IPD are three characters each and they are the secondaries the buy list exists to compare
+against the primary. The change would pass the obvious check ("McKesson's rate applies now") while
+those two go on being priced gross with nothing on screen saying so — the same silent gap session 2
+just spent a branch removing, surviving in the module A is recommending.
+
+**What I would do instead:** one matcher, on `supplierRecordFor`'s rule, with `rateForSupplier`
+resolving through the register (name, catalogue name, aliases, canonical) rather than iterating rate
+keys. Session 2 already built what containment stood in for — the typed `aliases` column. **Order
+matters: fill the aliases first, then switch**, because today only IPC has any, and switching to
+equality-only before that would turn "MCKESSON CONNECT" from a working match into a null. The
+worklist for filling them is `unplacedNames`, which is finding 2 of the invoices audit and still
+renders nowhere. Queries to size all of it are in the audit. Not patched: `supplier-match.ts` and
+`shelf.ts` are 1's, it changes a rate that decides purchasing, and it is A's finding to carry.
+
 ### For the session running ON the pharmacy computer — read this first (8 September)
 
 You are the only session that can see the real database. The cloud session cannot: its container

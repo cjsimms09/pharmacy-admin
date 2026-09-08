@@ -52,10 +52,33 @@ export function looksLikeDrillDown(text: string, fileName = ""): boolean {
   return isDrillDownText(text, fileName);
 }
 
-/** Reads just the header row, whatever the format. Returns [] for anything unreadable. */
+/**
+ * Reads just the header row, whatever the format. Returns [] for anything unreadable.
+ *
+ * A file with **no extension at all** is read as delimited text, because the pharmacy's feeds
+ * arrive that way and the site already knows it: `acceptableAttachment` below has a whole branch
+ * for extensionless attachments, written after PioneerRx sent the catalogue without one and the
+ * first Sunday's files were filed as unrecognised for want of four letters.
+ *
+ * The same thing was still true of every other header-read report. A NADAC file named
+ * "nadac_2026-08-26" — no extension, which is what an entry unpacked from a zip or forwarded from
+ * a phone looks like — read as unrecognised here while `looksLikeNadacHeader` in `nadac.ts`
+ * recognised the identical bytes, because that one reads the first line and this one asked the
+ * name first.
+ *
+ * This only ever *adds* recognition: a name with a known extension takes the branch it always
+ * took, and every rule that consumes these headers requires a specific combination of columns to
+ * be present, so a file that matched nothing before cannot start matching the wrong thing now.
+ *
+ * The extensionless branch is gated on the bytes looking like text, because without a name to go
+ * on there is nothing else stopping a twenty-megabyte binary from being decoded and parsed as a
+ * spreadsheet on the sweep's thread. A NUL byte in the first chunk is the cheap, certain tell.
+ */
 export function headersOf(fileName: string, buf: Buffer): string[] {
+  const named = /\.(csv|txt)$/i.test(fileName);
+  const unnamed = !/\.[A-Za-z0-9]{1,5}$/.test(fileName) && !buf.subarray(0, 8192).includes(0);
   try {
-    if (/\.(csv|txt)$/i.test(fileName)) {
+    if (named || unnamed) {
       // Read the header row itself rather than going through the object parser: a report whose
       // period happened to be empty still has to be recognised, and the object parser has no
       // rows to take keys from.
@@ -321,3 +344,59 @@ export function acceptableAttachment(att: { filename?: string | null; contentTyp
   return { ok: false, why: `${name} (no file extension, sent as ${type || "an unknown type"})` };
 }
 
+
+/**
+ * The sentence an inbox line carries when a PDF reads as a supplier invoice and nobody knows whose.
+ *
+ * Kept as a constant, and matched by `isUnknownSenderInvoice`, because the inbox page has to be
+ * able to offer the right control on the right line without re-reading the file. Every other piece
+ * of advice on that page is already derived from the recorded reason the same way; this follows it
+ * rather than adding a column.
+ */
+export const UNKNOWN_SENDER_INVOICE = "An invoice from a sender we do not know";
+
+/** Whether an inbox line's recorded reason is the unknown-sender invoice notice. */
+export function isUnknownSenderInvoice(reason: string | null | undefined): boolean {
+  return (reason ?? "").startsWith(UNKNOWN_SENDER_INVOICE);
+}
+
+/**
+ * The sentence the inbox records for one of these, and the only place it is composed.
+ *
+ * The mailbox writes it and the inbox page reads a name back out of it, which is exactly the pair
+ * that drifts apart: a comma moved here and the page silently stops offering the supplier's name,
+ * with nothing failing. So both halves live here and a test walks one into the other.
+ */
+export function unknownSenderInvoiceReason(from: string, printedSupplier: string | null): string {
+  const printed = printedSupplierSuggestion(printedSupplier);
+  return (
+    `${UNKNOWN_SENDER_INVOICE}. This PDF reads as a supplier invoice — item lines with an NDC and a price` +
+    `${printed ? `, printed under “${printed}”` : ""} — but nothing on the register sends from ${from}, ` +
+    `so it has not been filed as one. Say who it is and it will be filed with their invoices, and the next one will file itself.`
+  );
+}
+
+/**
+ * The name printed on an unplaced invoice, taken back out of the recorded reason.
+ *
+ * The page offers it as a placeholder rather than a value: it is what the document said, which is a
+ * starting point for somebody who can see it, not an answer. Typing over a placeholder costs
+ * nothing; a wrong name written onto the register sends the next invoice to the wrong supplier.
+ */
+export function printedNameInReason(reason: string | null | undefined): string | null {
+  const m = /printed under “(.+?)”/.exec(reason ?? "");
+  return m ? m[1] : null;
+}
+
+/**
+ * The name printed on an unplaced invoice, offered as a suggestion and never as an answer.
+ *
+ * Trimmed to something a person would recognise on a button. Null where the page named nobody, or
+ * named something too long or too short to be a trading name — a header line that ran together
+ * with an address is worse than no suggestion, because it would be typed onto the register.
+ */
+export function printedSupplierSuggestion(name: string | null | undefined): string | null {
+  const t = (name ?? "").replace(/\s+/g, " ").trim();
+  if (t.length < 2 || t.length > 60) return null;
+  return t;
+}

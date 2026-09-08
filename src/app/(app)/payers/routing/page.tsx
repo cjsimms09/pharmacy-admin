@@ -63,7 +63,9 @@ export default async function RoutingPage({ searchParams }: { searchParams: Prom
 
   const receiving = rows.filter((r) => r.enrollment?.status === "receiving").length;
   const requested = rows.filter((r) => r.enrollment?.status === "requested" || r.enrollment?.status === "confirmed").length;
-  const ready = rows.filter((r) => !r.enrollment && r.missing.length === 0).length;
+  const ready = rows.filter((r) => (r.enrollment?.status ?? "not_started") === "not_started" && r.request.ready).length;
+  /* A payer nothing on file explains how to enrol with. It is a real number and it is the work. */
+  const unknown = rows.filter((r) => r.request.route.how === "unknown").length;
 
   return (
     <>
@@ -77,7 +79,8 @@ export default async function RoutingPage({ searchParams }: { searchParams: Prom
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Figure value={rows.length} label="payers with a payment path on file" sub="from the contracts read" tone="muted" />
-        <Figure value={ready} label="ready to request" sub="identity complete and an address to send to" tone={ready ? "ok" : "muted"} />
+        <Figure value={ready} label="ready to request" sub="identity complete and a way in" tone={ready ? "ok" : "muted"} />
+        <Figure value={unknown} label="no way in on file" sub="nothing read says how they enrol" tone={unknown ? "warn" : "muted"} />
         <Figure value={requested} label="requested or confirmed" sub="waiting for the first 835" tone={requested ? "warn" : "muted"} />
         <Figure value={receiving} label="delivering here" sub="first 835 received" tone={receiving ? "ok" : "muted"} />
       </div>
@@ -144,16 +147,55 @@ export default async function RoutingPage({ searchParams }: { searchParams: Prom
                     )}
                   </div>
                   <div>
-                    {r.missing.length > 0 ? (
-                      <p className="text-xs text-warn">Before a request can go: {r.missing.join("; ")}.</p>
-                    ) : canManage && st === "not_started" ? (
-                      <form action={request}>
+                    {/*
+                      What to do about this payer, in one sentence, before anything else on the card.
+                      Twenty payers each with a different half-finished enrolment is a list nobody
+                      works through; twenty sentences saying what is next is.
+                    */}
+                    <p className="text-sm font-medium text-ink">{r.request.nextAction}</p>
+                    <p className="mt-0.5 text-[11px] text-ink-3">
+                      {r.request.route.why}
+                      {r.request.route.how === "form" || r.request.route.how === "portal" ? (
+                        r.request.route.target ? (
+                          <> <a href={r.request.route.target} target="_blank" rel="noreferrer" className="text-accent underline">open it</a></>
+                        ) : null
+                      ) : null}
+                    </p>
+
+                    {r.missing.length > 0 && (
+                      <ul className="mt-2 list-disc pl-4 text-xs text-warn">
+                        {r.missing.map((m, i) => <li key={i}>{m}</li>)}
+                      </ul>
+                    )}
+
+                    {/*
+                      A portal is somebody else's website and this will not drive it. What it can do
+                      is put every answer on one screen in the order a form asks for them, so the job
+                      is copying rather than hunting through Settings, a contract and a bank letter.
+                      A value nobody has filled in shows as missing, because a blank box on a form is
+                      how a field gets skipped and the enrolment comes back rejected.
+                    */}
+                    {(r.request.route.how === "form" || r.request.route.how === "portal") && (
+                      <details className="mt-2">
+                        <summary className="cursor-pointer text-xs text-accent hover:underline">What to type into it</summary>
+                        <dl className="mt-1 grid gap-x-4 gap-y-0.5 text-xs sm:grid-cols-2">
+                          {r.request.fields.map((f) => (
+                            <div key={f.label}>
+                              <dt className="text-ink-3">{f.label}</dt>
+                              <dd className="font-mono">{f.value ?? <span className="font-sans text-crit">missing</span>}</dd>
+                              {f.note && <dd className="text-[11px] text-ink-3">{f.note}</dd>}
+                            </div>
+                          ))}
+                        </dl>
+                      </details>
+                    )}
+
+                    {canManage && st === "not_started" && r.missing.length === 0 && r.request.letter && (
+                      <form action={request} className="mt-2">
                         <input type="hidden" name="pbm" value={r.pbmName} />
-                        <SubmitButton pendingLabel="Sending…" className="btn btn-sm btn-primary">Send the enrollment request to {r.requestEmail}</SubmitButton>
-                        <p className="mt-1 text-[11px] text-ink-3">A letter with the NCPDP, NPI, TIN and the delivery point, filed here and attached.</p>
+                        <SubmitButton pendingLabel="Sending…" className="btn btn-sm btn-primary">Send the enrollment request</SubmitButton>
+                        <p className="mt-1 text-[11px] text-ink-3">Filed here and attached, so what was asked and when is on the record whatever comes back.</p>
                       </form>
-                    ) : (
-                      <p className="text-xs text-ink-3">Request goes to {r.requestEmail}.</p>
                     )}
                   </div>
                 </div>
@@ -163,7 +205,10 @@ export default async function RoutingPage({ searchParams }: { searchParams: Prom
         </div>
       )}
       <p className="mt-4 text-xs text-ink-3">
-        Where a PBM enrols only through its portal or a form, the letter is still filed so the same facts can be pasted; record the state here when it is done.
+        How each request travels is decided by what that payer&rsquo;s contract printed: a form&rsquo;s address first, then a
+        portal, then an address for a letter. Nothing the contract did not say is filled in — a request sent with a guessed
+        NPI or a guessed trading-partner id is answered weeks later with a rejection nobody connects back to the guess. And
+        nothing leaves this site on its own; every one of these is a person pressing a button.
       </p>
     </>
   );
