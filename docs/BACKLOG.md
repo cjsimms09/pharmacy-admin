@@ -472,7 +472,7 @@ place, and an arithmetic check before anything is stored.
 | NADAC | weekly | ingesting, coverage measured 7 Sep |
 | MTF / facilitator payments | as they arrive | page exists (`/remits/mtf`) |
 | On-hand counts | weekly | **owner asked 7 September: "Did we receive a balance on hand report yet? Didn't come in right?"** — checked on the live database that night; see Done/HANDOFF for the answer |
-| Supplier catalogues with pricing | weekly | ingesting, 5 suppliers |
+| Supplier catalogues with pricing | nightly from PioneerRx | ingesting, 5 suppliers — **but on 7 September only ANDA and ParMed arrived; McKesson, IPC and IPD did not.** Owner action: check PioneerRx's scheduled deliveries for those three. Data health gains a per-supplier "last file" row so the site says this itself. |
 | Other expense invoices | as they arrive | ingesting |
 | Third-party reimbursement contracts | as signed | reader built, first live runs done |
 | **835 remittance files** | **future** | **none received yet**; the request builder is live (B), the remittance tables are designed (`payer-model.md`, A auditing) |
