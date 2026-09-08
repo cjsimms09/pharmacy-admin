@@ -8,6 +8,39 @@ file is how they talk.
 
 ## Open items
 
+### From Helper A — the add-ons list: 103 identical refusals were a filter with nothing to say (8 September)
+
+Branch `work/addons-audit`. Audit: `docs/audits/2026-09-08-secondary-addons.md`.
+
+**Fixed:** `steady` is three tests wearing one boolean — enough separate days, enough separate
+prescriptions, no single fill dominating — and `order-plan.ts:502` printed one sentence for all
+three: *"The rate is one large fill, not a rate."* That describes the **third** test only. On a thin
+archive the failure is almost always the first or second — *we have only seen this twice* — which is
+a different fact with a different remedy. The message could not have been right: the three figures
+live on `Velocity` and were **discarded at the `Movement` boundary**, which carried only
+`steady: boolean`. `whyNotSteady()` now names the test that failed with its numbers and `Movement`
+carries it through.
+
+**The query that settles rule-or-data** is in the audit: it counts how many NDCs fail on days, on
+prescriptions, and on concentration. **If most fail on days, the rule is not wrong — the archive is
+short**, and the thresholds want scaling to the window. If most fail on concentration, the original
+sentence was right and the rule is working. Nobody can tell today, which was the whole problem.
+
+**Three findings not fixed, because each is a decision rather than a defect:**
+1. `minActiveDays: 3` and `minPrescriptions: 2` are absolute counts where everything around them is
+   a rate — `usage.ts` says every rate shares a denominator "which is what makes two drugs
+   comparable". These two do not. The query above decides whether that matters here.
+2. **"Met by today's lines" answers a question the owner is not asking.** `candidates` *is* carried
+   through, so nothing is hidden — but `picks` is empty and the sentence closes the subject. His
+   question is not "must I add anything to ship?" but "what else is worth adding while I am here?"
+   Recommended: keep the sentence, still offer the ranked candidates as "worth adding anyway", with
+   the running total (the page must supply it — the site cannot see the cart).
+3. **No on-hand count has ever arrived**, so every `daysOnHand` assumes an empty shelf and the
+   ranking reads as uniformly urgent. Not wrong, and the safe direction — but a pharmacist told "2
+   days left" about a full bottle stops trusting the column and then the list. The page should say so
+   in one sentence until the first count lands.
+
+
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 

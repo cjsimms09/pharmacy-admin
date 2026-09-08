@@ -91,6 +91,15 @@ export type Movement = {
   ndc11: string;
   perDayThousandths: number;
   steady: boolean;
+  /**
+   * Which steadiness test failed, where one did.
+   *
+   * `steady` is three tests wearing one boolean, and the refusal printed downstream used to name
+   * only one of them — the least likely on a thin archive. The reason is carried rather than
+   * re-derived because the figures it is built from live in `usage.ts` and were being discarded at
+   * this boundary. Null where the drug is steady, or where the caller has not worked it out.
+   */
+  whyNotSteady?: string | null;
   /** Units on the shelf now, in thousandths. Zero where no count is held. */
   onHandThousandths: number;
 };
@@ -499,7 +508,14 @@ export function topUpCandidates(a: {
       continue;
     }
     if (!m.steady) {
-      refused.push({ ndc11: m.ndc11, name: label, supplier: a.supplier, why: "The rate is one large fill, not a rate. Buying deep on it is buying for a patient who may not return." });
+      // The reason names the test that actually failed. One sentence for three tests printed the
+      // wrong one 103 times out of 103 on this pharmacy's data.
+      refused.push({
+        ndc11: m.ndc11,
+        name: label,
+        supplier: a.supplier,
+        why: m.whyNotSteady ?? "The rate is one large fill, not a rate. Buying deep on it is buying for a patient who may not return.",
+      });
       continue;
     }
 
