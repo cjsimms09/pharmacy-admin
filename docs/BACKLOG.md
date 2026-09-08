@@ -661,6 +661,17 @@ named, and the statement's own total as the arithmetic gate. The sample is in th
 uploads folder (`5171c9d9-Image_001.pdf`); a fixture with identifiers changed goes in `fixtures/`.
 Assigned to 2 after the directory move; the recogniser side is B's.
 
+**Reviewed 8 September, 16:45 (1), from the statement's own text layer (page 2 has one):** it is
+RedSail's "Remittance Advice — RAS Copay Voucher Reimbursement": payment date, check/ACH number,
+payment amount, NPI; rows of rx (twelve digits, zero-padded), date of service, NDC, drug, qty,
+submitted, patient paid, voucher paid, with reversals as the same row negated; footer Total Claims,
+Total Fee, Balance Forward, Total Amount Paid. The rows net to the printed total to the cent
+($177.25 = 321762 $174.31 + 330204 $2.94; five other prescriptions paid and reversed) — the
+arithmetic gate. The claims it settles adjudicate on BIN 028249 / PCN RXLOCAL (308 on file); the
+claim's remit is what the voucher promised, so a line settles it (revenue 0) and a difference is
+flagged. Spec sent to 2 in full on 8 September; these lines are August fills, before the claims
+on file begin, and match once the twelve-month export lands.
+
 ### 25. The PSAO's discount card and copay networks guide (8 September)
 
 Uploaded as `898d0c4f-2026hmadiscountcardandcopaynetworks_1.xlsx`: a different shape from the
