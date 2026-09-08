@@ -124,6 +124,73 @@ export function fdaPackageUnits(packageDescription: string | null | undefined): 
   return { ok: true, units: Math.round(units * 1000) / 1000, uom: measure.uom };
 }
 
+/** One "N NOUN in 1 CONTAINER" level of an FDA description, outermost first. */
+export type PackLevel = { count: number; noun: string };
+
+/**
+ * The FDA's description broken into its levels, without judging them.
+ *
+ * `fdaPackageUnits` multiplies the levels out and throws the structure away, which is right for a
+ * total and useless for the question "how many containers, holding how much each". A single-dose
+ * vial is exactly that question: McKesson counts one vial, the FDA states twenty millilitres, and
+ * both are describing the same box truthfully.
+ */
+export function fdaPackageLevels(packageDescription: string | null | undefined): PackLevel[] | null {
+  const text = (packageDescription ?? "").trim();
+  if (!text || text.includes("*")) return null;
+  const levels: PackLevel[] = [];
+  for (const level of text.split("/").map((s) => s.trim()).filter(Boolean)) {
+    const m = /^(\d*\.?\d+)\s+(.+?)\s+in\s+1\s+/i.exec(level);
+    if (!m) return null;
+    const count = Number(m[1]);
+    if (!Number.isFinite(count) || count <= 0) return null;
+    levels.push({ count, noun: m[2].trim() });
+  }
+  return levels.length > 0 ? levels : null;
+}
+
+/**
+ * Containers a pharmacy dispenses one at a time, as opposed to outer packaging it throws away.
+ *
+ * Deliberately separate from `CONTAINERS`, which is the list that stops a reading. A vial is a real
+ * thing a wholesaler can count; a carton is not something anybody dispenses. The two lists answer
+ * different questions and must not be merged.
+ */
+const DISPENSED_CONTAINERS = /^(vial|syringe|ampule|ampoule|pen|cartridge|tube|bottle|inhaler|applicator|dropper)s?$/i;
+
+/**
+ * A package stated as N containers with a volume or a mass in each.
+ *
+ * Null where the description is not that shape. The count of containers is what a wholesaler
+ * counting "1 EA" is counting, and the total is what the FDA and every per-millilitre benchmark
+ * mean by the same package.
+ */
+export function fdaContainerContents(
+  packageDescription: string | null | undefined,
+): { containers: number; containerNoun: string; units: number; uom: "ML" | "GM" } | null {
+  const levels = fdaPackageLevels(packageDescription);
+  if (!levels || levels.length < 2) return null;
+
+  const inner = levels[levels.length - 1];
+  const measure = measureOf(inner.noun);
+  // The innermost has to be a volume or a mass. A count of tablets is not this shape.
+  if (measure === null || measure.uom === "EA") return null;
+
+  const outer = levels.slice(0, -1);
+  // Every outer level must be a container somebody dispenses, not a carton or a case.
+  if (!outer.every((l) => DISPENSED_CONTAINERS.test(l.noun))) return null;
+
+  const containers = outer.reduce((n, l) => n * l.count, 1);
+  const units = containers * inner.count * measure.factor;
+  if (!Number.isFinite(units) || units <= 0 || units > 1_000_000) return null;
+  return {
+    containers,
+    containerNoun: outer[outer.length - 1].noun,
+    units: Math.round(units * 1000) / 1000,
+    uom: measure.uom,
+  };
+}
+
 /**
  * The units in a wholesaler's pack size, as the catalogues write it.
  *

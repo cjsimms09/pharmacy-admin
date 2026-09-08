@@ -132,6 +132,18 @@ export default async function PackSizesPage({
         />
       </div>
 
+      {/*
+        The two counts differ and the difference is not an error, so it is said rather than left to
+        be discovered: the figure the button reports is what that run judged, and this one is every
+        open question including packages the run never reached.
+      */}
+      <p className="mb-4 text-xs text-ink-3">
+        &ldquo;Need a person&rdquo; counts every open question in the catalogue. The number reported after a run counts
+        only the packages that run judged, so the two differ and neither is wrong. The list below is ordered by what the
+        pharmacy actually dispenses, then by what it spends — a package somebody has held can be settled from memory,
+        and one nobody has bought can wait.
+      </p>
+
       <Card className="mb-4" title="Find a package">
         <form className="flex flex-wrap items-end gap-2">
           <label className="grow">
@@ -166,7 +178,13 @@ export default async function PackSizesPage({
               className="mb-4"
               tone={q.settled ? "ok" : q.reason === "unit-differs" ? "crit" : "warn"}
               title={q.description ?? q.ndc11}
-              subtitle={`${q.ndc11} · ${reasonWords(q.reason)}`}
+              subtitle={
+                `${q.ndc11} · ${reasonWords(q.reason)}` +
+                // Why this one is near the top: the queue is ordered by what the pharmacy actually
+                // deals in, so the reason it is in front of somebody has to be visible.
+                (q.fills > 0 ? ` · ${q.fills} fill${q.fills === 1 ? "" : "s"} dispensed` : "") +
+                (q.spentCents > 0 ? ` · ${money(q.spentCents)} bought` : "")
+              }
             >
               <p className="mb-3 text-xs text-ink-2">{q.why}</p>
 
