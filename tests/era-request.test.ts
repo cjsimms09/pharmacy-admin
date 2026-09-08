@@ -12,11 +12,20 @@ import { buildEraRequest, routeFor, missingFor, letterFor, nextActionFor, type E
  * or "the request goes the way this payer actually enrols".
  */
 
+/*
+ * Deliberately not shaped like real identifiers.
+ *
+ * A realistic NPI here bought nothing — no test validates the format — and cost a secret-scan
+ * failure: `.gitleaks.toml`'s `ncpdp-or-npi-literal` rule cannot tell a made-up ten-digit number
+ * from a real one, and it should not have to. Silencing it with an ignore would weaken the rule
+ * for every future commit to buy a fixture nobody reads. So the identifiers say what they are.
+ * Please leave them unrealistic.
+ */
 const whole: Identity = {
   name: "West Wichita Family Pharmacy",
-  ncpdp: "1712345",
-  npi: "1234567893",
-  tin: "48-1234567",
+  ncpdp: "NCPDP-EXAMPLE",
+  npi: "NPI-EXAMPLE",
+  tin: "TIN-EXAMPLE",
   address: "123 Example St, Wichita KS 67212",
   phone: "316-555-0100",
   mailbox: "reports@example-pharmacy.test",
@@ -77,7 +86,7 @@ describe("nothing the contract did not say is invented", () => {
   test("the pharmacy's own identifiers appear as they are, and a missing one is a dash not a guess", () => {
     const id: Identity = { ...whole, tin: null };
     const l = letterFor(bare({ contacts: [{ email: "a@b.test" }] }), id, "x@y.test", { how: "email", target: "a@b.test", why: "" });
-    assert.match(l!.body, /NCPDP 1712345 · NPI 1234567893 · TIN —/);
+    assert.match(l!.body, /NCPDP NCPDP-EXAMPLE · NPI NPI-EXAMPLE · TIN —/);
   });
 
   test("there is no letter for a portal, because a letter is not what a portal takes", () => {
