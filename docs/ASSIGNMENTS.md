@@ -140,6 +140,14 @@ work. You can, and you do not need the database to read arithmetic.
    it came from. Session 1 will put the claims inventory it is building under "Open items" in
    HANDOFF so you audit against what the export actually carries.
 
+4. **The secondary add-ons list** (added 8 September, the owner's ask — BACKLOG item 12):
+   `/purchasing`'s "Order these" and "Next best to add" per secondary wholesaler
+   (`minimum-filler.ts`, `minimum-store.ts`, `shelf.ts buyListNow`, `order-plan.ts`). For each
+   recommended line, is it defensible on on-hand, price and usage, with the window stated; does it
+   offer several ranked options with a running total rather than one answer, since the site cannot
+   see the cart; does it say plainly that no on-hand count has ever been received and what it is
+   using instead. Session 1 will put the live top lines and the facts behind each in HANDOFF.
+
 Write each audit as `docs/audits/2026-09-DD-<module>.md`: what is wrong, why it matters in
 dollars, the line, and **the query 1 should run on the real database to size it.** Open a pull
 request. Findings, not fixes — a fix you are sure of goes in the same pull request as a separate
