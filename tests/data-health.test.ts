@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   percentOf,
   percentTextOf,
+  fractionTextOf,
+  countTextOf,
   daysSince,
   healthOf,
   buildHealth,
@@ -213,5 +215,33 @@ describe("the sentence at the top of the page", () => {
     const s = summarise(buildHealth(all, "2026-09-08"));
     assert.equal(s.worst, "complete");
     assert.match(s.says, /every one of them holds/);
+  });
+});
+
+describe("the count beside the percentage", () => {
+  test("the fraction is what the owner acts on, so it is never dropped", () => {
+    // "29 dispensed NDCs have no NADAC" is a morning's work with a list at the end of it.
+    // "95.7%" is a feeling about the data.
+    assert.equal(countTextOf(652, 681), "652 of 681 · 95.7%");
+    assert.equal(countTextOf(26_245, 26_246), "26,245 of 26,246 · 99.9%");
+  });
+
+  test("a measured zero prints its denominator, which is the whole force of it", () => {
+    assert.equal(countTextOf(0, 1_081), "0 of 1,081 · 0%");
+  });
+
+  test("an empty denominator says so rather than printing 'of 0'", () => {
+    assert.equal(fractionTextOf(0, 0), "0 of none");
+    assert.equal(countTextOf(0, 0), "0 of none · nothing to measure");
+  });
+
+  test("thousands are grouped, because these are numbers somebody reads aloud", () => {
+    assert.equal(fractionTextOf(217_773, 217_773), "217,773 of 217,773");
+  });
+
+  test("an unmeasured row prints no fraction it cannot support", () => {
+    const row = buildHealth([], "2026-09-08").find((r) => r.key === "claim-contract")!;
+    assert.equal(row.countText, "not measured");
+    assert.equal(row.fractionText, "not measured");
   });
 });

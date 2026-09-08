@@ -86,6 +86,10 @@ export type HealthRow = {
   percent: number | null;
   /** The percentage as it should be printed, with the rounding rules applied. */
   percentText: string;
+  /** "26,245 of 26,246". What the owner acts on. */
+  fractionText: string;
+  /** The two together, which is how a row prints: "26,245 of 26,246 · 99.9%". */
+  countText: string;
   health: Health;
   measuredAt: string | null;
   /** Days since it was measured, where it has been. */
@@ -123,6 +127,25 @@ export function percentTextOf(numerator: number, denominator: number): string {
   const raw = (numerator / denominator) * 100;
   const shown = Math.min(99.9, Math.max(0.1, Math.round(raw * 10) / 10));
   return `${shown.toFixed(1)}%`;
+}
+
+/**
+ * The count, in words, beside the percentage.
+ *
+ * The percentage is how a row is scanned; the count is what gets acted on. "29 dispensed NDCs have
+ * no NADAC" is a morning's work with a list at the end of it, and "95.7%" is a feeling about the
+ * data — so both are printed, always together, and the fraction is never dropped to save a column.
+ */
+export function fractionTextOf(numerator: number, denominator: number): string {
+  const n = numerator.toLocaleString("en-US");
+  const d = denominator.toLocaleString("en-US");
+  if (denominator <= 0) return `${n} of none`;
+  return `${n} of ${d}`;
+}
+
+/** The fraction and the percentage as one string, which is how every row prints it. */
+export function countTextOf(numerator: number, denominator: number): string {
+  return `${fractionTextOf(numerator, denominator)} · ${percentTextOf(numerator, denominator)}`;
 }
 
 /** Whole days between two ISO dates, or null where either is missing or unreadable. */
@@ -341,6 +364,8 @@ export function buildHealth(
       denominator,
       percent: measuredAt ? percentOf(numerator, denominator) : null,
       percentText: measuredAt ? percentTextOf(numerator, denominator) : "not measured",
+      fractionText: measuredAt ? fractionTextOf(numerator, denominator) : "not measured",
+      countText: measuredAt ? countTextOf(numerator, denominator) : "not measured",
       health: healthOf({ numerator, denominator, measuredAt }),
       measuredAt,
       ageDays,
