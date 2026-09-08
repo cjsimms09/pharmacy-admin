@@ -54,7 +54,8 @@ question that needs real figures is written as a query under "Open items" in `do
 | **1** | `product-groups.ts`, `product-key.ts`, `drug-profit*.ts`, `products-store.ts`, `money-found.ts`, `replay-store.ts`, `suppliers.ts` (catalogue import), `nadac*.ts`, `catalogue-*.ts`, `drug-directory*.ts`, `shelf.ts`, `order-plan.ts`, `scripts/**`, migrations, these docs |
 | **2** | `invoices.ts`, `invoice-lines.ts`, `suppliers-registry.ts`, `rebate-rates.ts` (supplier matching), `purchase-ratio.ts`, `src/app/(app)/suppliers/**` |
 | **A** | `ledger.ts`, `ledger-store.ts`, `period-account.ts`, `profit-and-loss.ts`, `src/app/(app)/money/**`, `bars.tsx`, `charts.tsx`, `expense-categories.ts`; audit files under `docs/audits/` |
-| **B** | `mailbox.ts` (routing and recognition only), `src/app/(app)/inbox/**`, `labels.ts`, `autoroute.ts`, `intake-*`; audit files under `docs/audits/` |
+| **B** | `mailbox.ts` (routing and recognition only), `src/app/(app)/inbox/**`, `labels.ts`, `autoroute.ts`, `intake-*`, `era-enrollment.ts`, `src/app/(app)/payers/routing/**`; audit files under `docs/audits/` |
+| **1, contracts** | `contract-*.ts`, `src/app/(app)/payers/sort/**`, `payers/contracts/**`, `payers/[pbm]/**` — the contract ingestion is session 1's own job; nobody else edits the extraction |
 
 ---
 
@@ -104,6 +105,13 @@ work. You can, and you do not need the database to read arithmetic.
    `docs/reference/buying-logic.md` and `data-dictionary.md`: every figure one meaning, one unit,
    never used for what the dictionary says it must not be. Units are the thing that has already
    gone wrong here — a per-EA cost against a per-ML benchmark read as "100× NADAC".
+
+3. **Claims data** (added 7 September, the owner's ask): the claims reader `claims.ts` and every
+   column alias it accepts, `fills.ts` grouping, `claim-payments.ts`, and `reimbursement-fit.ts`.
+   One meaning and one unit per figure, nothing inferred that the export states, and every figure
+   the profit chain uses (`drug-profit.ts`, `contract-replay.ts`) traced back to the export column
+   it came from. Session 1 will put the claims inventory it is building under "Open items" in
+   HANDOFF so you audit against what the export actually carries.
 
 Write each audit as `docs/audits/2026-09-DD-<module>.md`: what is wrong, why it matters in
 dollars, the line, and **the query 1 should run on the real database to size it.** Open a pull
@@ -178,6 +186,29 @@ supplier ever resolve by substring again, does an invoice line carry one meaning
 unit it is in, is anything inferred that the invoice states. Write `docs/audits/2026-09-DD-invoices.md`
 with findings and the queries 2 should run, and open a pull request. **Session 2 owns this section
 from here and will write its own instructions to you under this heading.**
+
+### Before the inbox (7 September, from 1, with the owner's priority): get the 835s sent here
+
+The owner: *"Want to automate request to have 835s sent to this site instead of where they
+currently go!"* Session 1 is reading every contract and will extract, per payer, where remittance
+advice goes today, who changes it, the form or portal or mailbox that takes the request, the payer
+id and the clearinghouse. Your half is **the request itself and its tracking**, in your file group
+plus `era-enrollment.ts`, `era_enrollments`, `payment_routing`, `pbm_contacts` and
+`src/app/(app)/payers/routing/**` (handed to you for this; say so in the pull request):
+
+1. One generated, ready-to-send ERA/835 enrolment request per payer — the letter or form answers,
+   filled from the pharmacy's identifiers in settings (NPI, NCPDP, TIN, the site's receiving
+   address and clearinghouse/trading-partner id) and from what the contract extraction supplies.
+   Where a payer's form is a PDF the extraction names, the page says so and links it; where it is a
+   portal, the page lists the fields to type. Nothing is sent by the site on its own.
+2. A state per payer — not requested, request ready, sent (date, how, by whom), acknowledged,
+   first 835 received — shown on `/payers/routing`, with the next action in words.
+3. Pure and tested: the request builder takes the payer's extracted enrolment facts and the
+   pharmacy's identifiers and returns the request text and the missing-fields list. Fixtures only;
+   you cannot see real contracts. The extraction's output shape is in `contract-terms.ts` — 1 will
+   add the ERA fields there and note the names under "Open items" in HANDOFF.
+
+Then the inbox recogniser below.
 
 ### Build: an inbox that knows what arrived, and can always be corrected
 

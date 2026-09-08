@@ -91,7 +91,37 @@ four links, and it is only as good as its weakest:
 **Link 3 and link 4 both depend on item 1 above** — they group by product key, and the product key
 currently fragments. Fixing the key is the prerequisite, which is why it is first.
 
-### 3. Re-measure the six buying-logic fixes against real data (HANDOFF item 2)
+### 2b. Contract ingestion is session 1's own job (7 September)
+
+The owner: *"I want you handling the contract ingestion. All the contracts are in the contract
+folder. The goal is to extract as much info as we can to match claims with a contract. So you
+should be familiar with all the info we get from claims."* Session 1 reads the whole library —
+357 documents, 353 unread, the 2 stale failures re-run — in a separate process, queued by the
+dollars of claims behind each payer, and widens what the reader extracts to every identifier a
+claim carries (BIN, PCN, group, network reimbursement id, chain code, NCPDP, NPI, plan names) and
+to the 835/EFT/EDI enrolment instructions below. The claims side of the join is inventoried first
+so nothing extractable is left unasked.
+
+### 2c. Get the 835s sent here (7 September)
+
+The owner: *"Also want to search contracts for info to request 835 changes. Want to automate request
+to have 835s sent to this site instead of where they currently go!"* Two halves: the extraction
+(session 1, inside 2b — for every contract, where remittance advice is delivered today, who
+changes it, the form or portal or address, the payer ID, the clearinghouse) and **the request
+itself** — one generated, ready-to-send enrolment request per payer, tracked from sent to
+acknowledged to first 835 received, on `/payers/routing` (`era-enrollment.ts`, `era_enrollments`,
+`payment_routing`, `pbm_contacts` already exist). Assigned to B, ahead of the inbox recogniser.
+
+### 2d. Claims data joins the audit list (7 September)
+
+The owner: *"We also need to add claims data to the list of things to audit."* The claims reader
+(`claims.ts` and every column alias it accepts), fills grouping (`fills.ts`), payments
+(`claim-payments.ts`), and the reimbursement inference (`reimbursement-fit.ts`) — audited like the
+buying logic: one meaning and one unit per figure, nothing inferred that the export states, and
+every figure the profit chain uses traced back to the export column it came from. Assigned to A
+after the contract match; session 1 supplies the real-data queries.
+
+### 3. Re-measure the six buying-logic fixes against real data (HANDOFF item 2) — DONE, see Done
 
 Fixed on 8 September in commit `8d51d73`, none measurable at the time. Each needs a real number:
 margin at net rather than printed price, short-dated stock being recommended, the cross-unit NADAC
