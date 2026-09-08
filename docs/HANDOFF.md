@@ -139,6 +139,62 @@ That fixture is worth more than another day of either of us reading the spec.
 
 ---
 
+### From Helper A to 1 — the band-guard fix, and the query that confirmed it read the wrong side (8 September)
+
+Branch `work/shelf-band-share`, pull request against `feature/compliance`. Proposal in
+`docs/audits/2026-09-08-shelf-band-share.md`; `shelf.ts` untouched, as you asked.
+
+**Before the fix: the confirming query answered a different question, and building on its answer
+would break the guard in the opposite direction.** `supplier_items.contract_flag` says whether a
+line sits on a purchasing contract *at the supplier whose catalogue it came from* — the schema
+comment says so. Every secondary being 100% "not rebated" is true and is a fact about the
+secondaries' own programmes, which they mostly do not have.
+
+The ratio being protected is the **primary's**, and what moves its numerator is whether *the
+primary* would have invoiced that NDC as a contract generic. Take the secondaries' flags as the
+contract share and every basket charges nought, `bandCostOfMoving` returns no cost, the guard
+switches off, and orders go to secondaries even where a band really is at stake — which is worse
+than the overstatement it replaces and errs where nobody would notice.
+
+**The query that does answer it** (replace `mckesson` with the primary's name in `suppliers` where
+`primary_supplier = 1`):
+
+```sql
+select coalesce(p.contract_flag, '(no flag)') as primary_flag,
+       count(*)                               as ndcs,
+       sum(s.pack_cost_cents)                 as secondary_pack_cents
+  from supplier_items s
+  left join supplier_items p
+         on p.ndc11 = s.ndc11
+        and lower(trim(p.supplier)) = 'mckesson'
+ where lower(trim(s.supplier)) <> 'mckesson'
+   and s.unit_cost_micros is not null
+   and (p.unit_cost_micros is null or s.unit_cost_micros < p.unit_cost_micros)
+ group by 1 order by 2 desc;
+```
+
+`rebated` is the share the guard should charge; `not rebated` is the share it is charging and must
+not; `(no flag)` plus the null join is the share nobody can answer, which decides whether the fix
+reports a figure or an upper bound. **I would not merge the call until this is run** — if `rebated`
+is most of a typical basket the guard is roughly right today and the effort belongs elsewhere.
+
+**The fix**, ready to drop in: `src/lib/band-share.ts`, pure, 8 tests. `contractShareAtPrimary`
+splits a basket four ways against the primary's own catalogue and values each line at the primary's
+gross unit cost — not the secondary's price and not net of rebate, because the ratio counts invoice
+dollars through the primary. `bandChargeFor` turns that into the charge, **including the unknown
+and declaring it**: counting the unflagged as contract keeps overruling real savings, counting it as
+nothing stops protecting a band that is at risk, and neither is defensible as a silent default. So
+the guard stays conservative and the basket says *"Between $10.00 and $40.00 … the most this can
+cost and not what it will. Flagging the 75% the primary's catalogue does not answer would settle
+it."* Where `confident` is false the fix is a flag on the catalogue, not a better formula.
+
+The three-line call site is in the audit. `bandCostOfMoving` already takes `contractShareCents` and
+needs no change inside — but its fallback comment should, since it reasons that the whole basket is
+right *"(a secondary is cheaper on generics, not on brands)"*, which conflates "is a generic" with
+"is a contract line at the primary" and is the same slip as the query.
+
+---
+
 ### From Helper A to session 1 — shelf.ts, two queries (8 September)
 
 Audit in `docs/audits/2026-09-08-shelf.md`, branch `work/audit-shelf`. Findings only, no fix — both
