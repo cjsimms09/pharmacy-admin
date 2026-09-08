@@ -177,6 +177,19 @@ on the `make-claude-copy` / `measure-data-health` pattern (spawned detached, the
 result), with the line-64 read given a column list. `held.ts` and the column trims in
 `floor-review.ts`, `appeals.ts`, `claims.ts` and `money-found.ts` are 1's.
 
+**Then (8 September, from 1, the owner's words): fix the P&P manual** — BACKLOG item 14, moved from B
+to you. "I want P&P manual accurate to what we do and compliant." The manual lives at `/manual`
+(sections in `manual-store.ts`, the review in `manual-audit.ts`, the site's own policy text in
+`manual.ts policies()`), and the owner has said: "if the other session has questions they should
+ask me" — so ask him directly, one question at a time, when the manual and the site disagree
+about what the pharmacy does; never invent a practice. Three jobs: (1) every finding the review
+marks as one an inspector would write up, fixed in the section's own words; (2) every place the
+manual describes a procedure the site now does differently (training records, temperature logs,
+the C-250 count, the inbox, the backups, the 835s, the copay-card remits) brought into line with
+what the site actually does, citing the page; (3) the Kansas Board and DEA requirements the
+review knows about, checked present. Single files, verified when quiet, as before; the owner
+answers the questions.
+
 ### The bank feed — plan from 2 (8 September), for 1 to confirm before I build
 
 **Read the code first, as asked, and the headline is that most of this exists. Please do not have

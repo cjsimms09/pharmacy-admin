@@ -24,8 +24,9 @@ export const metadata = { title: "Print the manual" };
  * wrong the moment a section is inserted above it, and a manual whose contents page disagrees
  * with its body is worse than one with no contents page at all.
  */
-export default async function ManualPrintPage() {
+export default async function ManualPrintPage({ searchParams }: { searchParams: Promise<{ section?: string }> }) {
   await requireUser();
+  const { section } = await searchParams;
   const [sections, s, people, mark] = await Promise.all([
     allSections(),
     getSettings(),
@@ -36,7 +37,18 @@ export default async function ManualPrintPage() {
   const pic = people.find((p) => p.isPic);
   const pharmacy = s.pharmacy_name || "This pharmacy";
 
-  const numbered = outline(sections);
+  /*
+   * One section on its own, with what sits under it, when the manual page asked for it. The owner:
+   * "easy way to find anything in P&P manual I may need to print." A chapter prints with its
+   * sections; a section prints with its sub-sections; the contents page lists only what is printed.
+   */
+  const whole = outline(sections);
+  const start = section ? whole.findIndex((x) => x.id === section) : -1;
+  const numbered =
+    start < 0
+      ? whole
+      : whole.slice(start, (() => { let end = start + 1; while (end < whole.length && whole[end].depth > whole[start].depth) end++; return end; })());
+  const onlyOne = start >= 0 ? whole[start] : null;
 
   const reviewed = sections
     .map((x) => x.reviewedOn)
@@ -57,7 +69,7 @@ export default async function ManualPrintPage() {
           to <b>100%</b>. Then print to paper, or save as PDF for the copy you keep.
         </p>
         <p className="mt-1 text-xs text-ink-3">
-          {sections.length} sections. Printed straight from the live manual, so this is current as of right now — there
+          {onlyOne ? `Section ${onlyOne.number} — ${onlyOne.title}, with what sits under it (${numbered.length} of ${sections.length} sections).` : `${sections.length} sections.`} Printed straight from the live manual, so this is current as of right now — there
           is no separate file to keep in step.
         </p>
       </div>
