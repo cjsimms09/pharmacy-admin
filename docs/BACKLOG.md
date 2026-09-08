@@ -50,11 +50,11 @@ every drug it carries:
   of the 681 NDCs actually dispensed, 650 of those current within three months. The misses are CMS
   genuinely not pricing hospital injectables, devices, supplies and repackager labels — not a
   formatting fault, and not fixable by a product-level proxy (that would rescue 197 NDCs, 0.4%).
-- **The supplier's own item number, per supplier.** Measured 8 September after the nightly
-  imports: ANDA, ParMed, IPD and IPC **100%**; **McKesson 0 of 44,242**. The McKesson file carries
-  the column ("Supplier Item Number" is its first field) but its rows wrap onto two lines and the
-  PioneerRx parser is not picking the number up for that layout. Session 1, `pioneer-catalog.ts`,
-  with a McKesson-shaped fixture.
+- **The supplier's own item number, per supplier.** Done 8 September: all five suppliers
+  **100%** (McKesson 44,242 of 44,242). McKesson's read as zero only because its stored catalogue
+  was imported on 6 September, before the code that reads the column reached the site; the parser
+  reads every one, and re-running the stored file through the importer filled them. Nightly
+  imports keep it so. Note: no McKesson catalogue arrived on 7 September (the other four did).
 - **Pack sizes, against the FDA (8 September).** The levelled catalogue agrees with the FDA
   package on about 95% of rows at every supplier. The rest: 0.5–1% where the FDA is a whole
   multiple of the catalogue (IPD "30 EA" for 30 blister packs of 6 = 180, a sixfold unit-cost
@@ -62,10 +62,11 @@ every drug it carries:
   FDA *reading* being wrong, because `packageUnits` takes the outer count ("3 BLISTER PACK") and
   ignores the inner ("28 TABLET in 1 BLISTER PACK"). The parser has to read the nested description
   to the innermost unit. Assigned to session 2 as the Data health row it belongs to.
-- **AWP where a supplier prints none (8 September).** ParMed and IPD print no AWP; 7,551 NDCs
-  have no AWP on one supplier's row and a printed AWP on another's. AWP is a property of the
-  NDC, not the seller, so the levelled catalogue should carry the newest printed AWP for the NDC
-  onto every row, marked as borrowed. Session 1, `catalogue-cache.ts`.
+- **AWP where a supplier prints none.** Done 8 September: the levelled catalogue carries the
+  newest printed AWP for the NDC onto every row of that NDC that has none, naming the lender
+  (`borrowAwp`, `awpBorrowedFrom`). Rows with an AWP went from **50,870 to 59,741 of 63,809**
+  (79.7% → 93.6%); IPD 95.3%, ParMed 96.9%, where both had been zero. The 4,068 still without are
+  NDCs no catalogue prices at AWP.
 
 ### 2. Every claim matched to its contract, and to the formula that priced it (7 September)
 
@@ -395,6 +396,29 @@ health row should name the top unclassified triples); and where the BIN listing 
 business (`payer_bins.linesOfBusiness`, Medicare Part D BINs are published), the site proposes the
 class with its source and the owner confirms — proposed, never assumed. Assigned to A after the
 contract match; owner action for the top plans now.
+
+### 11. Pack sizes: fix every one we can, and a place to look up and correct the rest (8 September)
+
+The owner: *"We need to fix correctly all the package sizes that we can. For those we can't, I need
+a way to lookup and correct. These corrections need to stick."*
+
+Data health measures 48,852 of 51,502 catalogue rows agreeing with the FDA's package (94.9%);
+2,650 disagree, split between clean multiples (a catalogue counting inner packs — IPD's "30 EA" for
+30 blisters of 6) and the rest. A pack size is a divisor under every per-unit cost, so each wrong
+one is a drug that looks several times cheaper or dearer than it is. Three parts:
+
+- **Fix automatically what the FDA settles.** Where the FDA's description reads cleanly to a
+  dispensing unit and the catalogue's count is a whole multiple or fraction of it, the FDA's size
+  is written as the correction, marked as the FDA's, with the arithmetic that justified it.
+- **A page to look up and correct the rest** — every disagreement the FDA cannot settle (unit
+  differs, description stops at a container, no FDA row), showing the FDA text, every supplier's
+  pack size for the NDC, and the cost per unit under each reading, with one control to say which is
+  right or type the truth. Searchable by NDC and name.
+- **Corrections stick.** `ndc_pack_fixes` (per NDC) and `supplier_item_fixes` (per supplier and
+  NDC) already exist for this and are laid over every import; the levelling reads the pharmacy's
+  answer first, then the FDA's, then the wholesaler's. A correction records who, when and why.
+
+Assigned to session 2.
 
 ## The data the site has to ingest
 
