@@ -660,7 +660,45 @@ export async function fileInvoice(
    * recorded at the end. It reads the invoice row back, so it sees the supplierId resolved above
    * rather than being told it a second time.
    */
-  const written = text ? await writeInvoiceLines(id, text) : null;
+  /*
+   * ── The model is asked here too, and until now it never was ──
+   *
+   * Two faults in one line, both found on IPC 11490216 of 4 September: $1,530.89 filed with zero
+   * item lines while its sibling 11490227, from the same sender the same evening, read eight.
+   *
+   * The first is that `writeInvoiceLines` was called with no options, so `allowModel` was
+   * undefined. The model fallback inside it — the one whose own comment explains that IPD's
+   * columns "come out shredded and interleaved" and that only a reader which can see the page's
+   * geometry will ever get them — was reachable from the Add tool and from the backfill button on
+   * the invoices page, and from nothing else. Every invoice this pharmacy receives arrives by
+   * email, so the fallback was switched off on the only path an invoice actually travels.
+   *
+   * The second is `text ? … : null`. A PDF with no text layer — a scan, which is how some
+   * wholesalers send — produced no text, so the line reader was never called at all. But the model
+   * reads the *document*, not the text: a scan is precisely the case it exists for, and precisely
+   * the case that could not reach it. The warning written below then told the pharmacist to enter
+   * it by hand, which was honest about the outcome and wrong about the options.
+   *
+   * So the reader is always called, with the empty string standing in for a scan —
+   * `storeInvoiceLines` returns nothing read for text under 200 characters without touching a
+   * stored line, so the rule reader is a no-op there and the model gets its turn.
+   *
+   * ── Why this cannot run away with the owner's money ──
+   *
+   * The model is asked only where the rule read nothing at all, and only where the invoice carries
+   * a total worth reading. A document with neither lines nor a total is not evidently an invoice,
+   * and paying to look at one is how a ceiling gets spent on junk. Beyond that, every model call in
+   * this site goes through one function that holds the month's ceiling, so the worst case is that
+   * an invoice is filed unread and says so — which is exactly what happens today, every time.
+   *
+   * What is bought for that: $1,530.89 of purchases currently reaching the cost of no drug, no
+   * rebate ladder and no purchase ratio, on one invoice, from one wholesaler, in one week.
+   */
+  const worthReading = totalCents !== null && totalCents > 0;
+  const written = await writeInvoiceLines(id, text ?? "", {
+    allowModel: worthReading,
+    user: { id: ctx.userId, name: ctx.userName },
+  });
 
   /*
    * An invoice carrying money and no lines under it is not a quiet success.
@@ -679,6 +717,9 @@ export async function fileInvoice(
     linesStored: written?.read ?? 0,
     totalCents,
     hasTextLayer: text !== null,
+    // Said on the row, so nobody presses "read it again" expecting a different answer from the
+    // same two readers. Both have now had this document and neither could place a line on it.
+    modelTried: worthReading,
   });
   if (why) {
     await db
@@ -710,13 +751,31 @@ export function emptyInvoiceWarning(a: {
   totalCents: number | null;
   /** False for a scan. It changes the advice, because there is nothing on the page to re-read. */
   hasTextLayer: boolean;
+  /**
+   * Whether the model was given the document as well as the rule reader.
+   *
+   * It changes what a person should do next, which is the only reason the sentence exists. Where
+   * both readers have had it and neither could place a line, pressing the button again runs the
+   * same two readers over the same page for the same answer, at the cost of the second one. Where
+   * only the rule reader saw it, that button is worth pressing.
+   *
+   * Optional and false by default, so a caller that has not been taught to say makes no claim
+   * about what was tried rather than an untrue one.
+   */
+  modelTried?: boolean;
 }): string | null {
   if (a.linesStored > 0) return null;
   if (a.totalCents === null || a.totalCents <= 0) return null;
   const total = `$${(a.totalCents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  return a.hasTextLayer
-    ? `The total of ${total} was read off the page, but no item line could be read from it. Nothing on this invoice reaches the cost of any drug until somebody looks.`
-    : `The total of ${total} was read off the page, but this PDF carries no text layer, so not one item line could be read. Nothing on this invoice reaches the cost of any drug until somebody enters it or a readable copy replaces it.`;
+  const read = a.hasTextLayer
+    ? `The total of ${total} was read off the page, but no item line could be read from it.`
+    : `The total of ${total} was read off the page, but this PDF carries no text layer, so not one item line could be read from the text.`;
+  const next = a.modelTried
+    ? "Both readers have had this document — the rule reader and the model — and neither could place a line on it, so reading it again will give the same answer. It has to be entered by hand, or a readable copy has to replace it."
+    : a.hasTextLayer
+      ? "Nothing on this invoice reaches the cost of any drug until somebody looks."
+      : "Nothing on this invoice reaches the cost of any drug until somebody enters it or a readable copy replaces it.";
+  return `${read} ${next}`;
 }
 
 /** The invoice as text, or null for a scan with no text layer. Short text is treated as none. */

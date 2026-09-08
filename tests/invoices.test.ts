@@ -229,3 +229,53 @@ describe("whether a fresh read may replace the lines already stored", () => {
     assert.equal(may({ storedLines: 5, storedCents: 100_000, printedTotalCents: 100_000, readReconciles: false }), false);
   });
 });
+
+/*
+ * What the row says when both readers have failed, and why it matters that it says which.
+ *
+ * IPC 11490216 of 4 September, $1,530.89, sat filed with zero item lines while its sibling from
+ * the same sender that same evening read eight. The warning told the pharmacist to enter it by
+ * hand — honest about the outcome, wrong about the options, because the model that exists for
+ * exactly that page had never been asked. It was reachable from the Add tool and the backfill
+ * button and from nothing else, and every invoice this pharmacy gets arrives by email.
+ *
+ * Now the mailbox asks it too, so the sentence has to distinguish "one reader has looked" from
+ * "both have". They call for different actions: the first is a button worth pressing, the second
+ * is a page somebody has to type.
+ */
+describe("an invoice with money on it and nothing under it", () => {
+  const warn = (over: Partial<Parameters<typeof emptyInvoiceWarning>[0]> = {}) =>
+    emptyInvoiceWarning({ linesStored: 0, totalCents: 153_089, hasTextLayer: true, ...over });
+
+  test("the money is named, because the number is the reason to care", () => {
+    assert.match(warn()!, /\$1,530\.89/);
+  });
+
+  test("one reader having looked is an invitation to try the other", () => {
+    const s = warn({ modelTried: false })!;
+    assert.match(s, /until somebody looks/);
+    assert.doesNotMatch(s, /Both readers/);
+  });
+
+  test("both readers having looked says so, so nobody presses the button for the same answer", () => {
+    const s = warn({ modelTried: true })!;
+    assert.match(s, /Both readers have had this document/);
+    assert.match(s, /entered by hand, or a readable copy/);
+  });
+
+  test("a scan says the text layer is the reason, whichever readers have been asked", () => {
+    assert.match(warn({ hasTextLayer: false })!, /no text layer/);
+    assert.match(warn({ hasTextLayer: false, modelTried: true })!, /no text layer/);
+  });
+
+  test("saying nothing about the model is the default, because a caller that has not been taught must not claim", () => {
+    // The absent flag and an explicit false read the same: neither asserts the model was tried.
+    assert.equal(warn(), warn({ modelTried: false }));
+  });
+
+  test("an invoice with lines, or with no money on it, is not this and says nothing", () => {
+    assert.equal(warn({ linesStored: 1 }), null);
+    assert.equal(warn({ totalCents: 0 }), null);
+    assert.equal(warn({ totalCents: null }), null);
+  });
+});
