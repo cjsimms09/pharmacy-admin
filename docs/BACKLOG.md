@@ -619,6 +619,16 @@ a page, one hop per column, each hop's coverage as a fraction, and it is the sha
 section should take. Owner's two ideas to test, not assume: ERISA plans priced apart from the
 floor; commercial at NADAC plus $10.50. Order: link the top networks (one click each, biggest
 first), finish the read (the ceiling), then the backtest on what is linked.
+
+**Built 8 September, 15:02 (1):** no clicks where the paper decides. `deduceNetworkLinks` links a
+network on its own when a document prints the id, or when its payer has exactly one document
+written for this pharmacy's chain code; the reason is written on the link. Ran once: 14 networks,
+305 claims (all nine Blue Cross networks to Prime's 2025 Limited Commercial exhibit — the only Prime
+document read so far, so provisional until the rest are read; Capital Rx, MedOne, two Navitus).
+Left: 47 networks with several documents written for us (590 claims: Optum 10, ESI 12, Caremark
+9–10) — the PSAO listing or the backtest; 21 with nothing written for us (135 claims: Humana, Argus).
+Two follow-ups: run the deduction after every `applyAllReads`, and re-evaluate links the site made
+when new documents arrive (today it skips anything already linked).
 ## The data the site has to ingest
 
 Named by the owner on 7 September as what is still being connected. Each one needs a reader, a
