@@ -44,6 +44,13 @@ a second process in those hours** — no type check, no scratch script importing
 the site at 1.3 GB, so one such process is the difference between a site and paging. A fact is
 checked with a SQL query in a short-lived script, not by importing the module.
 
+## 1b. What the build refuses that the editor does not
+
+A file that begins `"use server"` may export async functions and nothing else. A constant, a
+type or a list exported from one fails the build — on the pharmacy computer, at deploy time,
+after the type check has passed. Constants live in a file beside it (`kinds.ts` next to
+`actions.ts`). Found by 2 on 8 September by reading rather than compiling.
+
 ## 2. Where the truth lives
 
 Read these before starting, not after:
