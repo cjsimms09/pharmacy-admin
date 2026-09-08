@@ -555,6 +555,16 @@ things to press hardest: whether the remittance tables carry everything reconcil
 CAS, PLB, TRN) and nothing it does not; and whether the payor/processor split survives every case
 you can think of (FEP, PSAO pay-on-behalf, the MTF, discount cards, a plan sponsor paying direct).
 
+**Later payments and the bank, measured for 2's bank plan (8 September).** All 22 `claim_payments`
+rows are Medicare Transaction Facilitator payments (source `mtf`, payer "MEDICARE TRANSACTION
+FACILITATOR", dated 2026-08-18 to 2026-09-01, $5,735.15). **No 835 has ever been received and no
+bank statement has ever been uploaded** (`bank_lines` empty). So Data health's "claim → 835 →
+deposit" is retitled "claim → later payment → deposit" and says so. Scope decided: the
+reconciliation lives at `/remits/reconcile` (2's `bank-reconcile*.ts`), `/money` stays A's, the
+seam is `depositExplanation(bankLineId)`, and the join table waits for the remittance tables in
+`docs/reference/payer-model.md` after A's audit. **Owner action: upload a bank statement at month
+end** — until one exists the cash side of the books has nothing to reconcile to.
+
 ### The merge round of 8 September (session 1)
 
 Helper A said the uncomfortable thing plainly: nine pull requests open, none merged, findings that

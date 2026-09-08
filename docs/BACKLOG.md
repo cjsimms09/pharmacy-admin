@@ -466,7 +466,8 @@ place, and an arithmetic check before anything is stored.
 | Supplier catalogues with pricing | weekly | ingesting, 5 suppliers |
 | Other expense invoices | as they arrive | ingesting |
 | Third-party reimbursement contracts | as signed | reader built, first live runs done |
-| **835 remittance files** | **future** | **not started — remits tracked per claim** |
+| **835 remittance files** | **future** | **none received yet**; the request builder is live (B), the remittance tables are designed (`payer-model.md`, A auditing) |
+| **Bank statement** | monthly | **never uploaded** — the owner's action at month end; the reader (`bank-statement.ts`) and the placement (`money/bank.ts`) exist; the deposit-to-remittance reconciliation is 2's next build |
 
 ## Done
 
