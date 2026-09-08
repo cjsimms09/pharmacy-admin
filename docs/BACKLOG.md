@@ -384,6 +384,18 @@ words ("29 dispensed NDCs have no NADAC — 2 are devices, 27 are repackager lab
 in a module, a store that runs it, a page that shows it. **Assigned to session 2** after its invoice
 follow-ups, because it runs on the pharmacy computer and can see the real database.
 
+### 10. Plans have to be classified, or the law-first pricing never fires (8 September)
+
+Data health's first run: **6 of 1,054 fills sit on a plan the register has classified.** The site
+decides which law governs a fill — and so whether the Kansas floor (NADAC + the greater of $10.50
+and the Medicaid fee) applies — from `plan_groups.classification`, which the owner sets per
+BIN/PCN/group. With 99% unclassified, `drug-profit.ts`'s law-first rung is a rule with nothing to
+act on. Two halves: the owner classifies the plans behind the most fills (the payers page; the Data
+health row should name the top unclassified triples); and where the BIN listing states the line of
+business (`payer_bins.linesOfBusiness`, Medicare Part D BINs are published), the site proposes the
+class with its source and the owner confirms — proposed, never assumed. Assigned to A after the
+contract match; owner action for the top plans now.
+
 ## The data the site has to ingest
 
 Named by the owner on 7 September as what is still being connected. Each one needs a reader, a

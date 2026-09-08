@@ -158,6 +158,15 @@ $458.29; BIN 610524 5 rows: remit $245.81, cost $0, profit $265.81. Pairs seen: 
 (status paid, not cash plan) by rx, fill, date, NDC; count distinct BIN. A: audit every page that
 states profit by payor against this — the fill owns the profit, each payor owns its own receivable.
 
+**Data health is live (8 September, session 2, `/tools/data-health`) and the hand counts move
+there.** First run on the live database: 17 rows in 9.9 s. Of note beyond what is above:
+**claim → plan class 6 of 1,054 fills (0.6%)** — the plan register (`plan_groups`) has classified
+almost nothing, so the law-first pricing rung (Medicaid = NADAC + fee, the Kansas floor) never
+fires; **NADAC current within three months for 30,067 of 43,396 NDCs** in the table (69.3%);
+**catalogue rows with an AWP 50,870 of 63,809** (79.7%); bank lines none, so no fill traces to
+cash. The page is the record from here; a figure quoted in a chat that is not on it is a figure to
+add to it.
+
 **File handed to 2 (8 September):** `packageUnits` in `drug-directory.ts`, for the FDA package
 parser behind the Data health row "catalogue row → FDA package size". Read the nested description
 to the innermost unit ("30 BLISTER PACK in 1 CARTON / 6 TABLET in 1 BLISTER PACK" = 180 EA); the
