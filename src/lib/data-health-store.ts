@@ -7,6 +7,7 @@ import { comparePack } from "./data-health-packages";
 import { allSuppliers, supplierRecordFor } from "./suppliers-registry";
 import { supplierFromFileName } from "./pioneer-catalog";
 import { getSettings } from "./settings";
+import type { OnHandImportProof } from "./data-health-onhand-proof";
 
 /**
  * Running the data health counts, and keeping the answers.
@@ -404,6 +405,59 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
             ],
       note: invoiceRows.length === 0 ? "No supplier invoice has been filed." : null,
     };
+  });
+
+  /*
+   * ── The shelf against the record count its report prints ─────────
+   *
+   * Counted per import rather than over the whole table, because the question is asked of one
+   * document at a time: this report said it held so many records, and so many are on the shelf for
+   * it. Rolling every count into one fraction would let a complete one cover a short one.
+   */
+  await timed("onhand-proof", async () => {
+    const { onHandProofFraction, onHandProofGaps, onHandProofNote } = await import("./data-health-onhand-proof");
+    const imports = await db
+      .select({
+        id: schema.onHandImports.id,
+        countedOn: schema.onHandImports.countedOn,
+        fileName: schema.onHandImports.fileName,
+        reportedCount: schema.onHandImports.reportedCount,
+        rowsRead: schema.onHandImports.rowsRead,
+        itemsKept: schema.onHandImports.itemsKept,
+        skipReasons: schema.onHandImports.skipReasons,
+      })
+      .from(schema.onHandImports);
+    // Grouped rather than counted per import, so this is one read of a small table and not one per count.
+    const stored = await db
+      .select({ importId: schema.onHand.importId, n: count() })
+      .from(schema.onHand)
+      .groupBy(schema.onHand.importId);
+    const byImport = new Map(stored.map((s) => [s.importId, s.n]));
+
+    const rows: OnHandImportProof[] = imports.map((i) => {
+      let skipped: Record<string, number> = {};
+      try {
+        const parsed = JSON.parse(i.skipReasons) as unknown;
+        // Only a plain object of counts. A shape that drifted is no reasons rather than wrong ones.
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          skipped = Object.fromEntries(Object.entries(parsed as Record<string, unknown>).filter(([, v]) => typeof v === "number" && Number.isFinite(v))) as Record<string, number>;
+        }
+      } catch {
+        skipped = {};
+      }
+      return {
+        countedOn: i.countedOn,
+        fileName: i.fileName,
+        reportedCount: i.reportedCount,
+        rowsRead: i.rowsRead,
+        itemsKept: i.itemsKept,
+        skipped,
+        storedRows: byImport.get(i.id) ?? 0,
+      };
+    });
+
+    const { numerator, denominator } = onHandProofFraction(rows);
+    return { numerator, denominator, gaps: onHandProofGaps(rows), note: onHandProofNote(rows) };
   });
 
   /*

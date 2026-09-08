@@ -258,6 +258,14 @@ export const SPECS: LinkSpec[] = [
       "Every other row on this page measures whether the site's tables agree with each other, which they can do perfectly while all of them disagree with the file they were read from. This one re-reads the stored reports each night and sets them against the claims. Both directions count: a paid row in a report that reached no claim, and a claim no report explains, are the same failure seen from opposite ends, and a denominator that could only see one of them would read a hundred per cent with four hundred strays in the table.",
   },
   {
+    key: "onhand-proof",
+    group: "Datasets",
+    title: "The shelf count proved against the report's own record count",
+    of: "items on the shelf, out of the records the report says it holds",
+    why:
+      "The shelf values the pharmacy's inventory and stands on one side of the cost-of-goods identity, so a row the reader dropped is stock the accounts do not know exists. Everything else the site knows about a count came out of the same reader, which means a reader that lost rows and a report that never had them look identical — the record count PioneerRx prints about itself is the only figure here that did not.",
+  },
+  {
     key: "directory-proof",
     group: "Datasets",
     title: "The FDA directory proved against the load that wrote it",
