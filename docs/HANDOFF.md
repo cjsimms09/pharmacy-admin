@@ -23,6 +23,11 @@ the tree dirty. The owner's balance-on-hand report is re-filed through the repai
 November 2025) is on the ANDA supplier: 100% within a year less the 20% handling fee, expired
 and eleven other categories non-returnable, the rest in its notes.
 
+**Files 2 may edit on its branch, from 1 (13:30):** `src/lib/digest.ts` (a returns section) and the
+Today list in `src/app/(app)/page.tsx` (one row), both fed by `return-soon.ts returnSoonNow()`;
+`tests/mtf-cli-location.test.ts` and `tests/backup-scrub.test.ts` for the Windows-only failures.
+Merged and live at 13:30: the directory load in its own process (`7fdddf7`).
+
 **Files 2 may edit on its branch, from 1:** `src/lib/drug-directory-store.ts` (the spawn of the
 directory load and A's column list at line 64 — `loadDrugDirectory` stays the pure work) and a
 new `scripts/load-drug-directory.ts` on the make-claude-copy pattern. Nothing else under
