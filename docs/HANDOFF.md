@@ -657,6 +657,17 @@ stack in one press. Query 3 sizes it; the `needs_review = 0` half is the number 
 misses. Beside finding 1 they compound — an invoice printing `IPC (INDEPENDENT PHARMACY
 COOPERATIVE), INC` is filed against no supplier *and* earns no rate, for two unrelated reasons.
 
+**Added after `e4097b8`, which landed while I was writing this.** That commit found the real
+version of finding 2 — IPC 11490216, $1,530.89, filed with zero item lines — and fixed both its
+faults in `fileInvoice`: `writeInvoiceLines` called with no options so `allowModel` was undefined,
+and `text ? … : null` so a scan never reached the reader. **`adoptDocument` still reads
+`if (text) await writeInvoiceLines(id, text);`** — the same two faults, verbatim, in the sibling
+path, and it is the one `adoptAll` presses over every adoptable document at once. With no
+`emptyInvoiceWarning` there either, an invoice adopted in bulk can still be filed with a total, no
+lines, no model asked and no flag. Same one-line edit, twenty lines further down the file. Not a
+fault: the redundant `storeInvoiceLines` call beside it replaces rather than appends
+(`replacesStoredLines` gates a delete), so it is wasted work, not doubled money.
+
 `suppliers-registry.ts`, `invoices.ts` and `supplier-match.ts` are yours; I have edited none of
 them. Each is one function and a test. Queries 3, 6, 8, 9 and 10 size all three, and **query 10
 stays the precondition** — aliases filled before anything else moves.

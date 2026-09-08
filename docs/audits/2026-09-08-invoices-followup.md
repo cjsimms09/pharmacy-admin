@@ -87,6 +87,41 @@ Put beside finding 1, the directions are opposite and they compound. An invoice 
 
 Filed against no supplier, and earning no rate, from one document, for two unrelated reasons.
 
+## Added after `e4097b8`: the fix landed on one of the two paths
+
+Written before that commit; this section after it, on `0963d03`.
+
+`e4097b8` — *"The reader that exists for this invoice had never once been asked"* — found the real
+version of finding 2 above, on real data: **IPC 11490216 of 4 September, $1,530.89, filed with zero
+item lines**, its sibling from the same sender the same evening reading eight. Its two faults, both
+in one line of `fileInvoice`:
+
+- `writeInvoiceLines(id, text)` called with no options, so `allowModel` was undefined and the model
+  fallback was off on the only path an invoice actually travels;
+- `text ? … : null`, so a scan — a PDF with no text layer — never reached the reader at all, which
+  is precisely the case the model exists for.
+
+Both are fixed in `fileInvoice`. **Neither is fixed in `adoptDocument`, where the same line reads:**
+
+```ts
+if (text) await writeInvoiceLines(id, text);
+```
+
+No options, so `allowModel` is undefined and the model is off. And the `if (text)` guard, so a scan
+never reaches the reader. That is the same two faults, verbatim, in the sibling path — and
+`adoptDocument` is the one `adoptAll` presses over every adoptable document at once, which is
+exactly where a backlog of scans would be sitting. Add the original finding — no
+`emptyInvoiceWarning`, `needsReview` from the schedule alone — and an invoice adopted in bulk can
+still be filed with a total, no lines, no model asked, and no flag.
+
+**One thing that is *not* wrong, so nobody chases it.** `adoptDocument` calls `writeInvoiceLines`
+and then `storeInvoiceLines` immediately after, and `writeInvoiceLines` calls `storeInvoiceLines`
+itself. That is redundant work, not doubled money: `storeInvoiceLines` deletes the existing lines
+before inserting, gated by `replacesStoredLines`, so the second call replaces rather than appends.
+Worth removing for clarity; it costs nothing but a second read.
+
+The fix is the same edit that was just made twenty lines up the file — and it is one line.
+
 ## What I have not done
 
 `suppliers-registry.ts`, `invoices.ts` and `supplier-match.ts` are 2's. I have edited none of them,
