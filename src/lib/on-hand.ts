@@ -69,6 +69,13 @@ export type OnHandParse = {
   rows: OnHandRow[];
   /** The date the count represents, ISO, from the file. Null where it prints none. */
   countedOn: string | null;
+  /**
+   * Where that date came from, so the import can record which kind of fact it is.
+   *
+   * A shelf the report dated itself and a shelf somebody typed a date onto are different claims,
+   * and the second is only as good as the memory behind it.
+   */
+  countedOnSource: CountDateSource | null;
   /** Headers in the file that meant nothing here. Reported, so a useful column is not lost silently. */
   unmappedColumns: string[];
   /** Rows read and rows kept; the difference is accounted for in `skipped`. */
@@ -141,22 +148,38 @@ const ISO = /(\d{4})-(\d{2})-(\d{2})/;
 const PAGE_FOOTER = /(\d{1,2})\/(\d{1,2})\/(\d{4})\s*,\s*Page\s+\d+\s+of\s+\d+/i;
 
 /**
- * The date the count represents.
+ * Where a count date came from, because the three are not the same quality of fact.
+ *
+ * "Counted on 8 September, dated by the report itself" and "dated by hand" are different claims,
+ * and the second is only as good as the memory of whoever typed it. The caller records this against
+ * the import so a shelf can say which it was rather than presenting both as equally settled.
+ *
+ * `typed` is not produced here — it is the caller's own answer overriding the file — but it is named
+ * in the union so the caller has one vocabulary rather than two.
+ */
+export type CountDateSource = "typed" | "labelled" | "head" | "footer";
+
+/**
+ * The date the count represents, and where it was read from.
  *
  * A line naming it wins over a bare date anywhere in the page furniture, because a report printed
  * on the seventh may well be the sixth's count and dating it wrong by a day misplaces a day of
  * dispensing.
  */
-export function countDate(text: string): string | null {
+export function readCountDate(text: string): { date: string | null; source: CountDateSource | null } {
   const head = text.slice(0, 4000);
   const labelled = head.split(/\r?\n/).find((l) => /(as of|count(ed)? (on|date)|inventory date|report run date|printed on|run date)/i.test(l));
-  for (const line of [labelled, head].filter((x): x is string => Boolean(x))) {
+  for (const [line, source] of [
+    [labelled, "labelled"],
+    [head, "head"],
+  ] as [string | undefined, CountDateSource][]) {
+    if (!line) continue;
     const iso = ISO.exec(line);
-    if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+    if (iso) return { date: `${iso[1]}-${iso[2]}-${iso[3]}`, source };
     const m = DATE.exec(line);
     if (m) {
       const yyyy = m[3].length === 2 ? `20${m[3]}` : m[3];
-      return `${yyyy}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
+      return { date: `${yyyy}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`, source };
     }
   }
 
@@ -172,9 +195,21 @@ export function countDate(text: string): string | null {
    * and the first one sits past the four thousand characters read above.
    */
   const footer = PAGE_FOOTER.exec(text);
-  if (footer) return `${footer[3]}-${footer[1].padStart(2, "0")}-${footer[2].padStart(2, "0")}`;
+  if (footer) {
+    return { date: `${footer[3]}-${footer[1].padStart(2, "0")}-${footer[2].padStart(2, "0")}`, source: "footer" };
+  }
 
-  return null;
+  return { date: null, source: null };
+}
+
+/**
+ * The date alone, for the callers that only want the date.
+ *
+ * Kept so `readCountDate` could be added without changing every caller — the date is what most of
+ * them need, and the source matters only where it is being recorded against an import.
+ */
+export function countDate(text: string): string | null {
+  return readCountDate(text).date;
 }
 
 type Mapping = Partial<Record<keyof typeof ALIASES, number>>;
@@ -323,10 +358,11 @@ export function parseOnHand(text: string): OnHandParse {
     skipped[why] = (skipped[why] ?? 0) + 1;
   };
 
+  const dated = readCountDate(clean);
   const header = findHeader(lines);
   if (!header) {
     return {
-      rows: [], countedOn: countDate(clean), unmappedColumns: [], rowsRead: 0, skipped: {},
+      rows: [], countedOn: dated.date, countedOnSource: dated.source, unmappedColumns: [], rowsRead: 0, skipped: {},
       continuations: 0, reportedCount: reportedRecordCount(lines),
       problems: [whyNotAnOnHandFile(lines)],
     };
@@ -468,7 +504,7 @@ export function parseOnHand(text: string): OnHandParse {
   }
 
 
-  return { rows, countedOn: countDate(clean), unmappedColumns: header.unmapped, rowsRead, skipped, continuations, reportedCount: reported, problems };
+  return { rows, countedOn: dated.date, countedOnSource: dated.source, unmappedColumns: header.unmapped, rowsRead, skipped, continuations, reportedCount: reported, problems };
 }
 
 /** Total units and total value, for the import summary. */
@@ -691,7 +727,8 @@ export function parsePioneerOnHand(text: string): OnHandParse {
    * screen scrape rather than a paged report. Both are stated rather than left off, so the two
    * paths return the same shape and a caller never has to know which one read the file.
    */
-  return { rows, countedOn: countDate(text), unmappedColumns: [], rowsRead, skipped, continuations: 0, reportedCount: null, problems };
+  const dated = readCountDate(text);
+  return { rows, countedOn: dated.date, countedOnSource: dated.source, unmappedColumns: [], rowsRead, skipped, continuations: 0, reportedCount: null, problems };
 }
 
 /** Reads whichever shape the file is. */

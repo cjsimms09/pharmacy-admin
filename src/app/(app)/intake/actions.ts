@@ -23,6 +23,36 @@ async function knownParties() {
 }
 
 /**
+ * The kinds of file the site can read, as the person adding one would name them.
+ *
+ * The owner's words on finding he could not say what he was uploading: "no way to tell system
+ * that's what this is in the add tool. need many more options!!!" He had a balance-on-hand report
+ * in his hand and the only choices offered were a person and a credential type.
+ *
+ * Left empty nothing changes and the site works it out as before. Naming one removes the guess,
+ * which matters most for the files that look like one another — a drug file and a wholesaler's
+ * catalogue are both a wide CSV of NDCs and prices.
+ */
+export const FILE_KINDS = [
+  { key: "", label: "Let the site work it out" },
+  { key: "balance_on_hand", label: "Drug file / balance on hand (PioneerRx)" },
+  { key: "rx_transactions", label: "Rx Transaction Details — the daily claims report" },
+  { key: "supplier_catalog", label: "A wholesaler's catalogue" },
+  { key: "supplier_invoice", label: "A wholesaler's invoice" },
+  { key: "remittance", label: "An 835 remittance from a plan" },
+  { key: "bank_statement", label: "A bank statement" },
+  { key: "contract", label: "A contract, rate exhibit or provider manual" },
+  { key: "staff_document", label: "A licence, certificate or training record" },
+] as const;
+
+/** What the person adding the file said it was, where they said anything. */
+export type IntakeHint = {
+  kind?: string | null;
+  /** The day a count represents, for a balance-on-hand report. Beats the file's own date. */
+  countedOn?: string | null;
+};
+
+/**
  * Reads one stored file the way the queue does: a report the site knows, then an 835, then the
  * business reader, then the compliance classifier for anything the business reader hands over.
  * Returns what to store on the item.
@@ -33,7 +63,47 @@ export async function readIntoIntake(
   intakeId: string,
   docId: string,
   user: { id: string; name: string },
+  hint?: IntakeHint,
 ): Promise<void> {
+  /*
+   * A named kind goes to its reader ahead of every guess — but only where naming it changes the
+   * outcome.
+   *
+   * Balance on hand is the case that prompted this and the only one wired so far: it needs a count
+   * date, no guess can ask for one, and the reader refuses without it. That is exactly how the
+   * owner's upload died with nothing on the screen to do about it.
+   *
+   * Every other kind falls through to the recogniser below, which is B's and is generally right.
+   * The choice is still recorded on the item, so the review page opens on the answer he gave.
+   * Wiring the rest is worth doing only where a named kind would actually beat the guess.
+   */
+  if (hint?.kind === "balance_on_hand") {
+    try {
+      const { fileOnHand } = await import("@/lib/shelf");
+      const r = await fileOnHand(bytes, file.fileName, { userId: user.id }, { countedOn: hint.countedOn ?? undefined, documentId: docId });
+      const summary = r.ok
+        ? `${r.items.toLocaleString("en-US")} items counted on ${r.countedOn}` +
+          (r.replaced ? ", replacing the count already held for that day" : "") +
+          (Object.keys(r.skipped).length > 0
+            ? `; ${Object.entries(r.skipped).map(([why, n]) => `${n} ${why}`).join(", ")}`
+            : "")
+        : r.why;
+      await db
+        .update(schema.intakeItems)
+        .set({
+          status: r.ok ? "applied" : "extracted",
+          ...(r.ok ? { appliedAt: new Date().toISOString() } : {}),
+          resultJson: JSON.stringify({ kind: "report", routedAs: "on_hand", summary }),
+        })
+        .where(eq(schema.intakeItems.id, intakeId));
+      // A refusal ends it either way: the reader has said what is wrong, and no model can supply a
+      // count date the file does not carry. The sentence is on the item for somebody to act on.
+      return;
+    } catch (e) {
+      void e;
+    }
+  }
+
   try {
     const { importDropped } = await import("@/lib/mailbox");
     const routed = await importDropped(bytes, file.fileName, { userId: user.id, userName: user.name }, docId);
@@ -129,6 +199,15 @@ export async function dropFiles(fd: FormData) {
   // faded surname off a phone photo does not. Everything else still comes from the document.
   const hintPersonId = String(fd.get("hintPersonId") ?? "").trim() || null;
   const hintCredentialType = String(fd.get("hintCredentialType") ?? "").trim() || null;
+  /*
+   * What the person says the file is, and — for a count — the day it represents.
+   *
+   * A typed date beats the report's own, because the person adding it knows whether this morning's
+   * print is this morning's shelf or yesterday's. Where they leave it blank the file's own date
+   * stands, and where neither exists the reader refuses and says so.
+   */
+  const hintKind = String(fd.get("hintKind") ?? "").trim() || null;
+  const hintCountedOn = String(fd.get("hintCountedOn") ?? "").trim() || null;
   const hinted = people.find((p) => p.id === hintPersonId) ?? null;
 
   const ids: string[] = [];
@@ -158,7 +237,7 @@ export async function dropFiles(fd: FormData) {
     ids.push(intakeId);
 
     const bytes = Buffer.from(await file.arrayBuffer());
-    await readIntoIntake(bytes, { fileName: file.name, mimeType: stored.mimeType }, intakeId, docId, { id: user.id, name: user.name });
+    await readIntoIntake(bytes, { fileName: file.name, mimeType: stored.mimeType }, intakeId, docId, { id: user.id, name: user.name }, { kind: hintKind, countedOn: hintCountedOn });
     /* The optional hints still apply where the compliance classifier answered. */
     if (hinted || hintCredentialType) {
       const it = await db.query.intakeItems.findFirst({ where: eq(schema.intakeItems.id, intakeId) });
@@ -173,7 +252,12 @@ export async function dropFiles(fd: FormData) {
       }
     }
   }
-  await audit({ action: "intake.dropped", userId: user.id, userName: user.name, details: `${files.length} file(s)` });
+  await audit({
+    action: "intake.dropped",
+    userId: user.id,
+    userName: user.name,
+    details: `${files.length} file(s)` + (hintKind ? `, told they are ${hintKind}` : "") + (hintCountedOn ? `, counted on ${hintCountedOn}` : ""),
+  });
   revalidatePath("/intake");
   if (ids.length === 1) {
     const it = await db.query.intakeItems.findFirst({ where: eq(schema.intakeItems.id, ids[0]) });

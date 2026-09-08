@@ -10,6 +10,7 @@ import { CREDENTIAL_LABEL } from "@/lib/labels";
 import { hasApiKey, type ClassifiedDocT } from "@/lib/ai";
 import { dropFiles } from "./actions";
 import { DropZone } from "./drop-zone";
+import { FILE_KINDS } from "./actions";
 import { describeBusinessDoc, type BusinessDocT } from "@/lib/business-docs";
 import { KIND_LABEL as BUSINESS_LABEL } from "./[id]/business-review";
 
@@ -55,6 +56,39 @@ export default async function IntakePage({ searchParams }: { searchParams: Promi
         <section className="card mb-6">
           <form action={dropFiles} encType="multipart/form-data" className="flex flex-col gap-3">
             <DropZone />
+
+            {/*
+              What is this? — asked before the guess rather than after it.
+
+              The owner uploaded a balance-on-hand report and had no way to say so: "no way to tell
+              system that's what this is in the add tool. need many more options!!!" The optional
+              block below offered a person and a credential type, which are the two things a
+              wholesaler's catalogue is not.
+
+              Out in the open rather than behind the "optional" fold, because the fold is for
+              refinements and this is the question. Left on "let the site work it out" it behaves
+              exactly as it did.
+            */}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="What is this?" hint="Naming it skips the guess. Leave it and the site reads the file to find out.">
+                <select name="hintKind" className="field" defaultValue="">
+                  {FILE_KINDS.map((k) => (
+                    <option key={k.key} value={k.key}>{k.label}</option>
+                  ))}
+                </select>
+              </Field>
+              {/*
+                Shown always rather than only for a count, because a select that reveals a field is
+                a select somebody has to discover. The hint says who it is for, and it is ignored
+                for every other kind.
+              */}
+              <Field
+                label="If it is a count, which day is it for?"
+                hint="Leave blank to use the date the report prints on itself. Only a count needs this."
+              >
+                <input type="date" name="hintCountedOn" className="field" defaultValue="" />
+              </Field>
+            </div>
 
             {/*
               Optional, and only worth filling in for a stack that shares an answer — one person's
