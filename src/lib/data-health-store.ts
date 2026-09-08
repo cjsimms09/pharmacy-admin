@@ -222,8 +222,9 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
   /*
    * ── How much history the claims cover ────────────────────────────
    *
-   * The archive is three weeks. Every rate, every steadiness test and every trend on this site is
-   * judged on whatever window exists, and three weeks cannot tell a slow seller from a new one. The
+   * The paid archive is fifteen days, 24 August to 7 September. Every rate, every steadiness test
+   * and every trend on this site is judged on whatever window exists, and a fortnight cannot tell a
+   * slow seller from a new one. The
    * denominator is a year because a year is what has been asked of PioneerRx — so the row reads as
    * progress towards the thing that fixes it rather than as an abstract percentage.
    */
