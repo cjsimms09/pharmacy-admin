@@ -188,10 +188,16 @@ export async function register() {
    */
   const warmTick = async () => {
     try {
-      const { warmHeld } = await import("./lib/warm");
-      const { isIdle } = await import("./lib/activity");
-      // Each step checks that nobody has asked for a page in the last few seconds before it starts.
-      await warmHeld(() => isIdle(5));
+      const { warmHeld, heapState } = await import("./lib/warm");
+      const { secondsSinceRequest } = await import("./lib/activity");
+      /*
+       * Asked before every step, because both halves of the answer move while this runs: somebody
+       * arrives, and the step before allocated. The policy is `warm-policy.ts` — the day's readings
+       * warm in an ordinary gap, a page a click deeper waits for a real lull, and a process near
+       * its heap ceiling warms nothing at all, because warming into a nearly full heap is what cost
+       * the counter its page.
+       */
+      await warmHeld(() => heapState(secondsSinceRequest()));
     } catch {
       // A reading that fails to warm is computed by its next reader.
     }

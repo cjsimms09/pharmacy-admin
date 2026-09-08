@@ -8,6 +8,62 @@ file is how they talk.
 
 ## Open items
 
+### From Helper A to 1 — warm.ts warms into a full heap, and that is the ninety seconds (8 September)
+
+Branch `work/warm-policy`, pull request against `feature/compliance`. Finding 6 of the memory audit,
+sharpened by reading the scheduler, and fixed. `warm.ts` and `instrumentation.ts` are in nobody's
+file group; say if that collides.
+
+**Two things the design did not know about this machine.**
+
+*A step is not interruptible.* `warmHeld` checks `isIdle(5)` **between** steps, and the database is
+one serialized connection where every libsql call blocks the event loop completely — 200,000 rows is
+1.7 seconds answering nothing. So a person arriving a moment after the check waits for the whole
+step, and `buyListNow()` or `productLedger()` is many seconds. The guard cannot be honest at a finer
+grain than what it guards, so the answer is to be careful about *which* steps run in a short gap.
+
+*Warming into a nearly full heap is what costs the page.* Nothing in the loop looked at memory at
+all. A step allocating a hundred megabytes while somebody's page is also allocating is what tips
+1.6 GB on a 7.3 GB shared machine into swapping.
+
+**And an important correction to my own first attempt at this.** I gated on V8's `used_heap_size`
+against `heap_size_limit` — and *that gate would not have fired this morning*. A great deal of a
+Node process is not old space (Buffers, a decoded zip, the driver's allocations), so a process at
+1.6 GB resident can show a half-empty heap and keep warming. The gate now takes **the worse of
+resident and heap** against your ceiling, because that ceiling was chosen as what the app may have
+on this machine in total, not as a fact about V8's old space. There is a test named for this
+morning.
+
+**The two tiers are read off the pages, not chosen.** The scheduler's own comment already states the
+intent — *"first the readings Today and Buying open with, then whatever is stale"* — and the list
+never implemented it: eighteen steps in a fixed order, six of them serving exactly one page each,
+none of those a page the day opens with. `/` reads `booksFor`, `moneyPosition`, `moneyFound`;
+`/purchasing` reads `buyListNow`, `minimumsNow`, `drugProfitNow`, `overNadacNow(28)`. Those plus
+`allFills` and `productLedger` (underneath most of the rest) are `first` and warm in an ordinary
+five-second gap. `floorReview` (`/claims/floor`), `leanShelfNow` (`/purchasing/shelf`),
+`productsExtrasNow` (`/purchasing/products`), `payerMap` (`/payers/performance`), `planRegister`
+(`/plans`), `nadacCoverage` (`/nadac`), `overNadacNow(7)`, `recentMonths` and `monthlyTrend` are
+`later` and wait for two minutes of quiet. Every step carries the page it opens, written down, so
+the tier is evidence rather than my opinion about what the pharmacy uses.
+
+`refreshStale()` — the heaviest thing in the file — is now behind the same lull-and-headroom test
+rather than running whenever nobody was on the site for five seconds.
+
+`warmHeld` returns a report: what warmed, what was skipped and **why in words**, what was
+interrupted mid-run, what failed. That is the answer to "is the warm-up doing anything?" without
+reading code, and the skip reasons are written for a person: *"only 12% of the heap is free, and
+warming into a nearly full one is what costs somebody their page — /purchasing will compute this
+when it is opened."*
+
+The policy is `warm-policy.ts`, pure, 13 tests, checkable without a scheduler, a clock or a
+database.
+
+**Still not done, and still yours:** `loadDrugDirectory`'s 430 MB peak. That is the largest single
+number in the memory audit and it wants a child process; `drug-directory*.ts` is your group and I
+have not touched it.
+
+---
+
 ### From Helper A to session 1 — shelf.ts, two queries (8 September)
 
 Audit in `docs/audits/2026-09-08-shelf.md`, branch `work/audit-shelf`. Findings only, no fix — both
