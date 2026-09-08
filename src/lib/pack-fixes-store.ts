@@ -336,7 +336,7 @@ export async function packQuestions(opts: { text?: string; limit?: number; inclu
   total: number;
 }> {
   const { byNdc, packageOf, fixes } = await load();
-  const { fillsBy, spentBy } = await dealings();
+  const [{ fillsBy, spentBy }, units] = await Promise.all([dealings(), nadacUnits()]);
   const wanted = (opts.text ?? "").trim().toLowerCase();
   const out: PackQuestion[] = [];
 
@@ -348,10 +348,27 @@ export async function packQuestions(opts: { text?: string; limit?: number; inclu
     // Settled by a person is done, unless somebody asked to see the settled ones too.
     if (settledByPerson && !opts.includeSettled) continue;
 
+    /*
+     * A unit disagreement NADAC has already settled is not a question.
+     *
+     * "McKesson counts 1 EA where the FDA counts 20 ML" looks like a disagreement and is not one:
+     * NADAC prices that NDC per EA, which says the package is counted, so the wholesaler's number is
+     * the right divisor and nothing needs deciding. Left in, these were 874 of the queue — items
+     * asking a pharmacist to adjudicate something a document had already answered, which is the
+     * fastest way to make a work queue ignored.
+     */
+    const nadacUnit = units.get(ndc11) ?? null;
+
     let reason: NeedsPersonReason | null = null;
     let why = "";
     for (const r of rows) {
       const v = comparePack(r.packSize, description);
+      if (v.verdict === "unit-differs") {
+        // NADAC says this package is counted and the catalogue counts it, so the FDA's volume is
+        // not a disagreement to adjudicate — it is a second true description of the same box.
+        const cat = cataloguePackUnits(r.packSize);
+        if (nadacUnit === "EA" && cat.ok && cat.uom === "EA") continue;
+      }
       if (v.verdict === "unit-differs") {
         reason = "unit-differs";
         why = `${r.supplier} counts ${v.catalogue} where the FDA counts ${v.fda}.`;
@@ -500,19 +517,46 @@ export async function unsettlePack(ndc11: string): Promise<void> {
 }
 
 /** How the work stands, for the top of the page. */
-export async function packFixSummary(): Promise<{ settledByPerson: number; settledByFda: number; needsPerson: number }> {
+export async function packFixSummary(): Promise<{
+  settledByPerson: number;
+  settledByFda: number;
+  needsPerson: number;
+  /** Questions NADAC answered: counted, as NADAC counts them. Nothing was wrong with these. */
+  closedByNadac: number;
+}> {
   const { byNdc, packageOf, fixes } = await load();
+  const units = await nadacUnits();
   let needsPerson = 0;
+  let closedByNadac = 0;
   for (const [ndc11, rows] of byNdc) {
     const description = packageOf.get(ndc11) ?? null;
     const existing = fixes.get(ndc11);
-    if (existing && !isFromFda(existing.correctedBy)) continue;
-    if (rows.some((r) => ["unit-differs", "differs", "cannot-compare"].includes(comparePack(r.packSize, description).verdict))) needsPerson++;
+    if (existing && isFromPerson(existing.correctedBy)) continue;
+    const nadacUnit = units.get(ndc11) ?? null;
+
+    // The same gate the queue applies, so the figure at the top of the page and the list under it
+    // can never disagree about how much work there is.
+    let open = false;
+    let closed = false;
+    for (const r of rows) {
+      const v = comparePack(r.packSize, description).verdict;
+      if (v === "unit-differs") {
+        const cat = cataloguePackUnits(r.packSize);
+        if (nadacUnit === "EA" && cat.ok && cat.uom === "EA") {
+          closed = true;
+          continue;
+        }
+      }
+      if (v === "unit-differs" || v === "differs" || v === "cannot-compare") open = true;
+    }
+    if (open) needsPerson++;
+    else if (closed) closedByNadac++;
   }
   const all = [...fixes.values()];
   return {
-    settledByPerson: all.filter((f) => !isFromFda(f.correctedBy)).length,
+    settledByPerson: all.filter((f) => isFromPerson(f.correctedBy)).length,
     settledByFda: all.filter((f) => isFromFda(f.correctedBy)).length,
     needsPerson,
+    closedByNadac,
   };
 }

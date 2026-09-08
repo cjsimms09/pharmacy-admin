@@ -176,6 +176,54 @@ describe("why a package is not containers-with-contents", () => {
   });
 
   test("the shape the rule does handle says so, so the breakdown adds up", () => {
-    assert.equal(containerShape("1 VIAL in 1 CARTON (0002-7501-01) / 20 mL in 1 VIAL"), "this shape");
+    assert.match(containerShape("1 VIAL in 1 CARTON (0002-7501-01) / 20 mL in 1 VIAL"), /this rule's own shape/);
+  });
+});
+
+/**
+ * The FDA's qualifier after the comma must not defeat any of the lists.
+ *
+ * The directory writes "BOTTLE, PLASTIC", "VIAL, SINGLE-USE", "SYRINGE, PLASTIC". Every list here
+ * names the thing, not the thing plus an adjective, so the qualifier let the container fault walk
+ * back in behind a comma: "3 BOTTLE, PLASTIC in 1 CARTON" read as three dispensing units and gave a
+ * per-unit cost three times too cheap, on the same descriptions the plain nouns refuse.
+ */
+describe("a container with an adjective is still a container", () => {
+  test("qualified outer packaging is refused exactly as the plain nouns are", () => {
+    // Only the nouns that are packaging. A bottle of unknown contents is not three of anything.
+    for (const noun of ["BOTTLE, PLASTIC", "BOTTLE, PUMP", "CARTON, UNIT-DOSE", "BLISTER PACK, UNIT-DOSE"]) {
+      const r = fdaPackageUnits(`3 ${noun} in 1 CASE (1234-5678-90)`);
+      assert.equal(r.ok, false, `"${noun}" must not read as three dispensing units`);
+    }
+  });
+
+  test("a qualified vial or syringe still counts, because those are dispensed one at a time", () => {
+    // The list that stops a reading deliberately excludes vial, syringe, tube and ampule. Three
+    // vials IS three dispensing units, and the qualifier must not change that in either direction.
+    for (const noun of ["VIAL, SINGLE-USE", "VIAL, MULTI-DOSE", "SYRINGE, PLASTIC"]) {
+      assert.deepEqual(fdaPackageUnits(`3 ${noun} in 1 CARTON (1234-5678-90)`), { ok: true, units: 3, uom: "EA" }, noun);
+    }
+  });
+
+  test("a qualified dosage form is still that dosage form", () => {
+    // The head noun rule has to cut both ways, or "TABLET, DELAYED RELEASE" stops being a tablet.
+    assert.deepEqual(fdaPackageUnits("100 TABLET, DELAYED RELEASE in 1 BOTTLE (0093-0073-01)"), {
+      ok: true,
+      units: 100,
+      uom: "EA",
+    });
+  });
+
+  test("a qualified vial still counts as a container somebody dispenses", () => {
+    // The other direction: the contents rule needs "VIAL, SINGLE-USE" to be a vial, or a package
+    // the FDA describes perfectly well is refused for having an adjective in it.
+    const v = comparePack("20 ML", "1 VIAL, SINGLE-USE in 1 CARTON (0002-7501-01) / 20 mL in 1 VIAL, SINGLE-USE");
+    assert.equal(v.verdict, "agree");
+    assert.match(containerShape("1 VIAL, SINGLE-USE in 1 CARTON (0002-7501-01) / 20 mL in 1 VIAL, SINGLE-USE"), /this rule's own shape/);
+  });
+
+  test("the shape everything else is measured against says what it is", () => {
+    // It read literally "this shape", which is a label that lost its words on a page somebody reads.
+    assert.doesNotMatch(containerShape("1 VIAL in 1 CARTON (1) / 20 mL in 1 VIAL"), /^this shape$/);
   });
 });
