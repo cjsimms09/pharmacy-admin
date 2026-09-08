@@ -693,6 +693,22 @@ enforces (refuse a file whose CLP, PLB and BPR do not balance), post the payment
 by prescription and fill, and file the payer's 835 as the receipt the cash books read. Unmatched
 lines are held and named, never dropped. Recogniser side B's; route and post 2's; the reader is
 A's and already tested. The facilitator's files already arrive this way through the MTF tool.
+### 28. From contracts to profit: prove the rate, then change what is bought and dispensed, on one page (8 September)
+
+The owner's words: "we have contract info and can make a lot of connections. how do we use that to
+extract more profit, change what we order. whats best way to do this.. are we sure about
+reimbursement rate, can we prove it? how do we turn that into more profit.. how do we present that
+info to me in a clear way to make it actionable??" And, the same hour: "a little concerned your
+info doesnt match reality." The order is fixed by that concern. (1) **Prove it** — the backtest of
+item 23: every fill on a settled network priced from its rate and set beside what the plan paid,
+by network, with the share that reproduces within a dollar; nothing downstream is trusted from a
+network the backtest has not proved. (2) **Then use it**, three levers each measured on the real
+fills: which NDC to dispense within an equivalence group under each network's formula (a MAC or
+AWP-minus rate pays the same for a dearer NDC, so the cheapest to buy wins; a NADAC-plus rate pays
+cost plus a fee, so the choice is indifferent); which wholesaler to buy each from given that; and
+where a days-supply band (84+) or a preferred network pays differently. (3) **Present it** on one
+page, Profit by payer: per network — fills, revenue, cost, margin, expected against paid, the top
+drugs losing money and the one action each — with the proof share printed beside every figure.
 ## The data the site has to ingest
 
 Named by the owner on 7 September as what is still being connected. Each one needs a reader, a
