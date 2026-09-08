@@ -188,6 +188,26 @@ export function applicationParts(application: string | null): { type: "A" | "N";
   return { type: m[1].toUpperCase() === "ANDA" ? "A" : "N", no: m[2].padStart(6, "0") };
 }
 
+/**
+ * Brand or generic, from the FDA's own marketing category, for an NDC NADAC does not classify.
+ *
+ * A product group carries NADAC's brand/generic flag so a brand and its generic are never one
+ * buying decision. NADAC prices 57% of the catalogue; for the rest the flag was "?", and on the
+ * live database 383 FDA-keyed groups with no NADAC row held both a brand and a generic under one
+ * key — exactly the merge the flag exists to prevent. The FDA states it for every NDC it lists:
+ * an ANDA is a generic, an NDA or BLA a brand, an "NDA AUTHORIZED GENERIC" is sold as a generic
+ * and bought as one. An OTC monograph product is neither in the sense a rate schedule means and is
+ * flagged OTC instead. Unapproved and homeopathic products stay unclassified rather than guessed.
+ */
+export function fdaClassification(marketingCategory: string | null | undefined): { classification: "B" | "G" | null; otc: boolean } {
+  const c = (marketingCategory ?? "").trim().toUpperCase();
+  if (!c) return { classification: null, otc: false };
+  if (c.startsWith("OTC")) return { classification: null, otc: true };
+  if (c === "ANDA" || c.includes("AUTHORIZED GENERIC")) return { classification: "G", otc: false };
+  if (c === "NDA" || c === "BLA" || c.startsWith("NDA ") || c.startsWith("BLA ")) return { classification: "B", otc: false };
+  return { classification: null, otc: false };
+}
+
 /** The numbers in a strength, so "20 mg/1" and "20MG" and "EQ 20MG BASE" compare as 20. */
 export function strengthNumbers(s: string): number[] {
   return (s.match(/\d+(?:\.\d+)?/g) ?? []).map(Number);

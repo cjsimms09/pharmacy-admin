@@ -2,7 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import zlib from "node:zlib";
-import { parseDirectoryProducts, parseDirectoryPackages, parseOrangeBook, buildDirectory, equivalenceKey, substitutable, applicationParts, strengthNumbers, packageUnits } from "../src/lib/drug-directory";
+import { parseDirectoryProducts, parseDirectoryPackages, parseOrangeBook, buildDirectory, equivalenceKey, substitutable, applicationParts, strengthNumbers, packageUnits, fdaClassification } from "../src/lib/drug-directory";
 import { readZip } from "../src/lib/zip-read";
 
 const products = parseDirectoryProducts(fs.readFileSync("fixtures/fda-ndc-product.txt", "latin1"));
@@ -223,5 +223,33 @@ describe("what a package holds, from the FDA rather than from a wholesaler", () 
     const rows = buildDirectory(products, [pkg, { ...pkg }], []);
     assert.equal(rows.length, 1);
     assert.equal(rows[0].ndc11, "72043250001");
+  });
+});
+
+/**
+ * Brand or generic from the FDA's marketing category, for the NDCs NADAC does not classify. On the
+ * live database 383 FDA-keyed groups with no NADAC row held a brand and a generic under one key
+ * because the flag was "?" for both.
+ */
+describe("brand or generic from the FDA's marketing category", () => {
+  test("an ANDA is a generic; an NDA or BLA is a brand", () => {
+    assert.deepEqual(fdaClassification("ANDA"), { classification: "G", otc: false });
+    assert.deepEqual(fdaClassification("NDA"), { classification: "B", otc: false });
+    assert.deepEqual(fdaClassification("BLA"), { classification: "B", otc: false });
+  });
+
+  test("an authorized generic is sold and bought as a generic, whatever application it sits under", () => {
+    assert.deepEqual(fdaClassification("NDA AUTHORIZED GENERIC"), { classification: "G", otc: false });
+  });
+
+  test("an OTC monograph product is OTC, not brand or generic", () => {
+    assert.deepEqual(fdaClassification("OTC MONOGRAPH DRUG"), { classification: null, otc: true });
+    assert.deepEqual(fdaClassification("OTC MONOGRAPH FINAL"), { classification: null, otc: true });
+  });
+
+  test("unapproved and homeopathic products stay unclassified rather than guessed", () => {
+    assert.deepEqual(fdaClassification("UNAPPROVED HOMEOPATHIC"), { classification: null, otc: false });
+    assert.deepEqual(fdaClassification("UNAPPROVED DRUG OTHER"), { classification: null, otc: false });
+    assert.deepEqual(fdaClassification(null), { classification: null, otc: false });
   });
 });

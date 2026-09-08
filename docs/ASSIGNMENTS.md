@@ -121,6 +121,18 @@ McKesson line. Start with Today and Ordering, because the owner opens those most
 Works in its own worktree, never in 1's folder (a deploy runs `git checkout -- .` there). Hands the
 branch to 1 by message when `npm run check` passes. **B audits this branch** — see B below.
 
+**Then (8 September, from 1, after the bank module): two ingestion jobs on the critical path.**
+(1) **The claims history** — the archive is 21 days long and every rate is judged on it; the
+owner is exporting twelve months of "Rx Transaction Details By Submission Type". Prove the reader
+(`rx-transactions.ts`, `importRxTransactions`) on a multi-month file: fixed columns across page
+breaks and month boundaries, `transactionKey` de-duplication on a re-sent day, a tens-of-thousands
+row import in a separate process so the site keeps answering, and an import report that says what
+it read and skipped. Fixture extended across a month boundary from `fixtures/rx-transactions.txt`.
+(2) **The on-hand count** — none has ever arrived; `shelf.ts fileOnHand` has never seen a real
+file. Fixture, test, and a refusal that names the column it wanted rather than filing zeros, so
+the first real file lands first time. Then the reconcile store and page once the remittance tables
+exist, and the McKesson invoice when it arrives.
+
 **Then (8 September, from 1, the owner's ask): pack sizes fixed and correctable** — `docs/BACKLOG.md`
 item 11. Auto-correct from the FDA where its description reads to a dispensing unit and the
 catalogue is a clean multiple; a lookup-and-correct page for the rest; corrections in
