@@ -2727,6 +2727,14 @@ export const onHand = sqliteTable(
     onOrderThousandths: integer("on_order_thousandths"),
     /** Units in one package, which is what turns "order 140" into "order two bottles". */
     packQty: integer("pack_qty"),
+    /**
+     * The level the pharmacy''s own system would reorder at, in whole units.
+     *
+     * Not on_order_thousandths, which is a different figure: what is on order has been bought and
+     * has not arrived; an order point is a level nobody has bought anything against. Null means
+     * none is set — PioneerRx writes -1 for that and a sentinel is not a quantity.
+     */
+    orderPointUnits: integer("order_point_units"),
     /** True where the file counted packages and the reader multiplied them out. */
     countedInPackages: integer("counted_in_packages", { mode: "boolean" }).notNull().default(false),
     unit: text("unit"),

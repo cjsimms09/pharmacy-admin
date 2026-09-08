@@ -54,6 +54,14 @@ export type OnHandRow = {
   onOrderThousandths?: number | null;
   /** Units in the package the item is bought in — "180 EA". */
   packQty?: number | null;
+  /**
+   * The level the pharmacy's own system would reorder at, in dispensing units.
+   *
+   * PioneerRx's answer, not this site's: it is what the pharmacist set, and the shelf screen shows
+   * it beside what is actually on hand so the two can disagree in public. Null where none is set —
+   * the file writes -1 for that, on 406 of 1,770 rows, and a sentinel is not a quantity.
+   */
+  orderPointUnits?: number | null;
   /** True where the report counted whole packages and this reader multiplied them out. */
   countedInPackages?: boolean;
   /** Units on the shelf, in thousandths, so a part bottle is exact. Always dispensing units. */
@@ -69,25 +77,55 @@ export type OnHandParse = {
   rows: OnHandRow[];
   /** The date the count represents, ISO, from the file. Null where it prints none. */
   countedOn: string | null;
+  /**
+   * Where that date came from, so the import can record which kind of fact it is.
+   *
+   * A shelf the report dated itself and a shelf somebody typed a date onto are different claims,
+   * and the second is only as good as the memory behind it.
+   */
+  countedOnSource: CountDateSource | null;
   /** Headers in the file that meant nothing here. Reported, so a useful column is not lost silently. */
   unmappedColumns: string[];
   /** Rows read and rows kept; the difference is accounted for in `skipped`. */
   rowsRead: number;
   skipped: Record<string, number>;
+  /**
+   * Lines that were the tail of the row above rather than a product of their own.
+   *
+   * Neither kept nor lost, so they belong in neither count — reported separately because a reader
+   * that silently discards lines is one nobody can check.
+   */
+  continuations: number;
+  /** The report's own record count, where it prints one. The only figure here we did not produce. */
+  reportedCount: number | null;
   problems: string[];
 };
 
 /** Column meanings, matched against a header cell folded to lower case with punctuation dropped. */
 const ALIASES: Record<
-  keyof Pick<OnHandRow, "ndc11" | "description" | "itemNumber" | "quantityThousandths" | "unit" | "unitCostMicros" | "valueCents" | "inventoryGroup">,
+  keyof Pick<
+    OnHandRow,
+    "ndc11" | "description" | "itemNumber" | "quantityThousandths" | "unit" | "unitCostMicros" | "valueCents" | "inventoryGroup" | "packQty" | "orderPointUnits"
+  >,
   RegExp
 > = {
   ndc11: /^(ndc|ndc ?11|ndc ?number|ndc ?code|item ?ndc|dispensed ?ndc)$/,
-  description: /^(description|item ?description|item ?name|drug ?name|product|product ?name|item)$/,
+  description: /^(description|item ?description|item ?name|drug|drug ?name|product|product ?name|item)$/,
   itemNumber: /^(item ?number|item ?no|item ?#|supplier ?item ?number|sku)$/,
   quantityThousandths: /^(quantity ?on ?hand|qty ?on ?hand|on ?hand ?quantity|on ?hand ?qty|on ?hand|qoh|quantity|qty|current ?quantity|current ?qty|inventory ?quantity|stock ?on ?hand)$/,
   unit: /^(unit|uom|unit ?of ?measure|dispensing ?unit|pricing ?unit)$/,
-  unitCostMicros: /^(unit ?cost|cost ?per ?unit|acquisition ?cost|acq ?cost|average ?cost|avg ?cost|cost ?each|last ?cost)$/,
+  /*
+   * A bare "Cost" is a cost per unit here, and the drug file's is the reason.
+   *
+   * Every row of the owner's first count came back costless — the shelf page said "the file carried
+   * no values" for 1,770 products — because PioneerRx heads the column "Cost" and this list wanted
+   * "Unit Cost". The figure is per unit: $0.93 against a bottle of 180 acamprosate.
+   *
+   * The ambiguity is real and is settled by the neighbours rather than by hope: a file meaning the
+   * whole line's cost calls it "Extended Cost", "Total Cost" or "Inventory Value", and every one of
+   * those is claimed by `valueCents` below. What is left for a bare "Cost" is the per-unit reading.
+   */
+  unitCostMicros: /^(cost|unit ?cost|cost ?per ?unit|acquisition ?cost|acq ?cost|average ?cost|avg ?cost|cost ?each|last ?cost)$/,
   valueCents: /^(extended ?cost|extended ?value|total ?cost|inventory ?value|on ?hand ?value|value|extended|ext ?cost)$/,
   /*
    * Which shelf the item sits on, which the four-line report reads and the column export dropped.
@@ -97,7 +135,37 @@ const ALIASES: Record<
    * and a front-shop line with an eleven-digit code is counted as stock on the pharmacy shelf.
    */
   inventoryGroup: /^(inventory ?group|inv ?group|group|department|dept|category|shelf|location)$/,
+  /**
+   * How many units the package holds, which the drug file heads "Size".
+   *
+   * Read but never multiplied by: this path counts units already, and `countedInPackages` stays
+   * false, so nothing here turns 180 tablets into 180 bottles. It is carried so the shelf can say
+   * "two bottles of 90" instead of "180", which is how a pharmacist thinks about a shelf.
+   */
+  packQty: /^(size|pack ?size|package ?size|pack ?qty|package ?quantity|units ?per ?pack)$/,
+  /**
+   * The level PioneerRx would reorder at, which it heads "Order Point".
+   *
+   * Minus one is the file's own "none set" — on 406 of the 1,770 rows — and it is a sentinel, not a
+   * shelf one unit overdrawn. Stored as null so nothing averages it or compares it to a quantity.
+   */
+  orderPointUnits: /^(order ?point|reorder ?point|min ?stock|minimum ?stock|par|par ?level)$/,
 };
+
+/**
+ * A whole count of units, or null.
+ *
+ * `treatMinusOneAsNull` is for a sentinel rather than a quantity: PioneerRx writes -1 for "no order
+ * point set". Averaged or compared as a number it would report a shelf one unit overdrawn.
+ */
+function wholeUnits(raw: string | null | undefined, treatMinusOneAsNull = false): number | null {
+  const t = (raw ?? "").trim();
+  if (t === "") return null;
+  const n = Number(t.replace(/,/g, ""));
+  if (!Number.isFinite(n)) return null;
+  if (treatMinusOneAsNull && n === -1) return null;
+  return n;
+}
 
 const fold = (s: string) => s.replace(/^﻿/, "").trim().toLowerCase().replace(/[._\-/]+/g, " ").replace(/\s+/g, " ").replace(/[:*]+$/, "");
 
@@ -119,25 +187,81 @@ const DATE = /(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})/;
 const ISO = /(\d{4})-(\d{2})-(\d{2})/;
 
 /**
- * The date the count represents.
+ * A printed report's page footer, which is where PioneerRx puts the date it was run.
+ *
+ * The Drug File Print carries no "As of" line at all: it prints "09/08/2026,Page 1 of 34" under
+ * every page, and the first of those sits past the first four thousand characters that `countDate`
+ * reads. So the file did say when it was counted, and the reader refused it for carrying no date —
+ * which is the site ignoring the document rather than reading it.
+ *
+ * Matched on the whole shape, the date and the page number together, so a date inside a drug name
+ * can never be mistaken for the day the shelf was counted.
+ */
+const PAGE_FOOTER = /(\d{1,2})\/(\d{1,2})\/(\d{4})\s*,\s*Page\s+\d+\s+of\s+\d+/i;
+
+/**
+ * Where a count date came from, because the three are not the same quality of fact.
+ *
+ * "Counted on 8 September, dated by the report itself" and "dated by hand" are different claims,
+ * and the second is only as good as the memory of whoever typed it. The caller records this against
+ * the import so a shelf can say which it was rather than presenting both as equally settled.
+ *
+ * `typed` is not produced here — it is the caller's own answer overriding the file — but it is named
+ * in the union so the caller has one vocabulary rather than two.
+ */
+export type CountDateSource = "typed" | "labelled" | "head" | "footer";
+
+/**
+ * The date the count represents, and where it was read from.
  *
  * A line naming it wins over a bare date anywhere in the page furniture, because a report printed
  * on the seventh may well be the sixth's count and dating it wrong by a day misplaces a day of
  * dispensing.
  */
-export function countDate(text: string): string | null {
+export function readCountDate(text: string): { date: string | null; source: CountDateSource | null } {
   const head = text.slice(0, 4000);
   const labelled = head.split(/\r?\n/).find((l) => /(as of|count(ed)? (on|date)|inventory date|report run date|printed on|run date)/i.test(l));
-  for (const line of [labelled, head].filter((x): x is string => Boolean(x))) {
+  for (const [line, source] of [
+    [labelled, "labelled"],
+    [head, "head"],
+  ] as [string | undefined, CountDateSource][]) {
+    if (!line) continue;
     const iso = ISO.exec(line);
-    if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+    if (iso) return { date: `${iso[1]}-${iso[2]}-${iso[3]}`, source };
     const m = DATE.exec(line);
     if (m) {
       const yyyy = m[3].length === 2 ? `20${m[3]}` : m[3];
-      return `${yyyy}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
+      return { date: `${yyyy}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`, source };
     }
   }
-  return null;
+
+  /*
+   * Last, and only last: the date the report was printed, off a page footer.
+   *
+   * Deliberately below everything above it, for the reason this function already gives — a report
+   * printed on the seventh may well be the sixth's count, so a line that names the count date beats
+   * the day the paper came out of the machine. But a print date is still the document speaking, and
+   * refusing a file that carries one is the site ignoring what it was told.
+   *
+   * Searched over the whole text rather than the head, because a footer is the last thing on a page
+   * and the first one sits past the four thousand characters read above.
+   */
+  const footer = PAGE_FOOTER.exec(text);
+  if (footer) {
+    return { date: `${footer[3]}-${footer[1].padStart(2, "0")}-${footer[2].padStart(2, "0")}`, source: "footer" };
+  }
+
+  return { date: null, source: null };
+}
+
+/**
+ * The date alone, for the callers that only want the date.
+ *
+ * Kept so `readCountDate` could be added without changing every caller — the date is what most of
+ * them need, and the source matters only where it is being recorded against an import.
+ */
+export function countDate(text: string): string | null {
+  return readCountDate(text).date;
 }
 
 type Mapping = Partial<Record<keyof typeof ALIASES, number>>;
@@ -239,8 +363,46 @@ export function looksLikeOnHand(text: string): boolean {
   return findHeader(head.split(/\r?\n/)) !== null;
 }
 
+/**
+ * An inch mark inside a quoted field, written the way PioneerRx writes it rather than the way CSV
+ * expects.
+ *
+ * Two rows of the pharmacy's own drug file carry a backslash-escaped quote — "ULTICARE TB SAFETY 1
+ * ML 25GX1\"" and "Walker Adult Folding W/5\" Wheels". CSV escapes a quote by doubling it, so
+ * `splitRow` reads the first as an escaped quote and never closes the field, and closes the second
+ * early and reopens it. Either way the rest of the line is swallowed, the NDC column with it, and
+ * the row is skipped for having no NDC — two products silently off the shelf, and nothing about the
+ * result looking wrong.
+ *
+ * Repaired rather than refused, because the intent is unambiguous: a backslash before a quote here
+ * is an inch mark, and doubling it is exactly what CSV wanted.
+ */
+function repairEscapedQuotes(text: string): string {
+  return text.replace(/\\"/g, '""');
+}
+
+/**
+ * The report's own record count, where it prints one.
+ *
+ * "Total Record Count:,1772" on the last line of the Drug File Print. It is the only figure in the
+ * file that did not come from us, and it is the arithmetic check every reader here is meant to have:
+ * rows kept plus rows skipped must equal it. It has already earned its place — it is what caught
+ * the two backslash rows, which between them had swallowed sixty-eight records while the load
+ * reported no errors at all.
+ */
+function reportedRecordCount(lines: string[]): number | null {
+  for (const line of lines) {
+    const m = /total\s+record\s+count\s*:?\s*,?\s*"?([\d,]+)"?/i.exec(line);
+    if (m) {
+      const n = Number(m[1].replace(/,/g, ""));
+      if (Number.isFinite(n)) return n;
+    }
+  }
+  return null;
+}
+
 export function parseOnHand(text: string): OnHandParse {
-  const clean = text.replace(/^﻿/, "");
+  const clean = repairEscapedQuotes(text.replace(/^﻿/, ""));
   const lines = clean.split(/\r?\n/);
   const skipped: Record<string, number> = {};
   const problems: string[] = [];
@@ -248,10 +410,12 @@ export function parseOnHand(text: string): OnHandParse {
     skipped[why] = (skipped[why] ?? 0) + 1;
   };
 
+  const dated = readCountDate(clean);
   const header = findHeader(lines);
   if (!header) {
     return {
-      rows: [], countedOn: countDate(clean), unmappedColumns: [], rowsRead: 0, skipped: {},
+      rows: [], countedOn: dated.date, countedOnSource: dated.source, unmappedColumns: [], rowsRead: 0, skipped: {},
+      continuations: 0, reportedCount: reportedRecordCount(lines),
       problems: [whyNotAnOnHandFile(lines)],
     };
   }
@@ -263,17 +427,57 @@ export function parseOnHand(text: string): OnHandParse {
     return v === undefined ? null : v.trim();
   };
 
+  /*
+   * How wide a real row is here, so a wrapped tail is judged against this file rather than against
+   * a number I picked.
+   *
+   * The first attempt called any line under four fields a tail, which is true of the drug file's
+   * eleven columns and catastrophic for an export of two: "NDC, Quantity On Hand" is a perfectly
+   * good count and every row of it was thrown away as a continuation. The tests caught it, which is
+   * the entire reason they exist.
+   */
+  const headerWidth = splitRow(lines[header.index], sep).length;
+
   const rows: OnHandRow[] = [];
   const seen = new Map<string, number>();
   let rowsRead = 0;
+  /** Lines that are the tail of the row above rather than a product of their own. */
+  let continuations = 0;
 
   for (let i = header.index + 1; i < lines.length; i++) {
     const line = lines[i];
     if (!line.trim()) continue;
     const cells = splitRow(line, sep);
-    // Page furniture: a footer or a repeated header carries no separator count worth reading.
-    if (cells.length < 2) continue;
-    if (/^(page \d|printed on|total|grand total)/i.test(line.trim())) continue;
+    /*
+     * A row that wrapped, recognised so it is neither counted as a product nor mourned as one.
+     *
+     * A long manufacturer spills onto a line of its own — "AMNEAL PHARMACEUTICALS, LLC", "INC/GNP",
+     * "PHARMA, LTD U.S". Every real row carries the full set of columns, so a line carrying less
+     * than half the header's width is the tail of the one above it — measured against this file,
+     * because "NDC, Quantity On Hand" is a two-column count and every row of it is two fields wide.
+     *
+     * Not appended to the row above, deliberately. The tail is a manufacturer and this reader has
+     * no manufacturer field, so the only place to put it would be the drug's name — which would
+     * turn "Desvenlafaxine Succinate ER 100mg" into a name with a company stuck on the end, and a
+     * wrong name is worse than an absent one. It is dropped as what it is.
+     *
+     * What matters is that it is not counted either way: counted as a record it makes the file
+     * longer than the report says it is, and skipped as unreadable it reports products lost that
+     * were never lost. On the pharmacy's own drug file that was seven rows of each.
+     */
+    /*
+     * Page furniture first, so the count of wrapped tails means what it says.
+     *
+     * A printed report puts its title on every page and "09/08/2026,Page 1 of 34" under it, and
+     * both are narrow enough to look like a tail. Judged the other way round the drug file reported
+     * 73 continuations where five were real — sixty-eight of them page footers — and a number that
+     * overstates itself by fourteen times is not worth printing.
+     */
+    if (/^(page \d|printed on|total|grand total|drug file print|\d{1,2}\/\d{1,2}\/\d{4}\s*,\s*page )/i.test(line.trim())) continue;
+    if (cells.length * 2 < headerWidth) {
+      continuations++;
+      continue;
+    }
     // A repeat of the header, printed at the top of each page.
     if (fold(cells[mapping.ndc11 as number] ?? "") && ALIASES.ndc11.test(fold(cells[mapping.ndc11 as number]))) continue;
     rowsRead++;
@@ -326,6 +530,9 @@ export function parseOnHand(text: string): OnHandParse {
       quantityThousandths: qty,
       unit: at(cells, "unit") || null,
       inventoryGroup: at(cells, "inventoryGroup") || null,
+      packQty: wholeUnits(at(cells, "packQty")),
+      // -1 is the file's "no order point set", and it must never read as a shelf one unit short.
+      orderPointUnits: wholeUnits(at(cells, "orderPointUnits"), true),
       unitCostMicros,
       valueCents,
     };
@@ -350,7 +557,29 @@ export function parseOnHand(text: string): OnHandParse {
 
   if (rows.length === 0 && rowsRead > 0) problems.push("The header was read but no row held a usable NDC and quantity.");
 
-  return { rows, countedOn: countDate(clean), unmappedColumns: header.unmapped, rowsRead, skipped, problems };
+  /*
+   * Our count against the report's own, where it prints one.
+   *
+   * Nothing inside our own arithmetic can answer "did we read all of it"; the report's last line
+   * can. Where they disagree the difference is named rather than smoothed over — a load that is
+   * quietly short looks exactly like a load that is complete, and on this file it was sixty-eight
+   * products.
+   */
+  const reported = reportedRecordCount(lines);
+  if (reported !== null) {
+    const skippedTotal = Object.values(skipped).reduce((n, x) => n + x, 0);
+    const accounted = rows.length + skippedTotal;
+    if (accounted !== reported) {
+      problems.push(
+        `The report says it holds ${reported.toLocaleString("en-US")} records; ${rows.length.toLocaleString("en-US")} were read and ` +
+          `${skippedTotal.toLocaleString("en-US")} skipped, which is ${accounted.toLocaleString("en-US")}. ` +
+          `${Math.abs(reported - accounted).toLocaleString("en-US")} row${Math.abs(reported - accounted) === 1 ? " is" : "s are"} unaccounted for.`,
+      );
+    }
+  }
+
+
+  return { rows, countedOn: dated.date, countedOnSource: dated.source, unmappedColumns: header.unmapped, rowsRead, skipped, continuations, reportedCount: reported, problems };
 }
 
 /** Total units and total value, for the import summary. */
@@ -568,7 +797,13 @@ export function parsePioneerOnHand(text: string): OnHandParse {
   }
 
   if (rows.length === 0 && rowsRead > 0) problems.push("Items were found but none carried a usable code and quantity.");
-  return { rows, countedOn: countDate(text), unmappedColumns: [], rowsRead, skipped, problems };
+  /*
+   * The four-line report has no wrapped tails and prints no record count of its own: it is a
+   * screen scrape rather than a paged report. Both are stated rather than left off, so the two
+   * paths return the same shape and a caller never has to know which one read the file.
+   */
+  const dated = readCountDate(text);
+  return { rows, countedOn: dated.date, countedOnSource: dated.source, unmappedColumns: [], rowsRead, skipped, continuations: 0, reportedCount: null, problems };
 }
 
 /** Reads whichever shape the file is. */

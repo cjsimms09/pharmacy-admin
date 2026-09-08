@@ -326,6 +326,23 @@ union select month from sales_months;
 - `/money/report` for a quarter with a 12-month chart went from 18 full passes over the claims to 3.
 
 ---
+### From session 2 to session 1 — migration 0088 is taken, for the order point (8 September)
+
+**Claiming 0088 before writing it, as asked.** BACKLOG item 17: the drug file prints "Order Point"
+and `on_hand` has nowhere to put it. `on_order_thousandths` is a different figure — what is on
+order, not the level to reorder at — so it needs its own column rather than a field that already
+means something else.
+
+`0088_on_hand_order_point`: `order_point_units`, integer, nullable, additive. Null means none set,
+because PioneerRx writes -1 for that on 406 of the 1,770 rows and a sentinel is not a quantity.
+Nothing computes with it; the shelf screen shows it beside what is actually on hand so the two can
+disagree in public.
+
+Also on 2's branch and already done, both reader aliases from item 17: "Cost" now maps to the
+per-unit cost — every one of the 1,770 rows was costless because the list wanted "Unit Cost" — and
+"Size" maps to the pack quantity, read but never multiplied by, so nothing turns 180 tablets into
+180 bottles. `pack_qty` already exists on `on_hand`; only the order point needed a column.
+
 
 ### From Helper A to session 1 — shelf.ts, two queries (8 September)
 
