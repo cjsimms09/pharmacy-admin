@@ -166,6 +166,15 @@ export const RemittanceTerms = z.object({
   paymentCycle: z.string().optional().describe("e.g. twice monthly, within 30 days of adjudication."),
   eraOffered: z.boolean().optional().describe("Whether an electronic remittance (835) is provided."),
   enrollmentMethod: z.string().optional().describe("How EFT/ERA is set up or changed: a form, a portal, a clearinghouse."),
+  /*
+   * The three things an 835 re-routing request is actually addressed with, pulled out of the prose
+   * above so a request can be generated rather than composed. The owner's ask on 7 September was
+   * to automate the request to have 835s sent to this site instead of where they go today, and
+   * "a form, a portal, a clearinghouse" in one sentence is not something a form-filler can use.
+   */
+  enrollmentFormUrl: z.string().optional().describe("The URL of the ERA/EFT enrollment form or portal page, exactly as printed. Empty if none is printed."),
+  clearinghouse: z.string().optional().describe("The clearinghouse or EDI vendor the document says remittances or enrollment go through (e.g. Change Healthcare, Availity), exactly as named."),
+  tradingPartnerId: z.string().optional().describe("Any EDI trading partner, submitter or receiver id the document gives for 835/EFT enrollment. Not a payer id — those go in payerIdentifiers."),
   remittanceContact: z.string().optional(),
   /**
    * How this payer appears on the remittance and on the bank statement.
@@ -577,7 +586,7 @@ RULES, in order of importance:
 
 11. **Say what the document cannot answer on its own.** Many agreements delegate the pricing formula, and the meaning of AWP, brand, generic and usual & customary, to a separate PBM contract. Put those documents in "incorporatesByReference" and name where definitions live. An extraction that reports a rate while silently omitting that the lesser-of formula lives elsewhere is half an answer presented as a whole one.
 
-12. **Capture the people and the payment path.** Every contact the document names — an appeals desk, provider relations, an EFT/ERA enrollment address, an audit contact, where notices go — with its purpose. And how the money travels: who pays, by what method, on what cycle, whether an 835 remittance is offered, and how enrollment is changed. An appeal cannot be sent and a remittance cannot be re-routed without these.
+12. **Capture the people and the payment path.** Every contact the document names — an appeals desk, provider relations, an EFT/ERA enrollment address, an audit contact, where notices go — with its purpose. And how the money travels: who pays, by what method, on what cycle, whether an 835 remittance is offered, and how enrollment is changed — and, separately, the enrollment form or portal URL, the clearinghouse or EDI vendor, and any trading-partner id, each exactly as printed. An appeal cannot be sent and a remittance cannot be re-routed without these.
 
 13. **Map the document.** List every section, exhibit and schedule with its pages and one sentence on what it decides. This read happens once; the map is how a question nobody has asked yet is answered from the document without reading it again.
 
