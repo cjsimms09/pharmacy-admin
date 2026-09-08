@@ -23,6 +23,18 @@ the tree dirty. The owner's balance-on-hand report is re-filed through the repai
 November 2025) is on the ANDA supplier: 100% within a year less the 20% handling fee, expired
 and eleven other categories non-returnable, the rest in its notes.
 
+**8 September, 15:20 (1) — two documents from the owner.** The PSAO's "2026 PBM Contracted
+Listing" (xlsx) is read by `pbm-listing.ts` (pure parse, tested) and loaded into `payer_bins`: 52
+PBMs, 597 BINs, 580 added, 79 updated with the listing's PBM as an alias, 61 BINs the listing puts
+under two PBMs marked `collides`. It prints no network id, PCN or group. 1,302 of 1,304 paid claims
+now sit on a BIN a document names; not on it: 028249 "RedSail" (223 claims, $617), 610097 Optum
+(70), 015581 Humana (50) — Humana is not an Atlas PBM at all, so a direct agreement is what to ask
+the owner for. The "2027 Medicare D Reimbursement Guide" (80 pages, a rate grid the site's own PDF
+text reader cannot lift) is filed in the contract library as `288d7ef9…`, state none, for the
+next `read --scans` once the ceiling is raised. `deduceNetworkLinks` (live in 2936d25) has linked 15
+of 82 networks, 306 of 1,030 claims, on its own; not yet wired into the nightly tick or after
+`applyAllReads` — a follow-up on BACKLOG 23.
+
 **Measured once, 8 September 14:50 (1), for 2's two Data-health rows:** wholesalers that have sent
 an invoice 1 of 5 (IPC; two invoices on 4 September, one of them — 11490216, $1,530.89 — filed
 with zero lines); returns policies on file 3 of 5 (McKesson, IPC, ANDA). Eleven deploys today, the
