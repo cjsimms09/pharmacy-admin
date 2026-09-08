@@ -216,6 +216,32 @@ export async function applyFdaCorrections(user: { name: string }): Promise<{
 }
 
 /**
+ * NADAC's pricing unit for every NDC it prices, newest row per NDC.
+ *
+ * This is the document that settles whether a package is counted or measured, and it is the unit
+ * the benchmark comparison and the Kansas floor both use. `claims.quantity_unit` cannot do the job:
+ * the daily report never carries it and it is null on every row.
+ */
+async function nadacUnits(): Promise<Map<string, "EA" | "ML" | "GM">> {
+  const rows = await db
+    .select({ ndc11: schema.nadacPrices.ndc11, pricingUnit: schema.nadacPrices.pricingUnit, effectiveOn: schema.nadacPrices.effectiveOn })
+    .from(schema.nadacPrices);
+  const newest = new Map<string, { on: string; unit: string }>();
+  for (const r of rows) {
+    const seen = newest.get(r.ndc11);
+    if (!seen || r.effectiveOn > seen.on) newest.set(r.ndc11, { on: r.effectiveOn, unit: r.pricingUnit });
+  }
+  const out = new Map<string, "EA" | "ML" | "GM">();
+  for (const [ndc11, v] of newest) {
+    const u = v.unit.trim().toUpperCase();
+    // Only the three the rest of this site knows. An unrecognised unit is left absent rather than
+    // mapped to a guess, so the NDC falls to a person instead of being settled on a misreading.
+    if (u === "EA" || u === "ML" || u === "GM") out.set(ndc11, u);
+  }
+  return out;
+}
+
+/**
  * How many of the open questions the container-contents rule would settle, without settling any.
  *
  * Counted before it is ever applied, deliberately. The rule is new, it rewrites a pack size from a
@@ -224,12 +250,17 @@ export async function applyFdaCorrections(user: { name: string }): Promise<{
  */
 export async function countContainerContents(): Promise<{
   wouldSettle: number;
+  countedAsNadacCounts: number;
+  noNadac: number;
   blockedByCount: number;
   notThisShape: number;
   examples: string[];
 }> {
   const { byNdc, packageOf, fixes } = await load();
+  const units = await nadacUnits();
   let wouldSettle = 0;
+  let countedAsNadacCounts = 0;
+  let noNadac = 0;
   let blockedByCount = 0;
   let notThisShape = 0;
   const examples: string[] = [];
@@ -249,6 +280,7 @@ export async function countContainerContents(): Promise<{
       p: proposeContainerContents({
         catalogue: r.packSize,
         packageDescription: description,
+        nadacUnit: units.get(ndc11) ?? null,
         existing: existing ? { packSize: existing.packSize, correctedBy: existing.correctedBy } : null,
       }),
     }));
@@ -261,11 +293,16 @@ export async function countContainerContents(): Promise<{
       }
       continue;
     }
-    if (proposals.some((x) => !x.p.apply && x.p.verdict === "differs")) blockedByCount++;
+    const verdicts = proposals.filter((x) => !x.p.apply).map((x) => (x.p as { verdict: string }).verdict);
+    // Ordered by what the answer means, not by which row came first: "NADAC counts it in EA" is a
+    // closed question and outranks the shape complaints, which are only ever "not this rule".
+    if (verdicts.includes("counted-as-nadac-counts")) countedAsNadacCounts++;
+    else if (verdicts.includes("no-nadac")) noNadac++;
+    else if (verdicts.includes("differs")) blockedByCount++;
     else notThisShape++;
   }
 
-  return { wouldSettle, blockedByCount, notThisShape, examples };
+  return { wouldSettle, countedAsNadacCounts, noNadac, blockedByCount, notThisShape, examples };
 }
 
 /**
