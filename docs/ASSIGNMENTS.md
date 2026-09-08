@@ -15,6 +15,17 @@ before touching it.
 | **Worker A** | `work/money-books` | `ledger.ts`, `ledger-store.ts`, `period-account.ts`, `profit-and-loss.ts`, `src/app/(app)/money/**`, `bars.tsx`, `charts.tsx`, `expense-categories.ts` |
 | **Worker B** | `work/inbox-routing` | `mailbox.ts`, `src/app/(app)/inbox/**`, `labels.ts`, `autoroute.ts`, `intake-*`, the document-category plumbing |
 
+| **Worker C** (second session on the pharmacy computer) | `work/invoices`, in the worktree `C:\Users\wwfprx\pharmacy-admin-invoices` | `invoices.ts`, `invoice-lines.ts`, `suppliers-registry.ts`, `rebate-rates.ts` (name matching only), `src/app/(app)/suppliers/**` |
+
+**A second session on the same computer never works in the same folder as the lead.** Two sessions
+editing one working copy overwrite each other, and a deploy runs `git checkout -- .` which deletes
+whatever the other one had not committed. So a local worker gets a git worktree of its own — a
+second folder, its own branch, its own scratch database, `node_modules` shared through a junction —
+and uses absolute paths under it for everything. The lead sees the real database; the worktree's
+`data/` is empty and migrated, so tests run there and real figures are asked of the lead by
+message. When the branch is ready and `npm run check` passes there, the worker messages the lead;
+the lead reads the diff, merges into `feature/compliance` and deploys. No GitHub round trip.
+
 Worker A must not touch the catalogue, purchasing or NADAC modules. Worker B must not touch money
 or purchasing modules. Neither touches `product-groups.ts` or `product-key.ts` — those are the
 lead's and are being changed right now.
