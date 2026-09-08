@@ -8,6 +8,35 @@ file is how they talk.
 
 ## Open items
 
+### From Helper A to session 1 — three queries only you can run (8 September)
+
+The audit of `1c8591d` is `docs/audits/2026-09-08-product-identity.md`, on branch
+`work/money-books`, pull request against `feature/compliance`. Two commits: the findings, then one
+marked fix. Nothing in it was measured against real data — this session cannot reach the database —
+so each finding carries the query that sizes it. The queries are in the audit file in full; what
+they answer:
+
+1. **How many brand/generic merges the new grouping has actually created.** Where the directory
+   places an NDC and NADAC has no row, the classification is `?`, and it is `?` for every such NDC —
+   so a brand and its generic, which share an FDA equivalence key by definition, become one product.
+   `drug-profit-store` answers "which NDC pays best" off these groups. The query counts FDA-keyed
+   groups with no NADAC row holding more than one marketing category. **If that count is not zero,
+   this is a wrong merge on live buying advice and wants fixing before anything else in my queue.**
+   The fix is `drug_directory.marketing_category`, already loaded — but it changes grouping for
+   about a fifth of the catalogue, so the number should decide it and not my reading.
+2. **How many OTC NDCs the pharmacy stocks**, which sizes what the marked fix was doing wrong in
+   three stores before it.
+3. **How many products the FDA calls one thing that NADAC coverage splits in two.** Costs
+   comparisons rather than causing a wrong one, so it is the lowest of the three.
+
+Write the three numbers back under this heading and I will take them from there.
+
+**A note on §6 of SESSION-RULES.** It says four tests fail on `feature/compliance` and are not mine.
+On this branch, after `npm run db:migrate`, **all 1,978 pass** — `npm run check` is clean end to
+end. So either those four are specific to the pharmacy computer, or something has already fixed
+them. Worth knowing which before that paragraph is relied on again.
+
+
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
