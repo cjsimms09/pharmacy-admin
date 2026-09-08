@@ -561,6 +561,20 @@ arrive — each one's invoice email to the mailbox, a fixture per shape, 2's pip
 ParMed's policies, pasted by the owner as ANDA's was; (3) a warning that reaches him — a line in
 the daily digest and on Today whenever a credit step drops within 7 days or a window shuts within
 14, naming the bottle, the supplier and the dollars.
+### 21. Return soon: one list of everything to send back, by policy, by idleness, by the dollars (8 September) — BUILT
+
+The owner's words: "a return soon tool that shows everything the system thinks I should return
+either based on return policy or non use, or expensive.. expensive things should have a much
+quicker return time.. if not used we need to send back. cant have money sitting on shelf." Built
+the same afternoon: `return-soon.ts` (pure ranking, tested) and `/purchasing/return-soon`, listed
+under Buying. Three reasons in one list — a credit step or window from the supplier's policy on
+the invoice line; nothing dispensed in the claims window; days of stock beyond what a line of
+that value may hold ($1,000 or more: 7 days; $250: 14; less: 30). Soonest clock first, then the
+dollars. Measured on the 8 September count: 1,200 lines, $137,606 sitting, 20 this week — and
+every one without a supplier, because only IPC's one invoice is on file; and with 15 days of
+claims "not moving" is a list to check, not to ship, and the page says so. Item 20's three
+pieces are what make it real: every wholesaler's invoices, IPD's and ParMed's policies, and a
+warning in the digest and on Today.
 ## The data the site has to ingest
 
 Named by the owner on 7 September as what is still being connected. Each one needs a reader, a

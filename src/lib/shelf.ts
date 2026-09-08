@@ -564,6 +564,8 @@ export type ShelfItem = {
   nadacMicros: number | null;
   /** What is on the shelf at today's cheapest price: a replacement value, not what was paid. */
   valueCents: number | null;
+  /** What the count itself valued the line at — PioneerRx's cost times the quantity — where it carried one. */
+  countValueCents: number | null;
 };
 
 export type FullShelfView = {
@@ -629,6 +631,7 @@ async function loadFullShelf(): Promise<FullShelfView> {
       cheapest: c ? { supplier: c.supplier, unitCostMicros: c.unitCostMicros } : null,
       nadacMicros: nadacBy.get(r.ndc11) ?? null,
       valueCents,
+      countValueCents: r.valueCents,
     };
   });
   rows.sort((a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || (a.name ?? "~").localeCompare(b.name ?? "~"));
