@@ -54,6 +54,14 @@ export type OnHandRow = {
   onOrderThousandths?: number | null;
   /** Units in the package the item is bought in — "180 EA". */
   packQty?: number | null;
+  /**
+   * The level the pharmacy's own system would reorder at, in dispensing units.
+   *
+   * PioneerRx's answer, not this site's: it is what the pharmacist set, and the shelf screen shows
+   * it beside what is actually on hand so the two can disagree in public. Null where none is set —
+   * the file writes -1 for that, on 406 of 1,770 rows, and a sentinel is not a quantity.
+   */
+  orderPointUnits?: number | null;
   /** True where the report counted whole packages and this reader multiplied them out. */
   countedInPackages?: boolean;
   /** Units on the shelf, in thousandths, so a part bottle is exact. Always dispensing units. */
@@ -95,7 +103,10 @@ export type OnHandParse = {
 
 /** Column meanings, matched against a header cell folded to lower case with punctuation dropped. */
 const ALIASES: Record<
-  keyof Pick<OnHandRow, "ndc11" | "description" | "itemNumber" | "quantityThousandths" | "unit" | "unitCostMicros" | "valueCents" | "inventoryGroup">,
+  keyof Pick<
+    OnHandRow,
+    "ndc11" | "description" | "itemNumber" | "quantityThousandths" | "unit" | "unitCostMicros" | "valueCents" | "inventoryGroup" | "packQty" | "orderPointUnits"
+  >,
   RegExp
 > = {
   ndc11: /^(ndc|ndc ?11|ndc ?number|ndc ?code|item ?ndc|dispensed ?ndc)$/,
@@ -103,7 +114,18 @@ const ALIASES: Record<
   itemNumber: /^(item ?number|item ?no|item ?#|supplier ?item ?number|sku)$/,
   quantityThousandths: /^(quantity ?on ?hand|qty ?on ?hand|on ?hand ?quantity|on ?hand ?qty|on ?hand|qoh|quantity|qty|current ?quantity|current ?qty|inventory ?quantity|stock ?on ?hand)$/,
   unit: /^(unit|uom|unit ?of ?measure|dispensing ?unit|pricing ?unit)$/,
-  unitCostMicros: /^(unit ?cost|cost ?per ?unit|acquisition ?cost|acq ?cost|average ?cost|avg ?cost|cost ?each|last ?cost)$/,
+  /*
+   * A bare "Cost" is a cost per unit here, and the drug file's is the reason.
+   *
+   * Every row of the owner's first count came back costless — the shelf page said "the file carried
+   * no values" for 1,770 products — because PioneerRx heads the column "Cost" and this list wanted
+   * "Unit Cost". The figure is per unit: $0.93 against a bottle of 180 acamprosate.
+   *
+   * The ambiguity is real and is settled by the neighbours rather than by hope: a file meaning the
+   * whole line's cost calls it "Extended Cost", "Total Cost" or "Inventory Value", and every one of
+   * those is claimed by `valueCents` below. What is left for a bare "Cost" is the per-unit reading.
+   */
+  unitCostMicros: /^(cost|unit ?cost|cost ?per ?unit|acquisition ?cost|acq ?cost|average ?cost|avg ?cost|cost ?each|last ?cost)$/,
   valueCents: /^(extended ?cost|extended ?value|total ?cost|inventory ?value|on ?hand ?value|value|extended|ext ?cost)$/,
   /*
    * Which shelf the item sits on, which the four-line report reads and the column export dropped.
@@ -113,7 +135,37 @@ const ALIASES: Record<
    * and a front-shop line with an eleven-digit code is counted as stock on the pharmacy shelf.
    */
   inventoryGroup: /^(inventory ?group|inv ?group|group|department|dept|category|shelf|location)$/,
+  /**
+   * How many units the package holds, which the drug file heads "Size".
+   *
+   * Read but never multiplied by: this path counts units already, and `countedInPackages` stays
+   * false, so nothing here turns 180 tablets into 180 bottles. It is carried so the shelf can say
+   * "two bottles of 90" instead of "180", which is how a pharmacist thinks about a shelf.
+   */
+  packQty: /^(size|pack ?size|package ?size|pack ?qty|package ?quantity|units ?per ?pack)$/,
+  /**
+   * The level PioneerRx would reorder at, which it heads "Order Point".
+   *
+   * Minus one is the file's own "none set" — on 406 of the 1,770 rows — and it is a sentinel, not a
+   * shelf one unit overdrawn. Stored as null so nothing averages it or compares it to a quantity.
+   */
+  orderPointUnits: /^(order ?point|reorder ?point|min ?stock|minimum ?stock|par|par ?level)$/,
 };
+
+/**
+ * A whole count of units, or null.
+ *
+ * `treatMinusOneAsNull` is for a sentinel rather than a quantity: PioneerRx writes -1 for "no order
+ * point set". Averaged or compared as a number it would report a shelf one unit overdrawn.
+ */
+function wholeUnits(raw: string | null | undefined, treatMinusOneAsNull = false): number | null {
+  const t = (raw ?? "").trim();
+  if (t === "") return null;
+  const n = Number(t.replace(/,/g, ""));
+  if (!Number.isFinite(n)) return null;
+  if (treatMinusOneAsNull && n === -1) return null;
+  return n;
+}
 
 const fold = (s: string) => s.replace(/^﻿/, "").trim().toLowerCase().replace(/[._\-/]+/g, " ").replace(/\s+/g, " ").replace(/[:*]+$/, "");
 
@@ -375,6 +427,17 @@ export function parseOnHand(text: string): OnHandParse {
     return v === undefined ? null : v.trim();
   };
 
+  /*
+   * How wide a real row is here, so a wrapped tail is judged against this file rather than against
+   * a number I picked.
+   *
+   * The first attempt called any line under four fields a tail, which is true of the drug file's
+   * eleven columns and catastrophic for an export of two: "NDC, Quantity On Hand" is a perfectly
+   * good count and every row of it was thrown away as a continuation. The tests caught it, which is
+   * the entire reason they exist.
+   */
+  const headerWidth = splitRow(lines[header.index], sep).length;
+
   const rows: OnHandRow[] = [];
   const seen = new Map<string, number>();
   let rowsRead = 0;
@@ -389,8 +452,9 @@ export function parseOnHand(text: string): OnHandParse {
      * A row that wrapped, recognised so it is neither counted as a product nor mourned as one.
      *
      * A long manufacturer spills onto a line of its own — "AMNEAL PHARMACEUTICALS, LLC", "INC/GNP",
-     * "PHARMA, LTD U.S". Every real row carries the full set of columns, so a line with only one or
-     * two is the tail of the one above it.
+     * "PHARMA, LTD U.S". Every real row carries the full set of columns, so a line carrying less
+     * than half the header's width is the tail of the one above it — measured against this file,
+     * because "NDC, Quantity On Hand" is a two-column count and every row of it is two fields wide.
      *
      * Not appended to the row above, deliberately. The tail is a manufacturer and this reader has
      * no manufacturer field, so the only place to put it would be the drug's name — which would
@@ -401,11 +465,19 @@ export function parseOnHand(text: string): OnHandParse {
      * longer than the report says it is, and skipped as unreadable it reports products lost that
      * were never lost. On the pharmacy's own drug file that was seven rows of each.
      */
-    if (cells.length < 4) {
+    /*
+     * Page furniture first, so the count of wrapped tails means what it says.
+     *
+     * A printed report puts its title on every page and "09/08/2026,Page 1 of 34" under it, and
+     * both are narrow enough to look like a tail. Judged the other way round the drug file reported
+     * 73 continuations where five were real — sixty-eight of them page footers — and a number that
+     * overstates itself by fourteen times is not worth printing.
+     */
+    if (/^(page \d|printed on|total|grand total|drug file print|\d{1,2}\/\d{1,2}\/\d{4}\s*,\s*page )/i.test(line.trim())) continue;
+    if (cells.length * 2 < headerWidth) {
       continuations++;
       continue;
     }
-    if (/^(page \d|printed on|total|grand total)/i.test(line.trim())) continue;
     // A repeat of the header, printed at the top of each page.
     if (fold(cells[mapping.ndc11 as number] ?? "") && ALIASES.ndc11.test(fold(cells[mapping.ndc11 as number]))) continue;
     rowsRead++;
@@ -458,6 +530,9 @@ export function parseOnHand(text: string): OnHandParse {
       quantityThousandths: qty,
       unit: at(cells, "unit") || null,
       inventoryGroup: at(cells, "inventoryGroup") || null,
+      packQty: wholeUnits(at(cells, "packQty")),
+      // -1 is the file's "no order point set", and it must never read as a shelf one unit short.
+      orderPointUnits: wholeUnits(at(cells, "orderPointUnits"), true),
       unitCostMicros,
       valueCents,
     };
