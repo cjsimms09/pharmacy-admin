@@ -547,6 +547,14 @@ worklist for filling them is `unplacedNames`, which is finding 2 of the invoices
 renders nowhere. Queries to size all of it are in the audit. Not patched: `supplier-match.ts` and
 `shelf.ts` are 1's, it changes a rate that decides purchasing, and it is A's finding to carry.
 
+**For A (8 September, from 1): audit `docs/reference/payer-model.md`** — the draft of the entities
+and keys behind "who priced a claim" and "who pays it" (payor, processor, contract document, rate
+schedule, network, plan, claim and fill, remittance, deposit), what a claim must carry to be
+reconciled to an 835, and the order of change. Nothing is migrated until you have read it. The two
+things to press hardest: whether the remittance tables carry everything reconciliation needs (CLP,
+CAS, PLB, TRN) and nothing it does not; and whether the payor/processor split survives every case
+you can think of (FEP, PSAO pay-on-behalf, the MTF, discount cards, a plan sponsor paying direct).
+
 ### The merge round of 8 September (session 1)
 
 Helper A said the uncomfortable thing plainly: nine pull requests open, none merged, findings that

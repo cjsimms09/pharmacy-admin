@@ -138,7 +138,8 @@ themselves by network name, 39 by chain code, 5 by BIN, 0 by network reimburseme
 contract side is named by network, the claim side is coded by BIN/PCN/group/network id, and the
 join between them is a table the pharmacy fills once per network id, not a string match.
 
-**Deliverable, session 1 after ingestion, audited by A:** `docs/reference/payer-model.md` defining
+**Drafted 8 September — `docs/reference/payer-model.md`, with A to audit before any migration.**
+The deliverable as first stated: `docs/reference/payer-model.md` defining
 the entities and their keys — payor, processor/PBM, contract document, rate schedule, network,
 plan (BIN/PCN/group), claim, remittance, deposit — with one canonical name per payor, the
 existing tables (`payer_bins`, `plan_groups`, `payer_links`, `network_rates`, `payment_routing`,
