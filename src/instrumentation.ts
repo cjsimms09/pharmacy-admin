@@ -213,10 +213,42 @@ export async function register() {
     }
   };
 
+  /**
+   * Measures the site against itself once a day, so Data health is never older than that.
+   *
+   * On the same beat as the backup and for the same reason: this runs on a pharmacy computer that
+   * is switched off overnight, so a job scheduled for 2am would simply never happen. It takes one
+   * whenever a day has passed since the last, which on a machine used every day means shortly
+   * after it is turned on — and after the mail sweep above, so the morning's imports are counted
+   * rather than missed by an hour.
+   *
+   * Behind `whenIdle`, which is not a nicety here. The measurement reads the whole catalogue and
+   * the whole NADAC table and took 12.3 seconds on the real database; every libsql call blocks the
+   * event loop, so run while somebody is using the site it would be a twelve-second outage. Idle,
+   * it costs nothing anybody can perceive.
+   *
+   * The page shows the date it was measured, so a machine left switched off for a week says so on
+   * its face rather than presenting week-old counts as today's.
+   */
+  const dataHealthTick = async () => {
+    try {
+      const { getSettings, setSetting } = await import("./lib/settings");
+      const s = await getSettings();
+      const last = s.data_health_last ? Date.parse(s.data_health_last) : 0;
+      if (Number.isFinite(last) && Date.now() - last < 20 * 60 * 60 * 1000) return;
+      const { measureDataHealth } = await import("./lib/data-health-store");
+      await measureDataHealth();
+      await setSetting("data_health_last", new Date().toISOString());
+    } catch {
+      // A measurement that fails leaves yesterday's counts and their date, which is honest.
+    }
+  };
+
   const runAll = async () => {
     await publicAccessTick();
     await whenIdle("warm", warmTick);
     await whenIdle("mail", tick);
+    await whenIdle("data-health", dataHealthTick);
     await whenIdle("backup", backupTick);
     await whenIdle("reminders", reminderTick);
     await whenIdle("nadac", nadacTick);
