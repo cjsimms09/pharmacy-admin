@@ -321,6 +321,17 @@ shaped around what PioneerRx actually holds rather than around what its export h
 things above, the next part is going through the contracts to see how we can efficiently match
 claims to a specific contract."* Drug file first, then claim-to-contract matching.
 
+**What to pull once SQL is connected (8 September, 1, the owner: "we should be thinking about all the
+info we will want to get from sql").** Per claim: everything in the dispensed export (AWP, WAC, NADAC,
+MAC, DAW, days supply, fee, basis of reimbursement, contract id, received plan id, DIR fee,
+e-voucher, secondary payer) plus the EDI response itself — the network reimbursement id, the
+response messages, reject codes, other-payer amounts — and the timestamp of every transaction and
+reversal. Per fill: sold date, quantity, the dispensed NDC, a hashed patient key, never a name.
+Third-party setup: every plan with BIN, PCN, group, plan name and network. Pricing as PioneerRx saw
+it at adjudication, per NDC and date. Inventory: on-hand daily, order points, the drug file. The
+daily text report stays the automatic feed until then, proved nightly; the export enriches when one
+is sent by hand.
+
 ### 7. Finish the logic audit (HANDOFF item 3)
 
 Not yet looked at: `shelf.ts` (895 lines, the largest and least examined), `order-plan.ts` beyond
