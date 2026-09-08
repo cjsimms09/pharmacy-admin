@@ -2,6 +2,8 @@ import "server-only";
 import { db, schema } from "@/db";
 import { todayIso } from "./dates";
 import { SPECS, type Measurement } from "./data-health";
+import { comparePack } from "./data-health-packages";
+import { allSuppliers, supplierRecordFor } from "./suppliers-registry";
 
 /**
  * Running the data health counts, and keeping the answers.
@@ -152,8 +154,16 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
   });
 
   // ── The FDA directory ────────────────────────────────────────────
-  const directory = await db.select({ ndc11: schema.drugDirectory.ndc11 }).from(schema.drugDirectory);
+  // The package description is kept only for NDCs the catalogue actually carries. The directory is
+  // 217,773 rows and holding every description would be tens of megabytes to answer a question
+  // asked of 63,809 of them.
+  const catalogueNdcSet = new Set(catalogue.map((r) => r.ndc11).filter(isNdc));
+  const directory = await db
+    .select({ ndc11: schema.drugDirectory.ndc11, packageDescription: schema.drugDirectory.packageDescription })
+    .from(schema.drugDirectory);
   const directoryNdcs = new Set(directory.map((r) => r.ndc11));
+  const packageOf = new Map<string, string>();
+  for (const r of directory) if (catalogueNdcSet.has(r.ndc11)) packageOf.set(r.ndc11, r.packageDescription);
   await timed("fda-directory", async () => ({
     numerator: directoryNdcs.size,
     denominator: directoryNdcs.size,
@@ -197,23 +207,52 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
   const supplierName = new Map(suppliers.map((s) => [s.id, s.name]));
 
   await timed("invoice-supplier-ladder", async () => {
-    const placed = lineRows.filter((l) => l.supplierId && withLadder.has(l.supplierId)).length;
-    const unplaced = lineRows.filter((l) => !l.supplierId);
-    const noLadder = lineRows.filter((l) => l.supplierId && !withLadder.has(l.supplierId));
+    /*
+     * Resolved exactly as earningSoFar resolves it: supplier_id first, then the register's own
+     * matcher on the printed name.
+     *
+     * Asking only for supplier_id read 0 of 8 on the live database and put "these lines resolve to
+     * no supplier" on the screen — while the supplier card, going through supplierRecordFor and the
+     * IPC aliases, placed all eight. Two screens disagreeing about the same eight lines is worse
+     * than either being wrong on its own, because it leaves nobody knowing which to believe. This
+     * page measures what the rest of the site does, or it measures nothing.
+     */
+    const registry = await allSuppliers(true);
+    const ownerOf = (l: { supplierId: string | null; supplier: string | null }): string | null =>
+      (l.supplierId && registry.some((s) => s.id === l.supplierId) ? l.supplierId : null) ??
+      supplierRecordFor(registry, l.supplier)?.id ??
+      null;
+
+    const owners = lineRows.map((l) => ({ line: l, owner: ownerOf(l) }));
+    const placed = owners.filter((o) => o.owner !== null && withLadder.has(o.owner)).length;
+    const unplaced = owners.filter((o) => o.owner === null);
+    const noLadder = owners.filter((o) => o.owner !== null && !withLadder.has(o.owner));
+
     const gaps: string[] = [];
     if (unplaced.length > 0) {
-      const names = [...new Set(unplaced.map((l) => (l.supplier ?? "").trim() || "(no supplier printed)"))];
-      gaps.push(`${unplaced.length} line${unplaced.length === 1 ? "" : "s"} resolve to no supplier on the register — printed as ${names.slice(0, 3).join(", ")}`);
+      const names = [...new Set(unplaced.map((o) => (o.line.supplier ?? "").trim() || "(no supplier printed)"))];
+      gaps.push(
+        `${unplaced.length} line${unplaced.length === 1 ? "" : "s"} match no supplier on the register, by id or by any name it holds — printed as ${names.slice(0, 3).join(", ")}. Add the printed name to that supplier's "Other names they go by".`,
+      );
     }
     if (noLadder.length > 0) {
-      const names = [...new Set(noLadder.map((l) => supplierName.get(l.supplierId!) ?? "?"))];
-      gaps.push(`${noLadder.length} line${noLadder.length === 1 ? "" : "s"} belong to a supplier with no rebate ladder on file — ${names.slice(0, 3).join(", ")}`);
+      const names = [...new Set(noLadder.map((o) => supplierName.get(o.owner!) ?? "?"))];
+      gaps.push(
+        `${noLadder.length} line${noLadder.length === 1 ? "" : "s"} belong to a supplier with no rebate ladder on file — ${names.slice(0, 3).join(", ")}. Nothing is being claimed on ${noLadder.length === 1 ? "it" : "them"}.`,
+      );
     }
     return {
       numerator: placed,
       denominator: lineRows.length,
       gaps,
-      note: "A line resolving to no supplier leaves the rebate arithmetic without a word, which is how eight lines and $78.50 went missing.",
+      // The two halves of this figure fail differently and want different actions, so the note says
+      // which one is in play rather than describing both every time.
+      note:
+        unplaced.length > 0
+          ? "A line matching no supplier leaves the rebate arithmetic without a word, which is how eight lines and $78.50 went missing."
+          : noLadder.length > 0
+            ? "Every line is placed on a supplier; what is missing is the ladder itself, which is a document to obtain rather than a matching fault."
+            : null,
     };
   });
 
@@ -225,9 +264,8 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
     note: onHand.length === 0 ? "No on-hand count has ever been received. Nothing can value the shelf until one is." : null,
   }));
 
-  const catalogueNdcs = new Set(catalogue.map((r) => r.ndc11).filter(isNdc));
   await timed("onhand-catalogue", async () => ({
-    numerator: onHand.filter((r) => r.codeKind === "ndc11" && catalogueNdcs.has(r.code)).length,
+    numerator: onHand.filter((r) => r.codeKind === "ndc11" && catalogueNdcSet.has(r.code)).length,
     denominator: onHand.length,
     note: onHand.length === 0 ? "Nothing to match: no on-hand count has been received." : null,
   }));
@@ -325,33 +363,148 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
       .map((p) => [p.bin ?? "", p.pcn ?? "", p.groupNumber ?? ""].join("|").toUpperCase()),
   );
   await timed("claim-plan", async () => {
-    const hit = [...fills.values()].filter((f) =>
-      classed.has([f.bin ?? "", f.pcn ?? "", f.groupNumber ?? ""].join("|").toUpperCase()),
-    ).length;
+    const tripleOf = (f: { bin: string | null; pcn: string | null; groupNumber: string | null }) =>
+      [f.bin ?? "", f.pcn ?? "", f.groupNumber ?? ""].join("|").toUpperCase();
+    const hit = [...fills.values()].filter((f) => classed.has(tripleOf(f))).length;
+
+    /*
+     * The unclassified plans, biggest first, so the work can start where the money is.
+     *
+     * This row came back 6 of 1,054 on the live database, which means the law-first rung in
+     * drug-profit — Medicaid pays NADAC plus a fee, and the Kansas floor binds or does not — never
+     * fires on 99% of fills. Classifying plans is the owner's work and it is a plan at a time, so a
+     * bare percentage is not actionable and a list is: three or four triples cover most of it.
+     */
+    const byTriple = new Map<string, { n: number; label: string }>();
+    for (const f of fills.values()) {
+      const key = tripleOf(f);
+      if (classed.has(key)) continue;
+      const label = [f.bin ?? "no BIN", f.pcn ?? "no PCN", f.groupNumber ?? "no group"].join(" / ");
+      const seen = byTriple.get(key);
+      if (seen) seen.n += 1;
+      else byTriple.set(key, { n: 1, label });
+    }
+    const worst = [...byTriple.values()].sort((a, b) => b.n - a.n).slice(0, 5);
+
     return {
       numerator: hit,
       denominator: fillCount,
-      note: "Which law applies — and so whether the Kansas floor applies at all — is decided by the plan's class.",
+      gaps:
+        worst.length === 0
+          ? []
+          : [
+              `${byTriple.size} plan${byTriple.size === 1 ? " has" : "s have"} no class on the register. The biggest by fills: ${worst.map((w) => `${w.label} (${w.n})`).join("; ")}`,
+            ],
+      note:
+        hit === 0 || hit / Math.max(fillCount, 1) < 0.5
+          ? "Which law applies — and so whether the Kansas floor binds at all — is decided by the plan's class. Until a plan is classified, the law-first rung in the profit engine cannot fire for its fills."
+          : "Which law applies — and so whether the Kansas floor applies at all — is decided by the plan's class.",
     };
   });
 
   /*
-   * ── Two rows this cannot measure soundly, and so does not ──
+   * ── Claim → contract ─────────────────────────────────────────────
    *
-   * "claim → contract" needs the contract matcher run against every fill, which means parsing every
-   * stored extraction. That is session 1's module and the answer is currently 0 of 1,081 for a
-   * reason no count would explain: governs() reads BIN, PCN and group, and the contracts on file
-   * name networks and chain codes. Measuring it here would print a zero without the sentence that
-   * makes it actionable, and the sentence is the point.
+   * Measured through the payer links, which is where a document actually reaches a claim: a link
+   * carries the BIN, PCN and group it was confirmed on, and `contract_doc_id` when the document
+   * that governs it is known. A link naming only a BIN stands for every fill on that BIN, which is
+   * how the register is written; a link naming more must match all of it.
    *
-   * "catalogue row → FDA package size" needs pack sizes and FDA package descriptions compared as
-   * quantities — "6 x 1 ML" against "PACKAGE OF 6 SYRINGES" — and a wrong reading of that produces
-   * exactly the cross-unit error the row exists to catch. A guess here would be worse than nothing.
-   *
-   * Both show as "not measured" on the page, which is honest and visible, rather than as a number
-   * somebody would act on.
+   * The note is as important as the number and is written whatever the number turns out to be. The
+   * contracts name networks and chain codes, and the claims carry network reimbursement ids; until
+   * that mapping exists, only a plan a document names by BIN, PCN or group can match at all. A bare
+   * percentage here would send somebody off to file more contracts, which is not the work.
    */
-  skipped.push("claim-contract", "catalogue-package");
+  const links = await db
+    .select({
+      bin: schema.payerLinks.bin,
+      pcn: schema.payerLinks.pcn,
+      groupNumber: schema.payerLinks.groupNumber,
+      contractDocId: schema.payerLinks.contractDocId,
+      contractFileName: schema.payerLinks.contractFileName,
+    })
+    .from(schema.payerLinks);
+
+  await timed("claim-contract", async () => {
+    const toContract = links.filter((l) => (l.contractDocId ?? l.contractFileName) !== null);
+    const up = (s: string | null) => (s ?? "").trim().toUpperCase();
+    const governed = (f: { bin: string | null; pcn: string | null; groupNumber: string | null }) =>
+      toContract.some((l) => {
+        if (up(l.bin) !== "" && up(l.bin) !== up(f.bin)) return false;
+        if (up(l.pcn) !== "" && up(l.pcn) !== up(f.pcn)) return false;
+        if (up(l.groupNumber) !== "" && up(l.groupNumber) !== up(f.groupNumber)) return false;
+        // A link naming nothing routable governs nothing; it is a note, not a match.
+        return up(l.bin) !== "" || up(l.pcn) !== "" || up(l.groupNumber) !== "";
+      });
+    const matched = [...fills.values()].filter(governed).length;
+    const linked = links.length;
+    return {
+      numerator: matched,
+      denominator: fillCount,
+      gaps:
+        linked === 0
+          ? []
+          : [
+              `${linked} payer link${linked === 1 ? "" : "s"} on the register, ${toContract.length} of them naming a contract document`,
+            ],
+      note:
+        "Contracts name networks; claims carry network reimbursement ids. The mapping between them is being built; until then only a fill whose BIN, PCN or group a document names can match at all.",
+    };
+  });
+
+  /*
+   * ── Catalogue row → FDA package size ─────────────────────────────
+   *
+   * The row that finds cross-unit errors, so it must not manufacture any. `comparePack` returns
+   * "cannot compare" wherever either side fails to reach a dispensing unit — chiefly an FDA
+   * description that stops at a container ("3 BLISTER PACK in 1 CARTON" and never says what is in
+   * the blister pack). Those are excluded from the denominator and reported as their own line,
+   * because scoring them as disagreements would bury the real ones among false alarms.
+   *
+   * A whole multiple is called out separately because it is the expensive kind and the commonest
+   * real fault: "30 EA" against an FDA 180 is thirty blister packs of six, and a per-unit cost
+   * taken from the catalogue is six times wrong in a figure the buy list acts on.
+   */
+  await timed("catalogue-package", async () => {
+    const placed = catalogue.filter((r) => isNdc(r.ndc11) && packageOf.has(r.ndc11));
+    let agree = 0;
+    let unreadable = 0;
+    const multiples: string[] = [];
+    let unitDiffers = 0;
+    let differs = 0;
+
+    for (const row of placed) {
+      const v = comparePack(row.packSize, packageOf.get(row.ndc11!));
+      if (v.verdict === "agree") agree++;
+      else if (v.verdict === "cannot-compare") unreadable++;
+      else if (v.verdict === "unit-differs") unitDiffers++;
+      else if (v.verdict === "multiple") {
+        if (multiples.length < 3) multiples.push(`${row.supplier} "${row.packSize}" against the FDA's ${v.fda} ${v.uom} — ${v.factor}× out`);
+        differs++;
+      } else differs++;
+    }
+
+    const comparable = placed.length - unreadable;
+    const gaps: string[] = [];
+    if (multiples.length > 0) {
+      gaps.push(`A whole multiple out, which is the expensive kind: ${multiples.join("; ")}`);
+    }
+    if (unitDiffers > 0) {
+      gaps.push(`${unitDiffers.toLocaleString("en-US")} rows are counted in a different unit from the FDA's — grams against tablets cannot be reconciled by any factor`);
+    }
+    if (unreadable > 0) {
+      gaps.push(
+        `${unreadable.toLocaleString("en-US")} rows could not be compared at all, most often because the FDA description stops at a container and never says what is inside. Not counted as disagreements.`,
+      );
+    }
+    return {
+      numerator: agree,
+      denominator: comparable,
+      gaps,
+      note:
+        "A pack size is a divisor: every per-unit cost is the pack cost over the units in the pack, so one wrong by a factor of six makes a drug look six times cheaper and the buy list recommends it.",
+    };
+  });
 
   const known = new Set(SPECS.map((s) => s.key));
   const rows = out.filter((m) => known.has(m.key));
