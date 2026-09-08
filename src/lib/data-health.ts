@@ -258,6 +258,14 @@ export const SPECS: LinkSpec[] = [
       "Every other row on this page measures whether the site's tables agree with each other, which they can do perfectly while all of them disagree with the file they were read from. This one re-reads the stored reports each night and sets them against the claims. Both directions count: a paid row in a report that reached no claim, and a claim no report explains, are the same failure seen from opposite ends, and a denominator that could only see one of them would read a hundred per cent with four hundred strays in the table.",
   },
   {
+    key: "directory-proof",
+    group: "Datasets",
+    title: "The FDA directory proved against the load that wrote it",
+    of: "packages in the table, out of the packages the last load says it wrote",
+    why:
+      "The directory decides which NDCs are the same drug, so a row lost from it silently ungroups a product and every equivalent, price comparison and substitution that runs through it. The loader records what it parsed and wrote at the moment it wrote — the measurement is free there and costs 430 MB anywhere else — and this sets that against the table today. The date is the load's, so a weekly fetch that quietly stopped shows here as an ageing proof over counts that are all perfectly correct.",
+  },
+  {
     key: "invoices-proof",
     group: "Datasets",
     title: "Invoices proved against their own printed total",

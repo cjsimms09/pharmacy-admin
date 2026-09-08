@@ -1,5 +1,6 @@
 import "server-only";
 import { db, schema } from "@/db";
+import { count } from "drizzle-orm";
 import { todayIso } from "./dates";
 import { SPECS, type Measurement } from "./data-health";
 import { comparePack } from "./data-health-packages";
@@ -402,6 +403,44 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
               `${owing.length} invoice${owing.length === 1 ? "" : "s"} worth $${(owingCents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} carry a total and no item lines — usually a scan with no text layer`,
             ],
       note: invoiceRows.length === 0 ? "No supplier invoice has been filed." : null,
+    };
+  });
+
+  /*
+   * ── The directory against the load that wrote it ─────────────────
+   *
+   * Read back from what `loadDrugDirectory` stamped, and set against a count of the table. The
+   * count is a `count(*)`, not a read of the rows: this is the 217,773-row table, and reading it to
+   * measure its health would be the joke at the pharmacy's expense this file's own header warns
+   * about.
+   */
+  await timed("directory-proof", async () => {
+    const { parseDirectoryProof, directoryProofFraction, directoryProofGaps, directoryProofNote } = await import("./data-health-directory-proof");
+    const proof = parseDirectoryProof((await getSettings()).drug_directory_proof);
+    const [{ n: tableRows }] = await db.select({ n: count() }).from(schema.drugDirectory);
+    if (!proof) {
+      return {
+        numerator: 0,
+        denominator: 0,
+        measuredAt: null,
+        gaps:
+          tableRows > 0
+            ? [`The table holds ${tableRows.toLocaleString("en-US")} packages that no recorded load accounts for. They were loaded before the loader began proving itself; the next load will prove them.`]
+            : [],
+        note:
+          tableRows > 0
+            ? "The directory was loaded before loads recorded what they wrote, so there is nothing to set it against until it is fetched again."
+            : "No drug directory has been loaded.",
+      };
+    }
+    const { numerator, denominator } = directoryProofFraction(proof, tableRows);
+    return {
+      numerator,
+      denominator,
+      // The load's date, not the sweep's: an ageing proof is the fetch having stopped.
+      measuredAt: proof.provedOn.slice(0, 10) || null,
+      gaps: directoryProofGaps(proof, tableRows, today),
+      note: directoryProofNote(proof, tableRows),
     };
   });
 
