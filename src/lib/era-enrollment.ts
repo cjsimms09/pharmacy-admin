@@ -58,43 +58,89 @@ export async function saveTin(tin: string): Promise<void> {
 /**
  * What each payer's contract said about remittance enrolment, by payer.
  *
- * Read from the extraction rather than from `payment_routing`, because the table is a projection
+ * Read from the extraction rather than from `payment_routing`, because that table is a projection
  * that drops exactly the three fields a request needs: the enrolment form's address, the
- * clearinghouse and the trading-partner id. Only the columns needed are selected and only
- * completed reads are parsed — the library is several hundred documents and their extractions are
- * not small, so pulling all of them to read one block each would be a page nobody opens twice.
+ * clearinghouse and the trading-partner id.
  *
- * Where a payer has more than one read contract, the newest wins and the others are ignored: an
- * amendment supersedes, and two answers merged would be a third answer no document gave.
+ * One answer per payer, from one document: the newest that actually says something about
+ * remittance. Not the newest full stop — an amendment about rates is silent on remittance and does
+ * not supersede terms it never mentions — and never two documents merged, because a merged answer
+ * is a third answer no document gave.
  */
 async function enrolmentFactsByPbm(): Promise<Map<string, EnrolmentFacts>> {
   const { parseTerms } = await import("./contract-extract");
-  const rows = await db.query.contractDocs.findMany({
+  const { inArray } = await import("drizzle-orm");
+  /*
+   * Two things to get right at once, and they pull against each other.
+   *
+   * The cheap way is to select every completed extraction and pick over them in memory. The library
+   * is several hundred documents and an extraction is a whole contract read into JSON, so that
+   * moves tens of megabytes to answer a question about a few dozen rows — on one SQLite file, on
+   * the pharmacy's own computer, where every call blocks the event loop for as long as it runs.
+   * `docs/reference/engine.md` rule 2: ask SQL for the row you need.
+   *
+   * The correct way is not simply "the newest document per payer", either. A payer's library is a
+   * base agreement plus amendments and rate sheets, and an amendment about rates says nothing about
+   * remittance — it does not supersede terms it is silent on. Taking the newest document and
+   * stopping would lose the base agreement's remittance terms the moment any later document was
+   * read, and the payer would show as never read.
+   *
+   * So: the index first, which is four small columns and no JSON; then fetch extractions in rounds,
+   * newest first, one candidate per unresolved payer per round, stopping as soon as every payer has
+   * an answer or has run out of documents. In practice that is one round, because the newest
+   * contract usually is the one carrying the terms. A payer with eleven documents costs one
+   * extraction, not eleven, and never loses an answer an older one holds.
+   */
+  const index = await db.query.contractDocs.findMany({
     where: eq(schema.contractDocs.extractionState, "done"),
-    columns: { pbmName: true, documentName: true, effectiveYear: true, extractionJson: true },
+    columns: { id: true, pbmName: true, documentName: true, effectiveYear: true },
   });
-  const newestFirst = [...rows].sort((a, b) => (b.effectiveYear ?? 0) - (a.effectiveYear ?? 0) || a.documentName.localeCompare(b.documentName));
-  const out = new Map<string, EnrolmentFacts>();
+  if (index.length === 0) return new Map();
+
+  const newestFirst = [...index].sort((a, b) => (b.effectiveYear ?? 0) - (a.effectiveYear ?? 0) || a.documentName.localeCompare(b.documentName));
+  const queue = new Map<string, typeof newestFirst>();
   for (const d of newestFirst) {
-    if (out.has(d.pbmName)) continue;
-    const t = parseTerms(d.extractionJson);
-    const r = t?.remittance;
-    if (!r) continue;
-    out.set(d.pbmName, {
-      pbmName: d.pbmName,
-      paidBy: r.paidBy,
-      paymentMethod: r.paymentMethod,
-      paymentCycle: r.paymentCycle,
-      eraOffered: r.eraOffered,
-      enrollmentMethod: r.enrollmentMethod,
-      enrollmentFormUrl: r.enrollmentFormUrl,
-      clearinghouse: r.clearinghouse,
-      tradingPartnerId: r.tradingPartnerId,
-      remittanceContact: r.remittanceContact,
-      payerIdentifiers: r.payerIdentifiers ?? [],
-      contacts: (t?.contacts ?? []).filter((c) => c.purpose === "payment_or_eft"),
-      readFrom: d.documentName,
+    const held = queue.get(d.pbmName);
+    if (held) held.push(d);
+    else queue.set(d.pbmName, [d]);
+  }
+
+  const out = new Map<string, EnrolmentFacts>();
+  while (queue.size > 0) {
+    const round = [...queue.entries()].map(([pbm, docs]) => ({ pbm, doc: docs[0]! }));
+    const read = await db.query.contractDocs.findMany({
+      where: inArray(schema.contractDocs.id, round.map((x) => x.doc.id)),
+      columns: { id: true, extractionJson: true },
     });
+    const jsonById = new Map(read.map((r) => [r.id, r.extractionJson]));
+
+    for (const { pbm, doc } of round) {
+      const t = parseTerms(jsonById.get(doc.id) ?? null);
+      const r = t?.remittance;
+      if (!r) {
+        // Silent on remittance. Try this payer's next document rather than calling it unread.
+        const rest = queue.get(pbm)!.slice(1);
+        if (rest.length > 0) queue.set(pbm, rest);
+        else queue.delete(pbm);
+        continue;
+      }
+      queue.delete(pbm);
+      out.set(pbm, {
+        pbmName: pbm,
+        paidBy: r.paidBy,
+        paymentMethod: r.paymentMethod,
+        paymentCycle: r.paymentCycle,
+        eraOffered: r.eraOffered,
+        enrollmentMethod: r.enrollmentMethod,
+        enrollmentFormUrl: r.enrollmentFormUrl,
+        clearinghouse: r.clearinghouse,
+        tradingPartnerId: r.tradingPartnerId,
+        remittanceContact: r.remittanceContact,
+        payerIdentifiers: r.payerIdentifiers ?? [],
+        contacts: (t?.contacts ?? []).filter((c) => c.purpose === "payment_or_eft"),
+        readFrom: doc.documentName,
+      });
+    }
   }
   return out;
 }
