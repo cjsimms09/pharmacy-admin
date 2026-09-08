@@ -48,6 +48,7 @@ export const FAMILIES = {
     { href: "/payers", label: "Payers" },
     { href: "/payers/contracts", label: "The contracts" },
     { href: "/payers/sort", label: "Sort the folder" },
+    { href: "/payers/networks", label: "Networks to contracts" },
     { href: "/payers/routing", label: "835 routing" },
   ],
   training: [
