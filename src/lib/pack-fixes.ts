@@ -1,4 +1,4 @@
-import { comparePack, cataloguePackUnits, fdaPackageUnits, type PackVerdict } from "./data-health-packages";
+import { comparePack, cataloguePackUnits, fdaPackageUnits, fdaContainerContents, type PackVerdict } from "./data-health-packages";
 
 /**
  * Settling how many dispensing units are in a package, and keeping the answer.
@@ -47,9 +47,24 @@ import { comparePack, cataloguePackUnits, fdaPackageUnits, type PackVerdict } fr
 /** The author recorded on a correction that came from the FDA's file rather than from a person. */
 export const FDA_SOURCE = "FDA package file";
 
-/** True where this correction was written by the automatic pass rather than decided by somebody. */
+/** The author recorded on a contents correction, distinct so the two rules stay tellable apart. */
+export const FDA_CONTENTS_SOURCE = "FDA package file (contents of containers)";
+
+/**
+ * True where this correction was written by an automatic pass rather than decided by somebody.
+ *
+ * Both authors count, and getting that wrong would be a quiet miscount rather than a crash: a row
+ * settled by the contents rule would be reported as one a pharmacist had signed, which overstates
+ * the work done by hand and understates what the file is doing.
+ */
 export function isFromFda(correctedBy: string | null | undefined): boolean {
-  return (correctedBy ?? "").trim() === FDA_SOURCE;
+  const by = (correctedBy ?? "").trim();
+  return by === FDA_SOURCE || by === FDA_CONTENTS_SOURCE;
+}
+
+/** True where a person signed it, which is the thing no automatic pass may touch. */
+export function isFromPerson(correctedBy: string | null | undefined): boolean {
+  return (correctedBy ?? "").trim() !== "" && !isFromFda(correctedBy);
 }
 
 export type ExistingFix = { packSize: string; correctedBy: string } | null;
@@ -83,7 +98,7 @@ export function proposeFdaCorrection(a: {
    * arithmetic run against him — not even to agree with him, because agreeing would rewrite his
    * note and his name with the file's.
    */
-  if (a.existing && !isFromFda(a.existing.correctedBy)) {
+  if (a.existing && (isFromPerson(a.existing.correctedBy) || a.existing.correctedBy.trim() === FDA_CONTENTS_SOURCE)) {
     return {
       apply: false,
       verdict: "already-settled",
@@ -134,6 +149,76 @@ export function proposeFdaCorrection(a: {
     `${verdict.factor} of the catalogue's is exactly the FDA's, so the catalogue was quoting an inner pack. Corrected to the FDA's figure.`;
 
   return { apply: true, packSize, note, factor: verdict.factor };
+}
+
+/**
+ * A wholesaler counting containers where the FDA states what is in them.
+ *
+ * "McKesson counts 1 EA where the FDA counts 20 ML" is not a disagreement about the package. It is
+ * two conventions: McKesson counts the vial you can hold, the FDA states the twenty millilitres in
+ * it, and both are describing the same box truthfully. It is also not a handful of rows — it is
+ * every single-dose vial in the catalogue, Alimta and Orencia and the rest, which is one convention
+ * to settle rather than thousands of judgements to make.
+ *
+ * The FDA's reading is the one to keep, because NADAC prices injectables per millilitre and every
+ * over- or under-payment figure is measured against NADAC. A per-EA cost held against a per-ML
+ * benchmark is the fault that once read as 100 times NADAC.
+ *
+ * ── What makes this safe, and it is the container count ──
+ *
+ * The rule fires only where the wholesaler's own number equals the number of containers the FDA
+ * describes. One vial against one container; twenty-five syringes against twenty-five. That
+ * equality is the evidence that the two are describing the same package by different conventions
+ * rather than disagreeing about its size — and where it fails, nothing is written.
+ *
+ * The outer levels must also be things a pharmacy dispenses one at a time — vial, syringe, ampule,
+ * pen, cartridge — never a carton or a case, so "1 EA" against a carton of unknown contents is
+ * still refused rather than settled at the carton's volume.
+ */
+export function proposeContainerContents(a: {
+  catalogue: string | null | undefined;
+  packageDescription: string | null | undefined;
+  existing?: ExistingFix;
+}): Proposal {
+  if (a.existing && isFromPerson(a.existing.correctedBy)) {
+    return {
+      apply: false,
+      verdict: "already-settled",
+      why: `${a.existing.correctedBy} has already settled this package at ${a.existing.packSize}.`,
+    };
+  }
+
+  const cat = cataloguePackUnits(a.catalogue);
+  if (!cat.ok) return { apply: false, verdict: "cannot-compare", why: cat.why };
+  // Only a wholesaler counting things, against a file measuring them. Anything else is not this.
+  if (cat.uom !== "EA") {
+    return { apply: false, verdict: "unit-differs", why: `The catalogue already counts ${cat.uom}, so it is not counting containers.` };
+  }
+
+  const contents = fdaContainerContents(a.packageDescription);
+  if (contents === null) {
+    return { apply: false, verdict: "cannot-compare", why: "The FDA does not describe this as containers with a volume or a mass in each." };
+  }
+  if (contents.containers !== cat.units) {
+    /*
+     * The guard. Without it this would settle "4 EA" at the contents of one vial, or at the
+     * contents of ten, and a per-unit cost would be wrong by whatever the mismatch was.
+     */
+    return {
+      apply: false,
+      verdict: "differs",
+      why: `The catalogue counts ${cat.units} where the FDA describes ${contents.containers} ${contents.containerNoun}. Those are not the same package by two conventions, they are two different numbers.`,
+    };
+  }
+
+  const packSize = `${contents.units} ${contents.uom}`;
+  const note =
+    `The catalogue counts ${cat.units} ${contents.containerNoun}${cat.units === 1 ? "" : "s"} and the FDA states what is in ` +
+    `${cat.units === 1 ? "it" : "them"}: ${contents.units} ${contents.uom} in total. Both describe the same package. ` +
+    `Recorded in ${contents.uom} because NADAC prices this per ${contents.uom === "ML" ? "millilitre" : "gram"}, and a per-unit ` +
+    `cost has to be in the same unit as the benchmark it is compared against.`;
+
+  return { apply: true, packSize, note, factor: contents.units / cat.units };
 }
 
 /** What a row needs a person for, grouped so the page can lead with the biggest kind. */
