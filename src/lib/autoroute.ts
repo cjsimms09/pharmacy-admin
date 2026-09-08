@@ -12,6 +12,7 @@ import { looksLikePayerPayments } from "./payer-payments";
 import { pdfText } from "./pdf-text";
 import { looksLikeRebateReport } from "./rebate-report";
 import { isDrillDownText } from "./drill-down-read";
+import { looksLikeX12Remittance } from "./business-docs";
 import { ALLOWED_MIME } from "./files";
 
 /**
@@ -329,6 +330,22 @@ const TEXT_MIME = new Set(["text/plain", "text/csv", "text/tab-separated-values"
 export function acceptableAttachment(att: { filename?: string | null; contentType?: string | null; content?: Buffer | Uint8Array | null }): { ok: true } | { ok: false; why: string } {
   const name = att.filename ?? "";
   const type = att.contentType ?? "";
+  /*
+   * A remittance advice is let in on its envelope, before any rule about names.
+   *
+   * BACKLOG item 27: the owner is having 835s emailed here. A payer names the file what it likes —
+   * `.835`, `.edi`, `.dat`, or nothing at all — and sends it as whatever its mail system decides,
+   * so both of the rules below refuse it: `.835` is not in `REPORT_EXT`, and an extensionless one
+   * is only let through for the PioneerRx catalogue. The line would read "not a type this reads"
+   * and the money in the file would never arrive, which is the same outcome as it never having
+   * been sent.
+   *
+   * The envelope is not a heuristic. An ISA header with an ST*835 inside it is a remittance and is
+   * not anything else, so it is asked first, and it needs no name — including the no-name case,
+   * which every branch below refuses and which is what a forwarded attachment sometimes looks like.
+   */
+  const content = att.content ? Buffer.from(att.content) : null;
+  if (content && looksLikeX12Remittance(content, name)) return { ok: true };
   if (!name) return { ok: false, why: "an attachment with no name" };
   const hasExt = /\.[A-Za-z0-9]{1,5}$/.test(name);
   if (hasExt) {

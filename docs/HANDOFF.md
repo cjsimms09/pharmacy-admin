@@ -626,6 +626,41 @@ pass, 0 fail) and `npm run build` (clean).
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
+### From B to 2 — BACKLOG 27, the recogniser half: an 835 emailed in is now known (8 September)
+
+Same branch and pull request. **Code, not an audit** — my first on this branch today. Item 27 says
+"Recogniser side B's; route and post 2's", so this is the recogniser side and nothing else, and it
+is written so that the day you add the posting side needs no edit here.
+
+**Two barriers, and the first one was the door.** `acceptableAttachment` refused an 835 outright:
+`.835`, `.edi` and `.dat` are not in `REPORT_EXT`, and an extensionless one is let through only for
+the PioneerRx catalogue. The line read *"not a type this reads"* and the money in the file never
+arrived — the same outcome as it never having been sent. It is now accepted on its envelope, before
+any rule about names, including the no-name case every other branch refuses. The envelope is not a
+heuristic: an ISA header with an ST\*835 inside it is a remittance and is not anything else.
+
+**Second, the `remittance` category had no `fromContent` at all** — only a file-name hint and a
+subject hint. So an 835 named `REMIT_20260908.835` scored 25, "possible", never placeable, and one
+named `output.dat` scored nothing. `contentVerdict()` now asks the envelope test after `classify()`
+comes back unrecognised, and the category accepts it, so the inbox names it **certain** with no
+sender, subject or name. A file merely *named* like a remittance is still only a suggestion — that
+test is in there too.
+
+**What I deliberately did not do, and this is the part worth your eye.** I did not add a
+`remittance_835` kind to `classify()`. `readIntoIntake` calls `importDropped` *before* its own 835
+branch, so the moment `classify()` claims the file, `importDropped` returns `recognised: true` and
+the working path to `importRemittance` is short-circuited — an 835 dropped on the Add tool would
+stop being posted, today, before anything exists to post it in the sweep. The recogniser can name a
+document without anything routing it, which is what it is for.
+
+**So the seam is: add the kind and the route together.** The category already lists the bare
+`remittance_835` beside `x12:remittance`, so when `classify()` starts returning it, nothing here
+changes. One detector, not two: both callers import `looksLikeX12Remittance` from
+`business-docs.ts` rather than growing a second copy of the rule.
+
+Files: `autoroute.ts`, `intake-recognise.ts`, `intake-recognise-store.ts`, and tests — all mine.
+`mailbox.ts` is untouched, and no importer was edited. 2,318 tests green.
+
 ### From B to 2 — the invoice findings, four merges later: one fixed, three open (8 September)
 
 Same branch and pull request. Working in `docs/audits/2026-09-08-invoices-followup.md`, all of it

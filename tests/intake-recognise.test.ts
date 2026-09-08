@@ -352,3 +352,31 @@ describe("a report with no file extension is still a report", () => {
     assert.equal(r.mayFile, true);
   });
 });
+
+/**
+ * A remittance advice, recognised by its envelope rather than by what the payer called the file.
+ *
+ * BACKLOG item 27. Before this the category had only a file-name hint and a subject hint, so an
+ * 835 named `REMIT_20260908.835` scored 25 at best — "possible", never placeable — and one named
+ * `output.dat` scored nothing at all. The envelope test in `intake-recognise-store.ts` supplies the
+ * content verdict; this is what the ranking then does with it.
+ */
+describe("a remittance advice arriving by email", () => {
+  test("the envelope alone places it, with no sender, subject or name", () => {
+    const r = recognise({ content: { verdict: "x12:remittance", why: "An X12 envelope carrying an 835." } });
+    assert.equal(r.best?.category, "remittance");
+    assert.equal(r.best?.sure, "certain");
+  });
+
+  test("and the routing kind classify() will return once posting lands is already accepted", () => {
+    const r = recognise({ content: { verdict: "remittance_835", why: "An X12 envelope carrying an 835." } });
+    assert.equal(r.best?.category, "remittance");
+    assert.equal(r.best?.sure, "certain");
+  });
+
+  test("a name that merely says remittance is still only a suggestion", () => {
+    const r = recognise({ fileName: "REMIT_20260908.835", content: null });
+    assert.equal(r.best?.category, "remittance");
+    assert.notEqual(r.best?.sure, "certain");
+  });
+});

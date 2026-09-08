@@ -145,3 +145,40 @@ describe("the daily transaction report", () => {
     assert.equal(classify("Daily (9_5_2026)", buf).kind, "rx_transactions");
   });
 });
+
+/**
+ * A remittance advice arriving by email, named whatever the payer felt like naming it.
+ *
+ * BACKLOG item 27. The money in an 835 is money the pharmacy has already been paid, so a file
+ * refused at the door is a deposit that never reaches the books. The envelope decides, because the
+ * name is written by whoever sent it.
+ */
+describe("an 835 emailed in, under any name", () => {
+  const era = Buffer.from(
+    "ISA*00*          *00*          *ZZ*PAYER          *ZZ*PHARMACY       *260908*1200*^*00501*000000001*0*P*:~" +
+      "GS*HP*PAYER*PHARM*20260908*1200*1*X*005010X221A1~ST*835*0001~" +
+      "BPR*I*102.50*C*ACH*CCP*01*999*DA*111*1234567890**01*999*DA*222*20260908~" +
+      "TRN*1*TRACE001*1999999999~N1*PR*BIG PBM*XV*PBM123~" +
+      "CLP*332359-1*1*100.00*60.00*10.00*07*CTRL9*~SE*8*0001~GE*1*1~IEA*1*000000001~",
+    "latin1",
+  );
+
+  test("the extensions no rule about names would let through", () => {
+    for (const [filename, contentType] of [
+      ["REMIT_20260908.835", "application/octet-stream"],
+      ["remit.edi", "application/octet-stream"],
+      ["835output.dat", "application/edi-x12"],
+      ["remittance", "application/octet-stream"],
+      ["", "application/octet-stream"],
+    ] as const) {
+      const v = acceptableAttachment({ filename, contentType, content: era });
+      assert.ok(v.ok, `${filename || "(no name)"} as ${contentType} should be accepted: ${v.ok ? "" : v.why}`);
+    }
+  });
+
+  test("and the envelope is what decides, not the name", () => {
+    // Named like a remittance, but the bytes are not one. The name alone must never open the door.
+    const v = acceptableAttachment({ filename: "remittance.835", contentType: "application/octet-stream", content: Buffer.from("Dear pharmacy, your remittance is attached.\n") });
+    assert.equal(v.ok, false);
+  });
+});

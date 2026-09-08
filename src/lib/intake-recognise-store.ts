@@ -6,6 +6,7 @@ import { classify } from "./autoroute";
 import { pdfText } from "./pdf-text";
 import { triageByText } from "./contract-triage";
 import { classifySupplierDocument } from "./invoices";
+import { looksLikeX12Remittance } from "./business-docs";
 import { readFile } from "./files";
 import { CATEGORIES, recognise, ruleFromCorrection, categoryFor, type Evidence, type Recognition, type SenderHistory, type SenderRule } from "./intake-recognise";
 
@@ -101,6 +102,25 @@ export async function historyFor(fromAddress: string): Promise<SenderHistory[]> 
 export function contentVerdict(fileName: string, buf: Buffer, subject = ""): { verdict: string; why: string; headers?: string[] } | null {
   const cls = classify(fileName, buf);
   if (cls.kind !== "unrecognised") return { verdict: cls.kind, why: cls.why, headers: cls.headers };
+  /*
+   * A remittance advice, known by its envelope rather than by its name.
+   *
+   * BACKLOG item 27: the owner is having 835s emailed here, and a payer names the file whatever it
+   * likes — `.835`, `.edi`, `.dat`, `.txt`, or nothing at all. The name is therefore no evidence and
+   * the envelope is conclusive: an ISA header with an ST*835 inside it is a remittance and is not
+   * anything else.
+   *
+   * Asked here rather than in `classify()` on purpose. `classify()` is what the sweep and the Add
+   * tool route on, and `readIntoIntake` calls `importDropped` *before* its own 835 branch — so a
+   * kind returned there would be claimed by the router and short-circuit the working path to
+   * `importRemittance` before the sweep has anywhere to post one. The recogniser can name a
+   * document without anything routing it, which is exactly what it is for. The verdict is
+   * namespaced like the other borrowed detectors, and the category also accepts the bare
+   * `remittance_835` that `classify()` will return once the posting side lands.
+   */
+  if (looksLikeX12Remittance(buf, fileName)) {
+    return { verdict: "x12:remittance", why: "An X12 envelope carrying an 835: a remittance advice, whatever the file is called." };
+  }
   let text = "";
   if (/^%PDF/.test(buf.subarray(0, 8).toString("latin1"))) {
     try {
