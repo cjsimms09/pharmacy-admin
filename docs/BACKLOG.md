@@ -234,6 +234,41 @@ This is a full pass over the page inventory and belongs to a cloud session, beca
 data — it needs eyes and the design rules. Not yet assigned: A and B are on the money chain,
 which the owner ordered first. Assign when one frees, or to a fifth session.
 
+### 9. Data health: complete, linked, and it says what is missing (7 September)
+
+The owner: *"The logic and data in this site needs to be correct, full, and cleanly organized. If we
+are missing data, I need to know and we need to fix it. Data needs to link when it should! This
+system needs to be incredibly organized and complete from many ends or we will get bad numbers.
+Main pieces are data from claims, data from supplier catalogs, data from third party sources
+(NADAC, AWP, package sizes, equivalents) — all these things HAVE to be correct or what we are
+building will not only fail but lead us astray."*
+
+So the site gets one page that measures itself: **Data health**. For each dataset, how complete it
+is, how current, and how many of its rows link where they must — counted on the real database,
+with the gap named as an action. Tonight's answers by hand were exactly this kind of figure (NADAC
+covers 96.9% of what we dispense; the FDA directory 96.9%; 0 of 1,081 claims match a contract; not
+one McKesson invoice; no on-hand count ever). They should be on a screen, every day, not in a chat.
+
+The links that must hold, each a row on that page with its coverage and its worst gaps:
+
+| Link | Why it matters |
+| --- | --- |
+| claim NDC → FDA directory | equivalence; without it a product cannot be compared |
+| claim NDC → NADAC (current within 3 months) | the benchmark every "over/under" figure uses |
+| claim NDC → a catalogue row with a pack size | a per-unit cost; without it no margin |
+| catalogue row → AWP | needed where a plan pays a discount off AWP (ParMed and IPD carry none) |
+| claim → payer (BIN/PCN/group resolved) → plan class | who paid, and under what law |
+| claim → contract (network id → contract) | the reimbursement formula |
+| claim → 835 line → bank deposit | cash actually received |
+| invoice → supplier register row → rebate ladder | what was really paid, after rebate |
+| catalogue row → FDA package size | unit arithmetic that does not cross units |
+| on-hand count → catalogue row | what is on the shelf, valued |
+
+Each row: numerator, denominator, percent, the date it was last measured, and the top gaps in
+words ("29 dispensed NDCs have no NADAC — 2 are devices, 27 are repackager labels"). Pure counting
+in a module, a store that runs it, a page that shows it. **Assigned to session 2** after its invoice
+follow-ups, because it runs on the pharmacy computer and can see the real database.
+
 ## The data the site has to ingest
 
 Named by the owner on 7 September as what is still being connected. Each one needs a reader, a

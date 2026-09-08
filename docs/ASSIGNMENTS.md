@@ -80,6 +80,16 @@ question that needs real figures is written as a query under "Open items" in `do
 Works in its own worktree, never in 1's folder (a deploy runs `git checkout -- .` there). Hands the
 branch to 1 by message when `npm run check` passes. **B audits this branch** — see B below.
 
+**Next, after the invoice follow-ups (8 September, from 1): the Data health page** — `docs/BACKLOG.md`
+item 9, the owner's own words. One page that measures the site against itself on the real
+database: for each dataset its completeness and currency, and for each link in the table there
+its coverage as numerator, denominator, percent, the date measured, and the worst gaps in words.
+Pure counting module (`data-health.ts`, tested on fixtures), a store that runs the counts in a
+separate process or held between requests (every libsql call blocks the server; 200,000 rows is
+1.7 seconds of nothing answering), and a page under Tools. Files: `data-health*.ts` and
+`src/app/(app)/tools/data-health/**` are yours. Start from tonight's hand-measured figures in
+HANDOFF so the first version already shows the real numbers.
+
 ---
 
 ## Helper A — auditor for 1, and the Money books
@@ -174,17 +184,35 @@ fixture where the same money is reachable two ways, a completeness check that sa
 feeds are not yet in the books, cash and accrual with the difference explained, and a test that the
 books balance from the stored rows. Full brief in `docs/BACKLOG.md` item 4.
 
-**The owner's rule for cash versus accrual (7 September), which is the test the books must pass:**
-*"System total accrual shows how much we collected in copays; this should be received on cash side,
-but third party payments shouldn't until we get the 835 or remit. For accrual side, both should be
-accounted for that month."* So, per fill: the patient's money (`patientTotalCents`, else
-`copayCents`) is **cash on the day it was collected** (`completedAt`) and **accrual in the fill
-month**; the payer's money (`remitCents`) is **accrual in the fill month** and **cash only on the day
-the 835 or remittance shows it paid** (`claim_payments`, the 835 reader in `x12-835.ts`, the MTF
-payments) — never on adjudication. Until an 835 for a claim exists, that claim's payer money is a
-receivable, and the books must show the receivable balance and its age. Write the fixture that
-proves it: one fill, adjudicated in month 1, remitted in month 2, and the two statements disagree
-by exactly the remit. *"Everything needs to be thought through and correct and audited."*
+**Cash versus accrual — the principle, which the owner stated and which is correct, and what the
+books must do with it.** He put it this way (7 September): copays collected at the register are
+cash when collected; third-party payments are not cash until the 835 or remittance arrives; on the
+accrual side both belong to the month of the fill. That is standard revenue recognition and it is
+the test the books must pass. What Claude adds, because he asked us to think it through rather than
+take it as given:
+
+- **Revenue, per fill.** The patient's money (`patientTotalCents`, else `copayCents`) is accrual
+  in the fill month and cash on the day it was collected (`completedAt`). The payer's money
+  (`remitCents`) is accrual in the fill month — recognised at the adjudicated amount, as a
+  receivable — and cash only when the 835 or remittance shows it paid (`claim_payments`, the 835
+  reader in `x12-835.ts`, the MTF payments). Never on adjudication. Reversals, DIR, clawbacks and
+  facilitator payments adjust the receivable when they are known, not the original month's cash.
+- **The bank statement is the truth on the cash side.** The owner will upload one at each month
+  end (`bank_lines`, `bank-statement.ts`). An 835 says a payer *decided* to pay; the deposit says
+  the money *landed*, and the two dates differ. So cash-basis revenue reconciles to deposits, and
+  every deposit should be explained by the 835s and register takings behind it. A deposit nothing
+  explains, or an 835 with no deposit, is a finding the books must show.
+- **Cost of goods follows the same split.** Accrual: the acquisition cost of what was dispensed,
+  in the fill month, matched against the revenue it earned. Cash: the supplier invoice when it was
+  paid (`supplier_invoices.paidOn`). Rebates reduce cost of goods in the period earned (accrual)
+  and when the credit memo lands (cash). Expenses likewise: incurred versus paid.
+- **The receivable has to be visible and aged.** Until an 835 exists for a claim, the payer's money
+  is owed; the books show the balance by payer and how old it is, because an old receivable is
+  either a lost remittance or a claim that will never pay, and both are money.
+
+Write the fixture that proves it: one fill, adjudicated in month 1, remitted in month 2, deposited
+in month 3, and the three views disagree by exactly the remit. *"Everything needs to be thought
+through and correct and audited."*
 
 ---
 
