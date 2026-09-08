@@ -177,6 +177,19 @@ on the `make-claude-copy` / `measure-data-health` pattern (spawned detached, the
 result), with the line-64 read given a column list. `held.ts` and the column trims in
 `floor-review.ts`, `appeals.ts`, `claims.ts` and `money-found.ts` are 1's.
 
+**Then (8 September, from 1, the owner's words): fix the P&P manual** — BACKLOG item 14, moved from B
+to you. "I want P&P manual accurate to what we do and compliant." The manual lives at `/manual`
+(sections in `manual-store.ts`, the review in `manual-audit.ts`, the site's own policy text in
+`manual.ts policies()`), and the owner has said: "if the other session has questions they should
+ask me" — so ask him directly, one question at a time, when the manual and the site disagree
+about what the pharmacy does; never invent a practice. Three jobs: (1) every finding the review
+marks as one an inspector would write up, fixed in the section's own words; (2) every place the
+manual describes a procedure the site now does differently (training records, temperature logs,
+the C-250 count, the inbox, the backups, the 835s, the copay-card remits) brought into line with
+what the site actually does, citing the page; (3) the Kansas Board and DEA requirements the
+review knows about, checked present. Single files, verified when quiet, as before; the owner
+answers the questions.
+
 ### The bank feed — plan from 2 (8 September), for 1 to confirm before I build
 
 **Read the code first, as asked, and the headline is that most of this exists. Please do not have
@@ -241,6 +254,25 @@ shelf.ts, order-plan.ts (short-dated lots), the band arithmetic, the claims feed
 (`payerShares`), the add-ons list (`whyNotSteady`), the ratio-measure form rule, and the
 claim-to-contract resolver with the networks page. Next in order: the Money books fold; the
 payer-model audit once 1 drafts `docs/reference/payer-model.md`; plan-class proposals (BACKLOG 10).
+
+### Audit the buying recommendation from its premise (8 September, from 1, the owner's words)
+
+The owner, on the What to add page: "we need to really audit the logic here. it needs to start with
+the right premise of what the goal is and figure out how to best do that with math.. it needs to be
+airtight." Yours, as the auditor. State the premise first, in one paragraph the owner would sign:
+the pharmacy earns the reimbursement the plan pays for the product dispensed, less what the bottle
+cost net of rebate, so the goal of every buying recommendation is the largest net over the claims
+the pharmacy actually gets — not the cheapest bottle, not the largest saving on the invoice. Then
+audit, on the real fills where you can and on fixtures where you cannot, every rung the site uses:
+`order-plan.ts` (needs, top-ups, the days-of-stock cap, the equal-price rule, the shortfall sizing),
+`minimum-filler.ts` (the ranked add-ons, the generic-only rule, the 60-day horizon), `band-share.ts`
+and `bandCostOfMoving` (the McKesson band), `catalogue-cache.ts` (the levelled unit price, the
+pack rules, the majority rule), and the equivalents change of 8 September (`offersForProduct`: an
+add-on may be the cheapest AB-rated equivalent). For each: what it assumes, where the assumption
+fails on this pharmacy's data (the cipro/dex case: the page chose the $38 Sun bottle over $19.93
+equivalents; Kansas Medicaid pays the same NADAC on all), and what the airtight rule is — including
+what reimbursement basis (NADAC-plus, MAC, AWP-minus) does to the choice, per BACKLOG 29. Deliver a
+finding list with money attached and the rule you would write, as a PR against `docs/audits/`.
 
 ### Audit first (7 September, from 1)
 
@@ -490,6 +522,15 @@ in your pull request what you could not verify.
 **Questions needing real figures** go in `docs/HANDOFF.md` under "Open items" addressed to 2. I
 run them here and write the number back. Do not ask the owner to send you a file; your container
 cannot reach this machine.
+### Two recognisers, both by content (8 September, from 1)
+
+(1) BACKLOG 27: an 835 arriving by email under any name — recognise an ISA envelope with ST*835
+(and a zip holding one) and route it to `importRemittance`, the same reader the Add tool uses. (2)
+BACKLOG 24: RedSail's "Remittance Advice — RAS Copay Voucher Reimbursement" (PDF; page 2 carries a
+text layer with those words) recognised as a copay-card remittance and routed to 2's reader
+(`copay-remit.ts`, merged). Also the intake kind names for both on the Add tool's list. Yours is
+the recogniser (`intake-recognise*.ts`, `autoroute.ts`); the readers are A's and 2's.
+
 ### Build: an inbox that knows what arrived, and can always be corrected
 
 The owner: *"The inbox should eventually be able to know what's coming in based off name, email,

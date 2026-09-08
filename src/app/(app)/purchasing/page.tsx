@@ -62,6 +62,8 @@ type Row = {
   why: string | null;
   overCap: { days: number; cap: number; smallerPack: { supplier: string; packQty: number; days: number; costCents: number } | null } | null;
   alternative: { supplier: string; unitMicros: number } | null;
+  /** The NDC the pharmacy dispenses that this offer would replace, where it is an equivalent. */
+  insteadOfNdc11?: string | null;
 };
 
 /** A supplier's name as an anchor. */
@@ -160,7 +162,7 @@ export default async function WhatToBuyPage({ searchParams }: { searchParams: Pr
         rows.push({
           kind: "next", itemNumber: c.itemNumber, ndc11: c.ndc11, name: c.name, packs: 1, packQty: c.packQty, units: c.packQty, unitMicros: c.unitMicros,
           costCents: c.packCostCents, savingCents: c.savingPerPackCents, daysOnHand: c.daysOnHand, perDayThousandths: c.perDayThousandths,
-          daysAfter: c.daysAfterOnePack, maxPacks: c.maxPacks, why: null, overCap: null, alternative: c.alternative,
+          daysAfter: c.daysAfterOnePack, maxPacks: c.maxPacks, why: null, overCap: null, alternative: c.alternative, insteadOfNdc11: c.insteadOfNdc11 ?? null,
         });
       }
       // Every short line, then the add-ons; enough of them to reach the minimum from nothing, and a few past.
@@ -301,7 +303,10 @@ export default async function WhatToBuyPage({ searchParams }: { searchParams: Pr
         sections.map(({ sup, basket, fill, rows, shown, shortCount, needCents, needSavingCents, minimumCents, allAddCents, listCents }) => {
           const key = slug(sup.supplier);
           const says =
-            minimumCents === null ? "No order minimum on file for this wholesaler; put it on the terms page."
+            minimumCents === null
+              ? rows.length === 0
+                ? `Nothing to add here today: nothing the shelf is short of is cheapest here, and nothing this wholesaler is cheapest on runs out inside ${minimums.horizonDays} days.`
+                : "No minimum on file, so nothing is filled to a target. This is the next best to order here: what runs out first, then what this wholesaler is cheapest on. Days left are on each line."
               : rows.length === 0 ? `Nothing qualifies to add here today: nothing the shelf is short of is cheapest here, and no generic this wholesaler is cheapest on runs out inside ${minimums.horizonDays} days.`
                 : `Add from the top until the ${sup.supplier} screen shows ${money(minimumCents)}. One pack of everything here comes to ${money(listCents)}${allAddCents > listCents - needCents ? `; ${money(needCents + allAddCents)} where a line says "up to"` : ""}.`;
           return (
@@ -311,7 +316,7 @@ export default async function WhatToBuyPage({ searchParams }: { searchParams: Pr
               className="mb-4"
               tone={shortCount > 0 ? "ok" : undefined}
               title={sup.supplier}
-              count={minimumCents !== null ? `minimum ${money(minimumCents)}` : "no minimum on file"}
+              count={minimumCents !== null ? `minimum ${money(minimumCents)}` : "ranked by days left"}
               subtitle={says}
               actions={<Link href={sup.supplierId ? `/suppliers/${sup.supplierId}/terms` : "/suppliers"} className="btn btn-sm">Terms</Link>}
             >
@@ -325,8 +330,8 @@ export default async function WhatToBuyPage({ searchParams }: { searchParams: Pr
                         <th className="num">Pack</th>
                         <th className="num">Price</th>
                         <th className="num">vs {primaryName}</th>
-                        <th className="num">On hand</th>
-                        <th className="num">After</th>
+                        <th className="num">Days left</th>
+                        <th className="num">After one pack</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -340,6 +345,7 @@ export default async function WhatToBuyPage({ searchParams }: { searchParams: Pr
                               {r.overCap && <span className="badge badge-muted ml-1" title={`${Math.round(r.overCap.days)} days of stock, past the ${r.overCap.cap}-day shelf.${r.overCap.smallerPack ? ` ${r.overCap.smallerPack.supplier} ships packs of ${r.overCap.smallerPack.packQty}.` : " No supplier ships it smaller."}`}>big pack</span>}
                             </span>
                             <span className="block font-mono text-[11px] text-ink-3">{r.ndc11} · {perUnit(r.unitMicros)} a unit{r.alternative ? `, ${perUnit(r.alternative.unitMicros)} at ${r.alternative.supplier}` : ""}</span>
+                            {r.insteadOfNdc11 && <span className="block text-[11px] text-ink-3">an AB-rated equivalent of the {r.insteadOfNdc11} you dispense — the plan pays the same on either where it pays by MAC or NADAC</span>}
                           </td>
                           <td className="num whitespace-nowrap">
                             {r.packs} × {r.packQty.toLocaleString()}

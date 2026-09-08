@@ -202,6 +202,40 @@ export async function catalogueRows(): Promise<CatalogueRow[]> {
     for (const [ndc11, size] of fdaPacks) if (readings.get(ndc11)?.has(size)) fdaAgreed.set(ndc11, size);
   }
 
+  /*
+   * Where neither document settles it and more than two wholesalers carry the NDC, the majority does.
+   *
+   * The owner's rule, 8 September: "if more than 2 suppliers then go with majority agreement." A
+   * vote is a whole-package reading — count and unit — so "(2) 33.4 GM" and "66.8 GM" are one
+   * vote, not a split. It takes three or more suppliers with more than half of them on one reading;
+   * a tie, or two suppliers disagreeing, still waits for the pharmacist on the pack-sizes page. It
+   * sits beneath both documents: a pack the pharmacist typed, or one the FDA states and a supplier
+   * already reads that way, is never outvoted.
+   */
+  const majorityPack = new Map<string, string>();
+  {
+    const votes = new Map<string, Map<string, Set<string>>>();
+    for (const r of raw) {
+      if (packBy.has(r.ndc11) || fdaAgreed.has(r.ndc11)) continue;
+      const p = packReadings(r.packSize);
+      if (p.uom === null || p.whole === null) continue;
+      const reading = `${p.whole} ${p.uom}`;
+      const byReading = votes.get(r.ndc11) ?? new Map<string, Set<string>>();
+      const who = byReading.get(reading) ?? new Set<string>();
+      who.add(r.supplier.trim().toLowerCase());
+      byReading.set(reading, who);
+      votes.set(r.ndc11, byReading);
+    }
+    for (const [ndc11, byReading] of votes) {
+      if (byReading.size < 2) continue;
+      const suppliers = new Set<string>();
+      for (const who of byReading.values()) for (const s of who) suppliers.add(s);
+      if (suppliers.size < 3) continue;
+      const [top] = [...byReading.entries()].sort((a, b) => b[1].size - a[1].size);
+      if (top[1].size * 2 > suppliers.size) majorityPack.set(ndc11, top[0]);
+    }
+  }
+
   const rows: CatalogueRow[] = raw.map((r) => {
     const fix = by.get(`${r.supplier.trim().toLowerCase()}|${r.ndc11}`);
     /*
@@ -213,7 +247,7 @@ export async function catalogueRows(): Promise<CatalogueRow[]> {
      * every wholesaler's row is put on the FDA's package and the arguing stops. It never overrides
      * a pharmacist who has settled a package himself; he has the bottle and the file does not.
      */
-    const settledPack = packBy.get(r.ndc11) ?? fdaAgreed.get(r.ndc11) ?? null;
+    const settledPack = packBy.get(r.ndc11) ?? fdaAgreed.get(r.ndc11) ?? majorityPack.get(r.ndc11) ?? null;
     if (!fix && !settledPack) return r;
     /*
      * A blank in a correction means "leave the supplier's", never "set it to nothing" — so fixing

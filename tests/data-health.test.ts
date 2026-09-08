@@ -245,3 +245,95 @@ describe("the count beside the percentage", () => {
     assert.equal(row.fractionText, "not measured");
   });
 });
+
+/*
+ * The two rows that count wholesalers rather than documents.
+ *
+ * The point of both is a denominator the invoice row cannot have. "Invoices with lines read, out
+ * of invoices filed" is blind by construction to a wholesaler that has never sent one: it
+ * contributes to neither half of the fraction, so four missing wholesalers read as a perfect
+ * score. On 8 September that was the live position — one IPC invoice on file, nothing from ANDA,
+ * IPD, ParMed or McKesson, and 1,200 lines on Return soon with no supplier against them.
+ *
+ * These hold the shape, since the arithmetic itself needs a database. What they hold is that the
+ * denominator is wholesalers, and that a wholesaler who has sent nothing is inside it.
+ */
+describe("what is missing is counted per wholesaler, not per document", () => {
+  const spec = (key: string) => SPECS.find((s) => s.key === key);
+
+  test("both rows exist and say they count wholesalers", () => {
+    for (const key of ["supplier-invoices", "supplier-returns"]) {
+      const s = spec(key);
+      assert.ok(s, `${key} has no spec`);
+      assert.match(s.of, /out of every active wholesaler/, "the denominator has to be the register, or a silent wholesaler cannot be seen");
+      assert.ok(s.why.length > 80, "the row has to say why a gap here matters, not just that there is one");
+    }
+  });
+
+  test("a wholesaler that has sent nothing is a gap, not an absence", () => {
+    // Four of five on the register have sent nothing: the fraction has to say 1 of 5, never 1 of 1.
+    const rows = buildHealth([
+      { key: "supplier-invoices", numerator: 1, denominator: 5, gaps: ["No invoice has ever been loaded from: ANDA, IPD, ParMed, Mckesson."], measuredAt: "2026-09-08", note: null },
+    ], "2026-09-08");
+    const r = rows.find((x) => x.key === "supplier-invoices")!;
+    assert.equal(r.percentText, "20.0%");
+    assert.equal(r.fractionText, "1 of 5");
+    assert.equal(r.health, "poor");
+    assert.match(r.gaps[0], /ANDA, IPD, ParMed, Mckesson/, "the names are the whole value of the row: they are the list to act on");
+  });
+
+  test("a returns policy nobody has typed shows as missing rather than as no returns due", () => {
+    const rows = buildHealth([
+      { key: "supplier-returns", numerator: 1, denominator: 5, gaps: ["No returns policy on file for: IPD, ParMed, Mckesson, ANDA."], measuredAt: "2026-09-08", note: null },
+    ], "2026-09-08");
+    const r = rows.find((x) => x.key === "supplier-returns")!;
+    assert.equal(r.fractionText, "1 of 5");
+    assert.notEqual(r.health, "complete", "silence about a supplier's stock must never read as nothing to send back");
+  });
+
+  test("all five on file is the finished state, and reads as finished", () => {
+    const rows = buildHealth([
+      { key: "supplier-invoices", numerator: 5, denominator: 5, gaps: [], measuredAt: "2026-09-08", note: null },
+      { key: "supplier-returns", numerator: 5, denominator: 5, gaps: [], measuredAt: "2026-09-08", note: null },
+    ], "2026-09-08");
+    for (const key of ["supplier-invoices", "supplier-returns"]) {
+      const r = rows.find((x) => x.key === key)!;
+      assert.equal(r.percentText, "100%");
+      assert.equal(r.health, "complete");
+    }
+  });
+});
+
+/*
+ * The proof rows, which ask a different question from every other row on the page.
+ *
+ * The rest of Data health asks whether the site's tables agree with one another. A proof asks
+ * whether they agree with the document they were read from — the owner's "these things need to be
+ * right!! … and continue to". The invoice one is the case where the two questions visibly differ:
+ * an invoice can be filed, linked to a supplier, carry a rebate ladder and sit on every screen
+ * looking complete, while the lines under it add to eighty-three dollars less than its own face.
+ */
+describe("proving a dataset against the document behind it", () => {
+  test("the invoice proof exists and says its denominator is invoices that print a total", () => {
+    const s = SPECS.find((x) => x.key === "invoices-proof");
+    assert.ok(s);
+    assert.match(s.of, /out of invoices carrying a total/);
+  });
+
+  test("an invoice whose lines do not add to its face stops the row reading complete", () => {
+    const rows = buildHealth(
+      [{ key: "invoices-proof", numerator: 6, denominator: 7, gaps: ["IPC invoice 11490216: 14 lines add to less than the printed total, by $128.79."], measuredAt: "2026-09-08", note: null }],
+      "2026-09-08",
+    );
+    const r = rows.find((x) => x.key === "invoices-proof")!;
+    assert.equal(r.fractionText, "6 of 7");
+    assert.notEqual(r.health, "complete");
+    assert.match(r.gaps[0], /by \$128\.79/, "the amount is the row's value: it says how much cost is wrong");
+  });
+
+  test("no invoice printing a total is nothing to measure, not a failure", () => {
+    const rows = buildHealth([{ key: "invoices-proof", numerator: 0, denominator: 0, gaps: [], measuredAt: "2026-09-08", note: null }], "2026-09-08");
+    const r = rows.find((x) => x.key === "invoices-proof")!;
+    assert.equal(r.health, "empty", "an unanswerable question is not a failed one");
+  });
+});

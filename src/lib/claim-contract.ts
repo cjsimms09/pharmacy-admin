@@ -109,6 +109,8 @@ export type ContractForMatch = {
 
 export type RateForMatch = {
   network: string | null;
+  /** Network reimbursement ids the rate is written for (NCPDP 545-2F). Empty where the document prints none. */
+  networkIds?: string[];
   /**
    * The routing this rate line was printed against, where the schedule printed one.
    *
@@ -432,27 +434,41 @@ export function candidatesFor(a: {
   networkId: string;
   /** Who the claim's BIN resolves to, where the site knows. Null where it does not. */
   payerName: string | null;
-  contracts: (ContractForMatch & { networkNames?: string[] })[];
+  /** Other names the same payer goes by on the BIN listing — "Prime Therapeutics" behind "Blue Cross Blue Shield", by the owner's word. */
+  payerAliases?: string[];
+  contracts: (ContractForMatch & { networkNames?: string[]; governsHere?: boolean | null; hasRates?: boolean })[];
   /** A date the candidate has to be in force on, where the caller has one. */
   on?: string | null;
-}): { documentId: string; documentName: string; counterparty: string | null; networkNames: string[]; why: string }[] {
+}): { documentId: string; documentName: string; counterparty: string | null; networkNames: string[]; hasRates: boolean; why: string }[] {
   const id = norm(a.networkId);
   const payer = norm(a.payerName);
+  const payers = [payer, ...(a.payerAliases ?? []).map(norm)].filter((p): p is string => p !== null);
   const live = a.on ? a.contracts.filter((c) => inForceOn(c, a.on as string)) : a.contracts;
 
   return live
     .map((c) => {
       const names = (c.networkNames ?? []).filter(Boolean);
-      const samePayer = payer !== null && norm(c.counterparty) !== null && (norm(c.counterparty)!.includes(payer) || payer.includes(norm(c.counterparty)!));
+      const cp = norm(c.counterparty);
+      const samePayer = cp !== null && payers.some((p) => cp.includes(p) || p.includes(cp));
       const namesId = id !== null && names.some((n) => norm(n)?.includes(id));
-      const rank = samePayer && namesId ? 0 : samePayer ? 1 : namesId ? 2 : 3;
+      // The document prints the id itself: 23 of the 177 read contracts list their network reimbursement ids, and three of those ids are on this pharmacy's claims.
+      const printsId = id !== null && (c.networkReimbursementIds ?? []).some((n) => norm(n) === id);
+      // Written for this pharmacy: the exhibit lists the chain code (605, 630, 841) or the NCPDP. The owner,
+      // 8 September: "there's no way to deduce the network is our group from the contract??" — this is the way.
+      const here = c.governsHere === true;
+      const rank = printsId ? -1 : samePayer && here ? 0 : samePayer && namesId ? 1 : samePayer ? 2 : namesId ? 3 : here ? 4 : 5;
       return {
         documentId: c.documentId,
         documentName: c.documentName,
         counterparty: c.counterparty,
         networkNames: names,
+        hasRates: c.hasRates === true,
         rank,
-        why: samePayer
+        why: printsId
+          ? `this document prints ${a.networkId} as one of its network reimbursement ids`
+          : samePayer && here
+          ? `${c.counterparty} is who this network's BIN resolves to, and this document is written for this pharmacy's chain code`
+          : samePayer
           ? `${c.counterparty} is who this network's BIN resolves to`
           : namesId
             ? `a network on this document is named for ${a.networkId}`
@@ -521,11 +537,14 @@ export function rateFor(contract: ContractForMatch, claim: ClaimForMatch): RateF
  * names routing the claim does not, and null where it names none — which is not a mismatch, it is
  * a line that inherits the document's routing and applies to everything the document does.
  */
-export function routes(rate: Pick<RateForMatch, "bins" | "pcns" | "groupIds">, claim: ClaimForMatch): boolean | null {
+export function routes(rate: Pick<RateForMatch, "bins" | "pcns" | "groupIds" | "networkIds">, claim: ClaimForMatch): boolean | null {
   const has = (xs: string[]) => xs.map(norm).filter((x): x is string => x !== null);
   const bins = has(rate.bins);
   const pcns = has(rate.pcns);
   const groups = has(rate.groupIds);
+  const ids = has(rate.networkIds ?? []);
+  // The id is the most specific thing a claim carries: where the rate prints ids, the id decides on its own.
+  if (ids.length > 0) return claim.networkId ? ids.includes(norm(claim.networkId)!) : false;
   if (bins.length === 0 && pcns.length === 0 && groups.length === 0) return null;
   if (bins.length > 0 && !(claim.bin && bins.includes(norm(claim.bin)!))) return false;
   if (pcns.length > 0 && !(claim.pcn && pcns.includes(norm(claim.pcn)!))) return false;

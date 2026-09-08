@@ -15,9 +15,16 @@ import { periodOf } from "../src/lib/imonnit";
  * counted signed months and coloured the count green whatever it was.
  */
 describe("which month a reading belongs to", () => {
-  test("a reading is filed under its own calendar month", () => {
-    assert.equal(periodOf("2026-08-14T09:30:00.000Z"), "2026-08");
-    assert.equal(periodOf("2026-01-01T00:00:00.000Z"), "2026-01");
+  /*
+   * Local time, on purpose. A fridge reading is an event in the pharmacy, and the log an inspector
+   * reads is printed in local time — so a reading at nine on the last evening of January is a
+   * January reading, though in UTC it is already February. The instants below are built in local
+   * time so the test says the same thing on the pharmacy computer in Kansas and on a UTC machine.
+   */
+  test("a reading is filed under its own calendar month, in local time", () => {
+    assert.equal(periodOf(new Date(2026, 7, 14, 9, 30).toISOString()), "2026-08");
+    assert.equal(periodOf(new Date(2026, 0, 1, 0, 0).toISOString()), "2026-01");
+    assert.equal(periodOf(new Date(2026, 0, 31, 21, 0).toISOString()), "2026-01", "a late-evening reading stays in its own month");
   });
 
   test("the last instant of a month does not leak into the next", () => {

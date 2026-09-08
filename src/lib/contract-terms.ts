@@ -65,6 +65,8 @@ export const RateTerm = z.object({
   bins: z.array(z.string()),
   pcns: z.array(z.string()),
   groupIds: z.array(z.string()),
+  /** The network reimbursement ids (NCPDP 545-2F) a claim carries under this rate, where a crosswalk prints them. */
+  networkIds: z.array(z.string()).optional(),
   /** The book this line prices, where the schedule says: Commercial, Medicare Part D, Medicaid. */
   lineOfBusiness: z.string().optional(),
   /** Preferred or standard cost sharing, where the schedule splits on it. */

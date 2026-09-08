@@ -100,6 +100,12 @@ export type Movement = {
    * this boundary. Null where the drug is steady, or where the caller has not worked it out.
    */
   whyNotSteady?: string | null;
+  /**
+   * Used enough to be an add-on: two days or two prescriptions in the window (usage.ts). Where
+   * the caller has not worked it out, `steady` stands in. The days-of-stock cap bounds the cost.
+   */
+  usedEnough?: boolean;
+  whyNotUsed?: string | null;
   /** Units on the shelf now, in thousandths. Zero where no count is held. */
   onHandThousandths: number;
 };
@@ -201,6 +207,8 @@ export type PlanInput = {
   maxDaysOfStock: number;
   /** Below this a saving is not a reason to split an order across suppliers. */
   materialityCents: number;
+  /** See topUpCandidates: the product an NDC belongs to, so an add-on may be an equivalent. */
+  groupOf?: (ndc11: string) => string | null;
   /**
    * What moving this basket off the primary does to the rebate band, in cents. Negative is a cost.
    * Supplied by the caller from ratio-effect.ts so there is one such calculation in the site.
@@ -232,6 +240,23 @@ export function packsFor(thousandths: number, packQty: number): number {
 }
 
 /** The cheapest offer per supplier for one NDC, cheapest supplier first. Short-dated last, never first. */
+/**
+ * The cheapest sound lot per supplier across every NDC of the dispensed product, where a group is
+ * known; the dispensed NDC alone where it is not. A supplier's row is its cheapest equivalent, so a
+ * dearer NDC it also carries never hides the cheaper one.
+ */
+export function offersForProduct(offers: Offer[], ndc11: string, groupOf?: (ndc11: string) => string | null): Offer[] {
+  const group = groupOf?.(ndc11) ?? null;
+  if (!group) return offersFor(offers, ndc11);
+  const ndcs = [...new Set(offers.filter((o) => o.ndc11 === ndc11 || groupOf!(o.ndc11) === group).map((o) => o.ndc11))];
+  const best = new Map<string, Offer>();
+  for (const n of ndcs) for (const o of offersFor(offers, n)) {
+    const held = best.get(o.supplier);
+    if (!held || o.effectiveUnitMicros < held.effectiveUnitMicros) best.set(o.supplier, o);
+  }
+  return [...best.values()];
+}
+
 export function offersFor(offers: Offer[], ndc11: string): Offer[] {
   const best = new Map<string, Offer>();
   for (const o of offers) {
@@ -412,15 +437,24 @@ export function planOrder(input: PlanInput): Plan {
         alreadyOrdered: new Set(draft.lines.map((l) => l.ndc11)),
         maxDaysOfStock: input.maxDaysOfStock,
         materialityCents: input.materialityCents,
+        groupOf: input.groupOf,
       });
       draft.refusals.push(...candidates.refused);
 
       let filled = 0;
       for (const c of candidates.ranked) {
         if (filled >= shortfall) break;
-        const line = lineFor(c.ndc11, nameOf.get(c.ndc11) ?? c.name, c.offer, c.alternative, c.capThousandths, "top_up");
-        // A pack that alone overshoots the whole shortfall is still allowed — the alternative is
-        // not ordering at all — but only because the days-of-stock cap already passed on it.
+        /*
+         * Only as many packs as the shortfall needs, never the whole cap. The cap is what the shelf
+         * could absorb; the shortfall is what the order needs — seven packs of a $300 pod to cover a
+         * $169 gap was the cap standing in for the need. One pack that alone overshoots is still
+         * allowed: the alternative is not reaching the minimum at all.
+         */
+        const perPack = packCostCents(c.offer, 1);
+        const packUnits = (c.offer.packQty as number) * 1000;
+        const capPacks = Math.max(1, Math.floor(c.capThousandths / packUnits));
+        const packs = Math.max(1, Math.min(capPacks, Math.ceil((shortfall - filled) / Math.max(1, perPack))));
+        const line = lineFor(c.ndc11, nameOf.get(c.ndc11) ?? c.name, c.offer, c.alternative, packs * packUnits, "top_up");
         draft.lines.push(line);
         filled += line.costCents;
       }
@@ -510,7 +544,10 @@ export function verdictFor(a: {
 }
 
 export type Candidate = {
+  /** The NDC to buy — an AB-rated equivalent of the dispensed one where that is cheaper, else the same. */
   ndc11: string;
+  /** The NDC the pharmacy dispenses, whose rate this add-on is sized on. */
+  dispensedNdc11: string;
   name: string | null;
   offer: Offer;
   alternative: Offer | null;
@@ -531,6 +568,8 @@ export type Candidate = {
  * the question is not which item saves most but which items save most per dollar of the pharmacy's
  * cash that has to sit on a shelf to get there.
  */
+const fold = (s: string) => s.trim().toLowerCase();
+
 export function topUpCandidates(a: {
   supplier: string;
   offers: Offer[];
@@ -539,6 +578,13 @@ export function topUpCandidates(a: {
   alreadyOrdered: Set<string>;
   maxDaysOfStock: number;
   materialityCents: number;
+  /**
+   * The product an NDC belongs to, for generics: every AB-rated equivalent the pharmacy could buy
+   * instead. The owner, 8 September: the page told him to buy the $38 Sun cipro/dex bottle when ANDA
+   * and McKesson sell equivalents at $19.93 and $19.75 and Kansas Medicaid pays the same NADAC on
+   * all of them. Null (or a null answer) keeps the comparison to the same NDC.
+   */
+  groupOf?: (ndc11: string) => string | null;
 }): { ranked: Candidate[]; refused: Refusal[] } {
   const ranked: Candidate[] = [];
   const refused: Refusal[] = [];
@@ -546,8 +592,10 @@ export function topUpCandidates(a: {
 
   for (const m of a.movement) {
     if (a.alreadyOrdered.has(m.ndc11)) continue;
-    const priced = offersFor(a.offers, m.ndc11);
-    const ours = priced.find((o) => o.supplier === a.supplier);
+    const priced = offersForProduct(a.offers, m.ndc11, a.groupOf);
+    // Folded: the register says "Parmed", the catalogue "ParMed", and a raw === lists nothing for it.
+    const mine = fold(a.supplier);
+    const ours = priced.find((o) => fold(o.supplier) === mine);
     if (!ours) continue;
     const label = name(m.ndc11, ours.description ?? null);
 
@@ -559,24 +607,25 @@ export function topUpCandidates(a: {
       refused.push({ ndc11: m.ndc11, name: label, supplier: a.supplier, why: "Nothing dispensed in the window. Stock with no velocity is a write-off with a delay." });
       continue;
     }
-    if (!m.steady) {
+    if (!(m.usedEnough ?? m.steady)) {
       // The reason names the test that actually failed. One sentence for three tests printed the
       // wrong one 103 times out of 103 on this pharmacy's data.
       refused.push({
         ndc11: m.ndc11,
         name: label,
         supplier: a.supplier,
-        why: m.whyNotSteady ?? "The rate is one large fill, not a rate. Buying deep on it is buying for a patient who may not return.",
+        why: m.whyNotUsed ?? m.whyNotSteady ?? "The rate is one large fill, not a rate. Buying deep on it is buying for a patient who may not return.",
       });
       continue;
     }
 
-    const alternative = priced.find((o) => o.supplier !== a.supplier) ?? null;
+    const alternative = priced.find((o) => fold(o.supplier) !== mine) ?? null;
     if (!alternative) {
       refused.push({ ndc11: m.ndc11, name: label, supplier: a.supplier, why: "Only this supplier prices it, so there is no saving to bank — buy it when it is needed." });
       continue;
     }
-    if (ours.effectiveUnitMicros >= alternative.effectiveUnitMicros) {
+    // The same price is allowed: reaching a minimum on it costs nothing. Dearer is not.
+    if (ours.effectiveUnitMicros > alternative.effectiveUnitMicros) {
       continue; // Not cheaper here. Silent: this is most of the catalogue.
     }
 
@@ -610,10 +659,12 @@ export function topUpCandidates(a: {
     const costCents = packCostCents(ours, packs);
     const alternativeCents = Math.round((alternative.effectiveUnitMicros * unitsThousandths) / 1000 / MICROS_PER_CENT);
     const savingCents = alternativeCents - costCents;
-    if (savingCents < a.materialityCents) continue;
+    // An add-on exists to reach a minimum, so a saving of nothing is allowed; a loss is not. The
+    // ranking below still puts the real savings first.
+    if (savingCents < 0) continue;
 
     ranked.push({
-      ndc11: m.ndc11, name: label, offer: ours, alternative,
+      ndc11: ours.ndc11, dispensedNdc11: m.ndc11, name: label, offer: ours, alternative,
       capThousandths: unitsThousandths, savingCents, costCents,
       savingPerDollar: costCents > 0 ? savingCents / costCents : 0,
     });

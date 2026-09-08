@@ -321,6 +321,17 @@ shaped around what PioneerRx actually holds rather than around what its export h
 things above, the next part is going through the contracts to see how we can efficiently match
 claims to a specific contract."* Drug file first, then claim-to-contract matching.
 
+**What to pull once SQL is connected (8 September, 1, the owner: "we should be thinking about all the
+info we will want to get from sql").** Per claim: everything in the dispensed export (AWP, WAC, NADAC,
+MAC, DAW, days supply, fee, basis of reimbursement, contract id, received plan id, DIR fee,
+e-voucher, secondary payer) plus the EDI response itself — the network reimbursement id, the
+response messages, reject codes, other-payer amounts — and the timestamp of every transaction and
+reversal. Per fill: sold date, quantity, the dispensed NDC, a hashed patient key, never a name.
+Third-party setup: every plan with BIN, PCN, group, plan name and network. Pricing as PioneerRx saw
+it at adjudication, per NDC and date. Inventory: on-hand daily, order points, the drug file. The
+daily text report stays the automatic feed until then, proved nightly; the export enriches when one
+is sent by hand.
+
 ### 7. Finish the logic audit (HANDOFF item 3)
 
 Not yet looked at: `shelf.ts` (895 lines, the largest and least examined), `order-plan.ts` beyond
@@ -376,6 +387,17 @@ larger than a season's use — is the failure. Multiple options, ranked, running
 minimum, never a single answer. Assigned to A (audit); session 1 supplies the live list and the
 facts behind each of its top lines.
 
+**Re-evaluated 8 September afternoon (1), at the owner's word** — "it lists very little options
+for each supplier… I dont want to order things we dont use but we need options of things we can
+add on to hit minimums." Measured first: every list empty; 442 of 545 dispensed drugs failed the
+three-test `steady` bar on fifteen days of claims; a saving under $5 was dropped; an equal price
+was dropped; and the planner's top-up took the whole days-of-stock cap (seven pods, $2,129, for a
+$169 gap). Changed: an add-on needs only to be *used* (two days or two prescriptions in the
+window; one fill is still refused), the cap on the observed rate bounds what it can cost; the same
+price as the primary is an option; a top-up buys the packs the shortfall needs. After: IPC 0 → 11
+options ($125.90 toward $200), IPD 0 → 3, the pod ×1. ANDA and ParMed still list nothing because
+**no minimum is on file for either** — the owner's to give. McKesson's price in every comparison is
+net of the ladder rebate at the band in force, and each basket prices its band cost.
 ### 13. The design pass is a fifth session (8 September)
 
 See item 8. Session C: cloud, no data, owns `src/app/**` presentation and `src/components/**`
@@ -530,6 +552,280 @@ the whole dispensing shelf, searchable — drug with strength and form, NDC, on 
 packages, per day and days of stock, PioneerRx's order point against on hand, cost and value, the
 cheapest supplier today, last dispensed, schedule — with the surplus section kept beneath it.
 Reader aliases ("Cost", "Order Point", "Size") are 2's; the page and `shelf.ts` are 1's.
+### 18. Pack sizes: where more than two suppliers carry an NDC, the majority settles it (8 September)
+
+The owner's rule: "if more than 2 suppliers then go with majority agreement." Placed in the
+levelling (`catalogue-cache.ts`, 1's) beneath the two documents: a pack the pharmacist typed wins,
+then the FDA where a supplier already reads the box the FDA's way, then — for the NDCs neither
+settles — the whole-package reading (count and unit) that more than half of three or more
+suppliers share. Compared as readings, not strings, so "(2) 33.4 GM" and "66.8 GM" are one
+vote. A tie or a two-supplier split still waits for the pharmacist on the pack-sizes page.
+
+### 19. When the contracts are read: how many claims match a contract, and what would raise it (8 September)
+
+The owner's ask: "once all contracts are done, want a breakdown of how many claims we can match
+to contract and how we can improve it more." Deliver as a page section on Payers and contracts and
+a HANDOFF paragraph: claims matched, by which route (network id, BIN, chain code, owner link), the
+unmatched grouped by BIN/PCN with the fills and dollars behind each, and for every unmatched group
+the one thing that would close it — a document not yet in the folder, a link the owner can make,
+a plan class. Waits on the read finishing, which waits on the Settings → Claude ceiling.
+### 20. Returns: the site has to tell the owner before a credit drops, and today it cannot (8 September)
+
+The owner's question: "is our system setup to make sure I am returning things when I need to? if
+we still have a bottle ordered from them we need to send it back before credit dips." Measured 8
+September: the arithmetic exists (`returns-due.ts`: credit now, the day it drops and to what, the
+day the window shuts, per invoice line against the supplier's own steps; surfaced on What to send
+back, the shelf's surplus list and Money found on Today), **and it has one invoice to work on** —
+IPC, 4 September, 8 lines. No ANDA, IPD, ParMed or McKesson invoice has ever been loaded, so no
+bottle from them can be timed; and IPD and ParMed have no returns policy on file. Nothing pushes
+a warning either: it waits on the page. Three pieces: (1) invoices from every wholesaler have to
+arrive — each one's invoice email to the mailbox, a fixture per shape, 2's pipeline; (2) IPD's and
+ParMed's policies, pasted by the owner as ANDA's was; (3) a warning that reaches him — a line in
+the daily digest and on Today whenever a credit step drops within 7 days or a window shuts within
+14, naming the bottle, the supplier and the dollars.
+### 21. Return soon: one list of everything to send back, by policy, by idleness, by the dollars (8 September) — BUILT
+
+The owner's words: "a return soon tool that shows everything the system thinks I should return
+either based on return policy or non use, or expensive.. expensive things should have a much
+quicker return time.. if not used we need to send back. cant have money sitting on shelf." Built
+the same afternoon: `return-soon.ts` (pure ranking, tested) and `/purchasing/return-soon`, listed
+under Buying. Three reasons in one list — a credit step or window from the supplier's policy on
+the invoice line; nothing dispensed in the claims window; days of stock beyond what a line of
+that value may hold ($1,000 or more: 7 days; $250: 14; less: 30). Soonest clock first, then the
+dollars. Measured on the 8 September count: 1,200 lines, $137,606 sitting, 20 this week — and
+every one without a supplier, because only IPC's one invoice is on file; and with 15 days of
+claims "not moving" is a list to check, not to ship, and the page says so. Item 20's three
+pieces are what make it real: every wholesaler's invoices, IPD's and ParMed's policies, and a
+warning in the digest and on Today.
+### 22. The add-on lists are only as right as the prices and equivalents under them (8 September)
+
+The owner's words: "For this list we really need to make sure our equivalents and drug pricing per
+supplier is correct or these recommendations will be wrong!" What holds today, from Data health on
+8 September: 48,852 of 51,502 comparable catalogue rows agree with the FDA on the package; 630
+rows are a whole multiple out (the expensive kind — a per-unit cost wrong by that factor) and
+those are exactly what the pack-sizes page and the majority rule (item 18) work down; 485 of 486
+dispensed NDCs carry a per-unit cost. The add-on rule compares the *same NDC* across suppliers,
+so an equivalent under another NDC never enters it — safe, and narrow: a cheaper equivalent at a
+secondary is never offered. Two pieces: (1) a pack-mismatch guard on the add-on list itself — a
+line whose package the FDA and the wholesaler disagree on by a whole multiple is not offered until
+settled, and the row says so; (2) add-ons by product (`equivalence_key`), offering the cheapest
+equivalent NDC the pharmacy already dispenses under, never a brand for a generic or the reverse.
+### 23. The chain: payer → BIN/PCN/group → plan class → network id → contract → rate → backtest (8 September)
+
+The owner's framing, as ideas rather than statements: "Payor to bin to group to network id to
+contract sounds like the whole game right?? This is what we need to do and correctly. This should be
+organized this way also.. then we can backtest to see if correct.. especially on ERISA and part d
+plans. Commercial plans will most likely be paying NADAC + 10.50?" It is the payer model in
+`docs/reference/payer-model.md`, and the site holds every hop, unevenly. Measured 8 September:
+BIN → payer: the claims report names the PBM on 1,302 of 1,304 paid claims and 36 payer links
+came off contracts. BIN/PCN/group → plan class: 6 of 1,054 fills on a classified plan; item 10's
+proposals wait on the owner's clicks. Network id → contract: 82 ids on 1,030 claims, 0 linked;
+2 printed by a document, 52 ranked by their PBM, 28 with nothing to rank. Contract → rate: 65
+rate lines in `network_rates` from 74 applied documents. Rate → price: `priceFromRate` exists and
+prices nothing yet, because nothing is linked. **The backtest does not exist**: for every fill on
+a linked contract, price it from the rate and set it beside what the plan actually remitted, by
+plan class — Part D, Medicaid (the Kansas floor, NADAC plus the dispensing fee), commercial,
+ERISA where a document says so — with the differences ranked by dollars. That is item 19 built as
+a page, one hop per column, each hop's coverage as a fraction, and it is the shape the Payers
+section should take. Owner's two ideas to test, not assume: ERISA plans priced apart from the
+floor; commercial at NADAC plus $10.50. Order: link the top networks (one click each, biggest
+first), finish the read (the ceiling), then the backtest on what is linked.
+
+**Built 8 September, 15:02 (1):** no clicks where the paper decides. `deduceNetworkLinks` links a
+network on its own when a document prints the id, or when its payer has exactly one document
+written for this pharmacy's chain code; the reason is written on the link. Ran once: 14 networks,
+305 claims (all nine Blue Cross networks to Prime's 2025 Limited Commercial exhibit — the only Prime
+document read so far, so provisional until the rest are read; Capital Rx, MedOne, two Navitus).
+Left: 47 networks with several documents written for us (590 claims: Optum 10, ESI 12, Caremark
+9–10) — the PSAO listing or the backtest; 21 with nothing written for us (135 claims: Humana, Argus).
+**8 September, 17:10 (1) — the last 21 claims, read off their own arithmetic.** With AWP and NADAC on
+the rows (item 32), each open network's formula can be read from the claims: CNCKSNPN (Express
+Scripts, BIN 003858, PCN A4 and MA, group 2ELA) paid **NADAC + $10.50** on every priced claim, basis
+of reimbursement 20 (NADAC) — the Kansas Medicaid rate, so it is Sunflower Health Plan's KanCare
+network under ESI; deduced and linked with the state's own fee as the document. Caremark's Part D
+ids: MDR1S100S7 (retail, 30-day) and MDE1S100S7 (extended, 90-day) pay generics at MAC with a
+$0.05 fee (basis 07) and the one brand at **AWP − 25.00% + $0.05** (basis 03); MDR0S02025 pays
+Breztri at **AWP − 20.00% + $0.10** and its BIN 020115 / PCN IS rows carry Medicare contract H6316
+with a $0.25 fee — all to be confirmed by the Medicare D guides when read, not linked yet. PAR001
+(Caremark, PCN ADV, plan DTC_CMK_) is a **direct-to-consumer discount programme**: the patient pays
+the whole discounted price, basis 6 (MAC), and the plan's "remit" is a −$5.00 programme fee —
+marked a programme. The transaction report's basis-of-reimbursement code (NCPDP 522-FM: 03 AWP
+less a percentage, 06/07 MAC, 20 NADAC) is what makes this reading safe; it is now on every row.
+
+**8 September, 17:00 (1) — RXADV, from PioneerRx's own screen.** The owner sent the EDI response for
+Rx 333913: Ventegra (BIN 012528, group VRX0071) returned Network Reimbursement ID (2F) RXADV with the
+message "RXADV-AC: NOVO NORDISK HAS PROVIDED A $1027.03 VOUCHER TOWARDS THE PATIENT COPAY. ORIGINAL
+COPAY: $1376. NEW COPAY: $348.97", after the plan rejected the drug (reject 70, plan exclusion). So
+RXADV is the id a plan returns when an automatic manufacturer voucher was applied at the point of
+sale — it rides on whichever plan adjudicated, which is why it sits under five payers — and the
+"remit" on such a row is voucher money toward the copay, not a plan payment. Marked a programme;
+Ventegra's BIN annotated on the register; the money belongs with item 24's reconciliation. The site's
+row for 333913 was faithful to the report; the owner's memory that a voucher was involved was also
+right; the report's "Amount" simply does not say which kind of money it is. That is the lesson for
+item 30: a proof against the source file is necessary and not sufficient — the kind of money is a
+fact the response carries and the transaction report does not.
+
+**8 September, 16:00 (1) — the 148 open claims, and what the web says (hints, never links).**
+Web findings carry a source and stay proposals until a document on file says the same. NET=400
+(5 claims, $3,960) is the **CMS Medicare GLP-1 Bridge**, BIN 028918 / PCN MEDDGLP1BR, paid by CMS's
+central processor at a fixed $50 copay through 31 December 2027 — CMS's own pharmacy document is
+downloaded and filed in the library (cms.gov/files/document/glp-1-pharmacies-c.pdf). PHXCOM30 (3
+claims) is the **Phoenix RxAdvantage discount card**, BIN 610268 / PCN PHXD (phoenixpbm.com savings
+card) — the discount-card family, item 25. DODT5IND (24 claims, $1,959) is **TRICARE**: BIN 003858,
+group DODA is TRICARE's own published BIN and group (tricare.mil FAQ); the rate is the TRICARE
+retail network agreement with Express Scripts, not in the folder. FEHBP01001 (11 claims, $1,617):
+BIN 610239 / PCN FEPRX is Caremark's Federal Employee Program routing (Caremark payer sheets), and
+the guide prints a "Federal Employee Health Benefit Plan National" Caremark rate — the strongest
+open proposal, one click or the backtest. Humana NET=0116/0111 (50 claims, $6,280): BIN 015581 /
+PCN 03200000 is Humana Medicare Advantage (Humana payer sheets); no web page prints the network
+id; the Humana Pharmacy Solutions manual and the pharmacy's own Humana agreement are the
+documents. RXADV and CNCKSNPN (13 claims): nothing on the web.
+
+Two follow-ups: run the deduction after every `applyAllReads`, and re-evaluate links the site made
+when new documents arrive (today it skips anything already linked).
+### 24. Copay-card remittance confirmations have to be read and reconciled to the claims (8 September)
+
+The owner's words, uploading one: "this is remit confirmation for copay cards. we need to be
+reconciling against the claims. we probably dont have these claims in our system but lets make
+sure this process is set up and correct for future." The document: a scanned statement from
+RedSail Technologies (RAS enrollment, Spartanburg SC) listing claims by prescription and fill with
+the drug and the amount, totals ("Total Claims 177.25 … Total Amount Paid"), no text layer worth
+reading. RedSail is BIN 028249 on the claims — 223 paid claims, the one BIN the PSAO listing does
+not name — so these are the copay-assistance secondaries, and the confirmation is their remit.
+Wanted: a reader on the intake path (the model read, since it is a scan; the same money guard the
+invoice reader now has), one `claim_payments` row per line with source `copay_card`, matched to
+the claim by prescription, fill and date the way the 835 reader matches, unmatched lines held and
+named, and the statement's own total as the arithmetic gate. The sample is in the session's
+uploads folder (`5171c9d9-Image_001.pdf`); a fixture with identifiers changed goes in `fixtures/`.
+Assigned to 2 after the directory move; the recogniser side is B's.
+
+**Reviewed 8 September, 16:45 (1), from the statement's own text layer (page 2 has one):** it is
+RedSail's "Remittance Advice — RAS Copay Voucher Reimbursement": payment date, check/ACH number,
+payment amount, NPI; rows of rx (twelve digits, zero-padded), date of service, NDC, drug, qty,
+submitted, patient paid, voucher paid, with reversals as the same row negated; footer Total Claims,
+Total Fee, Balance Forward, Total Amount Paid. The rows net to the printed total to the cent
+($177.25 = 321762 $174.31 + 330204 $2.94; five other prescriptions paid and reversed) — the
+arithmetic gate. The claims it settles adjudicate on BIN 028249 / PCN RXLOCAL (308 on file); the
+claim's remit is what the voucher promised, so a line settles it (revenue 0) and a difference is
+flagged. Spec sent to 2 in full on 8 September; these lines are August fills, before the claims
+on file begin, and match once the twelve-month export lands.
+
+### 25. The PSAO's discount card and copay networks guide (8 September)
+
+Uploaded as `898d0c4f-2026hmadiscountcardandcopaynetworks_1.xlsx`: a different shape from the
+networks guide — a rate tab per discount card programme (BIN, PCN, group, rates by days supply),
+a "Discount Card Listing" of BIN/PCN/group per card, and drug lists (Apollo Care NDCs by
+manufacturer, ConnectiveRx programmes, Visory specialty). Read it the way the networks guide is
+read (`psao-guide.ts`), one document per programme, with the BIN/PCN/group as the rate's routing;
+the drug lists are what says a claim on those BINs is a copay-card claim rather than a plan's.
+### 26. When the PSAO's guides roll to a new year, the site has to ask for the new ones (8 September)
+
+The owner's words: "also need a way ie 2027 for when they change to alert me to get new list." The
+guides are dated documents in the library now — the 2025 networks guide (42 documents), the 2026
+PBM listing, the 2026 and 2027 Medicare D guides. Rule: from 15 November of a guide's year, and
+again each month, if no guide for the coming year is on file for that family (networks, PBM
+listing, Medicare D, discount card), a line on Today and in the weekly email says which guide is
+missing and where it comes from (Atlas, pbmrelations.hmatlas@mckesson.com). And when a newer guide
+is loaded, the older year's rate lines are marked superseded from the newer one's effective date,
+never deleted: last year's claims still price on last year's guide. Lives with the contract clocks
+(`contractClocksDue`).
+
+### 27. Remittance advices (835s) emailed to the site have to be recognised and applied (8 September)
+
+The owner's words: "dont forget about remittance advice. going to have those emailed into site as
+well, system needs to know how to correctly handle them." Today an 835 is handled only when
+dropped through the Add tool (`intake/actions.ts` → `importRemittance`); the mailbox sweep
+(`autoroute.ts`, `mailbox.ts`) does not recognise one, whatever its extension. Wanted: recognise an
+835 by its content — an ISA envelope with ST*835 — under any name (.835, .edi, .txt, .dat, or a
+zip holding one), route it to `importRemittance` with the same balance check the reader already
+enforces (refuse a file whose CLP, PLB and BPR do not balance), post the payments onto the claims
+by prescription and fill, and file the payer's 835 as the receipt the cash books read. Unmatched
+lines are held and named, never dropped. Recogniser side B's; route and post 2's; the reader is
+A's and already tested. The facilitator's files already arrive this way through the MTF tool.
+### 28. From contracts to profit: prove the rate, then change what is bought and dispensed, on one page (8 September)
+
+The owner's words: "we have contract info and can make a lot of connections. how do we use that to
+extract more profit, change what we order. whats best way to do this.. are we sure about
+reimbursement rate, can we prove it? how do we turn that into more profit.. how do we present that
+info to me in a clear way to make it actionable??" And, the same hour: "a little concerned your
+info doesnt match reality." The order is fixed by that concern. (1) **Prove it** — the backtest of
+item 23: every fill on a settled network priced from its rate and set beside what the plan paid,
+by network, with the share that reproduces within a dollar; nothing downstream is trusted from a
+network the backtest has not proved. (2) **Then use it**, three levers each measured on the real
+fills: which NDC to dispense within an equivalence group under each network's formula (a MAC or
+AWP-minus rate pays the same for a dearer NDC, so the cheapest to buy wins; a NADAC-plus rate pays
+cost plus a fee, so the choice is indifferent); which wholesaler to buy each from given that; and
+where a days-supply band (84+) or a preferred network pays differently. (3) **Present it** on one
+page, Profit by payer: per network — fills, revenue, cost, margin, expected against paid, the top
+drugs losing money and the one action each — with the proof share printed beside every figure.
+### 29. Which NDC nets the most for a drug: an aggregate over the drug's claims, and only the exceptions (8 September)
+
+The owner's design, in his words: "I cant necessarily tailor my ordering to one claim, this is why
+we will have to look at aggregate of claims for 1 drug and find which NDC nets the most for that
+drug based on reimbursement (contracts) we do for that drug and what we purchase at.. this will be
+a fluid calculation.. and really our system is set to order cheapest net drug, so system should be
+looking for cases where that isnt true and let me know. will take multiple months to get enough
+data to be confident." So, per drug (equivalence group), not per claim: take every fill of that
+drug in the window, the network each fill priced under and that network's formula (proved by the
+item 23 backtest, never assumed), and for each candidate NDC the pharmacy could buy compute what
+those same fills would have paid under each formula (AWP-minus pays more for a higher-AWP NDC; MAC
+and NADAC-plus pay the same or by that NDC's own benchmark) less what the NDC costs to buy today,
+net of rebate — a net per unit for the drug's actual payer mix. The buy list already orders the
+cheapest net-cost NDC; this reports only the exceptions: drugs where a dearer-to-buy NDC nets more
+across the mix, with the dollars a month, the fills behind it, and a confidence that grows with
+the months of claims (thin until the twelve-month export lands). A very high-dollar item may be
+judged per claim; everything else in aggregate. `drug-profit.ts` is the start of it. Depends on
+23 (proved rates), the catalogue's AWP and NADAC per NDC, and the equivalence keys.
+### 30. Proof rows: every dataset re-proved against its own source file, every night (8 September) — the most important thing
+
+The owner's words: "these things need to be right!! we need to make sure claims are matching
+their info properly and continue to. we need to do the same with drug info (pricing, nadac, awp,
+equivalents, etc).. this is the most important thing." SESSION-RULES §1c is the rule. What holds
+today: the claims reader checks three totals against the report at import and refused nothing
+wrongly (the 4 September rows re-read from the stored file matched field for field); Data health
+measures completeness and linkage on twenty rows. What is missing is the nightly re-proof from
+the stored files. Build, in this order: **claims** — every stored report file re-read each night,
+rows and the report's own totals set against the claims table per day, any row that differs
+named; **catalogues** — each supplier's last file's row count and price sums against the stored
+rows; **NADAC** — the CMS file's rows and as-of date against the table; **FDA directory** — the
+zip's product and package counts against the table, and the equivalence keys re-derived; **on-hand**
+— the report's own count against stored (2 built the gate); **invoices** — total against lines;
+**remittances** — the 835's CLP and PLB against the payments posted; **the guides** — the
+workbook's rows against the documents. Each a Data health row with the file's date, each
+disagreement a red row on Today. Data health is 2's: the rows and the nightly script; the claims
+re-read is 1's. Ahead of item 24 in 2's order, by the owner's word.
+### 31. The site starts clean on 1 September 2026: no history is coming (8 September)
+
+The owner's words: "i will not be uploading claims from before sept.. or anything. this site is
+starting clean as of 09/01/.." So the twelve-month claims export is withdrawn from every list that
+waited on it (10b, 23, 24, 29, the HANDOFF owner list), and the site needs a stated start date:
+a `site_start_on` setting, 2026-09-01, read wherever the site judges a window. Consequences to
+build, small: the 23 facilitator payments and the RedSail statement's August lines are for fills
+before the start and will never match a claim — they are shown as "before the site's start" and
+counted in cash as received, not as unmatched; the facilitator page, the remits Data health row
+and the copay-card reconciliation say so in those words. Every rate, steadiness and idleness
+judgment carries the window it was made on, and the window grows from 1 September: the
+"short window" caveats on Return soon, the add-on lists and item 29 stand until the months
+accrue, and the pages print the number of days held. The claims of 24–31 August already on file
+stay (they are real and proved) but are outside the start.
+### 32. PioneerRx's dispensed export is the second claims feed: it enriches, it never duplicates (8 September)
+
+The owner uploaded `daily_0901_to_0907.xlsx` — "this is the correct info" — one row per
+prescription sold, 51 columns, with what the transaction report never prints: AWP, WAC and NADAC
+for the dispensed quantity, DAW, days supply, dispensing fee, basis of reimbursement, the plan's
+own contract id, DIR fee, e-voucher, the sold date, and the secondary payer beside the primary.
+Compared row for row the same day: 916 of 943 prescriptions in both agreed on the remit to the
+cent; every difference had a reason (the export prints the primary's copay, the transaction
+report what was left after a secondary paid; a $0 primary here is the paying secondary there).
+Built the same hour: `dispensed-export.ts` — pure parse, tested; `enrichClaimsFromDispensedExport`
+writes the export's columns onto the claims the transaction report proved, keyed by prescription,
+fill and BIN, and names what it cannot place (303 rows on the first file: fills processed before
+the site's records, per item 31). Migration 0091. First run: 940 primaries and 28 secondaries
+enriched; September's paid claims now carry AWP on 957, days supply on 1,035, NADAC on 914, the
+sold date on 952. Left to do: the export as a daily feed through the mailbox and the Add tool
+(its own kind; 2 and B), a nightly proof row that re-reads the stored file against the enriched
+columns (item 30), and the transaction report's `Rx Transaction Details` stays the source of the
+claim itself — the export enriches, it never creates.
 ## The data the site has to ingest
 
 Named by the owner on 7 September as what is still being connected. Each one needs a reader, a

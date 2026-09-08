@@ -13,6 +13,8 @@ import { classifyDocument, describeError, hasApiKey } from "@/lib/ai";
 import { addDays, todayIso } from "@/lib/dates";
 import { readBusinessDocument, looksLikeX12Remittance, matchParty, duplicateBill, type BusinessDocT, BUSINESS_KINDS } from "@/lib/business-docs";
 import { parseCents } from "@/lib/money";
+// A "use server" module may export only async functions, so the list and its type live beside it.
+import type { IntakeHint } from "./kinds";
 
 /** The names Claude is given to match a document's party against, and the categories a bill may take. */
 async function knownParties() {
@@ -33,7 +35,47 @@ export async function readIntoIntake(
   intakeId: string,
   docId: string,
   user: { id: string; name: string },
+  hint?: IntakeHint,
 ): Promise<void> {
+  /*
+   * A named kind goes to its reader ahead of every guess — but only where naming it changes the
+   * outcome.
+   *
+   * Balance on hand is the case that prompted this and the only one wired so far: it needs a count
+   * date, no guess can ask for one, and the reader refuses without it. That is exactly how the
+   * owner's upload died with nothing on the screen to do about it.
+   *
+   * Every other kind falls through to the recogniser below, which is B's and is generally right.
+   * The choice is still recorded on the item, so the review page opens on the answer he gave.
+   * Wiring the rest is worth doing only where a named kind would actually beat the guess.
+   */
+  if (hint?.kind === "balance_on_hand") {
+    try {
+      const { fileOnHand } = await import("@/lib/shelf");
+      const r = await fileOnHand(bytes, file.fileName, { userId: user.id }, { countedOn: hint.countedOn ?? undefined, documentId: docId });
+      const summary = r.ok
+        ? `${r.items.toLocaleString("en-US")} items counted on ${r.countedOn}` +
+          (r.replaced ? ", replacing the count already held for that day" : "") +
+          (Object.keys(r.skipped).length > 0
+            ? `; ${Object.entries(r.skipped).map(([why, n]) => `${n} ${why}`).join(", ")}`
+            : "")
+        : r.why;
+      await db
+        .update(schema.intakeItems)
+        .set({
+          status: r.ok ? "applied" : "extracted",
+          ...(r.ok ? { appliedAt: new Date().toISOString() } : {}),
+          resultJson: JSON.stringify({ kind: "report", routedAs: "on_hand", summary }),
+        })
+        .where(eq(schema.intakeItems.id, intakeId));
+      // A refusal ends it either way: the reader has said what is wrong, and no model can supply a
+      // count date the file does not carry. The sentence is on the item for somebody to act on.
+      return;
+    } catch (e) {
+      void e;
+    }
+  }
+
   try {
     const { importDropped } = await import("@/lib/mailbox");
     const routed = await importDropped(bytes, file.fileName, { userId: user.id, userName: user.name }, docId);
@@ -129,6 +171,15 @@ export async function dropFiles(fd: FormData) {
   // faded surname off a phone photo does not. Everything else still comes from the document.
   const hintPersonId = String(fd.get("hintPersonId") ?? "").trim() || null;
   const hintCredentialType = String(fd.get("hintCredentialType") ?? "").trim() || null;
+  /*
+   * What the person says the file is, and — for a count — the day it represents.
+   *
+   * A typed date beats the report's own, because the person adding it knows whether this morning's
+   * print is this morning's shelf or yesterday's. Where they leave it blank the file's own date
+   * stands, and where neither exists the reader refuses and says so.
+   */
+  const hintKind = String(fd.get("hintKind") ?? "").trim() || null;
+  const hintCountedOn = String(fd.get("hintCountedOn") ?? "").trim() || null;
   const hinted = people.find((p) => p.id === hintPersonId) ?? null;
 
   const ids: string[] = [];
@@ -158,7 +209,7 @@ export async function dropFiles(fd: FormData) {
     ids.push(intakeId);
 
     const bytes = Buffer.from(await file.arrayBuffer());
-    await readIntoIntake(bytes, { fileName: file.name, mimeType: stored.mimeType }, intakeId, docId, { id: user.id, name: user.name });
+    await readIntoIntake(bytes, { fileName: file.name, mimeType: stored.mimeType }, intakeId, docId, { id: user.id, name: user.name }, { kind: hintKind, countedOn: hintCountedOn });
     /* The optional hints still apply where the compliance classifier answered. */
     if (hinted || hintCredentialType) {
       const it = await db.query.intakeItems.findFirst({ where: eq(schema.intakeItems.id, intakeId) });
@@ -173,7 +224,12 @@ export async function dropFiles(fd: FormData) {
       }
     }
   }
-  await audit({ action: "intake.dropped", userId: user.id, userName: user.name, details: `${files.length} file(s)` });
+  await audit({
+    action: "intake.dropped",
+    userId: user.id,
+    userName: user.name,
+    details: `${files.length} file(s)` + (hintKind ? `, told they are ${hintKind}` : "") + (hintCountedOn ? `, counted on ${hintCountedOn}` : ""),
+  });
   revalidatePath("/intake");
   if (ids.length === 1) {
     const it = await db.query.intakeItems.findFirst({ where: eq(schema.intakeItems.id, ids[0]) });

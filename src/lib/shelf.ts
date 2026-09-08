@@ -4,8 +4,8 @@ import { desc, eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { readOnHand, onHandTotals } from "./on-hand";
 import type { Fill } from "./fills";
-import { velocity, toOrderThousandths, whyNotSteady, type Velocity } from "./usage";
-import { leanShelf, shelfTotals, type ShelfRow } from "./lean-shelf";
+import { velocity, toOrderThousandths, whyNotSteady, usedEnoughForTopUp, whyNotUsedEnough, type Velocity } from "./usage";
+import { leanShelf, shelfTotals, stateOf, type ShelfRow } from "./lean-shelf";
 import {
   planOrder,
   type Offer,
@@ -51,6 +51,8 @@ export type ShelfLine = {
   quantityThousandths: number;
   onOrderThousandths: number | null;
   packQty: number | null;
+  /** PioneerRx's reorder level in units, where the count carried one. Nothing computes with it. */
+  orderPointUnits: number | null;
   valueCents: number | null;
 };
 
@@ -149,12 +151,14 @@ export async function fileOnHand(
     countedOn,
     fileName,
     rowsRead: parsed.rowsRead,
+    reportedCount: parsed.reportedCount ?? null,
     itemsKept: parsed.rows.length,
     skipReasons: JSON.stringify(parsed.skipped),
     unmappedColumns: JSON.stringify(parsed.unmappedColumns),
     unitsThousandths: totals.unitsThousandths,
     valueCents: totals.valueCents,
     rxValueCents: rxTotals.valueCents,
+    datedBy: opts.countedOn ? "typed" : (parsed.countedOnSource ?? null),
     documentId: opts.documentId ?? null,
     createdBy: by.userId,
   });
@@ -176,6 +180,7 @@ export async function fileOnHand(
     quantityThousandths: r.quantityThousandths,
     onOrderThousandths: r.onOrderThousandths ?? null,
     packQty: r.packQty ?? null,
+    orderPointUnits: r.orderPointUnits ?? null,
     countedInPackages: r.countedInPackages ?? false,
     unit: r.unit,
     unitCostMicros: r.unitCostMicros,
@@ -238,6 +243,7 @@ export async function latestShelf(): Promise<ShelfSnapshot | null> {
     quantityThousandths: r.quantityThousandths,
     onOrderThousandths: r.onOrderThousandths,
     packQty: r.packQty,
+    orderPointUnits: r.orderPointUnits ?? null,
     valueCents: r.valueCents,
   }));
   const rxRows = lines.filter(isRx);
@@ -423,6 +429,8 @@ export async function shelfMovement(): Promise<{
       steady: v.steady,
       // Which of the three tests failed, so the refusal on the add-ons list can say so.
       whyNotSteady: whyNotSteady(v),
+      usedEnough: usedEnoughForTopUp(v),
+      whyNotUsed: whyNotUsedEnough(v),
       onHandThousandths: onHandBy.get(v.ndc11) ?? 0,
     })),
   };
@@ -525,6 +533,123 @@ async function loadLeanShelf(): Promise<LeanShelfView> {
     snapshot,
     missing,
   };
+}
+
+/*
+ * The whole dispensing shelf, one row per NDC counted, with what a person needs beside it.
+ *
+ * The owner's verdict on the first count, 8 September: "not showing the drug name or any other
+ * specifics that might be needed." The count file is the worst source for any of that — this one's
+ * first column was not even read as a name — so nothing here depends on it. The name is the best
+ * of four sources, strength, form and labeler are the FDA directory's, the rate is the claims',
+ * the price is the catalogue's and NADAC's. The surplus list stays what it is; this is the shelf.
+ */
+export type ShelfItem = {
+  ndc11: string;
+  name: string | null;
+  strength: string | null;
+  form: string | null;
+  labeler: string | null;
+  onHandThousandths: number;
+  /** Units in the settled package and the count as packages, where the catalogue states a package. */
+  packUnits: number | null;
+  packs: number | null;
+  /** PioneerRx's own reorder level, in units, where the count carried one. */
+  orderPointUnits: number | null;
+  perDayThousandths: number;
+  /** null where nothing was dispensed in the window: no rate, so no days. */
+  daysOfStock: number | null;
+  fills: number;
+  lastOn: string | null;
+  state: ShelfRow["state"];
+  /** The cheapest offer in the catalogue today, per unit on the levelled package. */
+  cheapest: { supplier: string; unitCostMicros: number } | null;
+  nadacMicros: number | null;
+  /** What is on the shelf at today's cheapest price: a replacement value, not what was paid. */
+  valueCents: number | null;
+  /** What the count itself valued the line at — PioneerRx's cost times the quantity — where it carried one. */
+  countValueCents: number | null;
+};
+
+export type FullShelfView = {
+  rows: ShelfItem[];
+  countedOn: string | null;
+  from: string | null;
+  to: string | null;
+  totals: { items: number; valueCents: number; valued: number; named: number; out: number; short: number; dead: number };
+};
+
+export async function fullShelfNow(): Promise<FullShelfView> {
+  const { held } = await import("./held");
+  return held("full-shelf", loadFullShelf);
+}
+
+const STATE_ORDER: Record<ShelfRow["state"], number> = { out: 0, short: 1, lean: 2, overstocked: 3, dead: 4 };
+
+async function loadFullShelf(): Promise<FullShelfView> {
+  const [{ velocity: vel, snapshot, from, to }, names, keys, catalogue, nadac] = await Promise.all([
+    shelfMovement(),
+    import("./drug-names").then((m) => m.drugNames()),
+    import("./drug-directory-store").then((m) => m.directoryKeys()),
+    import("./catalogue-cache").then((m) => m.catalogueRows()),
+    import("./nadac-latest").then((m) => m.nadacNow()),
+  ]);
+  const totals = { items: 0, valueCents: 0, valued: 0, named: 0, out: 0, short: 0, dead: 0 };
+  if (!snapshot) return { rows: [], countedOn: null, from, to, totals };
+
+  const { packReadings } = await import("./drug-file");
+  const velBy = new Map(vel.map((v) => [v.ndc11, v]));
+  const nadacBy = new Map(nadac.map((n) => [n.ndc11, n.unitMicros]));
+  // The cheapest per-unit offer today, on the levelled package, whichever wholesaler makes it.
+  const cheapestBy = new Map<string, { supplier: string; unitCostMicros: number; packUnits: number | null }>();
+  for (const r of catalogue) {
+    if (r.unitCostMicros === null || r.unitCostMicros <= 0) continue;
+    const held = cheapestBy.get(r.ndc11);
+    if (held && held.unitCostMicros <= r.unitCostMicros) continue;
+    cheapestBy.set(r.ndc11, { supplier: r.supplier, unitCostMicros: r.unitCostMicros, packUnits: packReadings(r.packSize).whole });
+  }
+
+  const rows: ShelfItem[] = snapshot.rxRows.map((r) => {
+    const v = velBy.get(r.ndc11);
+    const k = keys.get(r.ndc11);
+    const c = cheapestBy.get(r.ndc11) ?? null;
+    const perDay = v?.perDayThousandths ?? 0;
+    const packUnits = c?.packUnits ?? r.packQty ?? null;
+    const valueCents = c ? Math.round(((r.quantityThousandths / 1000) * c.unitCostMicros) / 10_000) : null;
+    return {
+      ndc11: r.ndc11,
+      name: names.get(r.ndc11) ?? v?.name ?? r.description ?? k?.genericName ?? null,
+      strength: k?.strength ?? null,
+      form: k?.form ?? null,
+      labeler: k?.labeler ?? null,
+      onHandThousandths: r.quantityThousandths,
+      packUnits,
+      packs: packUnits !== null && packUnits > 0 ? Math.round((r.quantityThousandths / 1000 / packUnits) * 10) / 10 : null,
+      orderPointUnits: r.orderPointUnits,
+      perDayThousandths: perDay,
+      daysOfStock: perDay > 0 ? r.quantityThousandths / perDay : null,
+      fills: v?.fills ?? 0,
+      lastOn: v?.lastOn ?? null,
+      state: stateOf(r.quantityThousandths, perDay, SHELF_POLICY.targetDays),
+      cheapest: c ? { supplier: c.supplier, unitCostMicros: c.unitCostMicros } : null,
+      nadacMicros: nadacBy.get(r.ndc11) ?? null,
+      valueCents,
+      countValueCents: r.valueCents,
+    };
+  });
+  rows.sort((a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || (a.name ?? "~").localeCompare(b.name ?? "~"));
+  for (const r of rows) {
+    totals.items++;
+    if (r.name) totals.named++;
+    if (r.valueCents !== null) {
+      totals.valued++;
+      totals.valueCents += r.valueCents;
+    }
+    if (r.state === "out") totals.out++;
+    if (r.state === "short") totals.short++;
+    if (r.state === "dead") totals.dead++;
+  }
+  return { rows, countedOn: snapshot.countedOn, from, to, totals };
 }
 
 export type BuyListView = {
@@ -652,6 +777,12 @@ async function loadBuyList(): Promise<BuyListView> {
       needs.push({ ndc11: v.ndc11, name: v.name, needThousandths: need });
   }
 
+  const { directoryKeys: dirKeys } = await import("./drug-directory-store");
+  const planKeys = await dirKeys();
+  const planGroupOf = (n: string) => {
+    const k = planKeys.get(n);
+    return k && k.classification === "G" && k.key ? k.key : null;
+  };
   const plan = planOrder({
     needs,
     offers,
@@ -661,6 +792,7 @@ async function loadBuyList(): Promise<BuyListView> {
     materialityCents: SHELF_POLICY.materialityCents,
     // Priced after the plan is built: the cost depends on the basket, which does not exist yet.
     bandDelta: () => null,
+    groupOf: planGroupOf,
   });
 
   /*

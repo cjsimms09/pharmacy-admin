@@ -228,12 +228,30 @@ describe("the copy that leaves the building", () => {
   });
 });
 
-test("the fixtures leave nothing behind", () => {
-  // Housekeeping, so a test run does not fill the temporary folder with databases of stand-ins.
-  for (const f of fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith("scrub-test-"))) {
-    fs.rmSync(path.join(os.tmpdir(), f), { force: true });
+/*
+ * Housekeeping, so a test run does not fill the temporary folder with databases of stand-ins.
+ *
+ * This threw `EPERM ... rm 'scrub-test-....db'` on every Windows run, which is the pharmacy's own
+ * machine, so the folder filled up anyway. Two reasons, and `removeWorkingFile` is the answer to
+ * both — it is the function the site already uses for exactly this, tested three tests below.
+ *
+ * The first is timing: Windows will not unlink a file a process still holds, and SQLite does not
+ * always let go the moment `close()` returns. `rmSync` gets one attempt; `removeWorkingFile` waits
+ * and tries again, which is what the copy job learned to do when the same thing turned a finished
+ * job into a failed one.
+ *
+ * The second is that `-wal` and `-shm` are files too. Removing only `scrub-test-x.db` left
+ * `scrub-test-x.db-wal` behind for every fixture ever built, and nothing was ever going to collect
+ * them, because nothing was looking for them.
+ */
+test("the fixtures leave nothing behind", async () => {
+  const { removeWorkingFile } = await import("../src/lib/backup-scrub");
+  const left = () => fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith("scrub-test-"));
+  // The siblings are removed by name from the base, so the base is what is passed.
+  for (const f of new Set(left().map((n) => n.replace(/-(wal|shm|journal)$/, "")))) {
+    await removeWorkingFile(path.join(os.tmpdir(), f));
   }
-  assert.ok(true);
+  assert.deepEqual(left(), [], "a fixture, or one of its write-ahead files, is still in the temporary folder");
 });
 
 /*

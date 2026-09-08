@@ -118,6 +118,60 @@ export function excelSerialToIso(serial: number): string | null {
  * Cells are placed by their own column reference rather than by order, so a row that omits empty
  * trailing cells — which Excel does — still lines up with its header.
  */
+/**
+ * Every worksheet in the workbook, by its tab name, in the workbook's own order.
+ *
+ * The PSAO's network guide is fourteen tabs — rates by line of business, a BIN list, and a
+ * crosswalk per PBM from network reimbursement id to network — and the first tab is a change log.
+ * A reader that takes only the first sheet reads the change log and calls it the guide.
+ */
+export function readSheets(file: Buffer): { name: string; rows: string[][] }[] {
+  const zip = unzip(file);
+  const strings = sharedStrings(zip);
+  const wb = zip.get("xl/workbook.xml")?.toString("utf8") ?? "";
+  const rels = zip.get("xl/_rels/workbook.xml.rels")?.toString("utf8") ?? "";
+  const target = new Map<string, string>();
+  const inXl = (p: string) => "xl/" + p.replace(/^\/?(xl\/)?/, "");
+  for (const m of rels.matchAll(/<Relationship\s[^>]*?Id="([^"]+)"[^>]*?Target="([^"]+)"/g)) target.set(m[1], inXl(m[2]));
+  for (const m of rels.matchAll(/<Relationship\s[^>]*?Target="([^"]+)"[^>]*?Id="([^"]+)"/g)) if (!target.has(m[2])) target.set(m[2], inXl(m[1]));
+  const out: { name: string; rows: string[][] }[] = [];
+  for (const m of wb.matchAll(/<sheet\s[^>]*?name="([^"]+)"[^>]*?r:id="([^"]+)"/g)) {
+    const path = target.get(m[2]);
+    const xml = path ? zip.get(path)?.toString("utf8") : undefined;
+    if (!xml) continue;
+    out.push({ name: decodeXml(m[1]).trim(), rows: rowsOf(xml, strings) });
+  }
+  return out;
+}
+
+function rowsOf(xml: string, strings: string[]): string[][] {
+  const rows: string[][] = [];
+  for (const rowXml of xml.match(/<row[^>]*>[\s\S]*?<\/row>|<row[^>]*\/>/g) ?? []) {
+    const cells: string[] = [];
+    for (const m of rowXml.matchAll(/<c\s([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+      const attrs = m[1] ?? "";
+      const body = m[2] ?? "";
+      const ref = /r="([A-Z]+\d+)"/.exec(attrs)?.[1];
+      const type = /t="([^"]+)"/.exec(attrs)?.[1] ?? "n";
+      const at = ref ? columnIndex(ref) : cells.length;
+      let value = "";
+      if (type === "inlineStr") value = textOf(body);
+      else {
+        const v = /<v>([\s\S]*?)<\/v>/.exec(body)?.[1];
+        if (v !== undefined) {
+          if (type === "s") {
+            const i = Number(v);
+            value = Number.isInteger(i) && i >= 0 && i < strings.length ? strings[i] : "";
+          } else value = decodeXml(v);
+        }
+      }
+      while (cells.length < at) cells.push("");
+      cells[at] = value;
+    }
+    rows.push(cells);
+  }
+  return rows;
+}
 export function readSheet(file: Buffer): string[][] {
   const zip = unzip(file);
   const strings = sharedStrings(zip);

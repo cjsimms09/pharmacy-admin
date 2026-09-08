@@ -1574,6 +1574,8 @@ export const networkRates = sqliteTable(
     bins: text("bins"),
     pcns: text("pcns"),
     groupIds: text("group_ids"),
+    /** Network reimbursement ids the rate is written for, comma-separated. Migration 0090. */
+    networkIds: text("network_ids"),
     effectiveDate: text("effective_date"),
     /** The last day the rate applies, where the exhibit says; null while it runs. A claim after it is not priced on this row. */
     effectiveTo: text("effective_to"),
@@ -2092,6 +2094,17 @@ export const claims = sqliteTable(
      * knowing this column exists; only the cash side has to ask.
      */
     onAccount: integer("on_account", { mode: "boolean" }).notNull().default(false),
+    /** From PioneerRx's dispensed export (migration 0091): the report's own figures for the dispensed quantity, in cents. */
+    wacCents: integer("wac_cents"),
+    nadacDispensedCents: integer("nadac_dispensed_cents"),
+    dirFeeCents: integer("dir_fee_cents"),
+    evoucherCents: integer("evoucher_cents"),
+    /** The contract id the plan returned on the claim, as the export prints it. */
+    contractId: text("contract_id"),
+    gcn: text("gcn"),
+    /** The day the prescription was completed (sold), from the export. */
+    soldOn: text("sold_on"),
+    enrichedFrom: text("enriched_from"),
     reversedOn: text("reversed_on"),
     /**
      * The day the fill was sold, as the transaction report had it.
@@ -2355,6 +2368,8 @@ export const supplierImports = sqliteTable("supplier_imports", {
   skipReasons: text("skip_reasons").notNull().default("{}"),
   unmappedColumns: text("unmapped_columns").notNull().default("[]"),
   pricedOn: text("priced_on"),
+  /** The stored document this import read, so the nightly proof can re-read the same file. Migration 0092. */
+  documentId: text("document_id"),
   createdBy: text("created_by").notNull(),
   createdAt: text("created_at").notNull().default(now()),
 });
@@ -2678,6 +2693,8 @@ export const onHandImports = sqliteTable(
     countedOn: text("counted_on").notNull(),
     fileName: text("file_name").notNull(),
     rowsRead: integer("rows_read").notNull().default(0),
+    /** The record count the report prints about itself, where it prints one. Migration 0092. */
+    reportedCount: integer("reported_count"),
     itemsKept: integer("items_kept").notNull().default(0),
     /** Reasons rows were dropped, as JSON, so a short read is visible rather than silent. */
     skipReasons: text("skip_reasons").notNull().default("{}"),
@@ -2695,6 +2712,8 @@ export const onHandImports = sqliteTable(
      * bottles of unexplained drug cost.
      */
     rxValueCents: integer("rx_value_cents"),
+    /** typed | labelled | head | footer: where the count's date came from. Null before 0089. */
+    datedBy: text("dated_by"),
     documentId: text("document_id"),
     createdBy: text("created_by").notNull(),
     createdAt: text("created_at").notNull().default(now()),
@@ -2727,6 +2746,14 @@ export const onHand = sqliteTable(
     onOrderThousandths: integer("on_order_thousandths"),
     /** Units in one package, which is what turns "order 140" into "order two bottles". */
     packQty: integer("pack_qty"),
+    /**
+     * The level the pharmacy''s own system would reorder at, in whole units.
+     *
+     * Not on_order_thousandths, which is a different figure: what is on order has been bought and
+     * has not arrived; an order point is a level nobody has bought anything against. Null means
+     * none is set — PioneerRx writes -1 for that and a sentinel is not a quantity.
+     */
+    orderPointUnits: integer("order_point_units"),
     /** True where the file counted packages and the reader multiplied them out. */
     countedInPackages: integer("counted_in_packages", { mode: "boolean" }).notNull().default(false),
     unit: text("unit"),

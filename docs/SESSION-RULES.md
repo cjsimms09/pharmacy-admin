@@ -51,6 +51,19 @@ type or a list exported from one fails the build — on the pharmacy computer, a
 after the type check has passed. Constants live in a file beside it (`kinds.ts` next to
 `actions.ts`). Found by 2 on 8 September by reading rather than compiling.
 
+## 1c. Every reader proves itself against its source, and keeps proving it
+
+The owner, 8 September, after a claim looked wrong and turned out to be right: "these things need
+to be right!! we need to make sure claims are matching their info properly and continue to. we
+need to do the same with drug info (pricing, nadac, awp, equivalents, etc).. this is the most
+important thing." So, for every feed the site ingests — claims, catalogues, NADAC, the FDA
+directory, on-hand counts, invoices, remittances, the PSAO's guides — three things are required,
+not one: (1) the reader checks the file's own totals against what it stored before anything is
+kept, and refuses or quarantines on a difference, in words; (2) a Data health row compares what is
+stored with what the source file says, measured every night from the stored file itself, not from
+the import's memory of it; (3) a disagreement is a red row on Today naming the file, the field and
+the difference. A figure that has no source file to be re-proved against is labelled as such on
+the page that shows it. Nothing that fails its proof feeds a decision.
 ## 2. Where the truth lives
 
 Read these before starting, not after:

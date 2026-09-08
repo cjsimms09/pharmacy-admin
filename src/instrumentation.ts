@@ -259,6 +259,21 @@ export async function register() {
         env: process.env,
       });
       child.unref();
+      /*
+       * And the claims proof beside it (SESSION-RULES §1c): every stored report re-read and set against
+       * the claims table, in its own process for the same reason. It writes `claims_proof` for Data
+       * health to show; a night it fails leaves the last proof and its date.
+       */
+      const proof = spawn(process.execPath, [tsx, "--tsconfig", path.join(root, "tsconfig.script.json"), path.join(root, "scripts", "prove-claims.ts")], {
+        cwd: root,
+        detached: true,
+        stdio: "ignore",
+        env: process.env,
+      });
+      proof.unref();
+      // And the rate backtest (BACKLOG 23): every settled network's rate against what the plan paid, kept in `rate_backtest`.
+      const backtest = spawn(process.execPath, [tsx, "--tsconfig", path.join(root, "tsconfig.script.json"), path.join(root, "scripts", "backtest-rates.ts")], { cwd: root, detached: true, stdio: "ignore", env: process.env });
+      backtest.unref();
     } catch {
       // A measurement that fails leaves yesterday's counts and their date, which is honest.
     }

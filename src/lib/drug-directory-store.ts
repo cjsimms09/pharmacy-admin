@@ -3,6 +3,9 @@ import { db, schema } from "@/db";
 import { readZip } from "./zip-read";
 import { parseDirectoryProducts, parseDirectoryPackages, parseOrangeBook, buildDirectory, packageUnits, fdaClassification, type DrugDirectoryRow } from "./drug-directory";
 import { newId } from "./crypto";
+import fsSync from "node:fs";
+import path from "node:path";
+import { createHash } from "node:crypto";
 
 /**
  * The drug directory, fetched, loaded and held.
@@ -29,13 +32,23 @@ function pick(entries: { name: string; data: Buffer }[], file: string): Buffer |
   return hit ? hit.data : null;
 }
 
-/** Loads both files from their zips, replacing every row. Either zip may be omitted to keep what is held for it. */
-export async function loadDrugDirectory(files: { ndcDirectoryZip?: Buffer; orangeBookZip?: Buffer }, by: { userId: string | null; origin: string }): Promise<DirectoryLoad> {
+/**
+ * Loads both files from their zips, replacing every row. Either zip may be omitted to keep what is held for it.
+ *
+ * `say` is optional and is where this reports its progress. It runs for a minute or more on the
+ * real files, and a screen that shows nothing for a minute is one the owner presses again.
+ */
+export async function loadDrugDirectory(
+  files: { ndcDirectoryZip?: Buffer; orangeBookZip?: Buffer },
+  by: { userId: string | null; origin: string },
+  say: (text: string) => void = () => {},
+): Promise<DirectoryLoad> {
   let products: ReturnType<typeof parseDirectoryProducts> | null = null;
   let packages: ReturnType<typeof parseDirectoryPackages> | null = null;
   let orangeBook: ReturnType<typeof parseOrangeBook> | null = null;
   try {
     if (files.ndcDirectoryZip) {
+      say("Reading the NDC Directory");
       const entries = readZip(files.ndcDirectoryZip);
       const productTxt = pick(entries, "product.txt");
       const packageTxt = pick(entries, "package.txt");
@@ -45,6 +58,7 @@ export async function loadDrugDirectory(files: { ndcDirectoryZip?: Buffer; orang
       if (products.length < 1000 || packages.length < 1000) return { ok: false, why: `The NDC Directory read ${products.length} products and ${packages.length} packages; the real file carries tens of thousands of each, so this is not it.` };
     }
     if (files.orangeBookZip) {
+      say("Reading the Orange Book");
       const entries = readZip(files.orangeBookZip);
       const productsTxt = pick(entries, "products.txt");
       if (!productsTxt) return { ok: false, why: `The Orange Book zip holds ${entries.map((e) => e.name).join(", ") || "nothing"}; products.txt was expected.` };
@@ -61,24 +75,120 @@ export async function loadDrugDirectory(files: { ndcDirectoryZip?: Buffer; orang
    * file alone never blanks the other's contribution. The Orange Book is rebuilt from the held
    * rows' codes only where the directory itself is not being replaced.
    */
-  const held = await db.query.drugDirectory.findMany();
+  /*
+   * Read only when something held is wanted, and only the columns that path actually rebuilds from.
+   *
+   * This read every row and every column unconditionally — 217,773 rows, eighteen columns, 106 MB —
+   * including on the ordinary path where both files arrived and nothing held is needed at all. A's
+   * memory audit puts that read and its three derivations at 178 MB of a 430 MB peak, inside the
+   * web server's own process, on a machine with 7.3 GB.
+   *
+   * One correction to the audit, which recommends five columns whenever it is read: five is right
+   * for one of the two paths and would break the other. `heldOrangeBook` wants the application, the
+   * TE code and enough to name the product; `heldProducts` rebuilds a whole product row and wants
+   * nearly everything. So the columns follow the path rather than a single list:
+   *
+   *   both files          nothing held is needed — no read at all, which is the common case
+   *   directory, no OB    the held TE codes are carried forward — the narrow read
+   *   OB alone            the directory is rebuilt from what is held — the wide read
+   */
+  if (!products && orangeBook) say("Rebuilding the packages already held, so a rating refresh does not blank them");
+  const needOrangeBookOnly = Boolean(products && packages && !orangeBook);
+  const needEverything = Boolean(!products && orangeBook);
+  const held = needEverything
+    ? await db.query.drugDirectory.findMany()
+    : needOrangeBookOnly
+      ? await db.query.drugDirectory.findMany({
+          columns: { application: true, teCode: true, strength: true, substances: true, brandName: true, labeler: true },
+        })
+      : [];
   const rows: DrugDirectoryRow[] =
     products && packages
-      ? buildDirectory(products, packages, orangeBook ?? heldOrangeBook(held))
+      ? buildDirectory(products, packages, orangeBook ?? heldOrangeBook(held as (typeof schema.drugDirectory.$inferSelect)[]))
       : orangeBook
-        ? buildDirectory(heldProducts(held), heldPackages(held), orangeBook)
+        ? buildDirectory(heldProducts(held as (typeof schema.drugDirectory.$inferSelect)[]), heldPackages(held as (typeof schema.drugDirectory.$inferSelect)[]), orangeBook)
         : [];
   if (rows.length === 0) return { ok: false, why: "The files joined to nothing: no package matched a product." };
 
+  say(`Writing ${rows.length.toLocaleString()} packages`);
   await db.transaction(async (tx) => {
     await tx.delete(schema.drugDirectory);
-    for (let i = 0; i < rows.length; i += 500) await tx.insert(schema.drugDirectory).values(rows.slice(i, i + 500));
+    for (let i = 0; i < rows.length; i += 500) {
+      await tx.insert(schema.drugDirectory).values(rows.slice(i, i + 500));
+      // Every twenty thousand, so the page moves without the parent writing a settings row per slice.
+      if (i > 0 && i % 20_000 === 0) say(`Writing ${rows.length.toLocaleString()} packages — ${i.toLocaleString()} so far`);
+    }
     if (products) await tx.insert(schema.drugDirectoryLoads).values({ id: newId(), source: "ndc_directory", origin: by.origin, rows: packages!.length, fileAsOf: null, loadedBy: by.userId });
     if (orangeBook) await tx.insert(schema.drugDirectoryLoads).values({ id: newId(), source: "orange_book", origin: by.origin, rows: orangeBook.length, fileAsOf: null, loadedBy: by.userId });
   });
   forgetDirectory();
-  return { ok: true, rows: rows.length, products: products?.length ?? 0, packages: packages?.length ?? 0, orangeBook: orangeBook?.length ?? 0, rated: rows.filter((r) => r.teCode).length };
+  const rated = rows.filter((r) => r.teCode).length;
+
+  /*
+   * ── The proof, written here because here is the only place it is free ──
+   *
+   * BACKLOG 30 wants every dataset set against the file behind it. For the directory the obvious
+   * way — re-read the two zips nightly and count — is the most expensive thing on the machine: it
+   * is the 430 MB peak, on 7.3 GB that ran out twice on 8 September, every night, to prove a file
+   * the FDA changes once a week.
+   *
+   * At this point in the load, all of it is already in hand. The parsed counts, the joined rows,
+   * the bytes of both zips: nothing has to be read again, and the measurement is closer to the
+   * source than any later re-read could be, because it is the source. So the loader says what it
+   * parsed and what it wrote, and the row sets that against what the table holds today.
+   *
+   * The date is the load's, which is the second half of it. A weekly fetch that silently stops
+   * leaves this proof ageing where somebody can see it, and an old proof over a directory that
+   * still counts correctly is exactly the failure a nightly re-read would hide by refreshing.
+   *
+   * `sha256` and the byte counts identify the files themselves, so two loads of the same zip are
+   * distinguishable from two loads of different ones — which is what says whether an unchanged row
+   * count means "nothing changed" or "the same file was loaded twice".
+   */
+  await writeDirectoryProof({
+    parsed: { products: products?.length ?? null, packages: packages?.length ?? null, orangeBook: orangeBook?.length ?? null },
+    wrote: { rows: rows.length, rated },
+    origin: by.origin,
+    files: {
+      ndcDirectory: files.ndcDirectoryZip ? fileMark(files.ndcDirectoryZip) : null,
+      orangeBook: files.orangeBookZip ? fileMark(files.orangeBookZip) : null,
+    },
+  });
+
+  return { ok: true, rows: rows.length, products: products?.length ?? 0, packages: packages?.length ?? 0, orangeBook: orangeBook?.length ?? 0, rated };
 }
+
+/** A file's identity without keeping the file: how big it was and what it hashed to. */
+function fileMark(buf: Buffer): { bytes: number; sha256: string } {
+  return { bytes: buf.length, sha256: createHash("sha256").update(buf).digest("hex") };
+}
+
+/**
+ * Records what this load parsed and wrote, for the Data health row to set against the table.
+ *
+ * Never allowed to fail the load. A directory that loaded and could not write its own proof is a
+ * directory that loaded; refusing it because the bookkeeping failed would be the tail wagging the
+ * dog, and the row says "not proved" which is true and visible.
+ */
+async function writeDirectoryProof(p: Omit<DirectoryProof, "provedOn">): Promise<void> {
+  try {
+    const { setSetting } = await import("./settings");
+    await setSetting("drug_directory_proof", JSON.stringify({ ...p, provedOn: new Date().toISOString() } satisfies DirectoryProof));
+  } catch {
+    // The load stands. The row will say it is unproved, which is the honest answer.
+  }
+}
+
+/** What the loader knew at the moment it wrote. The shape `data-health-directory-proof.ts` reads. */
+export type DirectoryProof = {
+  /** ISO datetime of the load. Its age is the age of the last successful fetch or hand-load. */
+  provedOn: string;
+  /** Null where that file was not part of this load, which is not the same as it having no rows. */
+  parsed: { products: number | null; packages: number | null; orangeBook: number | null };
+  wrote: { rows: number; rated: number };
+  origin: string;
+  files: { ndcDirectory: { bytes: number; sha256: string } | null; orangeBook: { bytes: number; sha256: string } | null };
+};
 
 /** Rebuild the pieces of a held directory so one file can be refreshed without the other. */
 function heldProducts(held: (typeof schema.drugDirectory.$inferSelect)[]) {
@@ -112,19 +222,148 @@ function heldOrangeBook(held: (typeof schema.drugDirectory.$inferSelect)[]) {
   return out;
 }
 
-/** Downloads both files from the FDA and loads them. */
-export async function fetchDrugDirectory(by: { userId: string | null }, fetchImpl: typeof fetch = fetch): Promise<DirectoryLoad> {
+/**
+ * Downloads both files from the FDA and loads them, here, in whatever process calls it.
+ *
+ * This is the work itself and the child process runs exactly this. Nothing in the web server should
+ * call it: `fetchDrugDirectory` below is the door, and it spawns.
+ */
+export async function fetchDrugDirectoryHere(
+  by: { userId: string | null },
+  opts: { fetchImpl?: typeof fetch; say?: (text: string) => void } = {},
+): Promise<DirectoryLoad> {
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const say = opts.say ?? (() => {});
   const get = async (url: string) => {
     const res = await fetchImpl(url, { signal: AbortSignal.timeout(120_000), redirect: "follow" });
     if (!res.ok) throw new Error(`${url} answered ${res.status}.`);
     return Buffer.from(await res.arrayBuffer());
   };
   try {
+    say("Downloading ndctext.zip and the Orange Book from fda.gov");
     const [ndcDirectoryZip, orangeBookZip] = await Promise.all([get(NDC_DIRECTORY_URL), get(ORANGE_BOOK_URL)]);
-    return await loadDrugDirectory({ ndcDirectoryZip, orangeBookZip }, { userId: by.userId, origin: "fda.gov" });
+    return await loadDrugDirectory({ ndcDirectoryZip, orangeBookZip }, { userId: by.userId, origin: "fda.gov" }, say);
   } catch (e) {
     return { ok: false, why: e instanceof Error ? e.message : "The FDA could not be reached." };
   }
+}
+
+/** Where the child process lives, or null where this machine cannot run one. */
+export function directoryProcessPlan(
+  root: string,
+  userId: string,
+  exists: (f: string) => boolean = (f) => fsSync.existsSync(f),
+): { command: string; args: string[] } | null {
+  const tsx = path.join(root, "node_modules", "tsx", "dist", "cli.mjs");
+  const script = path.join(root, "scripts", "load-drug-directory.ts");
+  const tsconfig = path.join(root, "tsconfig.script.json");
+  if (!exists(tsx) || !exists(script) || !exists(tsconfig)) return null;
+  return { command: process.execPath, args: [tsx, "--tsconfig", tsconfig, script, userId] };
+}
+
+/**
+ * Downloads both files from the FDA and loads them, in a process of its own.
+ *
+ * A's memory audit measured this function at a 430 MB peak — eight full-size copies of the
+ * directory alive at once — and then 217,773 rows inserted in slices inside a transaction, all on
+ * the event loop of the web server. V8 does not hand freed pages back promptly, so that peak became
+ * the site's resident figure and stayed there. On 8 September the pharmacy's machine ran out of
+ * memory twice with the owner at the counter.
+ *
+ * A child process fixes it completely, because the operating system takes the memory back when the
+ * process exits. It is the treatment `scripts/make-claude-copy.ts` and `scripts/import-claims.ts`
+ * already demonstrate, and this is the largest thing in the site that had not had it.
+ *
+ * `onStep` is fed the child's own progress lines, so a page can show where it has got to rather
+ * than showing nothing for two minutes.
+ *
+ * Where the child cannot be started — no tsx, no script — the work runs here rather than not at
+ * all, and says so through `onStep`. A directory that loads slowly beats one that never loads.
+ */
+export async function fetchDrugDirectory(
+  by: { userId: string | null },
+  opts: { onStep?: (text: string) => void | Promise<void> } = {},
+): Promise<DirectoryLoad> {
+  const plan = directoryProcessPlan(process.cwd(), by.userId ?? "scheduler");
+  if (!plan) {
+    await opts.onStep?.("Loading in the web server (the loader process could not be started)");
+    return fetchDrugDirectoryHere(by);
+  }
+
+  const { spawn } = await import("node:child_process");
+  return await new Promise<DirectoryLoad>((resolve) => {
+    const child = spawn(plan.command, plan.args, { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"], env: process.env });
+    let carried = "";
+    let stderr = "";
+    let result: DirectoryLoad | undefined;
+    /*
+     * Steps are written one after another rather than all at once.
+     *
+     * `onStep` writes a settings row, and four of those started together finish in whatever order
+     * the database returns them, which shows the page a step it has already passed. Chaining them
+     * costs nothing here — the child is doing the work — and the page only ever goes forwards.
+     */
+    let pending: Promise<void> = Promise.resolve();
+    const say = (text: string) => {
+      pending = pending.then(() => opts.onStep?.(text)).then(
+        () => {},
+        () => {},
+      );
+    };
+
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      const r = readDirectoryLines(carried, chunk);
+      carried = r.carried;
+      for (const m of r.messages) {
+        if (m.step) say(m.step);
+        if (m.result) result = m.result;
+      }
+    });
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (c: string) => {
+      stderr = (stderr + c).slice(-2000);
+    });
+
+    // Nothing resolves until the steps already announced have been written, so the job record's
+    // last step is not overwritten by one that arrived before it.
+    const finish = (load: DirectoryLoad) => {
+      void pending.then(() => resolve(load));
+    };
+    child.on("error", (e) => finish({ ok: false, why: `The directory loader could not be started: ${e.message}` }));
+    child.on("close", (code) => {
+      if (result) return finish(result);
+      const tail = stderr.trim() ? ` It reported: ${stderr.trim().split("\n").slice(-3).join(" ")}` : "";
+      finish({ ok: false, why: `The directory load stopped without saying why (exit ${code ?? "unknown"}).${tail}` });
+    });
+  });
+}
+
+/**
+ * One JSON object per line from the child, read as it arrives.
+ *
+ * Its own rather than borrowed from `claude-copy-job`, which reads the same shape for a different
+ * child: sharing it would put one type on two unrelated messages, and the first thing either child
+ * changed would silently be a lie about the other.
+ *
+ * A chunk can split a line anywhere, so the tail is carried to the next call. Anything that is not
+ * one of the child's own messages — a warning from a library, say — is passed over rather than
+ * guessed at.
+ */
+export function readDirectoryLines(carried: string, chunk: string): { carried: string; messages: { step?: string; result?: DirectoryLoad }[] } {
+  const lines = (carried + chunk).split("\n");
+  const rest = lines.pop() ?? "";
+  const messages: { step?: string; result?: DirectoryLoad }[] = [];
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    try {
+      const m = JSON.parse(line) as { step?: string; result?: DirectoryLoad };
+      if (m && (typeof m.step === "string" || m.result)) messages.push(m);
+    } catch {
+      // Not ours to interpret.
+    }
+  }
+  return { carried: rest, messages };
 }
 
 /* ── Held between requests: the map every grouping reads ── */

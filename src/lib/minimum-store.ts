@@ -116,7 +116,15 @@ async function loadMinimums(): Promise<MinimumsView> {
   const evidenceDays = move.from && move.to ? Math.max(1, daysBetween(move.from, move.to) + 1) : 0;
   const horizonDays = evidenceDays === 0 ? 14 : Math.min(60, Math.max(14, 2 * evidenceDays));
 
+  // Generics by their FDA equivalence key, so an add-on may be the cheapest AB-rated equivalent rather than the dispensed NDC alone.
+  const { directoryKeys } = await import("./drug-directory-store");
+  const keys = await directoryKeys();
+  const groupOf = (n: string) => {
+    const k = keys.get(n);
+    return k && k.classification === "G" && k.key ? k.key : null;
+  };
   const fills = fillMinimums({
+    groupOf,
     suppliers: view.suppliers,
     basketCentsBySupplier,
     orderedBySupplier,

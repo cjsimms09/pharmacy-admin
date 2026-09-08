@@ -8,6 +8,88 @@ file is how they talk.
 
 ## Open items
 
+### From 1 — 8 September afternoon: three deploys, the shelf, the count, ANDA, and files 2 may edit
+
+The owner set the hours rule aside ("we don't need to be holding updates right now"), so three
+deploys went out between 12:50 and 13:05: `70c0ca3` (cache eviction, facilitator reference fix,
+band share, menu item), `74777f1` (the shelf page rebuilt on four sources, the majority pack rule),
+`f3f4260` (2's reader and Add tool merged, migrations 0088 and 0089). The launcher was restarted
+at 13:09 so the heap ceiling is in force; the scheduled task "Pharmacy Admin" did not exist on
+the machine, so the launcher had no way to start at sign-in — recreated by 1 at 13:12. The lock
+file is committed as the pharmacy computer's npm writes it, which is why every deploy had found
+the tree dirty. The owner's balance-on-hand report is re-filed through the repaired reader:
+1,771 items dated by the report's own footer, all named and costed, 1,331 with an order point and
+321 below it, shelf worth $167,144.12 at PioneerRx's cost. ANDA's returns policy (as of 12
+November 2025) is on the ANDA supplier: 100% within a year less the 20% handling fee, expired
+and eleven other categories non-returnable, the rest in its notes.
+
+**8 September, 17:00 (1) — the owner: "i will not be uploading claims from before sept.. or
+anything. this site is starting clean as of 09/01/.."** The twelve-month claims export is
+withdrawn; nothing waits on it any more. BACKLOG 31 has the consequences: a `site_start_on` setting
+of 2026-09-01, the pre-start facilitator payments and RedSail lines shown as "before the site's
+start" rather than unmatched, and every window-based judgment printing the days it was made on.
+
+**8 September, 16:10 (1) — the owner: "make all changes with medium or higher confidence."** Six
+networks linked on his instruction, each to a document fetched from its source and filed in the
+library, with the reason and the source on the link: NET=400 → CMS's GLP-1 Bridge pharmacy
+document; DODT5IND → Express Scripts' TRICARE payer sheet (identity only, the TRICARE rate is not
+on file); PHXCOM30 → the Phoenix RxAdvantage card; FEHBP01001 → the guide's Caremark document (the
+FEHB National rate); NET=0116 and NET=0111 → Humana's Medicare payer sheet (identity only, no
+Humana agreement on file, nothing prices on them). RXADV and CNCKSNPN stay open. The web findings
+are recorded under BACKLOG 23 with their URLs.
+
+**8 September, 15:40 (1) — the PSAO's networks guide closes the chain.** The owner uploaded
+Health Mart Atlas's 2025 Commercial and Medicaid Networks workbook (14 tabs). `psao-guide.ts`
+reads every tab (`xlsx.ts readSheets`) into 42 library documents, one per PBM, in the read-contract
+shape: 341 rate lines with the row as citation, 1,314 network ids from the crosswalks, Optum's
+BIN/PCN/group routing on its rate lines. `RateTerm.networkIds` and `network_rates.network_ids`
+(migration 0090) let the id decide the rate; `routes()` honours it. `applyAllReads` put 710 rate
+lines and 259 BIN links in. `deduceNetworkLinks` now links on a printed id, on every claim matching
+by the document's BIN/PCN/group, or on a payer's only document for our chain code: **61 of 82
+networks, 882 of 1,030 claims linked by the site, no clicks.** Open, 148 claims: Humana NET=0116/0111
+(50 — no Humana document exists; not an Atlas PBM), DODT5IND (24, Express Scripts TRICARE, not in
+the crosswalk), FEHBP01001 (11), and small ones. BACKLOG 23's backtest is next: price every linked
+claim from its rate and set it beside the remit. Caveats written on the links: ESI's EN45 is
+ES1000, expired 29 Nov 2025, so its 2026 claims price under a direct ESI agreement or Prime, not
+the guide's rate; the Optum rows note that 841 stores have no effective-rate contract. Also
+uploaded and queued: the 2026 guide as a one-tab CSV (send the .xlsx), the discount card and copay
+networks guide (BACKLOG 25), a RedSail copay-card remit confirmation (BACKLOG 24).
+
+**8 September, 15:20 (1) — two documents from the owner.** The PSAO's "2026 PBM Contracted
+Listing" (xlsx) is read by `pbm-listing.ts` (pure parse, tested) and loaded into `payer_bins`: 52
+PBMs, 597 BINs, 580 added, 79 updated with the listing's PBM as an alias, 61 BINs the listing puts
+under two PBMs marked `collides`. It prints no network id, PCN or group. 1,302 of 1,304 paid claims
+now sit on a BIN a document names; not on it: 028249 "RedSail" (223 claims, $617), 610097 Optum
+(70), 015581 Humana (50) — Humana is not an Atlas PBM at all, so a direct agreement is what to ask
+the owner for. The "2027 Medicare D Reimbursement Guide" (80 pages, a rate grid the site's own PDF
+text reader cannot lift) is filed in the contract library as `288d7ef9…`, and the 2026 guide (94 pages) as `736e1cb2…`, state none, for the
+next `read --scans` once the ceiling is raised. `deduceNetworkLinks` (live in 2936d25) has linked 15
+of 82 networks, 306 of 1,030 claims, on its own; not yet wired into the nightly tick or after
+`applyAllReads` — a follow-up on BACKLOG 23.
+
+**Measured once, 8 September 14:50 (1), for 2's two Data-health rows:** wholesalers that have sent
+an invoice 1 of 5 (IPC; two invoices on 4 September, one of them — 11490216, $1,530.89 — filed
+with zero lines); returns policies on file 3 of 5 (McKesson, IPC, ANDA). Eleven deploys today, the
+last `83459e3` at 14:43 (network ranking: printed id, then BIN and group, then the claim's PBM).
+
+**Later on 8 September (1):** eight deploys in all, the last `6d90829` at 13:50 — Return soon
+(`/purchasing/return-soon`, BACKLOG 21), the add-on rule re-evaluated (BACKLOG 12: used, not steady;
+equal price allowed; a top-up sized to the gap — IPC 0 → 11 options, IPD 0 → 3), the directory load
+in its own process, the returns warning on Today and in the digest, the Windows-only tests fixed, the
+filler's sentences corrected for an equal price. ANDA's returns policy is on file; ANDA and ParMed
+still have no order minimum (asked of the owner). The first real directory fetch through
+`scripts/load-drug-directory.ts` runs tonight after 7 PM with memory watched; the Settings → Claude
+ceiling is still the owner's to raise before the contract read can resume.
+
+**Files 2 may edit on its branch, from 1 (13:30):** `src/lib/digest.ts` (a returns section) and the
+Today list in `src/app/(app)/page.tsx` (one row), both fed by `return-soon.ts returnSoonNow()`;
+`tests/mtf-cli-location.test.ts` and `tests/backup-scrub.test.ts` for the Windows-only failures.
+Merged and live at 13:30: the directory load in its own process (`7fdddf7`).
+
+**Files 2 may edit on its branch, from 1:** `src/lib/drug-directory-store.ts` (the spawn of the
+directory load and A's column list at line 64 — `loadDrugDirectory` stays the pure work) and a
+new `scripts/load-drug-directory.ts` on the make-claude-copy pattern. Nothing else under
+`drug-directory*.ts` or `scripts/**`.
 ### From 1 — the facilitator's payments never found a claim, and why (8 September)
 
 Measured on the live database, answering the owner's question whether the Medicare Transaction
@@ -326,6 +408,23 @@ union select month from sales_months;
 - `/money/report` for a quarter with a 12-month chart went from 18 full passes over the claims to 3.
 
 ---
+### From session 2 to session 1 — migration 0088 is taken, for the order point (8 September)
+
+**Claiming 0088 before writing it, as asked.** BACKLOG item 17: the drug file prints "Order Point"
+and `on_hand` has nowhere to put it. `on_order_thousandths` is a different figure — what is on
+order, not the level to reorder at — so it needs its own column rather than a field that already
+means something else.
+
+`0088_on_hand_order_point`: `order_point_units`, integer, nullable, additive. Null means none set,
+because PioneerRx writes -1 for that on 406 of the 1,770 rows and a sentinel is not a quantity.
+Nothing computes with it; the shelf screen shows it beside what is actually on hand so the two can
+disagree in public.
+
+Also on 2's branch and already done, both reader aliases from item 17: "Cost" now maps to the
+per-unit cost — every one of the 1,770 rows was costless because the list wanted "Unit Cost" — and
+"Size" maps to the pack quantity, read but never multiplied by, so nothing turns 180 tablets into
+180 bottles. `pack_qty` already exists on `on_hand`; only the order point needed a column.
+
 
 ### From Helper A to session 1 — shelf.ts, two queries (8 September)
 

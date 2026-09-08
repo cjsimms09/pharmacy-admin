@@ -812,6 +812,8 @@ export default async function ManualPage({
           sections.length > 0 ? (
             <>
               <Link href="/manual/print" className="btn">Print it</Link>
+              {/* The one page a patient asks for by name: printed from the same live copy as the manual. */}
+              <Link href="/forms/privacy-notice" className="btn">Print the privacy notice</Link>
               {canManage && problems.length > 0 && !working && (
                 <form action={putRightAction}>
                   <SubmitButton pendingLabel="Starting…" disabled={!aiReady && empty.length === 0 && citeTotal === 0}>
@@ -1589,7 +1591,7 @@ export default async function ManualPage({
           */}
           <Card
             title="Find anything in the manual"
-            subtitle="Searches every heading and every word of every policy. Two words narrow it rather than widen it."
+            subtitle="Searches every heading and every word of every policy, and prints any section on its own. Two words narrow it rather than widen it."
             className="mb-6"
           >
             <form className="flex flex-wrap items-center gap-2">
@@ -1618,6 +1620,7 @@ export default async function ManualPage({
                         <span className="mr-2 text-ink-3">{h.number}</span>{h.title}
                       </Link>
                       {h.inTitle && <span className="badge badge-ok ml-2">in the heading</span>}
+                      <Link href={`/manual/print?section=${h.id}`} className="btn btn-sm ml-3">Print this section</Link>
                       <p className="mt-0.5 text-xs text-ink-3">{h.chapterTitle}</p>
                       {h.snippet && <p className="mt-1 text-xs leading-relaxed text-ink-2">{h.snippet}</p>}
                     </li>

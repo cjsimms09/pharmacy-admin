@@ -88,6 +88,7 @@ describe("navigation", () => {
     assert.equal(groupFor("/money/found")?.label, "Money");
     assert.equal(groupFor("/money/monthly")?.label, "Money");
     assert.equal(groupFor("/purchasing/shelf")?.label, "Buying");
+    assert.equal(groupFor("/purchasing/return-soon")?.label, "Buying");
     assert.equal(groupFor("/purchasing/over-nadac")?.label, "Buying");
     assert.equal(groupFor("/intake")?.label, "Settings");
     assert.equal(groupFor("/inspection/walk")?.label, "Compliance");

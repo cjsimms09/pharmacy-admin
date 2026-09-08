@@ -1,0 +1,20 @@
+-- The level the pharmacy's own system would reorder at.
+--
+-- BACKLOG item 17. PioneerRx's drug file prints "Order Point" beside "On Hand" and the shelf had
+-- nowhere to put it, so the one figure that says whether the stock on the shelf is deliberate was
+-- dropped on every row of the first count.
+--
+-- Its own column rather than `on_order_thousandths`, which is a different figure: what is on order
+-- is stock already bought and not yet arrived, and the order point is a level nobody has bought
+-- anything against. Folding one into the other would be a column with two meanings, which is the
+-- thing the data dictionary exists to prevent.
+--
+-- Nullable, and null means none set. PioneerRx writes -1 for that — on 406 of the 1,770 rows of the
+-- first count — and -1 is a sentinel, not a shelf one unit overdrawn. Stored as null so nothing can
+-- average it, compare it to a quantity, or report a negative shelf.
+--
+-- In units, matching `quantity_thousandths`' subject but not its scale: an order point is whole
+-- units as the pharmacist set it, and there is no such thing as a third of a tablet as a threshold.
+-- Nothing computes with it. The shelf screen shows it beside what is actually on hand so that the
+-- two can disagree where somebody will see it.
+ALTER TABLE `on_hand` ADD COLUMN `order_point_units` integer;

@@ -4,6 +4,7 @@ import {
   planOrder, packsFor, packCostCents, offersFor, topUpCandidates, verdictFor,
   type Offer, type Movement, type SupplierTerms,
 } from "../src/lib/order-plan";
+import { usedEnoughForTopUp, whyNotUsedEnough } from "../src/lib/usage";
 
 /*
  * The pharmacy's real shape: McKesson is the primary and takes any order; IPC is the secondary,
@@ -197,14 +198,17 @@ describe("what a top-up is refused for", () => {
     assert.equal(r.refused.length, 0, "most of the catalogue is dearer here; that is not news");
   });
 
-  test("a saving under the materiality floor is not a reason to buy deep", () => {
+  test("a thin saving is still an option to reach a minimum, ranked after the real ones", () => {
+    // Until 8 September a saving under the floor was dropped, and every add-on list was empty on a
+    // fortnight of claims. The owner's rule: the point of an add-on is the minimum, not the saving.
     const thin = [
       offer({ ndc11: "X", supplier: "IPC", effectiveUnitMicros: 999_000, packQty: 10 }),
       offer({ ndc11: "X", supplier: "McKesson", effectiveUnitMicros: 1_000_000, packQty: 10 }),
+      offer({ ndc11: "Y", supplier: "IPC", effectiveUnitMicros: 500_000, packQty: 10 }),
+      offer({ ndc11: "Y", supplier: "McKesson", effectiveUnitMicros: 1_000_000, packQty: 10 }),
     ];
-    // 100 units at a tenth of a cent apart is 10c of saving, under a $1 floor.
-    const r = topUpCandidates({ ...base, offers: thin, movement: [moves("X", 10_000)] });
-    assert.equal(r.ranked.length, 0);
+    const r = topUpCandidates({ ...base, offers: thin, movement: [moves("X", 10_000), moves("Y", 10_000)] });
+    assert.deepEqual(r.ranked.map((c) => c.ndc11), ["Y", "X"]);
   });
 
   test("something already in the order is not topped up again", () => {
@@ -367,5 +371,86 @@ describe("why a line is for the quantity it is", () => {
       materialityCents: 500,
     }).baskets[0].lines[0];
     assert.equal(line.overCap, null);
+  });
+});
+
+/*
+ * The owner's rule of 8 September: "I dont want to order things we dont use but we need options of
+ * things we can add on to hit minimums." Three changes, each with its case: a drug used on two
+ * days or by two prescriptions may be an add-on even before it is steady; the same price as the
+ * primary is allowed, because reaching a minimum on it costs nothing; and a top-up buys only the
+ * packs the shortfall needs, never the whole cap.
+ */
+describe("add-ons to reach a minimum, on what the pharmacy uses", () => {
+  const offer2 = (o: Partial<Offer> & { ndc11: string; supplier: string; effectiveUnitMicros: number }): Offer => ({
+    unitCostMicros: o.effectiveUnitMicros, packQty: 100, ...o,
+  });
+  const base = { supplier: "IPC", names: new Map<string, string | null>(), alreadyOrdered: new Set<string>(), maxDaysOfStock: 14, materialityCents: 500 };
+
+  test("used on two days is enough for an add-on; one fill is not", () => {
+    assert.equal(usedEnoughForTopUp({ steady: false, activeDays: 2, prescriptions: 1 }), true);
+    assert.equal(usedEnoughForTopUp({ steady: false, activeDays: 1, prescriptions: 2 }), true);
+    assert.equal(usedEnoughForTopUp({ steady: false, activeDays: 1, prescriptions: 1 }), false);
+    assert.match(whyNotUsedEnough({ steady: false, activeDays: 1, prescriptions: 1, windowDays: 15 }) ?? "", /One fill is a patient, not use/);
+    assert.equal(whyNotUsedEnough({ steady: true, activeDays: 1, prescriptions: 1, windowDays: 15 }), null);
+  });
+
+  test("a drug not yet steady but used is offered, with the cap bounding it", () => {
+    const offers = [offer2({ ndc11: "U", supplier: "IPC", effectiveUnitMicros: 1_000_000, packQty: 10 }), offer2({ ndc11: "U", supplier: "McKesson", effectiveUnitMicros: 2_000_000, packQty: 10 })];
+    const r = topUpCandidates({ ...base, offers, movement: [{ ...moves("U", 2_000, 0, false), usedEnough: true }] });
+    assert.equal(r.ranked.length, 1);
+    assert.equal(r.ranked[0].capThousandths, 20_000, "fourteen days at two a day is one ten-pack, rounded down to whole packs");
+    const refused = topUpCandidates({ ...base, offers, movement: [{ ...moves("U", 2_000, 0, false), usedEnough: false, whyNotUsed: "Dispensed once." }] });
+    assert.equal(refused.ranked.length, 0);
+    assert.equal(refused.refused[0].why, "Dispensed once.");
+  });
+
+  test("the same price as the primary is an option; dearer is not", () => {
+    const same = [offer2({ ndc11: "S", supplier: "IPC", effectiveUnitMicros: 1_000_000, packQty: 10 }), offer2({ ndc11: "S", supplier: "McKesson", effectiveUnitMicros: 1_000_000, packQty: 10 })];
+    const r = topUpCandidates({ ...base, offers: same, movement: [moves("S", 2_000)] });
+    assert.equal(r.ranked.length, 1);
+    assert.equal(r.ranked[0].savingCents, 0);
+    const dearer = [offer2({ ndc11: "D", supplier: "IPC", effectiveUnitMicros: 1_100_000, packQty: 10 }), offer2({ ndc11: "D", supplier: "McKesson", effectiveUnitMicros: 1_000_000, packQty: 10 })];
+    assert.equal(topUpCandidates({ ...base, offers: dearer, movement: [moves("D", 2_000)] }).ranked.length, 0);
+  });
+
+  test("an add-on may be a cheaper AB-rated equivalent of the dispensed NDC, and says which it replaces", () => {
+    // The pharmacy dispenses SUN; IPC sells ARMAS, the same product, at half the price; McKesson sells SUN.
+    const groupOf = (n: string) => (n === "SUN" || n === "ARMAS" ? "cipro-dex" : null);
+    const offers = [
+      offer2({ ndc11: "SUN", supplier: "McKesson", effectiveUnitMicros: 8_900_000, packQty: 1 }),
+      offer2({ ndc11: "SUN", supplier: "IPC", effectiveUnitMicros: 5_888_000, packQty: 1 }),
+      offer2({ ndc11: "ARMAS", supplier: "IPC", effectiveUnitMicros: 2_657_000, packQty: 1 }),
+    ];
+    const r = topUpCandidates({ ...base, offers, movement: [moves("SUN", 1_000)] , groupOf });
+    assert.equal(r.ranked.length, 1);
+    assert.equal(r.ranked[0].ndc11, "ARMAS", "the cheaper equivalent is what to buy");
+    assert.equal(r.ranked[0].dispensedNdc11, "SUN");
+    assert.equal(r.ranked[0].alternative?.supplier, "McKesson");
+    // Without a group the comparison stays on the dispensed NDC.
+    const same = topUpCandidates({ ...base, offers, movement: [moves("SUN", 1_000)] });
+    assert.equal(same.ranked[0].ndc11, "SUN");
+  });
+
+  test("a top-up buys the packs the shortfall needs, not the whole cap", () => {
+    // IPC is $200 short. The pod is $300 a pack and the shelf could take seven: one pack is the answer.
+    const plan = planOrder({
+      needs: [{ ndc11: "N", name: "Need", needThousandths: 1_000 }],
+      offers: [
+        offer2({ ndc11: "N", supplier: "IPC", effectiveUnitMicros: 1_000_000, packQty: 1 }),
+        offer2({ ndc11: "N", supplier: "McKesson", effectiveUnitMicros: 2_000_000, packQty: 1 }),
+        offer2({ ndc11: "P", supplier: "IPC", effectiveUnitMicros: 300_000_000, packQty: 1 }),
+        offer2({ ndc11: "P", supplier: "McKesson", effectiveUnitMicros: 400_000_000, packQty: 1 }),
+      ],
+      terms: [{ supplier: "IPC", minimumCents: 20_100 }, { supplier: "McKesson", minimumCents: null, primary: true }],
+      movement: [moves("N", 1_000), moves("P", 1_000, 0)],
+      maxDaysOfStock: 14,
+      materialityCents: 500,
+      bandDelta: () => null,
+    });
+    const ipc = plan.baskets.find((b) => b.supplier === "IPC")!;
+    const topUp = ipc.lines.find((l) => l.reason === "top_up")!;
+    assert.equal(topUp.packs, 1, "one $300 pack covers a $200 shortfall; the cap of fourteen is not the need");
+    assert.ok(ipc.subtotalCents >= 20_100);
   });
 });

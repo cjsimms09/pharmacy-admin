@@ -1,10 +1,13 @@
 import "server-only";
 import { db, schema } from "@/db";
+import { count } from "drizzle-orm";
 import { todayIso } from "./dates";
 import { SPECS, type Measurement } from "./data-health";
 import { comparePack } from "./data-health-packages";
 import { allSuppliers, supplierRecordFor } from "./suppliers-registry";
 import { supplierFromFileName } from "./pioneer-catalog";
+import { getSettings } from "./settings";
+import type { OnHandImportProof } from "./data-health-onhand-proof";
 
 /**
  * Running the data health counts, and keeping the answers.
@@ -59,11 +62,59 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
   const out: (Measurement & { tookMs: number })[] = [];
   const skipped: string[] = [];
 
-  const timed = async (key: string, run: () => Promise<Omit<Measurement, "key" | "measuredAt">>) => {
+  /*
+   * `measuredAt` is today unless the measurement carries its own, and one of them has to.
+   *
+   * The claims proof is not measured by this sweep — it is read back from what a nightly script
+   * left behind, and its age is the age of that run. Stamping it with today would print "measured
+   * today" over a proof that last ran three weeks ago, which is precisely the blind spot the row
+   * exists to show. An explicit null still means never measured and is not overwritten either.
+   */
+  const timed = async (key: string, run: () => Promise<Omit<Measurement, "key" | "measuredAt"> & { measuredAt?: string | null }>) => {
     const t = Date.now();
-    const m = await run();
-    out.push({ key, measuredAt: today, tookMs: Date.now() - t, ...m });
+    const { measuredAt, ...m } = await run();
+    out.push({ key, measuredAt: measuredAt === undefined ? today : measuredAt, tookMs: Date.now() - t, ...m });
   };
+
+  /*
+   * ── The claims, proved against the reports they were read from ───
+   *
+   * The owner: "these things need to be right!! we need to make sure claims are matching their
+   * info properly and continue to … this is the most important thing." Every other row here asks
+   * whether the site's tables agree with one another, which they can do perfectly while all of
+   * them disagree with the file behind them. `scripts/prove-claims.ts` re-reads the stored daily
+   * reports each night and leaves its answer in a setting; this row is that answer, and it is read
+   * rather than recomputed so that the page and the proof can never differ about it.
+   */
+  await timed("claims-proof", async () => {
+    const { parseClaimsProof, claimsProofFraction, claimsProofGaps, claimsProofNote } = await import("./data-health-claims-proof");
+    const { SETTING_KEYS } = await import("./settings");
+    /*
+     * The row says so when it cannot see the proof, rather than reading it as nothing.
+     *
+     * `getSettings` builds its answer from `SETTING_KEYS` and drops every key not on that list, so
+     * a proof written to an unregistered key reads as the empty string here — for ever, quietly,
+     * looking exactly like a proof that has never run. The two need different actions from
+     * different people, so the row distinguishes them by name.
+     */
+    const registered = (SETTING_KEYS as readonly string[]).includes("claims_proof");
+    const raw = registered ? (await getSettings())["claims_proof" as keyof Awaited<ReturnType<typeof getSettings>>] : undefined;
+    const proof = parseClaimsProof(raw);
+    if (!proof) {
+      return {
+        numerator: 0,
+        denominator: 0,
+        // Never measured, which is not a measurement of zero and must not be stamped with today.
+        measuredAt: null,
+        gaps: registered ? [] : ["`claims_proof` is not in SETTING_KEYS, so the site cannot read what the nightly proof writes."],
+        note: registered
+          ? "The nightly proof has not run, so no claim on this site has been set against the report it came from."
+          : "The nightly proof writes to a setting this site does not read: `claims_proof` is missing from SETTING_KEYS in settings.ts. Until it is added, this row cannot see the proof however often it runs.",
+      };
+    }
+    const { numerator, denominator } = claimsProofFraction(proof);
+    return { numerator, denominator, measuredAt: proof.provedOn, gaps: claimsProofGaps(proof), note: claimsProofNote(proof) };
+  });
 
   // ── The rows every claim question is asked of ────────────────────
   // Counted by prescription, fill number, date and NDC rather than by claim row: one dispensing
@@ -321,13 +372,20 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
 
   // ── Invoices ─────────────────────────────────────────────────────
   const invoiceRows = await db
-    .select({ id: schema.supplierInvoices.id, supplier: schema.supplierInvoices.supplier, totalCents: schema.supplierInvoices.totalCents })
+    .select({
+      id: schema.supplierInvoices.id,
+      supplier: schema.supplierInvoices.supplier,
+      totalCents: schema.supplierInvoices.totalCents,
+      // Named on the proof row's gaps: "an invoice does not add up" is unactionable without it.
+      invoiceNumber: schema.supplierInvoices.invoiceNumber,
+    })
     .from(schema.supplierInvoices);
   const lineRows = await db
     .select({
       invoiceId: schema.invoiceLines.invoiceId,
       supplierId: schema.invoiceLines.supplierId,
       supplier: schema.invoiceLines.supplier,
+      extendedCents: schema.invoiceLines.extendedCents,
     })
     .from(schema.invoiceLines);
   const invoicesWithLines = new Set(lineRows.map((l) => l.invoiceId));
@@ -346,6 +404,232 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
               `${owing.length} invoice${owing.length === 1 ? "" : "s"} worth $${(owingCents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} carry a total and no item lines — usually a scan with no text layer`,
             ],
       note: invoiceRows.length === 0 ? "No supplier invoice has been filed." : null,
+    };
+  });
+
+  /*
+   * ── The shelf against the record count its report prints ─────────
+   *
+   * Counted per import rather than over the whole table, because the question is asked of one
+   * document at a time: this report said it held so many records, and so many are on the shelf for
+   * it. Rolling every count into one fraction would let a complete one cover a short one.
+   */
+  await timed("onhand-proof", async () => {
+    const { onHandProofFraction, onHandProofGaps, onHandProofNote } = await import("./data-health-onhand-proof");
+    const imports = await db
+      .select({
+        id: schema.onHandImports.id,
+        countedOn: schema.onHandImports.countedOn,
+        fileName: schema.onHandImports.fileName,
+        reportedCount: schema.onHandImports.reportedCount,
+        rowsRead: schema.onHandImports.rowsRead,
+        itemsKept: schema.onHandImports.itemsKept,
+        skipReasons: schema.onHandImports.skipReasons,
+      })
+      .from(schema.onHandImports);
+    // Grouped rather than counted per import, so this is one read of a small table and not one per count.
+    const stored = await db
+      .select({ importId: schema.onHand.importId, n: count() })
+      .from(schema.onHand)
+      .groupBy(schema.onHand.importId);
+    const byImport = new Map(stored.map((s) => [s.importId, s.n]));
+
+    const rows: OnHandImportProof[] = imports.map((i) => {
+      let skipped: Record<string, number> = {};
+      try {
+        const parsed = JSON.parse(i.skipReasons) as unknown;
+        // Only a plain object of counts. A shape that drifted is no reasons rather than wrong ones.
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          skipped = Object.fromEntries(Object.entries(parsed as Record<string, unknown>).filter(([, v]) => typeof v === "number" && Number.isFinite(v))) as Record<string, number>;
+        }
+      } catch {
+        skipped = {};
+      }
+      return {
+        countedOn: i.countedOn,
+        fileName: i.fileName,
+        reportedCount: i.reportedCount,
+        rowsRead: i.rowsRead,
+        itemsKept: i.itemsKept,
+        skipped,
+        storedRows: byImport.get(i.id) ?? 0,
+      };
+    });
+
+    const { numerator, denominator } = onHandProofFraction(rows);
+    return { numerator, denominator, gaps: onHandProofGaps(rows), note: onHandProofNote(rows) };
+  });
+
+  /*
+   * ── The directory against the load that wrote it ─────────────────
+   *
+   * Read back from what `loadDrugDirectory` stamped, and set against a count of the table. The
+   * count is a `count(*)`, not a read of the rows: this is the 217,773-row table, and reading it to
+   * measure its health would be the joke at the pharmacy's expense this file's own header warns
+   * about.
+   */
+  await timed("directory-proof", async () => {
+    const { parseDirectoryProof, directoryProofFraction, directoryProofGaps, directoryProofNote } = await import("./data-health-directory-proof");
+    const proof = parseDirectoryProof((await getSettings()).drug_directory_proof);
+    const [{ n: tableRows }] = await db.select({ n: count() }).from(schema.drugDirectory);
+    if (!proof) {
+      return {
+        numerator: 0,
+        denominator: 0,
+        measuredAt: null,
+        gaps:
+          tableRows > 0
+            ? [`The table holds ${tableRows.toLocaleString("en-US")} packages that no recorded load accounts for. They were loaded before the loader began proving itself; the next load will prove them.`]
+            : [],
+        note:
+          tableRows > 0
+            ? "The directory was loaded before loads recorded what they wrote, so there is nothing to set it against until it is fetched again."
+            : "No drug directory has been loaded.",
+      };
+    }
+    const { numerator, denominator } = directoryProofFraction(proof, tableRows);
+    return {
+      numerator,
+      denominator,
+      // The load's date, not the sweep's: an ageing proof is the fetch having stopped.
+      measuredAt: proof.provedOn.slice(0, 10) || null,
+      gaps: directoryProofGaps(proof, tableRows, today),
+      note: directoryProofNote(proof, tableRows),
+    };
+  });
+
+  /*
+   * ── Every invoice against the total printed on its own face ──────
+   *
+   * The proof of the invoice family, and it needs no file: the invoice's printed total was captured
+   * when it was filed, and the lines are stored beside it, so the two can be set against each other
+   * whenever anybody asks.
+   *
+   * That makes this narrower than a re-read and worth saying so. It proves the storing, not the
+   * reading — a total that was itself misread off the page would agree with lines read from the
+   * same misreading, and this row would show nothing. What it does catch is the failure that has
+   * actually happened here: lines dropped between the page and the table, where every line that
+   * survived looks perfectly sound and only the missing one's drug appears cheaper than it was.
+   */
+  await timed("invoices-proof", async () => {
+    const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const linesBy = new Map<string, { n: number; cents: number }>();
+    for (const l of lineRows) {
+      const held = linesBy.get(l.invoiceId) ?? { n: 0, cents: 0 };
+      held.n++;
+      held.cents += l.extendedCents ?? 0;
+      linesBy.set(l.invoiceId, held);
+    }
+    // Only invoices that print a total can be proved against one. An invoice without one is not a
+    // failure here; it is outside the question, and counting it as either answer would be a lie.
+    const provable = invoiceRows.filter((i) => (i.totalCents ?? 0) > 0);
+    const agree: typeof provable = [];
+    const differ: { supplier: string | null; number: string | null; byCents: number; lines: number }[] = [];
+    const empty: typeof provable = [];
+    for (const i of provable) {
+      const l = linesBy.get(i.id);
+      if (!l || l.n === 0) {
+        empty.push(i);
+        continue;
+      }
+      const by = l.cents - (i.totalCents ?? 0);
+      if (by === 0) agree.push(i);
+      else differ.push({ supplier: i.supplier, number: i.invoiceNumber, byCents: by, lines: l.n });
+    }
+    const gaps: string[] = [];
+    for (const d of differ.slice(0, 12)) {
+      gaps.push(
+        `${d.supplier ?? "an unnamed supplier"} invoice ${d.number ?? "with no number"}: ${d.lines} lines add to ${d.byCents > 0 ? "more" : "less"} than the printed total, by ${money(Math.abs(d.byCents))}.`,
+      );
+    }
+    if (differ.length > 12) gaps.push(`… and ${differ.length - 12} more that do not add up.`);
+    if (empty.length > 0) {
+      const owed = empty.reduce((n, i) => n + (i.totalCents ?? 0), 0);
+      gaps.push(
+        `${empty.length} invoice${empty.length === 1 ? "" : "s"} worth ${money(owed)} carry a total and not one line, so nothing on ${empty.length === 1 ? "it" : "them"} reaches the cost of any drug.`,
+      );
+    }
+    const withoutTotal = invoiceRows.length - provable.length;
+    return {
+      numerator: agree.length,
+      denominator: provable.length,
+      gaps,
+      note:
+        provable.length === 0
+          ? "No invoice on file prints a total, so none can be proved against one."
+          : `${agree.length.toLocaleString("en-US")} of ${provable.length.toLocaleString("en-US")} invoices carrying a total have lines that add to it exactly.` +
+            (withoutTotal > 0 ? ` ${withoutTotal.toLocaleString("en-US")} more print no total and are outside this count.` : "") +
+            " This proves what was stored against what the invoice said it came to; it cannot catch a total that was itself misread.",
+    };
+  });
+
+  /*
+   * ── Which wholesalers have ever sent an invoice, and which have a returns policy ──
+   *
+   * Two rows for the two halves of a question the site could not answer on 8 September: the owner
+   * asked "is our system setup to make sure I am returning things when I need to?" and the honest
+   * answer was no, for a reason no screen showed. The arithmetic works. It had one invoice to work
+   * on — IPC, 4 September, eight lines — and no ANDA, IPD, ParMed or McKesson invoice has ever been
+   * loaded, so 1,200 lines on Return soon carry no supplier at all.
+   *
+   * Counted per wholesaler on the register, never per invoice, and that is the whole point of
+   * these two rows. The row above counts invoices that arrived and is structurally blind to the
+   * ones that never did: a wholesaler that has sent nothing contributes nothing to a numerator or
+   * a denominator, so four missing wholesalers read as a perfect score. Measuring against the
+   * register puts them in the denominator, where they show up as the gap they are.
+   *
+   * Resolved the way the rest of the site resolves a supplier — `supplier_id` first, then
+   * `supplierRecordFor` on the printed name — because an invoice filed under "Independent Pharmacy
+   * Cooperative" is IPC's invoice, and a row that says otherwise would be the third screen to
+   * disagree with the supplier card about the same eight lines.
+   */
+  const registryForInvoices = await allSuppliers(true);
+  const activeSuppliers = registryForInvoices.filter((r) => r.active);
+
+  await timed("supplier-invoices", async () => {
+    const sent = new Set<string>();
+    for (const i of invoiceRows) {
+      const owner = supplierRecordFor(registryForInvoices, i.supplier);
+      if (owner) sent.add(owner.id);
+    }
+    // An invoice whose lines named a supplier the invoice's own face did not counts too.
+    for (const l of lineRows) {
+      const owner = (l.supplierId && registryForInvoices.some((s) => s.id === l.supplierId) ? l.supplierId : null) ?? supplierRecordFor(registryForInvoices, l.supplier)?.id ?? null;
+      if (owner) sent.add(owner);
+    }
+    const never = activeSuppliers.filter((s) => !sent.has(s.id));
+    return {
+      numerator: activeSuppliers.length - never.length,
+      denominator: activeSuppliers.length,
+      gaps:
+        never.length === 0
+          ? []
+          : [
+              `No invoice has ever been loaded from: ${never.map((s) => s.name).join(", ")}. Nothing bought from them has a cost, a supplier or a return clock.`,
+            ],
+      note:
+        activeSuppliers.length === 0
+          ? "No wholesaler is on the register."
+          : never.length === 0
+            ? null
+            : "One invoice email from each closes this. The site reads an invoice from an address it does not know, so nothing has to be set up first.",
+    };
+  });
+
+  await timed("supplier-returns", async () => {
+    const { currentReturnPolicy } = await import("./supplier-terms-store");
+    const without: string[] = [];
+    for (const s of activeSuppliers) {
+      if (!(await currentReturnPolicy(s.id))) without.push(s.name);
+    }
+    return {
+      numerator: activeSuppliers.length - without.length,
+      denominator: activeSuppliers.length,
+      gaps: without.length === 0 ? [] : [`No returns policy on file for: ${without.join(", ")}. Nothing bought from them can be given a credit clock.`],
+      note:
+        without.length === 0
+          ? null
+          : "Typed from the wholesaler's own returns policy, as ANDA's was — never inferred, because a guessed window sends a bottle back on a date nobody agreed to.",
     };
   });
 
@@ -407,11 +691,43 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
 
   // ── On-hand ──────────────────────────────────────────────────────
   const onHand = await db.select({ code: schema.onHand.code, codeKind: schema.onHand.codeKind }).from(schema.onHand);
-  await timed("on-hand", async () => ({
-    numerator: onHand.length,
-    denominator: onHand.length,
-    note: onHand.length === 0 ? "No on-hand count has ever been received. Nothing can value the shelf until one is." : null,
-  }));
+  const counts = await db
+    .select({ countedOn: schema.onHandImports.countedOn, datedBy: schema.onHandImports.datedBy })
+    .from(schema.onHandImports);
+
+  await timed("on-hand", async () => {
+    /*
+     * How the newest count came to be dated, because the answers are not equally good.
+     *
+     * "Counted on 8 September, dated by the report itself" is the report speaking. "Dated by hand"
+     * is only as good as the memory of whoever typed it, and a shelf dated a day wrong misplaces a
+     * day of dispensing against it. The row exists to say what is known, so it should say which of
+     * those this is rather than presenting both as settled.
+     */
+    const newest = [...counts].sort((a, b) => b.countedOn.localeCompare(a.countedOn))[0] ?? null;
+    const said: Record<string, string> = {
+      typed: "dated by hand on the Add tool",
+      labelled: "dated by a line in the report naming the count date",
+      head: "dated by a date printed at the top of the report",
+      footer: "dated by the date the report printed on itself",
+    };
+    const how = newest?.datedBy ? said[newest.datedBy] ?? `dated by ${newest.datedBy}` : null;
+    return {
+      numerator: onHand.length,
+      denominator: onHand.length,
+      gaps:
+        counts.length > 1
+          ? [`${counts.length} counts held; this row measures the shelf as it stands across all of them.`]
+          : [],
+      note:
+        onHand.length === 0
+          ? "No on-hand count has ever been received. Nothing can value the shelf until one is."
+          : newest
+            ? `Counted on ${newest.countedOn}` +
+              (how ? `, ${how}.` : ". Where the date came from was not recorded — the count predates that being kept.")
+            : null,
+    };
+  });
 
   await timed("onhand-catalogue", async () => ({
     numerator: onHand.filter((r) => r.codeKind === "ndc11" && catalogueNdcSet.has(r.code)).length,

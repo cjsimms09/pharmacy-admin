@@ -250,6 +250,54 @@ export const SPECS: LinkSpec[] = [
     why: "What the pharmacy actually paid. An invoice with a total and no lines reaches the cost of no drug.",
   },
   {
+    key: "claims-proof",
+    group: "Datasets",
+    title: "Claims proved against the reports they came from",
+    of: "rows proved, out of every row that has to be proved — the paid rows in the daily reports plus the claim rows no report accounts for",
+    why:
+      "Every other row on this page measures whether the site's tables agree with each other, which they can do perfectly while all of them disagree with the file they were read from. This one re-reads the stored reports each night and sets them against the claims. Both directions count: a paid row in a report that reached no claim, and a claim no report explains, are the same failure seen from opposite ends, and a denominator that could only see one of them would read a hundred per cent with four hundred strays in the table.",
+  },
+  {
+    key: "onhand-proof",
+    group: "Datasets",
+    title: "The shelf count proved against the report's own record count",
+    of: "items on the shelf, out of the records the report says it holds",
+    why:
+      "The shelf values the pharmacy's inventory and stands on one side of the cost-of-goods identity, so a row the reader dropped is stock the accounts do not know exists. Everything else the site knows about a count came out of the same reader, which means a reader that lost rows and a report that never had them look identical — the record count PioneerRx prints about itself is the only figure here that did not.",
+  },
+  {
+    key: "directory-proof",
+    group: "Datasets",
+    title: "The FDA directory proved against the load that wrote it",
+    of: "packages in the table, out of the packages the last load says it wrote",
+    why:
+      "The directory decides which NDCs are the same drug, so a row lost from it silently ungroups a product and every equivalent, price comparison and substitution that runs through it. The loader records what it parsed and wrote at the moment it wrote — the measurement is free there and costs 430 MB anywhere else — and this sets that against the table today. The date is the load's, so a weekly fetch that quietly stopped shows here as an ageing proof over counts that are all perfectly correct.",
+  },
+  {
+    key: "invoices-proof",
+    group: "Datasets",
+    title: "Invoices proved against their own printed total",
+    of: "invoices whose stored lines add to the total printed on the invoice's face, out of invoices carrying a total",
+    why:
+      "The invoice states what it came to and the lines say what was bought; if they do not agree, one of the drugs on that invoice has the wrong cost against it and every margin, rebate and purchase figure that uses it is wrong by an amount nobody can see. A partial read is the dangerous outcome, not a failed one — the lines that were read look perfectly sound and only the product whose line was dropped appears cheaper than the pharmacy paid.",
+  },
+  {
+    key: "supplier-invoices",
+    group: "Datasets",
+    title: "Which wholesalers have sent an invoice",
+    of: "active wholesalers with at least one invoice on file, out of every active wholesaler",
+    why:
+      "The row above counts the invoices that arrived and cannot see the ones that never did. Four of this pharmacy's five wholesalers have never had an invoice loaded, so nothing bought from them has a cost, a supplier or a return clock — and every screen that asks 'who sold this bottle' answers 'no invoice on file' without saying that it will go on answering that until somebody forwards one.",
+  },
+  {
+    key: "supplier-returns",
+    group: "Datasets",
+    title: "Returns policies",
+    of: "active wholesalers with a returns policy on file, out of every active wholesaler",
+    why:
+      "A returns policy is what turns an invoice line into a deadline: the credit now, the day it steps down, the day the window shuts. Without one the site is silent on that supplier's stock — correctly silent, because a guessed window would send a bottle back on a date nobody agreed to — but silence here reads exactly like nothing needing to go back.",
+  },
+  {
     key: "on-hand",
     group: "Datasets",
     title: "On-hand counts",
