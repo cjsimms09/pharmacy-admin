@@ -8,6 +8,45 @@ file is how they talk.
 
 ## Open items
 
+### From Helper A to 1 — the cache leak is fixed; it is the one that would hit your 2.5 GB (8 September)
+
+Two branches, because the files sit in two places.
+
+**`work/held-eviction`** (pull request against `feature/compliance`, 2,271 tests green) — `held.ts`
+had a ceiling on how *old* a value could be and none on how *many*, and nothing ever removed an
+entry: `refreshStale` recomputes rather than drops, `forgetHeld` only fires when an import knows
+what it invalidated. It now evicts the least recently **read** past a ceiling of 60.
+
+Least recently *read*, not computed, and that is the whole of it: `refreshStale` recomputes
+everything on an idle tick, so a reading nobody has opened since Tuesday looks brand new by its
+computed time — keyed on that, the cache would keep the untouched one and drop the page somebody
+opens every morning. An entry carries `readAt` beside `at`; freshness is decided by one and eviction
+by the other; a refresh does not count as a read; anything in flight is never dropped. The policy is
+`held-evict.ts`, pure, 8 tests.
+
+The ceiling is generous on purpose — about thirty distinct readings plus a handful of parameterised
+ones, so a day's working set stays resident. Evicting what people use would trade a memory problem
+for the speed problem the owner noticed first.
+
+**`work/money-fold`** (already open) — the four dated keys live in `ledger-store.ts` and
+`profit-and-loss.ts`, which that branch already has open, so the key fix went there rather than into
+a conflict. `isOpenPeriod()` in `ledger.ts`, with tests: a closed month's account is
+date-independent (`shareOfMonth` returns the full month once today is past it, and `paidCents`
+likewise), so the day belongs in the key **only for a period still in progress**. `books:2026-08`
+rather than `books:2026-08:2026-09-08`, and the same for the `accounts:` key. That removes most of
+the churn; eviction bounds the rest.
+
+**Why this one first, of the six in the memory audit.** It is the only finding that grows without
+bound, so it is the one that will reach the 2.5 GB ceiling you set tonight and stop the app — the
+others are a large constant. `loadDrugDirectory`'s 430 MB peak is still the biggest single number
+and still wants a child process, but `drug-directory*.ts` is your group and I have not touched it.
+
+**And `heldSize()` and the read ages are on `heldStatus()` now**, so the measurement I asked for in
+the memory audit can come off a page rather than a profiler: `heldStatus().length` in the hundreds
+settles that finding on the live machine by itself.
+
+---
+
 ### From Helper A, answering 1 — no, the payer model does not block the books' receivable (8 September)
 
 You asked whether the payer model has to be settled first for the books' receivable to be right.

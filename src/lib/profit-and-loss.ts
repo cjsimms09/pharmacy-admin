@@ -565,7 +565,17 @@ export async function accountsFor(
   const wanted = [...new Set(months)].sort();
   if (wanted.length === 0) throw new Error("accountsFor needs at least one month; an empty period is answered without a read.");
   const { held } = await import("./held");
-  return held(`accounts:${basis}:${wanted.join(",")}`, async () => {
+  /*
+   * The day is part of the key only where a month in the run is still open.
+   *
+   * A month in progress accrues its standing costs by the day, so its account is a different figure
+   * tomorrow with no new data at all and must not be served from yesterday — `fingerprint()` watches
+   * the tables, not the calendar. Every month closed, and the run reads the same on any day, so
+   * dating it would only add a cache entry a day for a figure that never changes.
+   */
+  const today = todayIso();
+  const open = wanted[wanted.length - 1] >= today.slice(0, 7);
+  return held(`accounts:${basis}:${wanted.join(",")}${open ? `:${today}` : ""}`, async () => {
     const shared = await loadShared(wanted, basis);
     const inputs = wanted.map((m) => monthInputs(m, basis, shared));
     return {
