@@ -181,6 +181,17 @@ rule first — 103 of 103 is not a filter, it is a fault or a threshold set for 
 shape — then the "met by today's lines" logic, which hides add-ons exactly when the pharmacist
 wants to see them.
 
+**A pack size's unit has to be the unit the claim bills and NADAC prices, not the FDA's (8
+September).** The "contents of N containers" rule would rewrite 309 NDCs from a count of
+containers to the FDA's volume. Checked on the claims: `quantity_unit` is null on every row (the
+daily report never carries it), and the dispensed NDCs the rule would touch are billed per unit —
+Restasis 60 against a 24 mL package (sixty 0.4 mL vials), EpiPen 2 against 0.6 mL, pledgets 60,
+patches 3. The FDA's volume would divide the unit cost by the vial size while the claim bills per
+vial: the cross-unit fault from the other side. Rule agreed with 2: settle at the FDA's contents
+only where `nadac_prices.pricing_unit` for the NDC is ML or GM; where NADAC prices per EA the
+count is right; where NADAC has no row, a person decides. Owner's export list gains the quantity
+unit (NCPDP 600-28).
+
 **Pack sizes, first FDA pass on the live catalogue (8 September):** 480 NDCs corrected from the
 FDA (multiples of 2× to 30×), 32,643 already right, **12,659 open questions**, dominated by one
 convention — McKesson counts a vial as 1 EA where the FDA states 20 mL — which a second automatic
