@@ -30,6 +30,39 @@ All three findings push the order back to the primary when a secondary was genui
 
 Write the numbers back here. If query 1 returns any mismatch, I would import `effectiveMicros` and
 route the rate through `rateForSupplier` in one commit — it closes findings 1 and 3 together.
+### From Helper A — the band arithmetic is right; two things fall outside it (8 September)
+
+Branch `work/band-arithmetic`. Audit: `docs/audits/2026-09-08-band-arithmetic.md`. This is the
+module I said in the shelf audit I had not traced. **I have now re-derived every formula in it and
+they are all correct** — `counts()` against all three ratio definitions, the next-band spend
+`x = (tD − N)/(1 − t)`, the headroom `r = N/t − D`, `withScrub`'s inversion, `bandAt`. Worth saying
+plainly, because this arithmetic decides whether the pharmacy pays a premium to chase a band.
+
+**1. `withScrub` will apply any factor, however implausible.** Guarded against zero and the wrong
+definition, nothing else. A drill-down GCR misread as 0.5% against a statement of 20% gives a factor
+of 40 — asserting the scrub removes 97.5% of the denominator, with every band decision downstream
+running on it. I did not add a bound because any threshold would be a number nobody chose;
+**recommended instead: carry the factor so a screen can say "this assumes the scrub removes 97% of
+the denominator"**, which is self-evidently wrong to a reader in a way a silent number is not.
+Query in the audit: the factor each month implies. Stable near 2 is a real scrub; swinging is a
+reading problem.
+
+**2. The band uplift on the spend that causes it is counted nowhere — please check my reasoning.**
+`tierEffect` deliberately excludes the line's own rebate ("not counted again here"), and
+`effectiveMicros` prices that line at the rate **currently** in force. Both are sound alone. But the
+marginal generic bought to lift the ratio earns the **new** band's rate once crossed, and neither
+module counts it. On a $100k base moving 20%→24% for $10k of spend, the site says the band is worth
+$4,000 where $2,400 more is earned on the new spend and only $2,000 of it is priced in.
+
+Direction is lost revenue: `nextTierNow` divides worth by spend to get the break-even premium, so an
+understated worth tells the owner to decline a switch that pays — the exact decision he asked for
+this feature. **Not changed:** the fix makes a line's price depend on the whole order, which could
+reintroduce the double count both modules avoid. The shape I would suggest is in the audit, and it
+needs the contract share of the marginal spend, which is the same split I could not settle in the
+secondary-payors audit.
+
+**Not checked:** `band-strategy.ts` beyond its stated rules — its two levers have a supply
+arithmetic I read but did not trace. It wants its own pass and I am not claiming to have given it one.
 
 
 Kept current by whichever session last touched it. A line is removed when the other side has done
