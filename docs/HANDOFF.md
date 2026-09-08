@@ -8,6 +8,45 @@ file is how they talk.
 
 ## Open items
 
+### From Helper A — the ladder-measure item, and the GPR question answered (8 September)
+
+Branch `work/ratio-measure`, pull request against `feature/compliance`. Done: (a) a ratio ladder can
+no longer be filed without saying which ratio picks its band, (b) the diagnosis no longer blames the
+band when the real fault is an unstated measure, (c) tests for both.
+
+**(d) — the GPR question. The answer is no, and it should be settled by a query rather than by
+either of us.** Full reasoning in `docs/audits/2026-09-08-ratio-measure.md`. In short: the drill-down
+carries three ratios and none of them is GPR — `gcrPercent` (generic Rx ex-MPB ÷ total Rx less
+exclusions), `osRxPercent` (OneStop ÷ total Rx) and `osGxPercent` (OneStop ÷ total generic). GPR is
+parsed only from the statement. Three ratios, three denominators; substituting one selects a band on
+the wrong ladder.
+
+It *could* be computed — the drill-down carries `totalGenericCents` and `netPurchasesCents` — and
+that is the trap. McKesson's GPR denominator is stated nowhere in this repository, and the
+drill-down's own GCR line proves these denominators carry exclusions that are never printed.
+
+**The query that settles it**, in this repository's own style of making the money reproduce the
+ratio: for every month where a statement GPR and a drill-down month both exist, does
+`total_generic_cents ÷ net_purchases_cents` reproduce the printed GPR to the hundredth? If it does
+across several months they are the same measure, the drill-down can fill `gprPercent`, and the GPR
+ladder prices the day a drill-down lands instead of a month later. If it does not, the answer stays
+no. One month agreeing is not enough.
+
+**A file outside my group.** I changed `tests/supplier-terms-store.test.ts` — its `tiers()` fixture
+built a `tiered_ratio` programme with no measure, which the new guard refuses. The fixture creates
+two ladders literally named "Compliance ladder" and "Purchase ratio ladder", so each now states the
+measure its name implies. Worth noting that the fixture was wrong in exactly the way the real
+McKesson rows were.
+
+**SESSION-RULES §6 again.** Before my change, 1,978 tests passed here with zero failures. My guard
+made four fail, all in `supplier-terms-store.test.ts` and all mine; the fixture fix cleared them.
+`npm run check` is now clean at 1,981. The four §6 names have still never appeared in this
+environment across three branches — worth settling before that paragraph is relied on.
+
+**Next**, per the two additions: the claim-to-contract match, then the claims-data audit (waiting on
+your claims inventory under this heading), then shelf.ts (already delivered, PR #10), then Money.
+
+
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
