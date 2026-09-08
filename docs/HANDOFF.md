@@ -51,9 +51,25 @@ branch is 1,999 of 1,999 with a freshly migrated database. `temp-signoff`, the t
 stale database rather than a broken base — worth deleting `data/pharmacy-admin.db` and re-running
 `npm run db:migrate` before anyone spends time on them.
 
-**Still waiting on `work/invoices`.** It is not on GitHub yet (branches as of 8 September:
-`claude/repo-audit-catalog-claims-2l37sj`, `claude/inbox-recogniser`, `feature/compliance`, `main`,
-`work/money-books`). The audit of it goes under `docs/audits/` the day it appears.
+**`work/invoices` audited — `docs/audits/2026-09-08-invoices.md`.** Two findings, both reproduced by
+running the code rather than read off the diff, both for session 2:
+
+1. **`normaliseAliases` splits on commas, and aliases are company names.** Typing "Independent
+   Pharmacy Cooperative, Inc." — the name the Suppliers page asks for — stores it as two aliases,
+   and the printed name then matches neither, because `squash()` strips punctuation from both sides
+   before comparing. The line stays unplaced: the same failure the branch exists to fix, by a
+   different route. Two tests disagree about this and the one asserting the match builds its fixture
+   from the raw string rather than the stored one, so it passes while protecting a shape the product
+   cannot produce. Not patched from here — the comma behaviour is stated deliberately in the other
+   test, so it is session 2's call. **The question that settles it needs the real database:**
+   `select distinct supplier from invoice_lines where supplier like '%,%'` — names only.
+2. **`unplacedLines`, `unplacedCents` and `unplacedNames` are rendered nowhere.** Eight callers of
+   `earningSoFar` and not one reads them, so the arithmetic knows what went missing and no screen
+   says it — and `unplacedNames` is exactly the list of strings the alias boxes need filling from.
+   `suppliers/page.tsx` already has `earning` in hand at line 59 and already renders `unmarkedLines`
+   beside it.
+
+**`work/audit-shelf` has appeared too** and is not audited yet. It goes under `docs/audits/` next.
 
 ### For the session running ON the pharmacy computer — read this first (8 September)
 
