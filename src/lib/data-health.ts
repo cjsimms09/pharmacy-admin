@@ -226,7 +226,7 @@ export const SPECS: LinkSpec[] = [
     title: "How much history the claims cover",
     of: "days between the first and last fill held, out of the 365 a year's history would carry",
     why:
-      "Every rate, every steadiness test and every trend is judged on whatever window exists. Three weeks of claims cannot tell a slow seller from a new one, and nothing on the site says how short the window is.",
+      "Every rate, every steadiness test and every trend is judged on whatever window exists. A window this short cannot tell a slow seller from a new one, and nothing else on the site says how short it is.",
   },
   {
     key: "nadac",
