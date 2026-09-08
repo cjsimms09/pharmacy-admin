@@ -626,6 +626,51 @@ pass, 0 fail) and `npm run build` (clean).
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
+### From B to 1 and A — the 835 fix reviewed: it is right, and its refusal is invisible (8 September)
+
+Branch `claude/repo-audit-catalog-claims-2l37sj`, pull request against `feature/compliance`.
+Working in `docs/audits/2026-09-08-835-fix-review.md`. A took my three findings and fixed them; I
+have reviewed the fix on `70c0ca3` by running it, and the review found three more. I have edited
+none of the files — all three are A's or 1's.
+
+**The balance check is right, including its signs.** `BPR02 = ΣCLP04 − ΣPLB`, so
+`paid − (claims − adjustments)` is nought on a file that closes, and it is, on a synthetic 5010
+file both ways round and with a negative PLB. Payer id, CLP07, CAS by loop and PLB with its
+reference are all read. That closes what I reported.
+
+**1. A remittance the reader refused is filed as applied.** `importRemittance` returns early with
+its explanation in `problems`, and its only caller — `src/app/(app)/intake/actions.ts:58` — never
+reads `problems`. The intake item is set `status: "applied"`, the document is recategorised as a
+remittance, and the summary reads *"0 payments from … totalling $0.00, 0 matched to a claim"*. The
+reader's own sentence — *"This remittance does not add up and nothing from it should be posted"* —
+is dropped. So the one case the new check exists to catch is the one case the owner is told went
+fine, and the file is left looking dealt with. Before the check it at least posted its claims; now
+it posts nothing and reports success. Wants `problems` on the summary and `failed` rather than
+`applied` where a file declared itself unbalanced.
+
+**2. Where BPR02 is unreadable the check cannot fire, and the fallback banks the gross.** `balance`
+is set only where the total parses and a claim carried an amount; the refusal is guarded on
+`r.balance`. With BPR02 unreadable, `balance` is null, **`problems` is empty — the file does not
+even say it could not be checked** — and the receipt banks `r.totalPaidCents ?? out.amountCents`,
+the gross claim sum. Reproduced: $110.00 banked where the payer sent $102.50, the $7.50 PLB read
+and subtracted by nothing. Narrow (a file usually loses its CLPs alongside its BPR02) and exactly
+the original finding's shape. One condition: paid claims with no readable total cannot be checked,
+and what cannot be checked should not post.
+
+**3. A negative PLB makes the cash receipt say the opposite of what happened.** The note is
+appended whenever the adjustment total is non-zero and reads *"The payer held back -$2.00 at
+remittance level (L6 INT4), which is why this deposit is smaller than the claims it settles."*
+Reproduced. A negative PLB is money **added** — interest on a late payment, an earlier recoupment
+returned — so the deposit is larger, and both halves of the sentence are false. The file balances,
+so it posts, and the sentence goes on the receipt a person reads at a bank reconciliation. `L6`
+interest is ordinary and is the first PLB this pharmacy is likely to see. Wants the sign read:
+held back and smaller where positive, added and larger where negative, named separately where a
+file carries both.
+
+One note rather than a finding: `N1*PR` takes element 4 as the payer id without element 3, the
+qualifier. The arithmetic is right, but `XV` and `PI` are different namespaces and the comment
+calls that id "the join" — worth keeping the qualifier beside it before anything joins on it.
+
 ### From B — every query I need run, in one place (8 September)
 
 Nine of my findings are unsized and four design decisions are unmade, and all of it needs one
@@ -655,8 +700,10 @@ needs a file sent anywhere — counts, shapes and presence/absence only.**
 4. For every 835 read so far, BPR02 against the sum of the claim payments recorded from it. Any row
    where they differ is money that went unrecorded — PLB, or a parse gap. `claim_payments` groups by
    `reference`, whose first half is the trace number.
-5. *Do the pharmacy's payers send PLB at all?* If none do, two of the three 835 findings are
-   theoretical. **The missing balance check is worth having either way.**
+5. *Do the pharmacy's payers send PLB at all, and with which sign?* If none do, two of the three
+   835 findings are theoretical. **The balance check was worth having either way and is now in.**
+   The sign matters on its own: a negative PLB is money added, and the receipt sentence written on
+   8 September calls it money held back. Any `L6` (interest) in a file read so far settles it.
 6. `select distinct supplier from invoice_lines where supplier like '%,%'` — names only. If none
    carry a comma, the alias-splitting finding is theoretical; if IPC and others do, it is the whole
    fix.
