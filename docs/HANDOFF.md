@@ -377,6 +377,58 @@ pass, 0 fail) and `npm run build` (clean).
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
+### From B — every query I need run, in one place (8 September)
+
+Nine of my findings are unsized and four design decisions are unmade, and all of it needs one
+sitting at the pharmacy computer. The reasoning for each is in the sections below and in
+`docs/audits/`; this is only the list, so it can be worked through without hunting. **Nothing here
+needs a file sent anywhere — counts, shapes and presence/absence only.**
+
+**The two that could change a design, so worth running first.**
+
+1. *Are scheduled reports named the same way week to week?* Three months of `inbox_items` as shapes:
+   `from_address` with the local part replaced, the first 40 characters of `subject`, `file_name`
+   with every digit replaced by `9`, and `routed_as`. **If the stems do not repeat, the narrow form
+   of the inbox correction rule is worthless and I should redesign it before it is wired into the
+   sweep.**
+2. *How many payers have no known enrolment route?* Per PBM with a completed extraction: whether
+   `enrollmentFormUrl`, `clearinghouse` and `tradingPartnerId` are present, and whether any
+   `contacts[]` entry has `purpose = "payment_or_eft"`. Presence or absence only. **If almost every
+   payer comes out unknown, the route ladder is not the problem and the extraction prompt is** — and
+   I would rather know that before `/payers/routing` tells the owner to ring forty payers by hand.
+
+**The money ones.**
+
+3. `select count(*), sum(total_cents) from supplier_invoices i where total_cents > 0 and not exists
+   (select 1 from invoice_lines l where l.invoice_id = i.id)` — then the same `and needs_review = 0`.
+   The second number is the one actively lying: invoices with a total, no lines, and no flag. Sizes
+   the `adoptDocument` gap.
+4. For every 835 read so far, BPR02 against the sum of the claim payments recorded from it. Any row
+   where they differ is money that went unrecorded — PLB, or a parse gap. `claim_payments` groups by
+   `reference`, whose first half is the trace number.
+5. *Do the pharmacy's payers send PLB at all?* If none do, two of the three 835 findings are
+   theoretical. **The missing balance check is worth having either way.**
+6. `select distinct supplier from invoice_lines where supplier like '%,%'` — names only. If none
+   carry a comma, the alias-splitting finding is theoretical; if IPC and others do, it is the whole
+   fix.
+7. `earningSoFar(...).unplacedNames` for the current month. It exists in memory right now with
+   nothing rendering it, and it is exactly the list the alias boxes need filling from.
+
+**The supplier matcher, before anyone changes `shelf.ts`.**
+
+8. `select id, name, catalog_name, aliases from suppliers where length(trim(name)) < 4` — the rows
+   containment can never reach.
+9. `select distinct lower(trim(supplier)) from supplier_items order by 1` — every spelling a price
+   file actually uses.
+10. `select count(*) from suppliers where coalesce(trim(aliases), '') = ''` — the precondition.
+    **Aliases must be filled before anything switches to equality-only**, or "MCKESSON CONNECT" turns
+    from a working match into a null.
+
+**And one file, if it can be spared.** A single real 835 with every identifier changed per
+`fixtures/README.md` — Rx numbers, NPI, member and payer ids. There is none in the repository, so
+every figure in the 835 audit is from a remittance I reconstructed to the 5010 shape. It is the one
+thing that would let that work be tested against reality rather than my reading of the standard.
+
 ### From B to 1 and A — the 835 reader drops PLB, and the difference is real money (8 September)
 
 Asked for under "Helper B" in ASSIGNMENTS (added 8 September): check `x12-835.ts` against 2b-ii's
