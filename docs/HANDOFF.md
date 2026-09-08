@@ -23,6 +23,12 @@ the tree dirty. The owner's balance-on-hand report is re-filed through the repai
 November 2025) is on the ANDA supplier: 100% within a year less the 20% handling fee, expired
 and eleven other categories non-returnable, the rest in its notes.
 
+**8 September, 17:00 (1) — the owner: "i will not be uploading claims from before sept.. or
+anything. this site is starting clean as of 09/01/.."** The twelve-month claims export is
+withdrawn; nothing waits on it any more. BACKLOG 31 has the consequences: a `site_start_on` setting
+of 2026-09-01, the pre-start facilitator payments and RedSail lines shown as "before the site's
+start" rather than unmatched, and every window-based judgment printing the days it was made on.
+
 **8 September, 16:10 (1) — the owner: "make all changes with medium or higher confidence."** Six
 networks linked on his instruction, each to a document fetched from its source and filed in the
 library, with the reason and the source on the link: NET=400 → CMS's GLP-1 Bridge pharmacy

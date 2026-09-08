@@ -756,6 +756,20 @@ zip's product and package counts against the table, and the equivalence keys re-
 workbook's rows against the documents. Each a Data health row with the file's date, each
 disagreement a red row on Today. Data health is 2's: the rows and the nightly script; the claims
 re-read is 1's. Ahead of item 24 in 2's order, by the owner's word.
+### 31. The site starts clean on 1 September 2026: no history is coming (8 September)
+
+The owner's words: "i will not be uploading claims from before sept.. or anything. this site is
+starting clean as of 09/01/.." So the twelve-month claims export is withdrawn from every list that
+waited on it (10b, 23, 24, 29, the HANDOFF owner list), and the site needs a stated start date:
+a `site_start_on` setting, 2026-09-01, read wherever the site judges a window. Consequences to
+build, small: the 23 facilitator payments and the RedSail statement's August lines are for fills
+before the start and will never match a claim — they are shown as "before the site's start" and
+counted in cash as received, not as unmatched; the facilitator page, the remits Data health row
+and the copay-card reconciliation say so in those words. Every rate, steadiness and idleness
+judgment carries the window it was made on, and the window grows from 1 September: the
+"short window" caveats on Return soon, the add-on lists and item 29 stand until the months
+accrue, and the pages print the number of days held. The claims of 24–31 August already on file
+stay (they are real and proved) but are outside the start.
 ## The data the site has to ingest
 
 Named by the owner on 7 September as what is still being connected. Each one needs a reader, a
