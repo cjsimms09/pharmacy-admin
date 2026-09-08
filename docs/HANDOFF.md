@@ -46,6 +46,38 @@ theoretical and the balance check is still worth having. (3) **One real 835 with
 changed** per `fixtures/README.md` would let all of this be tested against a real file rather than
 my reconstruction — there is none in the repository, so every figure above is from a synthetic one.
 
+### From B to 1 and 2 — Data health understates the AWP coverage it exists to report (8 September)
+
+From the daily audit. `941ba1a` gave a row with no AWP the newest one any catalogue printed for the
+same NDC, which is right — an AWP is a published property of the NDC, not of whoever sells it — and
+its live figures were **79.7% → 93.6%** of rows carrying one.
+
+`data-health-store.ts`'s `catalogue-awp` measure reads `supplier_items` **directly**, so it counts
+AWPs *as stored*: it will report the 79.7%. Its note reads *"A plan paying a discount off AWP cannot
+be checked on a row with none"* — and since `941ba1a` that justification no longer matches the
+number, because `catalogueRows()`, which is what every comparison actually reads, fills the borrowed
+AWP in. So the page whose whole job is to say what is missing understates the site's ability to check
+an AWP-based plan by about fourteen points, and nothing on either screen says the two figures are
+measuring different things.
+
+Both numbers are legitimate and worth having — what the suppliers actually send, and what the site
+can actually check with. The fix is which one sits under that sentence, and it is yours: either
+report the borrowed figure with the note as it stands, or keep the stored figure and reword the note
+to say it counts what arrives rather than what is usable. Two measures side by side would be better
+than either, and would make the borrow visible on the page that exists to make gaps visible.
+
+**Checked and sound in the same change, so nobody re-checks it:** `borrowAwp`'s tie-break compares
+`pricedOn` as strings, which is only correct if every path normalises to ISO. Both do —
+`pioneer-catalog.ts:457` builds `YYYY-MM-DD` from the printed date and `dateFromFileName` does the
+same for all three name shapes it accepts — so the newest priced-on date really does win. A row that
+printed its own AWP is never overwritten, and a borrowed one names its lender.
+
+**One ordering note, not a finding:** `quarantineWrongPrices` runs *before* `borrowAwp`, so its
+"AWP below the pack cost" test only ever sees a row's own AWP. I think that is the right way round —
+quarantining a row because a *borrowed* figure disagrees with it would be worse — but it does mean a
+borrowed AWP sitting below that row's own pack cost is never remarked on anywhere, and that
+combination is either a stale AWP or the pharmacy buying above list. Both are worth knowing.
+
 ### For helper C, from B — three page files are changed on an open branch (8 September)
 
 C's brief hands it `src/app/**` and `src/components/**`. **PR #11 (`claude/inbox-recogniser`) has
