@@ -122,7 +122,7 @@ Works in its own worktree, never in 1's folder (a deploy runs `git checkout -- .
 branch to 1 by message when `npm run check` passes. **B audits this branch** — see B below.
 
 **Then (8 September, from 1, after the bank module): two ingestion jobs on the critical path.**
-(1) **The claims history** — the archive is 21 days long and every rate is judged on it; the
+(1) **The claims history** — the paid archive is 15 days long (24 August on) and every rate is judged on it; the
 owner is exporting twelve months of "Rx Transaction Details By Submission Type". Prove the reader
 (`rx-transactions.ts`, `importRxTransactions`) on a multi-month file: fixed columns across page
 breaks and month boundaries, `transactionKey` de-duplication on a re-sent day, a tens-of-thousands
