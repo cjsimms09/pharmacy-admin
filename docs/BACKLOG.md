@@ -709,6 +709,24 @@ cost plus a fee, so the choice is indifferent); which wholesaler to buy each fro
 where a days-supply band (84+) or a preferred network pays differently. (3) **Present it** on one
 page, Profit by payer: per network — fills, revenue, cost, margin, expected against paid, the top
 drugs losing money and the one action each — with the proof share printed beside every figure.
+### 29. Which NDC nets the most for a drug: an aggregate over the drug's claims, and only the exceptions (8 September)
+
+The owner's design, in his words: "I cant necessarily tailor my ordering to one claim, this is why
+we will have to look at aggregate of claims for 1 drug and find which NDC nets the most for that
+drug based on reimbursement (contracts) we do for that drug and what we purchase at.. this will be
+a fluid calculation.. and really our system is set to order cheapest net drug, so system should be
+looking for cases where that isnt true and let me know. will take multiple months to get enough
+data to be confident." So, per drug (equivalence group), not per claim: take every fill of that
+drug in the window, the network each fill priced under and that network's formula (proved by the
+item 23 backtest, never assumed), and for each candidate NDC the pharmacy could buy compute what
+those same fills would have paid under each formula (AWP-minus pays more for a higher-AWP NDC; MAC
+and NADAC-plus pay the same or by that NDC's own benchmark) less what the NDC costs to buy today,
+net of rebate — a net per unit for the drug's actual payer mix. The buy list already orders the
+cheapest net-cost NDC; this reports only the exceptions: drugs where a dearer-to-buy NDC nets more
+across the mix, with the dollars a month, the fills behind it, and a confidence that grows with
+the months of claims (thin until the twelve-month export lands). A very high-dollar item may be
+judged per claim; everything else in aggregate. `drug-profit.ts` is the start of it. Depends on
+23 (proved rates), the catalogue's AWP and NADAC per NDC, and the equivalence keys.
 ## The data the site has to ingest
 
 Named by the owner on 7 September as what is still being connected. Each one needs a reader, a
