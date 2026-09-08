@@ -36,6 +36,15 @@ export type CatalogueRow = {
   unitCostMicros: number | null;
   packCostCents: number | null;
   awpCents: number | null;
+  /**
+   * The supplier whose catalogue printed the AWP on this row, where it was not this row's own.
+   *
+   * ParMed and IPD print no AWP at all. An AWP is a published property of the NDC, not of whoever
+   * sells it, so a row without one carries the newest AWP any catalogue printed for the same NDC —
+   * 7,551 NDCs on this database — and this names where it came from, because a figure that
+   * arrived from somewhere else must say so wherever it is shown.
+   */
+  awpBorrowedFrom?: string | null;
   contractFlag: string | null;
   availability: string | null;
   pricedOn: string | null;
@@ -265,10 +274,42 @@ export async function catalogueRows(): Promise<CatalogueRow[]> {
    * next screen buying on it. See quarantineWrongPrices for the four tests it has to fail.
    */
   const { quarantineWrongPrices } = await import("./catalogue-check");
-  const { rows: sound, taken } = quarantineWrongPrices(levelled);
+  const { rows: quarantinedOut, taken } = quarantineWrongPrices(levelled);
   quarantined = taken;
+  // An AWP is the NDC's, not the seller's: a row without one borrows the newest printed for the NDC.
+  const sound = borrowAwp(quarantinedOut);
   held = { key, at: Date.now(), rows: sound };
   return sound;
+}
+
+/**
+ * Carries a printed AWP onto every row of the same NDC that has none, naming the source.
+ *
+ * Two of the five catalogues — ParMed and IPD — print no AWP. A plan that pays a discount off AWP
+ * cannot be checked on a row with none, so every comparison that reads the AWP was blind to those
+ * two wholesalers entirely: 7,551 NDCs on this database had no AWP on one supplier's row and a
+ * printed AWP on another's. The AWP is a published figure for the NDC, the same whoever sells
+ * it, so the newest one any catalogue printed stands for the rest. Where two catalogues print
+ * different AWPs for one NDC the newest priced-on date wins, because AWPs change and the older
+ * catalogue is the stale one. A row that printed its own AWP is never overwritten.
+ *
+ * Pure, and exported for the test.
+ */
+export function borrowAwp<T extends { ndc11: string; supplier: string; awpCents: number | null; pricedOn: string | null }>(
+  rows: T[],
+): (T & { awpBorrowedFrom?: string | null })[] {
+  const newest = new Map<string, { awpCents: number; supplier: string; pricedOn: string }>();
+  for (const r of rows) {
+    if (r.awpCents === null || r.awpCents <= 0) continue;
+    const on = r.pricedOn ?? "";
+    const have = newest.get(r.ndc11);
+    if (!have || on > have.pricedOn) newest.set(r.ndc11, { awpCents: r.awpCents, supplier: r.supplier, pricedOn: on });
+  }
+  return rows.map((r) => {
+    if (r.awpCents !== null && r.awpCents > 0) return r;
+    const b = newest.get(r.ndc11);
+    return b ? { ...r, awpCents: b.awpCents, awpBorrowedFrom: b.supplier } : r;
+  });
 }
 
 /**
