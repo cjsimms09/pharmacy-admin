@@ -103,6 +103,24 @@ McKesson row has **no sender address**, so one could not file as an invoice if i
 actions: forward McKesson invoices to the site's inbox, and the register needs McKesson's invoice
 sender address. IPC aliases were typed on the register by session 1 from the two invoices.
 
+**For B, from 1 (8 September) — the ERA fields the extraction now supplies**, on
+`terms.remittance` in `contract-terms.ts`: `paidBy`, `paymentMethod`, `paymentCycle`,
+`eraOffered`, `enrollmentMethod`, **`enrollmentFormUrl`**, **`clearinghouse`**,
+**`tradingPartnerId`** (the three new ones), `remittanceContact`, `payerNamesOnRemittance[]`,
+`payerIdentifiers[]`; plus `terms.contacts[]` with `purpose === "payment_or_eft"` (name,
+organisation, phone, fax, email, portalUrl, postalAddress). The pharmacy's own identifiers come
+from `era-enrollment.ts identity()`. Build the request builder against those names; the library
+read that fills them is running on the pharmacy computer from 8 September.
+
+**Claims inventory for A's audit (8 September):** the daily transaction report is the feed that
+runs; it carries rx, fill, status, amount (remit), group, network reimbursement id (545-2F), copay,
+total (patient), date filled, BIN, tax, quantity, acquisition cost, PCN, NDC, gross profit, and
+days supply recovered from a wrapped line. It does **not** carry 522-FM basis, AWP, plan id, plan
+type, service type, DAW or quantity unit — those are PioneerRx export columns the owner can add
+(`docs/reference/pioneerrx-support-request.md`). `ingredientPaidCents` is derived on that feed as
+remit + copay − dispensing fee. `networkId` is filled on 95% of rows across 82 values and is the
+axis contracts are written on.
+
 **File handed to A (7 September):** `claim-contract.ts` and `src/app/(app)/payers/**` for the
 network-id mapping (ASSIGNMENTS, Helper A, "Second"). 1 does not edit them until A's pull request
 lands.

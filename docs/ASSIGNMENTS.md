@@ -52,7 +52,7 @@ question that needs real figures is written as a query under "Open items" in `do
 | Session | Files |
 | --- | --- |
 | **1** | `product-groups.ts`, `product-key.ts`, `drug-profit*.ts`, `products-store.ts`, `money-found.ts`, `replay-store.ts`, `suppliers.ts` (catalogue import), `nadac*.ts`, `catalogue-*.ts`, `drug-directory*.ts`, `shelf.ts`, `order-plan.ts`, `scripts/**`, migrations, these docs |
-| **2** | `invoices.ts`, `invoice-lines.ts`, `suppliers-registry.ts`, `rebate-rates.ts` (supplier matching), `purchase-ratio.ts`, `src/app/(app)/suppliers/**` |
+| **2** | `invoices.ts`, `invoice-lines.ts`, `suppliers-registry.ts`, `rebate-rates.ts` (supplier matching), `purchase-ratio.ts`, `src/app/(app)/suppliers/**`, `src/app/(app)/invoices/**` |
 | **A** | `ledger.ts`, `ledger-store.ts`, `period-account.ts`, `profit-and-loss.ts`, `src/app/(app)/money/**`, `bars.tsx`, `charts.tsx`, `expense-categories.ts`; audit files under `docs/audits/` |
 | **B** | `mailbox.ts` (routing and recognition only), `src/app/(app)/inbox/**`, `labels.ts`, `autoroute.ts`, `intake-*`, `era-enrollment.ts`, `src/app/(app)/payers/routing/**`; audit files under `docs/audits/` |
 | **1, contracts** | `contract-*.ts`, `src/app/(app)/payers/sort/**`, `payers/contracts/**`, `payers/[pbm]/**` — the contract ingestion is session 1's own job; nobody else edits the extraction |
@@ -173,6 +173,18 @@ speed fix: twelve passes over every claim become one). Deliver the fold, a doubl
 fixture where the same money is reachable two ways, a completeness check that says out loud which
 feeds are not yet in the books, cash and accrual with the difference explained, and a test that the
 books balance from the stored rows. Full brief in `docs/BACKLOG.md` item 4.
+
+**The owner's rule for cash versus accrual (7 September), which is the test the books must pass:**
+*"System total accrual shows how much we collected in copays; this should be received on cash side,
+but third party payments shouldn't until we get the 835 or remit. For accrual side, both should be
+accounted for that month."* So, per fill: the patient's money (`patientTotalCents`, else
+`copayCents`) is **cash on the day it was collected** (`completedAt`) and **accrual in the fill
+month**; the payer's money (`remitCents`) is **accrual in the fill month** and **cash only on the day
+the 835 or remittance shows it paid** (`claim_payments`, the 835 reader in `x12-835.ts`, the MTF
+payments) — never on adjudication. Until an 835 for a claim exists, that claim's payer money is a
+receivable, and the books must show the receivable balance and its age. Write the fixture that
+proves it: one fill, adjudicated in month 1, remitted in month 2, and the two statements disagree
+by exactly the remit. *"Everything needs to be thought through and correct and audited."*
 
 ---
 
