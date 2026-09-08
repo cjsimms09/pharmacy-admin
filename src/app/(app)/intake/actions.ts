@@ -13,6 +13,8 @@ import { classifyDocument, describeError, hasApiKey } from "@/lib/ai";
 import { addDays, todayIso } from "@/lib/dates";
 import { readBusinessDocument, looksLikeX12Remittance, matchParty, duplicateBill, type BusinessDocT, BUSINESS_KINDS } from "@/lib/business-docs";
 import { parseCents } from "@/lib/money";
+// A "use server" module may export only async functions, so the list and its type live beside it.
+import type { IntakeHint } from "./kinds";
 
 /** The names Claude is given to match a document's party against, and the categories a bill may take. */
 async function knownParties() {
@@ -21,36 +23,6 @@ async function knownParties() {
   const [sup, ven, cats] = await Promise.all([allSuppliers(true), vendors(), categories()]);
   return { suppliers: sup.map((x) => x.name), vendors: ven.map((x) => x.name), categories: cats.map((c) => c.name) };
 }
-
-/**
- * The kinds of file the site can read, as the person adding one would name them.
- *
- * The owner's words on finding he could not say what he was uploading: "no way to tell system
- * that's what this is in the add tool. need many more options!!!" He had a balance-on-hand report
- * in his hand and the only choices offered were a person and a credential type.
- *
- * Left empty nothing changes and the site works it out as before. Naming one removes the guess,
- * which matters most for the files that look like one another — a drug file and a wholesaler's
- * catalogue are both a wide CSV of NDCs and prices.
- */
-export const FILE_KINDS = [
-  { key: "", label: "Let the site work it out" },
-  { key: "balance_on_hand", label: "Drug file / balance on hand (PioneerRx)" },
-  { key: "rx_transactions", label: "Rx Transaction Details — the daily claims report" },
-  { key: "supplier_catalog", label: "A wholesaler's catalogue" },
-  { key: "supplier_invoice", label: "A wholesaler's invoice" },
-  { key: "remittance", label: "An 835 remittance from a plan" },
-  { key: "bank_statement", label: "A bank statement" },
-  { key: "contract", label: "A contract, rate exhibit or provider manual" },
-  { key: "staff_document", label: "A licence, certificate or training record" },
-] as const;
-
-/** What the person adding the file said it was, where they said anything. */
-export type IntakeHint = {
-  kind?: string | null;
-  /** The day a count represents, for a balance-on-hand report. Beats the file's own date. */
-  countedOn?: string | null;
-};
 
 /**
  * Reads one stored file the way the queue does: a report the site knows, then an 835, then the

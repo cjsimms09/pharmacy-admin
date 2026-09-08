@@ -10,7 +10,7 @@ import { CREDENTIAL_LABEL } from "@/lib/labels";
 import { hasApiKey, type ClassifiedDocT } from "@/lib/ai";
 import { dropFiles } from "./actions";
 import { DropZone } from "./drop-zone";
-import { FILE_KINDS } from "./actions";
+import { FILE_KINDS } from "./kinds";
 import { describeBusinessDoc, type BusinessDocT } from "@/lib/business-docs";
 import { KIND_LABEL as BUSINESS_LABEL } from "./[id]/business-review";
 
