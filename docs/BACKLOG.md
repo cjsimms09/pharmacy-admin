@@ -211,6 +211,29 @@ Not yet looked at: `shelf.ts` (895 lines, the largest and least examined), `orde
 its documentation, the rebate ladder and band arithmetic (`rebate-rates.ts`, `band-strategy.ts`,
 `ratio-effect.ts`), claim-to-contract matching, and the cash-versus-accrual split.
 
+### 8. The site has to look and work like a professional product (7 September)
+
+The owner: *"Site needs a lot of work in terms of design and usability functions! Are all the tools
+there that are needed? Are we presenting info in clean, clear way? This site should look and
+function like a professional website."*
+
+Three questions, each answerable page by page against `docs/reference/design-audit.md` (the site's
+design rules and page inventory), and none of them needing the database:
+
+- **Are the tools there?** For every page: what decision does the person on it have to make, and
+  can they make it without leaving? The test is the owner's own workflow, not a feature list.
+- **Is the information clean and clear?** One question per screen, the answer first, the number
+  with its unit, the reason in a sentence a pharmacist reads, and nothing on the page that does not
+  change what he does next. Folded detail rather than long lists; dashes where a figure is unknown,
+  never a zero that means "not known".
+- **Does it look and behave like a professional product?** Consistent layout, spacing, type and
+  colour across every page; states for loading, empty, error and success; forms that say what they
+  want and what went wrong; works on the phone he actually uses it from.
+
+This is a full pass over the page inventory and belongs to a cloud session, because it needs no
+data — it needs eyes and the design rules. Not yet assigned: A and B are on the money chain,
+which the owner ordered first. Assign when one frees, or to a fifth session.
+
 ## The data the site has to ingest
 
 Named by the owner on 7 September as what is still being connected. Each one needs a reader, a
