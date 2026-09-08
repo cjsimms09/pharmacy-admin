@@ -626,6 +626,42 @@ pass, 0 fail) and `npm run build` (clean).
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
+### From B to 1 — the recogniser answers without a sender, and the drop path never asks it (8 September)
+
+Same branch and pull request. Working in `docs/audits/2026-09-08-intake-recogniser-reach.md`. A
+wiring note, not a design one: **the seam already exists and nothing of mine needs to change.**
+
+The inbox recogniser is reached from one place, `/inbox`, for email lines that were not placed. A
+file dropped on `/intake` never consults it. It does not need a sender to answer: every field on
+`Evidence` is optional and the strongest band, content, is at `CERTAIN_AT`. Run with no address, no
+name and no subject — `pioneer_catalog` gives *a supplier's catalogue*, **certain**, 80;
+`supplier:invoice` gives *a supplier invoice*, **certain**, 80; `claims` plus
+`claims_export_20260908.csv` gives *a claims export*, **certain**, 85. A file name with no readable
+content gives *possible*, 25, and a scan with no text layer gives no guess at all — which is the
+design working.
+
+What `readIntoIntake` does instead, once the hint, `importDropped` and the 835 reader have all
+missed: `readBusinessDocument` and then `classifyDocument` — **up to two Claude calls**, against the
+ceiling that stopped the contract read this week — and where there is no key, *"This is not a report
+the site recognises, and there is no API key set for Claude to read it"*, with no guess and no
+control to say what it is. That is the half of BACKLOG item 5 that must never be missing.
+
+`intake-recognise-store.ts` already exports `recogniseBytes({ fileName, buf, … })` with sender,
+name and subject all optional. Its only caller is `recogniseStored()`, whose only caller is the
+inbox page. `readIntoIntake` has the bytes and the name in hand, so it is one line, and it belongs
+**after the cheap routers and before the API-key check**, so the free answer is taken before the
+paid one is attempted. What to do with the answer is yours; the two that seem plain are to place a
+`certain` guess as the inbox does, and to show the guess and the correction control on the intake
+review screen instead of a bare failure.
+
+One thing on today's comment in that file — *"Every other kind falls through to the recogniser
+below… Wiring the rest is worth doing only where a named kind would actually beat the guess."* The
+guess below that comment is `importDropped`'s, not the ranked recogniser's; they are two different
+things of mine. The bar for a named kind is higher once the recogniser is in the path, so some of
+the hint kinds may turn out not to be worth wiring at all.
+
+`src/app/(app)/intake/actions.ts` is yours and you edited it today; I have not touched it.
+
 ### From B to 1 and A — the 835 fix reviewed: it is right, and its refusal is invisible (8 September)
 
 Branch `claude/repo-audit-catalog-claims-2l37sj`, pull request against `feature/compliance`.
@@ -719,6 +755,13 @@ needs a file sent anywhere — counts, shapes and presence/absence only.**
 10. `select count(*) from suppliers where coalesce(trim(aliases), '') = ''` — the precondition.
     **Aliases must be filled before anything switches to equality-only**, or "MCKESSON CONNECT" turns
     from a working match into a null.
+
+11. *How often does a dropped file reach the Claude calls?* Of `intake_items`, how many ended in
+    `resultJson` carrying `kind: "business"` or a `classifyDocument` result, against how many were
+    placed by `importDropped` or the 835 reader — three months, counts only. **This sizes the
+    recogniser-reach finding and nothing else: if almost everything is caught by the cheap routers
+    first, the one-line wiring is worth little; if the Claude calls run often, it is worth it
+    today.**
 
 **And one file, if it can be spared.** A single real 835 with every identifier changed per
 `fixtures/README.md` — Rx numbers, NPI, member and payer ids. There is none in the repository, so
