@@ -1,0 +1,43 @@
+// The text layer of page 2 of RedSail Technologies' "Remittance Advice - RAS Copay Voucher
+// Reimbursement", which arrives as a PDF whose first page is a scan and whose second page carries
+// text. It settles claims adjudicating on BIN 028249 / PCN RXLOCAL.
+//
+// Invented: every prescription number, the check/ACH number, the NPI, the pharmacy name and
+// address. Kept: the NDCs (they identify products), the drug names, the quantities and every
+// amount, because the arithmetic is the whole point of the fixture and it has to be real
+// arithmetic. The rows net to the printed total to the cent.
+//
+// Two artifacts of the real text layer are preserved deliberately, because a reader that cannot
+// survive them cannot read the real file: the prescription number on the third row and the NDC on
+// the last pair are each broken across two runs by a space.
+
+Remittance Advice - RAS Copay Voucher Reimbursement
+RedSail Technologies
+Payment Date: 09/01/2026
+Check/ACH Number: 10261385
+Payment Amount: 177.25
+NPI: 1548737182
+Kansas Family Pharmacy
+1200 Prairie Street, Suite 400, Wichita KS 67000
+
+Rx Number | DOS | NDC | Drug Name | Qty | Submit | Patient Paid | Paid
+
+000000410088 20260821 00002150680 Mounjaro 2.5 MG/0.5ML SOPN 2.00 1331.24 1156.93 174.31
+000000410088 20260821 00002150680 Mounjaro 2.5 MG/0.5ML SOPN -2.00 -1331.24 -1156.93 -174.31
+0000004 07155 20260820 00002150680 Mounjaro 2.5 MG/0.5ML SOPN 2.00 1355.75 1181.44 174.31
+000000410265 20260820 00003089421 Eliquis 5 MG TABS 28.00 288.40 285.46 2.94
+000000410265 20260820 00003089421 Eliquis 5 MG TABS -28.00 -288.40 -285.46 -2.94
+000000410265 20260820 00003089421 Eliquis 5 MG TABS 28.00 155.00 152.06 2.94
+000000414709 20260821 00169441531 Wegovy 1.5 MG TABS 30.00 1707.11 1535.01 172.10
+000000414709 20260821 00169441531 Wegovy 1.5 MG TABS -30.00 -1707.11 -1535.01 -172.10
+000000414100 20260818 00169452514 Wegovy 0.25 MG/0.5ML SOAJ 2.00 1350.00 1177.90 172.10
+000000414100 20260818 00169452514 Wegovy 0.25 MG/0.5ML SOAJ -2.00 -1350.00 -1177.90 -172.10
+000000414277 20260818 00169452514 Wegovy 0.25 MG/0.5ML SOAJ 2.00 1350.00 1177.90 172.10
+000000414277 20260818 00169452514 Wegovy 0.25 MG/0.5ML SOAJ -2.00 -1350.00 -1177.90 -172.10
+000000397346 20260817 001730 89310 Trelegy ellipta 200-62.5-25 MCG/ACT AEPB 60.00 838.91 760.07 78.84
+000000397346 20260817 001730 89310 Trelegy ellipta 200-62.5-25 MCG/ACT AEPB -60.00 -838.91 -760.07 -78.84
+
+Total Claims: 177.25
+Total Fee: 0.00
+Balance Forward Amount: 0.00
+Total Amount Paid: 177.25
