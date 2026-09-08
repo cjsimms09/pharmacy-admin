@@ -43,6 +43,22 @@ export type PackRead =
 const CONTAINERS =
   /^(carton|box|case|blister\s*(pack|card)?|package|packet|tray|container|shipper|drum|dispenser\s*pack|bottle|jar|can|pail|bucket|bag|pouch|kit|cup)s?$/i;
 
+/**
+ * The noun itself, with the FDA's qualifier after the comma taken off.
+ *
+ * The directory writes "BOTTLE, PLASTIC", "VIAL, SINGLE-USE", "SYRINGE, PLASTIC", "TABLET, DELAYED
+ * RELEASE". Every list in this file names the thing, not the thing plus an adjective, so a
+ * qualifier used to defeat the match: "3 BOTTLE, PLASTIC in 1 CARTON" read as three dispensing
+ * units and returned a per-unit cost three times too cheap — the exact container fault this module
+ * was written to stop, walking back in behind a comma.
+ *
+ * The qualifier is never the unit. "TABLET, DELAYED RELEASE" is a tablet and "VIAL, MULTI-DOSE" is
+ * a vial, so taking the head noun is right for the measures as well as for the containers.
+ */
+function headNoun(noun: string): string {
+  return (noun.split(",")[0] ?? "").trim();
+}
+
 /** A duration is not a thing. Reading one as a count turned four patches into six hundred and seventy-two. */
 const DURATION = /^(h|hr|hour|d|day|wk|week|min|sec)s?\b/i;
 
@@ -54,7 +70,7 @@ const DURATION = /^(h|hr|hour|d|day|wk|week|min|sec)s?\b/i;
  * countable, which is the difference between this and `packageUnits`.
  */
 function measureOf(noun: string): { uom: "EA" | "ML" | "GM"; factor: number } | null {
-  const n = noun.trim().toLowerCase();
+  const n = headNoun(noun).toLowerCase();
   if (!n) return null;
   if (DURATION.test(n)) return null;
   if (/^ml$|^milliliter|^millilitre/.test(n)) return { uom: "ML", factor: 1 };
@@ -108,7 +124,7 @@ export function fdaPackageUnits(packageDescription: string | null | undefined): 
     innermost = m[2].trim();
   }
 
-  if (CONTAINERS.test(innermost)) {
+  if (CONTAINERS.test(headNoun(innermost))) {
     return {
       ok: false,
       why: `The description stops at "${innermost}" and never says what is inside it, so ${product} is a count of containers rather than of dispensing units.`,
@@ -178,7 +194,7 @@ export function fdaContainerContents(
 
   const outer = levels.slice(0, -1);
   // Every outer level must be a container somebody dispenses, not a carton or a case.
-  if (!outer.every((l) => DISPENSED_CONTAINERS.test(l.noun))) return null;
+  if (!outer.every((l) => DISPENSED_CONTAINERS.test(headNoun(l.noun)))) return null;
 
   const containers = outer.reduce((n, l) => n * l.count, 1);
   const units = containers * inner.count * measure.factor;
@@ -217,9 +233,9 @@ export function containerShape(packageDescription: string | null | undefined): s
   if (measure === null) return `innermost "${inner.noun}" is not a dispensing unit`;
   if (measure.uom === "EA") return `innermost "${inner.noun}" is counted, not measured`;
   const outer = levels.slice(0, -1);
-  const notDispensed = outer.filter((l) => !DISPENSED_CONTAINERS.test(l.noun));
+  const notDispensed = outer.filter((l) => !DISPENSED_CONTAINERS.test(headNoun(l.noun)));
   if (notDispensed.length > 0) return `outer "${notDispensed[0].noun}" is packaging, not a container anybody dispenses`;
-  return "this shape";
+  return "containers with a volume or a mass in each — this rule's own shape";
 }
 
 /**

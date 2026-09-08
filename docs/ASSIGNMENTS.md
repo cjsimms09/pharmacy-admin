@@ -138,6 +138,61 @@ separate process or held between requests (every libsql call blocks the server; 
 `src/app/(app)/tools/data-health/**` are yours. Start from tonight's hand-measured figures in
 HANDOFF so the first version already shows the real numbers.
 
+### The bank feed — plan from 2 (8 September), for 1 to confirm before I build
+
+**Read the code first, as asked, and the headline is that most of this exists. Please do not have
+me rebuild it.**
+
+`bank-statement.ts` parses a bank CSV: it finds the date, description and amount columns by their
+headings, handles separate debit and credit columns, and gives every line a stable key.
+`src/app/(app)/money/bank.ts` takes that, drops lines already held by key, places each one, writes
+`bank_lines`, creates a cash receipt for a deposit, marks an expense or a supplier invoice paid,
+audits, and redirects with a sentence saying what happened. `/money` already lists placed lines and
+names the unplaced ones. The placement rule is properly conservative — one open item, the exact
+amount, the right name, or it is left unplaced rather than guessed.
+
+So **`bank` reads 0 of 0 on Data health because no statement has ever been uploaded, not because
+the feed is missing.** That is an owner action, not a build: he exports the month-end CSV and
+presses the button on /money. Worth telling him plainly, because a page that says "0 bank lines"
+looks like broken software rather than a waiting task.
+
+**What is genuinely missing is the reconciliation, and it is one link, not a feed.**
+
+A deposit becomes a cash receipt attributed to a payer *by name from the description*. Nothing ties
+it to the 835 lines that make it up. So "claim → 835 line → deposit" on Data health cannot rise
+above zero however many statements are loaded, and the owner cannot answer the question the row
+exists for: *did this payer actually pay me what the remittances said they would?*
+
+`claim_payments` holds the 835 lines. `bank_lines` has `receipt_id`, `expense_id` and
+`invoice_id` but nothing pointing at the payments a deposit settles. That is the gap.
+
+**What I propose to own**
+
+1. `bank-reconcile.ts`, pure and tested: given a deposit (date, amount, payer) and the 835 lines
+   outstanding for that payer, find the set that sums to it. Exact sums only, within a stated date
+   window, and where more than one set matches it reports the ambiguity rather than choosing —
+   a deposit tied to the wrong remittances is worse than one left untied.
+2. Migration 0087, additive: a join table `bank_line_payments` (bank_line_id, claim_payment_id,
+   matched_by, matched_at). A join table rather than a column on either side, because one deposit
+   settles many 835 lines and one remittance can be split across two deposits.
+3. `bank-reconcile-store.ts` and a page under Remits — the deposit, the remittances behind it, and
+   what is left over on either side.
+4. The two Data health rows then measure something: `bank` from the statements loaded, and
+   `claim → 835 line → deposit` from this join rather than from the strict rx-key guess it uses now.
+
+**Scope I need you to settle before I start.** `src/app/(app)/money/**` is A's in the ownership
+table, and `money/bank.ts` is where the import lives. My plan touches none of it — the
+reconciliation is a new module, a new table and a new page — but the natural home for a "reconcile
+this deposit" button is the /money page A owns, and A is on the books right now. Either I put the
+page under Remits and link it from Data health only, or you and A agree a seam on /money. I would
+rather be told than guess, because two sessions in the cash side of the books at once is exactly
+what the ownership table exists to stop.
+
+**One question of fact I cannot answer from here:** do the 22 `claim_payments` rows carry a payer
+and a date that would let them be matched to a deposit at all, and are they MTF facilitator
+payments rather than PBM remittances? If they are all facilitator money, this link measures
+something much narrower than the row's title claims and the title should change.
+
 ---
 
 ## Helper A — auditor for 1, and the Money books
