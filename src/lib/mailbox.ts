@@ -8,7 +8,7 @@ import { db, schema } from "@/db";
 import { getSettings, setSetting } from "./settings";
 import { decryptText, encryptText, newId } from "./crypto";
 import { storeFile, ALLOWED_MIME, MAX_FILE_BYTES } from "./files";
-import { classify, parseSupplierRules, supplierFor } from "./autoroute";
+import { classify, parseSupplierRules, supplierFor, unknownSenderInvoiceReason } from "./autoroute";
 import { importClaims } from "./claims";
 import { importPioneerCatalog } from "./suppliers";
 import { importRxTransactions, describeTransactionImport } from "./claims";
@@ -23,7 +23,7 @@ import { audit } from "./audit";
 import { matchTrainingReplies, completeByEmailReply } from "./training-replies";
 import { matchCertificateReply, fileCertificateReply } from "./credential-requests";
 import { isBounce, parseBounce, describeBounce } from "./bounces";
-import { looksLikeInvoice, classifySupplierDocument, fileInvoice, filingFor } from "./invoices";
+import { looksLikeInvoice, classifySupplierDocument, fileInvoice, filingFor, looksLikeInvoiceFromUnknownSender, classifyInvoiceText } from "./invoices";
 
 /**
  * Sweeps the pharmacy's admin mailbox for scheduled reports.
@@ -513,6 +513,38 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
              */
             const supplierKind = supplierName ? classifySupplierDocument(pdfWords, fileName, subject).kind : "unknown";
             const asStatement = supplierKind === "statement" || supplierKind === "rebate_report" || supplierKind === "credit_memo";
+
+            /*
+             * A supplier invoice from an address nobody has registered.
+             *
+             * `looksLikeInvoice` begins `if (!opts.supplier) return false`, so a PDF from a sender
+             * the register cannot place can never be filed as an invoice however plainly the page
+             * says INVOICE. McKesson's own register row has no sending address on it at all, so a
+             * McKesson invoice arriving this afternoon would fall into the general vault as
+             * "report" — the pharmacy would go on believing its purchase records were complete,
+             * every figure built on invoice lines would be short without saying so, and a supplier
+             * invoice would be sitting among ordinary documents, which is the outcome
+             * 21 CFR 1304.04(h)(1) does not allow.
+             *
+             * So it is raised rather than filed. The predicate is session 2's and is deliberately
+             * narrow: the document's own words must classify as an invoice — two or more lines each
+             * carrying an NDC and a price — and a scan with no text layer answers false. The
+             * subject line is not evidence here, because it was written by whoever sent the email
+             * and the whole question is that we do not know who that is.
+             *
+             * Nothing is filed as an invoice on the strength of this. An unknown sender is exactly
+             * when a person should decide, and the control to say who it is already exists on the
+             * line: naming them writes the address onto the register, and the next one files
+             * itself.
+             */
+            const unknownSenderInvoice = looksLikeInvoiceFromUnknownSender({
+              fileName,
+              mimeType: att.contentType || "",
+              subject,
+              supplier: supplierName,
+              text: pdfWords,
+            });
+            const printedSupplier = unknownSenderInvoice && pdfWords ? classifyInvoiceText(pdfWords).supplier : null;
             const kindWord =
               supplierKind === "rebate_report" ? "rebate breakdown" : supplierKind === "credit_memo" ? "credit memo" : "statement of account";
 
@@ -564,7 +596,9 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
                 gate.note ??
                 (asStatement
                   ? `Not an invoice: a ${kindWord} from ${supplierName}, filed under supplier statements. It records no goods received, so it is kept out of the invoice files.`
-                  : null),
+                  : unknownSenderInvoice
+                    ? unknownSenderInvoiceReason(from, printedSupplier)
+                    : null),
               routedAs,
               routeResult,
             });

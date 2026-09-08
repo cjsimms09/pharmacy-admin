@@ -321,3 +321,59 @@ export function acceptableAttachment(att: { filename?: string | null; contentTyp
   return { ok: false, why: `${name} (no file extension, sent as ${type || "an unknown type"})` };
 }
 
+
+/**
+ * The sentence an inbox line carries when a PDF reads as a supplier invoice and nobody knows whose.
+ *
+ * Kept as a constant, and matched by `isUnknownSenderInvoice`, because the inbox page has to be
+ * able to offer the right control on the right line without re-reading the file. Every other piece
+ * of advice on that page is already derived from the recorded reason the same way; this follows it
+ * rather than adding a column.
+ */
+export const UNKNOWN_SENDER_INVOICE = "An invoice from a sender we do not know";
+
+/** Whether an inbox line's recorded reason is the unknown-sender invoice notice. */
+export function isUnknownSenderInvoice(reason: string | null | undefined): boolean {
+  return (reason ?? "").startsWith(UNKNOWN_SENDER_INVOICE);
+}
+
+/**
+ * The sentence the inbox records for one of these, and the only place it is composed.
+ *
+ * The mailbox writes it and the inbox page reads a name back out of it, which is exactly the pair
+ * that drifts apart: a comma moved here and the page silently stops offering the supplier's name,
+ * with nothing failing. So both halves live here and a test walks one into the other.
+ */
+export function unknownSenderInvoiceReason(from: string, printedSupplier: string | null): string {
+  const printed = printedSupplierSuggestion(printedSupplier);
+  return (
+    `${UNKNOWN_SENDER_INVOICE}. This PDF reads as a supplier invoice — item lines with an NDC and a price` +
+    `${printed ? `, printed under “${printed}”` : ""} — but nothing on the register sends from ${from}, ` +
+    `so it has not been filed as one. Say who it is and it will be filed with their invoices, and the next one will file itself.`
+  );
+}
+
+/**
+ * The name printed on an unplaced invoice, taken back out of the recorded reason.
+ *
+ * The page offers it as a placeholder rather than a value: it is what the document said, which is a
+ * starting point for somebody who can see it, not an answer. Typing over a placeholder costs
+ * nothing; a wrong name written onto the register sends the next invoice to the wrong supplier.
+ */
+export function printedNameInReason(reason: string | null | undefined): string | null {
+  const m = /printed under “(.+?)”/.exec(reason ?? "");
+  return m ? m[1] : null;
+}
+
+/**
+ * The name printed on an unplaced invoice, offered as a suggestion and never as an answer.
+ *
+ * Trimmed to something a person would recognise on a button. Null where the page named nobody, or
+ * named something too long or too short to be a trading name — a header line that ran together
+ * with an address is worse than no suggestion, because it would be typed onto the register.
+ */
+export function printedSupplierSuggestion(name: string | null | undefined): string | null {
+  const t = (name ?? "").replace(/\s+/g, " ").trim();
+  if (t.length < 2 || t.length > 60) return null;
+  return t;
+}

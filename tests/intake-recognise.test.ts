@@ -1,6 +1,12 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { recognise, ruleFromCorrection, stableStem, CATEGORIES, categoryFor } from "../src/lib/intake-recognise";
+import {
+  isUnknownSenderInvoice,
+  unknownSenderInvoiceReason,
+  printedNameInReason,
+  printedSupplierSuggestion,
+} from "../src/lib/autoroute";
 
 /*
  * What these protect.
@@ -243,5 +249,47 @@ describe("the list of categories is data", () => {
   test("categoryFor answers for what is there and refuses what is not", () => {
     assert.equal(categoryFor("nadac")?.label, "A NADAC price file");
     assert.equal(categoryFor("nonsense"), null);
+  });
+});
+
+/*
+ * The unknown-sender invoice notice.
+ *
+ * Session 2's predicate answers "this reads as a supplier invoice and we do not know whose"; the
+ * mailbox writes that as a sentence and the inbox page reads a name back out of it. That pair is
+ * what drifts: move a comma in the sentence and the page silently stops offering the supplier's
+ * name, with nothing failing anywhere. So the composer and the parser live together and these
+ * walk one into the other.
+ */
+describe("an invoice whose sender nobody has registered", () => {
+  test("the sentence the inbox records is recognised as the notice, with a name and without one", () => {
+    const withName = unknownSenderInvoiceReason("billing@mckesson.com", "McKesson Drug Company");
+    const without = unknownSenderInvoiceReason("billing@mckesson.com", null);
+    assert.equal(isUnknownSenderInvoice(withName), true);
+    assert.equal(isUnknownSenderInvoice(without), true);
+    assert.equal(isUnknownSenderInvoice("Filed only: automatic loading is switched off."), false);
+    assert.equal(isUnknownSenderInvoice(null), false);
+  });
+
+  test("the printed name survives the round trip, and its absence does not invent one", () => {
+    assert.equal(printedNameInReason(unknownSenderInvoiceReason("a@b.test", "McKesson Drug Company")), "McKesson Drug Company");
+    assert.equal(printedNameInReason(unknownSenderInvoiceReason("a@b.test", null)), null);
+    assert.equal(printedNameInReason("something else entirely"), null);
+    assert.equal(printedNameInReason(null), null);
+  });
+
+  test("the sentence says the address, so the line explains itself without the column beside it", () => {
+    assert.match(unknownSenderInvoiceReason("billing@mckesson.com", null), /billing@mckesson\.com/);
+    assert.match(unknownSenderInvoiceReason("billing@mckesson.com", null), /has not been filed as one/);
+  });
+
+  test("a header line that ran into an address is not offered as a supplier name", () => {
+    // Suggesting it would be worse than suggesting nothing: it is one keystroke from being typed
+    // onto the register, and a wrong name there sends every future invoice to the wrong supplier.
+    const long = "MCKESSON DRUG COMPANY 6555 STATE HWY 161 IRVING TX 75039 REMIT TO PO BOX 981838";
+    assert.equal(printedSupplierSuggestion(long), null);
+    assert.equal(printedSupplierSuggestion("M"), null);
+    assert.equal(printedSupplierSuggestion("  McKesson   Drug  Company "), "McKesson Drug Company");
+    assert.equal(printedNameInReason(unknownSenderInvoiceReason("a@b.test", long)), null);
   });
 });

@@ -7,6 +7,7 @@ import { getSettings } from "@/lib/settings";
 import { hasMailPassword } from "@/lib/mailbox";
 import { allSuppliers, addressesOf, type Supplier } from "@/lib/suppliers-registry";
 import { PageHeader, Notice, Empty } from "@/components/ui";
+import { isUnknownSenderInvoice, printedNameInReason } from "@/lib/autoroute";
 import { CATEGORIES } from "@/lib/intake-recognise";
 import { senderRules, describeRule, recogniseStored } from "@/lib/intake-recognise-store";
 import type { Recognition } from "@/lib/intake-recognise";
@@ -90,6 +91,14 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
                   </td>
                   <td>
                     <span className={`badge ${i.status === "stored" ? "badge-ok" : i.status === "rejected" ? "badge-crit" : "badge-muted"}`}>{i.status}</span>
+                    {/*
+                      A supplier invoice nobody could place. Loud, because the cost of missing it is
+                      a purchase record that is short and looks complete — and, for a controlled
+                      substance, an invoice filed outside the records 21 CFR 1304.04(h)(1) requires.
+                    */}
+                    {isUnknownSenderInvoice(i.reason) && (
+                      <div className="mt-1"><span className="badge badge-crit">an invoice, sender unknown</span></div>
+                    )}
                     {i.reason && <div className="mt-1 max-w-md text-xs text-ink-2">{i.reason}</div>}
                     {i.status === "stored" && !i.scanned && <div className="text-xs text-ink-3">Stored without a column check (not a text report).</div>}
                     {i.routedAs && i.routedAs !== "unrecognised" && (
@@ -197,7 +206,9 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
                       <form action={attributeInboxItem} className="mb-2 rounded border border-line bg-paper-2 p-2">
                         <input type="hidden" name="itemId" value={i.id} />
                         <p className="mb-1.5 text-xs text-ink-2">
-                          Nothing on the register sends from <span className="font-mono">{i.fromAddress}</span>, so this could not be placed. Who is it?
+                          {isUnknownSenderInvoice(i.reason)
+                            ? <>This reads as a supplier invoice, but nothing on the register sends from <span className="font-mono">{i.fromAddress}</span>. Whose is it? Naming them files it with their invoices.</>
+                            : <>Nothing on the register sends from <span className="font-mono">{i.fromAddress}</span>, so this could not be placed. Who is it?</>}
                         </p>
                         <div className="flex flex-wrap items-center gap-2">
                           <select name="supplierId" className="py-1 text-sm" defaultValue="">
@@ -205,7 +216,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
                             {suppliers.map((sup) => <option key={sup.id} value={sup.id}>{sup.name}</option>)}
                           </select>
                           <span className="text-xs text-ink-3">or</span>
-                          <input name="newSupplier" placeholder="a new one, by name" className="py-1 text-sm" />
+                          <input name="newSupplier" placeholder={printedNameInReason(i.reason) ?? "a new one, by name"} defaultValue="" className="py-1 text-sm" />
                           <button className="btn btn-sm btn-primary">Remember and read it</button>
                         </div>
                         <p className="mt-1 text-[11px] text-ink-3">
