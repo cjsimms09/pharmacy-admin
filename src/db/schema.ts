@@ -2695,6 +2695,8 @@ export const onHandImports = sqliteTable(
      * bottles of unexplained drug cost.
      */
     rxValueCents: integer("rx_value_cents"),
+    /** typed | labelled | head | footer: where the count's date came from. Null before 0089. */
+    datedBy: text("dated_by"),
     documentId: text("document_id"),
     createdBy: text("created_by").notNull(),
     createdAt: text("created_at").notNull().default(now()),

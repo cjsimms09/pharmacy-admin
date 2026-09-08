@@ -51,6 +51,8 @@ export type ShelfLine = {
   quantityThousandths: number;
   onOrderThousandths: number | null;
   packQty: number | null;
+  /** PioneerRx's reorder level in units, where the count carried one. Nothing computes with it. */
+  orderPointUnits: number | null;
   valueCents: number | null;
 };
 
@@ -155,6 +157,7 @@ export async function fileOnHand(
     unitsThousandths: totals.unitsThousandths,
     valueCents: totals.valueCents,
     rxValueCents: rxTotals.valueCents,
+    datedBy: opts.countedOn ? "typed" : (parsed.countedOnSource ?? null),
     documentId: opts.documentId ?? null,
     createdBy: by.userId,
   });
@@ -176,6 +179,7 @@ export async function fileOnHand(
     quantityThousandths: r.quantityThousandths,
     onOrderThousandths: r.onOrderThousandths ?? null,
     packQty: r.packQty ?? null,
+    orderPointUnits: r.orderPointUnits ?? null,
     countedInPackages: r.countedInPackages ?? false,
     unit: r.unit,
     unitCostMicros: r.unitCostMicros,
@@ -238,6 +242,7 @@ export async function latestShelf(): Promise<ShelfSnapshot | null> {
     quantityThousandths: r.quantityThousandths,
     onOrderThousandths: r.onOrderThousandths,
     packQty: r.packQty,
+    orderPointUnits: r.orderPointUnits ?? null,
     valueCents: r.valueCents,
   }));
   const rxRows = lines.filter(isRx);
@@ -546,6 +551,8 @@ export type ShelfItem = {
   /** Units in the settled package and the count as packages, where the catalogue states a package. */
   packUnits: number | null;
   packs: number | null;
+  /** PioneerRx's own reorder level, in units, where the count carried one. */
+  orderPointUnits: number | null;
   perDayThousandths: number;
   /** null where nothing was dispensed in the window: no rate, so no days. */
   daysOfStock: number | null;
@@ -613,6 +620,7 @@ async function loadFullShelf(): Promise<FullShelfView> {
       onHandThousandths: r.quantityThousandths,
       packUnits,
       packs: packUnits !== null && packUnits > 0 ? Math.round((r.quantityThousandths / 1000 / packUnits) * 10) / 10 : null,
+      orderPointUnits: r.orderPointUnits,
       perDayThousandths: perDay,
       daysOfStock: perDay > 0 ? r.quantityThousandths / perDay : null,
       fills: v?.fills ?? 0,

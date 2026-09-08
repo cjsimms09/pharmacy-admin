@@ -201,6 +201,7 @@ export default async function ShelfPage({ searchParams }: { searchParams: Promis
                 <tr>
                   <th>Drug</th>
                   <th className="text-right">On hand</th>
+                  <th className="text-right">Order point</th>
                   <th className="text-right">Per day</th>
                   <th className="text-right">Days of stock</th>
                   <th>Last dispensed</th>
@@ -226,6 +227,10 @@ export default async function ShelfPage({ searchParams }: { searchParams: Promis
                           {r.packs !== null && r.packs >= 1 ? `${r.packs} × ${r.packUnits}` : `part of a ${r.packUnits}-pack`}
                         </div>
                       )}
+                    </td>
+                    <td className="text-right">
+                      {r.orderPointUnits === null ? "—" : r.orderPointUnits}
+                      {r.orderPointUnits !== null && r.onHandThousandths < r.orderPointUnits * 1000 && <div className="text-xs text-warn">below it</div>}
                     </td>
                     <td className="text-right">{r.perDayThousandths > 0 ? units(r.perDayThousandths) : "—"}</td>
                     <td className="text-right">{r.daysOfStock === null ? "—" : `${Math.round(r.daysOfStock)} days`}</td>

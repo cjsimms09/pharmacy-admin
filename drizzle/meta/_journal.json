@@ -624,6 +624,13 @@
       "when": 1788807088029,
       "tag": "0088_on_hand_order_point",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "6",
+      "when": 1788807148029,
+      "tag": "0089_on_hand_dated_by",
+      "breakpoints": true
     }
   ]
 }
