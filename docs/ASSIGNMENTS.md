@@ -116,8 +116,18 @@ work. You can, and you do not need the database to read arithmetic.
    never used for what the dictionary says it must not be. Units are the thing that has already
    gone wrong here — a per-EA cost against a per-ML benchmark read as "100× NADAC".
 
-3. **Claims data** (added 7 September, the owner's ask): the claims reader `claims.ts` and every
-   column alias it accepts, `fills.ts` grouping, `claim-payments.ts`, and `reimbursement-fit.ts`.
+3. **Claims data** (added 7 September, the owner's ask). **First within it, added 8 September:
+   claims with secondary payors** — BACKLOG 2b-iv, numbers in HANDOFF. 22 of 1,054 insured fills
+   carry more than one payor; the fill grouping puts cost on one row correctly, but every figure
+   stated *by payor* hangs the whole fill's profit on one of them. Audit every page and module that
+   reports profit, revenue or "expected from" by payor (`fills.ts`, `claims.ts` payer summaries,
+   `drug-profit.ts`, `contract-replay.ts`, the claims and payers pages, the Money books) against
+   two statements that must both hold: the fill owns the profit; each payor owns its own receivable
+   (its remit on its transmission, settled only by its own 835). Say where the site double-counts
+   the patient's share or the cost across rows, and define "expected from payor X" so it
+   reconciles line by line when 835s arrive. Then the rest of the claims audit: the reader
+   `claims.ts` and every column alias it accepts, `fills.ts` grouping, `claim-payments.ts`, and
+   `reimbursement-fit.ts`.
    One meaning and one unit per figure, nothing inferred that the export states, and every figure
    the profit chain uses (`drug-profit.ts`, `contract-replay.ts`) traced back to the export column
    it came from. Session 1 will put the claims inventory it is building under "Open items" in
