@@ -7,6 +7,14 @@ Claude sessions build it, on two accounts, and they cannot see each other's conv
 - the **cloud session** works on `claude/repo-audit-catalog-claims-*` branches and opens a pull
   request against `feature/compliance` for each piece of work.
 
+**Only a session running on the pharmacy computer can see real data.** A cloud session's network
+reaches GitHub and a few package registries and nothing else — no tunnel, no address, no hosted
+copy of this site is reachable from one, and that was established by measurement after a tunnel had
+already been built and opened. So any question that needs the real database, the real screens or
+the real files belongs to the machine session, and the cloud session must hand it over through
+`docs/HANDOFF.md` rather than asking the owner to ferry files. Start Claude on that computer by
+double-clicking **Work on this with Claude.cmd**.
+
 **At the start of every session, read `docs/HANDOFF.md`, top section "Open items", and the open
 pull request from the other session.** That is the whole handshake. Anything either side wants
 the other to see goes in one of those two places, never only in a conversation.
