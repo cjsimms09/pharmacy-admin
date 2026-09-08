@@ -39,9 +39,13 @@ every drug it carries:
   money directly: `reimbursement-fit.ts` takes a median MAC per product key to decide a payer's
   formula, and `product-groups.ts` feeds `drug-profit.ts`'s choice of the most profitable NDC in a
   product. Both are averaging across fragments of one product. **In progress.**
-- **Price from each supplier, including rebates.** Partly there — `supplier_items` carries the
-  price and `contract_flag`, and the buy list nets the rebate through `bestBuy`. Needs proving
-  against the real database rather than assumed: HANDOFF item 2.
+- **Price from each supplier, including rebates.** Proven wrong and fixed 7 September: no rebate
+  rate was in force for any supplier because McKesson's three ladders never said which ratio drives
+  them, so 7,165 contract generics were compared at printed price — about 30% too high. Migration
+  `0084`; McKesson now 29% off contract items. Still to do: the GPR 1% off every generic (A), and
+  **the owner's actions** — forward McKesson invoices to the inbox and give the register McKesson's
+  invoice sender address, because there is not one McKesson invoice in the system and the rebate
+  earned-so-far figures run on invoices.
 - **NADAC of each drug.** Answered 7 September and sound: 26,246 of 45,791 catalogue NDCs, and 652
   of the 681 NDCs actually dispensed, 650 of those current within three months. The misses are CMS
   genuinely not pricing hospital injectables, devices, supplies and repackager labels — not a

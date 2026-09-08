@@ -110,6 +110,49 @@ dollars, the line, and **the query 1 should run on the real database to size it.
 request. Findings, not fixes — a fix you are sure of goes in the same pull request as a separate
 commit, clearly marked, for 1 to take or leave.
 
+### Small and first (7 September, from 1): a ladder must say which ratio drives it
+
+Found on the real database: all three McKesson programmes were stored with `ratioMeasure: null`,
+so `rebate-view.ts figuresFor()` could pick no figure, no band was ever selected, McKesson's rate
+was nothing, and 7,165 contract generics were compared at printed price — about 30% too high (at
+the 20.32% compliance on file the OneStop ladder pays 29% and GPR 1%). Migration `0084` sets the
+field from each programme's own `ratioDefinition` text. Your part, pure and small, in
+`supplier-terms.ts` and `src/app/(app)/suppliers/[id]/terms/page.tsx` (both yours for this):
+(a) a `tiered_ratio` programme cannot be saved with a null `ratioMeasure` — the form requires the
+choice, in words the pharmacist reads ("your scrubbed generic compliance rate" / "your generic
+purchase ratio"); (b) `contractRateDiagnosis` in `rebate-rates.ts` (1's file, yours for this
+sentence only) must never say "the band it lands in pays nothing" when the true reason is that no
+programme states its measure — say that instead, naming the programme; (c) a test for each;
+(d) verified after the fix: McKesson shows 29% contract and 0.75% brand but **`allGenericsPercent`
+null** — the GPR ladder reads `a.gprPercent`, which only a monthly statement fills, while the daily
+Purchase Drill Down already carries the generic share (`latestRatio().osGxPercent`, 79.8% today,
+which pays 1%). Read `rebate-rates.ts ratesFor()` and `rebate-view.ts figuresFor()`, decide
+whether the daily figure is the same measure McKesson settles on (the comment block in `ratesFor`
+argues this for the compliance rate; say whether it holds for GPR), and if so pass it through.
+
+### Second (7 September, from 1, added after the audit was assigned): the claim-to-contract match
+
+This comes **before** the Money books, because the owner's order is drug file → contracts → money,
+and because session 2 measured on the real database that **0 of 1,081 insured claims match a
+contract** (full numbers at the top of `docs/HANDOFF.md`). The reason is structural, not a matter
+of reading more documents: claims speak in codes — BIN 99.8%, PCN 94.4%, group 95.1%, and
+PioneerRx's `networkId` 95.3% across 82 distinct values — while rate exhibits identify themselves by
+network name ("Prime AccessOne Network") and chain code ("00605"), with empty BIN/PCN/group.
+`claim-contract.ts governs()` matches on BIN/PCN/group only and ignores `networkNames`,
+`networkReimbursementIds` and `chainCodes`. `payer_links.contract_id` was created to hold exactly
+the missing link and nothing writes it.
+
+**Build the mapping, pure and tested, in `claim-contract.ts` — which 1 hands to you for this job
+(HANDOFF line written).** A claim resolves to a contract by, in order: an explicit `payer_links`
+row (network id → contract document, set by the owner), a network reimbursement id the document
+itself states, then BIN/PCN/group as today. Never a name-similarity guess. Where nothing resolves,
+the answer is "unmatched" with the network id named, so the owner can map it on the payers page
+with one choice per network id — 82 choices at most, once. Deliver: the resolver with tests for
+each rung and for the unmatched case; the page control to set the link (in `src/app/(app)/payers/**`,
+which you may edit for this — say so in the pull request); and a report of the 82 network ids by
+claims and dollars behind each, which you cannot compute — write the query in HANDOFF and 1 will
+run it. Do not edit `contract-terms.ts` or the extraction; read them.
+
 ### Then build: one set of books, and no figure counted twice
 
 The owner: *"The money tab needs to have sound logic, needs to not forget about expenses or revenue
