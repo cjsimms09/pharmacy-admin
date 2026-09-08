@@ -8,6 +8,76 @@ file is how they talk.
 
 ## Open items
 
+### From Helper A to 1 — the memory audit: 128 MB of readings, and where the rest is (8 September)
+
+Branch `work/memory-audit`, pull request against `feature/compliance`. Working in
+`docs/audits/2026-09-08-memory.md`, all of it arithmetic on the row counts already in this file.
+
+**The held readings come to about 128 MB, not 1.6 GB.** Trimming `directoryKeys()` — your
+hypothesis, and a real fault — saves 41 MB. So the readings are a twelfth of it, and what matters
+is **peak** rather than resident.
+
+| Reading | Rows | Resident |
+| --- | ---: | ---: |
+| `directoryKeys()` | 217,773 | 58 MB |
+| `catalogueRows()` | 63,809 | 21 MB |
+| `allFills()` *at a year* | 30,000 | 17 MB |
+| `packageSizes()` | ~180,000 | 14 MB |
+| `productLedger()` | 45,782 | 11 MB |
+| `nadacNow()` | 43,396 | 7 MB |
+
+**`loadDrugDirectory` is the largest thing in the site: a 430 MB peak in one function.** Eight
+full-size representations of the directory alive at once — both zips as Buffers, `product.txt` and
+`package.txt` decoded to latin1, three parsed arrays, `db.query.drugDirectory.findMany()` with **no
+column list** at line 64 (106 MB), three more derivations of those rows, and the 217,773-row result
+of `buildDirectory` (another 106 MB) — then a 500-row-at-a-time insert on the event loop in the web
+server's own process. V8 does not return freed pages promptly, so that peak becomes the resident
+figure. This is the one that most deserves `scripts/make-claude-copy.ts`'s treatment. Line 64 is
+also read unconditionally when both files arrived and nothing held is wanted, and wants five columns
+rather than eighteen.
+
+**`held.ts` never removes anything, and four keys grow without bound.** `refreshStale` recomputes
+rather than drops; only `forgetHeld(prefix)` deletes; `holds` has no cap. And
+`books:${period}:${today}`, `recent:${n}:${today}`, `month-account:${m}:${basis}` and
+`accounts:${basis}:${months}` each add entries nothing will read again — one per period per day for
+the first two. The launcher restarts rarely and the tunnel work established this machine is left
+running for weeks. **This is the finding whose shape matches "1.6 GB after it has been up a while",
+and it is invisible on a cold start.** Fixes: drop the date from the key and let `fingerprint()` do
+its job, and evict the least-recently-read past a ceiling — `heldStatus()` already knows the ages.
+
+**`floorReview()` reads every paid claim with all 42 columns** (`floor-review.ts:353`), warmed by
+`warm.ts` step 11: 24 MB at a year where the nine fields it uses are 6 MB. Same shape in
+`appeals.ts:110`, `claims.ts:1306`, `money-found.ts:270`.
+
+**And one of these is mine.** `accountsFor()` on `work/money-fold` returned the shared read
+alongside the accounts, and `held` pins what is returned — so the month's books, the six-month strip
+and the twelve-month trend would each have pinned every fill, invoice, invoice line, count and
+payment in their span. Roughly 90 MB at a year the cache did not previously hold. **Fixed on that
+branch before it merges** (`003ffcd`): the books get three fields per fill, projected inside the held
+computation. Same mistake as the rest of this audit, made this morning, by me.
+
+**The order I would do them in:** the directory load into a child process; cap and evict `holds` and
+take the date out of the keys; trim `directoryKeys` and intern its strings, with a
+`directoryDetail(ndcs)` for the five wide fields the drug file wants for one page; one pass over
+`drug_directory` instead of two full scans; column lists on the four bare `claims.findMany` calls.
+Then reconsider what `warm.ts` warms at all — eighteen steps run before anybody asks, and a cold
+start is not an idle moment, it is the moment the pharmacist is waiting.
+
+**One measurement settles which of the first two is the 1.6 GB**, and I cannot take it:
+
+```ts
+const m = process.memoryUsage();   // rss, heapUsed, external, arrayBuffers
+const n = heldStatus().length;     // how many entries the cache is holding
+```
+
+At three moments: after a cold start with `warm.ts` finished; after a drug directory load; and at
+the end of a working day. High at the first is the directory load and V8's retained peak; climbing
+by the third is the cache; `heldStatus().length` in the hundreds settles the cache on its own. I
+would put both on `/tools/data-health` permanently — a site that has now twice cost this pharmacy
+its counter should be able to say how much memory it is using without anybody attaching a profiler.
+
+---
+
 ### From Helper A to session 1 — shelf.ts, two queries (8 September)
 
 Audit in `docs/audits/2026-09-08-shelf.md`, branch `work/audit-shelf`. Findings only, no fix — both
