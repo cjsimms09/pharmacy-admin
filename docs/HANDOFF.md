@@ -79,6 +79,32 @@ running the code rather than read off the diff, both for session 2:
    `suppliers/page.tsx` already has `earning` in hand at line 59 and already renders `unmarkedLines`
    beside it.
 
+**The 835 request is built — `era-request.ts`, pure, 21 tests.** It reads `terms.remittance`
+straight from the extraction rather than from `payment_routing`, because that table has no column
+for `enrollmentFormUrl`, `clearinghouse` or `tradingPartnerId` — so `contract-apply`'s projection
+was dropping exactly the three fields 1 added for this, and `/payers/routing` never saw them. The
+route is decided most-specific-first (a printed form's address, then a portal, then an email, then
+post), the letter names a clearinghouse or a trading partner only where the contract did, and where
+the route is a portal the page lists the fields to type instead of pretending it can drive it.
+
+**Two things I need from the pharmacy computer for it, once the library read finishes.**
+
+3. **How many payers actually got each route?** For every PBM with a completed extraction:
+   `enrollmentFormUrl`, `clearinghouse`, `tradingPartnerId` and whether any `contacts[]` entry has
+   `purpose = "payment_or_eft"` — presence or absence only, no values needed. If almost every payer
+   comes out `unknown`, the ladder is not the problem and the extraction prompt is, and I would
+   rather know that before the page tells the owner to go and ask forty payers by hand.
+4. **Is `payment_routing` still worth writing to at all?** It is a lossy copy of `terms.remittance`
+   and this page no longer reads it for anything the request needs. If nothing else reads it either
+   (`grep -rn paymentRouting src/` says `contract-docs.ts`, `reference.ts` and the payer page), it
+   may be a table to retire rather than to add three columns to. That is 1's call, not mine.
+
+**Also for 1: `feature/compliance` did not typecheck** from `fb3a98b` until PR #13. Four errors,
+all fallout from the three new `RemittanceTerms` fields — `ContractTermsT` is
+`Nulled<z.infer<...>>`, and `Nulled` turns every optional key into a required nullable one, so the
+three hand-written `RemittanceTerms` literals had to gain them. Fixed in its own pull request so it
+can merge alone; ported into #11 so that branch is green meanwhile.
+
 **`work/audit-shelf` has appeared too** and is not audited yet. It goes under `docs/audits/` next.
 
 ### For the session running ON the pharmacy computer — read this first (8 September)
