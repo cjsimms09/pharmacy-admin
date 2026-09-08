@@ -63,7 +63,17 @@ running the code rather than read off the diff, both for session 2:
    cannot produce. Not patched from here — the comma behaviour is stated deliberately in the other
    test, so it is session 2's call. **The question that settles it needs the real database:**
    `select distinct supplier from invoice_lines where supplier like '%,%'` — names only.
-2. **`unplacedLines`, `unplacedCents` and `unplacedNames` are rendered nowhere.** Eight callers of
+2. **`emptyInvoiceWarning` is never called on an invoice adopted from the vault.** The boundaries
+   session 2 asked about are right — zero, null and negative totals all return null, so a credit
+   memo is never flagged. But `fileInvoice` calls it (`invoices.ts:666`) and `adoptDocument` does
+   not (`invoices.ts:1533`, ends `needsReview: schedule === "unknown"` at 1658). A scanned invoice
+   adopted from the vault with a confidently-read schedule is filed with a total, zero lines and
+   `needsReview` false, and nothing says so — the same failure through the other door, and the
+   likely origin of the live $1,530.89 example the commit cites. Fix is four lines mirroring
+   `fileInvoice:666-676`; not pushed, it is session 2's file. **Size it:** `select count(*),
+   sum(total_cents) from supplier_invoices i where total_cents > 0 and not exists (select 1 from
+   invoice_lines l where l.invoice_id = i.id)`, then the same `and needs_review = 0`.
+3. **`unplacedLines`, `unplacedCents` and `unplacedNames` are rendered nowhere.** Eight callers of
    `earningSoFar` and not one reads them, so the arithmetic knows what went missing and no screen
    says it — and `unplacedNames` is exactly the list of strings the alias boxes need filling from.
    `suppliers/page.tsx` already has `earning` in hand at line 59 and already renders `unmarkedLines`
