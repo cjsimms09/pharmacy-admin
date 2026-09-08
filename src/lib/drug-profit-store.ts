@@ -115,6 +115,10 @@ async function loadDrugProfit(): Promise<DrugProfitView> {
           description: r.description,
           classification: r.classification,
           pricingUnit: r.pricingUnit,
+          // An OTC row is reimbursed differently or not at all, so it is not the same buying
+          // decision. Dropped here, it merged with its prescription counterpart — and keyed
+          // differently from replay-store, which passes it, so two stores disagreed about one NDC.
+          otc: r.otc,
         }),
       );
     if (!nadacByNdc.has(r.ndc11)) nadacByNdc.set(r.ndc11, { micros: r.unitMicros, description: r.description });
