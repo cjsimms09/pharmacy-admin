@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { fdaPackageUnits, cataloguePackUnits, comparePack } from "../src/lib/data-health-packages";
+import { fdaPackageUnits, cataloguePackUnits, comparePack, containerShape } from "../src/lib/data-health-packages";
 
 /**
  * A pack size is a divisor. Every per-unit cost on this site is a pack cost over the units in the
@@ -136,5 +136,46 @@ describe("comparing the two", () => {
     // McKesson "(3) 28 EA" against the FDA's 3 × 28. Both reach 84 and there is nothing wrong.
     const v = comparePack("(3) 28 EA", "3 BLISTER PACK in 1 CARTON (0555-9043-58) / 28 TABLET in 1 BLISTER PACK");
     assert.deepEqual(v, { verdict: "agree", units: 84, uom: "EA" });
+  });
+});
+
+/**
+ * Naming why a description is not "containers with a volume in each".
+ *
+ * Two thousand NDCs reported as "not this shape" is a number nobody can act on, and guessing at
+ * what the bulk of them were is what produced a rule that reached 309 of 12,659. Each reason is a
+ * different piece of work, so each is named.
+ */
+describe("why a package is not containers-with-contents", () => {
+  test("a single level counting tablets is a count, not a measure", () => {
+    assert.match(containerShape("100 CAPSULE in 1 BOTTLE (0093-0073-01)"), /one level only, counting/);
+  });
+
+  test("a nested package whose innermost is still counted", () => {
+    assert.match(
+      containerShape("3 BLISTER PACK in 1 CARTON (0555-9043-58) / 28 TABLET in 1 BLISTER PACK"),
+      /innermost "TABLET" is counted, not measured/,
+    );
+  });
+
+  test("outer packaging that nobody dispenses is named as such", () => {
+    assert.match(
+      containerShape("1 CARTON in 1 CASE (0002-7501-99) / 20 mL in 1 CARTON"),
+      /is packaging, not a container anybody dispenses/,
+    );
+  });
+
+  test("a duration is not a unit, and says so rather than being called a shape problem", () => {
+    assert.match(containerShape("4 POUCH in 1 CARTON (0378-1234-56) / 168 h in 1 POUCH"), /not a dispensing unit/);
+  });
+
+  test("a kit and an empty description are their own answers", () => {
+    assert.match(containerShape("1 KIT in 1 CARTON (1) * 1 TABLET in 1 BLISTER PACK"), /kit/);
+    assert.match(containerShape(""), /no FDA package description/);
+    assert.match(containerShape(null), /no FDA package description/);
+  });
+
+  test("the shape the rule does handle says so, so the breakdown adds up", () => {
+    assert.equal(containerShape("1 VIAL in 1 CARTON (0002-7501-01) / 20 mL in 1 VIAL"), "this shape");
   });
 });

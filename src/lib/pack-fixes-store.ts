@@ -2,7 +2,7 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "./crypto";
-import { comparePack, fdaPackageUnits, cataloguePackUnits } from "./data-health-packages";
+import { comparePack, fdaPackageUnits, cataloguePackUnits, containerShape } from "./data-health-packages";
 import {
   proposeFdaCorrection,
   proposeContainerContents,
@@ -254,6 +254,13 @@ export async function countContainerContents(): Promise<{
   noNadac: number;
   blockedByCount: number;
   notThisShape: number;
+  /**
+   * What the ones that are not this shape actually are, commonest first.
+   *
+   * Two thousand NDCs described as "not this shape" is a number nobody can act on. Named, it is a
+   * finding — and naming it is the only way to stop the next rule being a guess at the same bulk.
+   */
+  shapes: { shape: string; count: number }[];
   examples: string[];
 }> {
   const { byNdc, packageOf, fixes } = await load();
@@ -263,6 +270,7 @@ export async function countContainerContents(): Promise<{
   let noNadac = 0;
   let blockedByCount = 0;
   let notThisShape = 0;
+  const shapes = new Map<string, number>();
   const examples: string[] = [];
 
   for (const [ndc11, rows] of byNdc) {
@@ -299,10 +307,22 @@ export async function countContainerContents(): Promise<{
     if (verdicts.includes("counted-as-nadac-counts")) countedAsNadacCounts++;
     else if (verdicts.includes("no-nadac")) noNadac++;
     else if (verdicts.includes("differs")) blockedByCount++;
-    else notThisShape++;
+    else {
+      notThisShape++;
+      const shape = containerShape(description);
+      shapes.set(shape, (shapes.get(shape) ?? 0) + 1);
+    }
   }
 
-  return { wouldSettle, countedAsNadacCounts, noNadac, blockedByCount, notThisShape, examples };
+  return {
+    wouldSettle,
+    countedAsNadacCounts,
+    noNadac,
+    blockedByCount,
+    notThisShape,
+    shapes: [...shapes].map(([shape, count]) => ({ shape, count })).sort((a, b) => b.count - a.count),
+    examples,
+  };
 }
 
 /**
