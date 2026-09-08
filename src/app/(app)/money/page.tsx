@@ -72,7 +72,7 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
   const today = todayIso();
   const period = (periodParam && parsePeriod(periodParam)) || periodOf("month", today.slice(0, 7));
   const [books, recent, found, banked, bankLines] = await Promise.all([booksFor(period, today), recentMonths(6, today), moneyFound().catch(() => null), cashReceiptsFor(period.months), lastStatementLines(period.months)]);
-  const { accrual, cash, scripts, gap, pace, sources } = books;
+  const { accrual, cash, scripts, gap, pace, sources, countedOnce, feeds, difference, balances } = books;
   const KINDS: { key: "third_party" | "patient" | "retail" | "facilitator" | "rebate" | "other"; label: string }[] = [
     { key: "third_party", label: "Plan remittances" },
     { key: "patient", label: "Patient payments" },
@@ -176,6 +176,26 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
       </div>
 
       {/*
+        Months in the period with nothing on file at all.
+
+        They are left out of the arithmetic rather than run through it as noughts — a month nobody
+        has loaded a claim, a bill, a till report or a deposit for is not a month the pharmacy took
+        nothing in, and a column of noughts says the second thing. Which makes naming them
+        obligatory: a quarter quietly built from two months is a quarter read as three.
+      */}
+      {accrual.emptyMonths.length > 0 && (
+        <Notice kind="warn">
+          <b>
+            {accrual.emptyMonths.length} of the {period.months.length} months in {period.label}{" "}
+            {accrual.emptyMonths.length === 1 ? "has" : "have"} nothing on file.
+          </b>{" "}
+          {accrual.emptyMonths.join(", ")} {accrual.emptyMonths.length === 1 ? "is" : "are"} not in the figures below —
+          not as noughts, not at all. Load the claims, the System Sales Summary, the bills or the deposits for
+          {accrual.emptyMonths.length === 1 ? " it" : " them"} and {accrual.emptyMonths.length === 1 ? "it joins" : "they join"} the period.
+        </Notice>
+      )}
+
+      {/*
         Computed, and leaning. Kept apart from the incomplete-account notice above: that one says
         the bottom line cannot be read at all, this one says it can be read and is too high. A
         pharmacist who is told everything is a crisis stops reading either.
@@ -239,6 +259,57 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
           </table>
         </div>
         <p className="mt-2 text-xs text-ink-2">{gap.says}</p>
+
+        {/*
+          Why the two columns differ, in parts that add to exactly the difference.
+
+          Two bottom lines and no account of the gap between them invites the reader to decide one
+          of them is wrong. It is not a discrepancy: it is the receivable, the payable, and the
+          bills incurred and not yet paid, and each is worth knowing on its own. The parts are an
+          identity rather than an estimate, so when they do not add up the page says so instead of
+          printing four numbers that nearly work.
+        */}
+        {accrual.months.length > 0 && (
+          <div className={`mt-3 rounded-lg border p-3 ${difference.adds ? "border-line bg-ground/40" : "border-crit bg-crit-soft"}`}>
+            <p className="text-xs font-semibold">{difference.says}</p>
+            <ul className="mt-1.5 space-y-1">
+              {difference.parts.filter((x) => x.cents !== 0).map((x) => (
+                <li key={x.what} className="flex flex-wrap items-baseline gap-x-2 text-xs">
+                  <span className="tabular-nums font-semibold">{formatCents(x.cents)}</span>
+                  <span className="font-medium">{x.what}</span>
+                  <span className="min-w-0 grow text-ink-3">{x.says}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/*
+          The statement adds up, or it does not and says where.
+
+          Cheap, and it catches the one fault nobody spots by reading a page: a line in a list that
+          is not in the total above it. On a quarter it is a real check rather than a tautology —
+          the totals are added from the months while the lines are merged by label, so the two only
+          agree if both are right.
+        */}
+        {balances.accrual.ok && balances.cash.ok ? (
+          <p className="mt-2 text-[11px] text-ink-3">
+            Every total above is the sum of its own lines and every subtotal follows from the one before it, on both bases. Checked when this page was drawn.
+          </p>
+        ) : (
+          <Notice kind="crit">
+            <b>This statement does not add up, so do not use it.</b>
+            <ul className="mt-1 list-disc space-y-0.5 pl-5">
+              {[...balances.accrual.checks.map((c) => ({ ...c, basis: "accrual" })), ...balances.cash.checks.map((c) => ({ ...c, basis: "cash" }))]
+                .filter((c) => !c.ok)
+                .map((c, i) => (
+                  <li key={i}>
+                    {c.basis}: {c.says.toLowerCase()} — it should be {formatCents(c.expectedCents)} and the account says {formatCents(c.actualCents)}.
+                  </li>
+                ))}
+            </ul>
+          </Notice>
+        )}
         {accrual.stockMovementCents !== null && accrual.stockMovementCents !== 0 && (
           <p className="mt-1 text-xs text-ink-3">
             {formatCents(Math.abs(accrual.stockMovementCents))} {accrual.stockMovementCents > 0 ? "went onto the shelf" : "came off the shelf"} in the period: bought less dispensed. Not profit; where the cash went.
@@ -430,6 +501,77 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
           ) : (
             <p className="text-sm text-ink-3">Nothing on the list yet. It fills in as invoices, catalogues and claims arrive.</p>
           )}
+        </Card>
+      </div>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        {/*
+          Counted once, and the working shown.
+
+          The risk is never that somebody adds a number twice on purpose. It is that two feeds
+          arrive carrying the same money in different words — the till report's prescription line
+          and the claims, the wholesaler's rebate statement and the estimate from the ladder — and
+          both are true, and adding both is the natural thing for a program to do. Each pair is
+          decided in one place and listed here, so the decision is on the page rather than in a
+          branch nobody will read.
+        */}
+        <Card title="Counted once" subtitle="Money this pharmacy has on file in two places, which record the books believe, and what that kept out of this period.">
+          {countedOnce.length === 0 ? (
+            <p className="text-sm text-ink-3">Nothing recorded in this period, so there is nothing that could have been counted twice.</p>
+          ) : (
+            <ul className="rows">
+              {[...countedOnce].sort((a, b) => Number(b.bothPresent) - Number(a.bothPresent)).map((r) => (
+                <li key={r.what} className="row">
+                  <div className="min-w-0">
+                    <div className="row-title">
+                      {r.what}
+                      {r.bothPresent ? <span className="badge badge-ok ml-2">both on file, counted once</span> : <span className="badge badge-muted ml-2">one record only</span>}
+                    </div>
+                    <p className="row-why">{r.says}</p>
+                    <p className="row-why text-ink-3">{r.rule}</p>
+                  </div>
+                  {r.keptOutCents !== null && r.keptOutCents !== 0 && (
+                    <div className="whitespace-nowrap text-right text-sm">
+                      <span className="font-semibold tabular-nums">{formatCents(Math.abs(r.keptOutCents))}</span>
+                      <span className="block text-[11px] text-ink-3">kept out</span>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+
+        {/*
+          What is not in the books, said out loud.
+
+          The second requirement — "needs to not forget about expenses or revenue it knows" —
+          cannot be met by looking at the account, because what is being looked for is not on it.
+          It can only be met by listing every feed that carries money and saying what the books do
+          with each. Three reach neither basis today, and "deliberately outside the account" and
+          "nobody has wired it up" look identical until somebody writes down which is which.
+        */}
+        <Card
+          title="What is in the books, and what is not"
+          subtitle="Every feed this site holds that carries money, and where each one lands. The ones that reach neither account are named with what that costs."
+          actions={<span className="text-xs text-ink-3">{feeds.filter((f) => f.reaches === "none").length} reach neither</span>}
+        >
+          <ul className="rows">
+            {[...feeds].sort((a, b) => Number(a.reaches !== "none") - Number(b.reaches !== "none") || Number(!!b.gap) - Number(!!a.gap)).map((f) => (
+              <li key={f.name} className="row">
+                <div className="min-w-0">
+                  <div className="row-title">
+                    <Link href={f.href} className="text-accent underline">{f.name}</Link>
+                    <span className={`badge ml-2 ${f.reaches === "none" ? "badge-warn" : "badge-muted"}`}>
+                      {f.reaches === "none" ? "on no account" : f.reaches === "both" ? "both bases" : f.reaches}
+                    </span>
+                  </div>
+                  <p className="row-why">{f.how}</p>
+                  {f.gap && <p className="row-why text-warn">{f.gap}</p>}
+                </div>
+              </li>
+            ))}
+          </ul>
         </Card>
       </div>
 

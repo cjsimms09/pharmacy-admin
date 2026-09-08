@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { parsePeriod, periodOf, periodsBack, combineMonths, pace, scriptCounts, basisGap, statementRows, toCsv, neighbours, daysInMonth } from "../src/lib/ledger";
+import { parsePeriod, periodOf, periodsBack, combineMonths, pace, scriptCounts, basisGap, statementRows, toCsv, neighbours, daysInMonth, isOpenPeriod } from "../src/lib/ledger";
 import { monthlyPL, type PLInputs } from "../src/lib/profit-and-loss";
 
 /** A month with round figures, so the sums can be checked in the head. */
@@ -160,5 +160,35 @@ describe("the statement as a file", () => {
     assert.equal(rows[rows.length - 1].label, "Net profit");
     const csv = toCsv([{ a: 'say "hi"', b: 1 }]);
     assert.equal(csv, '"a","b"\r\n"say ""hi""","1"\r\n');
+  });
+});
+
+describe("whether the clock can still change a period's account", () => {
+  /*
+   * Which decides whether the day belongs in a cache key. A month in progress accrues its standing
+   * costs by the day — payroll of thirty thousand is ten thousand by the tenth — so its account is
+   * a different figure tomorrow with no new data at all. A closed month is not, and dating its key
+   * was adding a whole period's object graph to the cache every day, for ever.
+   */
+  test("a month in progress is open; one that has closed is not", () => {
+    assert.equal(isOpenPeriod(parsePeriod("2026-09")!, "2026-09-08"), true);
+    assert.equal(isOpenPeriod(parsePeriod("2026-08")!, "2026-09-08"), false);
+  });
+
+  test("a quarter or a year is open until its last month has closed", () => {
+    assert.equal(isOpenPeriod(parsePeriod("2026-Q3")!, "2026-09-08"), true, "September is in it and September is running");
+    assert.equal(isOpenPeriod(parsePeriod("2026-Q2")!, "2026-09-08"), false);
+    assert.equal(isOpenPeriod(parsePeriod("2026")!, "2026-09-08"), true, "December has not happened");
+    assert.equal(isOpenPeriod(parsePeriod("2025")!, "2026-09-08"), false);
+  });
+
+  test("the first day of a month closes the one before it", () => {
+    assert.equal(isOpenPeriod(parsePeriod("2026-08")!, "2026-09-01"), false);
+    assert.equal(isOpenPeriod(parsePeriod("2026-09")!, "2026-09-01"), true);
+  });
+
+  test("a period entirely in the future is open, which is the safe reading", () => {
+    // Nothing is recorded in it, but its account would change the moment something is.
+    assert.equal(isOpenPeriod(parsePeriod("2027-01")!, "2026-09-08"), true);
   });
 });

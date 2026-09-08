@@ -520,10 +520,69 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
  * themselves.
  */
 export async function monthlyAccount(month: string, basis: "accrual" | "cash" = "accrual"): Promise<MonthlyPL> {
+  // One month in, one account out: `accountsFor` computes every month it is given.
+  return (await accountsFor([month], basis)).months[0];
+}
+
+/**
+ * A run of months, computed from one read of everything under them.
+ *
+ * The one place a month's account is produced from the database, and the reason it exists is a
+ * fault rather than a tidiness: the books at `/money` and the reports at `/money/report` grew two
+ * separate routes to the same figures, and the reporting one read every claim the site holds once
+ * *per month* — three passes for a quarter, twelve for a year, and on the report page eighteen in
+ * a single load, since the period, the period before it and the twelve-month chart each did their
+ * own. Nothing underneath changes between one month's account and the next, so it is read once and
+ * sliced.
+ *
+ * The other half of the fault mattered more than the speed. Two routes to a number are two numbers
+ * eventually, and this is the owner's books: *"needs to not double count things."* Both surfaces
+ * now come through here, so a quarter on one page and a quarter on the other are the same
+ * arithmetic over the same read, and cannot drift apart.
+ *
+ * The inputs each account was built from come back too, in the same order: the double-count
+ * register reads them to say which of two routes to a figure the account took, and slicing them a
+ * second time would be the extra pass this exists to remove.
+ *
+ * What does **not** come back is the shared read itself, and that is a correction rather than a
+ * choice. This result is held between requests, so everything in it is pinned for as long as the
+ * key lives — and `SharedInputs` carries every fill, every supplier invoice, every invoice line,
+ * every stock count and every payment across the whole span. Handing it back put a year of claims
+ * into the cache under three separate keys at once (the month's books, the six-month strip, the
+ * twelve-month trend), on a machine that shares 7.3 GB with the dispensing system and where the
+ * counter has already lost its page for ninety seconds.
+ *
+ * What the books actually want from that read is three fields per fill. So three fields per fill is
+ * what they get, projected inside the held computation so the rows behind it can be collected the
+ * moment this returns rather than living as long as the cache entry.
+ */
+export type FillForScripts = { dateFilled: string; cashPlan: boolean; revenueCents: number };
+
+export async function accountsFor(
+  months: string[],
+  basis: "accrual" | "cash",
+): Promise<{ months: MonthlyPL[]; inputs: PLInputs[]; fills: FillForScripts[] }> {
+  const wanted = [...new Set(months)].sort();
+  if (wanted.length === 0) throw new Error("accountsFor needs at least one month; an empty period is answered without a read.");
   const { held } = await import("./held");
-  return held(`month-account:${month}:${basis}`, async () => {
-    const shared = await loadShared([month], basis);
-    return monthlyPL(monthInputs(month, basis, shared));
+  /*
+   * The day is part of the key only where a month in the run is still open.
+   *
+   * A month in progress accrues its standing costs by the day, so its account is a different figure
+   * tomorrow with no new data at all and must not be served from yesterday — `fingerprint()` watches
+   * the tables, not the calendar. Every month closed, and the run reads the same on any day, so
+   * dating it would only add a cache entry a day for a figure that never changes.
+   */
+  const today = todayIso();
+  const open = wanted[wanted.length - 1] >= today.slice(0, 7);
+  return held(`accounts:${basis}:${wanted.join(",")}${open ? `:${today}` : ""}`, async () => {
+    const shared = await loadShared(wanted, basis);
+    const inputs = wanted.map((m) => monthInputs(m, basis, shared));
+    return {
+      months: inputs.map(monthlyPL),
+      inputs,
+      fills: shared.fills.map((f) => ({ dateFilled: f.dateFilled, cashPlan: f.cashPlan, revenueCents: f.revenueCents })),
+    };
   });
 }
 
@@ -554,6 +613,13 @@ export type SharedInputs = {
 };
 
 export async function loadShared(months: string[], basis: "accrual" | "cash"): Promise<SharedInputs> {
+  /*
+   * The window is taken from the first and last month asked for, so an empty list would read the
+   * claims between "undefined-01" and "undefined-31" — no rows, no error, and an account of
+   * nothing that looks exactly like an account of a quiet month. Refused by name instead: a caller
+   * with no months to report on has an empty period, which it can say without reading anything.
+   */
+  if (months.length === 0) throw new Error("loadShared needs at least one month; an empty period is answered without a read.");
   const { salesMonths } = await import("./sales-store");
   const { expensesIn, cashReceiptsIn, categories } = await import("./expenses");
   const { allFills } = await import("./claims");
@@ -756,20 +822,33 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
   };
 }
 
-/** Which months there is anything to report on, most recent first. */
+/**
+ * Which months there is anything to report on, most recent first.
+ *
+ * The gate on both the books and the reports: a month not in this list is named as empty rather
+ * than run through the account, because a month nobody has loaded anything for is not a month the
+ * pharmacy took nothing in, and a column of noughts says the second thing.
+ *
+ * Money banked counts, and used not to. The list was drawn from sales, bills and claims — all
+ * three accrual feeds — so a month whose only record was a deposit had nothing to report on and
+ * disappeared from both surfaces, taking the cash account's only revenue with it. That is the one
+ * feed the cash basis has, so leaving it out of the gate meant the gate could hide it.
+ */
 export async function accountMonths(): Promise<string[]> {
   const { salesMonths } = await import("./sales-store");
   const { db, schema } = await import("@/db");
-  const [sales, bills, claims] = await Promise.all([
+  const [sales, bills, claims, receipts] = await Promise.all([
     salesMonths(),
     db.query.expenses.findMany({ columns: { invoiceDate: true } }),
     db.query.claims.findMany({ columns: { dateFilled: true } }),
+    db.query.cashReceipts.findMany({ columns: { month: true } }),
   ]);
   void schema;
   const set = new Set<string>();
   for (const m of sales) set.add(m.month);
   for (const b of bills) set.add(b.invoiceDate.slice(0, 7));
   for (const c of claims) set.add(c.dateFilled.slice(0, 7));
+  for (const r of receipts) set.add(r.month.slice(0, 7));
   return [...set].filter((m) => /^\d{4}-\d{2}$/.test(m)).sort().reverse();
 }
 
@@ -895,7 +974,8 @@ export async function periodAccount(
   if (!period) return null;
   const have = new Set(await accountMonths());
   const wanted = period.months.filter((m) => have.has(m));
-  const months = await Promise.all(wanted.map((m) => monthlyAccount(m, basis)));
+  if (wanted.length === 0) return periodTotals(period, basis, []);
+  const { months } = await accountsFor(wanted, basis);
   return periodTotals(period, basis, months);
 }
 
@@ -916,6 +996,7 @@ export async function monthlyTrend(
   if (all.length === 0) return [];
   const end = through && all.includes(through) ? through : all[0];
   const wanted = all.filter((m) => m <= end).slice(0, Math.max(1, count));
-  const months = await Promise.all(wanted.map((m) => monthlyAccount(m, basis)));
+  if (wanted.length === 0) return [];
+  const { months } = await accountsFor(wanted, basis);
   return trend(months);
 }

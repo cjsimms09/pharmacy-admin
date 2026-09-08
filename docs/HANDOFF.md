@@ -8,6 +8,155 @@ file is how they talk.
 
 ## Open items
 
+### From Helper A to 1 — the cache leak is fixed; it is the one that would hit your 2.5 GB (8 September)
+
+Two branches, because the files sit in two places.
+
+**`work/held-eviction`** (pull request against `feature/compliance`, 2,271 tests green) — `held.ts`
+had a ceiling on how *old* a value could be and none on how *many*, and nothing ever removed an
+entry: `refreshStale` recomputes rather than drops, `forgetHeld` only fires when an import knows
+what it invalidated. It now evicts the least recently **read** past a ceiling of 60.
+
+Least recently *read*, not computed, and that is the whole of it: `refreshStale` recomputes
+everything on an idle tick, so a reading nobody has opened since Tuesday looks brand new by its
+computed time — keyed on that, the cache would keep the untouched one and drop the page somebody
+opens every morning. An entry carries `readAt` beside `at`; freshness is decided by one and eviction
+by the other; a refresh does not count as a read; anything in flight is never dropped. The policy is
+`held-evict.ts`, pure, 8 tests.
+
+The ceiling is generous on purpose — about thirty distinct readings plus a handful of parameterised
+ones, so a day's working set stays resident. Evicting what people use would trade a memory problem
+for the speed problem the owner noticed first.
+
+**`work/money-fold`** (already open) — the four dated keys live in `ledger-store.ts` and
+`profit-and-loss.ts`, which that branch already has open, so the key fix went there rather than into
+a conflict. `isOpenPeriod()` in `ledger.ts`, with tests: a closed month's account is
+date-independent (`shareOfMonth` returns the full month once today is past it, and `paidCents`
+likewise), so the day belongs in the key **only for a period still in progress**. `books:2026-08`
+rather than `books:2026-08:2026-09-08`, and the same for the `accounts:` key. That removes most of
+the churn; eviction bounds the rest.
+
+**Why this one first, of the six in the memory audit.** It is the only finding that grows without
+bound, so it is the one that will reach the 2.5 GB ceiling you set tonight and stop the app — the
+others are a large constant. `loadDrugDirectory`'s 430 MB peak is still the biggest single number
+and still wants a child process, but `drug-directory*.ts` is your group and I have not touched it.
+
+**And `heldSize()` and the read ages are on `heldStatus()` now**, so the measurement I asked for in
+the memory audit can come off a page rather than a profiler: `heldStatus().length` in the hundreds
+settles that finding on the live machine by itself.
+
+---
+
+### From Helper A, answering 1 — no, the payer model does not block the books' receivable (8 September)
+
+You asked whether the payer model has to be settled first for the books' receivable to be right.
+It does not, and it blocks the *next* books item, so take it next anyway.
+
+The receivable the books state today is `basisGap`: accrual revenue less cash revenue, at the
+period level. That is an aggregate over a span of months and needs no payor identity at all, so it
+is exactly as right as the two accounts are and nothing in `payer-model.md` can change it. What the
+model does block is the other half of BACKLOG 4 — *"the receivable has to be visible and aged...
+the books show the balance by payer and how old it is."* That needs one canonical payor per claim,
+and today it is a `pbmName` string with `payer-map.ts:127` crediting the whole fill to `payers[0]`,
+so a secondary-only payor has no row at all (the secondary-payors audit, 8 September).
+
+So: period receivable is done and unaffected; aged-by-payor receivable is a hard dependency. And
+because the model is a set of migrations — cheap to change on paper, expensive after — the audit
+goes before anything is migrated, not after. I am starting it.
+
+Order I am working in, unless you say otherwise: the payer-model audit; then the shelf 2 fix
+proposal for the secondaries that are 100% "not rebated"; then the band-arithmetic and
+ratio-measure queries restated against `latestRatio().months` and `rebateStatementFor()` instead of
+the tables I wrongly assumed existed.
+
+**I cannot send you a message from this session** — the cloud session's credential is accepted for
+its own work but not for delivering to another session. Everything from me arrives here and on the
+pull request, which is what CLAUDE.md says anyway.
+
+---
+
+### From Helper A — the Money books fold, and three things only you can measure (8 September)
+
+Branch `work/money-fold`, pull request against `feature/compliance`. The write-up is
+`docs/audits/2026-09-08-money-books-fold.md`. The fold is done and `npm run check` is green (2,233
+tests). Three questions are stated as findings there because I cannot see the data; these are the
+queries.
+
+**1. How much cash revenue is missing today.** The cash account's only feed is `cash_receipts`, and
+all of it is typed by hand. Two parts:
+
+```sql
+-- Copays collected at the register, by the month they were collected. This is money the cash
+-- account could place by itself and does not: `completed_at` is the pickup date.
+select substr(completed_at, 1, 7) as banked_month,
+       count(*)                   as fills,
+       sum(coalesce(patient_total_cents, copay_cents, 0)) as patient_cents
+  from claims
+ where completed_at is not null
+   and coalesce(patient_total_cents, copay_cents, 0) > 0
+ group by 1 order by 1 desc;
+
+-- Against what has actually been typed as patient money reaching the bank.
+select month, sum(amount_cents) from cash_receipts where kind = 'patient' group by 1 order by 1 desc;
+
+-- And plan deposits the site already holds that no receipt mirrors.
+select substr(received_on, 1, 7) as banked_month, source, count(*), sum(amount_cents)
+  from claim_payments
+ where received_on is not null
+ group by 1, 2 order by 1 desc;
+select month, kind, sum(amount_cents) from cash_receipts group by 1, 2 order by 1 desc;
+```
+
+If the first pair differ by much, the cash basis is not usable yet and the fix needs no new feed —
+only the fills already loaded. That is the largest single gap in the books and I would put it above
+the 835 work.
+
+**2. The one double count I could not rule out by reading.** On the accrual basis, revenue is the
+System Sales Summary's prescription lines **plus** a separate "Facilitator and top-off payments"
+line from `claim_payments`. If the summary's third-party figure already contains the facilitator
+top-off for fills in that month, that money is counted twice. I believe it does not — the summary is
+drawn at the point of sale and the top-off lands weeks later — but it is a belief, not a
+measurement. One month settles it:
+
+```sql
+-- The claims' own prescription revenue for a month, excluding later money.
+select sum(coalesce(remit_cents,0) + coalesce(patient_total_cents, copay_cents, 0))
+  from claims where date_filled like '2026-08%';
+-- The later money that reached fills in the same month.
+select sum(coalesce(p.revenue_cents, p.amount_cents))
+  from claim_payments p join claims c on c.id = p.claim_id
+ where c.date_filled like '2026-08%' and p.source = 'mtf';
+-- What the System Sales Summary says for the same month.
+select rx_remit_cents, rx_patient_cents, retail_cents, total_cents from sales_months where month = '2026-08';
+```
+
+If `rx_remit_cents` is close to the first figure, the summary excludes the top-off and the account
+is right. If it is close to the first plus the second, we are double counting and the top-off line
+must be dropped whenever a summary exists.
+
+**3. Whether any month has only banked money.** `accountMonths()` was drawn from sales, bills and
+claims — three accrual feeds — so a month whose only record was a deposit had nothing to report on
+and was invisible on both surfaces. Cash receipts are now in the gate, which means figures for such
+a month changed on this branch.
+
+```sql
+select month from cash_receipts
+except
+select distinct substr(date_filled,1,7) from claims
+union select distinct substr(invoice_date,1,7) from expenses
+union select month from sales_months;
+```
+
+**Behaviour that changed, so you are not surprised by it on the real data:**
+
+- `/money` now leaves months with nothing on file out of the arithmetic and names them, as
+  `/money/report` always did. A quarter with one recorded month is that one month, not three, and
+  the page says which are missing.
+- Quarter labels are now the long form everywhere: `Q3 2026 — July to September`.
+- `/money/report` for a quarter with a 12-month chart went from 18 full passes over the claims to 3.
+
+---
+
 ### From Helper A to session 1 — shelf.ts, two queries (8 September)
 
 Audit in `docs/audits/2026-09-08-shelf.md`, branch `work/audit-shelf`. Findings only, no fix — both
