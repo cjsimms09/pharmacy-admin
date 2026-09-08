@@ -139,7 +139,7 @@ export async function networksToLink(): Promise<NetworkToLink[]> {
      * finding: the ranking says "is who this network's BIN resolves to", and the owner still links.
      */
     const payerName = bins.map((b) => payerByBin.get(b.toUpperCase())).find(Boolean) ?? (r.pbm ? r.pbm.trim() || null : null);
-    const link = links.find((l) => (l.contractId ?? "").trim().toUpperCase() === networkId.toUpperCase() && l.contractDocId);
+    const link = links.find((l) => (l.contractId ?? "").trim().toUpperCase() === networkId.toUpperCase() && (l.contractDocId || /^Programme:/.test(l.basis ?? "")));
     /*
      * A settled id is one tied to a document — or one the owner has said is a programme, not a network:
      * "these are loyalty/discount cards.. isn't a formula on loyalty or discount cards" (8 September). A
