@@ -3,7 +3,7 @@ import { isNull } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requireUser } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
-import { linkFor } from "@/lib/training-assignments";
+import { linkForItem } from "@/lib/training-assignments";
 import { TRAINING_LABEL } from "@/lib/labels";
 import { courseFor } from "@/lib/courses";
 import { fmt, fmtLong, todayIso } from "@/lib/dates";
@@ -39,7 +39,7 @@ export default async function HandoutPage() {
   const base = (s.public_base_url || "").trim();
 
   const withLinks = await Promise.all(
-    assignments.map(async (a) => ({ a, url: await linkFor(a.token) })),
+    assignments.map(async (a) => ({ a, url: await linkForItem(a.type, a.token) })),
   );
   const byPerson = people
     .filter((p) => p.active)
@@ -59,9 +59,9 @@ export default async function HandoutPage() {
           arriving — the link and the code are all anybody needs, and the certificate is produced the same way
           afterwards.
         </p>
-        {!base && (
+        {withLinks.some((x) => /localhost/.test(x.url)) && (
           <p className="mt-2 text-xs text-crit">
-            <b>No address is set for this site</b>, so the links below say <code>localhost</code> and will only work on
+            <b>No address is set for this site</b>, so {base ? "some" : "the"} links below say <code>localhost</code> and will only work on
             this computer. Set one under{" "}
             <Link href="/settings/network" className="underline">Settings → Network</Link> and reprint, or have people
             complete it on this computer.

@@ -87,3 +87,33 @@ describe("links that get a message junked", () => {
     assert.equal(linkHealth("not a url").spamShaped, true);
   });
 });
+
+/**
+ * With no address for this site, the alert used to send the pharmacist to Settings → Network to
+ * fix a link that the hosted courses had already fixed: the email's button opens the course on the
+ * pharmacy's own website, and never mentions localhost.
+ */
+describe("link health when the courses are hosted elsewhere", () => {
+  const written = ["hipaa_privacy_security", "osha_bloodborne"];
+  test("every written course hosted over https: nothing to alert about, and it says where", () => {
+    const h = linkHealth("", { hosted: { hipaa_privacy_security: "https://wwfrx.com/training/hipaa/", osha_bloodborne: "https://wwfrx.com/training/bbp/" }, written });
+    assert.equal(h.privateOnly, false);
+    assert.equal(h.spamShaped, false);
+    assert.equal(h.hostedAt, "https://wwfrx.com");
+    assert.deepEqual(h.reasons, []);
+  });
+  test("one written course without a page still points at localhost, and the reason names how many", () => {
+    const h = linkHealth("", { hosted: { hipaa_privacy_security: "https://wwfrx.com/training/hipaa/" }, written });
+    assert.equal(h.privateOnly, true);
+    assert.deepEqual(h.unhosted, ["osha_bloodborne"]);
+    assert.match(h.reasons[0], /1 written course has no hosted page/);
+  });
+  test("a hosted address that is not https does not count", () => {
+    const h = linkHealth("", { hosted: { hipaa_privacy_security: "http://wwfrx.com/training/hipaa/", osha_bloodborne: "https://wwfrx.com/training/bbp/" }, written });
+    assert.equal(h.privateOnly, true);
+  });
+  test("with a real address set, the hosted pages are beside the point", () => {
+    const h = linkHealth("https://pharmacy.wwfrx.com", { hosted: {}, written });
+    assert.equal(h.privateOnly, false);
+  });
+});
