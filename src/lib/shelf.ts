@@ -4,7 +4,7 @@ import { desc, eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { readOnHand, onHandTotals } from "./on-hand";
 import type { Fill } from "./fills";
-import { velocity, toOrderThousandths, type Velocity } from "./usage";
+import { velocity, toOrderThousandths, whyNotSteady, type Velocity } from "./usage";
 import { leanShelf, shelfTotals, type ShelfRow } from "./lean-shelf";
 import {
   planOrder,
@@ -421,6 +421,8 @@ export async function shelfMovement(): Promise<{
       ndc11: v.ndc11,
       perDayThousandths: v.perDayThousandths,
       steady: v.steady,
+      // Which of the three tests failed, so the refusal on the add-ons list can say so.
+      whyNotSteady: whyNotSteady(v),
       onHandThousandths: onHandBy.get(v.ndc11) ?? 0,
     })),
   };

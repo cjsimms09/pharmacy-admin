@@ -132,6 +132,7 @@ export const NAV: NavGroup[] = [
     label: "Settings",
     blurb: "The pharmacy's own details, every connection and whether each feed is arriving, and the reference data behind the figures.",
     items: [
+      { href: "/settings/setup", label: "Finish setting up", blurb: "Everything the site still needs from you, ranked by what it costs to leave undone" },
       { href: "/settings", label: "Pharmacy details", blurb: "Name, registration numbers, address" },
       { href: "/settings/connections", label: "Connections", blurb: "Keys for Claude, iMonnit and the rest, and whether every report is arriving" },
       { href: "/tools/data-health", label: "Data health", blurb: "How complete each feed is, and how much of it links where it must — counted on the real data, with the gaps named" },

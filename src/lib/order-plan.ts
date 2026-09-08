@@ -91,6 +91,15 @@ export type Movement = {
   ndc11: string;
   perDayThousandths: number;
   steady: boolean;
+  /**
+   * Which steadiness test failed, where one did.
+   *
+   * `steady` is three tests wearing one boolean, and the refusal printed downstream used to name
+   * only one of them — the least likely on a thin archive. The reason is carried rather than
+   * re-derived because the figures it is built from live in `usage.ts` and were being discarded at
+   * this boundary. Null where the drug is steady, or where the caller has not worked it out.
+   */
+  whyNotSteady?: string | null;
   /** Units on the shelf now, in thousandths. Zero where no count is held. */
   onHandThousandths: number;
 };
@@ -212,7 +221,21 @@ export function offersFor(offers: Offer[], ndc11: string): Offer[] {
     if (o.ndc11 !== ndc11) continue;
     if (o.packQty === null || o.packQty <= 0) continue;
     const held = best.get(o.supplier);
-    if (!held || o.effectiveUnitMicros < held.effectiveUnitMicros) best.set(o.supplier, o);
+    /*
+     * A supplier is represented by its cheapest *sound* lot, not simply its cheapest lot.
+     *
+     * Taking the cheapest of anything threw away the answer before the comparison below could make
+     * it. A wholesaler with a short-dated lot at 4c and a good lot at 10c was represented by the 4c
+     * one, which the sort then pushed to the back for being short-dated — so the 10c lot, the
+     * cheapest sound price on the table, never competed at all and the order went to a supplier at
+     * 11c. The comment below says a short-dated lot never wins a comparison it would otherwise win;
+     * it was also losing comparisons its supplier would otherwise have won.
+     */
+    const better =
+      !held ||
+      (Boolean(held.shortDated) && !o.shortDated) ||
+      (Boolean(held.shortDated) === Boolean(o.shortDated) && o.effectiveUnitMicros < held.effectiveUnitMicros);
+    if (better) best.set(o.supplier, o);
   }
   return [...best.values()].sort((a, b) => {
     // A short-dated lot is not a price; it never wins a comparison it would otherwise win.
@@ -294,12 +317,20 @@ export function planOrder(input: PlanInput): Plan {
     }
 
     const round = (t: number) => Math.round(t / 1000);
+    /*
+     * A need filled from an expiring lot says so on the line.
+     *
+     * A top-up is refused outright when it is short-dated, but a need is not: the drug is wanted and
+     * this may be the only lot anybody has. That is a decision to commit to stock expiring inside
+     * the return window, and it is the pharmacist's to make rather than one to discover on delivery.
+     */
+    const dated = offer.shortDated ? ` ${offer.supplier} has it only as ${offer.shortDated} — it expires inside the return window.` : "";
     const why =
       reason === "top_up"
         ? `Added to reach ${offer.supplier}'s minimum: it is cheaper here and it moves.`
         : overage <= 0
-          ? `Short ${round(neededThousandths)} and the pack is ${packQty}, so this is exactly the need.`
-          : `Short ${round(neededThousandths)}; the smallest pack here is ${packQty}, so ${packs} pack${packs === 1 ? "" : "s"} is ${round(unitsThousandths)} — ${round(overage)} more than the need.`;
+          ? `Short ${round(neededThousandths)} and the pack is ${packQty}, so this is exactly the need.${dated}`
+          : `Short ${round(neededThousandths)}; the smallest pack here is ${packQty}, so ${packs} pack${packs === 1 ? "" : "s"} is ${round(unitsThousandths)} — ${round(overage)} more than the need.${dated}`;
 
     return {
       ndc11,
@@ -331,7 +362,20 @@ export function planOrder(input: PlanInput): Plan {
       continue;
     }
     const pick = ranked[0];
-    const next = ranked[1] ?? null;
+    /*
+     * The saving is measured against a price this planner would actually pay.
+     *
+     * `ranked[1]` can be a short-dated lot, and a short-dated lot is not a price — the sort puts it
+     * last for exactly that reason. Measured against it the arithmetic went wrong in both
+     * directions: a cheap short-dated alternative made a sound pick look like a *loss*, dragging
+     * the basket's total saving down and able to flip the verdict on it; and where the pick itself
+     * was the only sound lot, the figure quoted the pharmacist a saving against stock nobody would
+     * buy.
+     *
+     * So the comparison is against the next offer of the same kind: sound against sound, and — where
+     * every lot on the market is short-dated — short-dated against short-dated.
+     */
+    const next = ranked.slice(1).find((o) => Boolean(o.shortDated) === Boolean(pick.shortDated)) ?? null;
     draftFor(pick.supplier).lines.push(lineFor(need.ndc11, need.name, pick, next, need.needThousandths, "need"));
   }
 
@@ -499,7 +543,14 @@ export function topUpCandidates(a: {
       continue;
     }
     if (!m.steady) {
-      refused.push({ ndc11: m.ndc11, name: label, supplier: a.supplier, why: "The rate is one large fill, not a rate. Buying deep on it is buying for a patient who may not return." });
+      // The reason names the test that actually failed. One sentence for three tests printed the
+      // wrong one 103 times out of 103 on this pharmacy's data.
+      refused.push({
+        ndc11: m.ndc11,
+        name: label,
+        supplier: a.supplier,
+        why: m.whyNotSteady ?? "The rate is one large fill, not a rate. Buying deep on it is buying for a patient who may not return.",
+      });
       continue;
     }
 

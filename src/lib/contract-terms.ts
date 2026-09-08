@@ -620,13 +620,32 @@ export function requireCitations(t: ContractTermsT): CitationFailure[] {
       missing.push({ field: `gcrTiers[${i}]`, value: `${g.rebatePercent}%` });
     }
   });
+  return missing;
+}
+
+/**
+ * Drops a cited-but-uncited single figure rather than refusing the read for it.
+ *
+ * A rate without its sentence is unusable and the whole read is refused (requireCitations): the
+ * document's money terms are what the read is for. The MAC appeal window and the DIR basis are
+ * single figures beside them, and three documents were thrown away on 8 September — Capital Rx's
+ * base agreement, IQVIA's service agreement, Navitus's Medicare D network — because the reader
+ * stated a DIR basis and did not quote it. That lost the counterparty, the networks, the chain
+ * codes and every contact on each, for one field. So the uncited value is dropped, the drop is
+ * written into `unclearOrMissing` where the page shows it, and the rest of the read stands.
+ */
+export function dropUncited(t: ContractTermsT): ContractTermsT {
+  const out = { ...t, unclearOrMissing: [...t.unclearOrMissing] };
   if (t.macAppealWindowDays.value != null && !t.macAppealWindowDays.citation?.quote?.trim()) {
-    missing.push({ field: "macAppealWindowDays", value: String(t.macAppealWindowDays.value) });
+    out.unclearOrMissing.push(`MAC appeal window: the reader said ${t.macAppealWindowDays.value} days but gave no quote, so it is not recorded.`);
+    // Nulls, as fillNulls leaves every absent field, so the stored draft has one shape throughout.
+    out.macAppealWindowDays = { value: null, citation: null } as unknown as ContractTermsT["macAppealWindowDays"];
   }
   if (t.dirFeeBasis.value && !t.dirFeeBasis.citation?.quote?.trim()) {
-    missing.push({ field: "dirFeeBasis", value: t.dirFeeBasis.value });
+    out.unclearOrMissing.push(`DIR basis: the reader said "${t.dirFeeBasis.value}" but gave no quote, so it is not recorded.`);
+    out.dirFeeBasis = { value: null, citation: null } as unknown as ContractTermsT["dirFeeBasis"];
   }
-  return missing;
+  return out;
 }
 
 /** Explicit nulls dropped at every depth: `.optional()` rejects a null, and old drafts are full of them. */

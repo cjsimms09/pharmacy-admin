@@ -44,10 +44,19 @@ export async function fingerprint(): Promise<string> {
        * most to the buy list, and nothing else here would catch it: the supplier import path writes
        * no audit event. An import always writes a row here, so this is the term that moves.
        */
-      "(select count(*) from supplier_imports) as si, (select max(created_at) from supplier_imports) as sm",
+      "(select count(*) from supplier_imports) as si, (select max(created_at) from supplier_imports) as sm, " +
+      /*
+       * A correction the pharmacist typed, named on its own rather than left to the audit row.
+       *
+       * A settled package is the one edit where being served a stale figure reads as the site
+       * ignoring the person using it — they went and looked at the bottle. The audit event would
+       * catch it, but that is a coincidence of two writes rather than a promise, and this is a
+       * promise.
+       */
+      "(select count(*) from ndc_pack_fixes) as f, (select max(corrected_at) from ndc_pack_fixes) as fa",
   );
   const row = r.rows[0] ?? {};
-  const fp = ["c", "a", "s", "n", "l", "o", "d", "e", "p", "g", "si", "sm"].map((k) => String(row[k] ?? "")).join("|");
+  const fp = ["c", "a", "s", "n", "l", "o", "d", "e", "p", "g", "si", "sm", "f", "fa"].map((k) => String(row[k] ?? "")).join("|");
   fpCache = { at: Date.now(), fp };
   return fp;
 }

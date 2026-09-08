@@ -196,7 +196,7 @@ export async function searchDrugs(q: DrugSearch = {}): Promise<DrugSearchResult>
     if (q.fixedOnly && !r.packFix) continue;
     if (q.switchableOnly && !r.equivalence?.cheaper) continue;
     matched++;
-    if (out.length < (q.limit ?? 200)) out.push(r);
+    out.push(r);
   }
 
   /*
@@ -204,6 +204,13 @@ export async function searchDrugs(q: DrugSearch = {}): Promise<DrugSearchResult>
    *
    * A drug nobody dispenses that two wholesalers describe differently matters less than one filled
    * every week, so where nothing is wrong the list is ordered by the money the claims put through it.
+   *
+   * Every match is ranked and only then cut to the page. It used to take the first hundred and
+   * fifty matches in whatever order the file held them and rank those — so on fifty thousand items
+   * the hundred and fifty shown were an accident of file order, and the mismatch worth the most
+   * money was usually not among them. The owner could not find the packages he needed to settle
+   * because they were never on the screen. Ranking fifty thousand rows is milliseconds; ranking
+   * the wrong hundred and fifty is the whole problem.
    */
   const rank = (r: DrugRow) => (r.problems.some((p) => p.level === "wrong") ? 0 : r.problems.length ? 1 : 2);
   const worth = (r: DrugRow) => Math.max(0, ...r.problems.map((p) => p.costCents));
@@ -217,7 +224,7 @@ export async function searchDrugs(q: DrugSearch = {}): Promise<DrugSearchResult>
       (b.reimbursement?.remitCents ?? 0) - (a.reimbursement?.remitCents ?? 0) ||
       (b.bestPackCostCents ?? 0) - (a.bestPackCostCents ?? 0),
   );
-  return { rows: out, matched, total: all.length };
+  return { rows: out.slice(0, q.limit ?? 200), matched, total: all.length };
 }
 
 /** The line at the top of the page: how much of the drug file is sound. */

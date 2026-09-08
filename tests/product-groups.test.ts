@@ -127,3 +127,27 @@ describe("the FDA directory decides the product where it carries the NDC", () =>
     assert.equal(groupKey(fda("1", null, null)), null);
   });
 });
+
+/*
+ * An OTC row is reimbursed differently or not at all, so it is not the same buying decision as its
+ * prescription counterpart — groupKey has always said so by appending OTC or RX.
+ *
+ * Three of the four stores unified in 1c8591d did not pass `otc` at all, so every NDC keyed as RX
+ * in them and as OTC in replay-store. Two failures at once: an OTC product merged with the
+ * prescription one in three stores, and a group formed in replay-store could not be reconciled with
+ * the same product anywhere else, because the keys differed by construction.
+ */
+test("an OTC row is never the same product as the prescription one", () => {
+  const rx = { ndc11: "1", equivalenceKey: "ibuprofen-200-tab-oral", description: "IBUPROFEN 200MG TAB", classification: "G", pricingUnit: "EA", otc: false };
+  const otc = { ...rx, ndc11: "2", otc: true };
+  assert.notEqual(groupKey(rx), groupKey(otc));
+  assert.match(groupKey(rx)!, /\|RX$/);
+  assert.match(groupKey(otc)!, /\|OTC$/);
+});
+
+test("an OTC flag nobody passes reads as prescription, which is why it has to be passed", () => {
+  // The bug in three stores: `otc` simply absent, so an OTC NDC keyed as RX and merged.
+  const passed = groupKey({ ndc11: "1", equivalenceKey: "k", description: null, classification: "G", pricingUnit: "EA", otc: true });
+  const dropped = groupKey({ ndc11: "1", equivalenceKey: "k", description: null, classification: "G", pricingUnit: "EA" });
+  assert.notEqual(passed, dropped);
+});
