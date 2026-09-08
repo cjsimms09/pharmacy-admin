@@ -192,6 +192,37 @@ export function fdaContainerContents(
 }
 
 /**
+ * Why a description is not "N containers with a volume in each", in words.
+ *
+ * `fdaContainerContents` returns null for four quite different reasons and the difference matters:
+ * two thousand NDCs that are "not this shape" is a number nobody can act on, where "1,400 of them
+ * are a single level counting tablets" is a finding. Named rather than guessed at, because guessing
+ * at the shape of the bulk is what produced a rule that only reached 309 of them.
+ */
+export function containerShape(packageDescription: string | null | undefined): string {
+  const text = (packageDescription ?? "").trim();
+  if (!text) return "no FDA package description";
+  if (text.includes("*")) return "a kit: several components, no single dispensing unit";
+  const levels = fdaPackageLevels(text);
+  if (levels === null) return "the description does not parse as levels";
+  if (levels.length < 2) {
+    const m = measureOf(levels[0].noun);
+    if (m === null) return `one level only, innermost "${levels[0].noun}" is not a unit this reads`;
+    return m.uom === "EA"
+      ? `one level only, counting ${levels[0].noun} — a count, not a measure`
+      : `one level only, already measured in ${m.uom}`;
+  }
+  const inner = levels[levels.length - 1];
+  const measure = measureOf(inner.noun);
+  if (measure === null) return `innermost "${inner.noun}" is not a dispensing unit`;
+  if (measure.uom === "EA") return `innermost "${inner.noun}" is counted, not measured`;
+  const outer = levels.slice(0, -1);
+  const notDispensed = outer.filter((l) => !DISPENSED_CONTAINERS.test(l.noun));
+  if (notDispensed.length > 0) return `outer "${notDispensed[0].noun}" is packaging, not a container anybody dispenses`;
+  return "this shape";
+}
+
+/**
  * The units in a wholesaler's pack size, as the catalogues write it.
  *
  * The shapes that actually appear: "84 EA", "30 EA", "473 ML", and McKesson's "(3) 28 EA" — three
