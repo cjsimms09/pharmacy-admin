@@ -265,6 +265,7 @@ export function proposeFromContract(
       bins: csv(r.bins),
       pcns: csv(r.pcns),
       groupIds: csv(r.groupIds),
+      networkIds: csv(r.networkIds ?? []),
       effectiveDate: r.effectiveFrom ?? t.effectiveDate ?? null,
       effectiveTo: r.effectiveTo ?? t.endDate ?? null,
       daysSupply,

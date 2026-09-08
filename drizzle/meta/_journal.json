@@ -631,6 +631,13 @@
       "when": 1788807148029,
       "tag": "0089_on_hand_dated_by",
       "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "6",
+      "when": 1788807208029,
+      "tag": "0090_network_rates_network_ids",
+      "breakpoints": true
     }
   ]
 }

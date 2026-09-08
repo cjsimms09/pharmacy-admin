@@ -183,8 +183,10 @@ function withLearned(
         why: `${n} of this network's ${claims} claims match it by BIN and group on the contract's own listing — the strongest sign short of the id printed on a document`,
       };
     });
-  const seen = new Set(first.map((c) => c.documentId));
-  return [...first, ...ranked.filter((c) => !seen.has(c.documentId))];
+  // A document that prints the id itself outranks what the claims learned: the guide's crosswalk is the one place the id is written down.
+  const printed = ranked.filter((c) => /as one of its network reimbursement ids/.test(c.why));
+  const seen = new Set([...printed, ...first].map((c) => c.documentId));
+  return [...printed, ...first.filter((c) => !printed.some((p) => p.documentId === c.documentId)), ...ranked.filter((c) => !seen.has(c.documentId))];
 }
 
 /**
@@ -211,13 +213,19 @@ export async function deduceNetworkLinks(user: { name: string }): Promise<{ link
     }
     const prints = /prints .* as one of its network reimbursement ids/.test(top.why);
     const here = r.candidates.filter((c) => /written for this pharmacy's chain code/.test(c.why));
-    const decided = prints ? top : here.length === 1 ? here[0] : null;
+    // Every one of the network's claims matched this document by its own BIN, PCN and group listing: the
+    // guide prints the routing where it does not print the id (Optum's crosswalk is keyed that way).
+    const learnedAll = /^(d+) of this network's (d+) claims match it by BIN and group/.exec(top.why);
+    const allMatch = learnedAll !== null && learnedAll[1] === learnedAll[2];
+    const decided = prints ? top : allMatch ? top : here.length === 1 ? here[0] : null;
     if (!decided) {
       undecided++;
       continue;
     }
     const why = prints
       ? `Linked by the site: ${decided.documentName} prints ${r.networkId} as one of its network reimbursement ids.`
+      : allMatch
+        ? `Linked by the site: every one of this network's ${r.claims} claims matches ${decided.documentName} by the BIN, PCN and group it lists. Replace it if the PSAO's listing says otherwise.`
       : `Linked by the site: the only ${decided.counterparty ?? r.payerName ?? "payer"} document written for this pharmacy's chain code. Replace it if the PSAO's listing says otherwise.`;
     await savePayerLink(
       { bin: null, pcn: null, groupNumber: null, contractId: r.networkId },

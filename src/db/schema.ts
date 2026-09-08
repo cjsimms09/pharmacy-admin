@@ -1574,6 +1574,8 @@ export const networkRates = sqliteTable(
     bins: text("bins"),
     pcns: text("pcns"),
     groupIds: text("group_ids"),
+    /** Network reimbursement ids the rate is written for, comma-separated. Migration 0090. */
+    networkIds: text("network_ids"),
     effectiveDate: text("effective_date"),
     /** The last day the rate applies, where the exhibit says; null while it runs. A claim after it is not priced on this row. */
     effectiveTo: text("effective_to"),

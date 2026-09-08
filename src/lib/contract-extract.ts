@@ -501,7 +501,7 @@ function mockTerms(name: string, pbm: string): ContractTermsT {
       {
         pbmVendor: "CVS/Caremark",
         network: "Mock Commercial Broad",
-        costSharingTier: "standard" as const, bins: [], pcns: [], groupIds: [], lineOfBusiness: null,
+        costSharingTier: "standard" as const, bins: [], pcns: [], groupIds: [], networkIds: [], lineOfBusiness: null,
         daysSupplyMin: 1,
         daysSupplyMax: 34,
         brandFormula: "AWP - 15.0%",

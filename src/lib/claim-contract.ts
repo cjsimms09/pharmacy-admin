@@ -109,6 +109,8 @@ export type ContractForMatch = {
 
 export type RateForMatch = {
   network: string | null;
+  /** Network reimbursement ids the rate is written for (NCPDP 545-2F). Empty where the document prints none. */
+  networkIds?: string[];
   /**
    * The routing this rate line was printed against, where the schedule printed one.
    *
@@ -534,11 +536,14 @@ export function rateFor(contract: ContractForMatch, claim: ClaimForMatch): RateF
  * names routing the claim does not, and null where it names none — which is not a mismatch, it is
  * a line that inherits the document's routing and applies to everything the document does.
  */
-export function routes(rate: Pick<RateForMatch, "bins" | "pcns" | "groupIds">, claim: ClaimForMatch): boolean | null {
+export function routes(rate: Pick<RateForMatch, "bins" | "pcns" | "groupIds" | "networkIds">, claim: ClaimForMatch): boolean | null {
   const has = (xs: string[]) => xs.map(norm).filter((x): x is string => x !== null);
   const bins = has(rate.bins);
   const pcns = has(rate.pcns);
   const groups = has(rate.groupIds);
+  const ids = has(rate.networkIds ?? []);
+  // The id is the most specific thing a claim carries: where the rate prints ids, the id decides on its own.
+  if (ids.length > 0) return claim.networkId ? ids.includes(norm(claim.networkId)!) : false;
   if (bins.length === 0 && pcns.length === 0 && groups.length === 0) return null;
   if (bins.length > 0 && !(claim.bin && bins.includes(norm(claim.bin)!))) return false;
   if (pcns.length > 0 && !(claim.pcn && pcns.includes(norm(claim.pcn)!))) return false;

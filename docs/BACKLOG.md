@@ -629,6 +629,30 @@ Left: 47 networks with several documents written for us (590 claims: Optum 10, E
 9–10) — the PSAO listing or the backtest; 21 with nothing written for us (135 claims: Humana, Argus).
 Two follow-ups: run the deduction after every `applyAllReads`, and re-evaluate links the site made
 when new documents arrive (today it skips anything already linked).
+### 24. Copay-card remittance confirmations have to be read and reconciled to the claims (8 September)
+
+The owner's words, uploading one: "this is remit confirmation for copay cards. we need to be
+reconciling against the claims. we probably dont have these claims in our system but lets make
+sure this process is set up and correct for future." The document: a scanned statement from
+RedSail Technologies (RAS enrollment, Spartanburg SC) listing claims by prescription and fill with
+the drug and the amount, totals ("Total Claims 177.25 … Total Amount Paid"), no text layer worth
+reading. RedSail is BIN 028249 on the claims — 223 paid claims, the one BIN the PSAO listing does
+not name — so these are the copay-assistance secondaries, and the confirmation is their remit.
+Wanted: a reader on the intake path (the model read, since it is a scan; the same money guard the
+invoice reader now has), one `claim_payments` row per line with source `copay_card`, matched to
+the claim by prescription, fill and date the way the 835 reader matches, unmatched lines held and
+named, and the statement's own total as the arithmetic gate. The sample is in the session's
+uploads folder (`5171c9d9-Image_001.pdf`); a fixture with identifiers changed goes in `fixtures/`.
+Assigned to 2 after the directory move; the recogniser side is B's.
+
+### 25. The PSAO's discount card and copay networks guide (8 September)
+
+Uploaded as `898d0c4f-2026hmadiscountcardandcopaynetworks_1.xlsx`: a different shape from the
+networks guide — a rate tab per discount card programme (BIN, PCN, group, rates by days supply),
+a "Discount Card Listing" of BIN/PCN/group per card, and drug lists (Apollo Care NDCs by
+manufacturer, ConnectiveRx programmes, Visory specialty). Read it the way the networks guide is
+read (`psao-guide.ts`), one document per programme, with the BIN/PCN/group as the rate's routing;
+the drug lists are what says a claim on those BINs is a copay-card claim rather than a plan's.
 ## The data the site has to ingest
 
 Named by the owner on 7 September as what is still being connected. Each one needs a reader, a
