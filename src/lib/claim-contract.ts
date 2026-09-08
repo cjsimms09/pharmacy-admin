@@ -60,6 +60,13 @@ export type ClaimForMatch = {
   bin: string | null;
   pcn: string | null;
   groupNumber: string | null;
+  /**
+   * The network reimbursement id PioneerRx prints on the claim, where it printed one.
+   *
+   * Present on 95.3% of this pharmacy's claims across 82 distinct values — a far better key than
+   * the triple for the contracts that carry no triple at all.
+   */
+  networkId?: string | null;
   dateFilled: string;
   daysSupply: number | null;
   /** What the plan actually paid, before the patient's share. */
@@ -85,6 +92,16 @@ export type ContractForMatch = {
   bins: string[];
   pcns: string[];
   groupIds: string[];
+  /**
+   * The network reimbursement ids (NCPDP 545-2F) the document states.
+   *
+   * The reason nothing matched. A rate exhibit routinely identifies itself by network name and
+   * chain code with the BIN, PCN and group columns left empty — so `governs()`, which reads only
+   * the triple, found nothing routable and returned null for every claim. The claims meanwhile
+   * carry PioneerRx's network id on 95.3% of rows. This is the field that closes the gap, and it
+   * is a code the PBM prints on both sides rather than a name anybody has to spell the same way.
+   */
+  networkReimbursementIds?: string[];
   effectiveDate: string | null;
   endDate: string | null;
   rates: RateForMatch[];
@@ -196,6 +213,254 @@ export function governs(contract: ContractForMatch, claim: ClaimForMatch, binSha
         `Which of them this contract was written for is not something the file says — confirm it before pricing on it.`
       : null,
   };
+}
+
+/* ── Which contract priced this claim, when the contract names no BIN at all ── */
+
+/**
+ * A network reimbursement id the owner has tied to a contract document.
+ *
+ * `payer_links.contract_id` holds the id PioneerRx prints and `payer_links.contract_doc_id` the
+ * document it was priced under. The column pair was created for exactly this and nothing has ever
+ * written the second one, which is why the link below is the rung that will actually carry most of
+ * the traffic once the owner has been through the list.
+ */
+export type NetworkLink = {
+  networkId: string;
+  contractDocId: string;
+  /** Who tied them, so the record says whose answer this is. */
+  setBy?: string | null;
+};
+
+/** Where the answer came from. The order is the order of authority, not of convenience. */
+export type MatchRung = "owner_link" | "network_id" | "routing";
+
+export type ClaimResolution =
+  | {
+      matched: true;
+      contract: ContractForMatch;
+      rung: MatchRung;
+      /** The triple's reasoning, where the triple is what answered. Null on the other two rungs. */
+      why: MatchWhy | null;
+      says: string;
+      confident: boolean;
+      caution: string | null;
+    }
+  | {
+      matched: false;
+      /** The id to offer the owner, where the claim carried one. */
+      networkId: string | null;
+      says: string;
+      /** True where one choice on the payers page would settle this claim and every other on the id. */
+      settleable: boolean;
+    };
+
+/** In force on the day of the fill, which every rung has to respect and only `governs` used to. */
+function inForceOn(contract: ContractForMatch, dateFilled: string): boolean {
+  if (contract.effectiveDate && dateFilled < contract.effectiveDate) return false;
+  if (contract.endDate && dateFilled > contract.endDate) return false;
+  return true;
+}
+
+/**
+ * The contract that priced this claim, by the surest route available, or an honest "not known".
+ *
+ * Nought of 1,081 insured claims matched a contract, and the reason was structural rather than a
+ * matter of reading more documents. Claims speak in codes — BIN on 99.8%, PCN on 94.4%, group on
+ * 95.1%, PioneerRx's network id on 95.3% across 82 distinct values. Rate exhibits identify
+ * themselves by network *name* ("Prime AccessOne Network") and chain code, with the BIN, PCN and
+ * group columns empty. `governs()` reads only the triple, so it found nothing routable on those
+ * documents and returned null every time. Both sides were complete; they were speaking different
+ * languages.
+ *
+ * Three rungs, in descending order of how much anybody should trust them:
+ *
+ *   1. **The owner said so.** A `payer_links` row tying a network id to a document. A person who
+ *      knows the pharmacy's contracts looked at the id and named the agreement. Nothing computed
+ *      outranks that.
+ *   2. **The document says so.** The contract states the network reimbursement id the claim carries.
+ *      That is a code the PBM printed on both sides, not a name anybody had to spell the same way.
+ *   3. **The routing.** BIN, PCN and group, exactly as before, most specific first.
+ *
+ * Measured across the first 86 of 325 contract documents read, rungs 2 and 3 are nearly empty: 63
+ * carry network names, 39 carry chain codes, **5 carry BINs and 0 carry a network reimbursement
+ * id**. So rung 1 is not a fallback for the awkward cases — it is the mechanism, and the other two
+ * are there because a document that does state a code should never need a person. That is why the
+ * unmatched answer below is built to be actionable rather than merely honest: it names the id, so
+ * the payers page can offer one choice per id and 82 choices settle the file.
+ *
+ * And a fourth thing that is not a rung: **a name is never matched.** "Prime AccessOne Network" on
+ * a rate exhibit and "PRIME THERAPEUTICS" on a claim are not evidence about each other, and a
+ * similarity score between them is a wrong contract applied to a real claim — a shortfall that
+ * looks real, an appeal that gets withdrawn. Where nothing resolves, this says so and names the id,
+ * because 82 choices made once by somebody who knows is worth more than 1,081 guesses.
+ *
+ * Pure.
+ */
+export function resolveContract(a: {
+  claim: ClaimForMatch;
+  contracts: ContractForMatch[];
+  /** Every link the owner has set. Ignored where it points at a document not on file. */
+  links?: NetworkLink[];
+  binShape?: BinShape | null;
+}): ClaimResolution {
+  const networkId = norm(a.claim.networkId);
+  const byId = new Map(a.contracts.map((c) => [c.documentId, c]));
+
+  /* ── 1. The owner said so ── */
+  if (networkId) {
+    const links = (a.links ?? []).filter((l) => norm(l.networkId) === networkId);
+    const named = links.map((l) => byId.get(l.contractDocId)).filter((c): c is ContractForMatch => !!c);
+    const live = named.filter((c) => inForceOn(c, a.claim.dateFilled));
+    if (live.length === 1) {
+      const who = links.find((l) => l.contractDocId === live[0].documentId)?.setBy;
+      return {
+        matched: true,
+        contract: live[0],
+        rung: "owner_link",
+        why: null,
+        says: `network ${networkId} is tied to ${live[0].documentName}${who ? ` by ${who}` : ""}`,
+        confident: true,
+        caution: null,
+      };
+    }
+    /*
+     * Two links disagreeing is a data problem, not a tie to break. Picking one would bury it.
+     */
+    if (live.length > 1) {
+      return {
+        matched: false,
+        networkId,
+        says:
+          `Network ${networkId} is tied to ${live.length} different contracts in force on ${a.claim.dateFilled} — ` +
+          `${live.map((c) => c.documentName).join(", ")}. One of those links is wrong; the payers page is where to settle it.`,
+        settleable: true,
+      };
+    }
+    if (named.length > 0) {
+      return {
+        matched: false,
+        networkId,
+        says:
+          `Network ${networkId} is tied to ${named.map((c) => c.documentName).join(", ")}, but ${named.length === 1 ? "it was" : "none was"} ` +
+          `in force on ${a.claim.dateFilled}. Either the fill predates the agreement or a newer one needs linking.`,
+        settleable: true,
+      };
+    }
+    if (links.length > 0) {
+      return {
+        matched: false,
+        networkId,
+        says: `Network ${networkId} is tied to a contract document that is no longer on file. Re-link it on the payers page.`,
+        settleable: true,
+      };
+    }
+  }
+
+  /* ── 2. The document states the id ── */
+  if (networkId) {
+    const stating = a.contracts.filter(
+      (c) => (c.networkReimbursementIds ?? []).map(norm).includes(networkId) && inForceOn(c, a.claim.dateFilled),
+    );
+    if (stating.length === 1) {
+      return {
+        matched: true,
+        contract: stating[0],
+        rung: "network_id",
+        why: null,
+        says: `${stating[0].documentName} states network reimbursement id ${networkId}`,
+        confident: true,
+        caution: null,
+      };
+    }
+    if (stating.length > 1) {
+      // Two documents claiming one id is contradictory paperwork; the owner picks, nothing guesses.
+      return {
+        matched: false,
+        networkId,
+        says:
+          `${stating.length} contracts state network ${networkId} and were both in force on ${a.claim.dateFilled} — ` +
+          `${stating.map((c) => c.documentName).join(", ")}. Choose which one prices this network on the payers page.`,
+        settleable: true,
+      };
+    }
+  }
+
+  /* ── 3. The routing, exactly as before ── */
+  const byRouting = contractFor(a.claim, a.contracts, a.binShape);
+  if (byRouting) {
+    return {
+      matched: true,
+      contract: byRouting.contract,
+      rung: "routing",
+      why: byRouting.why,
+      says: byRouting.why.says,
+      confident: byRouting.why.confident,
+      caution: byRouting.why.caution,
+    };
+  }
+
+  /* ── Nothing resolved, said in the words of the thing that would fix it ── */
+  return {
+    matched: false,
+    networkId,
+    says: networkId
+      ? `No contract is tied to network ${networkId}, none states it, and its BIN, PCN and group match nothing on file. ` +
+        `Tie it to a contract on the payers page and every claim on this network follows.`
+      : `This claim carries no network id, and its BIN, PCN and group match no contract on file. ` +
+        `Nothing here can be settled by linking; the contract for this routing has to be filed first.`,
+    settleable: networkId !== null,
+  };
+}
+
+/**
+ * The documents worth offering for one network id, best guess first.
+ *
+ * This is the *only* place a name is allowed near this problem, and it is allowed because nothing
+ * here decides anything: it orders a list for a person who knows the answer. The ordering is a
+ * convenience and never a match — no caller may take the first entry as the contract. That
+ * distinction is the whole reason the resolver refuses name similarity and this does not.
+ *
+ * Ordered by: the document's counterparty being the payer this network's BIN resolves to, then a
+ * network name that contains the id, then everything else that was in force on the day, so the
+ * short list is short. Documents not in force on the fill date are left out entirely — offering a
+ * contract that cannot govern the claim is offering a wrong answer with a tick box beside it.
+ *
+ * Pure.
+ */
+export function candidatesFor(a: {
+  networkId: string;
+  /** Who the claim's BIN resolves to, where the site knows. Null where it does not. */
+  payerName: string | null;
+  contracts: (ContractForMatch & { networkNames?: string[] })[];
+  /** A date the candidate has to be in force on, where the caller has one. */
+  on?: string | null;
+}): { documentId: string; documentName: string; counterparty: string | null; networkNames: string[]; why: string }[] {
+  const id = norm(a.networkId);
+  const payer = norm(a.payerName);
+  const live = a.on ? a.contracts.filter((c) => inForceOn(c, a.on as string)) : a.contracts;
+
+  return live
+    .map((c) => {
+      const names = (c.networkNames ?? []).filter(Boolean);
+      const samePayer = payer !== null && norm(c.counterparty) !== null && (norm(c.counterparty)!.includes(payer) || payer.includes(norm(c.counterparty)!));
+      const namesId = id !== null && names.some((n) => norm(n)?.includes(id));
+      const rank = samePayer && namesId ? 0 : samePayer ? 1 : namesId ? 2 : 3;
+      return {
+        documentId: c.documentId,
+        documentName: c.documentName,
+        counterparty: c.counterparty,
+        networkNames: names,
+        rank,
+        why: samePayer
+          ? `${c.counterparty} is who this network's BIN resolves to`
+          : namesId
+            ? `a network on this document is named for ${a.networkId}`
+            : "in force on the day, nothing else connects it",
+      };
+    })
+    .sort((x, y) => x.rank - y.rank || x.documentName.localeCompare(y.documentName))
+    .map(({ rank: _rank, ...rest }) => rest);
 }
 
 /** The contract that governs this claim, most specific first, then the one that began most recently. */
