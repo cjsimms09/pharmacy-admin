@@ -257,6 +257,8 @@ export const SETTING_KEYS = [
   "data_health_last",
   // The nightly claims proof (scripts/prove-claims.ts) keeps its JSON result here for Data health to show.
   "claims_proof",
+  // The nightly rate backtest (scripts/backtest-rates.ts) keeps its JSON result here.
+  "rate_backtest",
   /* What the last drug-directory load parsed and wrote, so Data health can set it against the table. */
   "drug_directory_proof",
   "backup_restore_result",

@@ -207,6 +207,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         </p>
         <Field label="NPI"><input name="pharmacy_npi" className="field font-mono" defaultValue={s.pharmacy_npi} /></Field>
         <Field label="NCPDP / NABP number"><input name="pharmacy_ncpdp" className="field font-mono" defaultValue={s.pharmacy_ncpdp} /></Field>
+        {/* The owner, 8 September: "I dont see place to enter our TIN number?" — it was only on the 835 routing page. Every enrolment letter needs it. */}
+        <Field label="TIN (tax identification number)" hint="On every 835 enrolment letter and W-9. Digits only."><input name="pharmacy_tin" className="field font-mono" defaultValue={s.pharmacy_tin} inputMode="numeric" /></Field>
         <Field label="DEA registration"><input name="pharmacy_dea" className="field font-mono" defaultValue={s.pharmacy_dea} /></Field>
         <Field
           label="Chain codes"
