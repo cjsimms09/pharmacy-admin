@@ -565,6 +565,12 @@ seam is `depositExplanation(bankLineId)`, and the join table waits for the remit
 `docs/reference/payer-model.md` after A's audit. **Owner action: upload a bank statement at month
 end** — until one exists the cash side of the books has nothing to reconcile to.
 
+**The heap ceiling is not in force until the launcher itself restarts.** The 2.5 GB
+`--max-old-space-size` (commit `d4f1faa`) is set by `scripts/launch.mjs` when it spawns the app, and
+the launcher running since 7 September (pid 7296) is the old code — a deploy replaces the app, not
+the launcher. It takes effect at the next sign-in or the next "Start Pharmacy Admin.cmd". Owner
+action, or the next reboot.
+
 **The site's process is 1.6 GB (8 September, 9:02 AM, measured after the counter lost the
 page).** `next start` at 1,606 MB working set, 1,812 MB private, stable after the warm tick loads
 every held reading on a cold start; free memory on the machine 1.3 GB with two Claude sessions,
