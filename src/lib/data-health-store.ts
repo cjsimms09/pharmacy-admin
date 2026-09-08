@@ -349,6 +349,76 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
     };
   });
 
+  /*
+   * ── Which wholesalers have ever sent an invoice, and which have a returns policy ──
+   *
+   * Two rows for the two halves of a question the site could not answer on 8 September: the owner
+   * asked "is our system setup to make sure I am returning things when I need to?" and the honest
+   * answer was no, for a reason no screen showed. The arithmetic works. It had one invoice to work
+   * on — IPC, 4 September, eight lines — and no ANDA, IPD, ParMed or McKesson invoice has ever been
+   * loaded, so 1,200 lines on Return soon carry no supplier at all.
+   *
+   * Counted per wholesaler on the register, never per invoice, and that is the whole point of
+   * these two rows. The row above counts invoices that arrived and is structurally blind to the
+   * ones that never did: a wholesaler that has sent nothing contributes nothing to a numerator or
+   * a denominator, so four missing wholesalers read as a perfect score. Measuring against the
+   * register puts them in the denominator, where they show up as the gap they are.
+   *
+   * Resolved the way the rest of the site resolves a supplier — `supplier_id` first, then
+   * `supplierRecordFor` on the printed name — because an invoice filed under "Independent Pharmacy
+   * Cooperative" is IPC's invoice, and a row that says otherwise would be the third screen to
+   * disagree with the supplier card about the same eight lines.
+   */
+  const registryForInvoices = await allSuppliers(true);
+  const activeSuppliers = registryForInvoices.filter((r) => r.active);
+
+  await timed("supplier-invoices", async () => {
+    const sent = new Set<string>();
+    for (const i of invoiceRows) {
+      const owner = supplierRecordFor(registryForInvoices, i.supplier);
+      if (owner) sent.add(owner.id);
+    }
+    // An invoice whose lines named a supplier the invoice's own face did not counts too.
+    for (const l of lineRows) {
+      const owner = (l.supplierId && registryForInvoices.some((s) => s.id === l.supplierId) ? l.supplierId : null) ?? supplierRecordFor(registryForInvoices, l.supplier)?.id ?? null;
+      if (owner) sent.add(owner);
+    }
+    const never = activeSuppliers.filter((s) => !sent.has(s.id));
+    return {
+      numerator: activeSuppliers.length - never.length,
+      denominator: activeSuppliers.length,
+      gaps:
+        never.length === 0
+          ? []
+          : [
+              `No invoice has ever been loaded from: ${never.map((s) => s.name).join(", ")}. Nothing bought from them has a cost, a supplier or a return clock.`,
+            ],
+      note:
+        activeSuppliers.length === 0
+          ? "No wholesaler is on the register."
+          : never.length === 0
+            ? null
+            : "One invoice email from each closes this. The site reads an invoice from an address it does not know, so nothing has to be set up first.",
+    };
+  });
+
+  await timed("supplier-returns", async () => {
+    const { currentReturnPolicy } = await import("./supplier-terms-store");
+    const without: string[] = [];
+    for (const s of activeSuppliers) {
+      if (!(await currentReturnPolicy(s.id))) without.push(s.name);
+    }
+    return {
+      numerator: activeSuppliers.length - without.length,
+      denominator: activeSuppliers.length,
+      gaps: without.length === 0 ? [] : [`No returns policy on file for: ${without.join(", ")}. Nothing bought from them can be given a credit clock.`],
+      note:
+        without.length === 0
+          ? null
+          : "Typed from the wholesaler's own returns policy, as ANDA's was — never inferred, because a guessed window sends a bottle back on a date nobody agreed to.",
+    };
+  });
+
   // ── Invoice line → supplier → rebate ladder ──────────────────────
   const suppliers = await db.select({ id: schema.suppliers.id, name: schema.suppliers.name }).from(schema.suppliers);
   const programs = await db.select({ supplierId: schema.supplierRebatePrograms.supplierId }).from(schema.supplierRebatePrograms);
