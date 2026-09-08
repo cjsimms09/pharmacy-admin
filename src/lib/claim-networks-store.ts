@@ -215,7 +215,7 @@ export async function deduceNetworkLinks(user: { name: string }): Promise<{ link
     const here = r.candidates.filter((c) => /written for this pharmacy's chain code/.test(c.why));
     // Every one of the network's claims matched this document by its own BIN, PCN and group listing: the
     // guide prints the routing where it does not print the id (Optum's crosswalk is keyed that way).
-    const learnedAll = /^(d+) of this network's (d+) claims match it by BIN and group/.exec(top.why);
+    const learnedAll = /^(\d+) of this network's (\d+) claims match it by BIN and group/.exec(top.why);
     const allMatch = learnedAll !== null && learnedAll[1] === learnedAll[2];
     const decided = prints ? top : allMatch ? top : here.length === 1 ? here[0] : null;
     if (!decided) {

@@ -23,6 +23,23 @@ the tree dirty. The owner's balance-on-hand report is re-filed through the repai
 November 2025) is on the ANDA supplier: 100% within a year less the 20% handling fee, expired
 and eleven other categories non-returnable, the rest in its notes.
 
+**8 September, 15:40 (1) — the PSAO's networks guide closes the chain.** The owner uploaded
+Health Mart Atlas's 2025 Commercial and Medicaid Networks workbook (14 tabs). `psao-guide.ts`
+reads every tab (`xlsx.ts readSheets`) into 42 library documents, one per PBM, in the read-contract
+shape: 341 rate lines with the row as citation, 1,314 network ids from the crosswalks, Optum's
+BIN/PCN/group routing on its rate lines. `RateTerm.networkIds` and `network_rates.network_ids`
+(migration 0090) let the id decide the rate; `routes()` honours it. `applyAllReads` put 710 rate
+lines and 259 BIN links in. `deduceNetworkLinks` now links on a printed id, on every claim matching
+by the document's BIN/PCN/group, or on a payer's only document for our chain code: **61 of 82
+networks, 882 of 1,030 claims linked by the site, no clicks.** Open, 148 claims: Humana NET=0116/0111
+(50 — no Humana document exists; not an Atlas PBM), DODT5IND (24, Express Scripts TRICARE, not in
+the crosswalk), FEHBP01001 (11), and small ones. BACKLOG 23's backtest is next: price every linked
+claim from its rate and set it beside the remit. Caveats written on the links: ESI's EN45 is
+ES1000, expired 29 Nov 2025, so its 2026 claims price under a direct ESI agreement or Prime, not
+the guide's rate; the Optum rows note that 841 stores have no effective-rate contract. Also
+uploaded and queued: the 2026 guide as a one-tab CSV (send the .xlsx), the discount card and copay
+networks guide (BACKLOG 25), a RedSail copay-card remit confirmation (BACKLOG 24).
+
 **8 September, 15:20 (1) — two documents from the owner.** The PSAO's "2026 PBM Contracted
 Listing" (xlsx) is read by `pbm-listing.ts` (pure parse, tested) and loaded into `payer_bins`: 52
 PBMs, 597 BINs, 580 added, 79 updated with the listing's PBM as an alias, 61 BINs the listing puts
