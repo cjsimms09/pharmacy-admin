@@ -2333,11 +2333,20 @@ export const claimPayments = sqliteTable(
     receivedOn: text("received_on"),
     /** The remittance or file this came from, so it can be traced back. */
     reference: text("reference"),
+    /**
+     * The document this payment was read out of, so a wrong reading can be taken back out.
+     *
+     * Not `reference`, which is the payer's own check number: a statement that prints no check
+     * number has none, and two statements can share one. Null on every payment recorded before the
+     * column existed and on any typed in by hand, which is why the undo says when it cannot reach a
+     * payment rather than deleting on a guess.
+     */
+    documentId: text("document_id"),
     notes: text("notes"),
     recordedBy: text("recorded_by").notNull(),
     createdAt: text("created_at").notNull().default(now()),
   },
-  (t) => [index("claim_payments_claim_idx").on(t.claimId), index("claim_payments_rx_idx").on(t.rxNumber), index("claim_payments_received_idx").on(t.receivedOn)],
+  (t) => [index("claim_payments_claim_idx").on(t.claimId), index("claim_payments_rx_idx").on(t.rxNumber), index("claim_payments_received_idx").on(t.receivedOn), index("claim_payments_document_idx").on(t.documentId)],
 );
 
 export const planGroups = sqliteTable(

@@ -245,6 +245,8 @@ export async function addCashReceipt(input: {
   amountCents: number;
   payer?: string | null;
   notes?: string | null;
+  /** The document it was read out of, so a deposit banked from a misread file can be found again. */
+  documentId?: string | null;
   createdBy: string;
   /** Stable identity for the thing that was read — "835|payer|trace|date". Never banked twice. */
   sourceKey?: string | null;
@@ -286,6 +288,7 @@ export async function addCashReceipt(input: {
     amountCents,
     payer: input.payer ?? null,
     notes: input.notes ?? null,
+    documentId: input.documentId ?? null,
     createdBy: input.createdBy,
     sourceKey: input.sourceKey ?? null,
     receivedOn: input.receivedOn ?? null,

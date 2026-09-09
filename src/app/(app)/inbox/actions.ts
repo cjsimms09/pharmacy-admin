@@ -531,3 +531,29 @@ export async function reRouteInboxItem(fd: FormData) {
     fail("/inbox", e instanceof Error ? e.message : "Could not re-route that document.");
   }
 }
+
+/**
+ * The other half of the fix: taking a wrong reading back out.
+ *
+ * `reRouteInboxItem` above loads the document as what it really is and leaves what the wrong
+ * reading wrote where it stands, which is honest and, for a remittance, not good enough — an 835
+ * or a copay statement read out of the wrong file puts money against fills and a deposit in the
+ * bank account, and no screen in this site lists a claim payment or removes one.
+ *
+ * It is deliberately not offered for anything else. `inbox-undo.ts` holds, kind by kind, what a
+ * load actually wrote and whether it can be reached; the screen says that sentence, and this
+ * refuses anything the screen did not promise.
+ */
+export async function undoInboxItem(fd: FormData) {
+  const itemId = String(fd.get("itemId") ?? "");
+  if (!itemId) fail("/inbox", "Nothing was chosen to take back out.");
+
+  const { requireManager } = await import("@/lib/auth");
+  const { undoInboxItem: run } = await import("@/lib/inbox-undo-store");
+  const user = await requireManager();
+
+  const r = await run(itemId, { id: user.id, name: user.name });
+  revalidatePath("/inbox");
+  if (!r.ok) fail("/inbox", r.said);
+  redirect(`/inbox?ok=${encodeURIComponent(`Taken back out. ${r.said}`)}`);
+}

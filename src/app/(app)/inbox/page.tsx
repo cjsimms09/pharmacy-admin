@@ -12,7 +12,8 @@ import { CATEGORIES } from "@/lib/intake-recognise";
 import { senderRules, describeRule, recogniseStored } from "@/lib/intake-recognise-store";
 import type { Recognition } from "@/lib/intake-recognise";
 import { sourceOf, storyOf, summarise } from "@/lib/inbox-line";
-import { reRouteInboxItem, fileInboxItem, deleteInboxItem, sweepNow, rereadItem, sortInboxItem, attributeInboxItem, teachInboxItem, forgetIntakeRule } from "./actions";
+import { leftBehind, willWriteShort, isRemovable } from "@/lib/inbox-undo";
+import { reRouteInboxItem, undoInboxItem, fileInboxItem, deleteInboxItem, sweepNow, rereadItem, sortInboxItem, attributeInboxItem, teachInboxItem, forgetIntakeRule } from "./actions";
 
 
 /**
@@ -209,14 +210,40 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
                           <select name="kind" defaultValue="" className="field text-xs">
                             <option value="">What is this document?</option>
                             {ROUTE_CHOICES.map((c) => (
-                              <option key={c.kind} value={c.kind}>{c.label}</option>
+                              <option key={c.kind} value={c.kind}>{c.label} — {willWriteShort(c.kind) ?? "…"}</option>
                             ))}
                           </select>
                           <button className="btn btn-primary text-xs" type="submit">Load it as this</button>
+                          {/*
+                            What the reading being overruled actually left behind, for this kind
+                            rather than for all of them. The sentence here used to be one vague line
+                            shown for all fourteen — which reads as reassurance on a remittance that
+                            banked money and as alarm on a catalogue that gets repriced by morning.
+                          */}
                           <p className="text-[11px] leading-snug text-ink-3">
-                            Runs the same loader the sweep runs, told the answer. It loads the right thing; it does
-                            not undo what a wrong reading already changed.
+                            Runs the same loader the sweep runs, told the answer. {leftBehind(i.routedAs)}
                           </p>
+                        </form>
+                      </details>
+                    )}
+                    {/*
+                      Taking a remittance back out. Offered on the two kinds where a wrong reading
+                      moved money and the rows can be identified — every payment and deposit those
+                      two readers write carries the id of the document it came from — and on no
+                      others, because an undo that deletes on a guess is worse than none.
+                    */}
+                    {isRemovable(i.routedAs) && i.documentId && (
+                      <details className="mb-2">
+                        <summary className="cursor-pointer text-xs text-crit hover:underline">Take the money back out</summary>
+                        <form action={undoInboxItem} className="mt-2 grid gap-2">
+                          <input type="hidden" name="itemId" value={i.id} />
+                          <p className="text-[11px] leading-snug text-ink-3">
+                            Deletes every payment and bank deposit recorded from this document, and nothing else.
+                            Use it where this was not a remittance at all, or was somebody else&rsquo;s. Payments loaded
+                            before the site began recording which document they came from cannot be reached, and it
+                            will say so rather than delete the wrong ones.
+                          </p>
+                          <button className="btn text-xs" type="submit">Remove what this loaded</button>
                         </form>
                       </details>
                     )}
