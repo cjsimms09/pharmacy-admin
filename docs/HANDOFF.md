@@ -986,6 +986,14 @@ mine and the change is additive; saying so here and on the pull request.
 **The Add tool's list.** `copay_remittance` — "A copay voucher remittance (RedSail RAS)" — added to
 `FILE_KINDS`. The 835 row was already there.
 
+**And the bounded reader's claim is now tested rather than asserted** (`tests/zip-read-bounded.test.ts`).
+A docstring promising safety that nobody has tried to break is not evidence, so: an archive of a few
+tens of kilobytes describing 64 MB of zeros is skipped before anything is inflated where it declares
+its true size, and **stopped by zlib's own ceiling where it lies about it** — which is the case that
+justifies passing `maxOutputLength` rather than trusting the central directory. A remittance sitting
+beside a hostile member still comes back. And there is a test that **`readZip` still throws** where
+the bounded one shrugs, so if anybody ever unifies them the FDA loader's guard fails loudly.
+
 **And what you did that I had held back.** `b1209cd` put `remittance_835` on `classify()` *and* the
 route into `importRecognised` in the same change, which is exactly the pairing I said the seam
 needed — so the drop path still reaches `importRemittance` and nothing regressed. I have checked it.
