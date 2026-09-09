@@ -55,7 +55,20 @@ async function loadMinimums(): Promise<MinimumsView> {
   const [view, move, rates] = await Promise.all([buyListNow(), shelfMovement(), contractRatesBySupplier()]);
   const missing = [...view.missing];
 
-  const items = await db.query.supplierItems.findMany({ columns: { supplier: true, ndc11: true, itemNumber: true, description: true, unitCostMicros: true, packSize: true, contractFlag: true, availability: true } });
+  /*
+   * The levelled catalogue, not the raw table.
+   *
+   * This read the supplier_items table directly until 9 September, and the raw table carries the
+   * unit cost as the wholesaler's export printed it. For a McKesson, ANDA or ParMed multi-pack —
+   * "(5) 1 ML", "(3) 28 EA" — that printed figure is the carton's cost over the inner pack alone,
+   * so it is n times too high: 1,593 of the 2,147 multi-packs with a NADAC land at the benchmark
+   * only once divided by the bracket. catalogue-cache levels every row to the whole package
+   * (wholePackage), applies the pharmacy's pack fixes and the majority rule, and withholds the rows
+   * that fail the price check; the shelf, the buy list and the planner all read it. This page did
+   * not, so every multi-pack add-on it ranked was priced up to thirty times too high, in the
+   * direction that sends the order to whoever printed the pack without a bracket.
+   */
+  const items = await (await import("./catalogue-cache")).catalogueRows();
   const offers: Offer[] = [];
   const names = new Map<string, string | null>();
   for (const it of items) {

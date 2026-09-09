@@ -856,19 +856,21 @@ a remittance that fails either is held whole, shown on Remits with the two figur
 matched until it is read again or the owner accepts the difference by name. The facilitator's 835s and RedSail's
 copay remits (item 24) go through the same gate. 1 builds it after the PioneerRx feeds (item 6).
 
-### 34. McKesson's "(5) 1 ML" multi-pack reads as one unit, so the unit cost is five times too high (9 September)
+### 34. Multi-pack unit costs: the printed "Cost Per Unit" is n times too high, and one page read it raw (9 September)
 
-Found by the first run of 2's catalogue proof (`scripts/prove-catalogue.ts`). McKesson 81284041105, "DIHYDRO MES
-INJ1MG ML PROV5", pack printed "(5) 1 ML": the pack reader takes the last number and reads packQty 1, so the
-table holds $272.10 per mL for a carton of five 1 mL vials whose true figure is $54.42. The "(n) size" form is
-McKesson's convention for multi-packs; the majority pack rule (item 18) cannot catch it where McKesson is the
-only supplier of the NDC, and the FDA directory's pack is the count of the outer package. What to build: read
-"(n) size" as n times size in the McKesson pack reader, with a test on this line and on "(10) 5 ML"; then a
-sweep of supplier_items for pack strings in that form to see how many prices it moved. Also from that run,
-settled rather than open: every "price differs" the proof reported was a second listing of the same NDC in the
-same file (539 NDCs in McKesson's, 19 in IPC's), and the importer keeps the cheapest listing; 2 is changing the
-proof to prove an NDC against any of its lines and count duplicates as their own figure. The tables match their
-files exactly.
+Found by the first run of 2's catalogue proof and settled the same night. PioneerRx's catalogue export prints a
+"Cost Per Unit" that, for a bracketed pack — McKesson, ANDA and ParMed write multi-packs as "(5) 1 ML", "(3) 28
+EA" — is the carton's cost over the inner pack alone, so it is n times too high. Proved against NADAC: of 2,147
+multi-pack rows with a NADAC, 1,593 land at the benchmark only once divided by the bracket, 30 fit as printed,
+524 fit neither (worth their own look: brand rows against a generic NADAC, and packs whose bracket is not a
+count). `catalogue-cache.ts wholePackage` already levels every row to the whole package at read time, so the
+shelf, the buy list and the planner were right. `minimum-store.ts` — the secondary-supplier add-on list on What
+to add — read the raw table and so priced every multi-pack add-on up to thirty times too high, in the direction
+that sends the order to whoever printed the pack without a bracket. Fixed the same night: it reads the levelled
+catalogue like everything else. Still raw, and to check: `appeals.ts` and the invoice-side readers that derive a
+unit cost from a pack. Also from that run, settled: every "price differs" the proof reported was a second listing
+of the same NDC in the same file (539 NDCs in McKesson's, 19 in IPC's); the importer keeps the cheapest
+full-dated listing, and 2's proof now proves an NDC against any of its lines. The tables match their files.
 
 ## The data the site has to ingest
 
