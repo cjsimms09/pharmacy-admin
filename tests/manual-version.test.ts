@@ -112,3 +112,4 @@ describe("where a person's acknowledgement stands", () => {
     assert.equal(ackState("legacy", current), "unknown");
   });
 });
+

@@ -623,6 +623,18 @@ export function policies(pharmacy: string): ManualPolicy[] {
       ],
     },
     {
+      key: "third_party_payments",
+      title: "Claims, remittances and what a plan actually paid",
+      authority: "K.A.R. 68-7-12; 45 CFR 164.530(j); 45 CFR 164.502(b).",
+      text: [
+        `What ${pharmacy} was paid for a dispensing is kept as a record in its own right, alongside the prescription record. The claim as adjudicated is read from the pharmacy's own daily dispensing report; the money that later arrives against it is read from the remittance the payer sends.`,
+        "Remittances are received electronically and read into figures rather than filed as documents to be read by hand. Each payment is matched to the dispensing it settles by prescription number, fill number and date of service. A payment matching no dispensing on file is held and listed as unmatched — it is never discarded, and never attached to a dispensing it does not belong to on a partial match.",
+        "The deposit recorded against a remittance is the amount the payer states it paid, not the sum of the claims it settles. Where those differ — because the payer held money back at remittance level — the difference is recorded on the receipt with the reason the payer gave, so that the gap between what was banked and what the dispensings came to is stated rather than absorbed into either figure.",
+        "The pharmacy does not transmit remittance information anywhere. These records are received, read and held on the pharmacy's own computer inside the pharmacy; the minimum necessary standard at 45 CFR 164.502(b) is met by nothing leaving the pharmacy rather than by limiting what does.",
+        "Payment records are retained for five years with the prescription records they belong to, and are included in the pharmacy's daily verified backup.",
+      ],
+    },
+    {
       key: "records",
       title: "Records, retention and backup",
       authority:
