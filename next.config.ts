@@ -48,7 +48,17 @@ const nextConfig: NextConfig = {
    */
   eslint: { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors: true },
-  serverExternalPackages: ["@libsql/client", "imapflow", "mailparser"],
+  /*
+   * Packages the server loads itself, rather than webpack bundling them.
+   *
+   * `ssh2-sftp-client` and `ssh2` are here for the same reason `imapflow` is: the SFTP mailbox
+   * (`sftp-pull.ts`, reached from `instrumentation.ts`) pulls in `ssh2`, which ships a compiled
+   * `sshcrypto.node`, and webpack has no loader for a native binary — so `next build` fails with
+   * "Module parse failed: Unexpected character" and the site cannot be deployed at all. The
+   * dynamic `await import()` in `instrumentation.ts` is not enough on its own; Next still traces
+   * it into the server bundle.
+   */
+  serverExternalPackages: ["@libsql/client", "imapflow", "mailparser", "ssh2-sftp-client", "ssh2"],
   experimental: {
     /*
      * Server actions are refused when the browser's Origin does not match the host the app thinks

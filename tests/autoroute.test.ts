@@ -163,7 +163,7 @@ describe("an 835 emailed in, under any name", () => {
     "latin1",
   );
 
-  test("the extensions no rule about names would let through", () => {
+  test("whatever it is called, and called nothing at all", () => {
     for (const [filename, contentType] of [
       ["REMIT_20260908.835", "application/octet-stream"],
       ["remit.edi", "application/octet-stream"],
@@ -176,9 +176,23 @@ describe("an 835 emailed in, under any name", () => {
     }
   });
 
-  test("and the envelope is what decides, not the name", () => {
-    // Named like a remittance, but the bytes are not one. The name alone must never open the door.
-    const v = acceptableAttachment({ filename: "remittance.835", contentType: "application/octet-stream", content: Buffer.from("Dear pharmacy, your remittance is attached.\n") });
+  /*
+   * The envelope's own contribution, now that the name rules have caught up with it.
+   *
+   * `45dba2b` added `.835`, `.edi`, `.x12`, `.dat` and `.xml` to `REPORT_EXT`, so those names are
+   * admitted at the door on their name, the way a `.csv` is — and the door only decides what the
+   * site will look at, never what a document is. What the envelope still adds, and what these two
+   * cases hold, is the file whose name is no help at all.
+   */
+  test("the envelope carries a name no rule would admit", () => {
+    const v = acceptableAttachment({ filename: "PAYER_REMIT_0908.rmt", contentType: "application/octet-stream", content: era });
+    assert.ok(v.ok, `an 835 named .rmt should be accepted: ${v.ok ? "" : v.why}`);
+  });
+
+  test("and a name no rule would admit is not opened by looking like a remittance", () => {
+    // The words say a covering note. The name says remittance. Neither the envelope nor the
+    // extension list is satisfied, so it is refused — the name on its own never opens the door.
+    const v = acceptableAttachment({ filename: "remittance.rmt", contentType: "application/octet-stream", content: Buffer.from("Dear pharmacy, your remittance is attached.\n") });
     assert.equal(v.ok, false);
   });
 });

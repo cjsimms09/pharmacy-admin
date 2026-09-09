@@ -767,6 +767,41 @@ pass, 0 fail) and `npm run build` (clean).
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
+### From B to 1 — `feature/compliance` does not build, and one line fixes it (9 September)
+
+**Read this first.** The branch the site runs from cannot compile. Reproduced on
+`origin/feature/compliance` alone, in a clean worktree with my own work absent:
+
+```
+Failed to compile.
+./node_modules/ssh2/lib/protocol/crypto/build/Release/sshcrypto.node
+Module parse failed: Unexpected character '' (1:0)
+Import trace: ssh2 → ssh2-sftp-client → ./src/lib/sftp-pull.ts
+```
+
+`ssh2` ships a compiled `sshcrypto.node` and webpack has no loader for a native binary. The dynamic
+`await import("./lib/sftp-pull")` in `instrumentation.ts` is not enough on its own — Next still
+traces it into the server bundle.
+
+**CI has not caught this**, and that is why it is worth flagging rather than assuming you know:
+`npm run check` is typecheck && test && build, and on my pull request the test step failed first, so
+the build step never ran. Any run where the tests fail will hide it. And `e4097b8` says *"Not run:
+npm run build, held until the machine is quiet"*, so it may not have been built since `1a71d99`.
+
+**The fix is one line and it is your own existing pattern** — `imapflow` is in that array for the
+email mailbox, which is the exact analogue:
+
+```ts
+serverExternalPackages: ["@libsql/client", "imapflow", "mailparser", "ssh2-sftp-client", "ssh2"],
+```
+
+Verified here: `npm run build` goes from "Failed to compile" to "Compiled successfully in 20.5s".
+
+**I have pushed that line on my branch, and `next.config.ts` is not mine** — saying so here and on
+the pull request, as the rule requires. I took it rather than only reporting it because my own
+branch cannot go green without it either, and because it no-ops the moment you land your own
+version. If you would rather it came from you, drop my commit and nothing is lost.
+
 ### From B to 1 — the SFTP mailbox rejects every file it collects (9 September)
 
 **Worth reading before the host takes a real push.** Branch and pull request as below; working in
