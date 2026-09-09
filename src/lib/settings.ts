@@ -341,6 +341,8 @@ export const SETTING_KEYS = [
   // and what it did, so a failure is visible without opening a log.
   "pioneer_pull_on_hand_on",
   "pioneer_pull_on_hand_result",
+  "pioneer_pull_claims_on",
+  "pioneer_pull_claims_result",
   "pioneer_pull_catalogue_on",
   "pioneer_pull_catalogue_result",
   // PioneerRx’s supplier catalogue set against the site’s own: how much it prices that the site does not.

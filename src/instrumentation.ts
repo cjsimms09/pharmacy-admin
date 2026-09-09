@@ -337,7 +337,7 @@ export async function register() {
       if (!s.pioneer_sql_server || !s.pioneer_sql_user) return;
       const today = new Date().toISOString().slice(0, 10);
       const catalogueDue = new Date().getDay() === 1 || !s.pioneer_pull_catalogue_on;
-      if (s.pioneer_pull_on_hand_on === today && !catalogueDue) return;
+      if (s.pioneer_pull_on_hand_on === today && s.pioneer_pull_claims_on === today && !catalogueDue) return;
       const { spawn } = await import("node:child_process");
       const path = await import("node:path");
       const root = process.cwd();
