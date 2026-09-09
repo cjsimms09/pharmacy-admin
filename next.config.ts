@@ -48,7 +48,13 @@ const nextConfig: NextConfig = {
    */
   eslint: { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors: true },
-  serverExternalPackages: ["@libsql/client", "imapflow", "mailparser"],
+  /*
+   * ssh2 and mssql are loaded from node_modules at run time rather than bundled: ssh2 probes for
+   * its native crypto and cpu-features modules with paths a bundle cannot resolve (the build warned,
+   * and the app spun at full CPU ten seconds after starting on the first build that bundled it),
+   * and tedious carries the same kind of optional native pieces.
+   */
+  serverExternalPackages: ["@libsql/client", "imapflow", "mailparser", "ssh2", "ssh2-sftp-client", "mssql", "tedious"],
   experimental: {
     /*
      * Server actions are refused when the browser's Origin does not match the host the app thinks
