@@ -617,6 +617,16 @@ export function policies(pharmacy: string): ManualPolicy[] {
         "Circumstances calling for resolution before dispensing include: a prescription outside the prescriber's usual scope or specialty; a patient travelling an unusual distance past other pharmacies; early refills or a pattern of lost or stolen prescriptions; cash payment for a controlled substance by an insured patient; identical drug, strength and quantity across a prescriber's patients; and alterations to quantity, refills or date on a paper prescription.",
         "K-TRACS is consulted where the circumstances call for it. Resolution is by contact with the prescriber, and what was asked and answered is recorded.",
         "A refusal is recorded with the reason. Where a refusal arises from suspected diversion or a forged prescription it is raised with the pharmacist-in-charge, who determines whether it is reportable.",
+        /*
+         * A real deadline that lived only in a training course until now.
+         *
+         * The technician material carried the 72 hours and the manual did not, which is the shape
+         * of finding worth naming: the pharmacy is inspected against the manual, and a rule it
+         * meets every day was written down nowhere the inspector reads. It is stated here once, in
+         * the section about dispensing controlled substances, and the daily log statement and
+         * signature sheet the site produces are what discharges it.
+         */
+        "Where the pharmacy's dispensing records are kept on a computer, the day's refills of Schedule III to V controlled substances are accounted for within 72 hours of the day they were dispensed — as a matter of course, not on request. Both 21 CFR 1306.22(f)(3) and K.A.R. 68-20-18a(c)(2)(A)(ii) allow two ways of doing it: a printout of that day's refill data provided to the pharmacy within 72 hours, or a bound logbook in which a pharmacist signs each day that the day's refill information has been reviewed and is correct. This pharmacy keeps the bound logbook; the statement pasted inside its cover and the monthly signature sheet are produced by this system and are described at Appendix A.",
       ],
     },
     {

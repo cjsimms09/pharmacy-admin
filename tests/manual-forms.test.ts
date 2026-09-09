@@ -177,3 +177,40 @@ describe("records are produced on request, not against a made-up clock", () => {
     assert.match(r().authority, /68-20-16/);
   });
 });
+
+/*
+ * The 72-hour refill rule, which is real and lived only in a training course.
+ *
+ * 21 CFR 1306.22(f)(3) and K.A.R. 68-20-18a(c)(2)(A)(ii) require the day's Schedule III to V refill
+ * data to be accounted for within 72 hours of dispensing — not on request — or a bound logbook
+ * signed daily. The technician material carried it, worded as a produce-on-request deadline, and
+ * the manual carried nothing. The pharmacy is inspected against the manual, so a rule it meets
+ * every day was written down nowhere the inspector reads.
+ *
+ * The invented 48 hours was found beside it and removed. Getting these two the wrong way round
+ * would have been the expensive mistake: deleting a real daily duty because a neighbouring
+ * invention turned up.
+ */
+describe("the daily controlled substance refill record", () => {
+  const d = () => policies("West Wichita Family Pharmacy").find((x) => x.key === "controlled_dispensing")!;
+
+  test("the manual states the rule itself, rather than leaving it to a training course", () => {
+    assert.match(d().text.join(" "), /within 72 hours of the day they were dispensed/);
+  });
+
+  test("it says the duty is standing, not triggered by a request", () => {
+    // Taught as "produce on request" it would never be done, because nobody requests it.
+    assert.match(d().text.join(" "), /as a matter of course, not on request/);
+  });
+
+  test("both lawful routes are named, and which one this pharmacy uses", () => {
+    const text = d().text.join(" ");
+    assert.match(text, /a printout of that day's refill data provided to the pharmacy within 72 hours, or a bound logbook/);
+    assert.match(text, /This pharmacy keeps the bound logbook/);
+  });
+
+  test("both authorities are cited, state and federal", () => {
+    assert.match(d().text.join(" "), /21 CFR 1306\.22\(f\)\(3\)/);
+    assert.match(d().text.join(" "), /K\.A\.R\. 68-20-18a\(c\)\(2\)\(A\)\(ii\)/);
+  });
+});
