@@ -5,11 +5,15 @@
 # Two accounts, both locked to one folder and to SFTP only (no shell, no port forwarding):
 #   - a sender account for each company that pushes files (RedSail first), with a password,
 #     because that is what their systems support; it can write into /inbox and nothing else;
-#   - the site's own account, with the public key from data/sftp/pharmacy_ed25519.pub on the
+#   - the site's own account "collector", with the public key from data/sftp/pharmacy_ed25519.pub on the
 #     pharmacy computer, which collects from /inbox and moves what it took to /inbox/done.
 #
 # Run as root on the host, once:
-#   sudo bash sftp-host-setup.sh "<pharmacy public key line>" redsail "<password for redsail>"
+#   sudo bash sftp-host-setup.sh "<site public key line>" redsail "<password for redsail>"
+#
+# Give it the key LINE itself ("ssh-ed25519 AAAA… collector"), not the first line of the admin
+# account’s authorized_keys: on a Google Cloud host that file starts with a comment the guest agent
+# writes, and the collector account was created with the comment as its key the first time.
 #
 # Add another sender later:
 #   sudo bash sftp-host-setup.sh --sender caremark "<password>"
@@ -53,7 +57,9 @@ add_sender() {
 }
 
 add_site() {
-  local pubkey="$1" name=pharmacy
+  # Not the admin account the host was created with (that one keeps its shell and sudo for
+  # maintenance); a second account with the same key, locked to the folder like every sender.
+  local pubkey="$1" name=collector
   id "$name" >/dev/null 2>&1 || useradd -M -d / -s /usr/sbin/nologin -G "$GROUP" "$name"
   usermod -aG "$GROUP" "$name"
   mkdir -p "/etc/ssh/authorized_keys.d"

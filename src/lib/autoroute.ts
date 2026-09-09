@@ -305,7 +305,8 @@ export function supplierFor(rules: { pattern: string; supplier: string }[], from
  * spreadsheet types reports come as; kept here so the acceptance rule can be tested without a
  * mailbox.
  */
-const REPORT_EXT = /\.(pdf|csv|tsv|txt|xls|xlsx|jpg|jpeg|png)$/i;
+// .835, .edi, .x12 and .dat are how remittances arrive (BACKLOG 27); .xml is how some plans send them.
+const REPORT_EXT = /\.(pdf|csv|tsv|txt|xls|xlsx|jpg|jpeg|png|835|edi|x12|dat|xml)$/i;
 const REPORT_MIME = new Set([
   ...ALLOWED_MIME,
   "text/csv",

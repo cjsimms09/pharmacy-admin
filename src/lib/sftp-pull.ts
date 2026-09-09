@@ -114,7 +114,15 @@ export async function pullSftp(ctx: { userId: string | null; userName: string | 
           continue;
         }
         const buf = (await client.get(remote)) as Buffer;
-        const verdict = acceptableAttachment({ filename: f.name, content: buf });
+        /*
+         * A file on an SFTP host has no content type, so one is given from what it is: an X12
+         * envelope ("ISA*…") is a remittance whatever it is named, text is text, and anything
+         * else is a plain stream, which the acceptance rule lets through when the name is known.
+         */
+        const head = buf.subarray(0, 4).toString("latin1");
+        const ext = (/\.([A-Za-z0-9]{1,5})$/.exec(f.name)?.[1] ?? "").toLowerCase();
+        const contentType = head === "ISA*" ? "application/octet-stream" : ext === "csv" ? "text/csv" : ext === "txt" || ext === "tsv" ? "text/plain" : ext === "pdf" ? "application/pdf" : "application/octet-stream";
+        const verdict = acceptableAttachment({ filename: f.name, contentType, content: buf });
         if (!verdict.ok) {
           await db.insert(schema.inboxItems).values({ id: itemId, messageId, receivedAt, fromAddress: from, subject: f.name, fileName: f.name, status: "rejected", reason: verdict.why });
           result.rejected++;
@@ -129,7 +137,7 @@ export async function pullSftp(ctx: { userId: string | null; userName: string | 
           await client.rename(remote, `${c.folder.replace(/\/$/, "")}/done/${f.name}`).catch(() => undefined);
           continue;
         }
-        const file = new File([new Uint8Array(buf)], f.name, { type: "application/octet-stream" });
+        const file = new File([new Uint8Array(buf)], f.name, { type: contentType });
         const stored = await storeFile(file, { allowReportTypes: true });
         const docId = newId();
         await db.insert(schema.documents).values({
