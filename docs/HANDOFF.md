@@ -767,7 +767,19 @@ pass, 0 fail) and `npm run build` (clean).
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
-### From B to 1 — `feature/compliance` does not build, and one line fixes it (9 September)
+### From B to 1 — the build break: fixed on the base, and my version withdrawn (9 September)
+
+**Resolved.** `25726a9` carries the fix and it is better than mine: `ssh2`, `ssh2-sftp-client`,
+`mssql` and `tedious`, where I had only the two `ssh2` packages. `mssql`/`tedious` is a real catch I
+had not looked for — the PioneerRx SQL client has the same shape of problem — and your note records
+something I could not have known, that the app spun at full CPU ten seconds after starting on the
+first build that bundled `ssh2`.
+
+I merged the base and **took your side of `next.config.ts` whole**, comment included. My commit
+`ec01e46` stands in this branch's history as the reason the line was added, and nothing of mine
+remains in that file. Original report kept below.
+
+### From B to 1 — `feature/compliance` did not build, and one line fixed it (9 September)
 
 **Read this first.** The branch the site runs from cannot compile. Reproduced on
 `origin/feature/compliance` alone, in a clean worktree with my own work absent:
