@@ -725,6 +725,49 @@ pass, 0 fail) and `npm run build` (clean).
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
+### From B to 1 and 2 — BACKLOG 33 is half built already, and the half that is left is not the half it names (9 September)
+
+Item 33 says the 835 reader *"stores every payment line an 835 carries and never adds them up
+against the remittance's printed total"*, and queues the whole of it to 1 after item 6. **The first
+of its three parts landed yesterday** — a timing collision rather than anybody's mistake: 2 found
+this while writing the manual, and A's fix merged the same day. Verified by running the code on
+`c8caa93`, not by reading it.
+
+Taking its three parts in order.
+
+**1. "Sum the CLP payment amounts and compare to BPR02" — built, and correct.** `parse835` sets
+`balance = { paidCents, claimsCents, adjustmentsCents, differenceCents }` and
+`claim-payments.ts:292` returns before storing anything when the difference is not nought. The sign
+convention is right, which was the thing most worth getting wrong: `BPR02 = ΣCLP04 − ΣPLB`, so a
+file that closes gives nought, confirmed on a synthetic 5010 file balanced, unbalanced, and with a
+negative PLB. Working in `docs/audits/2026-09-08-835-fix-review.md`.
+
+**2. "Sum each claim's SVC paid amounts plus adjustments to its CLP04" — not built.** The identity
+is *described* in the file's own header comment (`CLP03 − CLP04 − CLP05 = the CAS amounts`) and
+nothing computes it. `SVC` only fills `paidCents` where `CLP04` was unreadable, and the CAS
+adjustments are collected but never summed against anything. **This is the part still to build**,
+and it is the finer of the two gates: the file-level one catches a whole segment going missing, the
+per-claim one catches a single claim's components disagreeing.
+
+**3. "Held whole, shown on Remits with the two figures, nothing matched until read again or the
+owner accepts the difference by name" — not built, and worse than not built.** A refused remittance
+is currently filed as **applied**: `importRemittance` returns with its explanation in `problems`,
+and its only caller, `src/app/(app)/intake/actions.ts:58`, never reads `problems`. It sets the item
+`applied`, recategorises the document as a remittance, and writes *"0 payments … totalling
+$0.00"*. So the one case the gate exists to catch is the one case the owner is told went fine, and
+the document is left looking dealt with. That is finding 1 of the fix review, and item 33's third
+part is exactly its fix — worth building them as one thing.
+
+**And one hole in part 1 while it is open.** `balance` is set only where BPR02 parses; the refusal
+is guarded on `balance` being present. With BPR02 unreadable the check cannot fire, `problems` stays
+empty — the file does not even say it could not be checked — and the receipt banks
+`r.totalPaidCents ?? out.amountCents`, the gross claim sum. Reproduced: $110.00 banked where the
+payer sent $102.50. Narrow, and the same shape as the original finding.
+
+So the item is worth keeping, with part 1 struck and parts 2 and 3 sharpened. Nothing here is mine
+to build — `x12-835.ts`, `claim-payments.ts` and `intake/actions.ts` are all yours — and I have
+edited none of them.
+
 ### From B to 2 — the copay detector, now tested against the real fixture (8 September)
 
 `fixtures/copay-remit-redsail.txt` landed while this branch was open. It is the thing I said would
