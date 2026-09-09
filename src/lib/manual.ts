@@ -484,8 +484,17 @@ export function policies(pharmacy: string): ManualPolicy[] {
       title: "Temperature monitoring and review",
       authority: "CDC Vaccine Storage and Handling Toolkit; USP 1079.",
       text: [
-        `Refrigerated and room-temperature storage at ${pharmacy} is monitored continuously by an electronic logging sensor, and readings are collected automatically into the pharmacy's compliance system.`,
-        "The acceptable range for each sensor is recorded against that sensor. Any reading outside its range is flagged as an excursion and appears on a single list of excursions awaiting explanation.",
+        /*
+         * "Continuously" was the word here and it is not what this pharmacy does.
+         *
+         * The owner, asked: one data logger, four readings a day, records kept. Four readings a day
+         * is a defensible practice and continuous monitoring is a different and larger promise —
+         * and a manual is a standard the pharmacy is held to, so claiming the larger one turns a
+         * sound practice into a finding against itself. The number is stated rather than described,
+         * because "regularly" would leave an inspector to decide what regular means.
+         */
+        `Refrigerated and room-temperature storage at ${pharmacy} is monitored by an electronic data logger, which records four readings a day. Readings are collected automatically into the pharmacy's compliance system; no reading is transcribed by hand.`,
+        "The acceptable range for each logger is recorded against it. Any reading outside that range is flagged as an excursion and appears on a single list of excursions awaiting explanation.",
         "Every excursion must have a written explanation stating what happened and what was done about it, including the disposition of any affected stock. A month cannot be signed off while any excursion in it is unexplained.",
         "At the end of each month the pharmacist-in-charge reviews the month and signs it off. The signed month, its readings and its explanations are retained for five years and can be printed on demand.",
       ],
@@ -620,18 +629,6 @@ export function policies(pharmacy: string): ManualPolicy[] {
         "Every compounded preparation is assigned a beyond-use date by the applicable USP 795 default for its dosage form, and is labelled with that date. Beyond-use dates are not assigned by estimate.",
         "Compounding is carried out in a defined area kept clean and separate from routine dispensing traffic, using clean equipment dedicated to that purpose. Where a balance is used it is kept within calibration.",
         "The scope, records, dating, equipment and area are checked at each self-inspection.",
-      ],
-    },
-    {
-      key: "third_party_payments",
-      title: "Claims, remittances and what a plan actually paid",
-      authority: "K.A.R. 68-7-12; 45 CFR 164.530(j); 45 CFR 164.502(b).",
-      text: [
-        `What ${pharmacy} was paid for a dispensing is kept as a record in its own right, alongside the prescription record. The claim as adjudicated is read from the pharmacy's own daily dispensing report; the money that later arrives against it is read from the remittance the payer sends.`,
-        "Remittances are received electronically and read into figures rather than filed as documents to be read by hand. Each payment is matched to the dispensing it settles by prescription number, fill number and date of service. A payment matching no dispensing on file is held and listed as unmatched — it is never discarded, and never attached to a dispensing it does not belong to on a partial match.",
-        "The deposit recorded against a remittance is the amount the payer states it paid, not the sum of the claims it settles. Where those differ — because the payer held money back at remittance level — the difference is recorded on the receipt with the reason the payer gave, so that the gap between what was banked and what the dispensings came to is stated rather than absorbed into either figure.",
-        "The pharmacy does not transmit remittance information anywhere. These records are received, read and held on the pharmacy's own computer inside the pharmacy; the minimum necessary standard at 45 CFR 164.502(b) is met by nothing leaving the pharmacy rather than by limiting what does.",
-        "Payment records are retained for five years with the prescription records they belong to, and are included in the pharmacy's daily verified backup.",
       ],
     },
     {
