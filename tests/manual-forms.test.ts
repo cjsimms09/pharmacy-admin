@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { FORMS, suggestForm, appendixReference } from "../src/lib/manual";
+import { FORMS, suggestForm, appendixReference, policies } from "../src/lib/manual";
 
 /**
  * The headings that were empty, and whether the site can now close them.
@@ -77,5 +77,140 @@ describe("the forms themselves", () => {
     assert.match(names, /Notice of Privacy Practices/);
     assert.match(names, /CMS-10147/);
     assert.match(names, /Business associate agreement/);
+  });
+});
+
+/*
+ * The temperature section, which is the clearest case of a manual promising more than is done.
+ *
+ * The owner, asked directly: one data logger, four readings a day, records kept. The manual said
+ * "monitored continuously", which is a larger promise and a different one. Four readings a day is
+ * a sound practice; continuous monitoring is a standard an inspector can test and find wanting,
+ * and the pharmacy would have written that test for itself.
+ */
+describe("temperature monitoring says what is done, not more", () => {
+  const t = () => policies("West Wichita Family Pharmacy").find((x) => x.key === "temperatures")!;
+
+  test("the cadence is stated as a number rather than left to be interpreted", () => {
+    assert.match(t().text[0], /records four readings a day/);
+  });
+
+  test("it does not claim continuous monitoring", () => {
+    assert.doesNotMatch(t().text.join(" "), /continuous/i);
+  });
+
+  test("the readings are said to arrive automatically, which is the part that matters for the record", () => {
+    assert.match(t().text[0], /collected automatically/);
+    assert.match(t().text[0], /no reading is transcribed by hand/);
+  });
+
+  test("what happens to an excursion is unchanged, because that part was already true", () => {
+    const text = t().text.join(" ");
+    assert.match(text, /A month cannot be signed off while any excursion in it is unexplained/);
+    assert.match(text, /retained for five years/);
+  });
+});
+
+/*
+ * The business associate section, which promised an agreement and had none behind the heading.
+ *
+ * The owner, 9 September, asked whether a template already exists that a contract driver could
+ * sign. It does — Forms → Business associate agreement, every clause 45 CFR 164.504(e) names, with
+ * the parties left blank. So the manual now says where it is instead of promising one in the
+ * abstract, which is the difference between a section an inspector can follow and one they cannot.
+ */
+describe("business associate agreements name the form that exists", () => {
+  const b = () => policies("West Wichita Family Pharmacy").find((x) => x.key === "baa")!;
+
+  test("the manual points at the agreement the site produces", () => {
+    assert.match(b().text.join(" "), /Forms → Business associate agreement/);
+    assert.match(b().text.join(" "), /every clause 45 CFR 164\.504\(e\) requires/);
+  });
+
+  test("it cites the rule that governs the agreement's contents, not only the one requiring it", () => {
+    // 164.502(e) requires the agreement; 164.504(e) says what has to be in it. The section
+    // describes contents, so it has to cite the rule about contents.
+    assert.match(b().authority, /164\.504\(e\)/);
+  });
+
+  test("who is a business associate is stated, because the driver question turned on it", () => {
+    const text = b().text.join(" ");
+    assert.match(text, /a delivery driver, a courier, a billing service, an IT contractor/);
+    assert.match(text, /A carrier that only moves a sealed package, such as the United States Postal Service, is not/);
+  });
+
+  test("the agreement is signed before access, not after", () => {
+    assert.match(b().text.join(" "), /signed before the party is given access/);
+  });
+});
+
+/*
+ * The retrieval clock nobody imposed.
+ *
+ * The owner: "we shouldn't be restricting ourselves further than law requires." The manual said 48
+ * hours in one place and 72 in another, and 1 read the regulations: 21 CFR 1300.01 defines readily
+ * retrievable as separable in a reasonable time, K.A.R. 68-20-16 requires records readily
+ * retrievable and kept five years at the pharmacy, and the Board glosses the phrase as separated
+ * out quickly and easily during an inspection. No hours anywhere, state or federal. Both numbers
+ * were the manual's own invention, and a deadline nobody imposed is one the pharmacy can miss for
+ * no reason at all.
+ */
+describe("records are produced on request, not against a made-up clock", () => {
+  const r = () => policies("West Wichita Family Pharmacy").find((x) => x.key === "records")!;
+
+  test("no number of hours is stated", () => {
+    assert.doesNotMatch(r().text.join(" "), /\b\d+\s*hours?\b/);
+  });
+
+  test("the standard is stated in the Board's own terms instead", () => {
+    const text = r().text.join(" ");
+    assert.match(text, /separated out from all other records quickly and easily during an inspection/);
+    assert.match(text, /produced on request while the inspector is here/);
+  });
+
+  test("and it says plainly that no rule sets one, so nobody puts it back", () => {
+    assert.match(r().text.join(" "), /Neither the Board nor the DEA sets a number of hours, and this manual does not state one/);
+  });
+
+  test("the five-year retention it does have is untouched, because that one is real", () => {
+    assert.match(r().text.join(" "), /prescription and controlled substance records five years/);
+    assert.match(r().authority, /68-20-16/);
+  });
+});
+
+/*
+ * The 72-hour refill rule, which is real and lived only in a training course.
+ *
+ * 21 CFR 1306.22(f)(3) and K.A.R. 68-20-18a(c)(2)(A)(ii) require the day's Schedule III to V refill
+ * data to be accounted for within 72 hours of dispensing — not on request — or a bound logbook
+ * signed daily. The technician material carried it, worded as a produce-on-request deadline, and
+ * the manual carried nothing. The pharmacy is inspected against the manual, so a rule it meets
+ * every day was written down nowhere the inspector reads.
+ *
+ * The invented 48 hours was found beside it and removed. Getting these two the wrong way round
+ * would have been the expensive mistake: deleting a real daily duty because a neighbouring
+ * invention turned up.
+ */
+describe("the daily controlled substance refill record", () => {
+  const d = () => policies("West Wichita Family Pharmacy").find((x) => x.key === "controlled_dispensing")!;
+
+  test("the manual states the rule itself, rather than leaving it to a training course", () => {
+    assert.match(d().text.join(" "), /within 72 hours of the day they were dispensed/);
+  });
+
+  test("it says the duty is standing, not triggered by a request", () => {
+    // Taught as "produce on request" it would never be done, because nobody requests it.
+    assert.match(d().text.join(" "), /as a matter of course, not on request/);
+  });
+
+  test("both lawful routes are named, and which one this pharmacy uses", () => {
+    const text = d().text.join(" ");
+    assert.match(text, /a printout of that day's refill data provided to the pharmacy within 72 hours, or a bound logbook/);
+    assert.match(text, /This pharmacy keeps the bound logbook/);
+  });
+
+  test("both authorities are cited, state and federal", () => {
+    assert.match(d().text.join(" "), /21 CFR 1306\.22\(f\)\(3\)/);
+    assert.match(d().text.join(" "), /K\.A\.R\. 68-20-18a\(c\)\(2\)\(A\)\(ii\)/);
   });
 });

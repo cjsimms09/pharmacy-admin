@@ -271,6 +271,27 @@ export async function register() {
         env: process.env,
       });
       proof.unref();
+      /*
+       * The NADAC proof (2, BACKLOG 30) starts when the claims proof has finished rather than beside
+       * it: it streams half a gigabyte of CMS files, and on a machine with seven gigabytes two proofs
+       * reading at once is how the app got killed in September. Its heap is capped at what the first
+       * run needed with room to spare; a night the claims proof never exits leaves the last NADAC
+       * proof and its date, which Data health shows as such.
+       */
+      proof.on("exit", () => {
+        // The prune first, on its own clock (scripts/prune-nadac.ts says why), so the proof measures the table as it should be.
+        const prune = spawn(process.execPath, [tsx, "--tsconfig", path.join(root, "tsconfig.script.json"), path.join(root, "scripts", "prune-nadac.ts")], { cwd: root, detached: true, stdio: "ignore", env: process.env });
+        prune.on("exit", () => {
+          const nadac = spawn(process.execPath, ["--max-old-space-size=600", tsx, "--tsconfig", path.join(root, "tsconfig.script.json"), path.join(root, "scripts", "prove-nadac.ts")], { cwd: root, detached: true, stdio: "ignore", env: process.env });
+          // Then the catalogue proof (2, BACKLOG 30): each wholesaler's table against the file it came from, one file in memory at a time.
+          nadac.on("exit", () => {
+            const cat = spawn(process.execPath, ["--max-old-space-size=500", tsx, "--tsconfig", path.join(root, "tsconfig.script.json"), path.join(root, "scripts", "prove-catalogue.ts")], { cwd: root, detached: true, stdio: "ignore", env: process.env });
+            cat.unref();
+          });
+          nadac.unref();
+        });
+        prune.unref();
+      });
       // And the rate backtest (BACKLOG 23): every settled network's rate against what the plan paid, kept in `rate_backtest`.
       const backtest = spawn(process.execPath, [tsx, "--tsconfig", path.join(root, "tsconfig.script.json"), path.join(root, "scripts", "backtest-rates.ts")], { cwd: root, detached: true, stdio: "ignore", env: process.env });
       backtest.unref();
@@ -279,10 +300,28 @@ export async function register() {
     }
   };
 
+  /*
+   * The remittance SFTP mailbox (sftp-pull.ts), swept on the same half hour as email: senders push
+   * 835s and voucher remittances there because nobody emails a remittance, and a file that lands
+   * is handled exactly as an emailed one. Skipped in silence until a host is set up.
+   */
+  const sftpTick = async () => {
+    try {
+      const { getSettings } = await import("./lib/settings");
+      const s = await getSettings();
+      if (!s.sftp_host || !s.sftp_user) return;
+      const { pullSftp } = await import("./lib/sftp-pull");
+      await pullSftp({ userId: null, userName: "Automatic check" });
+    } catch {
+      // Recorded in sftp_last_result; never lets the app down.
+    }
+  };
+
   const runAll = async () => {
     await publicAccessTick();
     await whenIdle("warm", warmTick);
     await whenIdle("mail", tick);
+    await whenIdle("sftp", sftpTick);
     await whenIdle("data-health", dataHealthTick);
     await whenIdle("backup", backupTick);
     await whenIdle("reminders", reminderTick);

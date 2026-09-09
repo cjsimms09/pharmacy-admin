@@ -289,7 +289,12 @@ export async function importRemittance(
    * before anything is stored. So this stops here, keeps the reader's own account of the
    * difference, and leaves the file to be looked at.
    */
-  if (r.balance && r.balance.differenceCents !== 0) return out;
+  if (r.balance && r.balance.differenceCents !== 0) {
+    // Said in words, not only returned empty: a file held for its arithmetic used to look like a file with nothing in it.
+    const money = (n: number) => `${(n / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    out.problems.push(`The remittance does not balance: it says it paid ${money(r.balance.paidCents)}, its claim lines come to ${money(r.balance.claimsCents)} less ${money(r.balance.adjustmentsCents)} of provider adjustments, a difference of ${money(r.balance.differenceCents)}. Nothing from it was stored.`);
+    return out;
+  }
 
   const held = await db.query.claimPayments.findMany({ columns: { reference: true, rxNumber: true, amountCents: true } });
   const seen = new Set(held.map((h) => `${h.reference ?? ""}|${h.rxNumber}|${h.amountCents}`));

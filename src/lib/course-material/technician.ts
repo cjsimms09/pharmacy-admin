@@ -186,7 +186,22 @@ export const technician: Course = {
       body: [
         "This pharmacy's policy will not contradict any legislation, rule or statute enforced by the Kansas Board of Pharmacy, the Bureau of Narcotics and Dangerous Drugs, or the Drug Enforcement Administration. Where they are stricter, they govern.",
         "Patient profiles. Every prescription record carries the patient's name and address, the prescriber's name, the initial date of dispensing, the Rx number, the drug name, strength and quantity, the name of the dispensing pharmacist, and the patient's drug allergies or sensitivities.",
-        "Electronic prescriptions are stored electronically, backed up daily, and identified by a numerical prescription system. Any prescription information must be producible in written form within 72 hours of a request.",
+        "Electronic prescriptions are stored electronically, backed up daily, and identified by a numerical prescription system.",
+        /*
+         * The 72 hours is real and this course had it attached to the wrong thing.
+         *
+         * It read "any prescription information must be producible in written form within 72 hours
+         * of a request", which is a general retrieval deadline, and no rule imposes one of those.
+         * The real rule is narrower and harder: 21 CFR 1306.22(f)(3) and K.A.R.
+         * 68-20-18a(c)(2)(A)(ii) require the day's Schedule III to V refill data to be accounted
+         * for within 72 hours of the day it was dispensed, whether or not anybody asks — or, in the
+         * alternative both allow, a bound logbook signed daily.
+         *
+         * Taught as "produce on request" it would never be done at all, because nobody requests it.
+         * That is a deadline the pharmacy would breach every single day while believing itself
+         * compliant, which is worse than the invented 48-hour one this was found beside.
+         */
+        "The day's refills of Schedule III to V controlled substances must be accounted for within 72 hours of the day they were dispensed — not on request, but as a matter of course. Two ways are allowed, and this pharmacy uses the second: a printout of that day's refill data provided to the pharmacy within 72 hours, or a bound logbook in which a pharmacist signs each day that the day's refill information has been reviewed and is correct. 21 CFR 1306.22(f)(3); K.A.R. 68-20-18a(c)(2)(A)(ii).",
         "Everything not sent electronically is reduced to a hard copy, back-tagged with a pharmacy label, and filed daily into one of three groups: non-controls in groups of 500, C3 to C5 in groups of 500, and C2s in groups of 1,000. Each folder is labelled with the date of filing and the range of Rx numbers it contains.",
         "The three-file separation is not housekeeping. C2 hard copies are stored separately from every other prescription, in their own drawer, in increments of 1,000 by Rx number. C3 to C5 are stored together but separate from both the non-controls and the C2s, in their own drawer, in increments of 500. Federal law requires Schedule II records be kept separately from all other records of the registrant.",
         "Retention under Kansas law is five years for: compounding logs, compounding records, controlled substance prescription orders, DEA Form 222 transfer records, controlled substance inventories, distribution records, drug invoices, immunization records, immunization protocols, MTM protocols and MTM patient records, prescription orders, and sterile compounding records. The EDP pharmacist verification logbook is kept five years from the last dispensing date. Medicare paperwork is kept ten years.",
@@ -195,7 +210,7 @@ export const technician: Course = {
       takeaways: [
         "Three files: non-controls (500), C3–C5 (500), C2s (1,000) — C2s always in their own drawer.",
         "Five years for almost everything; ten for Medicare paperwork.",
-        "Electronic records must be producible on paper within 72 hours.",
+        "The day's C3–C5 refills: signed in the bound logbook every day, or a printout within 72 hours of dispensing. Not on request — every day.",
       ],
     },
     {

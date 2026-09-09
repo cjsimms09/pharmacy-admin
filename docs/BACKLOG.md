@@ -332,6 +332,22 @@ it at adjudication, per NDC and date. Inventory: on-hand daily, order points, th
 daily text report stays the automatic feed until then, proved nightly; the export enriches when one
 is sent by hand.
 
+**8 September evening (1) — the connection is built; the owner has the credentials.** He wrote: *"I have
+info on how to access sql I have instance name, username, password, and sql database name … can you use
+a sequel tool to build these reports for me?"* What went in: `src/lib/pioneer-sql.ts` (read-only intent,
+READ UNCOMMITTED on every batch so nobody at the counter waits on a lock, one SELECT at a time, TLS with a
+clear-text retry for an old server), a **PioneerRx database** card under Settings → Connections (server
+or instance, database, user in the clear; the password encrypted like every other credential), the page
+`/tools/pioneer-sql` (test the connection, read the table names into `data/pioneer-schema.json` — names,
+types and row counts only, never a value — search them, run one SELECT capped at 500 rows, shown and
+stored nowhere), and `scripts/pioneer-sql.ts` for the machine session (`test`, `tables [needle]`,
+`query "select …"`). The reports themselves cannot be written until the table names are on the machine:
+PioneerRx does not publish its schema. Order of work once they are: (1) the dispensed feed as a query,
+proved against the daily text report for the same day before it replaces anything; (2) the third-party
+plan table (BIN, PCN, group, plan name, network) for the linking chain; (3) the drug file with AWP, WAC,
+NADAC as PioneerRx holds them; (4) on-hand and order points nightly. Each feed lands beside the reader it
+replaces and proves itself the same way (SESSION-RULES §1c).
+
 ### 7. Finish the logic audit (HANDOFF item 3)
 
 Not yet looked at: `shelf.ts` (895 lines, the largest and least examined), `order-plan.ts` beyond
@@ -826,6 +842,36 @@ sold date on 952. Left to do: the export as a daily feed through the mailbox and
 (its own kind; 2 and B), a nightly proof row that re-reads the stored file against the enriched
 columns (item 30), and the transaction report's `Rx Transaction Details` stays the source of the
 claim itself — the export enriches, it never creates.
+### 33. The 835 reader has no arithmetic gate: lines are stored without being checked against the remittance's own total (8 September)
+
+Found by 2 while writing the manual's payments section, then withdrawn from the manual because it was not true
+of the code: `claim-payments.ts` stores every payment line an 835 carries and never adds them up against the
+remittance's printed total (the BPR amount, and per-claim CLP totals against their SVC lines). The invoice
+reader refuses a document that does not add up, on the argument that a partial read is the dangerous outcome
+rather than the failed one: every figure that was read looks sound, and only the dropped line's dispensing
+appears to have been paid less than it was. The same argument applies exactly here (SESSION-RULES §1c, and the
+rule that every reader that decides money is checked by arithmetic before anything is stored). What to build:
+sum the CLP payment amounts and compare to BPR02; sum each claim's SVC paid amounts plus adjustments to its CLP04;
+a remittance that fails either is held whole, shown on Remits with the two figures, and nothing from it is
+matched until it is read again or the owner accepts the difference by name. The facilitator's 835s and RedSail's
+copay remits (item 24) go through the same gate. 1 builds it after the PioneerRx feeds (item 6).
+
+### 34. Multi-pack unit costs: the printed "Cost Per Unit" is n times too high, and one page read it raw (9 September)
+
+Found by the first run of 2's catalogue proof and settled the same night. PioneerRx's catalogue export prints a
+"Cost Per Unit" that, for a bracketed pack — McKesson, ANDA and ParMed write multi-packs as "(5) 1 ML", "(3) 28
+EA" — is the carton's cost over the inner pack alone, so it is n times too high. Proved against NADAC: of 2,147
+multi-pack rows with a NADAC, 1,593 land at the benchmark only once divided by the bracket, 30 fit as printed,
+524 fit neither (worth their own look: brand rows against a generic NADAC, and packs whose bracket is not a
+count). `catalogue-cache.ts wholePackage` already levels every row to the whole package at read time, so the
+shelf, the buy list and the planner were right. `minimum-store.ts` — the secondary-supplier add-on list on What
+to add — read the raw table and so priced every multi-pack add-on up to thirty times too high, in the direction
+that sends the order to whoever printed the pack without a bracket. Fixed the same night: it reads the levelled
+catalogue like everything else. Still raw, and to check: `appeals.ts` and the invoice-side readers that derive a
+unit cost from a pack. Also from that run, settled: every "price differs" the proof reported was a second listing
+of the same NDC in the same file (539 NDCs in McKesson's, 19 in IPC's); the importer keeps the cheapest
+full-dated listing, and 2's proof now proves an NDC against any of its lines. The tables match their files.
+
 ## The data the site has to ingest
 
 Named by the owner on 7 September as what is still being connected. Each one needs a reader, a

@@ -25,7 +25,7 @@ export default async function RecordsPage() {
     <>
       <PageHeader
         title="Records"
-        subtitle={`Everything ${pharmacy === "This pharmacy" ? "this pharmacy" : pharmacy} keeps and can produce on request. Records held here are electronic on purpose — the Board's test is that they can be separated out and produced within 48 hours, and they can.`}
+        subtitle={`Everything ${pharmacy === "This pharmacy" ? "this pharmacy" : pharmacy} keeps and can produce on request. Records held here are electronic on purpose — the Board's test is that they can be separated out quickly and easily during an inspection, and they can. No rule sets a number of hours.`}
         actions={<Link href="/inspection" className="btn btn-primary">Inspection pack</Link>}
       />
 

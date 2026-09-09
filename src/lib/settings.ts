@@ -261,6 +261,12 @@ export const SETTING_KEYS = [
   "rate_backtest",
   /* What the last drug-directory load parsed and wrote, so Data health can set it against the table. */
   "drug_directory_proof",
+  /* What the nightly NADAC proof found: the CMS files re-read against the table. scripts/prove-nadac.ts */
+  "nadac_proof",
+  /* What the last prune did, or why it failed: scripts/prune-nadac.ts nightly, and the loader after a file. */
+  "nadac_last_prune",
+  /* What the nightly catalogue proof found: each wholesaler's last file re-read against the table. scripts/prove-catalogue.ts */
+  "catalogue_proof",
   "backup_restore_result",
   "mail_last_sweep",
   /**
@@ -307,6 +313,28 @@ export const SETTING_KEYS = [
   // Where a supply order from the Supplies page is sent. The pharmacy orders bags, labels and
   // vials by emailing a rep, so the address is the whole of the integration.
   "supplies_rep_email",
+
+  // ── PioneerRx, read directly (pioneer-sql.ts) ──
+  // The server as the owner was given it ("HOST\INSTANCE" or "HOST,port"), the database and the
+  // user in the clear; the password encrypted like every other credential. The site only reads.
+  "pioneer_sql_server",
+  "pioneer_sql_database",
+  "pioneer_sql_user",
+  "pioneer_sql_password_enc",
+  "pioneer_sql_last_test",
+  "pioneer_sql_last_result",
+  // When the table names were last read into data/pioneer-schema.json, and how many there were.
+  "pioneer_sql_schema_at",
+  "pioneer_sql_tables",
+
+  // ── The remittance SFTP mailbox (sftp-pull.ts): a host senders push to and this site pulls from ──
+  "sftp_host",
+  "sftp_port",
+  "sftp_user",
+  "sftp_folder",
+  "sftp_password_enc", // the fallback where the site’s key in data/sftp/ is not on the host
+  "sftp_last_pull",
+  "sftp_last_result",
 ] as const;
 export type SettingKey = (typeof SETTING_KEYS)[number];
 export type Settings = Record<SettingKey, string>;

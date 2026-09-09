@@ -484,8 +484,17 @@ export function policies(pharmacy: string): ManualPolicy[] {
       title: "Temperature monitoring and review",
       authority: "CDC Vaccine Storage and Handling Toolkit; USP 1079.",
       text: [
-        `Refrigerated and room-temperature storage at ${pharmacy} is monitored continuously by an electronic logging sensor, and readings are collected automatically into the pharmacy's compliance system.`,
-        "The acceptable range for each sensor is recorded against that sensor. Any reading outside its range is flagged as an excursion and appears on a single list of excursions awaiting explanation.",
+        /*
+         * "Continuously" was the word here and it is not what this pharmacy does.
+         *
+         * The owner, asked: one data logger, four readings a day, records kept. Four readings a day
+         * is a defensible practice and continuous monitoring is a different and larger promise —
+         * and a manual is a standard the pharmacy is held to, so claiming the larger one turns a
+         * sound practice into a finding against itself. The number is stated rather than described,
+         * because "regularly" would leave an inspector to decide what regular means.
+         */
+        `Refrigerated and room-temperature storage at ${pharmacy} is monitored by an electronic data logger, which records four readings a day. Readings are collected automatically into the pharmacy's compliance system; no reading is transcribed by hand.`,
+        "The acceptable range for each logger is recorded against it. Any reading outside that range is flagged as an excursion and appears on a single list of excursions awaiting explanation.",
         "Every excursion must have a written explanation stating what happened and what was done about it, including the disposition of any affected stock. A month cannot be signed off while any excursion in it is unexplained.",
         "At the end of each month the pharmacist-in-charge reviews the month and signs it off. The signed month, its readings and its explanations are retained for five years and can be printed on demand.",
       ],
@@ -554,9 +563,19 @@ export function policies(pharmacy: string): ManualPolicy[] {
     {
       key: "baa",
       title: "Business associate agreements",
-      authority: "45 CFR 164.502(e).",
+      authority: "45 CFR 164.502(e); 45 CFR 164.504(e).",
       text: [
         "A register is maintained of every outside party with access to protected health information, recording what they do, the date the agreement was signed, the date it runs to, and the signed agreement itself.",
+        /*
+         * Said because it is true and was not always.
+         *
+         * The manual promised business associate agreements with nothing behind the heading — a
+         * document stating the pharmacy has them, and no agreement to sign. The form exists now, so
+         * the manual names where it is rather than promising one in the abstract. A heading with no
+         * document behind it is the shape of finding this audit exists to remove.
+         */
+        `${pharmacy} produces the agreement itself, at Forms → Business associate agreement, carrying every clause 45 CFR 164.504(e) requires. Who the parties are and what the service is are left blank, because those are the only parts that make it this pharmacy's agreement rather than a specimen. No outside party need supply their own.`,
+        "The agreement is signed before the party is given access, and the signed copy is attached to its entry on the register. Anyone outside the pharmacy who handles prescriptions or patient information is a business associate — a delivery driver, a courier, a billing service, an IT contractor. A carrier that only moves a sealed package, such as the United States Postal Service, is not.",
         "The register is reviewed annually. An agreement that is unsigned, unattached or lapsed is treated as an open finding until it is put right.",
       ],
     },
@@ -598,6 +617,16 @@ export function policies(pharmacy: string): ManualPolicy[] {
         "Circumstances calling for resolution before dispensing include: a prescription outside the prescriber's usual scope or specialty; a patient travelling an unusual distance past other pharmacies; early refills or a pattern of lost or stolen prescriptions; cash payment for a controlled substance by an insured patient; identical drug, strength and quantity across a prescriber's patients; and alterations to quantity, refills or date on a paper prescription.",
         "K-TRACS is consulted where the circumstances call for it. Resolution is by contact with the prescriber, and what was asked and answered is recorded.",
         "A refusal is recorded with the reason. Where a refusal arises from suspected diversion or a forged prescription it is raised with the pharmacist-in-charge, who determines whether it is reportable.",
+        /*
+         * A real deadline that lived only in a training course until now.
+         *
+         * The technician material carried the 72 hours and the manual did not, which is the shape
+         * of finding worth naming: the pharmacy is inspected against the manual, and a rule it
+         * meets every day was written down nowhere the inspector reads. It is stated here once, in
+         * the section about dispensing controlled substances, and the daily log statement and
+         * signature sheet the site produces are what discharges it.
+         */
+        "Where the pharmacy's dispensing records are kept on a computer, the day's refills of Schedule III to V controlled substances are accounted for within 72 hours of the day they were dispensed — as a matter of course, not on request. Both 21 CFR 1306.22(f)(3) and K.A.R. 68-20-18a(c)(2)(A)(ii) allow two ways of doing it: a printout of that day's refill data provided to the pharmacy within 72 hours, or a bound logbook in which a pharmacist signs each day that the day's refill information has been reviewed and is correct. This pharmacy keeps the bound logbook; the statement pasted inside its cover and the monthly signature sheet are produced by this system and are described at Appendix A.",
       ],
     },
     {
@@ -629,7 +658,19 @@ export function policies(pharmacy: string): ManualPolicy[] {
         "K.A.R. 68-7-12; K.A.R. 68-19-1; K.A.R. 68-20-16; 45 CFR 164.530(j); 21 CFR 1304.11(a); 29 CFR 1910.1030(h)(2)(ii).",
       text: [
         "Compliance records are held in the pharmacy's own system on pharmacy premises. Backups are taken automatically, verified by re-reading the archive and comparing it record for record against the live data, and an unverifiable archive is deleted rather than kept.",
-        "Electronic records satisfy the Board's requirements where a record must be readily retrievable — that is, capable of being separated from all other records and produced within 48 hours of a written request. Continuous quality improvement incident reports, bimonthly summaries and null reports, training records and certificates, temperature logs and monthly reviews, the technician list, the business associate register and the self-inspection record are all kept in this system and are not separately maintained on paper.",
+        /*
+         * "Within 48 hours" was here and no rule requires it.
+         *
+         * The owner's objection, and it was the right one: "we shouldn't be restricting ourselves
+         * further than law requires." Neither Kansas nor the DEA sets a clock. 21 CFR 1300.01
+         * defines readily retrievable as separable from other records in a reasonable time;
+         * K.A.R. 68-20-16 requires records readily retrievable and kept five years at the pharmacy,
+         * and the Board glosses the phrase as separated out quickly and easily during an
+         * inspection. No hours anywhere. So the manual states none — a deadline nobody imposed is
+         * one the pharmacy can miss for no reason, and this one appeared in three places at two
+         * different numbers.
+         */
+        "Electronic records satisfy the Board's requirements where a record must be readily retrievable — that is, capable of being separated out from all other records quickly and easily during an inspection. Records are produced on request while the inspector is here, and records in archived storage are retrieved promptly. Neither the Board nor the DEA sets a number of hours, and this manual does not state one. Continuous quality improvement incident reports, bimonthly summaries and null reports, training records and certificates, temperature logs and monthly reviews, the technician list, the business associate register and the self-inspection record are all kept in this system and are not separately maintained on paper.",
         "Controlled substance inventories are the exception. K.A.R. 68-20-16 requires each inventory to be maintained in legible hard-copy format, and 21 CFR 1304.11(a) requires it to be kept in written, typewritten or printed form at the registered location. Each annual inventory is therefore printed, signed by every individual who took part with their licence or registration number, marked as taken before the opening or after the close of business, and filed on the premises. The copy held in this system is the working record; the signed printed copy is the record of file.",
         "Retention: prescription and controlled substance records five years; HIPAA training and related documentation six years; bloodborne pathogens training records three years from the date of training; hepatitis B vaccination and exposure records for the duration of employment plus thirty years.",
         "Records of former employees are retained for the same periods. Nobody is removed from the record when they leave.",

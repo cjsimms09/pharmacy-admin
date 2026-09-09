@@ -327,7 +327,16 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
       note:
         covered >= 365
           ? "A full year is held, so a seasonal drug can be told from a dying one."
-          : `${covered} day${covered === 1 ? "" : "s"} of history. Every rate, steadiness test and trend on this site is judged on that window, and it cannot tell a slow seller from a new one. A twelve-month export is what closes it.`,
+          /*
+           * No export is coming, and this sentence used to say one was.
+           *
+           * The owner, 8 September 2026: "i will not be uploading claims from before sept.. or
+           * anything. this site is starting clean as of 09/01/.." So the window does not close by
+           * a file arriving; it closes by days passing. Telling him to wait for a twelve-month
+           * export was telling him to wait for something that will never come, which is worse than
+           * saying nothing — it invites him to defer the judgments this row exists to caveat.
+           */
+          : `${covered} day${covered === 1 ? "" : "s"} of history. Every rate, steadiness test and trend on this site is judged on that window, and it cannot yet tell a slow seller from a new one. Nothing closes this but time: the site holds claims from 1 September 2026 onwards, and the window widens by a day each day.`,
     };
   });
 
@@ -458,6 +467,73 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
 
     const { numerator, denominator } = onHandProofFraction(rows);
     return { numerator, denominator, gaps: onHandProofGaps(rows), note: onHandProofNote(rows) };
+  });
+
+  /*
+   * ── Each wholesaler's catalogue against its own newest file ──────
+   *
+   * Read back from what the nightly script left behind. The fraction is per NDC rather than per
+   * listing, because a wholesaler lists the same NDC several times in one file and the table keeps
+   * one — the first run of this proof reported 239 wrong prices, every one of them a second listing
+   * of a product whose price was perfectly correct.
+   */
+  await timed("catalogue-proof", async () => {
+    const { parseCatalogueProof, catalogueProofFraction, catalogueProofGaps, catalogueProofNote } = await import("./data-health-catalogue-proof");
+    const proof = parseCatalogueProof((await getSettings()).catalogue_proof);
+    if (!proof) {
+      return {
+        numerator: 0,
+        denominator: 0,
+        measuredAt: null,
+        gaps: [],
+        note: "The nightly catalogue proof has not run, so no price on this site has been set against the wholesaler's file it came from.",
+      };
+    }
+    const { numerator, denominator } = catalogueProofFraction(proof);
+    // The proof's own date. An ageing row here is the nightly job having stopped, not a stale file.
+    return { numerator, denominator, measuredAt: proof.provedOn, gaps: catalogueProofGaps(proof), note: catalogueProofNote(proof) };
+  });
+
+  /*
+   * ── NADAC against the CMS files, and the prune that keeps it trimmed ──
+   *
+   * Both read back from what the nightly scripts left behind. Two rows rather than one because they
+   * fail differently: the prices can be exactly right while the table is three times the size it
+   * should be, and a single row showing one number would hide whichever of the two was well.
+   */
+  await timed("nadac-proof", async () => {
+    const { parseNadacProof, nadacProofFraction, nadacProofGaps, nadacProofNote } = await import("./data-health-nadac-proof");
+    const proof = parseNadacProof((await getSettings()).nadac_proof);
+    if (!proof) {
+      return {
+        numerator: 0,
+        denominator: 0,
+        measuredAt: null,
+        gaps: [],
+        note: "The nightly NADAC proof has not run, so no price on this site has been set against the CMS file it came from.",
+      };
+    }
+    const { numerator, denominator } = nadacProofFraction(proof);
+    // The proof's own date, not the sweep's: an ageing proof is the nightly job having stopped.
+    return { numerator, denominator, measuredAt: proof.provedOn, gaps: nadacProofGaps(proof), note: nadacProofNote(proof) };
+  });
+
+  await timed("nadac-prune", async () => {
+    const { parseNadacPrune, nadacPruneFraction, nadacPruneGaps, nadacPruneNote } = await import("./data-health-nadac-proof");
+    const prune = parseNadacPrune((await getSettings()).nadac_last_prune);
+    const { numerator, denominator } = nadacPruneFraction(prune);
+    return {
+      numerator,
+      denominator,
+      /*
+       * The run's own timestamp, so a prune that stopped running ages here rather than being
+       * refreshed by the health sweep. That is the exact failure this row was built for: the last
+       * recorded run said "removed 770,412" and was six weeks old.
+       */
+      measuredAt: prune?.at ? prune.at.slice(0, 10) : null,
+      gaps: nadacPruneGaps(prune),
+      note: nadacPruneNote(prune),
+    };
   });
 
   /*

@@ -149,6 +149,7 @@ export const NAV: NavGroup[] = [
       { href: "/settings/training", label: "Training settings", blurb: "Materials and cadence", hidden: true },
       { href: "/settings/features", label: "Extra sections", blurb: "Parts of the site that are still being built", hidden: true },
       { href: "/settings/network", label: "Network", blurb: "How to reach this from another computer", hidden: true },
+      { href: "/tools/pioneer-sql", label: "PioneerRx database", blurb: "Read straight from PioneerRx: test the connection, read the table names, run a report", hidden: true },
       { href: "/settings/updates", label: "Updates", blurb: "What version this is running", hidden: true },
     ],
   },
