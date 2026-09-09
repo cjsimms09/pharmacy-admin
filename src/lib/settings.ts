@@ -265,6 +265,8 @@ export const SETTING_KEYS = [
   "nadac_proof",
   /* What the last prune did, or why it failed: scripts/prune-nadac.ts nightly, and the loader after a file. */
   "nadac_last_prune",
+  /* What the nightly catalogue proof found: each wholesaler's last file re-read against the table. scripts/prove-catalogue.ts */
+  "catalogue_proof",
   "backup_restore_result",
   "mail_last_sweep",
   /**
