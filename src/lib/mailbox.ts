@@ -960,7 +960,7 @@ async function importRecognised(
       const gate = r.problems.find((p) => /does not balance/i.test(p));
       routeResult = gate
         ? `Held, nothing stored: ${gate}`
-        : `${r.payer ?? "Remittance"}${r.paidOn ? ` paid ${r.paidOn}` : ""}: ${r.payments} payments (${money(r.amountCents)}) — ${r.matched} matched to a claim, ${r.unmatched} held unmatched, ${r.alreadyHeld} already held${r.banked ? ", banked" : ""}${r.problems.length ? `; ${r.problems.slice(0, 2).join("; ")}` : ""}`;
+        : `${r.payer ?? "Remittance"}${r.paidOn ? ` paid ${r.paidOn}` : ""}: ${r.payments} payments (${money(r.amountCents)}) — ${r.matched} matched to a claim, ${r.unmatched} held unmatched${r.paidAReversedFill ? `, ${r.paidAReversedFill} paid against a fill this pharmacy had reversed` : ""}, ${r.alreadyHeld} already held${r.banked ? ", banked" : ""}${r.problems.length ? `; ${r.problems.slice(0, 2).join("; ")}` : ""}`;
       imported = !gate && r.payments > 0;
     } else if (cls.kind === "copay_remit") {
       /*
