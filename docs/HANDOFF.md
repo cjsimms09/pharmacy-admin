@@ -8,6 +8,31 @@ file is how they talk.
 
 ## Open items
 
+### From 1 — 8 September night: the SQL login is refused by the server; five manual sections await the owner; NADAC prune
+
+**PioneerRx over SQL.** The owner typed the credentials RedSail gave him (instance PIONEERSERVER\\NEWTECH, SQL
+Server 2019, the only instance on the network; database PioneerPharmacySystem_DayOld, a day-old copy; login
+DayOldUser, not read-only on their side). The instance answers, the encrypted connection completes, and every
+login is refused with 18456 — from the site's driver and from Microsoft's own client, by name and by address,
+against master too, with and without spaces round the password, in every case of the user name, and as a
+Windows account. The reason is in the server's own error log downstairs (the reason line of the 18456 event) or
+in RedSail's hands; the owner has the message to send them. Nothing to do on the code until a login works.
+
+**The manual.** 2 rewrote the five sections with blocking findings as whole bodies (Dispensing, Record keeping,
+Inventory, Disposal, and the inventory date); 1 loaded each as `suggestedBody` on that section's blocking
+findings, so the owner reads and applies on the manual page himself. Three paragraphs are marked
+`[PIC TO CONFIRM]` in the text. Owner's answers so far are recorded on the findings (answerFinding): no
+patient-returned controls (not a collector); delivery by USPS and a contract driver (no BAA on the register —
+put to him); inventory date not settled; reverse distributor for everything, nothing destroyed on site. Open
+questions to him: 48 or 72 hours to produce a record; what happens to a broken or spilled controlled
+substance; whether the pharmacy handles manufacturer samples. K.A.R. 68-20-16 verified (exact count of every
+non-liquid form of every schedule and drugs of concern, same calendar date, 375 days).
+
+**NADAC.** 2's nightly proof (`scripts/prove-nadac.ts`, setting `nadac_proof`) ran once on the real files: every
+price proved, and it found that `pruneNadac` had never run (770,000 rows past the cutoff still held). 1 gave the
+prune its own nightly script (`scripts/prune-nadac.ts`, setting `nadac_last_prune`) between the claims proof
+and the NADAC proof; 2's Data health rows for both are merged. The first nightly prune is tonight.
+
 ### From 1 — 8 September evening: PioneerRx over SQL is wired, waiting on the table names; IPD policy filed
 
 The owner has SQL credentials for PioneerRx (instance, database, user, password). The connection, the
