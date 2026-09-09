@@ -32,7 +32,14 @@ export default async function RecordsPage() {
       <div className="mb-6 grid gap-3 sm:grid-cols-3">
         <Figure value={FORMS.length} label="Forms produced here" sub="Each one described in the manual's appendix" tone="ok" href="/forms" />
         <Figure value="5 yrs" label="Retention" sub="Prescription and controlled substance records" tone="ok" />
-        <Figure value="48 hrs" label="Retrieval" sub="What “readily retrievable” means to the Board" tone="ok" />
+        {/*
+          This read "48 hrs", which no rule requires, and it was the most prominent statement of that
+          invented deadline anywhere in the site: a large number in a figure row, on the page about
+          records. The subtitle four lines above it was corrected in the same pass and this was
+          missed — a number rendered as a figure does not read like prose, and searching prose does
+          not find it.
+        */}
+        <Figure value="On request" label="Retrieval" sub="Separated out quickly and easily during an inspection. No rule sets a number of hours." tone="ok" />
       </div>
 
       <h2 className="mb-3">In this section</h2>
