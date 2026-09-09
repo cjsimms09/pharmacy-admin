@@ -1,7 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { parseCopayRemit, parseCopayRemitLine, netCopayLines, copayRemitSummary, COPAY_PAYER } from "../src/lib/copay-remit";
+import { parseCopayRemit, parseCopayRemitLine, netCopayLines, copayRemitSummary, COPAY_PAYER , looksLikeCopayRemit, SITE_STARTS_ON } from "../src/lib/copay-remit";
 
 const text = fs.readFileSync("fixtures/copay-remit-redsail.txt", "utf8");
 
@@ -173,5 +173,73 @@ describe("what it says about itself", () => {
 
   test("a statement with no rows says that, rather than saying nothing was paid", () => {
     assert.match(copayRemitSummary(parseCopayRemit("Payment Amount: 0.00")), /No item row could be read/);
+  });
+});
+
+/*
+ * Recognising the statement by what is in it, because its name will tell us nothing.
+ *
+ * RedSail is about to push these to the pharmacy's SFTP host under whatever name their system
+ * chooses, as .txt, .dat or PDF. So the recogniser cannot look at the name, and it must not be so
+ * loose that a covering email about the voucher programme routes as a remittance and gets read for
+ * money.
+ */
+describe("recognising one of these files", () => {
+  test("the real statement is recognised", () => {
+    assert.equal(looksLikeCopayRemit(text), true);
+  });
+
+  test("it is recognised with the title stripped, on the header and the rows alone", () => {
+    // The name says nothing, so neither may the recogniser depend on it.
+    const noTitle = text.replace(/Remittance Advice.*\n/, "").replace(/RedSail Technologies\n/, "");
+    assert.equal(looksLikeCopayRemit(noTitle), true);
+  });
+
+  test("a covering email that mentions the programme is not a remittance", () => {
+    assert.equal(
+      looksLikeCopayRemit("Subject: RAS Copay Voucher Reimbursement\n\nYour remittance advice for September is attached. Please contact us with any questions."),
+      false,
+    );
+  });
+
+  test("a table of figures with no marker is not one either", () => {
+    const rowsOnly = text.split("\n").filter((l) => /^\d/.test(l.trim())).join("\n");
+    assert.equal(looksLikeCopayRemit(rowsOnly), false, "rows alone could be anything");
+  });
+
+  test("one row is not enough, because one line of numbers is an accident", () => {
+    const oneRow = "Payment Date: 09/01/2026\nPayment Amount: 174.31\n000000410088 20260821 00002150680 Mounjaro 2.5 MG/0.5ML SOPN 2.00 1331.24 1156.93 174.31";
+    assert.equal(looksLikeCopayRemit(oneRow), false);
+  });
+
+  test("an empty or tiny file is not one", () => {
+    assert.equal(looksLikeCopayRemit(""), false);
+    assert.equal(looksLikeCopayRemit("Payment Date: 09/01/2026"), false);
+  });
+
+  test("an 835 is not mistaken for one, which is why the X12 test runs first", () => {
+    const x12 = "ISA*00*          *00*          *ZZ*SENDER         *ZZ*RECEIVER       *260901*1200*^*00501*000000001*0*P*:~GS*HP*S*R*20260901*1200*1*X*005010X221A1~ST*835*0001~";
+    assert.equal(looksLikeCopayRemit(x12), false);
+  });
+});
+
+/*
+ * The fills this statement settles are all before 1 September 2026.
+ *
+ * The owner settled that nothing before then is being uploaded and the site starts clean, so these
+ * will never match a claim however long anybody waits. That is not a failure to match — it is money
+ * for dispensings this site was not keeping records for, and it has to be counted apart from the
+ * unmatched or the one payment worth chasing is lost among a permanent, growing number.
+ */
+describe("what the site's start date means for these", () => {
+  test("every payable line on the sample statement predates the site's records", () => {
+    const r = parseCopayRemit(text);
+    const payable = r.net.filter((n) => !n.reversed && n.paidCents !== 0);
+    assert.equal(payable.length, 2);
+    assert.ok(payable.every((n) => n.dateOfService < SITE_STARTS_ON), "so none of them can ever match a claim");
+  });
+
+  test("the start date is the day the owner named, not a guess", () => {
+    assert.equal(SITE_STARTS_ON, "2026-09-01");
   });
 });
