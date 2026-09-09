@@ -42,6 +42,7 @@
 import { reconcileCogs, reconcileRevenue, type Check as ReconCheck } from "./reconcile";
 import { standingLines } from "./standing-math";
 import { todayIso } from "./dates";
+import { formatCents } from "./money";
 
 
 export type PLLine = { label: string; amountCents: number; note?: string };
@@ -486,13 +487,32 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
    * so a month without them does not look slightly optimistic — it looks profitable when it was not.
    */
   const spent = new Set(operating.filter((l) => l.amountCents !== 0).map((l) => l.label));
-  if (!spent.has("Wages and salaries")) {
-    missing.push("Wages and salaries. Usually the largest cost a pharmacy has — without it this account is not conservative, it is wrong.");
-  }
-  if (!spent.has("Rent and occupancy")) missing.push("Rent and occupancy.");
-  if (!spent.has("Card processing and bank fees")) {
-    missing.push("Card processing and bank fees — two to three per cent of everything taken on a card, and nobody sends an invoice for it.");
-  }
+  /*
+   * A cost the pharmacy has told the site about is not a cost the site has forgotten.
+   *
+   * On the cash basis a standing cost is nought until the day it is paid, so payroll on the 30th
+   * shows nothing on the 9th — correctly, no money has left the bank. But the line below reads a
+   * nought as an omission, and told the owner wages were missing on the very month he had just
+   * entered them, in the words "without it this account is not conservative, it is wrong". It is
+   * not wrong; it is early. Where the figure is on file and merely not due, that is a caveat about
+   * a month in progress, not a hole in the account.
+   */
+  const onFile = new Map((given.standing ?? []).filter((st) => !st.noPaidDay).map((st) => [st.categoryName, st] as const));
+  const absent = (label: string, why: string) => {
+    if (spent.has(label)) return;
+    const st = onFile.get(label);
+    if (st && i.basis === "cash") {
+      caveats.push(`${label} is on file at ${formatCents(st.amountCents)} a month and is not paid until later in the month, so the cash account does not carry it yet. The accrual account does.`);
+      return;
+    }
+    missing.push(why);
+  };
+  absent("Wages and salaries", "Wages and salaries. Usually the largest cost a pharmacy has — without it this account is not conservative, it is wrong.");
+  absent("Rent and occupancy", "Rent and occupancy.");
+  absent(
+    "Card processing and bank fees",
+    "Card processing and bank fees — two to three per cent of everything taken on a card, and nobody sends an invoice for it.",
+  );
   /*
    * DIR fees are entered by hand, so their absence means "nobody has entered them yet" far more
    * often than it means "there were none". Silence on a line that only ever reduces profit reads as

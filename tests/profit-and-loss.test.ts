@@ -300,6 +300,26 @@ describe("what the cash account is allowed to carry", () => {
     assert.equal(pl.operatingCents, 5_280_000);
     assert.ok(pl.missing.some((m) => m.includes("Payroll") && m.includes("no day of the month")));
   });
+  /*
+   * The owner had entered $45,000 of payroll, paid on the 30th, and on the 9th the cash account
+   * told him wages were missing — "without it this account is not conservative, it is wrong". They
+   * were not missing. No money had left the bank yet, which is what the cash basis is for. A cost
+   * the site has been told about and is merely early is a caveat about a month in progress, and
+   * saying otherwise trains the owner to ignore the one line that matters most.
+   */
+  test("a standing cost that is on file but not yet paid is a caveat on the cash account, not a hole", () => {
+    const notYetPaid = { name: "Payroll", categoryId: "w", categoryName: "Wages and salaries", kind: "operating", accruedCents: 0, amountCents: 4_500_000, days: 9, of: 30 };
+    const cash = monthlyPL({ ...cashBase, expenses: cashBase.expenses.filter((e) => e.categoryName !== "Wages and salaries"), standing: [notYetPaid] });
+    assert.equal(cash.operatingCents, 780_000, "nothing of it is on the cash account before the day it is paid");
+    assert.ok(!cash.missing.some((m) => m.startsWith("Wages and salaries")), "not reported as missing");
+    assert.ok(cash.caveats.some((c) => c.includes("Wages and salaries") && c.includes("$45,000.00")), "reported as not due yet, with the figure");
+  });
+
+  test("a category with no standing cost and no bill is still missing on the cash account", () => {
+    const cash = monthlyPL({ ...cashBase, expenses: cashBase.expenses.filter((e) => e.categoryName !== "Wages and salaries") });
+    assert.ok(cash.missing.some((m) => m.startsWith("Wages and salaries")));
+  });
+
   test("loan principal, draws, equipment and tax are cash out and never a cost", () => {
     const below = [
       { categoryId: "lp", categoryName: "Loan principal", kind: "balance_sheet", amountCents: 800_000 },
