@@ -347,6 +347,7 @@ export const SETTING_KEYS = [
   "pioneer_pull_invoices_result",
   // PioneerRx’s own September invoices set against the ones read from the suppliers’ PDFs.
   "pioneer_invoice_compare",
+  "pioneer_claims_reconcile",
   "pioneer_pull_retail_on",
   "pioneer_pull_retail_result",
   "pioneer_pull_suppliers_result",

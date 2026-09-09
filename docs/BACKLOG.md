@@ -25,44 +25,60 @@ The math has to be perfect — a wrong number that looks right is worse than no 
 
 ## Now
 
-### 0. Two-payer fills: the claims feed sees one side of each (9 September)
+### 0. Two-payer fills: understood, fixed, and reconciled to the penny (9 September)
 
 The owner: "We need to make sure we really understand secondaries and how to reconcile. How much to
 expect from each payer. Math has to be perfect and logic has to be sound." And, correcting me:
-"Secondary claims are not another claim are they? Same claim but 2 payors." He is right — one fill,
-one script, two payers, and the money adds while the script count must not.
+"Secondary claims are not another claim are they? Same claim but 2 payors." Right on both counts —
+one fill, one script, two payers; the money adds and the script count must not.
 
-**What is proven.** `ThirdParty.ClaimRemittancePricingByRxTransactionID.IsLatestClaimRecord = 1`
-returns exactly one row per fill, not one per payer: September has 1,916 fills, 107 of them
-cancelled or unfinished at $0, and the filter returns 1,809 rows — 1,758 flagged primary and 51
-flagged secondary. Taking the latest claim per fill *and payer side* instead shows **210 September
-fills have two payers.** So the feed sees one side of each of those 210 and cannot tell which side
-it got: for 51 it kept the secondary and lost the primary, for 159 the reverse. `pioneer-pull.ts`
-was written to carry both sides on one row and reports "0 secondary claims filled in" every run —
-correctly, because under this filter a second row never arrives.
+**Three things about PioneerRx that were guessed wrong first**, all now checked against the live
+database and written into `src/lib/pioneer-claims.ts`:
 
-There is a second, independent bug in the same block: the first row seen for a fill is assigned to
-`primary` regardless of its flag, so even once two rows do arrive a secondary-first ordering would
-land the secondary in the primary slot and let the primary overwrite it.
+1. `IsLatestClaimRecord = 1` returns one row per *fill*, not one per payer. The old feed used it, so
+   on a two-payer fill it kept whichever claim was transmitted last and threw the other away — it
+   saw one side of each and could not tell which. It reported "0 secondary claims" every run.
+2. `ClaimID` is a uniqueidentifier, so `max(ClaimID)` is not "the latest claim". Order by
+   `Transmission.CreatedOn` or `TransmittedDate`.
+3. `IsPrimaryThirdParty` is not the coordination-of-benefits position. `PrimaryClaimID` is: null on
+   the first payer, pointing at that payer's claim on the second.
 
-**The primary-side arithmetic is exact** and can be relied on: across the 210 two-payer fills,
-ingredient cost + dispensing fee = $37,789.11 and gross paid + patient pay = $37,814.00, a $24.89
-difference on 210 fills that is almost certainly tax.
+**The rule.** A fill's current money is the claims where `IsDuplicateClaim = 0`,
+`IsLastValidClaimForPayMethod = 1` and `TransactionResponseStatus = 'P'` — one row per payer, after
+reversals and rebills have settled. What each payer paid is its `NetAmountPaid`; what the patient
+owes is `PatientPayAmount`, which PioneerRx puts entirely on the last payer in the chain and zeroes
+on the earlier ones. So they can be summed across a fill, and the identity holds:
 
-**The secondary-side arithmetic does not reconcile and must not be booked until it does.** The
-primary says the patient owes $17,508.98; the secondary paid $3,668.27 and says the patient finally
-owes $2,259.94, which is $5,928.21 — an unexplained $11,580.77. Either `IsPrimaryThirdParty` does
-not mean COB sequence, or many of these second rows are re-bills after a rejection rather than true
-secondaries. Establish which before any of it reaches the account: booking a secondary payment
-against a primary's patient-pay balance without understanding the relationship is how a pharmacy
-counts the same dollar twice.
+    sum(NetAmountPaid) + sum(PatientPayAmount) = the fill's total price
 
-**Also to settle:** Pharm D is the pharmacy's cash plan, so cash-pay fills arrive as third-party
-claims (every one of September's 1,916 fills has `IsCashPaid = 0`). No 835 will ever pay them, and
-they must not sit as receivables waiting for one.
+Verified on September: exact on all 37 two-payer fills, and on 1,614 of 1,617 single-payer ones. The
+three exceptions differ by $16.50 in total and are named rather than absorbed.
 
-**Correctly excluded, checked:** 147 claims carry no gross paid, no copay and no ingredient cost —
-rejections, and dropping them is right. 107 fills are cancelled or waiting at $0.
+**The trap.** Do not sum `Prescription.Claim.PatientPayAmountPaid` across payers. That is the raw
+NCPDP field, where the primary states the balance it passed on and the secondary states what is left
+after it; adding them counts the same dollar twice, by $50,644.55 across September. The
+remittance-pricing figures are the ones to read.
+
+**Fixed.** `pioneer-pull.ts` reads one row per payer and `fillsFromClaimRows` assigns position from
+`PrimaryClaimID` alone — the old reader put the first row it saw into the primary slot whatever its
+flag said, so a secondary returning first was lost twice over. Twelve tests, including that the
+order rows arrive in changes nothing, and that a third payer's money is counted even though the
+site's shape holds two. The run now reports 1,654 fills, 37 with two payers, 37 secondaries filled
+in where it used to say none.
+
+**Still open, and it is not this feed's fault.** PioneerRx says September's payers owe $136,104.14;
+the site holds $132,161.53. Every fill on both systems agrees to the cent and none differ — the
+whole $3,942.61 is 32 fills the site has never seen, because the claims come from the daily
+transaction report and some of those reports were run before their day finished. 7 September holds
+76 of 101 fills. The feed now names the short days so the reports can be sent again, and counts the
+opposite error too: one fill the site holds that PioneerRx does not.
+
+**Also settled:** Pharm D is the pharmacy's cash plan, so cash-pay fills arrive as third-party claims
+(every one of September's 1,916 fills has `IsCashPaid = 0`) — there is no missing cash-Rx feed. But
+no 835 will ever pay them, and whether the site treats them as receivables waiting for one is not
+yet checked. 147 claims carrying no money at all are rejections and are correctly dropped; 107 fills
+are cancelled or unfinished at $0.
+
 
 ### 1. The drug catalogue has to be sound (7 September)
 
