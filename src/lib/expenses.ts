@@ -220,6 +220,8 @@ export async function addCashReceipt(input: {
   amountCents: number;
   payer?: string | null;
   notes?: string | null;
+  /** The document it was read out of, so a deposit banked from a misread file can be found again. */
+  documentId?: string | null;
   createdBy: string;
 }): Promise<string> {
   const id = newId();
@@ -230,6 +232,7 @@ export async function addCashReceipt(input: {
     amountCents: Math.round(input.amountCents),
     payer: input.payer ?? null,
     notes: input.notes ?? null,
+    documentId: input.documentId ?? null,
     createdBy: input.createdBy,
   });
   return id;

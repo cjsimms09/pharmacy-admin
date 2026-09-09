@@ -48,6 +48,8 @@ export type RecordPayment = {
   amountCents: number;
   receivedOn?: string | null;
   reference?: string | null;
+  /** The document it was read out of, where there is one. What an undo is keyed on. */
+  documentId?: string | null;
   notes?: string | null;
 };
 
@@ -78,6 +80,7 @@ export async function recordClaimPayment(p: RecordPayment, user: { name: string 
     revenueCents: Math.round(p.revenueCents ?? p.amountCents),
     receivedOn: p.receivedOn ?? null,
     reference: p.reference ?? null,
+    documentId: p.documentId ?? null,
     notes: p.notes ?? null,
     recordedBy: user.name,
   });
@@ -318,6 +321,7 @@ export async function importRemittance(
         revenueCents: settles ? 0 : p.paidCents!,
         receivedOn: r.paidOn,
         reference,
+        documentId: opts.documentId ?? null,
         notes: `From ${fileName}${r.traceNumber ? `, trace ${r.traceNumber}` : ""}.`,
       },
       user,
@@ -335,6 +339,7 @@ export async function importRemittance(
       kind: facilitator ? "facilitator" : "third_party",
       amountCents: r.totalPaidCents ?? out.amountCents,
       payer: r.payer ?? null,
+      documentId: opts.documentId ?? null,
       /*
        * The deposit and what stands behind it, in one sentence on the receipt.
        *

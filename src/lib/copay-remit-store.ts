@@ -205,6 +205,8 @@ export async function importCopayRemit(
         revenueCents: claim ? 0 : n.paidCents,
         receivedOn: r.paidOn,
         reference: r.reference,
+        // The handle an undo is keyed on. Accepted here since this reader was written and, until now, dropped.
+        documentId: opts.documentId ?? null,
         notes:
           `From ${fileName}${r.reference ? `, check/ACH ${r.reference}` : ""}. ${n.drug}, ${n.rows > 1 ? `${n.rows} rows netted` : "one row"}.` +
           (early ? " The fill predates 1 September 2026, when this site's records begin, so no claim for it exists." : ""),
@@ -243,6 +245,7 @@ export async function importCopayRemit(
       kind: "third_party",
       amountCents: r.paymentAmountCents ?? r.totals.paidCents ?? amountCents,
       payer: COPAY_PAYER,
+      documentId: opts.documentId ?? null,
       notes: `From ${fileName}${r.reference ? `, check/ACH ${r.reference}` : ""}, ${payments} payment${payments === 1 ? "" : "s"}${empty.reversedPairs ? `, ${empty.reversedPairs} paid and reversed in the same period` : ""}.`,
       createdBy: user.id ?? user.name,
     });
