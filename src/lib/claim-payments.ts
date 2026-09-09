@@ -58,12 +58,12 @@ export type RecordPayment = {
  * loaded yet is still recorded, and picks up its claim when the claim arrives. Losing money because
  * the remittance beat the daily report would be an ordering nobody outside this code knows about.
  */
-export async function recordClaimPayment(p: RecordPayment, user: { name: string }): Promise<{ id: string; matched: boolean }> {
+export async function recordClaimPayment(p: RecordPayment, user: { name: string }): Promise<{ id: string; matched: boolean; settledReversed: boolean }> {
   const rx = p.rxNumber.trim();
   if (!rx) throw new Error("A payment has to name the prescription it is for.");
   if (!Number.isFinite(p.amountCents) || p.amountCents === 0) throw new Error("Give the amount received.");
 
-  const claim = await findClaim(rx, p.fillNumber ?? null, p.dateFilled ?? null, p.ndc11 ?? null);
+  const { claim, onlyReversed } = await findClaim(rx, p.fillNumber ?? null, p.dateFilled ?? null, p.ndc11 ?? null);
   const id = newId();
   await db.insert(schema.claimPayments).values({
     id,
@@ -78,18 +78,38 @@ export async function recordClaimPayment(p: RecordPayment, user: { name: string 
     revenueCents: Math.round(p.revenueCents ?? p.amountCents),
     receivedOn: p.receivedOn ?? null,
     reference: p.reference ?? null,
-    notes: p.notes ?? null,
+    notes: [p.notes, onlyReversed ? "The only claim this pharmacy holds for that fill was reversed, so the payment is recorded against no claim. Worth asking the plan what it paid for." : null].filter(Boolean).join(" ") || null,
     recordedBy: user.name,
   });
-  return { id, matched: claim !== null };
+  return { id, matched: claim !== null, settledReversed: onlyReversed };
 }
 
-async function findClaim(rxNumber: string, fillNumber: number | null, dateFilled: string | null, ndc11: string | null) {
-  const rows = await db.query.claims.findMany({
+/**
+ * The claim a payment belongs to, and never a reversed one.
+ *
+ * `status` was read from the table and never used, so the first claim carrying the prescription
+ * number won — reversed or not. A plan settling a fill the pharmacy had reversed would attach to
+ * that reversed claim, and a reversed claim carries no revenue, so the money left every figure on
+ * the site while looking like an ordinary matched payment. Found by 2 in the copay reader on
+ * 9 September; the same query, and the same fault, was here.
+ *
+ * Paid claims are matched. Where the only claim for the fill was reversed the payment is recorded
+ * against no claim and says so, because that is a real thing worth asking the plan about rather
+ * than an absence to tidy away.
+ */
+async function findClaim(
+  rxNumber: string,
+  fillNumber: number | null,
+  dateFilled: string | null,
+  ndc11: string | null,
+): Promise<{ claim: { id: string; fillNumber: number | null; dateFilled: string; ndc11: string | null } | null; onlyReversed: boolean }> {
+  const all = await db.query.claims.findMany({
     where: eq(schema.claims.rxNumber, rxNumber),
-    columns: { id: true, fillNumber: true, dateFilled: true, ndc11: true },
+    columns: { id: true, fillNumber: true, dateFilled: true, ndc11: true, status: true },
   });
-  if (rows.length === 0) return null;
+  if (all.length === 0) return { claim: null, onlyReversed: false };
+  const rows = all.filter((r) => r.status === "paid");
+  if (rows.length === 0) return { claim: null, onlyReversed: true };
   /*
    * The most specific match that still identifies one claim, loosening one constraint at a time.
    *
@@ -109,10 +129,9 @@ async function findClaim(rxNumber: string, fillNumber: number | null, dateFilled
   ];
   for (const fits of levels) {
     const hits = rows.filter(fits);
-    if (hits.length === 1) return hits[0];
-    if (hits.length > 1) return hits[0];
+    if (hits.length >= 1) return { claim: hits[0], onlyReversed: false };
   }
-  return null;
+  return { claim: null, onlyReversed: false };
 }
 
 /** Every later payment, in the shape the fill grouping takes. */
@@ -150,7 +169,9 @@ export async function matchOrphanPayments(): Promise<{ matched: number }> {
   const orphans = await db.query.claimPayments.findMany({ where: isNull(schema.claimPayments.claimId) });
   let matched = 0;
   for (const p of orphans) {
-    const claim = await findClaim(p.rxNumber, p.fillNumber, p.dateFilled, p.ndc11);
+    // A payment waiting for its claim attaches to a paid one or keeps waiting; it never attaches to
+    // a reversed claim, which would take the money out of every figure the moment it landed.
+    const { claim } = await findClaim(p.rxNumber, p.fillNumber, p.dateFilled, p.ndc11);
     if (!claim) continue;
     await db.update(schema.claimPayments).set({ claimId: claim.id }).where(eq(schema.claimPayments.id, p.id));
     matched++;
@@ -234,6 +255,8 @@ export async function importRemittance(
   alreadyHeld: number;
   matched: number;
   unmatched: number;
+  /** Payments whose only claim for that fill had been reversed. Not matched, and not simply unknown. */
+  paidAReversedFill: number;
   amountCents: number;
   skipped: number;
   problems: string[];
@@ -271,6 +294,7 @@ export async function importRemittance(
     alreadyHeld: 0,
     matched: 0,
     unmatched: 0,
+    paidAReversedFill: 0,
     amountCents: 0,
     skipped: skipped.length,
     problems: [...r.problems],
@@ -325,6 +349,7 @@ export async function importRemittance(
     out.payments++;
     out.amountCents += p.paidCents!;
     if (rec.matched) out.matched++;
+    else if (rec.settledReversed) out.paidAReversedFill++;
     else out.unmatched++;
     seen.add(`${reference}|${p.rxNumber}|${p.paidCents}`);
   }

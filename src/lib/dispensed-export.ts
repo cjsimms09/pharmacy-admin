@@ -230,13 +230,27 @@ export type EnrichReport = {
  */
 export async function enrichClaimsFromDispensedExport(file: Buffer, fileName: string): Promise<EnrichReport> {
   const { readSheets } = await import("./xlsx");
-  const { db, schema } = await import("@/db");
-  const { eq, and } = await import("drizzle-orm");
   const sheets = readSheets(file);
   const parsed = parseDispensedExport(sheets[0]?.rows ?? []);
-  const report: EnrichReport = { rowsRead: parsed.rows.length, primaryEnriched: 0, secondaryEnriched: 0, notOnFile: 0, remitDiffers: 0, notes: [], unmapped: parsed.unmapped, problems: parsed.problems };
-  if (parsed.rows.length === 0) return report;
-  const stamp = `${fileName} @ ${new Date().toISOString().slice(0, 10)}`;
+  const r = await enrichClaimsFrom(parsed.rows, `${fileName} @ ${new Date().toISOString().slice(0, 10)}`);
+  return { ...r, unmapped: parsed.unmapped, problems: parsed.problems };
+}
+
+/**
+ * The enrichment itself, over rows from wherever they came.
+ *
+ * Split out on 9 September so the PioneerRx SQL feed can use it. The spreadsheet and the database
+ * answer the same question and must answer it the same way: which claim a row belongs to, what to
+ * do when the remit on the row and the remit on the claim disagree, and which of several claims on
+ * one BIN is the one that was paid. Two copies of those decisions would drift, and the drift would
+ * show up as money.
+ */
+export async function enrichClaimsFrom(rows: DispensedRow[], stamp: string): Promise<EnrichReport> {
+  const { db, schema } = await import("@/db");
+  const { eq, and } = await import("drizzle-orm");
+  const parsed = { rows };
+  const report: EnrichReport = { rowsRead: rows.length, primaryEnriched: 0, secondaryEnriched: 0, notOnFile: 0, remitDiffers: 0, notes: [], unmapped: [], problems: [] };
+  if (rows.length === 0) return report;
   const rxNumbers = [...new Set(parsed.rows.map((r) => r.rxNumber))];
   const { inArray } = await import("drizzle-orm");
   const held = await db.query.claims.findMany({

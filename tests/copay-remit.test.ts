@@ -92,11 +92,28 @@ describe("the three arithmetic gates", () => {
     assert.equal(r.reconciles, true);
   });
 
-  test("a statement whose rows do not add to its total says so rather than storing most of it", () => {
-    const short = text.replace("Total Amount Paid: 177.25", "Total Amount Paid: 180.19");
+  test("a statement whose rows do not add to the claims total says so rather than storing most of it", () => {
+    const short = text.replace("Total Claims: 177.25", "Total Claims: 180.19");
     const r = parseCopayRemit(short);
     assert.equal(r.reconciles, false);
     assert.match(copayRemitSummary(r), /do not add to the printed total/);
+  });
+
+  test("a footer that contradicts itself is a separate finding from rows that do not add up", () => {
+    /*
+     * The rows can be perfect while the footer is not. Folding the two into one verdict would
+     * either refuse a statement whose claims are all correct, or pass one whose own totals
+     * disagree — and the second is how a fee nobody accounted for goes unnoticed.
+     */
+    const oddFooter = text.replace("Total Amount Paid: 177.25", "Total Amount Paid: 180.19");
+    const r = parseCopayRemit(oddFooter);
+    assert.equal(r.reconciles, true, "the rows still add to the claims total, which is what they are");
+    assert.equal(r.totalsAgree, false, "but the footer does not hang together");
+    assert.match(copayRemitSummary(r), /the footer does not agree with itself/);
+  });
+
+  test("the sample statement footer agrees with itself", () => {
+    assert.equal(parseCopayRemit(text).totalsAgree, true);
   });
 
   test("no total printed is unverifiable, which is not the same as disagreeing", () => {
@@ -241,5 +258,41 @@ describe("what the site's start date means for these", () => {
 
   test("the start date is the day the owner named, not a guess", () => {
     assert.equal(SITE_STARTS_ON, "2026-09-01");
+  });
+});
+
+/*
+ * The rows are claims, so they are checked against the claims subtotal.
+ *
+ * This preferred "Total Amount Paid" and was right only by luck: the fee on the statement in hand
+ * is zero, so the two figures are equal. The invoice reader had exactly this fault and it cost
+ * real money — item lines checked against the amount due rather than the goods subtotal, so ten
+ * dollars of IPC's shipping refused an otherwise perfect reading and $4,878.56 of purchases went
+ * unread. The moment RedSail prints a fee the same thing happens here: every row correct, the
+ * statement refused, nothing stored.
+ */
+describe("the statement gate compares like with like", () => {
+  test("a fee that the payment includes and the claims total does not still reconciles", () => {
+    const withFee = text
+      .replace("Total Fee: 0.00", "Total Fee: 12.50")
+      .replace("Total Amount Paid: 177.25", "Total Amount Paid: 189.75");
+    const r = parseCopayRemit(withFee);
+    assert.equal(r.netCents, 17_725, "the rows are unchanged");
+    assert.equal(r.totals.claimsCents, 17_725);
+    assert.equal(r.totals.feeCents, 1_250);
+    assert.equal(r.totals.paidCents, 18_975);
+    assert.equal(r.reconciles, true, "the rows add to the claims total, which is what they are");
+  });
+
+  test("rows that genuinely disagree with the claims total still fail", () => {
+    const wrong = text.replace("Total Claims: 177.25", "Total Claims: 180.19");
+    assert.equal(parseCopayRemit(wrong).reconciles, false);
+  });
+
+  test("a statement printing only the amount paid is still checkable against it", () => {
+    const noClaims = text.replace("Total Claims: 177.25", "");
+    const r = parseCopayRemit(noClaims);
+    assert.equal(r.totals.claimsCents, null);
+    assert.equal(r.reconciles, true, "the payment total stands in where the claims total is absent");
   });
 });

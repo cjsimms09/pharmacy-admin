@@ -42,6 +42,7 @@
  */
 
 import { productKey } from "./product-key";
+import { isARated, teGroup } from "./drug-directory";
 
 export type GroupSource = {
   ndc11: string;
@@ -52,6 +53,14 @@ export type GroupSource = {
    * description is read instead. Callers fill this from `drug_directory.equivalence_key`.
    */
   equivalenceKey?: string | null;
+  /**
+   * The Orange Book's therapeutic equivalence rating — "AB", "AB1", "AP" — or null where the
+   * product carries none. Callers fill this from `drug_directory.te_code`.
+   *
+   * Without it the equivalence key decides alone, and the equivalence key is a statement about
+   * chemistry, not about substitution. See `groupKey`.
+   */
+  teCode?: string | null;
   /** NADAC's description for the NDC. Null where the NDC has no NADAC row, which is its own answer. */
   description: string | null;
   /** NADAC's classification for rate setting: "G" or "B". */
@@ -70,8 +79,39 @@ export function groupKey(src: GroupSource): string | null {
    * comparison and cannot recommend a switch that should not happen. The prefix keeps them apart
    * even in the unlikely event that a description key and an FDA key spell the same string.
    */
+  /*
+   * ── A key is not a rating, and the difference cost a recommendation ──
+   *
+   * On 9 September the site told the owner to buy NDC 00169-1704-30 rather than 00169-4404-31 and
+   * keep $193.31 a fill. Those are Ozempic and Wegovy. Same molecule, same strength, same form,
+   * same route, same manufacturer — so the same equivalence key, "semaglutide|4 mg/1|tablet|oral"
+   * — and two different FDA applications, NDA213051 and NDA218316, approved for different things.
+   * Neither may be dispensed for the other by anybody. 1,295 equivalence keys in this directory
+   * span more than one application that way.
+   *
+   * `drug-directory.ts` already held the correct rule and stated it plainly: "Two unrated products
+   * with the same key are the same drug on paper and still not called substitutable here, because
+   * nothing has said they are." `substitutable()` enforces it for dispensing. This module, which
+   * decides what to *buy*, did not use it, so the weaker rule sat in the more expensive place.
+   *
+   * A group now needs a rating as well as a key, in three cases.
+   *
+   * Products sharing an Orange Book A-rating are one group, suffix and all, because AB1 is not AB2
+   * and a bare AB is neither.
+   *
+   * A generic with no rating extracted is still a generic: an approved ANDA is therapeutically
+   * equivalent to its reference product by law, and that is what the approval means. 14,773 of this
+   * directory's generic NDCs carry no code — the Orange Book row did not match on strength, or the
+   * listing was not found — and splitting each into a group of one would have cost real comparisons
+   * on 4,317 NDCs that share a key with a rated product. They group on the key, as before.
+   *
+   * An unrated brand is substitutable for nothing. It groups only with other packages of its own
+   * product, which is a real buying choice and a safe one. That is the case Ozempic and Wegovy fall
+   * into, and Mounjaro and Zepbound, and Cymbalta and Drizalma Sprinkle.
+   */
   const fda = (src.equivalenceKey ?? "").trim();
-  const k = fda ? `fda:${fda}` : productKey(src.description).key;
+  const rating = isARated(src.teCode ?? null) ? `te:${teGroup(src.teCode ?? null)}` : (src.classification ?? "").trim().toUpperCase() === "B" ? `product:${src.ndc11.slice(0, 9)}` : "generic";
+  const k = fda ? `fda:${fda}|${rating}` : productKey(src.description).key;
   if (!k) return null;
   const cls = (src.classification ?? "").trim().toUpperCase() || "?";
   const unit = (src.pricingUnit ?? "").trim().toUpperCase() || "?";

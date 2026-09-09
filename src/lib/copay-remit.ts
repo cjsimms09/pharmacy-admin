@@ -105,6 +105,13 @@ export type CopayRemit = {
    * reason to suspect the reader.
    */
   reconciles: boolean | null;
+  /**
+   * Whether the footer agrees with itself: amount paid is the claims total give or take the fee.
+   *
+   * Null where the statement prints only one of the two. A separate question from `reconciles`,
+   * which is about the rows: they can be perfect while the footer contradicts itself.
+   */
+  totalsAgree: boolean | null;
   /** Rows that looked like items and did not hold together, kept verbatim so somebody can look. */
   unreadable: string[];
 };
@@ -307,13 +314,36 @@ export function parseCopayRemit(text: string): CopayRemit {
   const net = netCopayLines(lines);
   const netCents = lines.reduce((n, l) => n + l.paidCents, 0);
   /*
-   * Checked against the printed total, and against the payment amount where they differ.
+   * The rows are claims, so they are checked against the claims total and not the amount paid.
    *
-   * "Total Amount Paid" is the footer's own arithmetic and is the right thing to check. Where the
-   * footer was not read, the header's payment amount stands in — it is the same figure on this
-   * statement, and a statement that prints one of them and not the other is still checkable.
+   * This preferred "Total Amount Paid" and was right only by luck: on the statement in hand the
+   * fee is zero and the two figures are equal. The invoice reader had this exact fault and it cost
+   * real money — item lines were checked against the amount due rather than the goods subtotal, so
+   * ten dollars of IPC's shipping refused an otherwise perfect reading and $4,878.56 of purchases
+   * went unread across three invoices. The moment RedSail prints a fee, the same thing happens
+   * here: every row correct, the statement refused, and nothing stored.
+   *
+   * So the claims subtotal is preferred, and the amount paid is the fallback for a statement that
+   * prints one and not the other. `Total Fee` is read and reported for the same reason — a figure
+   * on the page that nothing looks at is how the next fault of this shape stays hidden.
    */
-  const printed = totals.paidCents ?? totals.claimsCents ?? money(amountRaw);
+  const printed = totals.claimsCents ?? totals.paidCents ?? money(amountRaw);
+
+  /*
+   * Whether the statement's own footer hangs together, which is a different question from whether
+   * the rows do.
+   *
+   * Separating the two is the point. The rows can be perfect while the footer is not, and folding
+   * that into one verdict would either refuse a statement whose claims are all correct or pass one
+   * whose totals contradict each other. The fee is allowed to explain the gap in either direction,
+   * because the sign convention is not knowable from a statement whose fee is zero — what is being
+   * tested is that the difference is the fee and not something unaccounted for.
+   */
+  const totalsAgree =
+    totals.claimsCents === null || totals.paidCents === null
+      ? null
+      : totals.paidCents === totals.claimsCents + (totals.feeCents ?? 0) - (totals.balanceForwardCents ?? 0) ||
+        totals.paidCents === totals.claimsCents - (totals.feeCents ?? 0) - (totals.balanceForwardCents ?? 0);
   return {
     payer: COPAY_PAYER,
     paidOn: paidOnRaw ? isoFromSlashes(paidOnRaw) : null,
@@ -325,6 +355,7 @@ export function parseCopayRemit(text: string): CopayRemit {
     totals,
     netCents,
     reconciles: printed === null || lines.length === 0 ? null : netCents === printed,
+    totalsAgree,
     unreadable,
   };
 }
@@ -347,6 +378,11 @@ export function copayRemitSummary(r: CopayRemit): string {
   if (reversed.length > 0) bits.push(`${reversed.length} paid and reversed in the same period, which record nothing`);
   if (r.reconciles === false) bits.push(`the rows do not add to the printed total of ${money(r.totals.paidCents ?? 0)}, so nothing was stored`);
   if (r.reconciles === null) bits.push("the statement printed no total to check the rows against");
+  if (r.totalsAgree === false) {
+    bits.push(
+      `the footer does not agree with itself — ${money(r.totals.claimsCents ?? 0)} of claims and a fee of ${money(r.totals.feeCents ?? 0)} do not make the ${money(r.totals.paidCents ?? 0)} it says it paid`,
+    );
+  }
   if (r.unreadable.length > 0) bits.push(`${r.unreadable.length} row${r.unreadable.length === 1 ? "" : "s"} could not be read`);
   return `${bits.join("; ")}.`;
 }
