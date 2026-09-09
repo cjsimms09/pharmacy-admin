@@ -8,6 +8,7 @@ import { triageByText } from "./contract-triage";
 import { classifySupplierDocument } from "./invoices";
 import { looksLikeX12Remittance } from "./business-docs";
 import { looksLikeCopayRemittance, whyCopayRemittance } from "./copay-remittance";
+import { readZipBounded } from "./zip-read";
 import { readFile } from "./files";
 import { CATEGORIES, recognise, ruleFromCorrection, categoryFor, type Evidence, type Recognition, type SenderHistory, type SenderRule } from "./intake-recognise";
 
@@ -121,6 +122,14 @@ export function contentVerdict(fileName: string, buf: Buffer, subject = ""): { v
    */
   if (looksLikeX12Remittance(buf, fileName)) {
     return { verdict: "x12:remittance", why: "An X12 envelope carrying an 835: a remittance advice, whatever the file is called." };
+  }
+  /*
+   * And the same file inside an archive, which is how a clearinghouse sends a day of them at once.
+   * Bounded, because this is a file from outside: see `readZipBounded`.
+   */
+  if (buf.length > 4 && buf.readUInt32LE(0) === 0x04034b50) {
+    const held = readZipBounded(buf).find((e) => looksLikeX12Remittance(e.data, e.name));
+    if (held) return { verdict: "x12:remittance", why: `A zip holding a remittance: ${held.name} is an X12 envelope carrying an 835.` };
   }
   let text = "";
   if (/^%PDF/.test(buf.subarray(0, 8).toString("latin1"))) {

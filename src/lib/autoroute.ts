@@ -13,6 +13,7 @@ import { pdfText } from "./pdf-text";
 import { looksLikeRebateReport } from "./rebate-report";
 import { isDrillDownText } from "./drill-down-read";
 import { looksLikeX12Remittance } from "./business-docs";
+import { readZipBounded } from "./zip-read";
 import { ALLOWED_MIME } from "./files";
 
 /**
@@ -340,6 +341,21 @@ const TEXT_MIME = new Set(["text/plain", "text/csv", "text/tab-separated-values"
  * happened. So a file with no extension is accepted when its type is text or its first lines are
  * the catalogue's own title; everything else still needs a known extension and a known type.
  */
+/**
+ * An 835, loose or in an archive.
+ *
+ * A clearinghouse that sends a day's remittances at once sends a zip, and a payer's portal offers
+ * one for download the same way, so "recognise an ISA envelope with ST*835 (and a zip holding one)"
+ * is one question with two shapes. The archive is walked with the bounded reader rather than the
+ * plain one: this is an attachment from outside, and a zip is a format in which something small
+ * describes something enormous.
+ */
+function remittanceInside(content: Buffer, name: string): boolean {
+  if (looksLikeX12Remittance(content, name)) return true;
+  if (content.length < 4 || content.readUInt32LE(0) !== 0x04034b50) return false;
+  return readZipBounded(content).some((e) => looksLikeX12Remittance(e.data, e.name));
+}
+
 export function acceptableAttachment(att: { filename?: string | null; contentType?: string | null; content?: Buffer | Uint8Array | null }): { ok: true } | { ok: false; why: string } {
   const name = att.filename ?? "";
   const type = att.contentType ?? "";
@@ -358,7 +374,7 @@ export function acceptableAttachment(att: { filename?: string | null; contentTyp
    * which every branch below refuses and which is what a forwarded attachment sometimes looks like.
    */
   const content = att.content ? Buffer.from(att.content) : null;
-  if (content && looksLikeX12Remittance(content, name)) return { ok: true };
+  if (content && remittanceInside(content, name)) return { ok: true };
   if (!name) return { ok: false, why: "an attachment with no name" };
   const hasExt = /\.[A-Za-z0-9]{1,5}$/.test(name);
   if (hasExt) {

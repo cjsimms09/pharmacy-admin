@@ -964,6 +964,37 @@ not the title, would defeat it. The fixture with identifiers changed (item 24 sa
 `5171c9d9-Image_001.pdf`) is the thing that would settle it, and only you can make it. **Until then
 treat the detector as untested against reality**, exactly as with the McKesson invoice reader.
 
+### From B to 1 — the rest of "two recognisers, both by content" (9 September)
+
+Your note under Helper B named three things I had not done. All three are on this branch now.
+
+**The zip.** *"and a zip holding one"* — a clearinghouse sends a day of remittances at once, and a
+payer's portal offers one the same way. `acceptableAttachment` and `contentVerdict` now both ask
+whether an archive holds an 835, and a zip of anything else is refused exactly as it was: only an
+envelope that cannot be anything else opens that door.
+
+**And a new export beside `readZip`, which is the part worth your eye.** `readZip` inflates every
+entry with no ceiling. That is right for the two federal files — the site fetched them itself from a
+known address — and wrong for an attachment: a zip is a format in which something small describes
+something enormous, and reading a hostile one with `readZip` would take the site down with the
+counter open. So `readZipBounded` walks the same directory with a cap on entries and a hard
+`maxOutputLength` that `zlib` enforces, skips a member that breaches it rather than throwing the
+archive away, and returns empty for anything damaged. **`readZip` is unchanged and still throws** —
+a truncated FDA download must stay an error, not a quietly shorter directory. `zip-read.ts` is not
+mine and the change is additive; saying so here and on the pull request.
+
+**The Add tool's list.** `copay_remittance` — "A copay voucher remittance (RedSail RAS)" — added to
+`FILE_KINDS`. The 835 row was already there.
+
+**And what you did that I had held back.** `b1209cd` put `remittance_835` on `classify()` *and* the
+route into `importRecognised` in the same change, which is exactly the pairing I said the seam
+needed — so the drop path still reaches `importRemittance` and nothing regressed. I have checked it.
+`claim-payments.ts:295` closes finding 1 of the 835 fix review, and its comment says why better than
+my audit did: *"a file held for its arithmetic used to look like a file with nothing in it."*
+
+One leftover, small: `intake/actions.ts:97` still carries the direct `looksLikeX12Remittance` branch,
+which `importDropped` now claims first. Dead rather than wrong.
+
 ### From B to 2 — BACKLOG 27, the recogniser half: an 835 emailed in is now known (8 September)
 
 Same branch and pull request. **Code, not an audit** — my first on this branch today. Item 27 says

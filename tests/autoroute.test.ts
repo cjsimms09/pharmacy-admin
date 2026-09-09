@@ -196,3 +196,81 @@ describe("an 835 emailed in, under any name", () => {
     assert.equal(v.ok, false);
   });
 });
+
+/**
+ * A zip holding a remittance, which is how a clearinghouse sends a day of them at once.
+ *
+ * ASSIGNMENTS, "Two recognisers, both by content": *"recognise an ISA envelope with ST*835 (and a
+ * zip holding one)"*. The archives here are built by hand in the stored (uncompressed) method, so
+ * the test depends on no library and the bytes are the ones a reader will actually walk.
+ */
+describe("a zip holding an 835", () => {
+  const era = Buffer.from(
+    "ISA*00*          *00*          *ZZ*PAYER          *ZZ*PHARMACY       *260908*1200*^*00501*000000001*0*P*:~" +
+      "GS*HP*PAYER*PHARM*20260908*1200*1*X*005010X221A1~ST*835*0001~BPR*I*102.50*C*ACH~" +
+      "TRN*1*TRACE001*1999999999~CLP*332359-1*1*100.00*60.00*10.00*07*CTRL9*~SE*6*0001~IEA*1*000000001~",
+    "latin1",
+  );
+
+  /** One stored entry, written the way the format specifies, so nothing here is mocked. */
+  function zipOf(entries: { name: string; data: Buffer }[]): Buffer {
+    const locals: Buffer[] = [];
+    const centrals: Buffer[] = [];
+    let offset = 0;
+    for (const e of entries) {
+      const name = Buffer.from(e.name, "utf8");
+      const lh = Buffer.alloc(30);
+      lh.writeUInt32LE(0x04034b50, 0);
+      lh.writeUInt16LE(20, 4);
+      lh.writeUInt16LE(0, 8); // stored
+      lh.writeUInt32LE(0, 14); // crc, unchecked by these readers
+      lh.writeUInt32LE(e.data.length, 18);
+      lh.writeUInt32LE(e.data.length, 22);
+      lh.writeUInt16LE(name.length, 26);
+      const local = Buffer.concat([lh, name, e.data]);
+      const ch = Buffer.alloc(46);
+      ch.writeUInt32LE(0x02014b50, 0);
+      ch.writeUInt16LE(20, 6);
+      ch.writeUInt16LE(0, 10); // stored
+      ch.writeUInt32LE(e.data.length, 20);
+      ch.writeUInt32LE(e.data.length, 24);
+      ch.writeUInt16LE(name.length, 28);
+      ch.writeUInt32LE(offset, 42);
+      centrals.push(Buffer.concat([ch, name]));
+      locals.push(local);
+      offset += local.length;
+    }
+    const central = Buffer.concat(centrals);
+    const eocd = Buffer.alloc(22);
+    eocd.writeUInt32LE(0x06054b50, 0);
+    eocd.writeUInt16LE(entries.length, 8);
+    eocd.writeUInt16LE(entries.length, 10);
+    eocd.writeUInt32LE(central.length, 12);
+    eocd.writeUInt32LE(offset, 16);
+    return Buffer.concat([...locals, central, eocd]);
+  }
+
+  test("is accepted, and so is one sitting beside other files", () => {
+    const one = zipOf([{ name: "REMIT_20260908.835", data: era }]);
+    assert.ok(acceptableAttachment({ filename: "remits.zip", contentType: "application/zip", content: one }).ok);
+
+    const many = zipOf([
+      { name: "readme.txt", data: Buffer.from("Your remittances for 8 September.\n") },
+      { name: "0908/PAYER_A.835", data: era },
+    ]);
+    assert.ok(acceptableAttachment({ filename: "remits.zip", contentType: "application/zip", content: many }).ok);
+  });
+
+  test("a zip of anything else is refused exactly as it was", () => {
+    // The existing rule stands: zips are not a type this site reads. Only a remittance inside one
+    // opens the door, because only that has an envelope that cannot be anything else.
+    const plain = zipOf([{ name: "catalogue.csv", data: Buffer.from("ndc,price\n00093721410,1.23\n") }]);
+    const v = acceptableAttachment({ filename: "catalogues.zip", contentType: "application/zip", content: plain });
+    assert.equal(v.ok, false);
+  });
+
+  test("a damaged archive is not an archive holding a remittance", () => {
+    const truncated = zipOf([{ name: "x.835", data: era }]).subarray(0, 40);
+    assert.equal(acceptableAttachment({ filename: "remits.zip", contentType: "application/zip", content: truncated }).ok, false);
+  });
+});
