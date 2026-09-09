@@ -17,15 +17,33 @@
  * absent from one night's file has not necessarily been withdrawn — but it means the table holds two
  * kinds of row, and only one of them has a file behind it today:
  *
- *   proved         in the newest file and in the table at the same unit cost
- *   priceDiffers   in both, and the table's figure is not the file's. The fault this exists for
- *   missing        in the newest file and not in the table at all
- *   carriedOver    in the table from an earlier import, absent from the newest file. Not a fault,
- *                  and not nothing: it is a price being quoted that the wholesaler last sent on the
- *                  date named, and nothing else on this site would say so
+ *   proved                the table holds the listing the importer's own rule would pick
+ *   matchedOtherListing   the table holds a different listing of the same NDC. Not a fault: the
+ *                         file or the rule has changed since the import
+ *   priceDiffers          the table's price is no listing in the file. The fault this exists for
+ *   missing               in the newest file and not in the table at all
+ *   carriedOver           in the table from an earlier import, absent from the newest file. Not a
+ *                         fault, and not nothing: it is a price still being quoted that the
+ *                         wholesaler last sent on the date named, and nothing else here says so
  *
  * Every item carries the `import_id` that wrote it, so "carried over" is read from the table rather
  * than inferred: an item whose import is not the newest for that supplier came from an older file.
+ *
+ * ── One NDC, several listings, and the rule that picks between them ──
+ *
+ * The first real run reported 239 prices as wrong across four wholesalers and not one of them was.
+ * Every line was a second listing of the same NDC in the same file — McKesson lists 539 NDCs more
+ * than once in a single catalogue, IPC 19, ANDA 5 — and comparing row by row asked of each listing
+ * "does the table hold this one", when the table can only hold one.
+ *
+ * So the file is grouped by NDC and compared against the listing `suppliers.ts` would select. That
+ * rule is not simply "cheapest": it prefers listings that are not short-dated, and falls back to
+ * short-dated ones only where no priced full-dated listing exists. A short-dated lot is often the
+ * cheaper line, so encoding "cheapest wins" would have replaced one false alarm with another.
+ *
+ * That rule lives in two files now, which is a coupling worth naming. It is bounded on purpose: if
+ * `suppliers.ts` changes how it picks, this reports `matchedOtherListing` — a count, not a fault —
+ * rather than a page of wrong prices.
  *
  * ── Finding the file ──
  *
@@ -45,10 +63,15 @@
  *
  *   { provedOn,
  *     suppliers: [{ supplier, supplierId, fileName, importedAt, printedOn, documentFound,
- *                   rowsInFile, itemsInTable, proved, priceDiffers, missing, carriedOver,
- *                   carriedOverOldestPricedOn, fileUnitMicros, tableUnitMicros, problems: [] }],
- *     rowsInFiles, proved, priceDiffers, missing, carriedOver,
- *     suppliersWithNoFile: [names], lines: [the first 40 faults in words] }
+ *                   rowsInFile, ndcsInFile, listedTwice, itemsInTable,
+ *                   proved, matchedOtherListing, priceDiffers, missing,
+ *                   carriedOver, carriedOverOldestPricedOn,
+ *                   fileUnitMicros, tableUnitMicros, problems: [] }],
+ *     rowsInFiles, ndcsInFiles, listedTwice, proved, matchedOtherListing, priceDiffers, missing,
+ *     carriedOver, suppliersWithNoFile: [names], lines: [the first 40 faults in words] }
+ *
+ * `rowsInFile` and `ndcsInFile` are both reported because they differ by hundreds on the real
+ * files, and every count that matters is per NDC.
  *
  * The supplier list is the register, so a wholesaler that has never sent a catalogue is in it with
  * nothing rather than absent from it — and when PioneerRx over SQL lands, its own AWP and WAC become
@@ -76,6 +99,9 @@ async function main() {
   let differsAll = 0;
   let missingAll = 0;
   let carriedAll = 0;
+  let ndcsInFiles = 0;
+  let matchedOtherAll = 0;
+  let listedTwiceAll = 0;
 
   for (const s of registry) {
     const problems: string[] = [];
@@ -144,28 +170,76 @@ async function main() {
     }
     const rows = section?.rows ?? [];
 
+    /*
+     * ── One NDC can be listed several times in one file, and the table keeps one of them ──
+     *
+     * The first run reported 239 prices as wrong across four wholesalers and not one of them was.
+     * Every line was a second listing of the same NDC in the same file: McKesson lists 539 NDCs
+     * more than once in a single catalogue, IPC 19, ANDA 5. Comparing row by row asked "does the
+     * table hold this listing" of each of them, and the table can only hold one.
+     *
+     * So the file is grouped by NDC and the table is compared against the listing the importer's
+     * own rule selects. That rule, from `suppliers.ts`, is not simply "cheapest": it prefers
+     * listings that are not short-dated, and only falls back to short-dated ones where there is no
+     * priced full-dated listing at all. A short-dated lot is often the cheaper line, so "cheapest
+     * wins" would have produced a new false alarm in exactly the cases the old one was hiding.
+     *
+     * Three answers, so a rule that drifts is visible without being reported as a price fault:
+     *
+     *   proved                the table holds the listing the importer's rule would pick
+     *   matchedOtherListing   the table holds a different listing of the same NDC. Not a fault —
+     *                         the file or the rule has changed since the import — but worth a count
+     *   priceDiffers          the table's price is no listing in the file. The real fault
+     */
+    const groups = new Map<string, typeof rows>();
+    for (const r of rows) {
+      const g = groups.get(r.ndc11);
+      if (g) g.push(r);
+      else groups.set(r.ndc11, [r]);
+    }
+
     let proved = 0;
+    let matchedOther = 0;
     let differs = 0;
     let missing = 0;
+    let listedTwice = 0;
+    let keptNotPreferred = 0;
     let fileUnitMicros = 0;
     const seen = new Set<string>();
-    for (const r of rows) {
-      seen.add(r.ndc11);
-      fileUnitMicros += r.unitCostMicros ?? 0;
-      const held = byNdc.get(r.ndc11);
+    for (const [ndc11, group] of groups) {
+      seen.add(ndc11);
+      if (group.length > 1) listedTwice++;
+      // The importer's own selection, replicated: full-dated before short-dated, then cheapest.
+      const dated = group.filter((r) => !r.shortDated && r.unitCostMicros !== null);
+      const short = group.filter((r) => r.shortDated && r.unitCostMicros !== null);
+      const preferred = (dated.length ? dated : short).sort((a, b) => (a.unitCostMicros ?? 0) - (b.unitCostMicros ?? 0))[0] ?? group[0];
+      fileUnitMicros += preferred.unitCostMicros ?? 0;
+
+      const held = byNdc.get(ndc11);
       if (!held) {
         missing++;
-        if (lines.length < 200) lines.push(`${s.name}: ${r.ndc11} is in ${last.file_name} at ${((r.unitCostMicros ?? 0) / 1_000_000).toFixed(5)} a unit and is not in the catalogue table at all.`);
+        if (lines.length < 200) lines.push(`${s.name}: ${ndc11} is in ${last.file_name} at ${((preferred.unitCostMicros ?? 0) / 1_000_000).toFixed(5)} a unit and is not in the catalogue table at all.`);
         continue;
       }
-      if ((held.unit_cost_micros ?? null) === (r.unitCostMicros ?? null)) {
+      if ((held.unit_cost_micros ?? null) === (preferred.unitCostMicros ?? null)) {
         proved++;
+        continue;
+      }
+      const other = group.find((r) => (r.unitCostMicros ?? null) === (held.unit_cost_micros ?? null));
+      if (other) {
+        matchedOther++;
+        keptNotPreferred++;
+        if (lines.length < 200 && keptNotPreferred <= 5) {
+          lines.push(
+            `${s.name}: ${ndc11} is listed ${group.length} times in ${last.file_name} and the table holds ${((held.unit_cost_micros ?? 0) / 1_000_000).toFixed(5)}, which is one of them but not the one the import rule would pick (${((preferred.unitCostMicros ?? 0) / 1_000_000).toFixed(5)}${other.shortDated ? ", the held line being short-dated" : ""}). Not a wrong price; the file or the rule has changed since the import.`,
+          );
+        }
         continue;
       }
       differs++;
       if (lines.length < 200) {
         lines.push(
-          `${s.name}: ${r.ndc11} — the file says ${((r.unitCostMicros ?? 0) / 1_000_000).toFixed(5)} a unit and the table holds ${((held.unit_cost_micros ?? 0) / 1_000_000).toFixed(5)}. Every buying decision on this NDC is made on the table's figure.`,
+          `${s.name}: ${ndc11} — the table holds ${((held.unit_cost_micros ?? 0) / 1_000_000).toFixed(5)} a unit and no listing in ${last.file_name} says that (${group.length === 1 ? `the file says ${((preferred.unitCostMicros ?? 0) / 1_000_000).toFixed(5)}` : `${group.length} listings, cheapest ${((preferred.unitCostMicros ?? 0) / 1_000_000).toFixed(5)}`}). Every buying decision on this NDC is made on the table's figure.`,
         );
       }
     }
@@ -184,10 +258,13 @@ async function main() {
     }
 
     rowsInFiles += rows.length;
+    ndcsInFiles += groups.size;
     provedAll += proved;
+    matchedOtherAll += matchedOther;
     differsAll += differs;
     missingAll += missing;
     carriedAll += carried.length;
+    listedTwiceAll += listedTwice;
     suppliers.push({
       supplier: s.name,
       supplierId: s.id,
@@ -196,8 +273,11 @@ async function main() {
       printedOn: parsed.printedOn ?? last.priced_on,
       documentFound: true,
       rowsInFile: rows.length,
+      ndcsInFile: groups.size,
+      listedTwice,
       itemsInTable: items.length,
       proved,
+      matchedOtherListing: matchedOther,
       priceDiffers: differs,
       missing,
       carriedOver: carried.length,
@@ -212,7 +292,10 @@ async function main() {
     provedOn: new Date().toISOString().slice(0, 10),
     suppliers,
     rowsInFiles,
+    ndcsInFiles,
+    listedTwice: listedTwiceAll,
     proved: provedAll,
+    matchedOtherListing: matchedOtherAll,
     priceDiffers: differsAll,
     missing: missingAll,
     carriedOver: carriedAll,
