@@ -1,3 +1,4 @@
+import { chooseClaimForRemittance } from "./match-remittance";
 import "server-only";
 import nodePath from "node:path";
 import { db, schema } from "@/db";
@@ -49,6 +50,14 @@ export type RecordPayment = {
   receivedOn?: string | null;
   reference?: string | null;
   notes?: string | null;
+  /**
+   * The paying BIN, where the remittance names one.
+   *
+   * What tells two payers on one fill apart. Without it a secondary payer's 835 can be filed
+   * against the primary's claim, which leaves the primary looking paid twice and the secondary
+   * ageing unsettled.
+   */
+  bin?: string | null;
 };
 
 /**
@@ -58,12 +67,12 @@ export type RecordPayment = {
  * loaded yet is still recorded, and picks up its claim when the claim arrives. Losing money because
  * the remittance beat the daily report would be an ordering nobody outside this code knows about.
  */
-export async function recordClaimPayment(p: RecordPayment, user: { name: string }): Promise<{ id: string; matched: boolean; settledReversed: boolean }> {
+export async function recordClaimPayment(p: RecordPayment, user: { name: string }): Promise<{ id: string; matched: boolean; settledReversed: boolean; ambiguous: { count: number; why: string } | null }> {
   const rx = p.rxNumber.trim();
   if (!rx) throw new Error("A payment has to name the prescription it is for.");
   if (!Number.isFinite(p.amountCents) || p.amountCents === 0) throw new Error("Give the amount received.");
 
-  const { claim, onlyReversed } = await findClaim(rx, p.fillNumber ?? null, p.dateFilled ?? null, p.ndc11 ?? null);
+  const { claim, onlyReversed, ambiguous } = await findClaim(rx, p.fillNumber ?? null, p.dateFilled ?? null, p.ndc11 ?? null, Math.round(p.amountCents), p.bin ?? null);
   const id = newId();
   await db.insert(schema.claimPayments).values({
     id,
@@ -81,7 +90,7 @@ export async function recordClaimPayment(p: RecordPayment, user: { name: string 
     notes: [p.notes, onlyReversed ? "The only claim this pharmacy holds for that fill was reversed, so the payment is recorded against no claim. Worth asking the plan what it paid for." : null].filter(Boolean).join(" ") || null,
     recordedBy: user.name,
   });
-  return { id, matched: claim !== null, settledReversed: onlyReversed };
+  return { id, matched: claim !== null, settledReversed: onlyReversed, ambiguous };
 }
 
 /**
@@ -97,41 +106,32 @@ export async function recordClaimPayment(p: RecordPayment, user: { name: string 
  * against no claim and says so, because that is a real thing worth asking the plan about rather
  * than an absence to tidy away.
  */
+/**
+ * The paid claim a payment belongs to, and where two fit equally well, neither.
+ *
+ * The choosing is in `match-remittance.ts`, pure and tested. This part is only the lookup: every
+ * claim on the prescription, and whether the paid ones are all that is left after reversals.
+ */
 async function findClaim(
   rxNumber: string,
   fillNumber: number | null,
   dateFilled: string | null,
   ndc11: string | null,
-): Promise<{ claim: { id: string; fillNumber: number | null; dateFilled: string; ndc11: string | null } | null; onlyReversed: boolean }> {
+  amountCents: number | null,
+  bin: string | null,
+): Promise<{ claim: { id: string; fillNumber: number | null; dateFilled: string; ndc11: string | null } | null; onlyReversed: boolean; ambiguous: { count: number; why: string } | null }> {
   const all = await db.query.claims.findMany({
     where: eq(schema.claims.rxNumber, rxNumber),
-    columns: { id: true, fillNumber: true, dateFilled: true, ndc11: true, status: true },
+    columns: { id: true, fillNumber: true, dateFilled: true, ndc11: true, status: true, bin: true, remitCents: true },
   });
-  if (all.length === 0) return { claim: null, onlyReversed: false };
+  if (all.length === 0) return { claim: null, onlyReversed: false, ambiguous: null };
   const rows = all.filter((r) => r.status === "paid");
-  if (rows.length === 0) return { claim: null, onlyReversed: true };
-  /*
-   * The most specific match that still identifies one claim, loosening one constraint at a time.
-   *
-   * A credit memo names the prescription, the drug and the day it was dispensed but never the fill
-   * number, and a remittance may disagree with the claim about the date by a day — the memo counts
-   * the day it was billed, the claim the day it was filled. Insisting on every field at once threw
-   * those away as unmatched, and money sitting against nothing is money nobody chases.
-   *
-   * Loosening stops the moment a level is ambiguous: two candidates is not an answer, and guessing
-   * which fill a payment belongs to is worse than leaving it to be attached deliberately.
-   */
-  const levels: ((r: { fillNumber: number | null; dateFilled: string; ndc11: string | null }) => boolean)[] = [
-    (r) => (fillNumber === null || r.fillNumber === fillNumber) && (dateFilled === null || r.dateFilled === dateFilled) && (ndc11 === null || r.ndc11 === ndc11),
-    (r) => (dateFilled === null || r.dateFilled === dateFilled) && (ndc11 === null || r.ndc11 === ndc11),
-    (r) => ndc11 === null || r.ndc11 === ndc11,
-    () => true,
-  ];
-  for (const fits of levels) {
-    const hits = rows.filter(fits);
-    if (hits.length >= 1) return { claim: hits[0], onlyReversed: false };
-  }
-  return { claim: null, onlyReversed: false };
+  if (rows.length === 0) return { claim: null, onlyReversed: true, ambiguous: null };
+  const chosen = chooseClaimForRemittance(
+    rows.map((r) => ({ id: r.id, fillNumber: r.fillNumber, dateFilled: r.dateFilled, ndc11: r.ndc11, bin: r.bin, remitCents: r.remitCents })),
+    { fillNumber, dateFilled, ndc11, amountCents, bin },
+  );
+  return { claim: chosen.claim, onlyReversed: false, ambiguous: chosen.ambiguous };
 }
 
 /** Every later payment, in the shape the fill grouping takes. */
@@ -171,7 +171,7 @@ export async function matchOrphanPayments(): Promise<{ matched: number }> {
   for (const p of orphans) {
     // A payment waiting for its claim attaches to a paid one or keeps waiting; it never attaches to
     // a reversed claim, which would take the money out of every figure the moment it landed.
-    const { claim } = await findClaim(p.rxNumber, p.fillNumber, p.dateFilled, p.ndc11);
+    const { claim } = await findClaim(p.rxNumber, p.fillNumber, p.dateFilled, p.ndc11, p.amountCents, null);
     if (!claim) continue;
     await db.update(schema.claimPayments).set({ claimId: claim.id }).where(eq(schema.claimPayments.id, p.id));
     matched++;
@@ -257,6 +257,14 @@ export async function importRemittance(
   unmatched: number;
   /** Payments whose only claim for that fill had been reversed. Not matched, and not simply unknown. */
   paidAReversedFill: number;
+  /**
+   * Lines that fitted more than one paid claim and were left unattached on purpose.
+   *
+   * A fill billed to two payers is two claim rows with the same prescription, fill, day and drug.
+   * Where the BIN and the amount both fail to say which of them this money settles, guessing makes
+   * two claims wrong at once. Counted here so the refusal is visible rather than quiet.
+   */
+  ambiguous: number;
   amountCents: number;
   skipped: number;
   problems: string[];
@@ -294,7 +302,7 @@ export async function importRemittance(
     alreadyHeld: 0,
     matched: 0,
     unmatched: 0,
-    paidAReversedFill: 0,
+    paidAReversedFill: 0, ambiguous: 0,
     amountCents: 0,
     skipped: skipped.length,
     problems: [...r.problems],
@@ -350,7 +358,10 @@ export async function importRemittance(
     out.amountCents += p.paidCents!;
     if (rec.matched) out.matched++;
     else if (rec.settledReversed) out.paidAReversedFill++;
-    else out.unmatched++;
+    else if (rec.ambiguous) {
+      out.ambiguous++;
+      if (out.problems.length < 12) out.problems.push(`Rx ${p.rxNumber}: ${rec.ambiguous.why}`);
+    } else out.unmatched++;
     seen.add(`${reference}|${p.rxNumber}|${p.paidCents}`);
   }
   if (opts.bank && r.paidOn && (r.totalPaidCents ?? out.amountCents) > 0 && out.payments > 0) {
