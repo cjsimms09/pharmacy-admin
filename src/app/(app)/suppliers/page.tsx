@@ -43,6 +43,10 @@ export default async function SuppliersPage({
   const canManage = user.role !== "staff";
 
   const [suppliers, all, s, terms, catalogs] = await Promise.all([allSuppliers(true), invoices(), getSettings(), termsSummaryBySupplier(), catalogSummaryBySupplier()]);
+  // The ones with nothing behind them, for the panel above the grid. Same test the action uses.
+  const unused = suppliers.filter((x) => x.active && !catalogs.get(x.id) && !all.some((i) => (i.supplier ?? "").toLowerCase().includes(x.name.toLowerCase().slice(0, 8))));
+  const unusedIds = unused.map((x) => x.id);
+  const unusedNames = unused.map((x) => x.name);
   /*
    * Where the rebate stands, above the list rather than two clicks inside it.
    *
@@ -112,6 +116,32 @@ export default async function SuppliersPage({
       if (e && typeof e === "object" && "digest" in e) throw e;
       redirect("/suppliers?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not save that."));
     }
+  }
+
+  /**
+   * Retires every supplier with no record behind it on this site.
+   *
+   * The list is worked out again here rather than passed in from the form: a hidden field carrying
+   * seventeen ids is a hidden field somebody can edit, and this is the one control on the page that
+   * changes many rows at once. Anything that has sent an invoice or loaded a catalogue since the
+   * page was drawn is left alone by that recount, which is the safe direction.
+   */
+  async function retireUnused() {
+    "use server";
+    const u = await requireManager();
+    const [rows, filed, cats] = await Promise.all([allSuppliers(true), invoices(), catalogSummaryBySupplier()]);
+    const unused = rows.filter(
+      (x) => x.active && !cats.get(x.id) && !filed.some((i) => (i.supplier ?? "").toLowerCase().includes(x.name.toLowerCase().slice(0, 8))),
+    );
+    for (const x of unused) await retireSupplier(x.id, false);
+    await audit({ action: "supplier.retire.unused", userId: u.id, userName: u.name, details: `${unused.length} retired: ${unused.map((x) => x.name).join(", ")}` });
+    revalidatePath("/suppliers");
+    redirect(
+      "/suppliers?ok=" +
+        encodeURIComponent(
+          `${unused.length} supplier${unused.length === 1 ? "" : "s"} retired — the ones with no invoice and no catalogue here. Nothing is deleted: bring any of them back with one press when you buy from them again.`,
+        ),
+    );
   }
 
   async function retire(fd: FormData) {
@@ -335,6 +365,27 @@ export default async function SuppliersPage({
         </Notice>
       )}
 
+      {/*
+        Clearing out the ones that were never going to be used.
+
+        Seventeen wholesalers arrived from PioneerRx at once, and the owner's answer was immediate:
+        "I need a way to inactivate some then no longer use a lot of them". Retiring them one at a
+        time is twenty-two decisions to reach the four or five that matter, so the ones with nothing
+        at all behind them on this site — no invoice ever filed, no catalogue ever loaded — are
+        offered together. Everything with a record stays a deliberate choice, one card at a time,
+        because retiring a supplier the pharmacy actually buys from stops its invoices being filed.
+      */}
+      {canManage && unusedIds.length > 0 && (
+        <Notice kind="warn">
+          {unusedIds.length} of these {suppliers.filter((x) => x.active).length} suppliers have never sent an invoice here and have no catalogue loaded:{" "}
+          {unusedNames.slice(0, 6).join(", ")}
+          {unusedNames.length > 6 ? ` and ${unusedNames.length - 6} more` : ""}.
+          <form action={retireUnused} className="mt-2">
+            <button className="btn btn-sm">Retire all {unusedIds.length}</button>
+          </form>
+        </Notice>
+      )}
+
       {suppliers.length === 0 ? (
         <Empty>
           No supplier is recorded, so nothing arriving by email will be filed as an invoice. Add the wholesalers below.
@@ -355,7 +406,19 @@ export default async function SuppliersPage({
                 className={sup.active ? "" : "opacity-60"}
                 actions={
                   canManage && (
-                    <Link href={`/suppliers?edit=${sup.id}#edit`} className="btn btn-sm">Edit</Link>
+                    <span className="flex items-center gap-1">
+                      <Link href={`/suppliers?edit=${sup.id}#edit`} className="btn btn-sm">Edit</Link>
+                      {/*
+                        Retiring one used to mean opening the edit form and finding a checkbox in it.
+                        Tolerable with five wholesalers; not with twenty-two, most of which came out
+                        of PioneerRx and will never be bought from again. One press, from the card.
+                      */}
+                      <form action={retire}>
+                        <input type="hidden" name="id" value={sup.id} />
+                        <input type="hidden" name="active" value={sup.active ? "no" : "yes"} />
+                        <button className="btn btn-sm">{sup.active ? "Retire" : "Bring back"}</button>
+                      </form>
+                    </span>
                   )
                 }
               >

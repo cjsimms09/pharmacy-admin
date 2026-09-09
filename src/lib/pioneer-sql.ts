@@ -121,13 +121,30 @@ export async function withPioneer<T>(fn: (pool: sql.ConnectionPool) => Promise<T
  * the same reason — on a 194-column claims table it is a request for whatever happens to be there.
  */
 const FORBIDDEN = [
+  // Everything the transmission carries about the person the claim was for.
   "patientfirstname", "patientlastname", "patientmiddlename", "patientstreetaddress", "patientcity",
   "patientstatecode", "patientzipcode", "patientphone", "patientssn", "patientdateofbirth",
   "patientemailaddress", "patientdriverslicensenumber", "patientstateissueidnumber",
-  "patientmilitaryidnumber", "patientpassportidnumber", "cardholderid", "sentedi", "receivededi",
-  "superstring", "ownername", "firstname", "lastname", "middlename", "dateofbirth", "socialsecurity",
-  "ssn", "streetaddress", "emailaddress", "homephone", "cellphone",
+  "patientmilitaryidnumber", "patientpassportidnumber", "patientname", "cardholderid",
+  // The raw EDI of a claim, which contains all of the above whatever the columns beside it say.
+  "sentedi", "receivededi", "superstring",
+  "socialsecuritynumber",
 ];
+
+/**
+ * Tables that are about people, refused whole.
+ *
+ * A column deny-list only catches the names somebody thought of, and the names in this database are
+ * not consistent. The `Person.` schema is 284 tables of patients and nothing the site needs, so it
+ * is refused outright rather than column by column — the coarse rule is the reliable one, and none
+ * of the reports here has any business in there.
+ *
+ * The first version of this list also blocked bare "emailaddress", "firstname" and the like, which
+ * read well until a supplier query was refused for asking a wholesaler's email address. Blocking
+ * business contact details taught nobody anything about patient privacy and would have been quietly
+ * worked around, which is how a rule stops meaning anything.
+ */
+const FORBIDDEN_TABLES = ["person."];
 
 /** True for one plain SELECT (or a CTE), which is the only thing this site will send. */
 export function isReadOnlySelect(text: string): { ok: true } | { ok: false; why: string } {
@@ -142,6 +159,8 @@ export function isReadOnlySelect(text: string): { ok: true } | { ok: false; why:
   }
   const named = FORBIDDEN.find((c) => new RegExp(`\\b${c}\\b`, "i").test(t));
   if (named) return { ok: false, why: `the column "${named}" is patient information and this site does not read it` };
+  const table = FORBIDDEN_TABLES.find((x) => t.toLowerCase().includes(x));
+  if (table) return { ok: false, why: `the "${table.replace(".", "")}" tables are patients and this site does not read them` };
   return { ok: true };
 }
 

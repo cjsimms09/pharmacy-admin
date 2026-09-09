@@ -276,6 +276,11 @@ export async function importCopayRemit(
       payer: COPAY_PAYER,
       notes: `From ${fileName}${r.reference ? `, check/ACH ${r.reference}` : ""}, ${payments} payment${payments === 1 ? "" : "s"}${empty.reversedPairs ? `, ${empty.reversedPairs} paid and reversed in the same period` : ""}.`,
       createdBy: user.id ?? user.name,
+      // See expenses.ts: a statement read twice is one deposit, and a voucher payment the payer
+      // payment report already banked is the same money arriving by a second road.
+      sourceKey: `copay|${r.reference ?? fileName}|${r.paidOn}`,
+      receivedOn: r.paidOn,
+      reference: r.reference ?? null,
     });
     banked = true;
   }
