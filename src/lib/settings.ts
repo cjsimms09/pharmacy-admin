@@ -261,6 +261,8 @@ export const SETTING_KEYS = [
   "rate_backtest",
   /* What the last drug-directory load parsed and wrote, so Data health can set it against the table. */
   "drug_directory_proof",
+  /* What the nightly NADAC proof found: the CMS files re-read against the table. scripts/prove-nadac.ts */
+  "nadac_proof",
   "backup_restore_result",
   "mail_last_sweep",
   /**
