@@ -11,6 +11,7 @@ import { isUnknownSenderInvoice, printedNameInReason } from "@/lib/autoroute";
 import { CATEGORIES } from "@/lib/intake-recognise";
 import { senderRules, describeRule, recogniseStored } from "@/lib/intake-recognise-store";
 import type { Recognition } from "@/lib/intake-recognise";
+import { sourceOf, storyOf, summarise } from "@/lib/inbox-line";
 import { reRouteInboxItem, fileInboxItem, deleteInboxItem, sweepNow, rereadItem, sortInboxItem, attributeInboxItem, teachInboxItem, forgetIntakeRule } from "./actions";
 
 
@@ -38,12 +39,20 @@ const ROUTE_CHOICES: { kind: string; label: string }[] = [
   { kind: "accrual_sales", label: "System sales summary" },
 ];
 
+/** The four tones `storyOf` returns, in the site's colours. */
+const TONE: Record<"ok" | "warn" | "crit" | "muted", string> = {
+  ok: "text-ink",
+  warn: "text-warn",
+  crit: "text-crit",
+  muted: "text-ink-3",
+};
+
 export const metadata = { title: "Inbox" };
 export const dynamic = "force-dynamic";
 
-export default async function InboxPage({ searchParams }: { searchParams: Promise<{ saved?: string; error?: string; detail?: string; ok?: string }> }) {
+export default async function InboxPage({ searchParams }: { searchParams: Promise<{ saved?: string; error?: string; detail?: string; ok?: string; guess?: string }> }) {
   await requireManager();
-  const { saved, error, detail, ok } = await searchParams;
+  const { saved, error, detail, ok, guess } = await searchParams;
   const [s, configured, items, people, suppliers, rules] = await Promise.all([
     getSettings(),
     hasMailPassword(),
@@ -54,28 +63,26 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
   ]);
 
   /*
-   * What the site makes of the lines it could not place.
+   * What the site makes of one line, worked out only where somebody asked about that line.
    *
-   * Only those, and only the twenty most recent of them: working this out means reading the file
-   * behind the line, and two hundred file reads to draw one page is how a page becomes slow enough
-   * that nobody opens it. A line that was placed already says what it is; a line that was not is
-   * exactly where the question "what is this?" is worth answering.
+   * Answering it means opening the stored file and reading it. The version before this did that
+   * for the twenty most recent unplaced lines on every single view — twenty file reads and forty
+   * queries to draw one page, on the thread that serves every other page, and this project has
+   * twice found the site pinned at full CPU by work of exactly that shape. It is now done for the
+   * one line the question was pressed on, and for no other.
    */
-  const unplaced = items.filter((i) => i.documentId && (!i.routedAs || i.routedAs === "unrecognised")).slice(0, 20);
   const guesses = new Map<string, Recognition>();
-  await Promise.all(
-    unplaced.map(async (i) => {
-      const r = await recogniseStored(i.id, rules);
-      if (r) guesses.set(i.id, r);
-    }),
-  );
+  if (guess) {
+    const r = await recogniseStored(guess, rules);
+    if (r) guesses.set(guess, r);
+  }
 
   return (
     <>
       <PageHeader
         tabs={familyTabs("arrivals", "/inbox")}
         title="Inbox"
-        subtitle="Reports that arrived by email, and anything that was refused."
+        subtitle={`${summarise(items)}${s.mail_last_sweep ? ` Last checked ${s.mail_last_sweep.replace("T", " ").slice(0, 16)} UTC.` : ""}`}
         actions={
           <>
             <Link href="/settings/email" className="btn">Email settings</Link>
@@ -97,14 +104,15 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
         <div className="overflow-x-auto rounded-lg border border-line bg-surface">
           <table className="table">
             <thead>
-              <tr><th>Received</th><th>From</th><th>Attachment</th><th>Status</th><th></th></tr>
+              <tr><th>Arrived</th><th>Where from</th><th>File</th><th>What happened to it</th><th>Put it right</th></tr>
             </thead>
             <tbody>
               {items.map((i) => (
-                <tr key={i.id}>
+                <tr key={i.id} id={i.id}>
                   <td className="whitespace-nowrap text-xs">{i.receivedAt.replace("T", " ").slice(0, 16)}</td>
                   <td className="text-xs">
-                    <div className="font-mono">{i.fromAddress}</div>
+                    <div className="text-ink-2">{sourceOf(i).label}</div>
+                    <div className="font-mono text-ink-3">{i.fromAddress}</div>
                     {i.subject && <div className="text-ink-3">{i.subject}</div>}
                   </td>
                   <td className="text-xs">
@@ -115,60 +123,70 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
                     )}
                   </td>
                   <td>
-                    <span className={`badge ${i.status === "stored" ? "badge-ok" : i.status === "rejected" ? "badge-crit" : "badge-muted"}`}>{i.status}</span>
-                    {/*
-                      A supplier invoice nobody could place. Loud, because the cost of missing it is
-                      a purchase record that is short and looks complete — and, for a controlled
-                      substance, an invoice filed outside the records 21 CFR 1304.04(h)(1) requires.
-                    */}
-                    {isUnknownSenderInvoice(i.reason) && (
-                      <div className="mt-1"><span className="badge badge-crit">an invoice, sender unknown</span></div>
-                    )}
-                    {i.reason && <div className="mt-1 max-w-md text-xs text-ink-2">{i.reason}</div>}
-                    {i.status === "stored" && !i.scanned && <div className="text-xs text-ink-3">Stored without a column check (not a text report).</div>}
-                    {i.routedAs && i.routedAs !== "unrecognised" && (
-                      <div className="mt-1 text-xs">
-                        {/* Recognised is not loaded. A catalogue refused for naming the wrong supplier was
-                            recognised perfectly well, and a green badge on it would say the opposite. */}
-                        {/could not be loaded|nothing could be loaded/i.test(i.routeResult ?? "") ? (
-                          <span className="badge badge-crit">recognised as {i.routedAs.replace(/_/g, " ")}, not loaded</span>
-                        ) : (
-                          <span className="badge badge-ok">loaded as {i.routedAs.replace(/_/g, " ")}</span>
-                        )}
-                        {i.routeResult && <div className="mt-0.5 max-w-md text-ink-2">{i.routeResult}</div>}
-                      </div>
-                    )}
-                    {i.routedAs === "unrecognised" && (
-                      <div className="mt-1 max-w-md text-xs text-ink-3">Filed only — {i.routeResult}</div>
-                    )}
-                    {!i.routedAs && i.routeResult && <div className="mt-1 max-w-md text-xs text-ink-3">{i.routeResult}</div>}
                     {(() => {
-                      const g = guesses.get(i.id);
-                      if (!g) return null;
-                      return (
-                        <div className="mt-1 max-w-md rounded-md border border-line bg-paper-2 px-2 py-1.5 text-xs">
-                          <div className="font-medium text-ink">{g.says}</div>
-                          {g.best && (
-                            <ul className="mt-1 list-disc pl-4 text-ink-3">
-                              {g.best.why.map((w, n) => <li key={n}>{w}</li>)}
-                            </ul>
-                          )}
-                          {g.ranked.length > 1 && (
-                            <div className="mt-1 text-ink-3">
-                              Also considered: {g.ranked.slice(1, 4).map((o) => `${o.label.toLowerCase()} (${o.sure})`).join(", ")}.
-                            </div>
-                          )}
-                          {/* The one thing this must never do is act on a guess it is not sure of. */}
-                          {!g.mayFile && <div className="mt-1 text-ink-3">Nothing was filed on this.</div>}
-                        </div>
-                      );
-                    })()}
-                    {(() => {
+                      /*
+                        One story, told once.
+
+                        This cell used to say the same thing three times over — a badge, the
+                        loader's own sentence, and the sweep's reason — and the badge could
+                        contradict the sentence beside it. Everything here comes off the row the
+                        sweep already wrote: nothing is opened, parsed or recomputed to draw it.
+                      */
+                      const st = storyOf(i);
                       const from = supplierByAddress(suppliers, i.fromAddress);
                       const advice = whatToDo({ ...i, senderIsSupplier: Boolean(from), supplierName: from?.name ?? null });
-                      return advice ? (
-                        <div className="mt-1 max-w-md rounded-md border border-warn bg-warn-soft px-2 py-1 text-xs text-warn">{advice}</div>
-                      ) : null;
+                      const g = guesses.get(i.id);
+                      return (
+                        <>
+                          <div className={`font-medium ${TONE[st.tone]}`}>{st.headline}</div>
+                          {st.changed && <div className="mt-0.5 max-w-md text-xs text-ink-2">{st.changed}</div>}
+                          {st.why && <div className="mt-0.5 max-w-md text-xs text-ink-3">{st.why}</div>}
+
+                          {/*
+                            A supplier invoice nobody could place. Loud, because the cost of missing
+                            it is a purchase record that is short and looks complete — and, for a
+                            controlled substance, an invoice filed outside the records
+                            21 CFR 1304.04(h)(1) requires.
+                          */}
+                          {isUnknownSenderInvoice(i.reason) && (
+                            <div className="mt-1"><span className="badge badge-crit">an invoice, sender unknown</span></div>
+                          )}
+                          {/* The sweep's own reason, only where the story has not already said it. */}
+                          {i.reason && i.reason !== st.why && (
+                            <div className="mt-1 max-w-md text-xs text-ink-2">{i.reason}</div>
+                          )}
+                          {i.status === "stored" && !i.scanned && (
+                            <div className="mt-0.5 text-xs text-ink-3">Stored without a column check (not a text report).</div>
+                          )}
+
+                          {st.outcome === "not_recognised" && i.documentId && !g && (
+                            <div className="mt-1">
+                              <Link href={`/inbox?guess=${i.id}#${i.id}`} className="text-xs text-accent hover:underline">What does the site make of it?</Link>
+                            </div>
+                          )}
+                          {g && (
+                            <div className="mt-1 max-w-md rounded-md border border-line bg-paper-2 px-2 py-1.5 text-xs">
+                              <div className="font-medium text-ink">{g.says}</div>
+                              {g.best && (
+                                <ul className="mt-1 list-disc pl-4 text-ink-3">
+                                  {g.best.why.map((w, n) => <li key={n}>{w}</li>)}
+                                </ul>
+                              )}
+                              {g.ranked.length > 1 && (
+                                <div className="mt-1 text-ink-3">
+                                  Also considered: {g.ranked.slice(1, 4).map((o) => `${o.label.toLowerCase()} (${o.sure})`).join(", ")}.
+                                </div>
+                              )}
+                              {/* The one thing this must never do is act on a guess it is not sure of. */}
+                              {!g.mayFile && <div className="mt-1 text-ink-3">Nothing was filed on this. Tell it what the document is and it will load it.</div>}
+                            </div>
+                          )}
+
+                          {advice && (
+                            <div className="mt-1 max-w-md rounded-md border border-warn bg-warn-soft px-2 py-1 text-xs text-warn">{advice}</div>
+                          )}
+                        </>
+                      );
                     })()}
                   </td>
                   <td>
