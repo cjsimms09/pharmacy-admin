@@ -242,6 +242,26 @@ async function pullCatalogue(): Promise<string> {
  */
 async function pullClaims(): Promise<string> {
   const { query } = await import("../src/lib/pioneer-sql");
+  /*
+   * The current, paid claim for each payer on each fill — one row per payer, not one per fill.
+   *
+   * `IsLastValidClaimForPayMethod = 1` is the flag that matters and the one this query used to get
+   * wrong. `IsLatestClaimRecord = 1`, which it used before, returns a single row per *fill*: on a
+   * two-payer fill it keeps whichever claim was transmitted last and throws the other away, so the
+   * feed saw one side of each of September's 37 two-payer fills and could not tell which side it
+   * had. Reversed and rebilled claims fall away on their own, because a claim that has been
+   * reversed is no longer the last valid one for its payer.
+   *
+   * The money comes from the remittance-pricing row rather than from the NCPDP fields on the claim.
+   * `NetAmountPaid` is what the payer actually paid and `PatientPayAmount` is what the patient owes
+   * after it — nought on every payer but the last, so the two can be added across a fill without
+   * counting the patient's dollar twice. The raw `Prescription.Claim.PatientPayAmountPaid` cannot:
+   * there the primary states the balance it passed to the secondary, and summing those across
+   * September's fills overstates the patient's share by $50,644.55.
+   *
+   * `TotalPricePaid` comes along so every fill can be checked: the payers plus the patient are the
+   * price of the fill, or the fill is named.
+   */
   const r = await query(
     `select c.RxNumber as rx_number,
             rx.RefillNumber as fill_number,
@@ -259,24 +279,25 @@ async function pullClaims(): Promise<string> {
             t.NetworkReimbursementID as network_id,
             t.PlanID as plan_id,
             c.ContractNumber as contract_id,
-            c.IngredientCostPaid as ingredient_paid,
-            c.DispensingFeePaid as dispensing_fee,
-            c.PatientPayAmountPaid as copay,
-            c.GrossAmountPaid as gross_paid,
+            p.PrimaryClaimID as primary_claim_id,
+            p.NetAmountPaid as net_paid,
+            p.PatientPayAmount as patient_pay,
+            p.DispensingFeePaid as dispensing_fee,
+            p.AcquisitionCost as acquisition,
             c.OtherPayerAmountPaid as other_payer,
             c.EvoucherAmountPaid as evoucher,
             c.DirFeeTotal as dir_fee,
-            c.AcquisitionCost as acquisition,
-            p.IsPrimaryThirdParty as is_primary
-       from Prescription.Claim c
-       join ThirdParty.ClaimRemittancePricingByRxTransactionID p on p.ClaimID = c.ClaimID
+            f.TotalPricePaid as fill_total_price
+       from ThirdParty.ClaimRemittancePricingByRxTransactionID p
+       join Prescription.Claim c on c.ClaimID = p.ClaimID
        join Prescription.Transmission t on t.TransmissionID = c.TransmissionID
-       join Prescription.RxTransaction rx on rx.RxTransactionID = c.RxTransactionID
+       join Prescription.RxTransaction rx on rx.RxTransactionID = p.RxTransactionID
        join Item.Item i on i.ItemID = rx.DispensedItemID
+       left join Prescription.RxTransactionFinancial f on f.RxTransactionID = p.RxTransactionID
       where rx.DateFilled >= '2026-09-01'
-        and p.IsLatestClaimRecord = 1
         and isnull(p.IsDuplicateClaim, 0) = 0
-        and c.GrossAmountPaid is not null`,
+        and p.IsLastValidClaimForPayMethod = 1
+        and p.TransactionResponseStatus = 'P'`,
     {},
     50_000,
   );
@@ -296,69 +317,141 @@ async function pullClaims(): Promise<string> {
     return d.length === 11 ? d : null;
   };
 
-  /*
-   * One row per fill, with the two payer sides on it, because that is the shape the enrichment
-   * takes. PioneerRx gives one row per claim and flags which side it is, so the fill is rebuilt by
-   * grouping on prescription and refill.
-   */
-  const byFill = new Map<string, DispensedRow>();
-  for (const row of r.rows) {
-    const rxNumber = text(row.rx_number);
-    if (!rxNumber) continue;
-    const fillNumber = Number(row.fill_number ?? 0) || 0;
-    const key = `${rxNumber}|${fillNumber}`;
-    const side: PayerSide = {
+  const { fillsFromClaimRows } = await import("../src/lib/pioneer-claims");
+  const built = fillsFromClaimRows(
+    r.rows.map((row) => ({
+      rxNumber: text(row.rx_number) ?? "",
+      fillNumber: Number(row.fill_number ?? 0) || 0,
+      primaryClaimId: text(row.primary_claim_id),
       bin: text(row.bin),
       pcn: text(row.pcn),
       groupNumber: text(row.group_number),
       networkId: text(row.network_id),
       planId: text(row.plan_id),
-      planCode: null,
       contractId: text(row.contract_id),
-      remitCents: cents(row.gross_paid),
-      copayCents: cents(row.copay),
-      otherPayerAmountCents: cents(row.other_payer),
-    };
-    const held = byFill.get(key);
-    const base: DispensedRow = held ?? {
-      rxNumber,
-      fillNumber,
+      netPaidCents: cents(row.net_paid),
+      patientPayCents: cents(row.patient_pay),
+      otherPayerCents: cents(row.other_payer),
       itemName: text(row.item_name),
       ndc11: ndc11(row.ndc),
+      gcn: text(row.gcn),
       quantityThousandths: row.quantity === null || row.quantity === undefined ? null : Math.round(Number(row.quantity) * 1000),
       daysSupply: row.days_supply === null || row.days_supply === undefined ? null : Number(row.days_supply),
-      daw: null,
-      primary: side,
-      secondary: null,
-      awpCents: null,
-      wacCents: null,
-      nadacDispensedCents: null,
-      acquisitionCents: cents(row.acquisition),
+      basisOfReimbursement: text(row.basis),
+      basisOfCostDetermination: text(row.basis_of_cost),
       dispensingFeeCents: cents(row.dispensing_fee),
       dirFeeCents: cents(row.dir_fee),
       evoucherCents: cents(row.evoucher),
-      gcn: text(row.gcn),
-      basisOfReimbursement: text(row.basis),
-      basisOfCostDetermination: text(row.basis_of_cost),
+      acquisitionCents: cents(row.acquisition),
       filledOn: text(row.date_filled),
-      completedOn: null,
-      netProfitCents: null,
-    };
-    if (!held) byFill.set(key, base);
-    else if (Number(row.is_primary) === 1) base.primary = side;
-    else base.secondary = side;
-    if (held && Number(row.is_primary) === 1 && held.primary !== side) {
-      // The primary row carries the fill's own facts; a secondary row must not overwrite them.
-      base.basisOfReimbursement = text(row.basis) ?? base.basisOfReimbursement;
-      base.dirFeeCents = cents(row.dir_fee) ?? base.dirFeeCents;
-      base.evoucherCents = cents(row.evoucher) ?? base.evoucherCents;
-    }
-  }
+      fillTotalPriceCents: cents(row.fill_total_price),
+    })),
+  );
 
   const { enrichClaimsFrom } = await import("../src/lib/dispensed-export");
   const stamp = `PioneerRx SQL @ ${new Date().toISOString().slice(0, 10)}`;
-  const e = await enrichClaimsFrom([...byFill.values()], stamp);
-  return `${e.rowsRead.toLocaleString("en-US")} fills read; ${e.primaryEnriched} primary and ${e.secondaryEnriched} secondary claims filled in, ${e.notOnFile} not on file${e.remitDiffers ? `, ${e.remitDiffers} where the remit disagrees` : ""}`;
+  const e = await enrichClaimsFrom(
+    built.fills.map((f) => ({
+      rxNumber: f.rxNumber,
+      fillNumber: f.fillNumber,
+      itemName: f.itemName,
+      ndc11: f.ndc11,
+      quantityThousandths: f.quantityThousandths,
+      daysSupply: f.daysSupply,
+      daw: null,
+      primary: f.primary,
+      secondary: f.secondary,
+      awpCents: null,
+      wacCents: null,
+      nadacDispensedCents: null,
+      acquisitionCents: f.acquisitionCents,
+      dispensingFeeCents: f.dispensingFeeCents,
+      dirFeeCents: f.dirFeeCents,
+      evoucherCents: f.evoucherCents,
+      gcn: f.gcn,
+      basisOfReimbursement: f.basisOfReimbursement,
+      basisOfCostDetermination: f.basisOfCostDetermination,
+      filledOn: f.filledOn,
+      completedOn: null,
+      netProfitCents: null,
+    })),
+    stamp,
+  );
+
+  /*
+   * What the pharmacy should expect, said in money rather than in row counts.
+   *
+   * The owner asked to know "how much to expect from each payer", and the reconciliation is the
+   * only part of this worth reading: PioneerRx's own figure for the month beside what the site
+   * holds. A gap here is not an error in this feed — the claims themselves come from the daily
+   * transaction report — but it is the number that says whether the account is complete.
+   */
+  const { db, schema } = await import("../src/db");
+  const { and, gte, eq } = await import("drizzle-orm");
+  const onFile = await db
+    .select({ rxNumber: schema.claims.rxNumber, fillNumber: schema.claims.fillNumber, dateFilled: schema.claims.dateFilled, remitCents: schema.claims.remitCents, copayCents: schema.claims.copayCents })
+    .from(schema.claims)
+    .where(and(gte(schema.claims.dateFilled, "2026-09-01"), eq(schema.claims.status, "paid")));
+  const heldRemit = onFile.reduce((n, c) => n + (c.remitCents ?? 0), 0);
+  const heldCopay = onFile.reduce((n, c) => n + (c.copayCents ?? 0), 0);
+
+  /*
+   * Which day is short, which is the only form of this that anybody can act on.
+   *
+   * The claims themselves come from the daily transaction report the pharmacy uploads, and the gap
+   * between that and PioneerRx is almost always one report run before its day had finished: on
+   * 7 September the site holds 76 of the day's 101 fills. A month-level "short by $3,942.61" sends
+   * somebody hunting; "7 September is 25 fills short, send that day's report again" is a job.
+   *
+   * Fills the site holds and PioneerRx does not are counted too. That direction should be empty,
+   * and a figure in it means the site is carrying a claim the pharmacy system has since reversed or
+   * replaced — the opposite error, and the one that overstates a month.
+   */
+  const heldKeys = new Set(onFile.map((c) => `${c.rxNumber}|${c.fillNumber ?? 0}`));
+  const pioneerKeys = new Set(built.fills.map((f) => `${f.rxNumber}|${f.fillNumber}`));
+  const byDay = new Map<string, { missing: number; missingCents: number }>();
+  for (const f of built.fills) {
+    if (heldKeys.has(`${f.rxNumber}|${f.fillNumber}`)) continue;
+    const day = f.filledOn ?? "no fill date";
+    const e = byDay.get(day) ?? { missing: 0, missingCents: 0 };
+    byDay.set(day, { missing: e.missing + 1, missingCents: e.missingCents + f.insuranceCents });
+  }
+  const shortDays = [...byDay].sort((a, b) => b[1].missing - a[1].missing);
+  const onlyOnSite = onFile.filter((c) => !pioneerKeys.has(`${c.rxNumber}|${c.fillNumber ?? 0}`)).length;
+  const insurance = built.fills.reduce((n, f) => n + f.insuranceCents, 0);
+  const patient = built.fills.reduce((n, f) => n + f.patientCents, 0);
+  const dollars = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  const { setSetting } = await import("../src/lib/settings");
+  await setSetting(
+    "pioneer_claims_reconcile",
+    JSON.stringify({
+      readAt: new Date().toISOString(),
+      fills: built.fills.length,
+      payers: built.payerCounts,
+      pioneerInsuranceCents: insurance,
+      pioneerPatientCents: patient,
+      siteRemitCents: heldRemit,
+      siteCopayCents: heldCopay,
+      fillsThatDoNotAddUp: built.disagree.length,
+      daysShort: shortDays.map(([day, e]) => ({ day, fills: e.missing, cents: e.missingCents })),
+      fillsOnlyOnSite: onlyOnSite,
+      problems: built.problems.slice(0, 20),
+    }),
+  );
+
+  const gap = insurance - heldRemit;
+  return (
+    `${built.fills.length.toLocaleString("en-US")} fills (${built.payerCounts.twoPayers} with two payers` +
+    `${built.payerCounts.more ? `, ${built.payerCounts.more} with more` : ""}); ` +
+    `PioneerRx says ${dollars(insurance)} from payers and ${dollars(patient)} from patients; ` +
+    `the site holds ${dollars(heldRemit)} and ${dollars(heldCopay)}` +
+    `${gap === 0 ? ", which agrees" : `, ${dollars(Math.abs(gap))} ${gap > 0 ? "short" : "over"}`}; ` +
+    `${e.primaryEnriched} primary and ${e.secondaryEnriched} secondary claims filled in` +
+    `${shortDays.length ? `; short on ${shortDays.map(([day, x]) => `${day} (${x.missing} fill${x.missing === 1 ? "" : "s"}, ${dollars(x.missingCents)})`).join(", ")} — send those days' transaction reports again` : ""}` +
+    `${onlyOnSite ? `; ${onlyOnSite} fill${onlyOnSite === 1 ? "" : "s"} the site holds that PioneerRx does not` : ""}` +
+    `${built.disagree.length ? `; ${built.disagree.length} fill${built.disagree.length === 1 ? "" : "s"} where the payers and the patient do not add to the fill's price` : ""}`
+  );
 }
 
 /**
