@@ -17,6 +17,8 @@ export type FiledSalesMonth = {
   periodTo: string;
   retailCents: number | null;
   retailTaxCents: number | null;
+  /** What the retail goods cost to buy, where the source carries it. */
+  retailCostCents: number | null;
   rxPatientCents: number | null;
   rxRemitCents: number | null;
   rxCents: number | null;
@@ -78,6 +80,7 @@ const read = (r: typeof schema.salesMonths.$inferSelect): FiledSalesMonth => ({
   periodTo: r.periodTo,
   retailCents: r.retailCents,
   retailTaxCents: r.retailTaxCents ?? null,
+  retailCostCents: r.retailCostCents,
   rxPatientCents: r.rxPatientCents,
   rxRemitCents: r.rxRemitCents,
   rxCents: r.rxCents,

@@ -33,7 +33,7 @@
  */
 import "dotenv/config";
 
-type Feed = "on-hand" | "claims" | "invoices" | "suppliers" | "catalogue";
+type Feed = "on-hand" | "claims" | "invoices" | "retail" | "suppliers" | "catalogue";
 import type { DispensedRow, PayerSide } from "../src/lib/dispensed-export";
 
 async function main() {
@@ -48,6 +48,7 @@ async function main() {
         ...(s.pioneer_pull_on_hand_on === today ? [] : (["on-hand"] as Feed[])),
         ...(s.pioneer_pull_claims_on === today ? [] : (["claims"] as Feed[])),
         ...(s.pioneer_pull_invoices_on === today ? [] : (["invoices"] as Feed[])),
+        ...(s.pioneer_pull_retail_on === today ? [] : (["retail"] as Feed[])),
         // Monday, or never pulled. 238,952 catalogue rows is the heavy one and the owner said weekly
         // is enough unless it turns out to be free.
         ...(new Date().getDay() === 1 || !s.pioneer_pull_catalogue_on ? (["suppliers", "catalogue"] as Feed[]) : []),
@@ -76,6 +77,11 @@ async function main() {
         await setSetting("pioneer_pull_invoices_on", today);
         await setSetting("pioneer_pull_invoices_result", `${new Date().toISOString()}: ${r}`);
         console.log(`invoices: ${r} (${Date.now() - started}ms)`);
+      } else if (feed === "retail") {
+        const r = await pullRetail();
+        await setSetting("pioneer_pull_retail_on", today);
+        await setSetting("pioneer_pull_retail_result", `${new Date().toISOString()}: ${r}`);
+        console.log(`retail: ${r} (${Date.now() - started}ms)`);
       } else if (feed === "suppliers") {
         const r = await pullSuppliers();
         await setSetting("pioneer_pull_suppliers_result", `${new Date().toISOString()}: ${r}`);
@@ -88,7 +94,7 @@ async function main() {
       }
     } catch (e) {
       const why = e instanceof Error ? e.message : String(e);
-      await setSetting(feed === "on-hand" ? "pioneer_pull_on_hand_result" : feed === "claims" ? "pioneer_pull_claims_result" : feed === "invoices" ? "pioneer_pull_invoices_result" : feed === "suppliers" ? "pioneer_pull_suppliers_result" : "pioneer_pull_catalogue_result", `${new Date().toISOString()}: failed: ${why}`);
+      await setSetting(feed === "on-hand" ? "pioneer_pull_on_hand_result" : feed === "claims" ? "pioneer_pull_claims_result" : feed === "invoices" ? "pioneer_pull_invoices_result" : feed === "retail" ? "pioneer_pull_retail_result" : feed === "suppliers" ? "pioneer_pull_suppliers_result" : "pioneer_pull_catalogue_result", `${new Date().toISOString()}: failed: ${why}`);
       console.error(`${feed}: failed: ${why}`);
     }
   }
@@ -660,6 +666,89 @@ async function pullSuppliers(): Promise<string> {
     names.push(name);
   }
   return `${created} suppliers added${names.length ? ` (${names.slice(0, 8).join(", ")}${names.length > 8 ? "…" : ""})` : ""}, ${filledIn} existing ones filled in`;
+}
+
+/**
+ * What the front of shop took, which the books have never seen at all.
+ *
+ * The owner: "are we using all the info the site has? we cant miss anything or have bad logic." The
+ * accrual account was carrying prescriptions and nothing else, and saying so — the System Sales
+ * Summary has never been loaded, so retail and over-the-counter sales were missing entirely and
+ * revenue, gross profit and net profit were all understated by whatever the counter took.
+ *
+ * PioneerRx's till has it, line by line, with the cost of each item beside the price. So both sides
+ * are booked or neither: retail revenue with no cost against it is pure profit and would flatter
+ * the margin by the whole cost of the front shop, which is a worse answer than the honest gap.
+ *
+ * Only the retail figures are written. The prescription columns are deliberately left empty so the
+ * claims go on supplying that side, because they are complete and reconciled to the cent and the
+ * till is neither — it records what was collected at the counter, not what was earned. The account
+ * takes each half from the best source that has it (`profit-and-loss.ts`), which is what makes a
+ * retail-only month safe to file.
+ *
+ * `ReferenceTypeEnum` says what a till line is, from PioneerRx's own list: 1 is a prescription,
+ * 4 the payment against it, 5 a discount, 10 an account posting. 2 is Item — the front of shop —
+ * and it is the only one taken here.
+ */
+async function pullRetail(): Promise<string> {
+  const { query } = await import("../src/lib/pioneer-sql");
+  const r = await query(
+    `select convert(varchar(7), t.PostingDate, 23) as month,
+            min(convert(varchar(10), t.PostingDate, 23)) as period_from,
+            max(convert(varchar(10), t.PostingDate, 23)) as period_to,
+            sum(d.ExtendedPrice) as retail,
+            sum(d.TotalCostForProfit) as cost,
+            sum(d.DisplayTaxAmount) as tax,
+            count(*) as lines
+       from PointOfSale.SaleTransaction t
+       join PointOfSale.SaleTransactionDetail d on d.SaleTransactionID = t.SaleTransactionID
+      where t.PostingDate >= '2026-09-01'
+        and d.ReferenceTypeEnum = 2
+      group by convert(varchar(7), t.PostingDate, 23)`,
+    {},
+    100,
+  );
+  if (r.rows.length === 0) return "the till recorded no front-of-shop sales since 1 September";
+
+  const { db, schema } = await import("../src/db");
+  const { eq } = await import("drizzle-orm");
+  const cents = (v: unknown) => (v === null || v === undefined ? null : Math.round(Number(v) * 100));
+  const written: string[] = [];
+  for (const row of r.rows) {
+    const month = String(row.month ?? "").trim();
+    if (!/^\d{4}-\d{2}$/.test(month)) continue;
+    const retail = cents(row.retail);
+    const cost = cents(row.cost);
+    const tax = cents(row.tax);
+    /*
+     * A month already filed from the real report is not overwritten.
+     *
+     * The System Sales Summary is the pharmacy's own document and carries the whole till; this is a
+     * reconstruction of one part of it. If somebody has filed the report, it wins.
+     */
+    const held = await db.query.salesMonths.findFirst({ where: eq(schema.salesMonths.month, month) });
+    if (held && held.fileName && !held.fileName.startsWith("PioneerRx")) {
+      written.push(`${month}: left alone, the Sales Summary is filed for it`);
+      continue;
+    }
+    const values = {
+      month,
+      periodFrom: String(row.period_from ?? `${month}-01`),
+      periodTo: String(row.period_to ?? `${month}-28`),
+      retailCents: retail,
+      retailTaxCents: tax,
+      retailCostCents: cost,
+      rowsJson: JSON.stringify([]),
+      fileName: `PioneerRx till, front of shop, ${month}`,
+      printedOn: new Date().toISOString().slice(0, 10),
+      createdBy: "pioneer-pull",
+      updatedAt: new Date().toISOString(),
+    };
+    if (held) await db.update(schema.salesMonths).set(values).where(eq(schema.salesMonths.month, month));
+    else await db.insert(schema.salesMonths).values(values);
+    written.push(`${month}: ${(Number(row.lines ?? 0)).toLocaleString("en-US")} lines, ${((retail ?? 0) / 100).toFixed(2)} taken, ${((cost ?? 0) / 100).toFixed(2)} of it cost`);
+  }
+  return written.join("; ");
 }
 
 main().catch((e) => {

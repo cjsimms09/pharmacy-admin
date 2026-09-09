@@ -1985,6 +1985,11 @@ export const salesMonths = sqliteTable("sales_months", {
   retailCents: integer("retail_cents"),
   /** Sales tax collected on retail in the month, from the report's Tax column. Owed to the state, never revenue. */
   retailTaxCents: integer("retail_tax_cents"),
+    /**
+     * What the front-of-shop goods cost to buy, so retail revenue can be booked with a cost against
+     * it rather than as pure profit. Null where the source does not carry one.
+     */
+    retailCostCents: integer("retail_cost_cents"),
   /** What patients paid at the till for prescriptions. */
   rxPatientCents: integer("rx_patient_cents"),
   /** What the plans remitted. */
