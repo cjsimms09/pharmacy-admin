@@ -119,6 +119,14 @@ export type ImportReport = {
   rowsRead: number;
   claimsAdded: number;
   duplicates: number;
+  /**
+   * Claims on a plan that never remits which nonetheless carried a figure in their remit column.
+   *
+   * Not money, and not a receivable: the part of the price the patient was not charged. Counted so
+   * that a plan quietly discounting thousands of dollars a month cannot do it in silence.
+   */
+  cashPlanDiscounts?: number;
+  cashPlanDiscountCents?: number;
   /** Reversals held but never paired, matched to the claims they cancel by this load. */
   reversalsPaired?: number;
   /** What the report itself said this file came to: total sales, and total gross profit. */
@@ -211,6 +219,7 @@ export async function importClaims(file: Buffer, fileName: string, userId: strin
     if (!to || dateFilled > to) to = dateFilled;
 
     const bin = (g("bin") ?? "").replace(/\D/g, "") || null;
+    const pcn = (g("pcn") ?? "").trim() || null;
     const payerLabel = (g("payerLabel") ?? "").trim() || null;
     const resolved = resolvePayer(bin, payerLabel, byBin, resolver);
     if (bin && !resolved.pbmName) unresolvedBins.add(bin);
@@ -231,7 +240,7 @@ export async function importClaims(file: Buffer, fileName: string, userId: strin
       ndc11: ndc.ndc11,
       itemName: (g("itemName") ?? "").trim() || null,
       bin,
-      pcn: (g("pcn") ?? "").trim() || null,
+      pcn,
       groupNumber: (g("groupNumber") ?? "").trim() || null,
       networkId: (g("networkId") ?? "").trim() || null,
       planId: (g("planId") ?? "").trim() || null,

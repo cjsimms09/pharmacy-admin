@@ -666,6 +666,13 @@
       "when": 1788807448029,
       "tag": "0094_retail_cost",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "6",
+      "when": 1788807508029,
+      "tag": "0095_cash_plans",
+      "breakpoints": true
     }
   ]
 }

@@ -287,7 +287,11 @@ async function pullClaims(): Promise<string> {
             c.OtherPayerAmountPaid as other_payer,
             c.EvoucherAmountPaid as evoucher,
             c.DirFeeTotal as dir_fee,
-            f.TotalPricePaid as fill_total_price
+            f.TotalPricePaid as fill_total_price,
+            (select convert(varchar(10), max(sale.PostingDate), 23)
+               from PointOfSale.SaleTransactionDetail line
+               join PointOfSale.SaleTransaction sale on sale.SaleTransactionID = line.SaleTransactionID
+              where line.ReferenceID = p.RxTransactionID and line.ReferenceTypeEnum = 1) as sold_on
        from ThirdParty.ClaimRemittancePricingByRxTransactionID p
        join Prescription.Claim c on c.ClaimID = p.ClaimID
        join Prescription.Transmission t on t.TransmissionID = c.TransmissionID
@@ -345,6 +349,7 @@ async function pullClaims(): Promise<string> {
       acquisitionCents: cents(row.acquisition),
       filledOn: text(row.date_filled),
       fillTotalPriceCents: cents(row.fill_total_price),
+      soldOn: text(row.sold_on),
     })),
   );
 
@@ -372,7 +377,7 @@ async function pullClaims(): Promise<string> {
       basisOfReimbursement: f.basisOfReimbursement,
       basisOfCostDetermination: f.basisOfCostDetermination,
       filledOn: f.filledOn,
-      completedOn: null,
+      completedOn: f.soldOn,
       netProfitCents: null,
     })),
     stamp,
