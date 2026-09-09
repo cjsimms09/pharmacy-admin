@@ -897,6 +897,15 @@ export const invoiceLines = sqliteTable(
      * comparison that followed.
      */
     rebated: integer("rebated", { mode: "boolean" }),
+    /**
+     * True where the line is a Schedule II item on an invoice that separates them.
+     *
+     * IPD sends the Schedule II items and everything else on one document, under their own headings
+     * with their own subtotals. 21 CFR 1304.04(h)(1) wants the Schedule II record kept apart, and
+     * the document is filed there because it carries them — but a folder is not a separation if the
+     * halves cannot be told apart inside it. Null where the invoice does not divide its items.
+     */
+    controlled: integer("controlled", { mode: "boolean" }),
     createdAt: text("created_at").notNull().default(now()),
   },
   (t) => [

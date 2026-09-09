@@ -213,6 +213,13 @@ export function readTotalCents(text: string): number | null {
     /amount due[^$\n]{0,20}\$\s*([\d,]+\.\d{2})/i,
     /invoice total[^$\n]{0,20}\$\s*([\d,]+\.\d{2})/i,
     /balance due[^$\n]{0,20}\$\s*([\d,]+\.\d{2})/i,
+    /*
+     * IPD prints the figure above its label rather than beside it: the money is on one line and the
+     * word "Subtotal" on the next. Nothing else the pharmacy receives is laid out that way, and
+     * without this its invoices carried no total at all — so nothing was reconciled against
+     * anything, and a dropped line would never have been noticed. One had been: $114.00 of drops.
+     */
+    /([\d,]+\.\d{2})\s*[\r\n]+\s*Subtotal\b/i,
   ];
   for (const re of patterns) {
     const m = re.exec(text);
@@ -907,6 +914,9 @@ async function storeModelInvoiceLines(
     awpCents: null,
     itemClass: l.itemClass,
     rebated: l.rebated,
+    // Which half of a combined invoice the line is on, so the Schedule II items are separable
+    // inside the document as well as by the folder it is filed in. See invoice-lines.ts.
+    controlled: (l as { controlled?: boolean | null }).controlled ?? null,
   }));
   for (let i = 0; i < rows.length; i += 200) await db.insert(schema.invoiceLines).values(rows.slice(i, i + 200));
   // A total read off the page where none was held is worth keeping: it is the figure to reconcile against.
@@ -1999,6 +2009,9 @@ export async function storeInvoiceLines(
     awpCents: l.awpCents,
     itemClass: l.itemClass,
     rebated: l.rebated,
+    // Which half of a combined invoice the line is on, so the Schedule II items are separable
+    // inside the document as well as by the folder it is filed in. See invoice-lines.ts.
+    controlled: l.controlled ?? null,
   }));
   for (let i = 0; i < rows.length; i += 200) await db.insert(schema.invoiceLines).values(rows.slice(i, i + 200));
   return { stored: rows.length, unread: parsed.unreadable.length, reconciles: parsed.reconciles, readCents: parsed.totalCents };
