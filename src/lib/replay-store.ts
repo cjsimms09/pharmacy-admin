@@ -61,7 +61,7 @@ async function loadReplay(monthsBack: number): Promise<ReplayView> {
     const cls = n.classification === "B" || n.classification === "G" ? n.classification : null;
     seen.set(n.ndc11, {
       ndc11: n.ndc11,
-      groupKey: groupKey({ ndc11: n.ndc11, equivalenceKey: directory.get(n.ndc11)?.key ?? null, description: n.description, classification: n.classification ?? directory.get(n.ndc11)?.classification ?? null, pricingUnit: n.pricingUnit, otc: n.otc ?? directory.get(n.ndc11)?.otc ?? false }),
+      groupKey: groupKey({ ndc11: n.ndc11, equivalenceKey: directory.get(n.ndc11)?.key ?? null, teCode: directory.get(n.ndc11)?.teCode ?? null, description: n.description, classification: n.classification ?? directory.get(n.ndc11)?.classification ?? null, pricingUnit: n.pricingUnit, otc: n.otc ?? directory.get(n.ndc11)?.otc ?? false }),
       classification: cls,
     });
   }

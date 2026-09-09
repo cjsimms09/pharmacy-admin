@@ -151,3 +151,50 @@ test("an OTC flag nobody passes reads as prescription, which is why it has to be
   const dropped = groupKey({ ndc11: "1", equivalenceKey: "k", description: null, classification: "G", pricingUnit: "EA" });
   assert.notEqual(passed, dropped);
 });
+
+describe("a shared equivalence key is not permission to substitute", () => {
+  const src = (ndc11: string, equivalenceKey: string, teCode: string | null) => ({
+    ndc11,
+    equivalenceKey,
+    teCode,
+    description: null,
+    classification: "B",
+    pricingUnit: "EA",
+    otc: false,
+  });
+
+  test("Ozempic and Wegovy are not one product, whatever the key says", () => {
+    /*
+     * The recommendation this test exists for, in the owner's words on 9 September: "why are these
+     * popping? there is only 1 ndc.. we need to check the logic here". The site had offered him
+     * $193.31 a fill to buy one instead of the other. Same molecule, same strength, same form,
+     * same route, same manufacturer, so the same FDA equivalence key — and two applications for
+     * two different indications, neither dispensable for the other.
+     */
+    const key = "semaglutide|4 mg/1|tablet|oral";
+    const ozempic = groupKey(src("00169170430", key, null));
+    const wegovy = groupKey(src("00169440431", key, null));
+    assert.ok(ozempic && wegovy, "both are placed");
+    assert.notEqual(ozempic, wegovy, "an unrated product is substitutable for nothing");
+  });
+
+  test("Mounjaro and Zepbound likewise, and every other strength of them", () => {
+    for (const strength of ["2.5 mg/.5ml", "5 mg/.5ml", "15 mg/.5ml"]) {
+      const key = `tirzepatide|${strength}|injection, solution|subcutaneous`;
+      assert.notEqual(groupKey(src("00002150680", key, null)), groupKey(src("00002240680", key, null)), strength);
+    }
+  });
+
+  test("two packages of the same product are still one buying choice", () => {
+    // The safe direction has to stay useful: different pack sizes of one application still compare.
+    const key = "semaglutide|4 mg/1|tablet|oral";
+    assert.equal(groupKey(src("00169440431", key, null)), groupKey(src("00169440499", key, null)));
+  });
+
+  test("products the Orange Book rates equivalent are one group, and the suffix is part of the rating", () => {
+    const key = "metoprolol succinate|50 mg/1|tablet, extended release|oral";
+    assert.equal(groupKey(src("00093733301", key, "AB")), groupKey(src("00378318001", key, "AB")));
+    assert.notEqual(groupKey(src("00093733301", key, "AB1")), groupKey(src("00378318001", key, "AB2")));
+    assert.notEqual(groupKey(src("00093733301", key, "AB")), groupKey(src("00378318001", key, "AB1")));
+  });
+});

@@ -112,6 +112,7 @@ async function loadDrugProfit(): Promise<DrugProfitView> {
         groupKey({
           ndc11: r.ndc11,
           equivalenceKey: directory.get(r.ndc11)?.key ?? null,
+          teCode: directory.get(r.ndc11)?.teCode ?? null,
           description: r.description,
           // NADAC's brand/generic flag where it has one; the FDA's marketing category where not.
           classification: r.classification ?? directory.get(r.ndc11)?.classification ?? null,
@@ -179,7 +180,7 @@ async function loadDrugProfit(): Promise<DrugProfitView> {
     // Classification from the FDA here, because NADAC has no row to give one: on the live database
     // 383 FDA-keyed groups with no NADAC row held a brand and a generic under one key without it.
     const d = directory.get(ndc);
-    const k = groupKey({ ndc11: ndc, equivalenceKey: d?.key ?? null, description: null, classification: d?.classification ?? null, pricingUnit: null, otc: d?.otc ?? false });
+    const k = groupKey({ ndc11: ndc, equivalenceKey: d?.key ?? null, teCode: d?.teCode ?? null, description: null, classification: d?.classification ?? null, pricingUnit: null, otc: d?.otc ?? false });
     groupByNdc.set(ndc, k);
     return k;
   };
