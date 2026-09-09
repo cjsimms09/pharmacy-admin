@@ -110,3 +110,36 @@ describe("temperature monitoring says what is done, not more", () => {
     assert.match(text, /retained for five years/);
   });
 });
+
+/*
+ * The business associate section, which promised an agreement and had none behind the heading.
+ *
+ * The owner, 9 September, asked whether a template already exists that a contract driver could
+ * sign. It does — Forms → Business associate agreement, every clause 45 CFR 164.504(e) names, with
+ * the parties left blank. So the manual now says where it is instead of promising one in the
+ * abstract, which is the difference between a section an inspector can follow and one they cannot.
+ */
+describe("business associate agreements name the form that exists", () => {
+  const b = () => policies("West Wichita Family Pharmacy").find((x) => x.key === "baa")!;
+
+  test("the manual points at the agreement the site produces", () => {
+    assert.match(b().text.join(" "), /Forms → Business associate agreement/);
+    assert.match(b().text.join(" "), /every clause 45 CFR 164\.504\(e\) requires/);
+  });
+
+  test("it cites the rule that governs the agreement's contents, not only the one requiring it", () => {
+    // 164.502(e) requires the agreement; 164.504(e) says what has to be in it. The section
+    // describes contents, so it has to cite the rule about contents.
+    assert.match(b().authority, /164\.504\(e\)/);
+  });
+
+  test("who is a business associate is stated, because the driver question turned on it", () => {
+    const text = b().text.join(" ");
+    assert.match(text, /a delivery driver, a courier, a billing service, an IT contractor/);
+    assert.match(text, /A carrier that only moves a sealed package, such as the United States Postal Service, is not/);
+  });
+
+  test("the agreement is signed before access, not after", () => {
+    assert.match(b().text.join(" "), /signed before the party is given access/);
+  });
+});

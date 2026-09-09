@@ -563,9 +563,19 @@ export function policies(pharmacy: string): ManualPolicy[] {
     {
       key: "baa",
       title: "Business associate agreements",
-      authority: "45 CFR 164.502(e).",
+      authority: "45 CFR 164.502(e); 45 CFR 164.504(e).",
       text: [
         "A register is maintained of every outside party with access to protected health information, recording what they do, the date the agreement was signed, the date it runs to, and the signed agreement itself.",
+        /*
+         * Said because it is true and was not always.
+         *
+         * The manual promised business associate agreements with nothing behind the heading — a
+         * document stating the pharmacy has them, and no agreement to sign. The form exists now, so
+         * the manual names where it is rather than promising one in the abstract. A heading with no
+         * document behind it is the shape of finding this audit exists to remove.
+         */
+        `${pharmacy} produces the agreement itself, at Forms → Business associate agreement, carrying every clause 45 CFR 164.504(e) requires. Who the parties are and what the service is are left blank, because those are the only parts that make it this pharmacy's agreement rather than a specimen. No outside party need supply their own.`,
+        "The agreement is signed before the party is given access, and the signed copy is attached to its entry on the register. Anyone outside the pharmacy who handles prescriptions or patient information is a business associate — a delivery driver, a courier, a billing service, an IT contractor. A carrier that only moves a sealed package, such as the United States Postal Service, is not.",
         "The register is reviewed annually. An agreement that is unsigned, unattached or lapsed is treated as an open finding until it is put right.",
       ],
     },
