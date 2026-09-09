@@ -81,7 +81,7 @@ export async function readBankStatement(fd: FormData) {
     let expenseId: string | null = null;
     let invoiceId: string | null = null;
     if (placement.kind === "deposit") {
-      receiptId = await addCashReceipt({ month: line.on.slice(0, 7), kind: placement.receiptKind, amountCents: line.amountCents, payer: placement.payer, notes: `From the bank statement: ${line.description}`, createdBy: user.id });
+      receiptId = (await addCashReceipt({ month: line.on.slice(0, 7), kind: placement.receiptKind, amountCents: line.amountCents, payer: placement.payer, notes: `From the bank statement: ${line.description}`, createdBy: user.id })).id;
       deposits++;
       depositCents += line.amountCents;
     } else if (placement.kind === "pays_bill") {

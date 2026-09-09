@@ -214,6 +214,31 @@ export async function cashReceiptsIn(month: string) {
   return db.query.cashReceipts.findMany({ where: eq(schema.cashReceipts.month, month) });
 }
 
+/**
+ * Banks money once, however many feeds see it.
+ *
+ * The owner, 9 September: "we need to make sure we are using this data to make our money tracking
+ * even more correct but also make sure we arent duplicating things!" He was right to ask, and this
+ * function was the hole. It inserted whatever it was given, so re-reading a remittance banked it a
+ * second time, and — worse, because nobody would think to look — the same deposit arriving through
+ * two feeds was banked twice on purpose.
+ *
+ * Three of them see the same money. The payer payment report lists every deposit by its payment
+ * number. An 835 for one of those deposits carries the same money with the trace number on it. A
+ * copay-voucher statement settles a slice of it again. Left alone they would have added to about
+ * two hundred thousand dollars of September income that the bank never saw.
+ *
+ * Two gates, in order.
+ *
+ * `sourceKey` is exact: the same statement read twice is the same money, and the column is unique
+ * so the database enforces it even if this function is bypassed.
+ *
+ * The second is the one that matters across feeds. A deposit of the same amount, on the same day,
+ * from a payer whose name starts the same way, banked by a *different* feed, is the same deposit.
+ * That is deliberately narrow — same cent, same day — because two real deposits matching all three
+ * is rare and being wrong in that direction only understates income, which somebody notices, while
+ * being wrong the other way inflates it, which nobody does.
+ */
 export async function addCashReceipt(input: {
   month: string;
   kind: typeof schema.cashReceipts.$inferInsert.kind;
@@ -221,18 +246,53 @@ export async function addCashReceipt(input: {
   payer?: string | null;
   notes?: string | null;
   createdBy: string;
-}): Promise<string> {
+  /** Stable identity for the thing that was read — "835|payer|trace|date". Never banked twice. */
+  sourceKey?: string | null;
+  /** The day the money landed, which is what the cross-feed check compares. */
+  receivedOn?: string | null;
+  reference?: string | null;
+  documentId?: string | null;
+}): Promise<{ id: string | null; duplicate: false } | { id: null; duplicate: true; why: string }> {
+  const amountCents = Math.round(input.amountCents);
+  if (input.sourceKey) {
+    const same = await db.query.cashReceipts.findFirst({ where: eq(schema.cashReceipts.sourceKey, input.sourceKey) });
+    if (same) return { id: null, duplicate: true, why: `already banked from ${same.createdBy} on ${same.month}` };
+  }
+  /*
+   * The cross-feed gate applies to feeds and not to people.
+   *
+   * A `sourceKey` is what an automatic reader supplies, so its presence is how this tells the two
+   * apart. Money typed in from a bank statement is trusted outright: the bank is the record, and if
+   * it shows two deposits of the same amount on the same day then there were two, and refusing the
+   * second would be this function overruling the statement it exists to agree with.
+   */
+  if (input.sourceKey && input.receivedOn) {
+    const sameDay = await db.query.cashReceipts.findMany({ where: eq(schema.cashReceipts.receivedOn, input.receivedOn) });
+    const head = (s: string | null | undefined) => (s ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 8);
+    const clash = sameDay.find((r) => r.amountCents === amountCents && (!input.payer || !r.payer || head(r.payer) === head(input.payer)));
+    if (clash) {
+      return {
+        id: null,
+        duplicate: true,
+        why: `${(amountCents / 100).toFixed(2)} from ${input.payer ?? "a payer"} on ${input.receivedOn} is already banked${clash.reference ? ` as ${clash.reference}` : ""}`,
+      };
+    }
+  }
   const id = newId();
   await db.insert(schema.cashReceipts).values({
     id,
     month: input.month,
     kind: input.kind,
-    amountCents: Math.round(input.amountCents),
+    amountCents,
     payer: input.payer ?? null,
     notes: input.notes ?? null,
     createdBy: input.createdBy,
+    sourceKey: input.sourceKey ?? null,
+    receivedOn: input.receivedOn ?? null,
+    reference: input.reference ?? null,
+    documentId: input.documentId ?? null,
   });
-  return id;
+  return { id, duplicate: false };
 }
 
 /** A receipt entered by mistake is removed; the bank statement is the record, not this row. */

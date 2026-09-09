@@ -33,7 +33,7 @@
  */
 import "dotenv/config";
 
-type Feed = "on-hand" | "claims" | "invoices" | "catalogue";
+type Feed = "on-hand" | "claims" | "invoices" | "suppliers" | "catalogue";
 import type { DispensedRow, PayerSide } from "../src/lib/dispensed-export";
 
 async function main() {
@@ -50,7 +50,7 @@ async function main() {
         ...(s.pioneer_pull_invoices_on === today ? [] : (["invoices"] as Feed[])),
         // Monday, or never pulled. 238,952 catalogue rows is the heavy one and the owner said weekly
         // is enough unless it turns out to be free.
-        ...(new Date().getDay() === 1 || !s.pioneer_pull_catalogue_on ? (["catalogue"] as Feed[]) : []),
+        ...(new Date().getDay() === 1 || !s.pioneer_pull_catalogue_on ? (["suppliers", "catalogue"] as Feed[]) : []),
       ];
 
   if (due.length === 0) {
@@ -76,6 +76,10 @@ async function main() {
         await setSetting("pioneer_pull_invoices_on", today);
         await setSetting("pioneer_pull_invoices_result", `${new Date().toISOString()}: ${r}`);
         console.log(`invoices: ${r} (${Date.now() - started}ms)`);
+      } else if (feed === "suppliers") {
+        const r = await pullSuppliers();
+        await setSetting("pioneer_pull_suppliers_result", `${new Date().toISOString()}: ${r}`);
+        console.log(`suppliers: ${r} (${Date.now() - started}ms)`);
       } else if (feed === "catalogue") {
         const r = await pullCatalogue();
         await setSetting("pioneer_pull_catalogue_on", today);
@@ -84,7 +88,7 @@ async function main() {
       }
     } catch (e) {
       const why = e instanceof Error ? e.message : String(e);
-      await setSetting(feed === "on-hand" ? "pioneer_pull_on_hand_result" : feed === "claims" ? "pioneer_pull_claims_result" : feed === "invoices" ? "pioneer_pull_invoices_result" : "pioneer_pull_catalogue_result", `${new Date().toISOString()}: failed: ${why}`);
+      await setSetting(feed === "on-hand" ? "pioneer_pull_on_hand_result" : feed === "claims" ? "pioneer_pull_claims_result" : feed === "invoices" ? "pioneer_pull_invoices_result" : feed === "suppliers" ? "pioneer_pull_suppliers_result" : "pioneer_pull_catalogue_result", `${new Date().toISOString()}: failed: ${why}`);
       console.error(`${feed}: failed: ${why}`);
     }
   }
@@ -556,6 +560,106 @@ async function pullInvoices(): Promise<string> {
   const { setSetting } = await import("../src/lib/settings");
   await setSetting("pioneer_invoice_compare", JSON.stringify({ readAt: new Date().toISOString(), invoices: invoices.size, created, alreadyHeld, agree, differ, notes }));
   return `${invoices.size} September invoices in PioneerRx: ${created} brought in, ${alreadyHeld} the site already held (${agree} agreeing on the total, ${differ} differing)`;
+}
+
+/**
+ * The wholesalers the pharmacy actually buys from, as PioneerRx knows them.
+ *
+ * The owner: "can you use info you have to create suppliers we dont have in site and put in
+ * everything we need". The site had five. PioneerRx carries eighteen with a catalogue or an invoice
+ * behind them, including the one whose account number is on the payer payment report the pharmacy
+ * receives every day — Buyline, 1722734, which is where that file's name comes from.
+ *
+ * Only suppliers with something behind them are created: a catalogue the pharmacy loads or an
+ * invoice it has received this year. A wholesaler set up years ago and never used is a row nobody
+ * wants, and the register is used to decide who to buy from.
+ *
+ * An existing supplier is never overwritten. Its account number, its sender addresses, its
+ * minimums and its rebate flag were set by the owner or learned from real files, and PioneerRx's
+ * copy of the same fact is not better evidence than the pharmacy's own. What this fills is blanks:
+ * a supplier the site has but with no account number gets one, and nothing else moves.
+ */
+async function pullSuppliers(): Promise<string> {
+  const { query } = await import("../src/lib/pioneer-sql");
+  const r = await query(
+    `select s.SupplierName as name,
+            s.AccountNumber as account,
+            s.EmailAddress as email,
+            s.WebAddress as website,
+            s.DeliveryTime as lead_days,
+            (select count(*) from Supplier.CatalogItem c where c.SupplierID = s.SupplierID) as catalog_items,
+            (select count(*) from Item.Invoice v where v.SupplierID = s.SupplierID and v.InvoiceDate >= '2026-01-01') as invoices
+       from Supplier.Supplier s
+      -- A real relationship, not a row somebody made once. A thousand catalogue lines means the
+      -- pharmacy loads their price file; an invoice this year means it has actually bought from
+      -- them. Without the bar this swept in 43, among them a supplier with one item, two spellings
+      -- of the same laboratory, and the medical practice upstairs.
+      where (select count(*) from Supplier.CatalogItem c where c.SupplierID = s.SupplierID) >= 1000
+         or (select count(*) from Item.Invoice v where v.SupplierID = s.SupplierID and v.InvoiceDate >= '2026-01-01') > 0`,
+    {},
+    500,
+  );
+  if (r.rows.length === 0) return "PioneerRx lists no supplier with a catalogue or an invoice";
+
+  const { db, schema } = await import("../src/db");
+  const { newId } = await import("../src/lib/crypto");
+  const { eq } = await import("drizzle-orm");
+  const text = (v: unknown): string | null => {
+    const t = String(v ?? "").trim();
+    return t === "" ? null : t;
+  };
+  /*
+   * Matched on a folded name, because the two systems spell them differently on purpose: the site
+   * reads "Mckesson" off a catalogue file and PioneerRx says "McKesson"; "ParMed" and "Parmed" are
+   * the same wholesaler. Aliases the owner has already recorded count too — that is what they are
+   * for, and IPC is on the site as "Independent Pharmacy Cooperative" in exactly that field.
+   */
+  const fold = (n: string) => n.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  const held = await db.query.suppliers.findMany();
+  const byName = new Map<string, (typeof held)[number]>();
+  for (const h of held) {
+    byName.set(fold(h.name), h);
+    for (const a of String(h.aliases ?? "").split(/[\n,]/)) if (a.trim()) byName.set(fold(a), h);
+  }
+
+  let created = 0;
+  let filledIn = 0;
+  const names: string[] = [];
+  for (const row of r.rows) {
+    const name = text(row.name);
+    if (!name) continue;
+    const account = text(row.account);
+    const email = text(row.email);
+    const website = text(row.website);
+    const lead = Number(row.lead_days ?? 0) || null;
+    const existing = byName.get(fold(name));
+    if (existing) {
+      // Blanks only. A figure the pharmacy set stands.
+      const fill: Record<string, unknown> = {};
+      if (!existing.accountNumber && account) fill.accountNumber = account;
+      if (!existing.website && website) fill.website = website;
+      if (!existing.leadTimeDays && lead) fill.leadTimeDays = lead;
+      if (Object.keys(fill).length > 0) {
+        await db.update(schema.suppliers).set({ ...fill, updatedAt: new Date().toISOString() }).where(eq(schema.suppliers.id, existing.id));
+        filledIn++;
+      }
+      continue;
+    }
+    await db.insert(schema.suppliers).values({
+      id: newId(),
+      name,
+      accountNumber: account ?? undefined,
+      senderEmails: email ?? undefined,
+      website: website ?? undefined,
+      leadTimeDays: lead ?? undefined,
+      active: true,
+      notes: `Added from PioneerRx on ${new Date().toISOString().slice(0, 10)}: ${Number(row.catalog_items ?? 0).toLocaleString("en-US")} catalogue items, ${Number(row.invoices ?? 0)} invoices this year.`,
+    });
+    byName.set(fold(name), { id: "", name } as (typeof held)[number]);
+    created++;
+    names.push(name);
+  }
+  return `${created} suppliers added${names.length ? ` (${names.slice(0, 8).join(", ")}${names.length > 8 ? "…" : ""})` : ""}, ${filledIn} existing ones filled in`;
 }
 
 main().catch((e) => {

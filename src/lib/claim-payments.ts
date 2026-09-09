@@ -375,6 +375,12 @@ export async function importRemittance(
           ? ` The payer held back ${formatCents(providerAdjustmentCents)} at remittance level (${r.providerAdjustments.map((a) => `${a.reasonCode}${a.reference ? ` ${a.reference}` : ""}`).join(", ")}), which is why this deposit is smaller than the claims it settles. That money is not yet on either account.`
           : ""),
       createdBy: user.id ?? user.name,
+      // Its identity, so the same remittance read twice banks once — and so a deposit the payer
+      // payment report already banked is recognised rather than added again (expenses.ts).
+      sourceKey: `835|${(r.payer ?? "payer").trim().toLowerCase()}|${r.traceNumber ?? fileName}|${r.paidOn}`,
+      receivedOn: r.paidOn,
+      reference: r.traceNumber ?? null,
+      documentId: opts.documentId ?? null,
     });
     out.banked = true;
   }

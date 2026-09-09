@@ -42,6 +42,15 @@ describe("patient columns are refused before the query is sent", () => {
     }
   });
 
+  test("the Person tables are refused whole, and a supplier’s own email is not", () => {
+    // A deny-list only catches the names somebody thought of. The Person schema is 284 tables of
+    // patients and nothing here needs any of it, so it goes by the table rather than the column.
+    assert.equal(isReadOnlySelect("select PersonID from Person.Patient").ok, false);
+    assert.equal(isReadOnlySelect("select p.PersonID from Person.PatientPayMethodThirdParty p").ok, false);
+    // And the rule that over-reached: a wholesaler’s email address is a business contact.
+    assert.equal(isReadOnlySelect("select SupplierName, EmailAddress, AccountNumber from Supplier.Supplier").ok, true);
+  });
+
   test("the columns the payer chain actually needs go through", () => {
     const q = "select Bin, Pcn, GroupNumber, NetworkReimbursementID, PlanID, DateFilled from Prescription.Transmission where DateFilled >= '2026-09-01'";
     assert.equal(isReadOnlySelect(q).ok, true);

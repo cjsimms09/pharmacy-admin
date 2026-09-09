@@ -100,8 +100,8 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
     if (!/^\d{4}-\d{2}$/.test(month)) redirect(`${back}&error=${encodeURIComponent("Say which month the money arrived, as YYYY-MM.")}`);
     if (!KINDS.some((k) => k.key === kind)) redirect(`${back}&error=${encodeURIComponent("Say what kind of money it was.")}`);
     if (amountCents === null || amountCents === 0) redirect(`${back}&error=${encodeURIComponent("Put the amount in dollars.")}`);
-    const id = await addCashReceipt({ month, kind, amountCents, payer: String(fd.get("payer") ?? "").trim() || null, notes: String(fd.get("notes") ?? "").trim() || null, createdBy: u.id });
-    await audit({ action: "cash_receipt.add", userId: u.id, userName: u.name, entity: "cash_receipt", entityId: id, details: `${month} ${kind} ${formatCents(amountCents)}` });
+    const { id } = await addCashReceipt({ month, kind, amountCents, payer: String(fd.get("payer") ?? "").trim() || null, notes: String(fd.get("notes") ?? "").trim() || null, createdBy: u.id });
+    await audit({ action: "cash_receipt.add", userId: u.id, userName: u.name, entity: "cash_receipt", entityId: id ?? undefined, details: `${month} ${kind} ${formatCents(amountCents)}` });
     revalidatePath("/money");
     revalidatePath("/money/monthly");
     redirect(`${back}&ok=${encodeURIComponent(`${formatCents(amountCents)} banked against ${month}.`)}`);
