@@ -693,18 +693,43 @@ async function pullSuppliers(): Promise<string> {
 async function pullRetail(): Promise<string> {
   const { query } = await import("../src/lib/pioneer-sql");
   const r = await query(
-    `select convert(varchar(7), t.PostingDate, 23) as month,
-            min(convert(varchar(10), t.PostingDate, 23)) as period_from,
-            max(convert(varchar(10), t.PostingDate, 23)) as period_to,
-            sum(d.ExtendedPrice) as retail,
-            sum(d.TotalCostForProfit) as cost,
-            sum(d.DisplayTaxAmount) as tax,
-            count(*) as lines
-       from PointOfSale.SaleTransaction t
-       join PointOfSale.SaleTransactionDetail d on d.SaleTransactionID = t.SaleTransactionID
-      where t.PostingDate >= '2026-09-01'
-        and d.ReferenceTypeEnum = 2
-      group by convert(varchar(7), t.PostingDate, 23)`,
+    /*
+     * Items sold, less the discounts given on them.
+     *
+     * A discount is its own line on the till (reference type 5) and is not deducted from the item
+     * line beside it, so counting the items alone overstates what the shop took. September's items
+     * came to $2,331.07 and $216.00 of that was discounted away.
+     *
+     * Which discounts are retail is decided by the sale they belong to. A discount in a sale that
+     * carried no prescription is a discount on the goods; one in a sale that also had a
+     * prescription could have come off either, and is left out of retail rather than guessed at —
+     * the safe direction, because it understates the front shop rather than the margin.
+     */
+    `with lines as (
+        select convert(varchar(7), t.PostingDate, 23) as month,
+               convert(varchar(10), t.PostingDate, 23) as day,
+               d.ReferenceTypeEnum as ref,
+               d.ExtendedPrice as amount,
+               d.TotalCostForProfit as cost,
+               d.DisplayTaxAmount as tax,
+               case when exists (select 1 from PointOfSale.SaleTransactionDetail x
+                                  where x.SaleTransactionID = d.SaleTransactionID
+                                    and x.ReferenceTypeEnum = 1) then 1 else 0 end as with_rx
+          from PointOfSale.SaleTransaction t
+          join PointOfSale.SaleTransactionDetail d on d.SaleTransactionID = t.SaleTransactionID
+         where t.PostingDate >= '2026-09-01'
+           and d.ReferenceTypeEnum in (2, 5)
+      )
+      select month,
+             min(day) as period_from,
+             max(day) as period_to,
+             sum(case when ref = 2 or with_rx = 0 then amount else 0 end) as retail,
+             sum(case when ref = 2 then cost else 0 end) as cost,
+             sum(case when ref = 2 or with_rx = 0 then tax else 0 end) as tax,
+             sum(case when ref = 2 then 1 else 0 end) as lines,
+             sum(case when ref = 5 and with_rx = 0 then amount else 0 end) as discounts
+        from lines
+       group by month`,
     {},
     100,
   );
@@ -746,7 +771,7 @@ async function pullRetail(): Promise<string> {
     };
     if (held) await db.update(schema.salesMonths).set(values).where(eq(schema.salesMonths.month, month));
     else await db.insert(schema.salesMonths).values(values);
-    written.push(`${month}: ${(Number(row.lines ?? 0)).toLocaleString("en-US")} lines, ${((retail ?? 0) / 100).toFixed(2)} taken, ${((cost ?? 0) / 100).toFixed(2)} of it cost`);
+    written.push(`${month}: ${(Number(row.lines ?? 0)).toLocaleString("en-US")} lines, ${((retail ?? 0) / 100).toFixed(2)} taken after ${Math.abs(Number(row.discounts ?? 0)).toFixed(2)} of discounts, ${((cost ?? 0) / 100).toFixed(2)} of it cost`);
   }
   return written.join("; ");
 }
