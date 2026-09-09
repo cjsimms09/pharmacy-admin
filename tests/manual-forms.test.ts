@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { FORMS, suggestForm, appendixReference } from "../src/lib/manual";
+import { FORMS, suggestForm, appendixReference, policies } from "../src/lib/manual";
 
 /**
  * The headings that were empty, and whether the site can now close them.
@@ -77,5 +77,36 @@ describe("the forms themselves", () => {
     assert.match(names, /Notice of Privacy Practices/);
     assert.match(names, /CMS-10147/);
     assert.match(names, /Business associate agreement/);
+  });
+});
+
+/*
+ * The temperature section, which is the clearest case of a manual promising more than is done.
+ *
+ * The owner, asked directly: one data logger, four readings a day, records kept. The manual said
+ * "monitored continuously", which is a larger promise and a different one. Four readings a day is
+ * a sound practice; continuous monitoring is a standard an inspector can test and find wanting,
+ * and the pharmacy would have written that test for itself.
+ */
+describe("temperature monitoring says what is done, not more", () => {
+  const t = () => policies("West Wichita Family Pharmacy").find((x) => x.key === "temperatures")!;
+
+  test("the cadence is stated as a number rather than left to be interpreted", () => {
+    assert.match(t().text[0], /records four readings a day/);
+  });
+
+  test("it does not claim continuous monitoring", () => {
+    assert.doesNotMatch(t().text.join(" "), /continuous/i);
+  });
+
+  test("the readings are said to arrive automatically, which is the part that matters for the record", () => {
+    assert.match(t().text[0], /collected automatically/);
+    assert.match(t().text[0], /no reading is transcribed by hand/);
+  });
+
+  test("what happens to an excursion is unchanged, because that part was already true", () => {
+    const text = t().text.join(" ");
+    assert.match(text, /A month cannot be signed off while any excursion in it is unexplained/);
+    assert.match(text, /retained for five years/);
   });
 });

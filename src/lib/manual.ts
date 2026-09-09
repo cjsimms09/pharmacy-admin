@@ -484,8 +484,17 @@ export function policies(pharmacy: string): ManualPolicy[] {
       title: "Temperature monitoring and review",
       authority: "CDC Vaccine Storage and Handling Toolkit; USP 1079.",
       text: [
-        `Refrigerated and room-temperature storage at ${pharmacy} is monitored continuously by an electronic logging sensor, and readings are collected automatically into the pharmacy's compliance system.`,
-        "The acceptable range for each sensor is recorded against that sensor. Any reading outside its range is flagged as an excursion and appears on a single list of excursions awaiting explanation.",
+        /*
+         * "Continuously" was the word here and it is not what this pharmacy does.
+         *
+         * The owner, asked: one data logger, four readings a day, records kept. Four readings a day
+         * is a defensible practice and continuous monitoring is a different and larger promise —
+         * and a manual is a standard the pharmacy is held to, so claiming the larger one turns a
+         * sound practice into a finding against itself. The number is stated rather than described,
+         * because "regularly" would leave an inspector to decide what regular means.
+         */
+        `Refrigerated and room-temperature storage at ${pharmacy} is monitored by an electronic data logger, which records four readings a day. Readings are collected automatically into the pharmacy's compliance system; no reading is transcribed by hand.`,
+        "The acceptable range for each logger is recorded against it. Any reading outside that range is flagged as an excursion and appears on a single list of excursions awaiting explanation.",
         "Every excursion must have a written explanation stating what happened and what was done about it, including the disposition of any affected stock. A month cannot be signed off while any excursion in it is unexplained.",
         "At the end of each month the pharmacist-in-charge reviews the month and signs it off. The signed month, its readings and its explanations are retained for five years and can be printed on demand.",
       ],
