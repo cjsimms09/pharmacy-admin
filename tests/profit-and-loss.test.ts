@@ -16,7 +16,7 @@ const base: PLInputs = {
   receipts: [],
   laterMoneyCents: 0,
   dispensedCostCents: 55_000_000,
-  paidPurchasesCents: null,
+  billedPurchasesCents: null,
   purchasesCents: 58_000_000,
   rebatesCents: 1_200_000,
   expenses: [
@@ -186,17 +186,17 @@ describe("cash and accrual are different accounts", () => {
     const r = monthlyPL(base);
     const cogs = r.costOfGoods.find((l) => l.label.startsWith("Acquisition cost"));
     assert.equal(cogs?.amountCents, 55_000_000);
-    assert.equal(r.costOfGoods.some((l) => l.label === "Paid to the wholesalers"), false);
+    assert.equal(r.costOfGoods.some((l) => l.label === "Billed by the wholesalers"), false);
   });
 
-  test("cash takes cost from what was paid to the wholesalers, not from what was dispensed", () => {
+  test("cash takes cost from what the wholesalers billed, not from what was dispensed", () => {
     const r = monthlyPL({
       ...base,
       basis: "cash",
       receipts: [{ kind: "third_party", amountCents: 60_000_000 }],
-      paidPurchasesCents: 48_000_000,
+      billedPurchasesCents: 48_000_000,
     });
-    const cogs = r.costOfGoods.find((l) => l.label === "Paid to the wholesalers");
+    const cogs = r.costOfGoods.find((l) => l.label === "Billed by the wholesalers");
     assert.equal(cogs?.amountCents, 48_000_000);
     assert.equal(r.costOfGoods.some((l) => l.label.startsWith("Acquisition cost")), false, "the accrual figure must not appear on a cash account");
   });
@@ -206,19 +206,32 @@ describe("cash and accrual are different accounts", () => {
      * The substitution that would make the two accounts agree. Silence here is correct and has to
      * be loud, because a cost of goods of zero reads as an extremely good month.
      */
-    const r = monthlyPL({ ...base, basis: "cash", receipts: [{ kind: "third_party", amountCents: 60_000_000 }], paidPurchasesCents: null });
+    const r = monthlyPL({ ...base, basis: "cash", receipts: [{ kind: "third_party", amountCents: 60_000_000 }], billedPurchasesCents: null });
     assert.equal(r.costOfGoods.some((l) => l.label.startsWith("Acquisition cost")), false);
-    assert.match(r.missing.join(" "), /No wholesaler invoice falls in this month/);
+    assert.match(r.missing.join(" "), /No wholesaler invoice is dated in this month/);
   });
 
-  test("invoices counted on an assumed date are named on the line, so the figure is never read as a bank statement", () => {
+  test("the cash cost of goods is what the wholesalers billed, and says so on the line", () => {
     const r = monthlyPL({
       ...base, basis: "cash", receipts: [{ kind: "third_party", amountCents: 60_000_000 }],
-      paidPurchasesCents: 48_000_000, purchasesUnpaidCount: 3, purchasesAssumedCount: 3,
+      billedPurchasesCents: 48_000_000,
     });
     const line = r.costOfGoods.find((l) => l.amountCents === 48_000_000);
-    assert.match(line?.note ?? "", /3 of them are counted on the invoice date plus the supplier's payment terms/);
+    assert.equal(line?.label, "Billed by the wholesalers");
+    assert.match(line?.note ?? "", /dated in this month/);
     assert.equal(r.costOfGoodsCents, 48_000_000);
+  });
+
+  /*
+   * The two bases must not agree. Cash counts what was bought in the month, accrual what was sold
+   * out of stock; a month with a big buy-in is worse on one and unchanged on the other, and if the
+   * same figure ever appeared on both it would mean one of them had quietly borrowed the other's.
+   */
+  test("cash counts the bills and accrual counts the dispensings, and they are different numbers", () => {
+    const cash = monthlyPL({ ...base, basis: "cash", receipts: [{ kind: "third_party", amountCents: 60_000_000 }], billedPurchasesCents: 58_000_000 });
+    const accrual = monthlyPL(base);
+    assert.equal(cash.costOfGoodsCents, 58_000_000, "what the wholesalers billed");
+    assert.equal(accrual.costOfGoodsCents, 55_000_000 - 1_200_000, "what the month dispensed, less rebates");
   });
 
   test("a standing cost joins the expenses by category at the month's share", () => {
@@ -287,7 +300,7 @@ describe("what the cash account is allowed to carry", () => {
     basis: "cash",
     sales: null,
     receipts: [{ kind: "third_party", amountCents: 50_000_000 }, { kind: "patient", amountCents: 9_000_000 }],
-    paidPurchasesCents: 52_000_000,
+    billedPurchasesCents: 52_000_000,
     expenses: [
       { categoryId: "w", categoryName: "Wages and salaries", kind: "operating", amountCents: 4_500_000 },
       { categoryId: "r", categoryName: "Rent and occupancy", kind: "operating", amountCents: 600_000 },
@@ -347,7 +360,7 @@ describe("the same money twice", () => {
   });
   test("on the cash basis a rebate banked as a receipt wins over the same statement entered as a bill", () => {
     const stated = { categoryId: "wr", categoryName: "Wholesaler rebates", kind: "cost_of_goods", amountCents: -1_150_000 };
-    const pl = monthlyPL({ ...base, basis: "cash", sales: null, receipts: [{ kind: "third_party", amountCents: 1 }, { kind: "rebate", amountCents: 1_150_000 }], paidPurchasesCents: 10_000, expenses: [stated] });
+    const pl = monthlyPL({ ...base, basis: "cash", sales: null, receipts: [{ kind: "third_party", amountCents: 1 }, { kind: "rebate", amountCents: 1_150_000 }], billedPurchasesCents: 10_000, expenses: [stated] });
     assert.equal(pl.costOfGoodsCents, 10_000 - 1_150_000);
   });
   test("a wholesaler bill filed on Spending is left out on both bases and named", () => {
@@ -355,7 +368,7 @@ describe("the same money twice", () => {
     const accrual = monthlyPL({ ...base, expenses: [...base.expenses, bill] });
     assert.equal(accrual.costOfGoodsCents, 55_000_000 - 1_200_000);
     assert.ok(accrual.missing.some((m) => m.includes("Drug purchases")));
-    const cash = monthlyPL({ ...base, basis: "cash", sales: null, receipts: [{ kind: "third_party", amountCents: 1 }], paidPurchasesCents: 3_000_000, expenses: [bill] });
+    const cash = monthlyPL({ ...base, basis: "cash", sales: null, receipts: [{ kind: "third_party", amountCents: 1 }], billedPurchasesCents: 3_000_000, expenses: [bill] });
     assert.equal(cash.costOfGoodsCents, 3_000_000);
   });
 });

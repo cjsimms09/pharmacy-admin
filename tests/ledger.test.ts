@@ -12,7 +12,7 @@ function month(m: string, over: Partial<PLInputs> = {}): PLInputs {
     receipts: [],
     laterMoneyCents: 0,
     dispensedCostCents: 4_500_000,
-    paidPurchasesCents: null,
+    billedPurchasesCents: null,
     purchasesCents: 4_700_000,
     rebatesCents: 100_000,
     expenses: [
@@ -137,7 +137,7 @@ describe("the two bases side by side", () => {
     const accrual = combineMonths(parsePeriod("2026-08")!, [monthlyPL(month("2026-08"))]);
     const cash = combineMonths(
       parsePeriod("2026-08")!,
-      [monthlyPL(month("2026-08", { basis: "cash", receipts: [{ kind: "third_party", amountCents: 4_000_000 }, { kind: "patient", amountCents: 900_000 }, { kind: "rebate", amountCents: 80_000 }], paidPurchasesCents: 4_000_000 }))],
+      [monthlyPL(month("2026-08", { basis: "cash", receipts: [{ kind: "third_party", amountCents: 4_000_000 }, { kind: "patient", amountCents: 900_000 }, { kind: "rebate", amountCents: 80_000 }], billedPurchasesCents: 4_000_000 }))],
     );
     const g = basisGap(accrual, cash);
     assert.equal(g.receivableCents, 6_000_000 - 4_900_000);
