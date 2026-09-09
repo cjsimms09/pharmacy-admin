@@ -92,7 +92,12 @@ export type ParseReport = {
   weeks: number;
 };
 
-type RowCtx = {
+/**
+ * The per-row reader and its running context are exported for scripts/prove-nadac.ts (2, BACKLOG 30),
+ * which streams a year archive a line at a time exactly as loadOneFile does. One reader for one
+ * file format: a second one in the proof would be the fault the proof exists to find.
+ */
+export type RowCtx = {
   rows: ParsedNadacRow[];
   skipped: number;
   reasons: Record<string, number>;
@@ -101,10 +106,10 @@ type RowCtx = {
   asOfSeen: Set<string>;
 };
 
-const newCtx = (): RowCtx => ({ rows: [], skipped: 0, reasons: {}, fileAsOf: null, fileAsOfLatest: null, asOfSeen: new Set() });
+export const newCtx = (): RowCtx => ({ rows: [], skipped: 0, reasons: {}, fileAsOf: null, fileAsOfLatest: null, asOfSeen: new Set() });
 
 /** One CMS row, as an object keyed by header, into a price or a counted reason. */
-function readNadacRow(r: Record<string, string>, ctx: RowCtx): ParsedNadacRow | null {
+export function readNadacRow(r: Record<string, string>, ctx: RowCtx): ParsedNadacRow | null {
   const skip = (why: string) => {
     ctx.skipped++;
     ctx.reasons[why] = (ctx.reasons[why] ?? 0) + 1;
