@@ -88,6 +88,7 @@ type ItemRow = { ndc11: string; unit_cost_micros: number | null; import_id: stri
 async function main() {
   const { readFile } = await import("../src/lib/files");
   const { parsePioneerCatalog } = await import("../src/lib/pioneer-catalog");
+  const { isPlaceholderRow } = await import("../src/lib/catalogue-check");
   const { allSuppliers } = await import("../src/lib/suppliers-registry");
 
   const registry = (await allSuppliers(true)).filter((s) => s.active);
@@ -168,7 +169,17 @@ async function main() {
       problems.push(`the file no longer carries a section for ${last.supplier}`);
       lines.push(`${s.name}: the stored file ${last.file_name} has no section for ${last.supplier}, so the import's own idea of whose file it was and the file disagree.`);
     }
-    const rows = section?.rows ?? [];
+    /*
+     * The importer's own exclusions, applied here too, or the proof reports them as losses.
+     *
+     * McKesson's file carries a handful of reserved rows described "TBD DO NOT DELETE OR RELEASE"
+     * against NDCs like 00000001235, every one at the same invented price. `importSupplierCatalog`
+     * drops them deliberately (catalogue-check.ts, isPlaceholderRow), so the table is right not to
+     * hold them — but the first nightly run of this proof counted all nine as missing, and would
+     * have gone on saying so every night for ever. A proof that reports a deliberate exclusion as a
+     * fault teaches the reader to ignore it, which is the one thing it must never do.
+     */
+    const rows = (section?.rows ?? []).filter((r) => !isPlaceholderRow(r.description));
 
     /*
      * ── One NDC can be listed several times in one file, and the table keeps one of them ──
