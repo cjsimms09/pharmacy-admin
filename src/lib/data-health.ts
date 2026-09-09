@@ -266,6 +266,22 @@ export const SPECS: LinkSpec[] = [
       "The shelf values the pharmacy's inventory and stands on one side of the cost-of-goods identity, so a row the reader dropped is stock the accounts do not know exists. Everything else the site knows about a count came out of the same reader, which means a reader that lost rows and a report that never had them look identical — the record count PioneerRx prints about itself is the only figure here that did not.",
   },
   {
+    key: "nadac-proof",
+    group: "Datasets",
+    title: "NADAC proved against the CMS files it came from",
+    of: "distinct prices accounted for, out of every price that has to be — those held, plus those the files carry that the table has not got",
+    why:
+      "Every over- and under-payment figure on this site is measured against NADAC, and the Kansas floor is calculated from it, so a price the table holds that no file contained is wrong money on a screen. Counted in prices rather than rows: the weekly files republish the same NDC and effective date about seven times each, so a figure built on rows would read five and three-quarter million out of five and three-quarter million and mean nothing. It also reports a file that has changed since it was loaded — the one fault where every count is right and the file they describe no longer exists.",
+  },
+  {
+    key: "nadac-prune",
+    group: "Datasets",
+    title: "The nightly NADAC prune",
+    of: "whether the last run succeeded",
+    why:
+      "The benchmark table is trimmed each night to the months the pharmacy can use; without it, it grows by about a million and a half rows a year and every reading over it grows with it. This has already failed silently: the prune had one caller, reached only when a new file had just been loaded, and swallowed its own error — so a prune that never ran and one that failed every time looked identical, and 770,000 prices sat past the cutoff with nothing to say so. Kept apart from the proof above because they are different failures: the prices being right, and the table being the size it should be.",
+  },
+  {
     key: "directory-proof",
     group: "Datasets",
     title: "The FDA directory proved against the load that wrote it",

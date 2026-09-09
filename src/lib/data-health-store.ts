@@ -470,6 +470,48 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
   });
 
   /*
+   * ── NADAC against the CMS files, and the prune that keeps it trimmed ──
+   *
+   * Both read back from what the nightly scripts left behind. Two rows rather than one because they
+   * fail differently: the prices can be exactly right while the table is three times the size it
+   * should be, and a single row showing one number would hide whichever of the two was well.
+   */
+  await timed("nadac-proof", async () => {
+    const { parseNadacProof, nadacProofFraction, nadacProofGaps, nadacProofNote } = await import("./data-health-nadac-proof");
+    const proof = parseNadacProof((await getSettings()).nadac_proof);
+    if (!proof) {
+      return {
+        numerator: 0,
+        denominator: 0,
+        measuredAt: null,
+        gaps: [],
+        note: "The nightly NADAC proof has not run, so no price on this site has been set against the CMS file it came from.",
+      };
+    }
+    const { numerator, denominator } = nadacProofFraction(proof);
+    // The proof's own date, not the sweep's: an ageing proof is the nightly job having stopped.
+    return { numerator, denominator, measuredAt: proof.provedOn, gaps: nadacProofGaps(proof), note: nadacProofNote(proof) };
+  });
+
+  await timed("nadac-prune", async () => {
+    const { parseNadacPrune, nadacPruneFraction, nadacPruneGaps, nadacPruneNote } = await import("./data-health-nadac-proof");
+    const prune = parseNadacPrune((await getSettings()).nadac_last_prune);
+    const { numerator, denominator } = nadacPruneFraction(prune);
+    return {
+      numerator,
+      denominator,
+      /*
+       * The run's own timestamp, so a prune that stopped running ages here rather than being
+       * refreshed by the health sweep. That is the exact failure this row was built for: the last
+       * recorded run said "removed 770,412" and was six weeks old.
+       */
+      measuredAt: prune?.at ? prune.at.slice(0, 10) : null,
+      gaps: nadacPruneGaps(prune),
+      note: nadacPruneNote(prune),
+    };
+  });
+
+  /*
    * ── The directory against the load that wrote it ─────────────────
    *
    * Read back from what `loadDrugDirectory` stamped, and set against a count of the table. The
