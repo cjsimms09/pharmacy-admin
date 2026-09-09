@@ -106,6 +106,29 @@ export async function withPioneer<T>(fn: (pool: sql.ConnectionPool) => Promise<T
   }
 }
 
+/**
+ * Columns this site will not read, whatever anybody types.
+ *
+ * PioneerRx's `Prescription.Transmission` carries the whole payer chain — BIN, PCN, group, plan and
+ * the network reimbursement id, which is the key to matching a claim to its contract — and in the
+ * same row it carries the patient's name, address, social security number, date of birth, driving
+ * licence and passport number, plus the raw EDI of the claim in `SentEdi`, `ReceivedEdi` and
+ * `SuperString`. The useful columns and the forbidden ones are neighbours.
+ *
+ * The pharmacy has no business associate agreement covering this session, so the rule is not a
+ * preference to be remembered while writing a query. It is enforced here, once, on every query the
+ * site or a person sends: name a column on this list and nothing runs. `select *` is refused for
+ * the same reason — on a 194-column claims table it is a request for whatever happens to be there.
+ */
+const FORBIDDEN = [
+  "patientfirstname", "patientlastname", "patientmiddlename", "patientstreetaddress", "patientcity",
+  "patientstatecode", "patientzipcode", "patientphone", "patientssn", "patientdateofbirth",
+  "patientemailaddress", "patientdriverslicensenumber", "patientstateissueidnumber",
+  "patientmilitaryidnumber", "patientpassportidnumber", "cardholderid", "sentedi", "receivededi",
+  "superstring", "ownername", "firstname", "lastname", "middlename", "dateofbirth", "socialsecurity",
+  "ssn", "streetaddress", "emailaddress", "homephone", "cellphone",
+];
+
 /** True for one plain SELECT (or a CTE), which is the only thing this site will send. */
 export function isReadOnlySelect(text: string): { ok: true } | { ok: false; why: string } {
   const t = text.replace(/--[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "").trim().replace(/;\s*$/, "");
@@ -113,6 +136,12 @@ export function isReadOnlySelect(text: string): { ok: true } | { ok: false; why:
   if (/;/.test(t)) return { ok: false, why: "one statement at a time" };
   if (!/^(select|with)\b/i.test(t)) return { ok: false, why: "only SELECT is allowed" };
   if (/\b(insert|update|delete|merge|drop|alter|create|truncate|exec|execute|grant|revoke|backup|restore|shutdown|into|openrowset|openquery|xp_|sp_)\b/i.test(t)) return { ok: false, why: "a word that is not a read is in it" };
+  // Every column named, or nothing runs. See FORBIDDEN.
+  if (/(^|[\s,(])\*|\.\*/.test(t.replace(/count\s*\(\s*\*\s*\)/gi, "count(1)"))) {
+    return { ok: false, why: "select * is not allowed on this database — name the columns, so that a patient column cannot arrive by accident" };
+  }
+  const named = FORBIDDEN.find((c) => new RegExp(`\\b${c}\\b`, "i").test(t));
+  if (named) return { ok: false, why: `the column "${named}" is patient information and this site does not read it` };
   return { ok: true };
 }
 

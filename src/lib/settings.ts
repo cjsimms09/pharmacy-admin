@@ -335,6 +335,16 @@ export const SETTING_KEYS = [
   "sftp_password_enc", // the fallback where the site’s key in data/sftp/ is not on the host
   "sftp_last_pull",
   "sftp_last_result",
+
+  // ── The morning pull from PioneerRx (scripts/pioneer-pull.ts), eight o’clock daily ──
+  // The day each feed last ran, so a restart or a second tick cannot pull the same thing twice,
+  // and what it did, so a failure is visible without opening a log.
+  "pioneer_pull_on_hand_on",
+  "pioneer_pull_on_hand_result",
+  "pioneer_pull_catalogue_on",
+  "pioneer_pull_catalogue_result",
+  // PioneerRx’s supplier catalogue set against the site’s own: how much it prices that the site does not.
+  "pioneer_catalogue_compare",
 ] as const;
 export type SettingKey = (typeof SETTING_KEYS)[number];
 export type Settings = Record<SettingKey, string>;

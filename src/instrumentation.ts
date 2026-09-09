@@ -317,11 +317,44 @@ export async function register() {
     }
   };
 
+  /*
+   * The morning pull from PioneerRx, at eight.
+   *
+   * The owner asked for it then for a reason: the night’s receiving has been keyed in by eight and
+   * the day’s order is placed around four, so the shelf the order is planned against is this
+   * morning’s rather than yesterday’s. The sweep runs every half hour, so this fires on the first
+   * tick after eight; the script itself records the day each feed last ran and does nothing on the
+   * ticks after that, which is also what makes a restart safe.
+   *
+   * Its own process. It reads a hundred thousand rows out of SQL Server and writes them through the
+   * on-hand reader, and every one of those writes is a libsql call on whatever thread makes it.
+   */
+  const pioneerTick = async () => {
+    try {
+      if (new Date().getHours() < 8) return;
+      const { getSettings } = await import("./lib/settings");
+      const s = await getSettings();
+      if (!s.pioneer_sql_server || !s.pioneer_sql_user) return;
+      const today = new Date().toISOString().slice(0, 10);
+      const catalogueDue = new Date().getDay() === 1 || !s.pioneer_pull_catalogue_on;
+      if (s.pioneer_pull_on_hand_on === today && !catalogueDue) return;
+      const { spawn } = await import("node:child_process");
+      const path = await import("node:path");
+      const root = process.cwd();
+      const tsx = path.join(root, "node_modules", "tsx", "dist", "cli.mjs");
+      const child = spawn(process.execPath, [tsx, "--tsconfig", path.join(root, "tsconfig.script.json"), path.join(root, "scripts", "pioneer-pull.ts")], { cwd: root, detached: true, stdio: "ignore", env: process.env });
+      child.unref();
+    } catch {
+      // Recorded in pioneer_pull_*_result; a pull that fails never touches the site.
+    }
+  };
+
   const runAll = async () => {
     await publicAccessTick();
     await whenIdle("warm", warmTick);
     await whenIdle("mail", tick);
     await whenIdle("sftp", sftpTick);
+    await whenIdle("pioneer", pioneerTick);
     await whenIdle("data-health", dataHealthTick);
     await whenIdle("backup", backupTick);
     await whenIdle("reminders", reminderTick);
