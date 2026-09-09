@@ -321,7 +321,16 @@ async function loadProductLedger(): Promise<{ rows: LedgerRow[]; rate: number | 
   const { eq } = await import("drizzle-orm");
 
   const [lines, catalogue, nadac, fills, s, shelf] = await Promise.all([
-    db.query.invoiceLines.findMany(),
+    /*
+     * Six of the invoice line's fourteen columns — the ones `LedgerInput.invoiceLines` declares.
+     *
+     * This read every column of all forty-five thousand rows, sitting between two neighbours whose
+     * comments explain how carefully they were narrowed. The efficiency pass fixed the catalogue
+     * and the NADAC read either side of it and went straight past the line in the middle.
+     */
+    db.query.invoiceLines.findMany({
+      columns: { ndc11: true, supplier: true, description: true, unitCostCents: true, rebated: true, invoiceDate: true },
+    }),
     // Held between requests: forty-five thousand rows that change once a week. See catalogue-cache.
     (await import("./catalogue-cache")).catalogueRows(),
     // The newest price per drug, asked for in SQL and held between requests. Loading every NADAC

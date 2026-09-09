@@ -243,7 +243,15 @@ export async function returnsDueNow(): Promise<{ rows: ReturnCandidate[]; suppli
   const { currentReturnPolicy } = await import("./supplier-terms-store");
 
   const [lines, claims, suppliers] = await Promise.all([
-    db.query.invoiceLines.findMany(),
+    /*
+     * Eight of fourteen columns, which is what `ReturnsInput.lines` asks for.
+     *
+     * The claims read beside it names its four; this one read every column of all forty-five
+     * thousand invoice lines. The two were written together and only one of them was narrowed.
+     */
+    db.query.invoiceLines.findMany({
+      columns: { ndc11: true, description: true, supplier: true, supplierId: true, invoiceId: true, invoiceDate: true, quantity: true, extendedCents: true },
+    }),
     db.query.claims.findMany({ columns: { ndc11: true, quantityThousandths: true, dateFilled: true, status: true } }),
     allSuppliers(true),
   ]);

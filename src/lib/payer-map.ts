@@ -121,6 +121,41 @@ export type NdcReimbursement = {
   spreadPerFillCents: number | null;
 };
 
+/*
+ * The columns both readings in this file build a `ClaimRow` from — nineteen of the claims table's
+ * forty-two, plus `networkId` for the plan-to-contract join.
+ *
+ * Both read every column of the whole table, unbounded by date, and `warm.ts` runs the payer map on
+ * every cold start. Measured on 30,000 claims elsewhere in this pass, reading every column against
+ * only what is used is roughly twice the cost — and all of it blocks the web server, because the
+ * connection is serialized and no page is served while a query runs.
+ *
+ * Named once and shared by both, so the two cannot drift into reading different things for the same
+ * `ClaimRow`.
+ */
+const PAYER_CLAIM_COLUMNS = {
+  id: true,
+  rxNumber: true,
+  fillNumber: true,
+  dateFilled: true,
+  ndc11: true,
+  itemName: true,
+  bin: true,
+  pcn: true,
+  groupNumber: true,
+  pbmName: true,
+  payerLabel: true,
+  quantityThousandths: true,
+  remitCents: true,
+  copayCents: true,
+  patientTotalCents: true,
+  acquisitionCents: true,
+  status: true,
+  onAccount: true,
+  reversalKey: true,
+  networkId: true,
+} as const;
+
 const nameOf = (f: Fill): string => f.payers.map((p) => p.name ?? p.bin ?? "unnamed").join(" + ");
 
 /** The one payer that carried a fill, for ranking. A coordinated fill is credited to the primary. */
@@ -144,7 +179,7 @@ async function loadPayerMap(): Promise<{
   subsidy: { fills: number; revenueCents: number; sources: string[] };
 }> {
   const [claims, bins, groups, contracts, rates, confirmed] = await Promise.all([
-    db.query.claims.findMany(),
+    db.query.claims.findMany({ columns: PAYER_CLAIM_COLUMNS }),
     db.query.payerBins.findMany(),
     db.query.planGroups.findMany(),
     db.query.contractDocs.findMany(),
@@ -474,7 +509,7 @@ export async function payerTree(): Promise<{ companies: CompanyNode[]; unnamedRe
 
 async function loadPayerTree(): Promise<{ companies: CompanyNode[]; unnamedRevenueCents: number }> {
   const [claims, bins, groups, confirmed] = await Promise.all([
-    db.query.claims.findMany(),
+    db.query.claims.findMany({ columns: PAYER_CLAIM_COLUMNS }),
     db.query.payerBins.findMany(),
     db.query.planGroups.findMany(),
     allPayerLinks(),

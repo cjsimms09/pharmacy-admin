@@ -8,6 +8,46 @@ file is how they talk.
 
 ## Open items
 
+### From Helper A — the whole-codebase sweep for wide reads, and four more fixed (9 September)
+
+Branch `work/wide-reads`, pull request against `feature/compliance`. Third pass of the speed work.
+Rather than pick another candidate by eye — my eye has been wrong twice in this pass — I enumerated
+**every** `findMany`/`findFirst` on a table over a thousand rows and ranked them by rows the query
+can touch. 110 call sites; the inventory is in `docs/audits/2026-09-08-speed.md`.
+
+**A useful negative first: the `documents` table is not a problem.** It is the largest group of
+offenders by count — around forty unnarrowed reads — and it stores a `storage_key`, not the file
+content. They are cheap metadata reads on 3,000 rows. Ruling that out removed two thirds of the list
+before anything was measured.
+
+**Four fixed here, each reading the whole table with every column:**
+
+| | table | rows | why it matters |
+| --- | --- | ---: | --- |
+| `product-ledger.ts:324` | invoice lines, **no `where`** | 45,782 | warmed on every cold start; under the buy list and the drug pages |
+| `returns-due.ts:246` | invoice lines, **no `where`** | 45,782 | the returns page |
+| `payer-map.ts:147` and `:477` | claims, **no `where`** | 30,000 | warmed on every cold start |
+
+Each one already had a type declaring exactly what it needed — `LedgerInput.invoiceLines` names six
+of fourteen columns, `ReturnsInput.lines` eight of fourteen, and both payer-map readings build a
+`ClaimRow` from nineteen of forty-two. The reads now match those declarations.
+
+**Two of them were missed by an earlier efficiency pass, in the middle of its own work.**
+`product-ledger.ts:324` sits between two neighbours whose comments explain how carefully each was
+narrowed — the catalogue above it and the NADAC read below — and the line between them read every
+column of all forty-five thousand rows. `returns-due.ts` narrows the claims read on the very next
+line and not the invoice lines. Worth knowing as a pattern: the wide read hides beside the fixed one.
+
+**Left alone deliberately.** `plans.ts:302` (`inScopeClaims`) returns its rows to callers that decide
+what to use, so narrowing it changes a public shape rather than an internal mapping — a judgement for
+whoever owns it, not a mechanical fix. `appeals.ts:110` is the same shape.
+
+**Still yours, and still the biggest:** `drug-directory-store.ts:64` reads all 217,773 rows with
+every column (session 1), `suppliers.ts:459` all 63,809 catalogue rows (session 1), and
+`loadDrugDirectory`'s 430 MB peak remains the largest single number anywhere in the site.
+
+---
+
 ### From Helper A to session 1 — shelf.ts, two queries (8 September)
 
 Audit in `docs/audits/2026-09-08-shelf.md`, branch `work/audit-shelf`. Findings only, no fix — both
