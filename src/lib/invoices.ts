@@ -230,6 +230,42 @@ export function readTotalCents(text: string): number | null {
   return null;
 }
 
+/**
+ * What the invoice says its goods came to, before shipping and tax.
+ *
+ * A different figure from the amount due, and the right one to check item lines against. IPC's
+ * invoice for the Omnipod pods reads "Sub Total $1,520.89", "Shipping/Handling $10.00", "Total Due
+ * $1,530.89" — so the lines can only ever add up to the first of those, and checking them against
+ * the last refused a perfectly good reading and left $1,520.89 of purchases with no items behind
+ * it. The amount due is still what the pharmacy owes and is still what is stored on the invoice;
+ * this is only the figure the reading is proved against.
+ *
+ * Null where the invoice prints no separate goods subtotal, which is most of them — then the
+ * amount due is the only figure there is and the check uses it, as it always did.
+ */
+export function readGoodsSubtotalCents(text: string): number | null {
+  const patterns = [
+    /*
+     * The label has to start its line.
+     *
+     * Without that anchor this matched "CII Subtotal:$3,022.32" — the heading that closes the
+     * Schedule II half of an IPD invoice — and then refused the whole reading for not adding up to
+     * one of its own halves. A section subtotal is a real figure about part of the invoice; it is
+     * simply not this one.
+     */
+    /(?:^|[\r\n])\s*sub\s*-?\s*total[^$\n]{0,10}\$\s*([\d,]+\.\d{2})/i,
+    // IPD prints the figure above its label rather than beside it.
+    /([\d,]+\.\d{2})\s*[\r\n]+\s*Sub\s*-?\s*total\b/i,
+  ];
+  for (const re of patterns) {
+    const m = re.exec(text);
+    if (!m) continue;
+    const n = Number(m[1].replace(/,/g, ""));
+    if (Number.isFinite(n) && n >= 0) return Math.round(n * 100);
+  }
+  return null;
+}
+
 export type TextVerdict = {
   schedule: InvoiceSchedule;
   confident: boolean;
@@ -1954,7 +1990,9 @@ export async function storeInvoiceLines(
 ): Promise<{ stored: number; unread: number; reconciles: boolean | null; readCents: number }> {
   const { parseInvoiceLines } = await import("./invoice-lines");
   if (!meta.text || meta.text.length < 200) return { stored: 0, unread: 0, reconciles: null, readCents: 0 };
-  const parsed = parseInvoiceLines(meta.text, meta.printedTotalCents);
+  // Item lines add up to the goods, not to the amount due: shipping and tax are on the invoice and
+  // are not items. Where the invoice prints both, the goods figure is what proves the reading.
+  const parsed = parseInvoiceLines(meta.text, readGoodsSubtotalCents(meta.text) ?? meta.printedTotalCents);
   if (parsed.lines.length === 0) return { stored: 0, unread: parsed.unreadable.length, reconciles: parsed.reconciles, readCents: 0 };
   if (parsed.reconciles === false) return { stored: 0, unread: parsed.lines.length + parsed.unreadable.length, reconciles: false, readCents: parsed.totalCents };
 

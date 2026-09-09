@@ -87,3 +87,31 @@ describe("IPD's own invoice", () => {
     assert.equal(p.lines.filter((l) => l.controlled === null).length, 2, "the open half says nothing about itself");
   });
 });
+
+describe("the two shapes that read nothing at all", () => {
+  test("McKesson's front-end lines: a UPC in the NDC column and no item class", () => {
+    // A real over-the-counter invoice read $0 of $91.97 because its code is hyphenated 6-5 rather
+    // than 5-4-2 and its lines carry no class letter. The digits are the same eleven either way.
+    const otc = "305361-32710231-6966974132450            1EA ACETAM TAB 325MG RUG 1000@       18.19        21.80 K       21.80";
+    const p = parseInvoiceLines(otc, null);
+    assert.equal(p.format, "mckesson");
+    assert.equal(p.lines.length, 1);
+    assert.equal(p.lines[0].ndc11, "30536132710");
+    assert.equal(p.lines[0].itemClass, null, "a front-end line states no class rather than a wrong one");
+    assert.equal(p.lines[0].rebated, true);
+    assert.equal(p.lines[0].extendedCents, 2180);
+  });
+
+  test("a line the wholesaler rounded is read, and one that is genuinely wrong is not", () => {
+    // Five pods at $304.18 is $1,520.90; IPC printed $1,520.89. A penny of rounding, not an error.
+    const rounded = "5328661Omnipod 5 Dexcom G6-G7 Pods (Gen 5)  508508300021$307.25$384.0655$304.18$1,520.89";
+    const p = parseInvoiceLines(rounded, null);
+    assert.equal(p.lines.length, 1);
+    assert.equal(p.lines[0].quantity, 5);
+    assert.equal(p.lines[0].extendedCents, 152089, "the invoice's own figure is kept, not the multiplication");
+
+    // The same line with the extension out by a dollar is a misread, and is refused.
+    const wrong = rounded.replace("$1,520.89", "$1,620.89");
+    assert.equal(parseInvoiceLines(wrong, null).lines.length, 0);
+  });
+});

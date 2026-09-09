@@ -91,12 +91,23 @@ const MONEY = String.raw`[\d,]+\.\d{2}`;
  * amount.
  */
 const MCK = new RegExp(
-  String.raw`^(\d{5}-\d{4}-\d{2})` + // NDC, hyphenated
+  /*
+   * Two hyphenations, because McKesson uses the column for two kinds of code.
+   *
+   * A prescription item is an NDC, split 5-4-2. An over-the-counter item is a UPC, split 6-5 —
+   * "305361-32710" for the acetaminophen on a real front-end invoice. Both are the same eleven
+   * digits once the hyphens come out, so nothing downstream has to know which it was; but a
+   * pattern that only knew the first shape read no line at all off that invoice, and $91.97 of
+   * purchases sat in the site with a total and no items under it.
+   */
+  String.raw`^(\d{5}-\d{4}-\d{2}|\d{6}-\d{5})` + // NDC, or a UPC on a front-end item
     String.raw`(\d{3}-\d{4})` + // McKesson item number
     String.raw`\d{9}` + // document number, not kept
     String.raw`\s+(\d+)\*?([A-Z]{2})\s+` + // quantity, an optional asterisk, unit of measure
     String.raw`(.*?)\s+(${MONEY})` + // description, then AWP
-    String.raw`\s+([A-Z])` + // item class
+    // The item class — R for legend, X for Schedule II — prints on prescription lines and not on
+    // front-end ones, so its absence is a fact about the item rather than a line this cannot read.
+    String.raw`(?:\s+([A-Z]))?` +
     String.raw`\s+(${MONEY})` + // unit price
     String.raw`(\s+K)?` + // the contract rebate flag
     String.raw`\s+(${MONEY})` + // extended amount
@@ -192,17 +203,41 @@ export function ndc11(raw: string): string | null {
  * rather than read wrongly.
  */
 export function splitQuantities(run: string, unitCents: number, extendedCents: number): { ordered: number; shipped: number } | null {
+  const splits: { ordered: number; shipped: number }[] = [];
   for (let cut = 1; cut < run.length; cut++) {
     const ordered = Number(run.slice(0, cut));
     const shipped = Number(run.slice(cut));
     if (!Number.isFinite(ordered) || !Number.isFinite(shipped)) continue;
     if (String(shipped).length !== run.length - cut) continue; // a leading zero is not a quantity
     if (shipped * unitCents === extendedCents) return { ordered, shipped };
+    if (lineAddsUp(shipped, unitCents, extendedCents)) splits.push({ ordered, shipped });
   }
   // A single digit is both, and the commonest line on any invoice: one ordered, one shipped.
   const only = Number(run);
   if (Number.isFinite(only) && only * unitCents === extendedCents) return { ordered: only, shipped: only };
+  // Nothing was exact. A reading that is right to the penny is accepted only if it is the only
+  // one — two near misses mean the split is genuinely ambiguous, and a guess here is a wrong cost.
+  if (splits.length === 1) return splits[0];
+  if (Number.isFinite(only) && lineAddsUp(only, unitCents, extendedCents) && splits.length === 0) return { ordered: only, shipped: only };
   return null;
+}
+
+/**
+ * Whether a line's own figures agree, allowing for the rounding the wholesaler did.
+ *
+ * The invoice prints a unit price to the cent and an extension to the cent, and the extension is
+ * the rounded product of the two. Five pods at $304.18 came to $1,520.89 on a real IPC invoice
+ * where the multiplication says $1,520.90, and the line was refused for it — so $1,520.89 of a
+ * $1,530.89 invoice went unrecorded, which is a far worse answer than a penny.
+ *
+ * The tolerance is half a cent per unit, which is exactly what rounding can hide and nothing more.
+ * It cannot let a misread field through: a description that shifted the columns along puts dollars
+ * between the two figures, never pennies.
+ */
+export function lineAddsUp(quantity: number, unitCents: number, extendedCents: number): boolean {
+  if (!Number.isFinite(quantity) || quantity <= 0) return false;
+  const tolerance = Math.max(1, Math.ceil(quantity / 2));
+  return Math.abs(quantity * unitCents - extendedCents) <= tolerance;
 }
 
 /**
@@ -263,7 +298,7 @@ export function parseInvoiceLines(text: string, printedTotalCents: number | null
       const key = ndc11(run.slice(-11));
       // The line's own arithmetic, as everywhere else here: a description that ran into the digits
       // would otherwise shift every field along it and the wrong cost would look entirely ordinary.
-      if (!key || quantity * unitCostCents !== extendedCents) {
+      if (!key || !lineAddsUp(quantity, unitCostCents, extendedCents)) {
         unreadable.push(line.slice(0, 200));
         continue;
       }
@@ -305,7 +340,7 @@ export function parseInvoiceLines(text: string, printedTotalCents: number | null
       const key = ndc11(ndc);
       // The line's own arithmetic. A description containing something that looks like money would
       // otherwise shift every field after it, and the wrong cost would look perfectly plausible.
-      if (!key || quantity * unitCostCents !== extendedCents) {
+      if (!key || !lineAddsUp(quantity, unitCostCents, extendedCents)) {
         unreadable.push(line.slice(0, 200));
         continue;
       }
@@ -319,7 +354,7 @@ export function parseInvoiceLines(text: string, printedTotalCents: number | null
         unitCostCents,
         extendedCents,
         awpCents: money(awp),
-        itemClass: cls,
+        itemClass: cls ?? null,
         rebated: Boolean(k),
         controlled: null,
       });
