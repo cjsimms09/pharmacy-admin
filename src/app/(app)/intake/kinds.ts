@@ -23,6 +23,7 @@ export const FILE_KINDS = [
   { key: "supplier_catalog", label: "A wholesaler's catalogue" },
   { key: "supplier_invoice", label: "A wholesaler's invoice" },
   { key: "remittance", label: "An 835 remittance from a plan" },
+  { key: "copay_remit", label: "A copay-card voucher remittance (RedSail)" },
   { key: "bank_statement", label: "A bank statement" },
   { key: "contract", label: "A contract, rate exhibit or provider manual" },
   { key: "staff_document", label: "A licence, certificate or training record" },

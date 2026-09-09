@@ -1,4 +1,5 @@
 import "server-only";
+import { looksLikeCopayRemit } from "./copay-remit";
 import { parseCsvRows } from "./reference";
 import { readSheet } from "./xlsx";
 import { mapColumns } from "./claims";
@@ -29,7 +30,7 @@ import { ALLOWED_MIME } from "./files";
  * behaviour we already had and is never wrong, only unhelpful.
  */
 
-export type RouteKind = "claims" | "rx_transactions" | "payer_payments" | "accrual_sales" | "on_hand" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "return_policy" | "nadac" | "remittance_835" | "unrecognised";
+export type RouteKind = "claims" | "rx_transactions" | "payer_payments" | "accrual_sales" | "on_hand" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "return_policy" | "nadac" | "remittance_835" | "copay_remit" | "unrecognised";
 
 export type Classification = {
   kind: RouteKind;
@@ -118,6 +119,20 @@ export function classify(fileName: string, buf: Buffer): Classification {
     return { kind: "unrecognised", why: "An X12 envelope that is not an 835 remittance. Filed as a document.", headers: [] };
   }
   /*
+   * A copay-voucher remittance, known by what is in it rather than what it is called.
+   *
+   * After the X12 test and before the header-row rules. An 835 is an 835 whatever it settles, so
+   * that test goes first; these arrive as plain text under whatever name RedSail's system chooses
+   * when it pushes them to the SFTP host, so the name says nothing at all.
+   *
+   * The test wants a marker and two rows that pass the row's own arithmetic together, so a covering
+   * email about the voucher programme does not match it and neither does a table of figures from
+   * somewhere else.
+   */
+  if (looksLikeCopayRemit(buf.subarray(0, 65_536).toString("utf8"))) {
+    return { kind: "copay_remit", why: "A RedSail copay-voucher remittance: a payment header and item rows that hold together.", headers: [] };
+  }
+  /*
    * A PDF, which is the one shape here that is not text at all.
    *
    * McKesson's monthly rebate breakdown is the document that carries the tier ladder and the rate
@@ -138,6 +153,16 @@ export function classify(fileName: string, buf: Buffer): Classification {
     }
     try {
       const text = pdfText(buf);
+      /*
+       * The same voucher test again, on the text the PDF gave up.
+       *
+       * The byte test above cannot see inside a PDF, and RedSail offered these as either text or
+       * PDF. One statement in hand has a scanned first page and a second page with a text layer,
+       * which is exactly the shape this reaches: nothing readable on page one, the rows on page two.
+       */
+      if (looksLikeCopayRemit(text)) {
+        return { kind: "copay_remit", why: "A PDF whose text carries a copay-voucher remittance: a payment header and item rows that hold together.", headers: [] };
+      }
       if (looksLikeRebateReport(text)) {
         return {
           kind: "rebate_report",

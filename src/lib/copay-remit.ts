@@ -350,3 +350,44 @@ export function copayRemitSummary(r: CopayRemit): string {
   if (r.unreadable.length > 0) bits.push(`${r.unreadable.length} row${r.unreadable.length === 1 ? "" : "s"} could not be read`);
   return `${bits.join("; ")}.`;
 }
+
+/**
+ * The day the site's own records begin.
+ *
+ * The owner, 8 September 2026: "i will not be uploading claims from before sept.. or anything.
+ * this site is starting clean as of 09/01/.." So a voucher line for a fill before that date will
+ * never match a claim, however long anybody waits, and it is not a failure to match — it is money
+ * for a dispensing this site was not keeping records for. Reported apart from the unmatched, which
+ * are the ones worth chasing.
+ */
+export const SITE_STARTS_ON = "2026-09-01";
+
+/**
+ * Whether a file is one of these statements, judged by what is in it rather than what it is called.
+ *
+ * RedSail will push these to an SFTP host under whatever name their system chooses, in .txt, .dat
+ * or PDF, so the name says nothing. Two things have to hold together:
+ *
+ *   the shape — at least two lines that read as item rows, each of which has already had to pass
+ *   the row's own arithmetic (submitted less patient paid is the voucher's payment), which no
+ *   ordinary text does by accident;
+ *
+ *   and a marker — either the statement naming itself, or the payment header a remittance carries.
+ *
+ * Either alone is not enough. A covering email mentioning the voucher programme has the marker and
+ * no rows; a table of numbers from somewhere else could have rows and nothing saying what they are.
+ */
+export function looksLikeCopayRemit(text: string): boolean {
+  if (!text || text.length < 40) return false;
+  const head = text.slice(0, 20_000);
+  const named = /RAS\s+Copay\s+Voucher|Copay\s+Voucher\s+Reimbursement/i.test(head) || (/RedSail/i.test(head) && /Remittance\s+Advice/i.test(head));
+  const headed = /Check\s*\/?\s*ACH\s*Number/i.test(head) || (/Payment\s*Date/i.test(head) && /Payment\s*Amount/i.test(head));
+  if (!named && !headed) return false;
+
+  let rows = 0;
+  for (const line of text.split(/\r?\n/)) {
+    const r = parseCopayRemitLine(line.trim());
+    if ("line" in r && ++rows >= 2) return true;
+  }
+  return false;
+}
