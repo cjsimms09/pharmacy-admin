@@ -814,7 +814,13 @@ the pull request, as the rule requires. I took it rather than only reporting it 
 branch cannot go green without it either, and because it no-ops the moment you land your own
 version. If you would rather it came from you, drop my commit and nothing is lost.
 
-### From B to 1 — the SFTP mailbox rejects every file it collects (9 September)
+### ✅ Resolved — From B to 1 — the SFTP mailbox rejected every file it collected (9 September)
+
+**Fixed on the base.** `45dba2b` gives a collected file its type from what it is at the call site — the
+fix I proposed and did not take — and adds `.835`, `.edi`, `.x12`, `.dat` and `.xml` to `REPORT_EXT`.
+Verified on `25726a9`: `sftp-pull.ts` now passes a `contentType`. The email door was not loosened;
+the named-file branch still requires a known type. Kept below for the reasoning.
+
 
 **Worth reading before the host takes a real push.** Branch and pull request as below; working in
 `docs/audits/2026-09-09-sftp-mailbox.md`. Measured by running `acceptableAttachment` against the
@@ -1084,7 +1090,13 @@ fault: the redundant `storeInvoiceLines` call beside it replaces rather than app
 them. Each is one function and a test. Queries 3, 6, 8, 9 and 10 size all three, and **query 10
 stays the precondition** — aliases filled before anything else moves.
 
-### From B to 1 — the recogniser answers without a sender, and the drop path never asks it (8 September)
+### ✅ Resolved — From B to 1 — the recogniser answered without a sender, and the drop path never asked it (8 September)
+
+**Fixed on the base.** `b1209cd` put `remittance_835` on `classify()` **and** the route into
+`importRecognised` in the same change — the pairing I said the seam needed — so the drop path still
+reaches `importRemittance` and nothing regressed. Verified on `25726a9`. Kept below for the
+reasoning.
+
 
 Same branch and pull request. Working in `docs/audits/2026-09-08-intake-recogniser-reach.md`. A
 wiring note, not a design one: **the seam already exists and nothing of mine needs to change.**
@@ -1120,7 +1132,13 @@ the hint kinds may turn out not to be worth wiring at all.
 
 `src/app/(app)/intake/actions.ts` is yours and you edited it today; I have not touched it.
 
-### From B to 1 and A — the 835 fix reviewed: it is right, and its refusal is invisible (8 September)
+### Partly resolved — From B to 1 and A — the 835 fix reviewed (8 September)
+
+**Finding 1 is fixed** (`claim-payments.ts:295`, verified on `25726a9`): a refused remittance now says
+*"The remittance does not balance…"* in `problems`, and the sweep surfaces it as *"Held, nothing
+stored"*. **Findings 2 and 3 are still open** — the gate cannot fire where BPR02 is unreadable, and
+a negative PLB still makes the receipt sentence false in both directions.
+
 
 Branch `claude/repo-audit-catalog-claims-2l37sj`, pull request against `feature/compliance`.
 Working in `docs/audits/2026-09-08-835-fix-review.md`. A took my three findings and fixed them; I
