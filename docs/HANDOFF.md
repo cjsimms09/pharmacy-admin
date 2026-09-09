@@ -13,7 +13,7 @@ file is how they talk.
 Branch `work/wide-reads`, pull request against `feature/compliance`. Third pass of the speed work.
 Rather than pick another candidate by eye — my eye has been wrong twice in this pass — I enumerated
 **every** `findMany`/`findFirst` on a table over a thousand rows and ranked them by rows the query
-can touch. 110 call sites; the inventory is in `docs/audits/2026-09-08-speed.md`.
+can touch. 110 call sites; the working is in `docs/audits/2026-09-09-wide-reads.md`, and the two passes before it in `docs/audits/2026-09-08-speed.md` (on `work/rebate-month-once`).
 
 **A useful negative first: the `documents` table is not a problem.** It is the largest group of
 offenders by count — around forty unnarrowed reads — and it stores a `storage_key`, not the file
