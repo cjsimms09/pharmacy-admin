@@ -2,11 +2,10 @@ import "server-only";
 import { desc, eq, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "./crypto";
-import { classify } from "./autoroute";
+import { classify, isX12Remittance } from "./autoroute";
 import { pdfText } from "./pdf-text";
 import { triageByText } from "./contract-triage";
 import { classifySupplierDocument } from "./invoices";
-import { looksLikeX12Remittance } from "./business-docs";
 import { readZipBounded } from "./zip-read";
 import { readFile } from "./files";
 import { CATEGORIES, recognise, ruleFromCorrection, categoryFor, type Evidence, type Recognition, type SenderHistory, type SenderRule } from "./intake-recognise";
@@ -104,30 +103,18 @@ export function contentVerdict(fileName: string, buf: Buffer, subject = ""): { v
   const cls = classify(fileName, buf);
   if (cls.kind !== "unrecognised") return { verdict: cls.kind, why: cls.why, headers: cls.headers };
   /*
-   * A remittance advice, known by its envelope rather than by its name.
+   * A remittance inside an archive, which `classify()` does not open.
    *
-   * BACKLOG item 27: the owner is having 835s emailed here, and a payer names the file whatever it
-   * likes — `.835`, `.edi`, `.dat`, `.txt`, or nothing at all. The name is therefore no evidence and
-   * the envelope is conclusive: an ISA header with an ST*835 inside it is a remittance and is not
-   * anything else.
+   * A loose 835 never reaches here — `classify()` claims it above — so this is the zip a
+   * clearinghouse sends when it has a day of them at once. `isX12Remittance` is the router's own
+   * rule rather than the looser `looksLikeX12Remittance`, because a document named here is named
+   * without anybody being asked: an 820 payment order carries a BPR and is not a remittance, and
+   * the loose test says it is.
    *
-   * Asked here rather than in `classify()` on purpose. `classify()` is what the sweep and the Add
-   * tool route on, and `readIntoIntake` calls `importDropped` *before* its own 835 branch — so a
-   * kind returned there would be claimed by the router and short-circuit the working path to
-   * `importRemittance` before the sweep has anywhere to post one. The recogniser can name a
-   * document without anything routing it, which is exactly what it is for. The verdict is
-   * namespaced like the other borrowed detectors, and the category also accepts the bare
-   * `remittance_835` that `classify()` will return once the posting side lands.
-   */
-  if (looksLikeX12Remittance(buf, fileName)) {
-    return { verdict: "x12:remittance", why: "An X12 envelope carrying an 835: a remittance advice, whatever the file is called." };
-  }
-  /*
-   * And the same file inside an archive, which is how a clearinghouse sends a day of them at once.
    * Bounded, because this is a file from outside: see `readZipBounded`.
    */
   if (buf.length > 4 && buf.readUInt32LE(0) === 0x04034b50) {
-    const held = readZipBounded(buf).find((e) => looksLikeX12Remittance(e.data, e.name));
+    const held = readZipBounded(buf).find((e) => isX12Remittance(e.data));
     if (held) return { verdict: "x12:remittance", why: `A zip holding a remittance: ${held.name} is an X12 envelope carrying an 835.` };
   }
   let text = "";

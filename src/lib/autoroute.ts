@@ -116,8 +116,7 @@ export function classify(fileName: string, buf: Buffer): Classification {
    * reader it goes to checks the file against its own totals before anything is stored.
    */
   if (buf.subarray(0, 4).toString("latin1") === "ISA*") {
-    const head = buf.subarray(0, 2048).toString("latin1");
-    if (/(^|[~\r\n])ST\*835\*/.test(head)) return { kind: "remittance_835", why: "An X12 envelope declaring an 835 remittance advice.", headers: [] };
+    if (isX12Remittance(buf)) return { kind: "remittance_835", why: "An X12 envelope declaring an 835 remittance advice.", headers: [] };
     return { kind: "unrecognised", why: "An X12 envelope that is not an 835 remittance. Filed as a document.", headers: [] };
   }
   /*
@@ -366,6 +365,27 @@ const TEXT_MIME = new Set(["text/plain", "text/csv", "text/tab-separated-values"
  * happened. So a file with no extension is accepted when its type is text or its first lines are
  * the catalogue's own title; everything else still needs a known extension and a known type.
  */
+/**
+ * Whether these bytes are an 835 remittance, strictly.
+ *
+ * The envelope and the transaction set together, and nothing else. `looksLikeX12Remittance` in
+ * `business-docs.ts` is deliberately looser — it also answers true for a `.835` file name or a bare
+ * `BPR` segment — which is right at the Add tool's door, where a person confirms what a document is,
+ * and wrong anywhere a document gets *named* without being asked about.
+ *
+ * The difference is not academic. An **820 payment order** carries a `BPR` and declares `ST*820`:
+ * the loose test calls it a remittance and this one does not. So does a 999 acknowledgement that
+ * somebody saved as `REMIT.835`. Filing either as a remittance would put money against claims it
+ * never paid.
+ *
+ * Exported so `classify()` and the recogniser ask the same question rather than two that agree
+ * most of the time — the fault this repository has already paid for twice in supplier matching.
+ */
+export function isX12Remittance(buf: Buffer): boolean {
+  if (buf.subarray(0, 4).toString("latin1") !== "ISA*") return false;
+  return /(^|[~\r\n])ST\*835\*/.test(buf.subarray(0, 2048).toString("latin1"));
+}
+
 /**
  * An 835, loose or in an archive.
  *

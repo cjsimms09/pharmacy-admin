@@ -1,6 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { classify, headersOf, parseSupplierRules, supplierFor, acceptableAttachment } from "../src/lib/autoroute";
+import { classify, headersOf, parseSupplierRules, supplierFor, acceptableAttachment, isX12Remittance } from "../src/lib/autoroute";
+import { looksLikeX12Remittance } from "../src/lib/business-docs";
 
 /**
  * This runs unattended, overnight, with nobody watching. A file loaded as the wrong kind of
@@ -272,5 +273,43 @@ describe("a zip holding an 835", () => {
   test("a damaged archive is not an archive holding a remittance", () => {
     const truncated = zipOf([{ name: "x.835", data: era }]).subarray(0, 40);
     assert.equal(acceptableAttachment({ filename: "remits.zip", contentType: "application/zip", content: truncated }).ok, false);
+  });
+});
+
+/**
+ * The strict X12 test, and why it is not the loose one.
+ *
+ * `business-docs.looksLikeX12Remittance` also answers true for a `.835` file name or a bare `BPR`
+ * segment. That is right at the Add tool's door, where a person confirms what a document is. It is
+ * wrong anywhere a document gets *named* without being asked — and for a while the recogniser used
+ * it, so an 820 payment order came back "a remittance from a plan, certain" while `classify()`
+ * correctly refused it. Both now ask `isX12Remittance`.
+ */
+describe("an X12 envelope that is not a remittance", () => {
+  const isa = "ISA*00*          *00*          *ZZ*PAYER          *ZZ*PHARMACY       *260909*1200*^*00501*000000001*0*P*:~";
+
+  test("an 820 payment order carries a BPR and is still not an 835", () => {
+    const p820 = Buffer.from(
+      isa + "GS*RA*PAYER*PHARM*20260909*1200*1*X*005010X218~ST*820*0001~" +
+        "BPR*C*5000.00*C*ACH*CCP*01*999*DA*111*1234567890**01*999*DA*222*20260909~TRN*1*PAY123~SE*4*0001~IEA*1*000000001~",
+      "latin1",
+    );
+    assert.equal(isX12Remittance(p820), false);
+    assert.equal(classify("payment.edi", p820).kind, "unrecognised");
+    // The loose test disagrees, which is the whole reason this one exists.
+    assert.equal(looksLikeX12Remittance(p820, "payment.edi"), true);
+  });
+
+  test("and a 999 acknowledgement saved as REMIT.835 is not one either", () => {
+    const ack = Buffer.from(isa + "GS*FA*PAYER*PHARM*20260909*1200*1*X*005010X231~ST*999*0001~SE*2*0001~IEA*1*000000001~", "latin1");
+    assert.equal(isX12Remittance(ack), false);
+    assert.equal(classify("REMIT.835", ack).kind, "unrecognised");
+    assert.equal(looksLikeX12Remittance(ack, "REMIT.835"), true);
+  });
+
+  test("a real 835 still passes both", () => {
+    const era = Buffer.from(isa + "GS*HP*PAYER*PHARM*20260909*1200*1*X*005010X221A1~ST*835*0001~BPR*I*102.50*C*ACH~SE*3*0001~IEA*1*000000001~", "latin1");
+    assert.equal(isX12Remittance(era), true);
+    assert.equal(classify("anything.txt", era).kind, "remittance_835");
   });
 });

@@ -907,6 +907,37 @@ So the item is worth keeping, with part 1 struck and parts 2 and 3 sharpened. No
 to build — `x12-835.ts`, `claim-payments.ts` and `intake/actions.ts` are all yours — and I have
 edited none of them.
 
+### From B to 1 — two X12 tests that disagreed, and the loose one was mine to have wired (9 September)
+
+Found by checking whether the recogniser's category table still covers every kind `classify()` can
+return. It does. What the comparison turned up instead is that **the router and the recogniser were
+asking different questions about the same file**, and the looser one was the one I put in the
+recogniser's path.
+
+`business-docs.looksLikeX12Remittance` answers true on an ISA envelope plus *any* of `ST*835`, a
+`.835` file name, or a bare `BPR` segment. `classify()` wants the envelope **and** `ST*835`.
+Reproduced:
+
+| file | `classify()` | the loose test | what the inbox said |
+| --- | --- | --- | --- |
+| an **820 payment order** (`ST*820`, carries a `BPR`) | unrecognised | true | *a remittance from a plan, **certain*** |
+| a **999 acknowledgement** saved as `REMIT.835` | unrecognised | true | *a remittance, **certain*** |
+
+The router was right both times. The recogniser named them anyway, because I wired the loose test
+into `contentVerdict` — and naming happens with nobody being asked, which is exactly where a loose
+rule does damage. An 820 is a payment order: filing one as a remittance would put money against
+claims it never paid.
+
+**Fixed by having one rule.** `isX12Remittance(buf)` is now exported from `autoroute.ts` and used by
+`classify()` and by the recogniser, so they cannot drift. The loose test stays where it belongs —
+the Add tool's door, where a person confirms what a document is — and there is a test that holds the
+two apart deliberately, asserting that the loose one still says true for the 820 so nobody
+"tidies" them into one.
+
+The loose 835 branch in `contentVerdict` is gone entirely: `classify()` claims a loose 835 before
+that line is ever reached. What remains is the **zip** branch, which `classify()` does not open, and
+it now asks the strict rule of each entry.
+
 ### From B to 2 — my copay detector withdrawn: yours is better and there should only be one (9 September)
 
 `749b681` landed `copay-remit.ts` with the reader, the store and the routing. That left **two copay
