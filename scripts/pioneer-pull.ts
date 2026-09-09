@@ -90,7 +90,7 @@ async function pullOnHand(): Promise<string> {
     `select i.NDC as [NDC],
             i.ItemName as [Description],
             g.OnHandQuantity as [Quantity On Hand],
-            i.StockSize as [Pack],
+            i.StockSize as [Package Size],
             -- The report's own Cost column is LastCostPaid, matching to the cent on every item
             -- checked. PreferredCost is PioneerRx's expected cost from the catalogue and answers a
             -- different question: it disagreed on 1,703 of 1,745 items and valued the shelf
@@ -112,7 +112,7 @@ async function pullOnHand(): Promise<string> {
    * A cost of null prints empty rather than 0: the reader tells the two apart, and a nought would
    * put a free product on the shelf page.
    */
-  const cols = ["NDC", "Description", "Quantity On Hand", "Pack", "Cost", "Item Number"];
+  const cols = ["NDC", "Description", "Quantity On Hand", "Package Size", "Cost", "Item Number"];
   const cell = (v: unknown) => (v === null || v === undefined ? "" : String(v).replace(/[\t\r\n]+/g, " ").trim());
   const lines = [cols.join("\t"), ...r.rows.map((row) => cols.map((c) => cell(row[c])).join("\t"))];
   const buf = Buffer.from(`${lines.join("\n")}\n`, "utf8");
