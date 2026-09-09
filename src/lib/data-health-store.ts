@@ -470,6 +470,31 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
   });
 
   /*
+   * ── Each wholesaler's catalogue against its own newest file ──────
+   *
+   * Read back from what the nightly script left behind. The fraction is per NDC rather than per
+   * listing, because a wholesaler lists the same NDC several times in one file and the table keeps
+   * one — the first run of this proof reported 239 wrong prices, every one of them a second listing
+   * of a product whose price was perfectly correct.
+   */
+  await timed("catalogue-proof", async () => {
+    const { parseCatalogueProof, catalogueProofFraction, catalogueProofGaps, catalogueProofNote } = await import("./data-health-catalogue-proof");
+    const proof = parseCatalogueProof((await getSettings()).catalogue_proof);
+    if (!proof) {
+      return {
+        numerator: 0,
+        denominator: 0,
+        measuredAt: null,
+        gaps: [],
+        note: "The nightly catalogue proof has not run, so no price on this site has been set against the wholesaler's file it came from.",
+      };
+    }
+    const { numerator, denominator } = catalogueProofFraction(proof);
+    // The proof's own date. An ageing row here is the nightly job having stopped, not a stale file.
+    return { numerator, denominator, measuredAt: proof.provedOn, gaps: catalogueProofGaps(proof), note: catalogueProofNote(proof) };
+  });
+
+  /*
    * ── NADAC against the CMS files, and the prune that keeps it trimmed ──
    *
    * Both read back from what the nightly scripts left behind. Two rows rather than one because they

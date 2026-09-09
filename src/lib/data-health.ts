@@ -266,6 +266,14 @@ export const SPECS: LinkSpec[] = [
       "The shelf values the pharmacy's inventory and stands on one side of the cost-of-goods identity, so a row the reader dropped is stock the accounts do not know exists. Everything else the site knows about a count came out of the same reader, which means a reader that lost rows and a report that never had them look identical — the record count PioneerRx prints about itself is the only figure here that did not.",
   },
   {
+    key: "catalogue-proof",
+    group: "Datasets",
+    title: "Each wholesaler's catalogue proved against its own file",
+    of: "NDCs the table agrees with the newest file about, out of every NDC that file carries — per NDC, never per listing",
+    why:
+      "The catalogue is what every buying decision here is made from: which supplier is cheapest, what an add-on costs, what the shelf is worth. A price the table holds that the wholesaler's file does not state is a purchase made on a number nobody sent. Counted per NDC because a wholesaler lists the same NDC several times in one file — McKesson 539 of them — and the table keeps one. Prices carried over from an earlier file are outside the figure and named in the gaps with their age: the newest file says nothing about them, so there is nothing to agree or disagree with, and counting them against the score would make a wholesaler who trimmed their catalogue look like one whose prices are wrong.",
+  },
+  {
     key: "nadac-proof",
     group: "Datasets",
     title: "NADAC proved against the CMS files it came from",
