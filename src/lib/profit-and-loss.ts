@@ -123,7 +123,7 @@ export type PLInputs = {
   month: string;
   basis: "accrual" | "cash";
   /** From the System Sales Summary: the whole till, retail included. Accrual. */
-  sales: { retailCents: number | null; rxPatientCents: number | null; rxRemitCents: number | null; totalCents: number | null } | null;
+  sales: { retailCents: number | null; retailCostCents?: number | null; rxPatientCents: number | null; rxRemitCents: number | null; totalCents: number | null } | null;
   /** From the remittances actually banked, where the basis is cash. */
   receipts: { kind: string; amountCents: number }[];
   /** Facilitator and top-off money that reached fills in the month. */
@@ -138,6 +138,9 @@ export type PLInputs = {
    * month of claims sits in the database is the answer that makes the page look broken.
    */
   claimsRevenueCents?: number | null;
+  /** The same figure split, so the summary and the claims can each supply the half they know. */
+  claimsRemitCents?: number | null;
+  claimsPatientCents?: number | null;
   claimsCount?: number;
   /** The value on the shelf at the first and last count of the month, for the independent check. */
   openingStockCents?: number | null;
@@ -245,29 +248,62 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
    */
   const revenue: PLLine[] = [];
   if (i.basis === "accrual") {
-    if (i.sales) {
-      if (i.sales.rxRemitCents) revenue.push({ label: "Third-party remittance", amountCents: i.sales.rxRemitCents });
-      if (i.sales.rxPatientCents) revenue.push({ label: "Patient payments", amountCents: i.sales.rxPatientCents });
-      if (i.sales.retailCents) revenue.push({ label: "Retail and over the counter", amountCents: i.sales.retailCents, note: "Before sales tax. The tax collected is the state's money and is not in this account." });
-    } else if (i.claimsRevenueCents) {
-      /*
-       * The claims, when the till report has not arrived. Never as well as it — that would count
-       * every prescription twice, since the summary already contains them.
-       *
-       * Retail is genuinely unknown here rather than zero, so it is named as missing. An account
-       * short of the front of shop understates revenue and profit, which is the safe direction to
-       * be wrong in and still needs saying out loud.
-       */
+    /*
+     * Each side of the revenue from the best source that has it, rather than all three or none.
+     *
+     * This used to be a single choice: a System Sales Summary, or the claims. That was fine while
+     * the only source was the summary, and wrong the moment a partial one existed — a summary
+     * carrying retail and no prescription figures would have taken the whole prescription side of
+     * the account with it, silently, because the claims branch was an `else`.
+     *
+     * So the three components are chosen one at a time. The summary wins where it has a figure,
+     * because it is the till and the till is what the bank will agree with. The claims stand in for
+     * the prescription halves where it does not. And retail has no fallback at all: there is no
+     * other source for what the front of shop took, so its absence is reported rather than papered
+     * over with a nought.
+     */
+    /*
+     * The split is preferred and the combined figure still works.
+     *
+     * `claimsRevenueCents` is what every existing caller passes, and a reader that only understood
+     * the two halves would have shown a month of noughts to any of them. So the halves are used
+     * where they are given and the whole is used where they are not.
+     */
+    const splitKnown = i.claimsRemitCents !== null && i.claimsRemitCents !== undefined;
+    const remitCents = i.sales?.rxRemitCents ?? (splitKnown ? i.claimsRemitCents : null) ?? null;
+    const patientCents = i.sales?.rxPatientCents ?? (splitKnown ? i.claimsPatientCents : null) ?? null;
+    const fromClaims = !i.sales?.rxRemitCents && !i.sales?.rxPatientCents;
+    if (remitCents) {
+      revenue.push({
+        label: "Third-party remittance",
+        amountCents: remitCents,
+        note: fromClaims ? `From the claims, across ${(i.claimsCount ?? 0).toLocaleString()} dispensings.` : undefined,
+      });
+    }
+    if (patientCents) {
+      revenue.push({
+        label: "Patient payments",
+        amountCents: patientCents,
+        note: fromClaims ? "What patients paid at the counter, as the claims recorded it." : undefined,
+      });
+    }
+    if (i.sales?.retailCents) {
+      revenue.push({ label: "Retail and over the counter", amountCents: i.sales.retailCents, note: "Before sales tax. The tax collected is the state's money and is not in this account." });
+    }
+    // Neither half known, but a combined claims figure was given: show it as one line, as before.
+    if (!remitCents && !patientCents && i.claimsRevenueCents) {
       revenue.push({
         label: "Prescriptions, from the claims",
         amountCents: i.claimsRevenueCents,
-        note: `Every plan's remittance plus what the patient paid, across ${(i.claimsCount ?? 0).toLocaleString()} dispensings. The System Sales Summary has not been loaded for this month, so this stands in for the prescription side of it.`,
+        note: `Every plan’s remittance plus what the patient paid, across ${(i.claimsCount ?? 0).toLocaleString()} dispensings.`,
       });
-      missing.push(
-        "The System Sales Summary for this month. Prescriptions are taken from the claims instead, but retail and over-the-counter sales are missing entirely — so revenue, gross profit and net profit are all understated by whatever the front of shop took.",
-      );
-    } else {
+    }
+    if (!remitCents && !patientCents && !i.claimsRevenueCents) {
       missing.push("The System Sales Summary for this month, which is the only report carrying retail sales as well as prescriptions.");
+    } else if (!i.sales?.retailCents) {
+      missing.push(
+        "What the front of shop took this month. Prescriptions are complete, but retail and over-the-counter sales are missing entirely — so revenue, gross profit and net profit are all understated by whatever it was.",
+      );
     }
     if (i.laterMoneyCents) {
       revenue.push({
@@ -337,6 +373,18 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
       });
     } else {
       missing.push("The acquisition cost of what was dispensed — no claims are loaded for this month, so there is no cost of goods.");
+    }
+    /*
+     * And what the front-of-shop goods cost.
+     *
+     * Retail revenue used to arrive with nothing against it, because cost of goods here is the
+     * acquisition cost on each claim and a bottle of shampoo has no claim. Booked that way it is
+     * pure profit, which flatters the margin by the whole cost of the front shop. PioneerRx's till
+     * carries the cost on every line, so where the source supplies one it is booked beside the
+     * dispensed cost and the caveat further down no longer applies.
+     */
+    if (i.sales?.retailCostCents) {
+      costOfGoods.push({ label: "What the retail goods cost", amountCents: i.sales.retailCostCents });
     }
 
     /*
@@ -678,6 +726,11 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
    * coordinated claim is one bottle's revenue and not two.
    */
   const claimsRevenueCents = monthFills.length ? monthFills.reduce((n, f) => n + f.remitCents + f.patientPaidCents, 0) : null;
+  // Kept apart as well as together: the summary can supply one side of the prescription revenue
+  // and not the other, and an account that could only take all three figures or none of them was
+  // one retail-only summary away from dropping every prescription. See the revenue block above.
+  const claimsRemitCents = monthFills.length ? monthFills.reduce((n, f) => n + f.remitCents, 0) : null;
+  const claimsPatientCents = monthFills.length ? monthFills.reduce((n, f) => n + f.patientPaidCents, 0) : null;
   const onAccount = {
     receivableCents: monthFills.reduce((n, f) => n + f.receivableCents, 0),
     unbilledCostCents: monthFills.reduce((n, f) => n + (f.unbilledCostCents ?? 0), 0),
@@ -770,10 +823,12 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
   return {
     month,
     basis,
-    sales: sales ? { retailCents: sales.retailCents, rxPatientCents: sales.rxPatientCents, rxRemitCents: sales.rxRemitCents, totalCents: sales.totalCents } : null,
+    sales: sales ? { retailCents: sales.retailCents, retailCostCents: sales.retailCostCents ?? null, rxPatientCents: sales.rxPatientCents, rxRemitCents: sales.rxRemitCents, totalCents: sales.totalCents } : null,
     receipts,
     laterMoneyCents,
     claimsRevenueCents,
+    claimsRemitCents,
+    claimsPatientCents,
     claimsCount: monthFills.length,
     dispensedCostCents,
     purchasesCents,

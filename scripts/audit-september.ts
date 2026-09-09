@@ -86,6 +86,50 @@ async function main() {
   console.log(dupes === 0 ? "\n  Nothing is duplicated.\n" : `\n  ${dupes} group${dupes === 1 ? "" : "s"} to look at.\n`);
 
 /*
+   * ── Money, traced from the claims to the account ──
+   *
+   * The owner: "is everything right on money? are we making sure everything is accounted for and
+   * correct, not double counted". Two separate questions, and this answers both with arithmetic.
+   *
+   * Accounted for: what the account shows must be reachable from the claims table by a rule that
+   * can be written down. Where it is not, the difference is named rather than tolerated — an
+   * unexplained $244 is how an unexplained $24,000 starts.
+   *
+   * Not double counted: `books-check.ts` holds one rule per pair of feeds that can carry the same
+   * money, and the account reports for each whether both roads were carrying. That check runs on
+   * every books page; what is added here is the reconciliation underneath it.
+   */
+  console.log("── Money ──\n");
+  const claimMoney = await one(
+    `select count(*) n,
+            sum(remit_cents) remit,
+            sum(coalesce(copay_cents,0)) copay,
+            sum(case when remit_cents < 0 then remit_cents + coalesce(copay_cents,0) else 0 end) negatives,
+            sum(case when remit_cents < 0 then 1 else 0 end) negative_rows
+       from claims where status='paid' and date_filled >= '${FROM}'`,
+  );
+  const gross = Number(claimMoney.remit ?? 0) + Number(claimMoney.copay ?? 0);
+  console.log(`  ${n(claimMoney.n)} paid claims: ${money(claimMoney.remit)} from plans, ${money(claimMoney.copay)} from patients, ${money(gross)} together`);
+  console.log(`  less ${n(claimMoney.negative_rows)} claims carrying a negative remit, ${money(claimMoney.negatives)} — a reversal the site received and could not tie to its original`);
+  console.log(`  revenue the account should show: ${money(gross - Number(claimMoney.negatives ?? 0))}`);
+
+  const banked = await one(`select count(*) n, sum(amount_cents) v from cash_receipts where month >= '2026-09'`);
+  const later = await one(`select count(*) n, sum(amount_cents) amt, sum(revenue_cents) rev from claim_payments`);
+  console.log(`  banked so far: ${money(banked.v)} across ${n(banked.n)} deposits`);
+  console.log(`  money arriving after the fill: ${n(later.n)} payments, ${money(later.amt)} received, ${money(later.rev)} of it revenue the claim did not already carry`);
+
+  /*
+   * The gap between what was earned and what has landed is not an error — plans pay in arrears —
+   * but it is the number worth watching, because a gap that stops closing is a payer that stopped
+   * paying.
+   */
+  console.log(`  earned but not yet banked: ${money(gross - Number(claimMoney.negatives ?? 0) - Number(banked.v ?? 0))}`);
+
+  const unpaid = await one(`select count(*) n, sum(total_cents) v from supplier_invoices where invoice_date >= '${FROM}' and paid_on is null`);
+  console.log(`  wholesaler invoices with no payment date recorded: ${n(unpaid.n)}, ${money(unpaid.v)} — the cash account dates these by the supplier's terms and says so`);
+  console.log("");
+
+/*
    * ── Reversals ──
    *
    * The owner: "are we matching reversed claims efficiently and properly." A reversal is the one
