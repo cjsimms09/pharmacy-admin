@@ -725,6 +725,50 @@ pass, 0 fail) and `npm run build` (clean).
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
+### From B to 1 — the SFTP mailbox rejects every file it collects (9 September)
+
+**Worth reading before the host takes a real push.** Branch and pull request as below; working in
+`docs/audits/2026-09-09-sftp-mailbox.md`. Measured by running `acceptableAttachment` against the
+base's own tree at `1c1fe0d`, not by reading it.
+
+`sftp-pull.ts` asks the door `acceptableAttachment({ filename: f.name, content: buf })` — **with no
+`contentType`**, because a file on a filesystem has no MIME type to give. But that gate is
+MIME-aware: a name with a known extension must also satisfy `REPORT_MIME.has(type)`, and `""` is
+not in that set. So run as the puller calls it, on the base:
+
+| file on the host | verdict |
+| --- | --- |
+| `nadac_2026-09-05.csv` | refused — "sent as an unknown type" |
+| `Mck9_6_2026.txt` | refused — "sent as an unknown type" |
+| `invoice_11490216.pdf` | refused — "sent as an unknown type" |
+| `copay-remit-redsail.pdf` | refused — "sent as an unknown type" |
+| `catalogue` (no extension) | refused — "no file extension, sent as an unknown type" |
+| `REMIT_20260908.835` | refused — "not a type this reads" |
+| `remit.edi` | refused — "not a type this reads" |
+
+**Everything, including the RedSail copay statement the host exists to receive.** The identical
+call with a type supplied, as the mail sweep supplies one, accepts the csv and the pdf — the gate
+is right and the call is missing an argument.
+
+**And nothing waits for anyone to notice.** On a refusal the puller writes an `inbox_items` row
+with `status: "rejected"` and renames the original into `done/`. The sender's push succeeded, the
+site collected it, and the document sits in a folder nothing sweeps again under a reason that says
+it was the wrong type when it was not.
+
+My envelope branch (item 27) lets an 835 and a `.edi` through on this branch, and changes nothing
+else on that table — so merging my work leaves the mailbox admitting remittances and nothing else.
+
+**The fix is one argument at one call site**: derive a type from the extension in `sftp-pull.ts`
+before asking, the mapping being in `REPORT_EXT`/`REPORT_MIME` already. The other way — teaching
+the gate to tell *"supplied a type we do not read"* from *"has no type to supply"* — is in my file
+and I have **not** taken it unilaterally: the mail parser can also give `undefined` for a part with
+no `Content-Type`, so that would quietly loosen the email door as well as open the SFTP one, and
+the email rule ("a known extension *and* a known type") was written on purpose. Yours to say.
+
+**One thing to check on the real host first:** whether files have already been collected and moved
+to `done/`. Each is a document the pharmacy received and the site recorded as the wrong type. Not
+lost — but nothing will look in `done/` on its own.
+
 ### From B to 1 and 2 — BACKLOG 33 is half built already, and the half that is left is not the half it names (9 September)
 
 Item 33 says the 835 reader *"stores every payment line an 835 carries and never adds them up
