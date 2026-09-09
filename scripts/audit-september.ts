@@ -85,6 +85,55 @@ async function main() {
   }
   console.log(dupes === 0 ? "\n  Nothing is duplicated.\n" : `\n  ${dupes} group${dupes === 1 ? "" : "s"} to look at.\n`);
 
+/*
+   * ── Reversals ──
+   *
+   * The owner: "are we matching reversed claims efficiently and properly." A reversal is the one
+   * event that can silently inflate every figure on the site, because the money was real when it
+   * was paid and is not real now, and the row that says so sits beside the row that says the
+   * opposite. So this asks four questions rather than one.
+   */
+  console.log("── Reversals ──\n");
+  const rev = await one(
+    `select count(*) rows,
+            sum(case when reversal_key is not null then 1 else 0 end) keyed,
+            sum(case when reversed_on is not null then 1 else 0 end) dated,
+            sum(remit_cents) remit
+       from claims where date_filled >= '${FROM}' and status = 'reversed'`,
+  );
+  console.log(`  ${n(rev.rows)} reversed claims, ${money(rev.remit)} of remit no longer owed`);
+  console.log(`  ${n(rev.keyed)} carry the key of what they reversed, ${n(rev.dated)} carry the date`);
+  if (Number(rev.keyed) !== Number(rev.rows) || Number(rev.dated) !== Number(rev.rows)) {
+    console.log(`  A reversal without a key cannot be tied to the claim it cancels.`);
+  }
+
+  /*
+   * The dangerous case, and the only one that costs money: a paid claim still standing beside a
+   * reversal of the same drug, for the same fill, from the same payer. A re-bill to a different
+   * payer is not this — that is one fill billed twice and only one of them stands — and neither is
+   * a reversal of a claim that paid nothing.
+   */
+  const bothWays = await one(
+    `select count(*) rows, sum(p.remit_cents) remit
+       from claims p
+      where p.date_filled >= '${FROM}' and p.status = 'paid'
+        and exists (select 1 from claims r
+                     where r.status = 'reversed' and r.rx_number = p.rx_number
+                       and coalesce(r.fill_number,0) = coalesce(p.fill_number,0)
+                       and coalesce(r.ndc11,'') = coalesce(p.ndc11,'')
+                       and coalesce(r.bin,'') = coalesce(p.bin,''))`,
+  );
+  console.log(`  ${n(bothWays.rows)} paid claims stand beside a reversal of the same drug on the same payer, worth ${money(bothWays.remit)}`);
+
+  /*
+   * And the surface that would show it. "Revenue" on the payers page is what a fill brought in —
+   * the plan's money and the patient's — over paid claims only. Set against the same sum taken
+   * straight from the table, a gap here would mean a reversed claim had reached a money figure.
+   */
+  const truth = await one(`select sum(remit_cents) remit, sum(copay_cents) copay from claims where status = 'paid'`);
+  console.log(`  every paid claim: ${money(truth.remit)} from plans and ${money(truth.copay)} from patients, ${money(Number(truth.remit ?? 0) + Number(truth.copay ?? 0))} together`);
+  console.log("");
+
   console.log("── Gaps: what a claim still cannot answer ──\n");
   const gaps = await db.execute(
     `select 'no AWP' what, count(*) c from claims where date_filled >= '${FROM}' and status='paid' and awp_cents is null
