@@ -53,8 +53,28 @@
  *     files: [{ file, bytes, sha256, manifestSha256, changedSinceLoad, loadedAt,
  *               rowsRead, rowsUnreadable, unreadableReasons, effectiveFrom, effectiveTo,
  *               proved, prunedAway, missing, problems: [] }],
- *     rowsInFiles, proved, prunedAway, missing,
- *     tableRowsNoFileAccountsFor, lines: [the first 40 faults in words] }
+ *     rowsInFiles, provedRows, provedKeys, prunedRows, missingRows, missingKeys, missingKeysCapped,
+ *     tableRows, tableNdcs, tableRowsNoFileAccountsFor,
+ *     prunableStillHeld, prunableStillHeldNdcs,
+ *     lines: [the first 40 faults in words] }
+ *
+ * ── Rows and keys are different questions ──
+ *
+ * The first real run printed "proved 5,754,041", which reads as if the table held five and
+ * three-quarter million prices. It holds 815,908, over 43,396 NDCs: the weekly snapshots republish
+ * the same (NDC, effective date) about seven times each, and every repetition is a row proved
+ * against a price already proved. So both are reported, with the table's own size beside them, and
+ * the count of distinct prices the files accounted for — which is free, being every key the files
+ * struck off the table.
+ *
+ * ── prunableStillHeld, and why a proof reports on the pruner ──
+ *
+ * This proof's "prunedAway" answer is only correct if the pruner is doing what it says. On the first
+ * run it was zero while the table held prices from 2020-01-01 against a 2025-03-09 cutoff — not a
+ * fault in any price, but a prune that had not run. `pruneNadac` has one caller, inside
+ * `loadNadacFilesNow`, reached only where a new file was actually loaded, and its failure is
+ * swallowed. So the proof asks the pruner's own delete condition as a count: anything but zero means
+ * rows the pruner should have removed are still there, and the table is growing.
  *
  * The file list is whatever is in the folder, so a new source of NADAC — PioneerRx's own, when the
  * SQL connection lands — becomes another entry with its own name rather than a second shape.
@@ -111,6 +131,29 @@ async function main() {
   }
   const unseen = new Set(keys);
 
+  /*
+   * Rows the pruner should have removed and has not — which is how this proof notices the pruner
+   * is not running.
+   *
+   * The first real run read 5,754,041 file rows, proved every one and pruned nothing, while the
+   * table still held prices effective 2020-01-01 against a cutoff of 2025-03-09. Nothing was wrong
+   * with the prices; what was wrong was that `pruneNadac` had not run. It has exactly one caller,
+   * inside `loadNadacFilesNow`, reached only where a new file was actually loaded, and its failure
+   * is swallowed by `.catch(() => undefined)`. A prune that never runs and a prune that throws every
+   * time look identical from outside, and the table grows either way.
+   *
+   * This asks the pruner's own delete condition as a count. It costs one indexed pass, and it is
+   * the only place in the site that would ever say so.
+   */
+  const prunable = (
+    await db.execute({
+      sql: `select count(*) as n, count(distinct ndc11) as ndcs from nadac_prices p
+            where p.effective_on < ?
+              and exists (select 1 from nadac_prices n where n.ndc11 = p.ndc11 and n.effective_on > p.effective_on)`,
+      args: [cutoff],
+    })
+  ).rows[0] as unknown as { n: number; ndcs: number };
+
   const dir = nadacDir();
   let names: string[] = [];
   try {
@@ -131,6 +174,7 @@ async function main() {
   let provedAll = 0;
   let prunedAll = 0;
   let missingAll = 0;
+  const missingKeys = new Set<string>();
 
   for (const name of names) {
     const full = path.join(dir, name);
@@ -200,6 +244,9 @@ async function main() {
         continue;
       }
       missing++;
+      // Distinct lost prices, not lost rows. Capped so a catastrophic run cannot become a
+      // catastrophic allocation; a run that hits the cap has a far bigger problem than the count.
+      if (missingKeys.size < 50_000) missingKeys.add(key);
       if (lines.length < 200) {
         lines.push(
           `${name}: NDC ${row.ndc11} effective ${row.effectiveOn} at $${(row.unitMicros / 1_000_000).toFixed(5)}/${row.pricingUnit} is in the file and not in the table${newest ? `; the newest price held for that NDC is ${newest}` : "; no price at all is held for that NDC"}.`,
@@ -246,17 +293,40 @@ async function main() {
     );
   }
 
+  /*
+   * Rows and keys are different questions, and the first run printed only one of them.
+   *
+   * "proved 5,754,041" reads as if the table held five and three-quarter million prices. It holds
+   * 815,908, over 43,396 NDCs. The weekly snapshots republish the same NDC and effective date about
+   * seven times each, so most of those five million are a row proved against a price already proved.
+   * Both are reported now, with the table's own size beside them.
+   */
   const summary = {
     provedOn: new Date().toISOString().slice(0, 10),
     cutoff,
     keepMonths,
     files,
     rowsInFiles,
-    proved: provedAll,
-    prunedAway: prunedAll,
-    missing: missingAll,
+    provedRows: provedAll,
+    /** Distinct prices the files accounted for: every key the files struck off the table. Free. */
+    provedKeys: keys.size - unseen.size,
+    prunedRows: prunedAll,
+    missingRows: missingAll,
+    /** Distinct prices lost, which is the figure that matters. Capped; see the loop. */
+    missingKeys: missingKeys.size,
+    missingKeysCapped: missingKeys.size >= 50_000,
+    tableRows: held.length,
+    tableNdcs: newestByNdc.size,
     tableRowsNoFileAccountsFor: orphans.length,
+    /** What pruneNadac would delete today. Anything but zero means it is not running. */
+    prunableStillHeld: Number(prunable?.n ?? 0),
+    prunableStillHeldNdcs: Number(prunable?.ndcs ?? 0),
   };
+  if (summary.prunableStillHeld > 0) {
+    lines.unshift(
+      `${summary.prunableStillHeld.toLocaleString("en-US")} prices across ${summary.prunableStillHeldNdcs.toLocaleString("en-US")} NDCs are older than ${cutoff} and have a newer price held for the same NDC, so pruneNadac should have deleted them and has not. The prices are not wrong; the table is growing and nothing else says so.`,
+    );
+  }
   await db.execute({
     sql: `insert into settings (key, value) values ('nadac_proof', ?) on conflict(key) do update set value = excluded.value`,
     args: [JSON.stringify({ ...summary, lines: lines.slice(0, 40) })],
