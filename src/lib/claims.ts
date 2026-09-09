@@ -9,7 +9,6 @@ import { SB20_MIN_DISPENSING_FEE_CENTS } from "./reimbursement-rules";
 import { fillKey } from "./fills";
 import { remitCheck } from "./remit-check";
 import { CLASS_INFO, planLookup } from "./plans";
-import { readPayerMoney } from "./cash-plans";
 import { readNdc } from "./ndc";
 import { heldNdcs } from "./ndc-held";
 import type { Transaction } from "./rx-transactions";
@@ -178,9 +177,6 @@ export async function importClaims(file: Buffer, fileName: string, userId: strin
     byBin.get(b.bin)!.add(b.pbmName);
   }
 
-  /** The plans that never remit; a claim on one of them is money nobody owes. */
-  const cashPlans = await db.query.cashPlans.findMany({ columns: { bin: true, pcn: true, name: true } });
-
   const importId = newId();
   const skipReasons: Record<string, number> = {};
   const unresolvedBins = new Set<string>();
@@ -188,8 +184,6 @@ export async function importClaims(file: Buffer, fileName: string, userId: strin
 
   let added = 0;
   let duplicates = 0;
-  let cashPlanDiscountCents = 0;
-  let cashPlanDiscounts = 0;
   const pending: (typeof schema.claims.$inferInsert)[] = [];
   let from: string | null = null;
   let to: string | null = null;
@@ -237,23 +231,6 @@ export async function importClaims(file: Buffer, fileName: string, userId: strin
     const ndc = readNdc(g("ndc11"), isKnown);
     if (ndc.ndc11 === null && (g("ndc11") ?? "").trim()) skip(`kept without an NDC: ${ndc.reason}`);
 
-    /*
-     * A plan that never remits: the copay is the whole of the money.
-     *
-     * The owner: "There is no third party remit from pharmd. Whatever the copay is is the only
-     * money we receive." Left alone, a cash-plan claim carrying a figure in its remit column books
-     * revenue nobody will send and opens a receivable against a payer that has never paid anything
-     * — September had three, $418.22 between them, on an Omnipod, a Mounjaro and a Wegovy. In each
-     * the copay and the "remit" add exactly to the price of the fill, which is what gives it away:
-     * that money did not arrive from anywhere, it is the part of the price the patient was not
-     * charged. It is counted as a discount given and named on the import line.
-     */
-    const money = readPayerMoney({ bin, pcn, remitCents: parseCents(g("remit")), copayCents: parseCents(g("copay")) }, cashPlans);
-    if (money.discountGivenCents !== 0) {
-      cashPlanDiscountCents += money.discountGivenCents;
-      cashPlanDiscounts++;
-    }
-
     pending.push({
       id: newId(),
       importId,
@@ -278,8 +255,8 @@ export async function importClaims(file: Buffer, fileName: string, userId: strin
       quantityThousandths: parseQuantityThousandths(g("quantity")),
       quantityUnit: isPricingUnit(unitRaw) ? unitRaw : null,
       daysSupply: /^\d+$/.test((g("daysSupply") ?? "").trim()) ? Number(g("daysSupply")) : null,
-      remitCents: money.payer.remitCents,
-      copayCents: money.payer.copayCents,
+      remitCents: parseCents(g("remit")),
+      copayCents: parseCents(g("copay")),
       awpCents: parseCents(g("awp")),
       acquisitionCents: parseCents(g("acquisition")),
       grossProfitCents: parseCents(g("grossProfit")),
@@ -311,7 +288,7 @@ export async function importClaims(file: Buffer, fileName: string, userId: strin
   }).where(sql`${schema.claimImports.id} = ${importId}`);
 
   return {
-    importId, rowsRead: rows.length, claimsAdded: added, duplicates, skipped, cashPlanDiscounts, cashPlanDiscountCents,
+    importId, rowsRead: rows.length, claimsAdded: added, duplicates, skipped,
     skipReasons, unmappedColumns: unmapped, unresolvedBins: [...unresolvedBins].sort(),
     periodFrom: from, periodTo: to,
   };

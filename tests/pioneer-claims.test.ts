@@ -37,6 +37,7 @@ const claim = (over: Partial<PioneerClaimRow> = {}): PioneerClaimRow => ({
   evoucherCents: null,
   acquisitionCents: 4_000,
   filledOn: "2026-09-03",
+  soldOn: "2026-09-03",
   fillTotalPriceCents: 9_000,
   ...over,
 });

@@ -67,6 +67,8 @@ export type PioneerClaimRow = {
   evoucherCents: number | null;
   acquisitionCents: number | null;
   filledOn: string | null;
+  /** The day the script was actually sold at the till, or null where it has never been picked up. */
+  soldOn: string | null;
   /** PioneerRx's own answer for the whole fill, where it has one, so the identity can be checked. */
   fillTotalPriceCents: number | null;
 };
@@ -103,6 +105,8 @@ export type PioneerFill = {
   evoucherCents: number | null;
   acquisitionCents: number | null;
   filledOn: string | null;
+  /** The day it was sold at the till. Null means it is still in the bin and nobody has paid for it. */
+  soldOn: string | null;
   /** What every payer on the fill paid together. */
   insuranceCents: number;
   /** What the patient owes, which lives on the last payer in the chain. */
@@ -224,6 +228,7 @@ export function fillsFromClaimRows(rows: PioneerClaimRow[]): FillsReport {
       evoucherCents: head.evoucherCents,
       acquisitionCents: head.acquisitionCents,
       filledOn: head.filledOn,
+      soldOn: head.soldOn,
       insuranceCents,
       patientCents,
       fillTotalPriceCents,

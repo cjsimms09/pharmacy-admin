@@ -1,28 +1,33 @@
 /**
- * A cash plan: one the pharmacy bills through, and which never sends any money.
+ * A cash plan: one the pharmacy bills through, and which never sends any money of its own.
  *
  * The owner: "There is no third party remit from pharmd. Whatever the copay is is the only money
- * we receive."
+ * we receive." And: "it just bounces off the switch company and returns the price we have set."
+ * Both true. Pharm D is RxLocal, BIN 028249 — a claim on it is adjudicated, transmitted and stored
+ * exactly like a Medicare Part D claim, and there is no payer behind it.
  *
- * This looks like a small distinction and is not. A claim on Pharm D — RxLocal, BIN 028249 — is
- * adjudicated, transmitted and paid like any other, and ends up in the claims table beside a
- * Medicare Part D claim with the same shape. But there is no payer behind it. Three consequences,
- * each of which the site had wrong before this module existed:
+ * **What this module is for, and what it is not.** It answers one question: does this plan owe the
+ * pharmacy anything? On a cash plan the answer is no, and that matters because `payerShares` gives
+ * every payer a receivable of its own remit, settled only by its own 835 — on a cash plan that is
+ * money owed by nobody, waiting for a remittance that will never come.
  *
- * 1. **It is never a receivable.** `payerShares` gives every payer a receivable of its own remit,
- *    settled only by its own 835. On a cash plan that is money owed by nobody, waiting for a
- *    remittance that will never arrive, ageing quietly on a report of what is outstanding.
- * 2. **A remit on one is not revenue.** September had three: an Omnipod, a Mounjaro and a Wegovy,
- *    $418.22 between them. In each the patient's payment and the "remit" add exactly to the price of
- *    the fill — so the figure is not money arriving, it is the part of the price the patient was not
- *    charged. Booking it overstates the month by $418.22 and books it against a payer who will never
- *    pay it.
- * 3. **The copay is the whole revenue**, collected at the register on the day, which is the same on
- *    both the accrual and the cash basis. There is nothing outstanding to reconcile.
+ * It is **not** a licence to zero the money on the claim, and an earlier version of this file said
+ * it was. Three September claims on RxLocal carried a figure in their remit column — an Omnipod, a
+ * Mounjaro and a Wegovy, $418.22 between them — and reading them as a discount the pharmacy had
+ * given was wrong. `Prescription.Claim.EvoucherAmountPaid` equals that figure to the cent on all
+ * three: it is a manufacturer e-voucher, real money, owed by the voucher programme rather than by
+ * the plan. `evoucherCents` on the claim already holds it, and nothing counts that column as
+ * revenue, so taking the figure out of the remit removed $418.22 of real money from the month
+ * rather than moving it somewhere better. It was put back.
+ *
+ * Twelve more September claims carry both a real remit and a voucher — Rx 327712 has $913.47 from
+ * the plan and $100.00 from a voucher — so the two are not one field wearing different hats and
+ * cannot be collapsed into each other. Until the voucher has a counted home of its own,
+ * `readPayerMoney` is deliberately not wired into the importer.
  *
  * Which plans these are is data, not a constant: `cash_plans` holds them, seeded with the
- * pharmacy's own. Matching is on BIN, and on PCN as well where the row names one, because a BIN can
- * carry more than one plan and only some of them are cash.
+ * pharmacy's own. Matching is on BIN, and on PCN as well where the row names one, because a BIN
+ * can carry more than one plan and only some of them are cash.
  *
  * Pure, so it is tested.
  */
