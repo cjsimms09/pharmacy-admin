@@ -952,6 +952,16 @@ async function importRecognised(
           "Nothing is stored yet — open the supplier's terms page, check each figure against the sentence it came from, and save.";
         imported = true;
       }
+    } else if (cls.kind === "remittance_835") {
+      // A remittance, from the SFTP mailbox or an email: read through the 835 reader, which stores
+      // nothing from a file whose claim lines do not add up to its own total (claim-payments.ts).
+      const { importRemittance } = await import("./claim-payments");
+      const r = await importRemittance(buf.toString("utf8"), fileName, { name: ctx.userName ?? "Automatic check", id: ctx.userId ?? undefined }, { bank: true, documentId: filed?.documentId ?? null });
+      const gate = r.problems.find((p) => /does not balance/i.test(p));
+      routeResult = gate
+        ? `Held, nothing stored: ${gate}`
+        : `${r.payer ?? "Remittance"}${r.paidOn ? ` paid ${r.paidOn}` : ""}: ${r.payments} payments (${money(r.amountCents)}) — ${r.matched} matched to a claim, ${r.unmatched} held unmatched, ${r.alreadyHeld} already held${r.banked ? ", banked" : ""}${r.problems.length ? `; ${r.problems.slice(0, 2).join("; ")}` : ""}`;
+      imported = !gate && r.payments > 0;
     } else if (cls.kind === "nadac") {
       const dir = nadacDir();
       await fs.mkdir(dir, { recursive: true });

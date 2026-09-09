@@ -29,7 +29,7 @@ import { ALLOWED_MIME } from "./files";
  * behaviour we already had and is never wrong, only unhelpful.
  */
 
-export type RouteKind = "claims" | "rx_transactions" | "payer_payments" | "accrual_sales" | "on_hand" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "return_policy" | "nadac" | "unrecognised";
+export type RouteKind = "claims" | "rx_transactions" | "payer_payments" | "accrual_sales" | "on_hand" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "return_policy" | "nadac" | "remittance_835" | "unrecognised";
 
 export type Classification = {
   kind: RouteKind;
@@ -105,6 +105,18 @@ export function headersOf(fileName: string, buf: Buffer): string[] {
  * would otherwise match the looser catalogue rule.
  */
 export function classify(fileName: string, buf: Buffer): Classification {
+  /*
+   * A remittance advice (835), known by its envelope and not its name (BACKLOG 27).
+   *
+   * An X12 file opens with an ISA segment and declares the transaction in its ST segment;
+   * "ST*835" is a remittance whatever the sender called the file (.835, .edi, .txt, .dat). The
+   * reader it goes to checks the file against its own totals before anything is stored.
+   */
+  if (buf.subarray(0, 4).toString("latin1") === "ISA*") {
+    const head = buf.subarray(0, 2048).toString("latin1");
+    if (/(^|[~\r\n])ST\*835\*/.test(head)) return { kind: "remittance_835", why: "An X12 envelope declaring an 835 remittance advice.", headers: [] };
+    return { kind: "unrecognised", why: "An X12 envelope that is not an 835 remittance. Filed as a document.", headers: [] };
+  }
   /*
    * A PDF, which is the one shape here that is not text at all.
    *
