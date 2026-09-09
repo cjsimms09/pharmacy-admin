@@ -1388,6 +1388,28 @@ export const inboxItems = sqliteTable(
 // Loaded from CSVs dropped in data/reference/. Plain lookup tables, no AI: this is what lets
 // a claim carrying a BIN be resolved to the PBM and the agreement that governs it.
 
+/**
+ * The plans that never remit: the pharmacy bills them, and the copay is the whole of the money.
+ *
+ * The owner: "There is no third party remit from pharmd. Whatever the copay is is the only money
+ * we receive." A claim on one of these is not owed by anybody, so it must never become a
+ * receivable waiting for an 835 that is not coming — and where PioneerRx shows a payment against
+ * one, that is not money arriving, it is the part of the price the patient was not charged.
+ */
+export const cashPlans = sqliteTable(
+  "cash_plans",
+  {
+    id: text("id").primaryKey(),
+    bin: text("bin").notNull(),
+    pcn: text("pcn"),
+    name: text("name").notNull(),
+    note: text("note"),
+    addedBy: text("added_by"),
+    addedAt: text("added_at").notNull().default(now()),
+  },
+  (t) => [index("cash_plans_bin_idx").on(t.bin)],
+);
+
 export const payerBins = sqliteTable(
   "payer_bins",
   {
