@@ -283,6 +283,11 @@ export async function register() {
         const prune = spawn(process.execPath, [tsx, "--tsconfig", path.join(root, "tsconfig.script.json"), path.join(root, "scripts", "prune-nadac.ts")], { cwd: root, detached: true, stdio: "ignore", env: process.env });
         prune.on("exit", () => {
           const nadac = spawn(process.execPath, ["--max-old-space-size=600", tsx, "--tsconfig", path.join(root, "tsconfig.script.json"), path.join(root, "scripts", "prove-nadac.ts")], { cwd: root, detached: true, stdio: "ignore", env: process.env });
+          // Then the catalogue proof (2, BACKLOG 30): each wholesaler's table against the file it came from, one file in memory at a time.
+          nadac.on("exit", () => {
+            const cat = spawn(process.execPath, ["--max-old-space-size=500", tsx, "--tsconfig", path.join(root, "tsconfig.script.json"), path.join(root, "scripts", "prove-catalogue.ts")], { cwd: root, detached: true, stdio: "ignore", env: process.env });
+            cat.unref();
+          });
           nadac.unref();
         });
         prune.unref();
