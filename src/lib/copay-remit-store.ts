@@ -29,8 +29,10 @@ import { parseCopayRemit, COPAY_PAYER, COPAY_BIN, SITE_STARTS_ON, type CopayRemi
  * anybody waits. Calling that "unmatched" would put a permanent and growing number on a screen that
  * nobody can ever act on, which is how a real unmatched payment gets lost among them.
  *
- *   matched            the claim is on file; the payment settles it
+ *   matched            the claim is on file and was paid; the payment settles it
  *   beforeTheStart     the fill predates 1 September 2026, so no claim exists or ever will
+ *   reversed           the only claim for that fill was reversed. The voucher paid for a
+ *                      dispensing that did not stand, which is a real event and not a settlement
  *   unmatched          a fill this site should have and does not. The one worth chasing
  *
  * ── The gate ──
@@ -141,10 +143,31 @@ export async function importCopayRemit(
         .from(schema.claims)
         .where(and(inArray(schema.claims.rxNumber, rxNumbers), eq(schema.claims.bin, COPAY_BIN)))
     : [];
-  const claimFor = (n: CopayRemitNetLine) =>
-    claims.find((c) => c.rxNumber === n.rxNumber && c.dateFilled === n.dateOfService && (n.fillNumber === null || c.fillNumber === n.fillNumber)) ??
-    claims.find((c) => c.rxNumber === n.rxNumber && c.dateFilled === n.dateOfService) ??
-    null;
+  /*
+   * A paid claim and a reversed one are not the same kind of thing, and only one of them can be
+   * settled.
+   *
+   * `status` was selected here and never used: the first match won, so a voucher payment could
+   * settle a claim the pharmacy had reversed — recorded at revenue zero against a claim that
+   * carries no revenue either, which makes the money disappear from every figure on the site while
+   * looking like an ordinary settlement. A reversed fill that a voucher paid for anyway is a real
+   * event and worth saying out loud; it is not a claim to settle.
+   *
+   * The same family as the backtest measuring MAC-priced claims against an AWP discount: the
+   * comparison is only meaningful where the two sides are the same quantity.
+   */
+  const matchesOn = (c: (typeof claims)[number], n: CopayRemitNetLine) =>
+    c.rxNumber === n.rxNumber && c.dateFilled === n.dateOfService && (n.fillNumber === null || c.fillNumber === n.fillNumber || c.fillNumber === null);
+  const claimFor = (n: CopayRemitNetLine) => {
+    const paid = claims.filter((c) => c.status === "paid");
+    return (
+      paid.find((c) => matchesOn(c, n)) ??
+      paid.find((c) => c.rxNumber === n.rxNumber && c.dateFilled === n.dateOfService) ??
+      null
+    );
+  };
+  const reversedFor = (n: CopayRemitNetLine) =>
+    claims.find((c) => c.status === "reversed" && c.rxNumber === n.rxNumber && c.dateFilled === n.dateOfService) ?? null;
 
   /*
    * What is already held, so a statement pushed twice is banked once.
@@ -176,14 +199,21 @@ export async function importCopayRemit(
       continue;
     }
     const claim = claimFor(n);
-    const early = !claim && n.dateOfService < SITE_STARTS_ON;
+    const reversed = claim ? null : reversedFor(n);
+    const early = !claim && !reversed && n.dateOfService < SITE_STARTS_ON;
+
+    if (reversed) {
+      problems.push(
+        `Rx ${n.rxNumber} on ${n.dateOfService}: the voucher paid ${money(n.paidCents)} for a fill this pharmacy reversed. The payment is recorded as money received rather than as settling that claim, because a reversed claim has nothing to settle. Worth asking the plan about.`,
+      );
+    }
 
     if (claim && claim.remitCents !== null && claim.remitCents !== n.paidCents) {
       problems.push(
         `Rx ${n.rxNumber} on ${n.dateOfService}: the claim was promised ${money(claim.remitCents)} at adjudication and the voucher paid ${money(n.paidCents)}, a difference of ${money(Math.abs(n.paidCents - claim.remitCents))}. The payment is recorded; the difference is the plan paying something other than what it said.`,
       );
     }
-    if (!claim && !early) {
+    if (!claim && !reversed && !early) {
       problems.push(
         `Rx ${n.rxNumber} on ${n.dateOfService}, ${money(n.paidCents)} for ${n.drug}: no claim on BIN ${COPAY_BIN} matches it. The payment is recorded and held against the prescription number so it is not lost.`,
       );
@@ -216,7 +246,8 @@ export async function importCopayRemit(
     amountCents += n.paidCents;
     if (claim) matched++;
     else if (early) beforeTheStart++;
-    else unmatched++;
+    // A payment against a reversed fill is not matched and is not unexplained: it is named above.
+    else if (!reversed) unmatched++;
   }
 
   if (beforeTheStart > 0) {
