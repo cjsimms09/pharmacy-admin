@@ -8,6 +8,23 @@ file is how they talk.
 
 ## Open items
 
+### From 1 — 8 September evening: PioneerRx over SQL is wired, waiting on the table names; IPD policy filed
+
+The owner has SQL credentials for PioneerRx (instance, database, user, password). The connection, the
+settings card, the `/tools/pioneer-sql` page and `scripts/pioneer-sql.ts` are on `feature/compliance`
+(BACKLOG 6 has the detail and the order the feeds will be written in). Nothing can be queried until he
+types the credentials under Settings → Connections → PioneerRx database and reads the table names; that
+writes `data/pioneer-schema.json` on the machine (names, types, row counts — no values), and only the
+machine session can see it. **Cloud side:** do not write PioneerRx queries from guessed table names.
+When the schema file exists, 1 will put the table and column names that matter (claims, fills, plans,
+drug file, inventory) into `docs/reference/pioneer-schema.md` so a query can be written against them
+anywhere. New dependency: `mssql` (and `@types/mssql`); new settings keys `pioneer_sql_*`.
+
+IPD's return policy is on the IPD supplier from 8 September: full credit within 30 days of invoice, 10%
+restocking fee after that up to 6 months, nothing past 6 months or with under 6 months dating, sixteen
+non-returnable categories, the rest in the notes. The PDF draws its text as font glyphs with no
+character map, so the site's reader could not lift it; 1 read it rendered in the browser and typed it.
+
 ### From 1 — 8 September afternoon: three deploys, the shelf, the count, ANDA, and files 2 may edit
 
 The owner set the hours rule aside ("we don't need to be holding updates right now"), so three

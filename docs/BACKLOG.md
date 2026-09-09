@@ -332,6 +332,22 @@ it at adjudication, per NDC and date. Inventory: on-hand daily, order points, th
 daily text report stays the automatic feed until then, proved nightly; the export enriches when one
 is sent by hand.
 
+**8 September evening (1) — the connection is built; the owner has the credentials.** He wrote: *"I have
+info on how to access sql I have instance name, username, password, and sql database name … can you use
+a sequel tool to build these reports for me?"* What went in: `src/lib/pioneer-sql.ts` (read-only intent,
+READ UNCOMMITTED on every batch so nobody at the counter waits on a lock, one SELECT at a time, TLS with a
+clear-text retry for an old server), a **PioneerRx database** card under Settings → Connections (server
+or instance, database, user in the clear; the password encrypted like every other credential), the page
+`/tools/pioneer-sql` (test the connection, read the table names into `data/pioneer-schema.json` — names,
+types and row counts only, never a value — search them, run one SELECT capped at 500 rows, shown and
+stored nowhere), and `scripts/pioneer-sql.ts` for the machine session (`test`, `tables [needle]`,
+`query "select …"`). The reports themselves cannot be written until the table names are on the machine:
+PioneerRx does not publish its schema. Order of work once they are: (1) the dispensed feed as a query,
+proved against the daily text report for the same day before it replaces anything; (2) the third-party
+plan table (BIN, PCN, group, plan name, network) for the linking chain; (3) the drug file with AWP, WAC,
+NADAC as PioneerRx holds them; (4) on-hand and order points nightly. Each feed lands beside the reader it
+replaces and proves itself the same way (SESSION-RULES §1c).
+
 ### 7. Finish the logic audit (HANDOFF item 3)
 
 Not yet looked at: `shelf.ts` (895 lines, the largest and least examined), `order-plan.ts` beyond

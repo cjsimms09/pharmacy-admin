@@ -307,6 +307,19 @@ export const SETTING_KEYS = [
   // Where a supply order from the Supplies page is sent. The pharmacy orders bags, labels and
   // vials by emailing a rep, so the address is the whole of the integration.
   "supplies_rep_email",
+
+  // ── PioneerRx, read directly (pioneer-sql.ts) ──
+  // The server as the owner was given it ("HOST\INSTANCE" or "HOST,port"), the database and the
+  // user in the clear; the password encrypted like every other credential. The site only reads.
+  "pioneer_sql_server",
+  "pioneer_sql_database",
+  "pioneer_sql_user",
+  "pioneer_sql_password_enc",
+  "pioneer_sql_last_test",
+  "pioneer_sql_last_result",
+  // When the table names were last read into data/pioneer-schema.json, and how many there were.
+  "pioneer_sql_schema_at",
+  "pioneer_sql_tables",
 ] as const;
 export type SettingKey = (typeof SETTING_KEYS)[number];
 export type Settings = Record<SettingKey, string>;

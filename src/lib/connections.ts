@@ -12,7 +12,7 @@ import { getSettings, setSetting, type SettingKey } from "./settings";
  */
 
 export type Connection = {
-  id: "anthropic" | "mtf" | "mail" | "imonnit";
+  id: "anthropic" | "mtf" | "mail" | "imonnit" | "pioneerrx";
   name: string;
   what: string;
   /** Where the credential is obtained, in words the person fetching it can follow. */
@@ -58,6 +58,24 @@ export const CONNECTIONS: Connection[] = [
       { key: "imonnit_base_url", label: "Address", hint: "Leave blank unless Monnit have told you otherwise.", placeholder: "https://www.imonnit.com/json" },
     ],
     more: { href: "/temps", label: "Choose which sensors to log" },
+  },
+  {
+    id: "pioneerrx",
+    name: "PioneerRx database",
+    what:
+      "Reads claims, the drug file and what is on hand straight from PioneerRx’s SQL Server, so nothing has to be " +
+      "exported and uploaded. The site only ever reads: read-only intent, no locks, one SELECT at a time.",
+    where:
+      "RedSail (PioneerRx support) gives the instance name, the database name, a user and a password when SQL access " +
+      "is turned on for the pharmacy. Type the first three below and paste the password.",
+    secretKey: "pioneer_sql_password_enc",
+    secretLabel: "Password",
+    fields: [
+      { key: "pioneer_sql_server", label: "Server or instance", hint: "As RedSail wrote it: a name, NAME\\INSTANCE, or NAME,1433.", placeholder: "PRXSERVER\\PIONEERRX" },
+      { key: "pioneer_sql_database", label: "Database", placeholder: "PioneerRx" },
+      { key: "pioneer_sql_user", label: "User", placeholder: "" },
+    ],
+    more: { href: "/tools/pioneer-sql", label: "Test the connection and read the table names" },
   },
   {
     id: "mtf",
