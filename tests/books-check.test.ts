@@ -32,7 +32,7 @@ function accrualMonth(m: string, over: Partial<PLInputs> = {}): PLInputs {
     claimsCount: 0,
     dispensedCostCents: null,
     purchasesCents: null,
-    paidPurchasesCents: null,
+    billedPurchasesCents: null,
     rebatesCents: null,
     expenses: [],
     ...over,
@@ -108,7 +108,7 @@ describe("the same money, reachable two ways", () => {
   test("on the cash account the rebate receipt wins and the bill saying the same thing is dropped", () => {
     const i = cashMonth("2026-09", {
       receipts: [{ kind: "third_party", amountCents: REMIT }, { kind: "rebate", amountCents: 45_00 }],
-      paidPurchasesCents: 4_000_00,
+      billedPurchasesCents: 4_000_00,
       rebatesCents: 40_00,
       expenses: [{ categoryId: "reb", categoryName: "Wholesaler rebates", kind: "cost_of_goods", amountCents: -45_00 }],
     });
@@ -143,12 +143,12 @@ describe("adjudicated in one month, remitted in the next, deposited in the one a
   const july = {
     accrual: monthlyPL(accrualMonth("2026-07", { claimsRevenueCents: REMIT + COPAY, claimsCount: 1, dispensedCostCents: COST })),
     // The copay is cash in July: it was taken at the register on the day.
-    cash: monthlyPL(cashMonth("2026-07", { receipts: [{ kind: "patient", amountCents: COPAY }], paidPurchasesCents: COST })),
+    cash: monthlyPL(cashMonth("2026-07", { receipts: [{ kind: "patient", amountCents: COPAY }], billedPurchasesCents: COST })),
   };
   const august = {
     accrual: monthlyPL(accrualMonth("2026-08")),
     // The 835 says the plan will pay. Nothing reached the bank, so the cash account has no revenue.
-    cash: monthlyPL(cashMonth("2026-08", { paidPurchasesCents: null })),
+    cash: monthlyPL(cashMonth("2026-08", { billedPurchasesCents: null })),
   };
   const september = {
     accrual: monthlyPL(accrualMonth("2026-09")),
@@ -268,7 +268,7 @@ describe("the books add up from the rows they were built from", () => {
     const cash = monthlyPL(
       cashMonth("2026-09", {
         receipts: [{ kind: "third_party", amountCents: 6_000_00 }],
-        paidPurchasesCents: 4_500_00,
+        billedPurchasesCents: 4_500_00,
         expenses: [
           { categoryId: "w", categoryName: "Wages and salaries", kind: "operating", amountCents: 800_00 },
           { categoryId: "l", categoryName: "Loan principal", kind: "balance_sheet", amountCents: 300_00 },

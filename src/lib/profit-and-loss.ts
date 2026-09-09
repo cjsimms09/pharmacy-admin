@@ -42,6 +42,7 @@
 import { reconcileCogs, reconcileRevenue, type Check as ReconCheck } from "./reconcile";
 import { standingLines } from "./standing-math";
 import { todayIso } from "./dates";
+import { formatCents } from "./money";
 
 
 export type PLLine = { label: string; amountCents: number; note?: string };
@@ -152,17 +153,10 @@ export type PLInputs = {
   /**
    * What was actually paid to the wholesalers in the month, from the invoices marked paid.
    *
-   * The cash account's cost of goods. Null where no invoice in the month carries a payment date,
-   * which is not the same as zero and must never be shown as it.
+   * The cash account's cost of goods: the wholesaler invoices dated in the month. Null where the
+   * month has none, which is not the same as zero and must never be shown as it.
    */
-  paidPurchasesCents: number | null;
-  /** How many invoices in the month have no payment date, so the gap can be named rather than hidden. */
-  purchasesUnpaidCount?: number;
-  /**
-   * How many of the cash cost-of-goods invoices are counted on an assumed date — the invoice date
-   * plus the supplier's payment terms, or the invoice date alone — rather than a recorded payment.
-   */
-  purchasesAssumedCount?: number;
+  billedPurchasesCents: number | null;
   /**
    * The standing costs the month carries so far: payroll and rent by the day, each already reduced
    * to the month's share. Dropped where a real bill from the same vendor is entered for the month.
@@ -412,17 +406,15 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
           "dispensing and an OTC sale is not a dispensing. Profit below is overstated by whatever that stock cost.",
       );
     }
-  } else if (i.paidPurchasesCents !== null) {
+  } else if (i.billedPurchasesCents !== null) {
     costOfGoods.push({
-      label: "Paid to the wholesalers",
-      amountCents: i.paidPurchasesCents,
-      note: i.purchasesAssumedCount
-        ? `Wholesaler invoices paid in this month. ${i.purchasesAssumedCount} of them ${i.purchasesAssumedCount === 1 ? "is" : "are"} counted on the invoice date plus the supplier's payment terms, because no payment date was recorded; enter the date paid on the invoices page and this becomes exact.`
-        : "Invoices marked paid in this month. On a cash account the goods are a cost when the money leaves, not when the bottle does.",
+      label: "Billed by the wholesalers",
+      amountCents: i.billedPurchasesCents,
+      note: "Every wholesaler invoice dated in this month, at its own total. The accrual account counts something different on purpose — what the month's dispensings cost to buy — so a month with a big buy-in reads worse here and better there, which is the gap between the two bases doing its job.",
     });
   } else {
     missing.push(
-      "What was paid to the wholesalers this month. No wholesaler invoice falls in this month by its recorded payment date or by its date plus the supplier's terms, so a cash account has no cost of goods — " +
+      "What the wholesalers billed this month. No wholesaler invoice is dated in this month, so a cash account has no cost of goods — " +
         "the dispensed cost is deliberately not substituted, because that is the accrual answer and would make the two accounts agree when they should not.",
     );
   }
@@ -486,13 +478,32 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
    * so a month without them does not look slightly optimistic — it looks profitable when it was not.
    */
   const spent = new Set(operating.filter((l) => l.amountCents !== 0).map((l) => l.label));
-  if (!spent.has("Wages and salaries")) {
-    missing.push("Wages and salaries. Usually the largest cost a pharmacy has — without it this account is not conservative, it is wrong.");
-  }
-  if (!spent.has("Rent and occupancy")) missing.push("Rent and occupancy.");
-  if (!spent.has("Card processing and bank fees")) {
-    missing.push("Card processing and bank fees — two to three per cent of everything taken on a card, and nobody sends an invoice for it.");
-  }
+  /*
+   * A cost the pharmacy has told the site about is not a cost the site has forgotten.
+   *
+   * On the cash basis a standing cost is nought until the day it is paid, so payroll on the 30th
+   * shows nothing on the 9th — correctly, no money has left the bank. But the line below reads a
+   * nought as an omission, and told the owner wages were missing on the very month he had just
+   * entered them, in the words "without it this account is not conservative, it is wrong". It is
+   * not wrong; it is early. Where the figure is on file and merely not due, that is a caveat about
+   * a month in progress, not a hole in the account.
+   */
+  const onFile = new Map((given.standing ?? []).filter((st) => !st.noPaidDay).map((st) => [st.categoryName, st] as const));
+  const absent = (label: string, why: string) => {
+    if (spent.has(label)) return;
+    const st = onFile.get(label);
+    if (st && i.basis === "cash") {
+      caveats.push(`${label} is on file at ${formatCents(st.amountCents)} a month and is not paid until later in the month, so the cash account does not carry it yet. The accrual account does.`);
+      return;
+    }
+    missing.push(why);
+  };
+  absent("Wages and salaries", "Wages and salaries. Usually the largest cost a pharmacy has — without it this account is not conservative, it is wrong.");
+  absent("Rent and occupancy", "Rent and occupancy.");
+  absent(
+    "Card processing and bank fees",
+    "Card processing and bank fees — two to three per cent of everything taken on a card, and nobody sends an invoice for it.",
+  );
   /*
    * DIR fees are entered by hand, so their absence means "nobody has entered them yet" far more
    * often than it means "there were none". Silence on a line that only ever reduces profit reads as
@@ -750,28 +761,22 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
    * counted as unpaid-unknown instead of as zero.
    */
   /*
-   * The day an invoice's money left, in order of how well it is known: the payment date somebody
-   * recorded; else the invoice date plus the supplier's payment terms from its agreement; else the
-   * invoice date itself. The first is a fact, the second is the document's own rule, the third is
-   * the nearest thing to either — and every invoice on the second or third is counted and said to
-   * be, so the figure is never mistaken for a bank statement. What it is never allowed to be is
-   * nought for want of a date, which is what a cash account with no cost of goods was saying.
+   * The owner: "Let's simplify it.. let's just use invoices in September."
+   *
+   * This used to be the day the money left, in order of how well it was known — a recorded payment
+   * date, else the invoice date plus the supplier's payment terms, else the invoice date. That is
+   * the cash basis in principle. In practice not one of September's 71 invoices carries a payment
+   * date and not one of the 22 suppliers has terms on file, so every invoice fell through to its
+   * own date and the cascade was three ways of arriving at the same $200,225.87 — while leaving a
+   * standing instruction to key in 71 payment dates to make the account "exact". Nobody was ever
+   * going to do that for a number the account already had.
+   *
+   * So the invoice date, plainly, which is the date the pharmacy itself means by a September bill.
+   * The cost is the whole invoice where it has a total; an invoice whose total was never read
+   * cannot contribute and is left out rather than counted as nought.
    */
-  const termsFor = (v: (typeof invoices)[number]): number => {
-    const sup = shared.suppliers.find((s) => s.id === v.supplierId) ?? shared.suppliers.find((s) => v.supplier && s.name.toLowerCase() === v.supplier.toLowerCase());
-    return sup?.paymentTermsDays ?? 0;
-  };
-  const cashDateOf = (v: (typeof invoices)[number]): string | null => {
-    if (v.paidOn) return v.paidOn;
-    if (!v.invoiceDate) return null;
-    const d = new Date(`${v.invoiceDate}T00:00:00Z`);
-    d.setUTCDate(d.getUTCDate() + termsFor(v));
-    return d.toISOString().slice(0, 10);
-  };
-  const paidThisMonth = invoices.filter((v) => v.totalCents !== null && cashDateOf(v)?.startsWith(month));
-  const paidPurchasesCents = paidThisMonth.length ? paidThisMonth.reduce((n, v) => n + (v.totalCents ?? 0), 0) : null;
-  const purchasesAssumedCount = paidThisMonth.filter((v) => !v.paidOn).length;
-  const purchasesUnpaidCount = invoices.filter((v) => !v.paidOn && v.invoiceDate?.startsWith(month)).length;
+  const billedThisMonth = invoices.filter((v) => v.totalCents !== null && v.invoiceDate?.startsWith(month));
+  const billedPurchasesCents = billedThisMonth.length ? billedThisMonth.reduce((n, v) => n + (v.totalCents ?? 0), 0) : null;
 
 
   /*
@@ -832,9 +837,8 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
     claimsCount: monthFills.length,
     dispensedCostCents,
     purchasesCents,
-    paidPurchasesCents,
-    purchasesUnpaidCount,
-    purchasesAssumedCount,
+    billedPurchasesCents,
+
     standing,
     openingStockCents,
     closingStockCents,

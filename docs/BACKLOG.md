@@ -25,6 +25,45 @@ The math has to be perfect — a wrong number that looks right is worse than no 
 
 ## Now
 
+### 0. Two-payer fills: the claims feed sees one side of each (9 September)
+
+The owner: "We need to make sure we really understand secondaries and how to reconcile. How much to
+expect from each payer. Math has to be perfect and logic has to be sound." And, correcting me:
+"Secondary claims are not another claim are they? Same claim but 2 payors." He is right — one fill,
+one script, two payers, and the money adds while the script count must not.
+
+**What is proven.** `ThirdParty.ClaimRemittancePricingByRxTransactionID.IsLatestClaimRecord = 1`
+returns exactly one row per fill, not one per payer: September has 1,916 fills, 107 of them
+cancelled or unfinished at $0, and the filter returns 1,809 rows — 1,758 flagged primary and 51
+flagged secondary. Taking the latest claim per fill *and payer side* instead shows **210 September
+fills have two payers.** So the feed sees one side of each of those 210 and cannot tell which side
+it got: for 51 it kept the secondary and lost the primary, for 159 the reverse. `pioneer-pull.ts`
+was written to carry both sides on one row and reports "0 secondary claims filled in" every run —
+correctly, because under this filter a second row never arrives.
+
+There is a second, independent bug in the same block: the first row seen for a fill is assigned to
+`primary` regardless of its flag, so even once two rows do arrive a secondary-first ordering would
+land the secondary in the primary slot and let the primary overwrite it.
+
+**The primary-side arithmetic is exact** and can be relied on: across the 210 two-payer fills,
+ingredient cost + dispensing fee = $37,789.11 and gross paid + patient pay = $37,814.00, a $24.89
+difference on 210 fills that is almost certainly tax.
+
+**The secondary-side arithmetic does not reconcile and must not be booked until it does.** The
+primary says the patient owes $17,508.98; the secondary paid $3,668.27 and says the patient finally
+owes $2,259.94, which is $5,928.21 — an unexplained $11,580.77. Either `IsPrimaryThirdParty` does
+not mean COB sequence, or many of these second rows are re-bills after a rejection rather than true
+secondaries. Establish which before any of it reaches the account: booking a secondary payment
+against a primary's patient-pay balance without understanding the relationship is how a pharmacy
+counts the same dollar twice.
+
+**Also to settle:** Pharm D is the pharmacy's cash plan, so cash-pay fills arrive as third-party
+claims (every one of September's 1,916 fills has `IsCashPaid = 0`). No 835 will ever pay them, and
+they must not sit as receivables waiting for one.
+
+**Correctly excluded, checked:** 147 claims carry no gross paid, no copay and no ingredient cost —
+rejections, and dropping them is right. 107 fills are cancelled or waiting at $0.
+
 ### 1. The drug catalogue has to be sound (7 September)
 
 The owner's four requirements, each of which is a thing the catalogue must be able to state for
