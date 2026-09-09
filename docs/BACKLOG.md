@@ -842,6 +842,20 @@ sold date on 952. Left to do: the export as a daily feed through the mailbox and
 (its own kind; 2 and B), a nightly proof row that re-reads the stored file against the enriched
 columns (item 30), and the transaction report's `Rx Transaction Details` stays the source of the
 claim itself — the export enriches, it never creates.
+### 33. The 835 reader has no arithmetic gate: lines are stored without being checked against the remittance's own total (8 September)
+
+Found by 2 while writing the manual's payments section, then withdrawn from the manual because it was not true
+of the code: `claim-payments.ts` stores every payment line an 835 carries and never adds them up against the
+remittance's printed total (the BPR amount, and per-claim CLP totals against their SVC lines). The invoice
+reader refuses a document that does not add up, on the argument that a partial read is the dangerous outcome
+rather than the failed one: every figure that was read looks sound, and only the dropped line's dispensing
+appears to have been paid less than it was. The same argument applies exactly here (SESSION-RULES §1c, and the
+rule that every reader that decides money is checked by arithmetic before anything is stored). What to build:
+sum the CLP payment amounts and compare to BPR02; sum each claim's SVC paid amounts plus adjustments to its CLP04;
+a remittance that fails either is held whole, shown on Remits with the two figures, and nothing from it is
+matched until it is read again or the owner accepts the difference by name. The facilitator's 835s and RedSail's
+copay remits (item 24) go through the same gate. 1 builds it after the PioneerRx feeds (item 6).
+
 ## The data the site has to ingest
 
 Named by the owner on 7 September as what is still being connected. Each one needs a reader, a
