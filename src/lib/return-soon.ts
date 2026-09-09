@@ -418,7 +418,16 @@ export async function returnSoonNow(): Promise<ReturnSoonView> {
   if (!shelf.countedOn) notes.push("No count of the shelf has been uploaded, so nothing can be judged idle or slow.");
   else notes.push(`The shelf as counted on ${shelf.countedOn}; the rate is the ${shelf.from ?? "?"} to ${shelf.to ?? "?"} claims.`);
   if (windowDays !== null && windowDays < SHORT_WINDOW_DAYS)
-    notes.push(`Only ${windowDays} days of claims are held, so "not moving" means not dispensed in ${windowDays} days — a monthly drug looks idle. The twelve-month claims export makes that judgment real; until then those rows are a list to check, not to ship.`);
+    /*
+     * The claims history grows by a day each day, and nothing else will grow it.
+     *
+     * This said "the twelve-month claims export makes that judgment real". There is no such export:
+     * the owner settled on 8 September 2026 that nothing before 1 September is being uploaded and
+     * the site starts clean. A caveat that points at a file which is never going to arrive reads as
+     * "this will be fixed" and is really "this will be true in a few months" — and the difference
+     * matters, because the first invites him to leave the list alone until then.
+     */
+    notes.push(`Only ${windowDays} days of claims are held, so "not moving" means not dispensed in ${windowDays} days — a monthly drug looks idle. The site holds claims from 1 September 2026 onwards and the window widens by a day each day; until it is past ${SHORT_WINDOW_DAYS}, these rows are a list to check rather than to ship.`);
   notes.push(
     due.linesConsidered === 0
       ? "No supplier invoice lines are on file, so no credit clock can be timed and no line can say who sold it."

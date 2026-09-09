@@ -327,7 +327,16 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
       note:
         covered >= 365
           ? "A full year is held, so a seasonal drug can be told from a dying one."
-          : `${covered} day${covered === 1 ? "" : "s"} of history. Every rate, steadiness test and trend on this site is judged on that window, and it cannot tell a slow seller from a new one. A twelve-month export is what closes it.`,
+          /*
+           * No export is coming, and this sentence used to say one was.
+           *
+           * The owner, 8 September 2026: "i will not be uploading claims from before sept.. or
+           * anything. this site is starting clean as of 09/01/.." So the window does not close by
+           * a file arriving; it closes by days passing. Telling him to wait for a twelve-month
+           * export was telling him to wait for something that will never come, which is worse than
+           * saying nothing — it invites him to defer the judgments this row exists to caveat.
+           */
+          : `${covered} day${covered === 1 ? "" : "s"} of history. Every rate, steadiness test and trend on this site is judged on that window, and it cannot yet tell a slow seller from a new one. Nothing closes this but time: the site holds claims from 1 September 2026 onwards, and the window widens by a day each day.`,
     };
   });
 
