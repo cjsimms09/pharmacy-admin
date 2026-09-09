@@ -143,3 +143,37 @@ describe("business associate agreements name the form that exists", () => {
     assert.match(b().text.join(" "), /signed before the party is given access/);
   });
 });
+
+/*
+ * The retrieval clock nobody imposed.
+ *
+ * The owner: "we shouldn't be restricting ourselves further than law requires." The manual said 48
+ * hours in one place and 72 in another, and 1 read the regulations: 21 CFR 1300.01 defines readily
+ * retrievable as separable in a reasonable time, K.A.R. 68-20-16 requires records readily
+ * retrievable and kept five years at the pharmacy, and the Board glosses the phrase as separated
+ * out quickly and easily during an inspection. No hours anywhere, state or federal. Both numbers
+ * were the manual's own invention, and a deadline nobody imposed is one the pharmacy can miss for
+ * no reason at all.
+ */
+describe("records are produced on request, not against a made-up clock", () => {
+  const r = () => policies("West Wichita Family Pharmacy").find((x) => x.key === "records")!;
+
+  test("no number of hours is stated", () => {
+    assert.doesNotMatch(r().text.join(" "), /\b\d+\s*hours?\b/);
+  });
+
+  test("the standard is stated in the Board's own terms instead", () => {
+    const text = r().text.join(" ");
+    assert.match(text, /separated out from all other records quickly and easily during an inspection/);
+    assert.match(text, /produced on request while the inspector is here/);
+  });
+
+  test("and it says plainly that no rule sets one, so nobody puts it back", () => {
+    assert.match(r().text.join(" "), /Neither the Board nor the DEA sets a number of hours, and this manual does not state one/);
+  });
+
+  test("the five-year retention it does have is untouched, because that one is real", () => {
+    assert.match(r().text.join(" "), /prescription and controlled substance records five years/);
+    assert.match(r().authority, /68-20-16/);
+  });
+});

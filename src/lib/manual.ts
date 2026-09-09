@@ -648,7 +648,19 @@ export function policies(pharmacy: string): ManualPolicy[] {
         "K.A.R. 68-7-12; K.A.R. 68-19-1; K.A.R. 68-20-16; 45 CFR 164.530(j); 21 CFR 1304.11(a); 29 CFR 1910.1030(h)(2)(ii).",
       text: [
         "Compliance records are held in the pharmacy's own system on pharmacy premises. Backups are taken automatically, verified by re-reading the archive and comparing it record for record against the live data, and an unverifiable archive is deleted rather than kept.",
-        "Electronic records satisfy the Board's requirements where a record must be readily retrievable — that is, capable of being separated from all other records and produced within 48 hours of a written request. Continuous quality improvement incident reports, bimonthly summaries and null reports, training records and certificates, temperature logs and monthly reviews, the technician list, the business associate register and the self-inspection record are all kept in this system and are not separately maintained on paper.",
+        /*
+         * "Within 48 hours" was here and no rule requires it.
+         *
+         * The owner's objection, and it was the right one: "we shouldn't be restricting ourselves
+         * further than law requires." Neither Kansas nor the DEA sets a clock. 21 CFR 1300.01
+         * defines readily retrievable as separable from other records in a reasonable time;
+         * K.A.R. 68-20-16 requires records readily retrievable and kept five years at the pharmacy,
+         * and the Board glosses the phrase as separated out quickly and easily during an
+         * inspection. No hours anywhere. So the manual states none — a deadline nobody imposed is
+         * one the pharmacy can miss for no reason, and this one appeared in three places at two
+         * different numbers.
+         */
+        "Electronic records satisfy the Board's requirements where a record must be readily retrievable — that is, capable of being separated out from all other records quickly and easily during an inspection. Records are produced on request while the inspector is here, and records in archived storage are retrieved promptly. Neither the Board nor the DEA sets a number of hours, and this manual does not state one. Continuous quality improvement incident reports, bimonthly summaries and null reports, training records and certificates, temperature logs and monthly reviews, the technician list, the business associate register and the self-inspection record are all kept in this system and are not separately maintained on paper.",
         "Controlled substance inventories are the exception. K.A.R. 68-20-16 requires each inventory to be maintained in legible hard-copy format, and 21 CFR 1304.11(a) requires it to be kept in written, typewritten or printed form at the registered location. Each annual inventory is therefore printed, signed by every individual who took part with their licence or registration number, marked as taken before the opening or after the close of business, and filed on the premises. The copy held in this system is the working record; the signed printed copy is the record of file.",
         "Retention: prescription and controlled substance records five years; HIPAA training and related documentation six years; bloodborne pathogens training records three years from the date of training; hepatitis B vaccination and exposure records for the duration of employment plus thirty years.",
         "Records of former employees are retained for the same periods. Nobody is removed from the record when they leave.",

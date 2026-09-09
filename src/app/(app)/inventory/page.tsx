@@ -41,7 +41,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
         registration number, and file it on the premises — then scan it back in against the inventory below, which is
         what the &ldquo;signed sheet&rdquo; column is asking for. Everything else this site keeps (CQI, training,
         temperatures, the technician list) may be held electronically, because the Board&rsquo;s test for those is
-        readily retrievable within 48 hours, and they are.
+        readily retrievable — separated out quickly and easily during an inspection — and they are. The Board sets no number of hours and neither does the DEA.
       </Notice>
 
       <section className="card mb-6 flex flex-wrap items-center justify-between gap-3">
