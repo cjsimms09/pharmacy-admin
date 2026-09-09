@@ -343,6 +343,10 @@ export const SETTING_KEYS = [
   "pioneer_pull_on_hand_result",
   "pioneer_pull_claims_on",
   "pioneer_pull_claims_result",
+  "pioneer_pull_invoices_on",
+  "pioneer_pull_invoices_result",
+  // PioneerRx’s own September invoices set against the ones read from the suppliers’ PDFs.
+  "pioneer_invoice_compare",
   "pioneer_pull_catalogue_on",
   "pioneer_pull_catalogue_result",
   // PioneerRx’s supplier catalogue set against the site’s own: how much it prices that the site does not.
