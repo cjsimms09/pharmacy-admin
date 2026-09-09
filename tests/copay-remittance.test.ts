@@ -2,6 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { looksLikeCopayRemittance } from "../src/lib/copay-remittance";
+import { pdfText } from "../src/lib/pdf-text";
 
 /**
  * Recognising RedSail's copay voucher remittance (BACKLOG item 24, recogniser side).
@@ -107,5 +108,46 @@ describe("the real statement's text layer", () => {
       .map((l) => Number(l.trim().split(/\s+/).pop()));
     assert.equal(paid.length, 14);
     assert.equal(Math.round(paid.reduce((n, c) => n + c, 0) * 100), 17725);
+  });
+});
+
+/**
+ * The link the fixture cannot test: from the PDF's bytes to the words this module reads.
+ *
+ * The real statement is a scan whose *second* page carries the text layer, and `contentVerdict`
+ * only asks this detector where `pdfText` returned something. The fixture is that extracted text,
+ * so it proves the rules and not the extraction — and a recogniser that never sees the words is a
+ * recogniser that never fires, which is the fault this whole week has been about.
+ *
+ * So: a PDF whose first content stream is a drawing with no text at all, and whose second carries
+ * the statement's heading. `pdfText` walks every stream in the file rather than the first page, and
+ * skips one with no text-placing operator — this holds that behaviour, because the copay recogniser
+ * depends on it and `pdf-text.ts` is not mine to keep still.
+ */
+describe("from the bytes of a scan to the words", () => {
+  function twoPagePdf(pageOneOps: string, pageTwoText: string): Buffer {
+    const stream = (body: string) => `stream\n${body}\nendstream\n`;
+    const show = pageTwoText
+      .split("\n")
+      .map((line, i) => `BT /F1 10 Tf 72 ${700 - i * 14} Td (${line.replace(/([()\\])/g, "\\$1")}) Tj ET`)
+      .join("\n");
+    return Buffer.from(`%PDF-1.4\n${stream(pageOneOps)}${stream(show)}%%EOF\n`, "latin1");
+  }
+
+  test("a first page with no text layer does not hide the second page's words", () => {
+    const pdf = twoPagePdf(
+      // A scanned page: an image drawn into place, and not one text-placing operator.
+      "q 612 0 0 792 0 0 cm /Im0 Do Q",
+      ["RedSail Technologies", "Remittance Advice - RAS Copay Voucher Reimbursement", "Total Amount Paid 177.25"].join("\n"),
+    );
+    const text = pdfText(pdf);
+    assert.match(text, /Copay Voucher/i, `pdfText should reach the second stream, got: ${JSON.stringify(text.slice(0, 120))}`);
+    assert.equal(looksLikeCopayRemittance(text, "5171c9d9-Image_001.pdf"), true);
+  });
+
+  test("and a document that is only a scan still answers false", () => {
+    // No text anywhere: the recogniser must say nothing rather than guess from the file's name.
+    const pdf = twoPagePdf("q 612 0 0 792 0 0 cm /Im0 Do Q", "");
+    assert.equal(looksLikeCopayRemittance(pdfText(pdf), "RAS copay voucher remittance.pdf"), false);
   });
 });
