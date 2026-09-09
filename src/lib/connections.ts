@@ -12,7 +12,7 @@ import { getSettings, setSetting, type SettingKey } from "./settings";
  */
 
 export type Connection = {
-  id: "anthropic" | "mtf" | "mail" | "imonnit" | "pioneerrx";
+  id: "anthropic" | "mtf" | "mail" | "imonnit" | "pioneerrx" | "sftp";
   name: string;
   what: string;
   /** Where the credential is obtained, in words the person fetching it can follow. */
@@ -76,6 +76,25 @@ export const CONNECTIONS: Connection[] = [
       { key: "pioneer_sql_user", label: "User", placeholder: "" },
     ],
     more: { href: "/tools/pioneer-sql", label: "Test the connection and read the table names" },
+  },
+  {
+    id: "sftp",
+    name: "Remittance SFTP mailbox",
+    what:
+      "The host RedSail and the PBMs push remittances to. The site collects every file there each half hour, files it, " +
+      "loads what it recognises (an 835 through the remittance reader) and moves the original to done/ on the host.",
+    where:
+      "The host was set up with scripts/sftp-host-setup.sh. The site logs in with its own key from data/sftp/; a password " +
+      "is only needed where that key is not on the host.",
+    secretKey: "sftp_password_enc",
+    secretLabel: "Password (optional, when the site’s key is not on the host)",
+    fields: [
+      { key: "sftp_host", label: "Host", placeholder: "remits.example.com or an address" },
+      { key: "sftp_port", label: "Port", placeholder: "22" },
+      { key: "sftp_user", label: "User", placeholder: "pharmacy" },
+      { key: "sftp_folder", label: "Folder", hint: "Where senders drop files.", placeholder: "/inbox" },
+    ],
+    more: { href: "/settings/email", label: "Automatic loading is the same switch as email" },
   },
   {
     id: "mtf",

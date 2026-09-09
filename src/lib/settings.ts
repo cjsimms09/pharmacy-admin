@@ -326,6 +326,15 @@ export const SETTING_KEYS = [
   // When the table names were last read into data/pioneer-schema.json, and how many there were.
   "pioneer_sql_schema_at",
   "pioneer_sql_tables",
+
+  // ── The remittance SFTP mailbox (sftp-pull.ts): a host senders push to and this site pulls from ──
+  "sftp_host",
+  "sftp_port",
+  "sftp_user",
+  "sftp_folder",
+  "sftp_password_enc", // the fallback where the site’s key in data/sftp/ is not on the host
+  "sftp_last_pull",
+  "sftp_last_result",
 ] as const;
 export type SettingKey = (typeof SETTING_KEYS)[number];
 export type Settings = Record<SettingKey, string>;

@@ -295,10 +295,28 @@ export async function register() {
     }
   };
 
+  /*
+   * The remittance SFTP mailbox (sftp-pull.ts), swept on the same half hour as email: senders push
+   * 835s and voucher remittances there because nobody emails a remittance, and a file that lands
+   * is handled exactly as an emailed one. Skipped in silence until a host is set up.
+   */
+  const sftpTick = async () => {
+    try {
+      const { getSettings } = await import("./lib/settings");
+      const s = await getSettings();
+      if (!s.sftp_host || !s.sftp_user) return;
+      const { pullSftp } = await import("./lib/sftp-pull");
+      await pullSftp({ userId: null, userName: "Automatic check" });
+    } catch {
+      // Recorded in sftp_last_result; never lets the app down.
+    }
+  };
+
   const runAll = async () => {
     await publicAccessTick();
     await whenIdle("warm", warmTick);
     await whenIdle("mail", tick);
+    await whenIdle("sftp", sftpTick);
     await whenIdle("data-health", dataHealthTick);
     await whenIdle("backup", backupTick);
     await whenIdle("reminders", reminderTick);
