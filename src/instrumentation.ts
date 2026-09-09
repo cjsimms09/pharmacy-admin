@@ -271,6 +271,17 @@ export async function register() {
         env: process.env,
       });
       proof.unref();
+      /*
+       * The NADAC proof (2, BACKLOG 30) starts when the claims proof has finished rather than beside
+       * it: it streams half a gigabyte of CMS files, and on a machine with seven gigabytes two proofs
+       * reading at once is how the app got killed in September. Its heap is capped at what the first
+       * run needed with room to spare; a night the claims proof never exits leaves the last NADAC
+       * proof and its date, which Data health shows as such.
+       */
+      proof.on("exit", () => {
+        const nadac = spawn(process.execPath, ["--max-old-space-size=600", tsx, "--tsconfig", path.join(root, "tsconfig.script.json"), path.join(root, "scripts", "prove-nadac.ts")], { cwd: root, detached: true, stdio: "ignore", env: process.env });
+        nadac.unref();
+      });
       // And the rate backtest (BACKLOG 23): every settled network's rate against what the plan paid, kept in `rate_backtest`.
       const backtest = spawn(process.execPath, [tsx, "--tsconfig", path.join(root, "tsconfig.script.json"), path.join(root, "scripts", "backtest-rates.ts")], { cwd: root, detached: true, stdio: "ignore", env: process.env });
       backtest.unref();
