@@ -261,7 +261,13 @@ async function loadNadacFilesNow(opts: LoadOpts): Promise<LoadReport[]> {
   // The screens hold the current benchmark between requests; a new file must be seen at once.
   if (reports.length > 0) {
     (await import("./nadac-latest")).forgetNadac();
-    await pruneNadac().catch(() => undefined);
+    // A prune that fails here used to say nothing, so a prune that never ran and one that failed
+    // every load looked the same from outside (2, 8 September). Recorded now; the nightly
+    // scripts/prune-nadac.ts is the prune that does not depend on a file arriving.
+    const { setSetting } = await import("./settings");
+    await pruneNadac()
+      .then((n) => setSetting("nadac_last_prune", `${new Date().toISOString()}: removed ${n} prices after a load`))
+      .catch((e) => setSetting("nadac_last_prune", `${new Date().toISOString()}: failed after a load: ${e instanceof Error ? e.message : String(e)}`).catch(() => undefined));
   }
   return reports;
 }

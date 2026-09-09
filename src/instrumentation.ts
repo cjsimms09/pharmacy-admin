@@ -279,8 +279,13 @@ export async function register() {
        * proof and its date, which Data health shows as such.
        */
       proof.on("exit", () => {
-        const nadac = spawn(process.execPath, ["--max-old-space-size=600", tsx, "--tsconfig", path.join(root, "tsconfig.script.json"), path.join(root, "scripts", "prove-nadac.ts")], { cwd: root, detached: true, stdio: "ignore", env: process.env });
-        nadac.unref();
+        // The prune first, on its own clock (scripts/prune-nadac.ts says why), so the proof measures the table as it should be.
+        const prune = spawn(process.execPath, [tsx, "--tsconfig", path.join(root, "tsconfig.script.json"), path.join(root, "scripts", "prune-nadac.ts")], { cwd: root, detached: true, stdio: "ignore", env: process.env });
+        prune.on("exit", () => {
+          const nadac = spawn(process.execPath, ["--max-old-space-size=600", tsx, "--tsconfig", path.join(root, "tsconfig.script.json"), path.join(root, "scripts", "prove-nadac.ts")], { cwd: root, detached: true, stdio: "ignore", env: process.env });
+          nadac.unref();
+        });
+        prune.unref();
       });
       // And the rate backtest (BACKLOG 23): every settled network's rate against what the plan paid, kept in `rate_backtest`.
       const backtest = spawn(process.execPath, [tsx, "--tsconfig", path.join(root, "tsconfig.script.json"), path.join(root, "scripts", "backtest-rates.ts")], { cwd: root, detached: true, stdio: "ignore", env: process.env });

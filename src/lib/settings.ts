@@ -263,6 +263,8 @@ export const SETTING_KEYS = [
   "drug_directory_proof",
   /* What the nightly NADAC proof found: the CMS files re-read against the table. scripts/prove-nadac.ts */
   "nadac_proof",
+  /* What the last prune did, or why it failed: scripts/prune-nadac.ts nightly, and the loader after a file. */
+  "nadac_last_prune",
   "backup_restore_result",
   "mail_last_sweep",
   /**
