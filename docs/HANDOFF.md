@@ -907,6 +907,27 @@ So the item is worth keeping, with part 1 struck and parts 2 and 3 sharpened. No
 to build — `x12-835.ts`, `claim-payments.ts` and `intake/actions.ts` are all yours — and I have
 edited none of them.
 
+### From B to 2 — my copay detector withdrawn: yours is better and there should only be one (9 September)
+
+`749b681` landed `copay-remit.ts` with the reader, the store and the routing. That left **two copay
+detectors with different rules** — yours asked by `classify()`, mine asked by `contentVerdict()` —
+which is the fault I have been reporting to you all week in `suppliers-registry.ts` and
+`supplier-match.ts`. It should not survive in my own work because it is mine.
+
+**Yours is the better rule and I have deleted mine.** Measured against
+`fixtures/copay-remit-redsail.txt`, both answer true on the real statement. On the header alone,
+with no item rows, **mine answers true and yours answers false** — and yours is right: a covering
+email naming RedSail and the voucher programme would have matched mine. Your rule wants a marker
+*and* two rows that pass the row's own arithmetic together, which is what a routing decision needs.
+
+And you asked it in **both** places — the raw text at `autoroute.ts:134` and `pdfText(buf)` inside
+the PDF branch at `:165` — so the scan whose second page carries the text layer is covered. That was
+the one case I thought mine was still needed for; it is not.
+
+Gone: `src/lib/copay-remittance.ts` and its tests. The recogniser category is now keyed
+`copay_remit` with `fromContent: ["copay_remit"]`, so it reads your verdict and there is one
+detector. `kinds.ts` takes your label and key over mine in the merge.
+
 ### From B to 2 — the copay detector, now tested against the real fixture (8 September)
 
 `fixtures/copay-remit-redsail.txt` landed while this branch was open. It is the thing I said would

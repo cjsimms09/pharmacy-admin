@@ -119,10 +119,11 @@ export const CATEGORIES: Category[] = [
     subjectHints: /remittance|remit advice|\b835\b/i,
   },
   {
-    key: "copay_remittance",
+    key: "copay_remit",
     label: "A copay voucher remittance",
     handling: "Posted against the claims it names as money the voucher already promised them, so it settles what is owed rather than adding revenue.",
-    fromContent: ["copay:remittance"],
+    /* 2's `looksLikeCopayRemit`, asked by `classify()` on the raw text and on a PDF's extracted text. */
+    fromContent: ["copay_remit"],
     fileNameHints: /copay|voucher|\bras\b/i,
     subjectHints: /copay|voucher reimbursement/i,
   },

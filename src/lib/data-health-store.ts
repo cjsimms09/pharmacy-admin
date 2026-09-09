@@ -1,6 +1,6 @@
 import "server-only";
 import { db, schema } from "@/db";
-import { count } from "drizzle-orm";
+import { count, desc } from "drizzle-orm";
 import { todayIso } from "./dates";
 import { SPECS, type Measurement } from "./data-health";
 import { comparePack } from "./data-health-packages";
@@ -549,18 +549,42 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
     const proof = parseDirectoryProof((await getSettings()).drug_directory_proof);
     const [{ n: tableRows }] = await db.select({ n: count() }).from(schema.drugDirectory);
     if (!proof) {
+      /*
+       * No proof, but that is not the same as nothing known — and the difference is the whole row.
+       *
+       * The directory was loaded on 7 September, before the loader recorded what it wrote, so
+       * `drug_directory_proof` has never existed and will not until the next fetch. Reported as
+       * "never measured" the row read as neglect: amber, for a fact that is perfectly fine.
+       *
+       * `drug_directory_loads` does hold the load itself — when, from where, and how many products
+       * and packages were parsed. That cannot prove the table, because the joined row count the
+       * loader actually wrote was not recorded then and is the only figure a proof could compare.
+       * So the denominator stays zero, which is the page's third answer: nothing to measure, as
+       * against nothing measured. What the load record can supply is the date, so staleness works,
+       * and a sentence saying exactly why there is nothing to compare and when there will be.
+       */
+      const loads = await db
+        .select({ source: schema.drugDirectoryLoads.source, origin: schema.drugDirectoryLoads.origin, rows: schema.drugDirectoryLoads.rows, loadedAt: schema.drugDirectoryLoads.loadedAt })
+        .from(schema.drugDirectoryLoads)
+        .orderBy(desc(schema.drugDirectoryLoads.loadedAt))
+        .limit(4);
+      const last = loads[0] ?? null;
+      const n = (x: number) => x.toLocaleString("en-US");
       return {
         numerator: 0,
         denominator: 0,
-        measuredAt: null,
+        // The load's own day where there was one, so an ageing row is a fetch that stopped.
+        measuredAt: last?.loadedAt ? last.loadedAt.slice(0, 10) : null,
         gaps:
-          tableRows > 0
-            ? [`The table holds ${tableRows.toLocaleString("en-US")} packages that no recorded load accounts for. They were loaded before the loader began proving itself; the next load will prove them.`]
+          tableRows > 0 && !last
+            ? [`The table holds ${n(tableRows)} packages and no load record accounts for them at all.`]
             : [],
         note:
-          tableRows > 0
-            ? "The directory was loaded before loads recorded what they wrote, so there is nothing to set it against until it is fetched again."
-            : "No drug directory has been loaded.",
+          tableRows === 0
+            ? "No drug directory has been loaded."
+            : last
+              ? `Loaded from ${last.origin} on ${last.loadedAt.slice(0, 10)}: ${loads.map((l) => `${n(l.rows)} ${l.source.replace(/_/g, " ")}`).join(", ")}. The table holds ${n(tableRows)} packages. That load predates the loader recording what it wrote, and the joined row count is the only figure a proof could set against the table — so there is nothing to compare until the next fetch, which will prove it.`
+              : `The table holds ${n(tableRows)} packages loaded before any record was kept of it, so there is nothing to set them against until the directory is fetched again.`,
       };
     }
     const { numerator, denominator } = directoryProofFraction(proof, tableRows);

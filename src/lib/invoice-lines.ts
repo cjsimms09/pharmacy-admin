@@ -40,11 +40,29 @@ export type InvoiceLineRead = {
   itemClass: string | null;
   /** True where the line was marked as earning the supplier's contract rebate. */
   rebated: boolean | null;
+  /**
+   * Whether the line is a Schedule II item, where the invoice separates them.
+   *
+   * IPD sends one document with both halves on it — the Schedule II items under a CII heading with
+   * their own subtotal, everything else beneath — and 21 CFR 1304.04(h)(1) wants the Schedule II
+   * record kept apart from the rest. The document is filed under Schedule II because it carries
+   * them, but the halves have to be told apart inside it or the separation is only a folder name.
+   * Null where the invoice does not divide its items and nothing can honestly be said.
+   */
+  controlled: boolean | null;
 };
 
 export type LineParse = {
   lines: InvoiceLineRead[];
-  format: "mckesson" | "ipc" | null;
+  format: "mckesson" | "ipc" | "ipd" | null;
+  /**
+   * The two halves of an invoice that separates Schedule II from the rest, as it printed them.
+   *
+   * Kept beside the lines rather than derived from them, because they are the invoice's own
+   * arithmetic and the point of reading them is to check the reading against it: the Schedule II
+   * lines must come to the Schedule II subtotal and the rest to theirs, or the split is a guess.
+   */
+  sections: { controlled: boolean; printedCents: number; readCents: number; lines: number }[];
   /** Lines that looked like items but did not reconcile, kept verbatim so somebody can look. */
   unreadable: string[];
   /** Sum of the extended amounts read, for checking against the invoice total. */
@@ -73,12 +91,23 @@ const MONEY = String.raw`[\d,]+\.\d{2}`;
  * amount.
  */
 const MCK = new RegExp(
-  String.raw`^(\d{5}-\d{4}-\d{2})` + // NDC, hyphenated
+  /*
+   * Two hyphenations, because McKesson uses the column for two kinds of code.
+   *
+   * A prescription item is an NDC, split 5-4-2. An over-the-counter item is a UPC, split 6-5 —
+   * "305361-32710" for the acetaminophen on a real front-end invoice. Both are the same eleven
+   * digits once the hyphens come out, so nothing downstream has to know which it was; but a
+   * pattern that only knew the first shape read no line at all off that invoice, and $91.97 of
+   * purchases sat in the site with a total and no items under it.
+   */
+  String.raw`^(\d{5}-\d{4}-\d{2}|\d{6}-\d{5})` + // NDC, or a UPC on a front-end item
     String.raw`(\d{3}-\d{4})` + // McKesson item number
     String.raw`\d{9}` + // document number, not kept
     String.raw`\s+(\d+)\*?([A-Z]{2})\s+` + // quantity, an optional asterisk, unit of measure
     String.raw`(.*?)\s+(${MONEY})` + // description, then AWP
-    String.raw`\s+([A-Z])` + // item class
+    // The item class — R for legend, X for Schedule II — prints on prescription lines and not on
+    // front-end ones, so its absence is a fact about the item rather than a line this cannot read.
+    String.raw`(?:\s+([A-Z]))?` +
     String.raw`\s+(${MONEY})` + // unit price
     String.raw`(\s+K)?` + // the contract rebate flag
     String.raw`\s+(${MONEY})` + // extended amount
@@ -106,6 +135,56 @@ const IPC = new RegExp(
     String.raw`\$(${MONEY})\s*$`, // extended amount
 );
 
+/**
+ * IPD's own printed invoice: item number and NDC run together, then the quantities, the unit and
+ * the money.
+ *
+ *   7613370165002030 2 0EACH 574.70  0  1,149.40
+ *
+ * That is item 76133, NDC 70165-0020-30, two shipped of nought back-ordered, EACH, $574.70 each,
+ * no discount, $1,149.40. The per cent sign floats: it prints on some lines and not others, so it
+ * is optional rather than a field. The item number's length is not fixed, so the NDC is taken as
+ * the last eleven digits of the run rather than the item as the first five.
+ */
+const IPD = new RegExp(
+  String.raw`^(\d{12,})` + // item number and NDC, run together
+    String.raw`\s+(\d+)` + // quantity shipped
+    String.raw`\s+(\d+)([A-Z]{2,6})` + // back-ordered quantity, then the unit of measure, run together
+    String.raw`\s+(${MONEY})` + // unit price
+    String.raw`\s+([\d.]+)\s*%?` + // discount, with or without its sign
+    String.raw`\s+(${MONEY})\s*$`, // extension
+);
+
+/**
+ * The same IPD line where the product name is long enough to print beside the figures.
+ *
+ *   7954162756042790CIPROFLOXACIN HCL/DEXAMETH  3 0EACH 38.00  0
+ *
+ * Two things differ and both matter. The name runs straight onto the NDC with no separator, so the
+ * digit run has to be taken as digits only rather than to the first space. And the extension falls
+ * off the end — on the real invoice the per cent sign that follows it was pushed onto the line
+ * above — so there is no printed figure to check the line against.
+ *
+ * That line is $114.00 of cipro-dexamethasone drops, and it was the whole of the difference between
+ * what this reader read off IPD's first invoice and what IPD said the invoice came to. Dropping it
+ * silently is exactly the failure the whole-invoice check exists to catch, so it is read with the
+ * extension worked out from the quantity and the price — and then the half it belongs to has to add
+ * up to the subtotal IPD printed for that half, or nothing from the invoice is trusted. The check
+ * moves from the line to the section; it does not disappear.
+ */
+const IPD_NAMED = new RegExp(
+  String.raw`^(\d{12,})` + // item number and NDC, run together
+    String.raw`([A-Za-z][^\d]{2,60}?)` + // the product name, run onto the digits
+    String.raw`\s+(\d+)` + // quantity shipped
+    String.raw`\s+(\d+)([A-Z]{2,6})` + // back-ordered quantity and the unit of measure
+    String.raw`\s+(${MONEY})` + // unit price
+    String.raw`\s+([\d.]+)\s*%?` + // discount
+    String.raw`(?:\s+(${MONEY}))?\s*$`, // extension, where it printed at all
+);
+
+/** "CII Subtotal:$3,022.32" and "Non-CII Subtotal:$233.38", which close each half of an IPD invoice. */
+const IPD_SUBTOTAL = new RegExp(String.raw`^(Non-)?CII\s+Subtotal:\s*\$?(${MONEY})`, "i");
+
 /** An eleven-digit NDC to the hyphenated form's digits, unchanged; a hyphenated one padded to 11. */
 export function ndc11(raw: string): string | null {
   const m = /^(\d{4,5})-(\d{3,4})-(\d{1,2})$/.exec(raw.trim());
@@ -124,17 +203,41 @@ export function ndc11(raw: string): string | null {
  * rather than read wrongly.
  */
 export function splitQuantities(run: string, unitCents: number, extendedCents: number): { ordered: number; shipped: number } | null {
+  const splits: { ordered: number; shipped: number }[] = [];
   for (let cut = 1; cut < run.length; cut++) {
     const ordered = Number(run.slice(0, cut));
     const shipped = Number(run.slice(cut));
     if (!Number.isFinite(ordered) || !Number.isFinite(shipped)) continue;
     if (String(shipped).length !== run.length - cut) continue; // a leading zero is not a quantity
     if (shipped * unitCents === extendedCents) return { ordered, shipped };
+    if (lineAddsUp(shipped, unitCents, extendedCents)) splits.push({ ordered, shipped });
   }
   // A single digit is both, and the commonest line on any invoice: one ordered, one shipped.
   const only = Number(run);
   if (Number.isFinite(only) && only * unitCents === extendedCents) return { ordered: only, shipped: only };
+  // Nothing was exact. A reading that is right to the penny is accepted only if it is the only
+  // one — two near misses mean the split is genuinely ambiguous, and a guess here is a wrong cost.
+  if (splits.length === 1) return splits[0];
+  if (Number.isFinite(only) && lineAddsUp(only, unitCents, extendedCents) && splits.length === 0) return { ordered: only, shipped: only };
   return null;
+}
+
+/**
+ * Whether a line's own figures agree, allowing for the rounding the wholesaler did.
+ *
+ * The invoice prints a unit price to the cent and an extension to the cent, and the extension is
+ * the rounded product of the two. Five pods at $304.18 came to $1,520.89 on a real IPC invoice
+ * where the multiplication says $1,520.90, and the line was refused for it — so $1,520.89 of a
+ * $1,530.89 invoice went unrecorded, which is a far worse answer than a penny.
+ *
+ * The tolerance is half a cent per unit, which is exactly what rounding can hide and nothing more.
+ * It cannot let a misread field through: a description that shifted the columns along puts dollars
+ * between the two figures, never pennies.
+ */
+export function lineAddsUp(quantity: number, unitCents: number, extendedCents: number): boolean {
+  if (!Number.isFinite(quantity) || quantity <= 0) return false;
+  const tolerance = Math.max(1, Math.ceil(quantity / 2));
+  return Math.abs(quantity * unitCents - extendedCents) <= tolerance;
 }
 
 /**
@@ -147,10 +250,86 @@ export function parseInvoiceLines(text: string, printedTotalCents: number | null
   const out: InvoiceLineRead[] = [];
   const unreadable: string[] = [];
   let format: LineParse["format"] = null;
+  const sections: LineParse["sections"] = [];
+  /*
+   * IPD's lines are read before it is known which half they belong to.
+   *
+   * The invoice prints its Schedule II items, then "CII Subtotal", then the rest, then "Non-CII
+   * Subtotal" — so the heading that settles a line comes after the line. They are held here until
+   * a subtotal closes the half, which is also when the reading is checked against it.
+   */
+  let pending: InvoiceLineRead[] = [];
 
-  for (const raw of text.split(/\r?\n/)) {
+  const rows = text.split(/\r?\n/);
+  for (let i = 0; i < rows.length; i++) {
+    const raw = rows[i];
     const line = raw.trim();
     if (!line) continue;
+
+    const sub = IPD_SUBTOTAL.exec(line);
+    if (sub) {
+      const controlled = !sub[1];
+      const printedCents = money(sub[2]);
+      for (const l of pending) l.controlled = controlled;
+      sections.push({ controlled, printedCents, readCents: pending.reduce((n, l) => n + l.extendedCents, 0), lines: pending.length });
+      pending = [];
+      continue;
+    }
+
+    const named = IPD_NAMED.exec(line);
+    const ipd = named ?? IPD.exec(line);
+    if (ipd) {
+      // The named form carries the product name as its second group and pushes every field after it
+      // along by one; the plain form has no name and takes its description from the next row. Read
+      // by position rather than destructured, because the two shapes differ by exactly that shift
+      // and a mis-set field here is a wrong price on a drug rather than an error anybody would see.
+      const at = named ? 1 : 0;
+      const run = ipd[1];
+      const inlineName = named ? ipd[2].trim() : null;
+      const qtyText = ipd[2 + at];
+      const uom = ipd[4 + at];
+      const unit = ipd[5 + at];
+      const ext = ipd[7 + at] as string | undefined;
+      const quantity = Number(qtyText);
+      const unitCostCents = money(unit);
+      // Where IPD printed no extension, the line's own arithmetic supplies it and the section
+      // subtotal is what proves it. See IPD_NAMED.
+      const extendedCents = ext ? money(ext) : quantity * unitCostCents;
+      const key = ndc11(run.slice(-11));
+      // The line's own arithmetic, as everywhere else here: a description that ran into the digits
+      // would otherwise shift every field along it and the wrong cost would look entirely ordinary.
+      if (!key || !lineAddsUp(quantity, unitCostCents, extendedCents)) {
+        unreadable.push(line.slice(0, 200));
+        continue;
+      }
+      /*
+       * The product name is on the next line, not this one.
+       *
+       * IPD prints the item's figures and its name on separate rows, and the row after the name is
+       * the lot table's heading. So the name is the next non-empty row that is not itself an item
+       * line and not the lot heading — and where it is neither, the line keeps no name rather than
+       * taking "Internal Lot External Lot Expiry Date" for a drug.
+       */
+      const next = inlineName ?? rows.slice(i + 1, i + 3).map((r) => r.trim()).find((r) => r && !IPD.test(r) && !/^(Internal|External|Number|C-\d|CII|Non-CII)/i.test(r));
+      const line0: InvoiceLineRead = {
+        ndc11: key,
+        description: next ? next.replace(/\s{2,}/g, " ").slice(0, 120) : null,
+        itemNumber: run.slice(0, -11) || null,
+        quantity,
+        unitOfMeasure: uom,
+        unitCostCents,
+        extendedCents,
+        awpCents: null,
+        itemClass: null,
+        // IPD's invoice prints no contract marking, so nothing is claimed either way.
+        rebated: null,
+        controlled: null,
+      };
+      format = "ipd";
+      out.push(line0);
+      pending.push(line0);
+      continue;
+    }
 
     const mck = MCK.exec(line);
     if (mck) {
@@ -161,7 +340,7 @@ export function parseInvoiceLines(text: string, printedTotalCents: number | null
       const key = ndc11(ndc);
       // The line's own arithmetic. A description containing something that looks like money would
       // otherwise shift every field after it, and the wrong cost would look perfectly plausible.
-      if (!key || quantity * unitCostCents !== extendedCents) {
+      if (!key || !lineAddsUp(quantity, unitCostCents, extendedCents)) {
         unreadable.push(line.slice(0, 200));
         continue;
       }
@@ -175,8 +354,9 @@ export function parseInvoiceLines(text: string, printedTotalCents: number | null
         unitCostCents,
         extendedCents,
         awpCents: money(awp),
-        itemClass: cls,
+        itemClass: cls ?? null,
         rebated: Boolean(k),
+        controlled: null,
       });
       continue;
     }
@@ -206,15 +386,19 @@ export function parseInvoiceLines(text: string, printedTotalCents: number | null
         // This invoice prints no contract marking, so nothing is claimed either way. Saying "not
         // rebated" here would strip a discount off a price in every comparison that followed.
         rebated: null,
+        controlled: null,
       });
     }
   }
 
+  // A half left open — the last subtotal never printed, or the page it was on did not read — is
+  // not silently treated as one kind or the other; those lines keep a null and say nothing.
   const totalCents = out.reduce((n, l) => n + l.extendedCents, 0);
   return {
     lines: out,
     format,
     unreadable,
+    sections,
     totalCents,
     printedTotalCents,
     reconciles: printedTotalCents === null || out.length === 0 ? null : totalCents === printedTotalCents,

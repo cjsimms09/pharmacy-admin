@@ -962,6 +962,19 @@ async function importRecognised(
         ? `Held, nothing stored: ${gate}`
         : `${r.payer ?? "Remittance"}${r.paidOn ? ` paid ${r.paidOn}` : ""}: ${r.payments} payments (${money(r.amountCents)}) — ${r.matched} matched to a claim, ${r.unmatched} held unmatched, ${r.alreadyHeld} already held${r.banked ? ", banked" : ""}${r.problems.length ? `; ${r.problems.slice(0, 2).join("; ")}` : ""}`;
       imported = !gate && r.payments > 0;
+    } else if (cls.kind === "copay_remit") {
+      /*
+       * A copay-voucher remittance, from the SFTP host or from an email. The same treatment as an
+       * 835 and for the same reason: the reader stores nothing from a statement whose rows do not
+       * add to the total it prints, or that prints no total at all to add to.
+       */
+      const { importCopayRemit } = await import("./copay-remit-store");
+      const c = await importCopayRemit(buf.toString("utf8"), fileName, { name: ctx.userName ?? "Automatic check", id: ctx.userId ?? undefined }, { bank: true, documentId: filed?.documentId ?? null });
+      const held = c.problems.find((p) => /^Held, nothing stored/i.test(p));
+      routeResult = held
+        ? held
+        : `${c.payer}${c.paidOn ? ` paid ${c.paidOn}` : ""}: ${c.payments} payment${c.payments === 1 ? "" : "s"} (${money(c.amountCents)}) — ${c.matched} settled a claim, ${c.beforeTheStart} for fills before this site's records begin, ${c.unmatched} held unmatched, ${c.alreadyHeld} already held${c.reversedPairs ? `, ${c.reversedPairs} paid and reversed` : ""}${c.banked ? ", banked" : ""}`;
+      imported = !held && c.payments > 0;
     } else if (cls.kind === "nadac") {
       const dir = nadacDir();
       await fs.mkdir(dir, { recursive: true });

@@ -7,7 +7,6 @@ import { pdfText } from "./pdf-text";
 import { triageByText } from "./contract-triage";
 import { classifySupplierDocument } from "./invoices";
 import { looksLikeX12Remittance } from "./business-docs";
-import { looksLikeCopayRemittance, whyCopayRemittance } from "./copay-remittance";
 import { readZipBounded } from "./zip-read";
 import { readFile } from "./files";
 import { CATEGORIES, recognise, ruleFromCorrection, categoryFor, type Evidence, type Recognition, type SenderHistory, type SenderRule } from "./intake-recognise";
@@ -140,15 +139,6 @@ export function contentVerdict(fileName: string, buf: Buffer, subject = ""): { v
     }
   }
   if (text) {
-    /*
-     * The copay voucher remittance, asked before the supplier sorter.
-     *
-     * BACKLOG item 24, recogniser side. It is asked first because it is the narrowest rule here —
-     * it wants the programme's own name — and because a statement of payments has a total and
-     * money columns, which is close enough to the supplier sorter's idea of a statement to be
-     * worth settling before that question is put.
-     */
-    if (looksLikeCopayRemittance(text, fileName)) return { verdict: "copay:remittance", why: whyCopayRemittance() };
     const sup = classifySupplierDocument(text, fileName, subject);
     if (sup.kind !== "unknown") return { verdict: `supplier:${sup.kind}`, why: sup.why };
     const triage = triageByText(text, fileName);
