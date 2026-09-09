@@ -248,7 +248,7 @@ export function packsFor(thousandths: number, packQty: number): number {
 export function offersForProduct(offers: Offer[], ndc11: string, groupOf?: (ndc11: string) => string | null): Offer[] {
   const group = groupOf?.(ndc11) ?? null;
   if (!group) return offersFor(offers, ndc11);
-  const ndcs = [...new Set(offers.filter((o) => o.ndc11 === ndc11 || groupOf!(o.ndc11) === group).map((o) => o.ndc11))];
+  const ndcs = ndcsByGroup(offers, groupOf!).get(group) ?? [ndc11];
   const best = new Map<string, Offer>();
   for (const n of ndcs) for (const o of offersFor(offers, n)) {
     const held = best.get(o.supplier);
@@ -257,10 +257,60 @@ export function offersForProduct(offers: Offer[], ndc11: string, groupOf?: (ndc1
   return [...best.values()];
 }
 
+/*
+ * The offer table indexed by NDC, and the NDCs of each product, built once per array.
+ *
+ * Both lookups below used to be scans. `offersFor` walked every offer to find one NDC's, and
+ * `offersForProduct` walked them all again to find a product's equivalents and then called
+ * `offersFor` once per equivalent — so pricing one dispensed drug cost a pass over the whole
+ * catalogue for every NDC in its group, and the planner prices two thousand drugs against fifty
+ * thousand catalogue rows. On 8 September that pinned a core for minutes at a time and the site
+ * answered nothing at all while it ran: a CPU profile of the live process put 93% of its samples
+ * inside these two functions and the equivalence lookup they call.
+ *
+ * Keyed on the array itself, so nothing has to be invalidated: the catalogue cache builds a new
+ * array whenever it reloads, and a WeakMap lets an old index go with the rows it indexed. The
+ * group index is keyed on the grouping function too, because each caller passes its own.
+ */
+const offerIndexes = new WeakMap<Offer[], Map<string, Offer[]>>();
+const groupIndexes = new WeakMap<Offer[], WeakMap<(ndc11: string) => string | null, Map<string, string[]>>>();
+
+function offersByNdc(offers: Offer[]): Map<string, Offer[]> {
+  const held = offerIndexes.get(offers);
+  if (held) return held;
+  const index = new Map<string, Offer[]>();
+  for (const o of offers) {
+    const list = index.get(o.ndc11);
+    if (list) list.push(o);
+    else index.set(o.ndc11, [o]);
+  }
+  offerIndexes.set(offers, index);
+  return index;
+}
+
+function ndcsByGroup(offers: Offer[], groupOf: (ndc11: string) => string | null): Map<string, string[]> {
+  let perFunction = groupIndexes.get(offers);
+  if (!perFunction) {
+    perFunction = new WeakMap();
+    groupIndexes.set(offers, perFunction);
+  }
+  const held = perFunction.get(groupOf);
+  if (held) return held;
+  const index = new Map<string, string[]>();
+  for (const ndc11 of offersByNdc(offers).keys()) {
+    const group = groupOf(ndc11);
+    if (!group) continue;
+    const list = index.get(group);
+    if (list) list.push(ndc11);
+    else index.set(group, [ndc11]);
+  }
+  perFunction.set(groupOf, index);
+  return index;
+}
+
 export function offersFor(offers: Offer[], ndc11: string): Offer[] {
   const best = new Map<string, Offer>();
-  for (const o of offers) {
-    if (o.ndc11 !== ndc11) continue;
+  for (const o of offersByNdc(offers).get(ndc11) ?? []) {
     if (o.packQty === null || o.packQty <= 0) continue;
     const held = best.get(o.supplier);
     /*
