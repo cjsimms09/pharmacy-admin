@@ -1268,6 +1268,20 @@ async function loadClaimFlags(scope: ClaimScope) {
          * is the revenue — which is why chasing the acquisition cost is the fix, not adjusting here.
          */
         uncheckedReportMarginCents: uncheckedFills.reduce((n, f) => n + (f.reportedMarginCents ?? 0), 0),
+        /*
+         * And which ones they are.
+         *
+         * The owner has asked twice what the $35.00 on this tile is. A figure with no name against
+         * it cannot be acted on or dismissed, so it gets asked about again — which is the whole
+         * cost of showing a number without saying what it belongs to.
+         */
+        uncheckedNamed: uncheckedFills.slice(0, 3).map((f) => ({
+          rxNumber: f.rxNumber,
+          fillNumber: f.fillNumber,
+          itemName: f.itemName,
+          dateFilled: f.dateFilled,
+          reportMarginCents: f.reportedMarginCents ?? 0,
+        })),
         balances: Math.abs(ours - later - report) <= 2 && off.length === 0,
       };
     })(),

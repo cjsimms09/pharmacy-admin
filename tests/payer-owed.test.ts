@@ -148,7 +148,12 @@ describe("grouping and ordering", () => {
     assert.equal(s.lines[0].name, "Express Scripts");
   });
 
-  test("the oldest unsettled claim is the one aged, not the newest", () => {
+  test("the payer's oldest claim is the one aged, not its newest", () => {
+    /*
+     * Deliberately not "oldest unsettled". Payments are summed per payer rather than matched claim
+     * by claim, so nothing here knows which claims a part-payment covered. What is printed is the
+     * longest anything of this payer's could have been waiting, which errs towards chasing.
+     */
     const s = owedByPayer([bill({ dateFilled: "2026-09-08" }), bill({ dateFilled: "2026-09-01" })], [], TODAY);
     assert.equal(s.lines[0].oldestOn, "2026-09-01");
     assert.equal(s.lines[0].daysWaiting, 8);

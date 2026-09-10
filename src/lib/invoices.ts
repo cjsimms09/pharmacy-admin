@@ -378,13 +378,67 @@ function isoFrom(us: string): string | null {
   return m ? `${m[3]}-${m[1]}-${m[2]}` : null;
 }
 
+/**
+ * Who sent this invoice, read off the page — subsidiaries before their parents.
+ *
+ * The owner, 10 September: "I believe it labeled the parmed invoice as cardinal." He was right, and
+ * the reason is that ParMed Pharmaceuticals is a Cardinal Health company. Its invoices carry
+ * Cardinal's name on the letterhead and the remit-to, ParMed was not on this list at all, and
+ * CARDINAL was — so every ParMed invoice was filed under a wholesaler the pharmacy does not buy
+ * from.
+ *
+ * ── Why it is not enough to add the name ──
+ *
+ * The list used to be one alternation matched against the first line containing any of it, and a
+ * regex alternation matches at the earliest **position**, not in the order the alternatives are
+ * written. A page carrying "Cardinal Health" above "ParMed Pharmaceuticals" would answer Cardinal
+ * however the alternatives were ordered. So each name is now its own pass over the whole document
+ * and the first pass that hits wins, which makes the order on this list the rule rather than a
+ * suggestion — the same lesson as the invoice number below, where the loose positional pattern had
+ * to be tried last or it confidently returned the order number.
+ *
+ * Every name above a parent is a company whose paper also carries the parent's:
+ *
+ *   ParMed  → Cardinal Health      Kinray → Cardinal Health      Anda → Teva
+ *
+ * ── What it costs to get wrong ──
+ *
+ * Not just a label. The supplier decides which returned goods policy times the stock — so a ParMed
+ * bottle was being counted down against Cardinal's terms or, more likely, against none at all,
+ * because the pharmacy has no Cardinal record for a policy to hang on. It also decides which
+ * catalogue the invoice price is compared against, and which supplier's record the invoice is filed
+ * under for an inspection.
+ */
+export function supplierNamedOn(text: string): string | null {
+  /*
+   * IPD and IPC print their names in full and nothing else does, so they are unambiguous wherever
+   * they appear. Everything after them is ordered subsidiary-first.
+   */
+  const inOrder: RegExp[] = [
+    /\bIndependent Pharmacy (?:Distributor|Cooperative)\b/i,
+    /\bPAR ?MED\b/i,
+    /\bKINRAY\b/i,
+    /\bANDA\b/i,
+    /\bMCKESSON\b/i,
+    /\bCARDINAL\b/i,
+    /\bCENCORA\b/i,
+    /\bAMERISOURCE\w*/i,
+    /\bMORRIS ?& ?DICKSON\b/i,
+    /\bHD SMITH\b/i,
+    /\bSMITH DRUG\b/i,
+    /\bBURLINGTON\b/i,
+  ];
+  for (const re of inOrder) {
+    const m = text.match(re);
+    if (m) return m[0];
+  }
+  return null;
+}
+
 export function classifyInvoiceText(text: string): TextVerdict {
   const lines = text.split("\n");
 
-  const supplier =
-    text.match(/\bIndependent Pharmacy (?:Distributor|Cooperative)\b/i)?.[0] ??
-    lines.find((l) => /\b(MCKESSON|CARDINAL|CENCORA|AMERISOURCE|MORRIS ?& ?DICKSON|HD SMITH|KINRAY|ANDA|SMITH DRUG|BURLINGTON)\b/i.test(l))
-      ?.match(/\b(MCKESSON|CARDINAL|CENCORA|AMERISOURCE\w*|MORRIS ?& ?DICKSON|HD SMITH|KINRAY|ANDA|SMITH DRUG|BURLINGTON)\b/i)?.[0] ?? null;
+  const supplier = supplierNamedOn(text);
   /*
    * The invoice number, and only the invoice number.
    *
