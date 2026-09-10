@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { getSettings } from "@/lib/settings";
-import { allSuppliers, addSupplier, updateSupplier, retireSupplier, importLegacyRules, addressesOf, normaliseAddresses } from "@/lib/suppliers-registry";
+import { allSuppliers, addSupplier, updateSupplier, retireSupplier, useReceiptAsInvoice, importLegacyRules, addressesOf, normaliseAddresses } from "@/lib/suppliers-registry";
 import { invoices, filingFor, money } from "@/lib/invoices";
 import { termsSummaryBySupplier } from "@/lib/supplier-terms-store";
 import { describeRebate, describeReturns } from "@/lib/supplier-terms";
@@ -158,6 +158,34 @@ export default async function SuppliersPage({
           active
             ? "Back in use. Their invoices will be recognised again."
             : "Retired. Every invoice already filed against them is kept — they are records the pharmacy has to produce for years after it stops buying.",
+        ),
+    );
+  }
+
+  /*
+   * Whether their PioneerRx receipt counts as the invoice.
+   *
+   * The owner: "there are a couple suppliers where I'd rather just use the pioneers invoice as
+   * the invoice (ie Xymogen supplier)."
+   *
+   * It changes nothing about the money — every PioneerRx purchase no invoice covers is already
+   * counted — only whether the pharmacy goes and asks for a document it is not going to get.
+   */
+  async function receiptIsInvoice(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const id = String(fd.get("id") ?? "");
+    const name = String(fd.get("name") ?? "that supplier");
+    const on = String(fd.get("on") ?? "") === "1";
+    await useReceiptAsInvoice(id, on);
+    await audit({ action: "supplier.receipt_is_invoice", userId: u.id, userName: u.name, entity: "supplier", entityId: id, details: `${name} on=${on}` });
+    revalidatePath("/suppliers");
+    redirect(
+      "/suppliers?ok=" +
+        encodeURIComponent(
+          on
+            ? `${name}: their PioneerRx receipt is the invoice. Their deliveries still count as purchases; nothing chases them for a document.`
+            : `${name}: waiting for their invoice again. Any delivery of theirs without one is shown on Supplier invoices.`,
         ),
     );
   }
@@ -429,6 +457,25 @@ export default async function SuppliersPage({
                         <input type="hidden" name="active" value={sup.active ? "no" : "yes"} />
                         <button className="btn btn-sm">{sup.active ? "Retire" : "Bring back"}</button>
                       </form>
+                      {/*
+                        And whether the pharmacy waits for a document from them at all. Xymogen
+                        never sends one; the receipt PioneerRx already holds is the record.
+                      */}
+                      <form action={receiptIsInvoice}>
+                        <input type="hidden" name="id" value={sup.id} />
+                        <input type="hidden" name="name" value={sup.name} />
+                        <input type="hidden" name="on" value={sup.invoiceFromPioneer ? "0" : "1"} />
+                        <button
+                          className="btn btn-sm"
+                          title={
+                            sup.invoiceFromPioneer
+                              ? "Go back to expecting an invoice by email from them."
+                              : "For a supplier who never emails an invoice: the PioneerRx receipt becomes the record and they are no longer chased for one."
+                          }
+                        >
+                          {sup.invoiceFromPioneer ? "Expect an invoice" : "Receipt is the invoice"}
+                        </button>
+                      </form>
                     </span>
                   )
                 }
@@ -440,7 +487,17 @@ export default async function SuppliersPage({
                   A supplier with no address recorded is a supplier whose invoices are quietly not
                   being filed, and nothing else on this page would reveal that.
                 */}
-                {sup.senderEmails.trim() ? (
+                {sup.invoiceFromPioneer ? (
+                  /*
+                   * Not a fault, so not in red. He has said their receipt is the record, and the
+                   * crit line below would tell him their invoices are quietly not being filed —
+                   * true, and no longer news. Xymogen had it, and it was the wrong news to give.
+                   */
+                  <p className="text-xs text-ink-2">
+                    Their PioneerRx receipt is the invoice. Deliveries are counted from PioneerRx and nothing waits
+                    on an email from them.
+                  </p>
+                ) : sup.senderEmails.trim() ? (
                   <p className="text-xs text-ink-2">
                     Sends from{" "}
                     {addressesOf(sup).map((a) => (

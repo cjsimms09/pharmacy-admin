@@ -828,6 +828,18 @@ export const suppliers = sqliteTable(
      */
     paymentTermsDays: integer("payment_terms_days"),
     /**
+     * True where this wholesaler's PioneerRx receipt is the invoice, because no invoice is coming.
+     *
+     * The owner: "there are a couple suppliers where I'd rather just use the pioneers invoice as
+     * the invoice." The money never depended on it — the cash account already counts every
+     * PioneerRx purchase no invoice covers — but the chasing did. A supplier that never emails one
+     * left a permanent row on the list of invoices to go and find, and a list that always has
+     * something unactionable on it is a list nobody reads.
+     *
+     * His decision, not a rule: it says which suppliers he is not waiting on.
+     */
+    invoiceFromPioneer: integer("invoice_from_pioneer", { mode: "boolean" }).notNull().default(false),
+    /**
      * The wholesaler whose compliance ratio moving spend away from costs a rebate band.
      *
      * Exactly one supplier is the primary. It is not inferred from spend: the pharmacy's contract
@@ -1445,6 +1457,52 @@ export const cashPlans = sqliteTable(
     addedAt: text("added_at").notNull().default(now()),
   },
   (t) => [index("cash_plans_bin_idx").on(t.bin)],
+);
+
+/**
+ * What PioneerRx already says a plan is, read in and kept as it was written.
+ *
+ * PioneerRx has been classifying these plans for years and this site had never looked. Two places
+ * in that database hold an answer, and they are not equally good, so both are kept and each row
+ * says which it came from:
+ *
+ *  - `plan_file` is `ThirdParty.ThirdPartyPlan`, the plan reference PioneerRx ships: 1,851 rows of
+ *    BIN and PCN with a plan name, the processor behind it and a type. Nobody here typed it.
+ *  - `pharmacy` is `ThirdParty.ThirdParty`, this pharmacy's own third-party records — 286 of them,
+ *    carrying whatever type somebody set when the payer was first billed.
+ *
+ * Deliberately a landing table rather than a write into `plan_groups`. The register holds findings
+ * a person made and this holds another system's opinion; folding the second into the first is
+ * exactly how a guess stops being distinguishable from a fact. `plan-evidence.ts` reads this and
+ * offers; a person still confirms.
+ *
+ * ── The trap in this data, recorded here because it is the whole difficulty ──
+ *
+ * "Standard" is PioneerRx's default, not a classification. GoodRx is filed Standard. This
+ * pharmacy's own cash plan is filed Standard. On September's claims 535 of them sit on a plan typed
+ * Standard, and counting those as classified would have been 535 claims of pure fiction. Only a
+ * type that is *not* Standard is somebody having answered — and even then only where every row for
+ * that BIN and PCN agrees, because BIN 004336 PCN ADV alone carries thirteen named plans, two of
+ * them Part D and eleven not.
+ */
+export const pioneerPlanTypes = sqliteTable(
+  "pioneer_plan_types",
+  {
+    id: text("id").primaryKey(),
+    bin: text("bin").notNull(),
+    /** Empty string rather than null: a plan-file row with no PCN stands for the whole BIN, and "" compares where null does not. */
+    pcn: text("pcn").notNull().default(""),
+    /** "plan_file" (PioneerRx's shipped reference) or "pharmacy" (set here). */
+    source: text("source", { enum: ["plan_file", "pharmacy"] }).notNull(),
+    planName: text("plan_name"),
+    processor: text("processor"),
+    carrierCode: text("carrier_code"),
+    /** PioneerRx's own word, untranslated: "Part D", "Standard", "Medicaid", "Worker's Comp", "Government", "Cash/AR", "Medicare Part B", "Documentary". */
+    planType: text("plan_type"),
+    isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+    readAt: text("read_at").notNull(),
+  },
+  (t) => [index("pioneer_plan_types_key_idx").on(t.bin, t.pcn), index("pioneer_plan_types_source_idx").on(t.source)],
 );
 
 export const payerBins = sqliteTable(
@@ -2435,6 +2493,27 @@ export const planGroups = sqliteTable(
     proposedClassification: text("proposed_classification", { enum: PLAN_CLASSES }),
     /** The sentence that produced it, quoting the document. A proposal with no source is a guess. */
     proposedFrom: text("proposed_from"),
+    /**
+     * Which source produced it, named: the payer's own payer sheet, PioneerRx's plan file,
+     * PioneerRx as set here, the PCN, the BIN listing, the payer's name. See EvidenceSource in
+     * plan-evidence.ts.
+     *
+     * A LOG of what the last run said, never the answer. Nothing renders these four proposal
+     * columns and nothing may start: they are only as fresh as the last "Look again", while the
+     * evidence behind them moves every time the PioneerRx feed runs or a payer sheet is added. The
+     * page and the Confirm button both recompute. See refreshProposals for the two occasions this
+     * exact divergence has already cost real work.
+     */
+    proposedSource: text("proposed_source"),
+    /**
+     * How well that source settles it: "stated" where a record says it in words, "indicated" where
+     * a code or a listing points at it hard enough to offer.
+     *
+     * Added because the sentence alone was not enough. A Part D plan named "Bc/bs Kansas Pdp" in
+     * PioneerRx's own plan file and a Part D read out of four letters of a PCN were being stored
+     * identically, and telling a fact from a guess is the entire job of this table.
+     */
+    proposedConfidence: text("proposed_confidence"),
     /** How it was established — a Form 5500 filing, the plan document, a call. Required to file. */
     basis: text("basis"),
     sourceUrl: text("source_url"),

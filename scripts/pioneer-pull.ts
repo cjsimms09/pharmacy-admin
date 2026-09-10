@@ -33,7 +33,7 @@
  */
 import "dotenv/config";
 
-type Feed = "on-hand" | "claims" | "invoices" | "retail" | "suppliers" | "catalogue";
+type Feed = "on-hand" | "claims" | "invoices" | "retail" | "suppliers" | "catalogue" | "plan-types";
 import type { DispensedRow, PayerSide } from "../src/lib/dispensed-export";
 
 async function main() {
@@ -52,6 +52,15 @@ async function main() {
         // Monday, or never pulled. 238,952 catalogue rows is the heavy one and the owner said weekly
         // is enough unless it turns out to be free.
         ...(new Date().getDay() === 1 || !s.pioneer_pull_catalogue_on ? (["suppliers", "catalogue"] as Feed[]) : []),
+        /*
+         * The plan types, weekly with the other reference data.
+         *
+         * Payers do not change what kind of plan they are from one Tuesday to the next, and this is
+         * two small tables — but a new third party set up at the counter on Monday is a plan the
+         * register cannot classify until this has run, so it rides along with the catalogue rather
+         * than waiting for somebody to remember it.
+         */
+        ...(new Date().getDay() === 1 || !s.pioneer_pull_plan_types_on ? (["plan-types"] as Feed[]) : []),
       ];
 
   if (due.length === 0) {
@@ -86,6 +95,16 @@ async function main() {
         const r = await pullSuppliers();
         await setSetting("pioneer_pull_suppliers_result", `${new Date().toISOString()}: ${r}`);
         console.log(`suppliers: ${r} (${Date.now() - started}ms)`);
+      } else if (feed === "plan-types") {
+        const { pullPlanTypes } = await import("../src/lib/pioneer-plans");
+        const c = await pullPlanTypes();
+        // The third number is the one that matters. The first two are row counts; "typed" is how
+        // many of them actually say anything, because PioneerRx defaults every record to "Standard"
+        // and a Standard row is nobody having answered.
+        const r = `${c.planFile} plan-file rows, ${c.pharmacy} of the pharmacy's own; ${c.typed} carry a type that is not PioneerRx's "Standard" default`;
+        await setSetting("pioneer_pull_plan_types_on", today);
+        await setSetting("pioneer_pull_plan_types_result", `${new Date().toISOString()}: ${r}`);
+        console.log(`plan-types: ${r} (${Date.now() - started}ms)`);
       } else if (feed === "catalogue") {
         const r = await pullCatalogue();
         await setSetting("pioneer_pull_catalogue_on", today);
@@ -94,7 +113,7 @@ async function main() {
       }
     } catch (e) {
       const why = e instanceof Error ? e.message : String(e);
-      await setSetting(feed === "on-hand" ? "pioneer_pull_on_hand_result" : feed === "claims" ? "pioneer_pull_claims_result" : feed === "invoices" ? "pioneer_pull_invoices_result" : feed === "retail" ? "pioneer_pull_retail_result" : feed === "suppliers" ? "pioneer_pull_suppliers_result" : "pioneer_pull_catalogue_result", `${new Date().toISOString()}: failed: ${why}`);
+      await setSetting(feed === "on-hand" ? "pioneer_pull_on_hand_result" : feed === "claims" ? "pioneer_pull_claims_result" : feed === "invoices" ? "pioneer_pull_invoices_result" : feed === "retail" ? "pioneer_pull_retail_result" : feed === "suppliers" ? "pioneer_pull_suppliers_result" : feed === "plan-types" ? "pioneer_pull_plan_types_result" : "pioneer_pull_catalogue_result", `${new Date().toISOString()}: failed: ${why}`);
       console.error(`${feed}: failed: ${why}`);
     }
   }

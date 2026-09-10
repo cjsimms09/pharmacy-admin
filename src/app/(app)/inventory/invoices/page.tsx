@@ -37,11 +37,14 @@ import {
   recheckFiledInvoices,
   sumOf,
   money,
+  invoicesStillOwed,
+  invoicesOnFileTwice,
 } from "@/lib/invoices";
+import { stillToChase, fromBeforeWeWatched } from "@/lib/invoices-owed";
 import { invoiceCompliance, RETENTION_YEARS } from "@/lib/invoice-compliance";
 import { setSetting } from "@/lib/settings";
 import { getSettings } from "@/lib/settings";
-import { allSuppliers, addressesOf } from "@/lib/suppliers-registry";
+import { allSuppliers, addressesOf, useReceiptAsInvoice } from "@/lib/suppliers-registry";
 import { PageHeader, Card, Figure, Notice, Empty } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import { INVOICE_SCHEDULES, type InvoiceSchedule } from "@/db/schema";
@@ -162,6 +165,34 @@ export default async function InvoicesPage({
   const namedMisfiled = misfiled.filter((m) => m.belongsIn !== null);
   const noAmountCount = await missingTotals();
   const noLinesCount = await invoicesWithoutLines();
+  /*
+   * What PioneerRx booked in that no invoice covers.
+   *
+   * The independent count. Every other figure on this page is read off the invoices themselves,
+   * so none of them can tell an invoice that never arrived from one that does not exist.
+   */
+  const owed = await invoicesStillOwed();
+  const chase = stillToChase(owed);
+  const backlog = fromBeforeWeWatched(owed);
+  /*
+   * One bill on file twice, which the cash account adds twice.
+   *
+   * The owner asked for this in September — "there is a duplicate ipd invoice in there and I dont
+   * have a way to delete.." — and the missing button was the smaller half of it. Nothing was
+   * telling him either: the duplicate check keyed on the invoice number, IPD's carry none, and both
+   * rows are the same PDF byte for byte.
+   */
+  const filedTwice = canManage ? await invoicesOnFileTwice() : [];
+  /*
+   * Only the ones worth his attention get a row.
+   *
+   * The owner, after the first run of this put $142,036.21 on the page: "We are going to ignore
+   * those alerts for invoices from beginning of this month.. that was just to get them in from
+   * before this site was setup." So the pre-setup backlog is one line at the foot rather than
+   * seven rows at the top, and what is left is a wholesaler that owes a document, plus the ones he
+   * has already settled — those stay visible so the decision can be seen and undone.
+   */
+  const owedRows = owed.filter((l) => l.waiting > 0 || l.receiptIsTheInvoice);
   const unreceipted = await awaitingReceipt();
   const onlyUnreceipted = sp.unreceipted === "1";
   const compliance = complianceRows;
@@ -357,6 +388,54 @@ export default async function InvoicesPage({
    * compliance panel permanently red about a record that exists. Naming the system settles the
    * line honestly and stops the asking.
    */
+  /*
+   * Removes one copy of a bill that is on file twice.
+   *
+   * The same path the per-row delete uses, so the document, the invoice record and every line read
+   * off it go together. A copy left behind with its lines removed would be the worst of both: the
+   * money still counted twice and the item lines gone from the one that stayed.
+   */
+  async function removeCopy(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const id = String(fd.get("id") ?? "");
+    const { message } = await purgeFromInvoiceFile(id, u);
+    revalidatePath("/inventory/invoices");
+    redirect("/inventory/invoices?ok=" + encodeURIComponent(message));
+  }
+
+  /*
+   * "there are a couple suppliers where I'd rather just use the pioneers invoice as the invoice."
+   *
+   * On the line with the problem, because the alternative is the paragraph this project already
+   * printed once: go to Suppliers, find them, open terms, tick it, come back.
+   */
+  async function receiptIsInvoice(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const id = String(fd.get("id") ?? "");
+    const name = String(fd.get("name") ?? "that supplier");
+    const on = String(fd.get("on") ?? "") === "1";
+    await useReceiptAsInvoice(id, on);
+    await audit({
+      action: "supplier.receipt_is_invoice",
+      userId: u.id,
+      userName: u.name,
+      entity: "supplier",
+      entityId: id,
+      details: on ? `${name}: the PioneerRx receipt is the invoice` : `${name}: waiting for their invoice again`,
+    });
+    revalidatePath("/inventory/invoices");
+    redirect(
+      "/inventory/invoices?ok=" +
+        encodeURIComponent(
+          on
+            ? `${name}: their PioneerRx receipt is the invoice. Deliveries still count as purchases — they are no longer chased for a document.`
+            : `${name} is on the list again: any delivery of theirs with no invoice will be shown here.`,
+        ),
+    );
+  }
+
   async function receiptKeptIn(fd: FormData) {
     "use server";
     const u = await requireManager();
@@ -813,6 +892,129 @@ export default async function InvoicesPage({
               </li>
             ))}
           </ul>
+        </Card>
+      )}
+
+      {/*
+        One bill, on file twice.
+
+        Above the missing-invoice card deliberately: money the account is counting twice is a wrong
+        figure today, and a document that has not arrived is a record to collect. Only one of those
+        makes the September numbers wrong.
+      */}
+      {filedTwice.length > 0 && (
+        <Card
+          tone="crit"
+          title="The same invoice, on file twice"
+          count={filedTwice.length}
+          className="mt-4 mb-6"
+          subtitle="A wholesaler issues one bill once. Two rows carrying it are one purchase counted twice, and the cash account adds both — so this is money out of the month that never left the bank."
+        >
+          <ul className="rows">
+            {filedTwice.map((g) => (
+              <li key={g.key} className="py-2">
+                <div className="flex flex-wrap items-baseline gap-2">
+                  <span className="badge badge-crit tabular-nums">{money(g.overCents)} counted twice</span>
+                  <span className="text-sm">{g.says}</span>
+                </div>
+                <ul className="mt-1 space-y-1">
+                  {g.copies.map((c, n) => (
+                    <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 text-xs text-ink-3">
+                      <span>
+                        {n === 0 ? "Keeping" : "Copy"} &middot; {c.invoiceDate ?? "no date"} &middot;{" "}
+                        <span className="tabular-nums">{money(c.totalCents ?? 0)}</span> &middot; {c.linesRead ?? 0} item lines
+                        {c.sameDocument && n > 0 && " · identical file"}
+                      </span>
+                      {n > 0 && (
+                        <form action={removeCopy}>
+                          <input type="hidden" name="id" value={c.id} />
+                          <button
+                            className="btn btn-sm border-crit text-crit hover:bg-crit-soft"
+                            title="Deletes this copy, its document and every line read off it. The one above is kept."
+                          >
+                            Remove this copy
+                          </button>
+                        </form>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
+      {/*
+        Did every invoice actually arrive?
+
+        The owner: "are we using pioneers receipts to make sure we are getting invoices from
+        suppliers? If it was received by pioneer than we should be receiving the invoice."
+
+        Nothing else on this page can answer that. Every count above is read off the invoices the
+        pharmacy holds, so an invoice that never came is invisible to all of them — the file looks
+        complete because it is consistent with itself. PioneerRx booked the delivery in at the
+        counter, which makes its purchase list the only independent record of what was billed.
+      */}
+      {(owedRows.length > 0 || backlog.invoices > 0) && (
+        <Card
+          tone={chase.invoices > 0 ? "warn" : "ok"}
+          title="Delivered, and no invoice for it"
+          className="mt-4 mb-6"
+          subtitle="PioneerRx records every delivery booked in at the counter. Anything it has that the invoice file has not is a wholesaler that has not sent one — the only check here that does not read the invoices to ask about the invoices."
+        >
+          <p className="text-sm">
+            {chase.invoices === 0 ? (
+              <>
+                Every delivery PioneerRx has recorded since this started catching invoices has one on file.
+              </>
+            ) : (
+              <>
+                <b className="tabular-nums">{money(chase.cents)}</b> was delivered and never invoiced &mdash;{" "}
+                {chase.invoices} deliver{chase.invoices === 1 ? "y" : "ies"} from {chase.suppliers} supplier
+                {chase.suppliers === 1 ? "" : "s"}. The money is counted either way; what is missing is the document.
+              </>
+            )}
+          </p>
+          <ul className="rows mt-2">
+            {owedRows.map((l) => (
+              <li key={l.supplierId ?? l.supplier} className="flex flex-wrap items-center justify-between gap-2 py-1.5">
+                <div className="min-w-0">
+                  <span className="text-sm font-medium">{l.supplier}</span>
+                  {l.receiptIsTheInvoice ? (
+                    <span className="badge ml-2">receipt is the invoice</span>
+                  ) : (
+                    <span className="badge badge-warn ml-2 tabular-nums">{money(l.waitingCents)}</span>
+                  )}
+                  <p className="mt-0.5 text-xs text-ink-3">{l.says}</p>
+                </div>
+                {canManage && l.supplierId && (
+                  <form action={receiptIsInvoice} className="shrink-0">
+                    <input type="hidden" name="id" value={l.supplierId} />
+                    <input type="hidden" name="name" value={l.supplier} />
+                    <input type="hidden" name="on" value={l.receiptIsTheInvoice ? "0" : "1"} />
+                    <button
+                      className="btn btn-sm"
+                      title={
+                        l.receiptIsTheInvoice
+                          ? "Puts them back on this list, so any delivery of theirs without an invoice is shown."
+                          : "For a supplier who never emails one: their PioneerRx receipt becomes the record and they stop being chased. Their deliveries still count as purchases."
+                      }
+                    >
+                      {l.receiptIsTheInvoice ? "Wait for their invoice" : "Their receipt is the invoice"}
+                    </button>
+                  </form>
+                )}
+              </li>
+            ))}          </ul>
+          {backlog.invoices > 0 && (
+            <p className="mt-2 text-xs text-ink-3">
+              {backlog.invoices} deliveries from before this started catching invoices, worth{" "}
+              <span className="tabular-nums">{money(backlog.cents)}</span>, are left off this list. Loading them was
+              how the money from before September got counted, and it is counted &mdash; they are not something anyone
+              needs to chase.
+            </p>
+          )}
         </Card>
       )}
 

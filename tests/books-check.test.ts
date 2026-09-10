@@ -2,7 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { monthlyPL, type PLInputs } from "../src/lib/profit-and-loss";
 import { parsePeriod, combineMonths } from "../src/lib/ledger";
-import { countedTwice, countedTwiceOver, feedsInTheBooks, booksBalance, basisDifference } from "../src/lib/books-check";
+import { countedTwice, countedTwiceOver, feedsInTheBooks, booksBalance, basisDifference, invoicesFiledTwice } from "../src/lib/books-check";
 
 /*
  * The owner's three requirements of his books, each one turned into something that can fail.
@@ -362,5 +362,72 @@ describe("the fold: one period, named in one place", () => {
     const rx = over.find((r) => r.what === "What the prescriptions took")!;
     assert.equal(rx.bothPresent, false);
     assert.match(rx.says, /nothing had to be kept out/);
+  });
+});
+
+/**
+ * One bill on file twice.
+ *
+ * Every other rule in the register is about two feeds carrying one dollar. This is a single feed
+ * carrying it twice, and it is not hypothetical: IPD's invoice is on file twice at $3,255.70, the
+ * two rows are the same PDF byte for byte, and neither carries a number this reader can find — so
+ * the check that exists to catch exactly this could not see the one instance of it in the file.
+ */
+describe("a wholesaler's bill on file twice", () => {
+  const inv = (invoiceNumber: string | null, totalCents: number, fingerprint: string | null = null) => ({
+    invoiceNumber,
+    totalCents,
+    invoiceDate: "2026-09-08",
+    fingerprint,
+  });
+
+  test("the same number twice is one purchase counted twice", () => {
+    const t = invoicesFiledTwice([inv("7656141698", 100_000), inv("7656141698", 100_000)]);
+    assert.equal(t.length, 1);
+    assert.equal(t[0].copies, 2);
+    assert.equal(t[0].overCents, 100_000, "the first is the bill; the second is money the month carries twice");
+  });
+
+  test("two different numbers are two bills", () => {
+    assert.deepEqual(invoicesFiledTwice([inv("111", 100_000), inv("222", 100_000)]), []);
+  });
+
+  /*
+   * This is what the check used to miss. It skipped anything with no number, on the reasoning that
+   * a document nothing can match is not a duplicate — and the one real duplicate in the file was
+   * exactly that. The cash account added both copies and the register said nothing.
+   */
+  test("the same document twice is a duplicate even when neither copy carries a number", () => {
+    const sha = "9c9d450a6822d73a9ebf1d09ac46b1540af2e027f2a32cfd7936fb72952b4a11";
+    const t = invoicesFiledTwice([inv(null, 325_570, sha), inv(null, 325_570, sha)]);
+    assert.equal(t.length, 1);
+    assert.equal(t[0].overCents, 325_570);
+  });
+
+  test("and is described by what he can see on it, never by a fingerprint", () => {
+    const sha = "9c9d450a";
+    const t = invoicesFiledTwice([inv(null, 325_570, sha), inv(null, 325_570, sha)]);
+    assert.doesNotMatch(t[0].number, /9c9d450a/, "a hash means nothing to anybody reading the page");
+    assert.match(t[0].number, /2026-09-08/);
+  });
+
+  test("two different documents for the same money are two bills", () => {
+    assert.deepEqual(invoicesFiledTwice([inv(null, 325_570, "aaa"), inv(null, 325_570, "bbb")]), []);
+  });
+
+  /*
+   * A row with neither a number nor a document behind it is genuinely unmatchable. Calling it a
+   * duplicate of every other such row would invent a finding, which is worse than missing one.
+   */
+  test("a row with no number and no document is not matched to anything", () => {
+    assert.deepEqual(invoicesFiledTwice([inv(null, 325_570, null), inv(null, 325_570, null)]), []);
+  });
+
+  test("the number wins over the fingerprint, so one PDF sent twice under two numbers is two bills", () => {
+    assert.deepEqual(invoicesFiledTwice([inv("111", 100_000, "same"), inv("222", 100_000, "same")]), []);
+  });
+
+  test("nothing on file more than once is an empty list, not a nought", () => {
+    assert.deepEqual(invoicesFiledTwice([inv("111", 100_000)]), []);
   });
 });
