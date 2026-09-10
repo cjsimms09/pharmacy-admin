@@ -57,8 +57,13 @@ findings, so the owner reads and applies on the manual page himself. Three parag
 `[PIC TO CONFIRM]` in the text. Owner's answers so far are recorded on the findings (answerFinding): no
 patient-returned controls (not a collector); delivery by USPS and a contract driver (no BAA on the register —
 put to him); inventory date not settled; reverse distributor for everything, nothing destroyed on site. Open
-questions to him: 48 or 72 hours to produce a record; what happens to a broken or spilled controlled
-substance; whether the pharmacy handles manufacturer samples. K.A.R. 68-20-16 verified (exact count of every
+questions to him: none of the three left. 48/72 hours settled (no clock in either rule; the manual states
+none). Broken or spilled controlled substances settled (retained in the stock bottle until the reverse
+distributor destroys or returns them). **Manufacturer samples settled on 10 September: "We do not keep
+samples."** Nothing was added to the manual for it and nothing should be — a standard says what the pharmacy
+does, and a manual is not required to enumerate what it does not do. The finding is answerable as not
+applicable rather than as a gap. Recorded here because the question will be asked again, by an inspector or by
+a session that finds the empty space and reads it as an omission. K.A.R. 68-20-16 verified (exact count of every
 non-liquid form of every schedule and drugs of concern, same calendar date, 375 days).
 
 **NADAC.** 2's nightly proof (`scripts/prove-nadac.ts`, setting `nadac_proof`) ran once on the real files: every
