@@ -16,7 +16,8 @@ Short answers, before the detail:
 
 1. **A reversal before pickup is handled correctly.** A return *after* the sale is not: it silently
    rewrites a month that has already been reported, and the date needed to do it properly is stored
-   and never read.
+   and never read. **The owner has since decided how it should behave — "month it came back" — and
+   the rule that follows from it is written out below.**
 2. **A payer's own reversal on an 835 cannot attach to the claim it reverses**, by an explicit rule
    that is right for every other case.
 3. **No code on an 835 is understood by this site.** Claim-level CAS adjustments are parsed and
@@ -70,9 +71,46 @@ matches are the four writes. It is the exact shape of the trap `252d37c` names f
 a stored column nothing reads. Here it is not a component of something else, it is simply unused,
 and it is the one field that would let a return be booked in the period it happened.
 
-Whether a return should be booked in the original month or the month it came back is an accounting
-decision, not a coding one, and both are defensible — but *silently* restating a closed month is
-not either of them. At minimum the account should say so.
+### The owner has decided: the month it came back
+
+Asked which of the two it should be, he answered: **"Month it came back."** So the month of the sale
+keeps its revenue and its cost and never moves again, and the month of the return carries the
+negative. That is the answer that makes a reported month final, which is the property the accounts
+did not have.
+
+Written as a rule, it is two lines rather than one, and every case falls out of them:
+
+```
+sold in M                                → + revenue, + cost      (whether or not it came back later)
+reversed in M, and it had been sold      → − revenue, − cost
+```
+
+- **Never collected** — no sold date, so it appears in neither line. The bin case, unchanged, and
+  right: nothing was earned, so nothing is taken back.
+- **Sold and returned inside one month** — it is in both lines and nets to nothing, which is the
+  true answer for that month. It should still be *counted*, because forty returns netting to zero is
+  a fact about the month worth seeing.
+- **Sold in August, returned in September** — August keeps both figures for good; September carries
+  the negative. This is the case the decision is about.
+- **Reversed with no reversal date** — cannot be placed, so it is named rather than guessed, in the
+  posture the rest of this site takes. Query 21 says whether any such row exists.
+
+Two things follow that the decision does not settle by itself.
+
+**It makes the loading window a prerequisite rather than a separate finding.** September's account
+now has to see a fill *dispensed in August* in order to reverse it out, and `loadShared` selects
+fills on `date_filled` inside the months asked for
+(`docs/audits/2026-09-10-sold-month-window.md`). Worse than for the sold-month case: a return can
+arrive months after the fill, so widening the window's front edge by one month — which is what I
+proposed there — is not enough here. The clean version kills both findings at once: **select fills
+on `completed_at` or `reversed_on` falling inside the window, rather than on `date_filled` at all.**
+`date_filled` is not a date either account is keyed on any more.
+
+**It does not settle the cost.** Taking the cost back out of the month assumes the drug returns to
+the saleable shelf. If a drug that has left with a patient cannot be restocked, then the return
+should carry `− revenue` and **no** `− cost` at all: the stock was consumed, and what was gross
+profit becomes a loss of the whole acquisition cost. The two treatments differ by exactly the cost
+of the drug on every returned fill, and this is still an open question for the owner.
 
 ### The 835 side cannot attach the payer's reversal to the claim it reverses
 
@@ -228,6 +266,8 @@ Queries for the machine, added to the list under "Open items" in `HANDOFF.md`:
 
 - how many claims are reversed with a `completed_at` set — that is the size of the sold-and-returned
   case, and it decides whether any of Part 1 is urgent;
+- **(21)** how many reversed claims have a `completed_at` and **no** `reversed_on` — the rows the
+  new rule cannot place, which have to be named on the account rather than guessed at;
 - of those, how many were reversed in a later month than they were sold in, which is the count of
   months that have silently changed;
 - how many `claim_payments` rows are negative, and how many carry no `claim_id`;

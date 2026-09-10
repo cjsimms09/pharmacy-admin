@@ -800,6 +800,55 @@ pass, 0 fail) and `npm run build` (clean).
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
+### From B to 1 — THE OWNER HAS DECIDED: a return is booked in the month it came back (10 September)
+
+Asked whether a fill sold in one month and returned in another belongs to the month of the sale or
+the month of the return, he answered: **"Month it came back."**
+
+So **a reported month is final.** August keeps the revenue and the cost of a fill it sold, for good,
+and September carries the negative. This is the property the accounts do not have today — today the
+fill simply leaves August, and August quietly becomes a different number.
+
+The rule is two lines, and every case falls out of them:
+
+```
+sold in M                           → + revenue, + cost     (whether or not it came back later)
+reversed in M, and it had been sold → − revenue, − cost
+```
+
+- **Never collected** — no sold date, so it is in neither line. The bin case, unchanged and right.
+- **Sold and returned inside one month** — in both lines, netting to nothing, which is the true
+  answer. Still worth *counting*: forty returns netting to zero is a fact about the month.
+- **Sold in August, returned in September** — August never moves; September carries the negative.
+- **Reversed with no reversal date** — cannot be placed, so it is named rather than guessed. Query
+  21 says whether any such row exists.
+
+**Two things this changes for you, and one still open.**
+
+**1. It makes the loading window a prerequisite, not a separate finding.** September's account now
+has to see a fill *dispensed in August* in order to reverse it out, and `loadShared` selects fills
+on `date_filled` inside the months asked for. Worse than for the sold-month case: a return can
+arrive months after the fill, so widening the front edge by one month — what I proposed in
+`2026-09-10-sold-month-window.md` — is **not enough here**. The clean version kills both findings
+at once: **select on `completed_at` or `reversed_on` falling inside the window, and not on
+`date_filled` at all.** `date_filled` is no longer a date either account is keyed on.
+
+**2. `reversedOn` stops being a column nothing reads** and becomes the key to the second line. It is
+already written on all three reversal paths (`claims.ts:470`, `:489`, `:701`), so nothing new has to
+arrive for it — same shape as `completedAt` in `a19d100`.
+
+**3. Still open, and it is his to answer, not ours: the cost.** Taking the cost back out assumes the
+drug goes back on the saleable shelf. If a drug that has left with a patient cannot be restocked,
+the return carries `− revenue` and **no** `− cost`: the stock was consumed, and the whole
+acquisition cost becomes a loss rather than a reversed cost of goods. **The two treatments differ by
+the full cost of the drug on every returned fill.** I have not assumed either. Worth putting to him
+with the Kansas position beside it, which is a manual question and yours.
+
+The worked rule, with the 835 and money sides of the same event, is in
+`docs/audits/2026-09-10-reversals-and-835-codes.md`. I have still not touched `fills.ts` or
+`profit-and-loss.ts` — money logic, yours, and I would rather not bake in an assumption about the
+cost while that half is unanswered.
+
 ### From B to 1 — RELAY FROM THE OWNER: remits, 835s and the whole of how this pharmacy is run (10 September)
 
 **This is the owner's instruction, passed to you because he asked me to pass it on.** His words,
@@ -1519,6 +1568,14 @@ needs a file sent anywhere — counts, shapes and presence/absence only.**
 20. *Does any contract name a code beside a fee?* On a sample of contracts already extracted, does
     the text near a named fee carry a code the remittance would use. If none do, the contract half
     of BACKLOG 2b-v is not the answer and the codes have to come from the payer manuals instead.
+
+**The return rule (added 10 September, after the owner's decision).**
+
+21. *Can every return be placed?* `select count(*) from claims where status = 'reversed' and
+    completed_at is not null and (reversed_on is null or reversed_on = '')` — reversed, sold, and
+    with no date to book the return against. Under the new rule these are the only rows the account
+    cannot place, and they have to be named on it rather than guessed at. If the count is zero the
+    rule is total, which is worth knowing before it is built.
 
 **And one file, if it can be spared.** A single real 835 with every identifier changed per
 `fixtures/README.md` — Rx numbers, NPI, member and payer ids. There is none in the repository, so
