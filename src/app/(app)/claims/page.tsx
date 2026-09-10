@@ -375,6 +375,16 @@ export default async function ClaimsPage({
                 action: "See them",
                 why: `This site makes these dispensings ${formatCents(flags.balance.ourMarginCents)} and PioneerRx makes them ${formatCents(flags.balance.reportMarginCents)}. Both are computed from the same rows, so a column is not where this reader thinks it is.${flags.unreconciled.length > 0 ? ` Worst is Rx ${flags.unreconciled[0].rxNumber}${flags.unreconciled[0].fillNumber !== null ? `-${flags.unreconciled[0].fillNumber}` : ""}${flags.unreconciled[0].itemName ? ` (${flags.unreconciled[0].itemName})` : ""}, out by ${formatCents(Math.abs(flags.unreconciled[0].unreconciledCents ?? 0))} — open "Why is this a loss?" on it and send me the box.` : ""}`,
               }
+            : flags.balance.unchecked > 0
+              ? {
+                  key: "balance",
+                  tone: "warn" as const,
+                  amount: formatCents(flags.balance.uncheckedReportMarginCents),
+                  title: `The books balance on everything that can be checked — ${flags.balance.unchecked} dispensing${flags.balance.unchecked === 1 ? "" : "s"} cannot be`,
+                  href: "#loss",
+                  action: "See them",
+                  why: `This site and the report agree to the cent on ${(flags.balance.checkedFills ?? 0).toLocaleString("en-US")} dispensings. The other ${flags.balance.unchecked} carry no acquisition cost on the report, so there is nothing to compare — PioneerRx shows ${formatCents(flags.balance.uncheckedReportMarginCents)} of gross profit on them, which is the whole of the revenue because it has no cost either. That is a missing figure, not a disagreement, and the fix is the cost rather than the account.`,
+                }
             : {
                 key: "balance",
                 tone: "ok" as const,

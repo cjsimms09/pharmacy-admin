@@ -1033,7 +1033,23 @@ async function loadClaimFlags(scope: ClaimScope) {
       onAccount: c.onAccount,
       status: c.status,
       // A reversal kept because it matched nothing: negative money against a fill never counted.
-      unmatchedReversal: (c.remitCents ?? 0) < 0 && !c.reversalKey,
+      /*
+       * A negative remit is money going to the plan, and there are two reasons for that.
+       *
+       * The plan taking back what it paid — a reversal — or the plan charging a fee it never paid
+       * anything to offset. Only the first cancels a fill. The second leaves a real dispensing
+       * where the patient paid at the counter and the plan billed the pharmacy for the privilege:
+       * $2.25, $3.00, $4.00, $5.00 a claim, on Clonazepam and Pantoprazole and a Dotti patch.
+       *
+       * The sign alone cannot tell them apart, and it was being asked to. Fourteen live fills were
+       * being dropped from every figure in the building — the script count, the payer table, the
+       * loss list, the NADAC comparison, the Kansas floor check — on the strength of it. Together
+       * they carry $382.14 of patient money against $78.30 of plan fees.
+       *
+       * The status is what says a fill was reversed, because that is what it is for. A row still
+       * marked paid is a fill, whatever its remit column does.
+       */
+      unmatchedReversal: (c.remitCents ?? 0) < 0 && !c.reversalKey && c.status !== "paid",
     })),
     later,
   );
@@ -1209,11 +1225,31 @@ async function loadClaimFlags(scope: ClaimScope) {
      * it. This does, on every fill, every day, without anybody having to look.
      */
     balance: (() => {
-      const ours = fills.reduce((n, f) => n + (f.marginCents ?? 0), 0);
-      const later = fills.reduce((n, f) => n + f.laterPaymentsCents, 0);
-      const report = fills.reduce((n, f) => n + (f.reportedMarginCents ?? 0), 0);
-      const off = fills.filter((f) => f.agreesWithReport === false);
-      const unchecked = fills.filter((f) => f.agreesWithReport === null).length;
+      /*
+       * Only over the fills both sides can price.
+       *
+       * The identity is a comparison, and a comparison needs two figures. A fill PioneerRx printed
+       * no acquisition cost for has no margin on this side — deliberately, since a bottle of unknown
+       * cost is not a free one — while the report still carries a gross profit for it, being the
+       * whole of the revenue with nothing taken off. Summing both sides across those fills subtracts
+       * a number from nothing and calls the remainder a discrepancy.
+       *
+       * It produced a message that contradicted itself on the owner's screen: "the books do not
+       * balance — 0 fills disagree with the report", $35.00 out. Nothing disagreed. The check had
+       * counted five fills as uncheckable and then included them in the arithmetic anyway. Over the
+       * 1,884 fills that can be checked the identity holds exactly — $17,564.67 less nothing less
+       * $17,564.67 — and the five carry $3,467.69 of report-side gross profit that this side has
+       * never claimed.
+       *
+       * So they are named instead. What cannot be checked is a gap in the evidence, and a tripwire
+       * that reports it as an error is a tripwire somebody learns to walk past.
+       */
+      const checkable = fills.filter((f) => f.agreesWithReport !== null);
+      const ours = checkable.reduce((n, f) => n + (f.marginCents ?? 0), 0);
+      const later = checkable.reduce((n, f) => n + f.laterPaymentsCents, 0);
+      const report = checkable.reduce((n, f) => n + (f.reportedMarginCents ?? 0), 0);
+      const off = checkable.filter((f) => f.agreesWithReport === false);
+      const uncheckedFills = fills.filter((f) => f.agreesWithReport === null);
       return {
         ourMarginCents: ours,
         laterCents: later,
@@ -1221,7 +1257,17 @@ async function loadClaimFlags(scope: ClaimScope) {
         differenceCents: ours - later - report,
         fillsOff: off.length,
         /** Fills the report gave nothing to check against: no gross profit, or no acquisition cost. */
-        unchecked,
+        unchecked: uncheckedFills.length,
+        /** How many the identity actually ran over, so the notice can say what was proved. */
+        checkedFills: checkable.length,
+        /**
+         * What the report claims as gross profit on those, which this side does not.
+         *
+         * Stated so the difference between "we disagree" and "we cannot tell" is a figure rather
+         * than a footnote. On every one of these PioneerRx has no cost either, so its gross profit
+         * is the revenue — which is why chasing the acquisition cost is the fix, not adjusting here.
+         */
+        uncheckedReportMarginCents: uncheckedFills.reduce((n, f) => n + (f.reportedMarginCents ?? 0), 0),
         balances: Math.abs(ours - later - report) <= 2 && off.length === 0,
       };
     })(),
@@ -1363,7 +1409,23 @@ async function loadFills(from: string, to: string) {
       onAccount: c.onAccount,
       status: c.status,
       // A reversal kept because it matched nothing: negative money against a fill never counted.
-      unmatchedReversal: (c.remitCents ?? 0) < 0 && !c.reversalKey,
+      /*
+       * A negative remit is money going to the plan, and there are two reasons for that.
+       *
+       * The plan taking back what it paid — a reversal — or the plan charging a fee it never paid
+       * anything to offset. Only the first cancels a fill. The second leaves a real dispensing
+       * where the patient paid at the counter and the plan billed the pharmacy for the privilege:
+       * $2.25, $3.00, $4.00, $5.00 a claim, on Clonazepam and Pantoprazole and a Dotti patch.
+       *
+       * The sign alone cannot tell them apart, and it was being asked to. Fourteen live fills were
+       * being dropped from every figure in the building — the script count, the payer table, the
+       * loss list, the NADAC comparison, the Kansas floor check — on the strength of it. Together
+       * they carry $382.14 of patient money against $78.30 of plan fees.
+       *
+       * The status is what says a fill was reversed, because that is what it is for. A row still
+       * marked paid is a fill, whatever its remit column does.
+       */
+      unmatchedReversal: (c.remitCents ?? 0) < 0 && !c.reversalKey && c.status !== "paid",
     })),
     await laterPayments(),
   );

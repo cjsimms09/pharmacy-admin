@@ -23,7 +23,10 @@ import { ContractTerms, ContractTermsWire, EXTRACT_SYSTEM, shapeForPrompt, requi
 
 const MOCK = process.env.AI_MOCK === "1";
 
-async function client(): Promise<{ client: Anthropic; model: string }> {
+async function client(what = "Reading a contract"): Promise<{ client: Anthropic; model: string }> {
+  // The second door to the model. Same rule, same gate.
+  const { mustBeAsked } = await import("./ai-gate");
+  mustBeAsked(what);
   const { getSettings } = await import("./settings");
   const { decryptText } = await import("./crypto");
   const s = await getSettings();

@@ -56,10 +56,29 @@ describe("what a supplier actually sent", () => {
     assert.equal(looksLikeInvoice({ fileName: "inv.pdf", mimeType: "application/pdf", subject: "Invoice", supplier: "IPD", text: withFooter }), true);
   });
 
-  test("a credit memo is neither", () => {
+  /*
+   * A credit memo files with the invoices, and it is the one exception to the rule above.
+   *
+   * This test used to assert the opposite, and it was right when it was written: a credit had
+   * nowhere to go, so letting it in as an invoice would have added $199.00 to a month instead of
+   * taking it off. What changed is that `readTotalCents` can now read a negative — IPC prints its
+   * credits in brackets — so the same filing that was wrong is now the arithmetic that makes it
+   * right.
+   *
+   * The documents this still refuses are refused for a different reason. A statement of account and
+   * a rebate breakdown restate money already counted somewhere else, so filing them as invoices
+   * counts it twice. A credit memo is money counted nowhere at all, on a document the wholesaler
+   * issues in the same series as its invoices and applies against one of them by number.
+   */
+  test("a credit memo files with the invoices, negative", () => {
     const credit = ["INDEPENDENT PHARMACY COOPERATIVE", "CREDIT MEMO   RGA 88213", "Credit applied to account: $118.40"].join("\n");
     assert.equal(classifySupplierDocument(credit, "credit.pdf", "").kind, "credit_memo");
-    assert.equal(looksLikeInvoice({ fileName: "credit.pdf", mimeType: "application/pdf", subject: "Invoice credit", supplier: "IPC", text: credit }), false);
+    assert.equal(looksLikeInvoice({ fileName: "credit.pdf", mimeType: "application/pdf", subject: "Invoice credit", supplier: "IPC", text: credit }), true);
+  });
+
+  test("a statement and a rebate breakdown are still refused, because their money is counted elsewhere", () => {
+    const statement = ["INDEPENDENT PHARMACY DISTRIBUTOR", "STATEMENT OF ACCOUNT", "Balance forward", "Aging: 30 60 90"].join("\n");
+    assert.equal(looksLikeInvoice({ fileName: "stmt.pdf", mimeType: "application/pdf", subject: "Invoice", supplier: "IPD", text: statement }), false);
   });
 
   test("with nothing readable in it, the old behaviour stands", () => {

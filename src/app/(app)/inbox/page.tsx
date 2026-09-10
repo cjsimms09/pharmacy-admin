@@ -13,7 +13,7 @@ import { senderRules, describeRule, recogniseStored } from "@/lib/intake-recogni
 import type { Recognition } from "@/lib/intake-recognise";
 import { sourceOf, storyOf, summarise } from "@/lib/inbox-line";
 import { leftBehind, willWriteShort, isRemovable } from "@/lib/inbox-undo";
-import { reRouteInboxItem, undoInboxItem, fileInboxItem, deleteInboxItem, sweepNow, rereadItem, sortInboxItem, attributeInboxItem, teachInboxItem, forgetIntakeRule } from "./actions";
+import { reRouteInboxItem, undoInboxItem, fileInboxItem, deleteInboxItem, sweepNow, rereadItem, sortInboxItem, attributeInboxItem, teachInboxItem, forgetIntakeRule, resortAll } from "./actions";
 
 
 /**
@@ -51,9 +51,9 @@ const TONE: Record<"ok" | "warn" | "crit" | "muted", string> = {
 export const metadata = { title: "Inbox" };
 export const dynamic = "force-dynamic";
 
-export default async function InboxPage({ searchParams }: { searchParams: Promise<{ saved?: string; error?: string; detail?: string; ok?: string; guess?: string }> }) {
+export default async function InboxPage({ searchParams }: { searchParams: Promise<{ saved?: string; error?: string; detail?: string; ok?: string; guess?: string; showDone?: string }> }) {
   await requireManager();
-  const { saved, error, detail, ok, guess } = await searchParams;
+  const { saved, error, detail, ok, guess, showDone: showDoneParam } = await searchParams;
   const [s, configured, items, people, suppliers, rules] = await Promise.all([
     getSettings(),
     hasMailPassword(),
@@ -78,6 +78,27 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
     if (r) guesses.set(guess, r);
   }
 
+  /*
+   * Two piles, because only one of them is work.
+   *
+   * The owner: "the inbox is very unclear, too wordy, to hard to try to make sure i see
+   * everything I need to." Fifty-three arrivals were rendering as fifty-three four-line blocks,
+   * every one carrying its full set of fix-it controls whether or not anything was wrong with it.
+   * The six that needed him were somewhere in the middle of that.
+   *
+   * What needs him is anything the site could not place, refused, or is holding for confirmation.
+   * Everything else is done and folds away behind a count — kept, because "what happened to that
+   * file" is a real question, but not competing with the work.
+   */
+  const needsAttention = (i: (typeof items)[number]) => {
+    const o = storyOf(i).outcome;
+    return o === "not_recognised" || o === "rejected" || o === "held";
+  };
+  const needsYou = items.filter(needsAttention);
+  const done = items.filter((i) => !needsAttention(i));
+  const showDone = showDoneParam === "yes";
+  const shown = showDone ? items : needsYou;
+
   return (
     <>
       <PageHeader
@@ -88,6 +109,11 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
           <>
             <Link href="/settings/email" className="btn">Email settings</Link>
             {configured && <form action={sweepNow.bind(null, "inbox")}><button className="btn btn-primary">Check for new mail now</button></form>}
+            {configured && needsYou.length > 0 && (
+              <form action={resortAll}>
+                <button className="btn">Sort {needsYou.length} again</button>
+              </form>
+            )}
           </>
         }
       />
@@ -99,7 +125,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
         <Empty>
           No mailbox connected yet. <Link href="/settings/email" className="text-accent underline">Set one up</Link> so scheduled reports land here on their own.
         </Empty>
-      ) : items.length === 0 ? (
+      ) : shown.length === 0 ? (
         <Empty>Nothing has arrived yet. {s.mail_last_sweep ? `Last checked ${s.mail_last_sweep.replace("T", " ").slice(0, 16)} UTC.` : "Use “Check for new mail now” to look."}</Empty>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-line bg-surface">
@@ -108,7 +134,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
               <tr><th>Arrived</th><th>Where from</th><th>File</th><th>What happened to it</th><th>Put it right</th></tr>
             </thead>
             <tbody>
-              {items.map((i) => (
+              {shown.map((i) => (
                 <tr key={i.id} id={i.id}>
                   <td className="whitespace-nowrap text-xs">{i.receivedAt.replace("T", " ").slice(0, 16)}</td>
                   <td className="text-xs">
@@ -377,6 +403,21 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
               ))}
             </tbody>
           </table>
+          {done.length > 0 && (
+            <p className="border-t border-line px-3 py-2 text-xs text-ink-3">
+              {showDone ? (
+                <>
+                  Showing all {items.length}.{" "}
+                  <Link href="/inbox" className="underline">Just the {needsYou.length} that need you</Link>
+                </>
+              ) : (
+                <>
+                  {done.length} more arrived and were handled.{" "}
+                  <Link href="/inbox?showDone=yes" className="underline">Show them</Link>
+                </>
+              )}
+            </p>
+          )}
         </div>
       )}
 

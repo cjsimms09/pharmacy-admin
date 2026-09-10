@@ -161,7 +161,21 @@ export function looksLikeInvoice(opts: {
    */
   if (opts.text) {
     const kind = classifySupplierDocument(opts.text, opts.fileName, opts.subject).kind;
-    if (kind !== "invoice" && kind !== "unknown") return false;
+    /*
+     * A credit memo files here too, and is the one exception worth making.
+     *
+     * The others this refuses — a statement of account, a rebate breakdown — restate money that is
+     * already counted somewhere else, so filing them as invoices counts it twice. A credit memo is
+     * the opposite: it is money the pharmacy has not counted at all, on a document the wholesaler
+     * issues in the same series as its invoices and applies against one of them by number. IPC's
+     * sits against invoice 11490216 for $199.00 of returned goods.
+     *
+     * With nowhere to go it went nowhere: refused here, handled by nothing else, and absent from
+     * cost of goods entirely — so the pharmacy paid $199.00 less than its own books said it did.
+     * Filed as an invoice with a negative total it nets against the month by the ordinary
+     * arithmetic, and needs no separate machinery to be right.
+     */
+    if (kind !== "invoice" && kind !== "unknown" && kind !== "credit_memo") return false;
   }
   return /invoice|inv\b|statement of account|packing (list|slip)/i.test(`${opts.subject} ${opts.fileName}`);
 }
@@ -206,13 +220,41 @@ const ITEM_LINE = /^(\d{4,5}-\d{3,4}-\d{2}|\d{5}-\d{4}-\d{2}).{0,200}?\s([\d,]+\
  * The order matters. One wholesaler prints "TOTAL RX PURCHASES" and "NET PAYABLE" on the same
  * invoice, and the payable is the one the pharmacy is actually billed.
  */
+/**
+ * A credit memo's total is negative, and this used to be unable to say so.
+ *
+ * The owner: "we got an invoice credit from IPC did we read it right and apply credit?" It could
+ * not have. Every pattern below captured only the digits, so "TOTAL DUE -$123.45" and the
+ * accountant's "TOTAL DUE ($123.45)" both came back as a positive $123.45 — and the guard on the
+ * next line, `n >= 0`, could never fire because the capture group had no way to hold a sign.
+ *
+ * A credit filed as an invoice is wrong twice over: the money it should have taken off purchases is
+ * added instead, so the cash account moves by twice the credit and in the wrong direction. On a
+ * $123.45 credit that is $246.90.
+ *
+ * Both forms are read here. The minus may sit before the dollar sign or after it, and brackets
+ * around the figure are the same statement in accounting notation.
+ */
+const NEGATIVE_BEFORE = /(?:-\s*\$|\$\s*-)\s*[\d,]+\.\d{2}\s*$/;
+
+function signedCents(matched: string, whole: string, at: number): number | null {
+  const n = Number(matched.replace(/,/g, ""));
+  if (!Number.isFinite(n)) return null;
+  // The twenty characters before the figure carry the sign, if it has one.
+  const before = whole.slice(Math.max(0, at - 20), at);
+  const after = whole.slice(at + matched.length, at + matched.length + 2);
+  const bracketed = /\(\s*\$?\s*$/.test(before) && /^\s*\)/.test(after);
+  const minus = /-\s*\$?\s*$/.test(before);
+  return Math.round(n * 100) * (bracketed || minus ? -1 : 1);
+}
+
 export function readTotalCents(text: string): number | null {
   const patterns = [
-    /net payable[^$\n]{0,60}\$\s*([\d,]+\.\d{2})/i,
-    /total due[^$\n]{0,20}\$\s*([\d,]+\.\d{2})/i,
-    /amount due[^$\n]{0,20}\$\s*([\d,]+\.\d{2})/i,
-    /invoice total[^$\n]{0,20}\$\s*([\d,]+\.\d{2})/i,
-    /balance due[^$\n]{0,20}\$\s*([\d,]+\.\d{2})/i,
+    /net payable[^$\n]{0,60}\$\s*(-?[\d,]+\.\d{2})/i,
+    /total due[^$\n]{0,20}\$\s*(-?[\d,]+\.\d{2})/i,
+    /amount due[^$\n]{0,20}\$\s*(-?[\d,]+\.\d{2})/i,
+    /invoice total[^$\n]{0,20}\$\s*(-?[\d,]+\.\d{2})/i,
+    /balance due[^$\n]{0,20}\$\s*(-?[\d,]+\.\d{2})/i,
     /*
      * IPD prints the figure above its label rather than beside it: the money is on one line and the
      * word "Subtotal" on the next. Nothing else the pharmacy receives is laid out that way, and
@@ -224,10 +266,21 @@ export function readTotalCents(text: string): number | null {
   for (const re of patterns) {
     const m = re.exec(text);
     if (!m) continue;
-    const n = Number(m[1].replace(/,/g, ""));
-    if (Number.isFinite(n) && n >= 0) return Math.round(n * 100);
+    /*
+     * Where the figure sits in the page, so the sign in front of it can be read. `m.index` is the
+     * start of the whole match, not of the captured number, so the offset is found from the match.
+     */
+    const at = m.index + m[0].lastIndexOf(m[1]);
+    const cents = signedCents(m[1], text, at);
+    if (cents !== null) return cents;
   }
   return null;
+}
+
+/** True where the document is a credit rather than a bill: a negative total, or it says so. */
+export function looksLikeCredit(text: string, totalCents: number | null): boolean {
+  if (totalCents !== null && totalCents < 0) return true;
+  return /\bcredit\s+(memo|note|invoice)\b|\bmemo\s+credit\b|\breturn\s+credit\b/i.test(text);
 }
 
 /**
@@ -253,15 +306,21 @@ export function readGoodsSubtotalCents(text: string): number | null {
      * one of its own halves. A section subtotal is a real figure about part of the invoice; it is
      * simply not this one.
      */
-    /(?:^|[\r\n])\s*sub\s*-?\s*total[^$\n]{0,10}\$\s*([\d,]+\.\d{2})/i,
+    /(?:^|[\r\n])\s*sub\s*-?\s*total[^$\n]{0,10}\$\s*(-?[\d,]+\.\d{2})/i,
     // IPD prints the figure above its label rather than beside it.
     /([\d,]+\.\d{2})\s*[\r\n]+\s*Sub\s*-?\s*total\b/i,
   ];
   for (const re of patterns) {
     const m = re.exec(text);
     if (!m) continue;
-    const n = Number(m[1].replace(/,/g, ""));
-    if (Number.isFinite(n) && n >= 0) return Math.round(n * 100);
+    /*
+     * Signed, like the total. A credit memo's lines are all negative and its subtotal with them —
+     * IPC prints them in brackets — and reading that as a positive made the goods disagree with the
+     * total by twice the credit, which then refused the whole reading for not adding up.
+     */
+    const at = m.index + m[0].lastIndexOf(m[1]);
+    const cents = signedCents(m[1], text, at);
+    if (cents !== null) return cents;
   }
   return null;
 }

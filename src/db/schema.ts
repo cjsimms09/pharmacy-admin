@@ -916,6 +916,43 @@ export const invoiceLines = sqliteTable(
   ],
 );
 
+/**
+ * What PioneerRx recorded receiving. Not an invoice, and deliberately not in the invoice table.
+ *
+ * The owner: "we shouldn't be taking pioneer order receipts as invoices, invoices are mailed to us
+ * from suppliers and that's what we have to keep". An invoice is the document the wholesaler sends
+ * and the pharmacy has to keep; this is the pharmacy system's own note that the boxes arrived.
+ *
+ * The separation is a table rather than a flag because a flag gets forgotten. Every query over
+ * `supplier_invoices` would have to remember to exclude these, and the one that forgot would count
+ * a purchase twice — once from the wholesaler's invoice and once from PioneerRx's record of the
+ * same delivery. This way it cannot be done by accident.
+ *
+ * What they are for, in his words: "I more just wanted to use it to catch the money from invoices
+ * we didn't get before this was setup in September... But we can use it to make sure we get
+ * everything and we read the price right." Two jobs, then: standing in for a purchase whose invoice
+ * never reached the pharmacy, and checking the invoices that did — both the fact of them and the
+ * figure read off them.
+ */
+export const pioneerPurchases = sqliteTable(
+  "pioneer_purchases",
+  {
+    id: text("id").primaryKey(),
+    supplier: text("supplier"),
+    supplierId: text("supplier_id"),
+    /** The wholesaler's own number, which is what ties this to the invoice when it arrives. */
+    invoiceNumber: text("invoice_number"),
+    invoiceDate: text("invoice_date"),
+    /** What PioneerRx recorded. Null where it recorded none, never nought. */
+    totalCents: integer("total_cents"),
+    lines: integer("lines"),
+    itemsText: text("items_text").notNull().default(""),
+    readAt: text("read_at").notNull().default(now()),
+  },
+  (t) => [uniqueIndex("pioneer_purchases_number_idx").on(t.invoiceNumber), index("pioneer_purchases_date_idx").on(t.invoiceDate)],
+);
+
+
 export const supplierInvoices = sqliteTable(
   "supplier_invoices",
   {
@@ -2565,6 +2602,14 @@ export const trainingAssignments = sqliteTable(
      * unmatchable when someone has three trainings outstanding.
      */
     replyCode: text("reply_code"),
+    /**
+     * The address the last email actually went to.
+     *
+     * The send reads the person record live, so it has always used the current address — but the
+     * owner changed a technician's email and had no way to confirm where the mail went, and
+     * "the code reads it fresh" is an argument rather than evidence. This is the evidence.
+     */
+    sentTo: text("sent_to"),
     assignedOn: text("assigned_on").notNull(),
     dueOn: text("due_on").notNull(),
     /** Where the material lives, if it is not being read on the page itself. */

@@ -557,3 +557,35 @@ export async function undoInboxItem(fd: FormData) {
   if (!r.ok) fail("/inbox", r.said);
   redirect(`/inbox?ok=${encodeURIComponent(`Taken back out. ${r.said}`)}`);
 }
+
+/**
+ * Sort everything again, with what the site knows now.
+ *
+ * The owner: "invoices arent being recognize." They were — twenty-one invoices from McKesson, IPC
+ * and IPD sat marked unrecognised, and the current rules recognise every one of them. They arrived
+ * before the register knew their senders, and the sweep decides once and never asks again.
+ *
+ * So adding a supplier used to fix every future message and no past one, and the only way to clear a
+ * backlog was to open each line and press its own button. One press does the lot.
+ */
+export async function resortAll() {
+  const { requireManager } = await import("@/lib/auth");
+  const { resortInbox } = await import("@/lib/inbox-resort");
+  const { audit } = await import("@/lib/audit");
+  const user = await requireManager();
+  const r = await resortInbox({ userId: user.id, userName: user.name });
+  await audit({
+    action: "inbox.resorted",
+    userId: user.id,
+    userName: user.name,
+    entity: "inbox",
+    entityId: "",
+    details: `${r.looked} looked at, ${r.filed} filed, ${r.stillStuck} still stuck`,
+  });
+  revalidatePath("/inbox");
+  const said =
+    r.looked === 0
+      ? "Nothing was waiting to be sorted."
+      : `${r.filed} of ${r.looked} sorted themselves.${r.stillStuck ? ` ${r.stillStuck} still need you — they are at the top.` : ""}`;
+  redirect(`/inbox?ok=${encodeURIComponent(said)}`);
+}

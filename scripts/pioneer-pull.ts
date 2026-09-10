@@ -548,7 +548,7 @@ async function pullInvoices(): Promise<string> {
 
   const { db, schema } = await import("../src/db");
   const { newId } = await import("../src/lib/crypto");
-  const { storeRawText } = await import("../src/lib/files");
+  const { eq } = await import("drizzle-orm");
   const held = await db.query.supplierInvoices.findMany({ columns: { id: true, supplier: true, invoiceNumber: true, totalCents: true } });
   const suppliers = await db.query.suppliers.findMany({ columns: { id: true, name: true } });
   const fold = (n: string) => n.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -570,6 +570,18 @@ async function pullInvoices(): Promise<string> {
   const notes: string[] = [];
   for (const inv of invoices.values()) {
     const goodsCents = inv.lines.reduce((n, l) => n + l.extendedCents, 0);
+    /*
+     * Every purchase is recorded, including the ones an invoice already covers.
+     *
+     * The owner: "we can use it to make sure we get everything and we read the price right." Both of
+     * those need the whole list. Skipping the purchases that match an invoice — which is what this
+     * did — meant the only thing kept was the ones nobody could check, and the check he actually
+     * asked for became impossible: you cannot tell whether every invoice arrived if the evidence for
+     * the ones that did is thrown away.
+     *
+     * Recording them costs nothing on the money side, because the cash account matches on the
+     * wholesaler's own invoice number and takes a purchase only where no invoice carries it.
+     */
     const existing = heldBy.get(inv.number.trim());
     if (existing) {
       alreadyHeld++;
@@ -578,8 +590,7 @@ async function pullInvoices(): Promise<string> {
         differ++;
         if (notes.length < 8) notes.push(`${inv.supplier} ${inv.number}: the site holds ${(existing.totalCents / 100).toFixed(2)}, PioneerRx has ${((goodsCents + inv.shippingCents) / 100).toFixed(2)}`);
       } else agree++;
-      continue;
-    }
+    } else created++;
     const two = inv.lines.some((l) => l.dea === "2");
     const lower = inv.lines.some((l) => l.dea === "3" || l.dea === "4" || l.dea === "5");
     /*
@@ -598,78 +609,42 @@ async function pullInvoices(): Promise<string> {
      * points at that. It is not the supplier's own invoice and does not claim to be — the note on
      * the row says where it came from — but it is a page, and every figure on the row is on it.
      */
-    const rendered = [
-      `${inv.supplier} invoice ${inv.number}`,
-      `Invoice date: ${inv.date}`,
-      "",
-      "Read from PioneerRx's receiving records, not from the supplier's own document.",
-      "",
-      ["NDC", "Description", "Qty", "Pack", "Unit cost", "Extended", "DEA"].join("\t"),
-      ...inv.lines.map((l) =>
-        [l.ndc11 ?? "", l.description ?? "", l.quantity, l.packSize ?? "", (l.unitCostCents / 100).toFixed(4), (l.extendedCents / 100).toFixed(2), l.dea && l.dea !== "0" ? `C-${l.dea}` : ""].join("\t"),
-      ),
-      "",
-      `Goods: ${(goodsCents / 100).toFixed(2)}`,
-      `Shipping: ${(inv.shippingCents / 100).toFixed(2)}`,
-      `Total: ${((goodsCents + inv.shippingCents) / 100).toFixed(2)}`,
-    ].join("\n");
-    const stored = await storeRawText(rendered);
-    const documentId = newId();
-    const invoiceId = newId();
-    await db.insert(schema.documents).values({
-      id: documentId,
-      category: two ? "invoice_schedule_2" : lower ? "invoice_schedule_3_5" : "invoice",
-      title: `${inv.supplier} invoice ${inv.number} (from PioneerRx)`,
-      fileName: `${inv.supplier} ${inv.number}.txt`,
-      mimeType: stored.mimeType,
-      sizeBytes: stored.sizeBytes,
-      sha256: stored.sha256,
-      storageKey: stored.storageKey,
-      notes: "Rendered from PioneerRx's own receiving records on the morning pull.",
-      uploadedBy: "pioneer-pull",
-    });
-    await db.insert(schema.supplierInvoices).values({
-      id: invoiceId,
-      documentId,
+    /*
+     * Recorded as a purchase, not filed as an invoice.
+     *
+     * The owner: "we shouldn't be taking pioneer order receipts as invoices, invoices are mailed to
+     * us from suppliers and that's what we have to keep... pioneer ordering receipts are not
+     * invoices." This used to render a text document per purchase — a document nobody asked for,
+     * written only because `supplier_invoices.document_id` is NOT NULL — and file it beside the
+     * wholesalers' own PDFs, where it was indistinguishable from them on every screen.
+     *
+     * What he wants it for: "to catch the money from invoices we didn't get before this was setup
+     * in September... we can use it to make sure we get everything and we read the price right."
+     * So it lands in `pioneer_purchases`, which the cash account draws on only where no invoice
+     * carries the same number, and which the invoice reader can be checked against.
+     */
+    const number = inv.number?.trim() || null;
+    const held = number ? await db.query.pioneerPurchases.findFirst({ where: eq(schema.pioneerPurchases.invoiceNumber, number) }) : null;
+    const values = {
       supplier: inv.supplier,
       supplierId: supplierId.get(fold(inv.supplier)) ?? null,
-      invoiceNumber: inv.number,
+      invoiceNumber: number,
       invoiceDate: inv.date,
-      schedule: two ? "schedule_2" : lower ? "schedule_3_5" : "none",
-      basis: two || lower ? "PioneerRx records a controlled item on this invoice." : "PioneerRx records no controlled item on this invoice.",
-      controlledItems: JSON.stringify(inv.lines.filter((l) => l.dea && l.dea !== "0").map((l) => `${l.description ?? l.ndc11 ?? "?"} (C-${l.dea})`)),
-      receivedFrom: "PioneerRx (SQL)",
       totalCents: goodsCents + inv.shippingCents,
-      linesRead: inv.lines.length,
-      linesUnread: 0,
-      receiptNote: "Read from PioneerRx's own receiving records rather than from the supplier's document. The supplier's invoice is the record; this is the purchase.",
-    });
-    const rows = inv.lines
-      .map((l) => ({
-        id: newId(),
-        invoiceId,
-        supplier: inv.supplier,
-        supplierId: supplierId.get(fold(inv.supplier)) ?? null,
-        invoiceDate: inv.date,
-        ndc11: l.ndc11 ?? "",
-        description: l.description,
-        itemNumber: null,
-        quantity: l.quantity,
-        unitOfMeasure: l.packSize,
-        unitCostCents: l.unitCostCents,
-        extendedCents: l.extendedCents,
-        awpCents: null,
-        itemClass: l.dea && l.dea !== "0" ? `C-${l.dea}` : null,
-        rebated: null,
-        controlled: l.dea === "2" ? true : l.dea && l.dea !== "0" ? false : null,
-      }))
-      .filter((x) => x.ndc11 !== "");
-    for (let i = 0; i < rows.length; i += 200) await db.insert(schema.invoiceLines).values(rows.slice(i, i + 200));
-    created++;
+      lines: inv.lines.length,
+      itemsText: inv.lines.map((l) => [l.ndc11 ?? '', l.description ?? '', l.quantity, (l.extendedCents / 100).toFixed(2)].join(' ')).join('\n'),
+      readAt: new Date().toISOString(),
+    };
+    if (held) await db.update(schema.pioneerPurchases).set(values).where(eq(schema.pioneerPurchases.id, held.id));
+    else await db.insert(schema.pioneerPurchases).values({ id: newId(), ...values });
   }
   const { setSetting } = await import("../src/lib/settings");
   await setSetting("pioneer_invoice_compare", JSON.stringify({ readAt: new Date().toISOString(), invoices: invoices.size, created, alreadyHeld, agree, differ, notes }));
-  return `${invoices.size} September invoices in PioneerRx: ${created} brought in, ${alreadyHeld} the site already held (${agree} agreeing on the total, ${differ} differing)`;
+  return (
+    `${invoices.size} September purchases in PioneerRx, all recorded; ` +
+    `${alreadyHeld} of them have the supplier's own invoice on file (${agree} agreeing on the total${differ ? `, ${differ} differing` : ""}), ` +
+    `${created} do not and are what the cash account draws on until an invoice turns up`
+  );
 }
 
 /**

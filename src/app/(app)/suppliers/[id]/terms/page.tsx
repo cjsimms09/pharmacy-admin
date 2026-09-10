@@ -1,3 +1,4 @@
+import { asked } from "@/lib/ai-gate";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -379,7 +380,7 @@ export default async function SupplierTermsPage({
         user: u,
       });
       const { readReturnPolicy } = await import("@/lib/ai");
-      const read = await readReturnPolicy(buf, supplier!.name, { userId: u.id, userName: u.name });
+      const read = await asked(u.name, "Reading a return policy", () => readReturnPolicy(buf, supplier!.name, { userId: u.id, userName: u.name }));
       await audit({ action: "supplier.returns.read", userId: u.id, userName: u.name, entity: "supplier", entityId: id, details: (file as File).name });
       await setSetting("returns_policy_draft", JSON.stringify({ ...read, supplierId: id, fileName: (file as File).name, readAt: new Date().toISOString(), documentId: doc.id }));
       revalidatePath(`/suppliers/${id}/terms`);

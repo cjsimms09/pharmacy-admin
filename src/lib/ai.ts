@@ -1,3 +1,4 @@
+import { mustBeAsked } from "./ai-gate";
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
@@ -78,7 +79,9 @@ export class AiCapReachedError extends Error {
  * added next year unguarded — and the point of a limit somebody sets to stop worrying is that they
  * do not then have to check whether it covers the thing they are about to press.
  */
-export async function client(): Promise<{ client: Anthropic; model: string }> {
+export async function client(what = "This"): Promise<{ client: Anthropic; model: string }> {
+  // Nothing reaches the model on its own — see ai-gate.ts. Refused before the key is even read.
+  mustBeAsked(what);
   const s = await getSettings();
   if (!s.anthropic_api_key_enc) throw new AiNotConfiguredError();
   const { monthlyCap, dollars } = await import("./ai-spend");
