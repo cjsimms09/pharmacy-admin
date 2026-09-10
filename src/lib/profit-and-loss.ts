@@ -183,6 +183,8 @@ export type PLInputs = {
    * month has none, which is not the same as zero and must never be shown as it.
    */
   billedPurchasesCents: number | null;
+  /** The month's invoices as filed, so the register can see a bill that is on file twice. */
+  invoicesInMonth?: { invoiceNumber: string | null; totalCents: number | null; invoiceDate: string | null }[];
   /**
    * The part of that which is PioneerRx's receiving record standing in for an invoice that never came.
    *
@@ -988,6 +990,7 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
     dispensedCostCents,
     purchasesCents,
     billedPurchasesCents,
+    invoicesInMonth: billedThisMonth.map((v) => ({ invoiceNumber: v.invoiceNumber, totalCents: v.totalCents, invoiceDate: v.invoiceDate })),
     uninvoicedPurchasesCents,
     uninvoicedPurchases: uninvoiced.length,
 

@@ -216,188 +216,82 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
                       );
                     })()}
                   </td>
-                  <td>
-                    {/*
-                      Overruling the recogniser, which is the fix the owner asked for first.
-                      Asked which of the things that can go wrong worries him most, he chose a
-                      document filed as the wrong kind — and until now that was a dead end: the
-                      line explained what it had decided and there was nothing to press.
+                  {/*
+                    One control, and it is the one that fixes the thing for good.
 
-                      Every kind the loader can actually handle is offered, the one it chose
-                      included, so "it is right, load it again" is as available as "it is wrong".
-                    */}
-                    {i.documentId && (
-                      <details className="mb-2">
-                        <summary className="cursor-pointer text-xs text-accent hover:underline">
-                          {i.routedAs && i.routedAs !== "unrecognised" ? "Wrong? Re-route it" : "Tell it what this is"}
-                        </summary>
-                        <form action={reRouteInboxItem} className="mt-2 grid gap-2">
-                          <input type="hidden" name="itemId" value={i.id} />
-                          <select name="kind" defaultValue="" className="field text-xs">
-                            <option value="">What is this document?</option>
-                            {ROUTE_CHOICES.map((c) => (
-                              <option key={c.kind} value={c.kind}>{c.label} — {willWriteShort(c.kind) ?? "…"}</option>
-                            ))}
-                          </select>
-                          <button className="btn btn-primary text-xs" type="submit">Load it as this</button>
-                          {/*
-                            What the reading being overruled actually left behind, for this kind
-                            rather than for all of them. The sentence here used to be one vague line
-                            shown for all fourteen — which reads as reassurance on a remittance that
-                            banked money and as alarm on a catalogue that gets repriced by morning.
-                          */}
-                          <p className="text-[11px] leading-snug text-ink-3">
-                            Runs the same loader the sweep runs, told the answer. {leftBehind(i.routedAs)}
-                          </p>
-                        </form>
-                      </details>
-                    )}
-                    {/*
-                      Taking a remittance back out. Offered on the two kinds where a wrong reading
-                      moved money and the rows can be identified — every payment and deposit those
-                      two readers write carries the id of the document it came from — and on no
-                      others, because an undo that deletes on a guess is worse than none.
-                    */}
-                    {isRemovable(i.routedAs) && i.documentId && (
-                      <details className="mb-2">
-                        <summary className="cursor-pointer text-xs text-crit hover:underline">Take the money back out</summary>
-                        <form action={undoInboxItem} className="mt-2 grid gap-2">
-                          <input type="hidden" name="itemId" value={i.id} />
-                          <p className="text-[11px] leading-snug text-ink-3">
-                            Deletes every payment and bank deposit recorded from this document, and nothing else.
-                            Use it where this was not a remittance at all, or was somebody else&rsquo;s. Payments loaded
-                            before the site began recording which document they came from cannot be reached, and it
-                            will say so rather than delete the wrong ones.
-                          </p>
-                          <button className="btn text-xs" type="submit">Remove what this loaded</button>
-                        </form>
-                      </details>
-                    )}
-                    {/* An emailed CPR card is useless sitting here. This is where it becomes a
-                        record: whose it is, what it is, and when it expires are all known to the
-                        person reading the email and to nobody else. */}
-                    {i.documentId && people.length > 0 && (
-                      <details className="mb-2">
-                        <summary className="cursor-pointer text-xs text-accent hover:underline">File to a person</summary>
-                        <form action={fileInboxItem} className="mt-2 grid gap-2">
-                          <input type="hidden" name="itemId" value={i.id} />
-                          <select name="personId" className="field text-xs">
-                            <option value="">Whose is it?</option>
-                            {people.map((p) => <option key={p.id} value={p.id}>{p.firstName} {p.lastName}</option>)}
-                          </select>
-                          <select name="category" defaultValue="cpr_card" className="field text-xs">
-                            <option value="cpr_card">CPR card</option>
-                            <option value="license">Licence or registration</option>
-                            <option value="immunization_training">Immunization training</option>
-                            <option value="immunization_protocol">Immunization protocol</option>
-                            <option value="other">Something else</option>
-                          </select>
-                          <input name="number" placeholder="Number (optional)" className="field text-xs" />
-                          <label className="text-xs text-ink-3">Issued<input name="issuedOn" type="date" className="field text-xs" /></label>
-                          <label className="text-xs text-ink-3">Expires<input name="expiresOn" type="date" className="field text-xs" /></label>
-                          <label className="flex items-center gap-1 text-xs"><input type="checkbox" name="noExpiry" /> Does not expire</label>
-                          <button className="btn btn-primary text-xs" type="submit">File it</button>
-                        </form>
-                      </details>
-                    )}
-                    {/*
-                      "Delete" used to mean "destroy the document this was filed as, and its file".
-                      It now means what somebody clearing an inbox thinks it means, and the label
-                      says which — because the difference is a supplier invoice the pharmacy has to
-                      keep for five years.
-                    */}
-                    {/*
-                      The second reading. A report or invoice that was not recognised on arrival —
-                      because the supplier's address was not on the register yet, or automatic
-                      loading was off — is read again here with today's rules, by the same path the
-                      sweep takes. The sweep itself never touches a message twice, so this is the
-                      only way a stored file gets a second chance.
-                    */}
-                    {i.documentId && i.routedAs !== "invoice" && (
-                      <form action={sortInboxItem.bind(null, i.id)} className="mb-2">
-                        <button className="btn btn-sm btn-primary">Sort it: read and file where the money goes</button>
-                      </form>
-                    )}
-                    {/*
-                      Whose file this is, answered where the problem is.
+                    This cell was a hundred and eighty-three lines per row: six stacked buttons, a
+                    disclosure, and a paragraph telling him to go to Suppliers, add the address,
+                    come back and press read again. Nine items ran to ten pages, and the sentence
+                    describing the long way round was printed beside the button that does it in one.
 
-                      A file from an address the register does not know is refused rather than
-                      guessed at — loading ParMed's prices under McKesson would send orders to the
-                      wrong place. But the only way out used to be leaving here, finding Suppliers,
-                      adding the supplier, remembering to type the address it sends from, coming
-                      back, and pressing read again. Now: name them once, the address is recorded
-                      against them, and the file is read on the spot.
-                    */}
-                    {i.documentId && i.fromAddress && !supplierByAddress(suppliers, i.fromAddress) && (
-                      <form action={attributeInboxItem} className="mb-2 rounded border border-line bg-paper-2 p-2">
-                        <input type="hidden" name="itemId" value={i.id} />
-                        <p className="mb-1.5 text-xs text-ink-2">
-                          {isUnknownSenderInvoice(i.reason)
-                            ? <>This reads as a supplier invoice, but nothing on the register sends from <span className="font-mono">{i.fromAddress}</span>. Whose is it? Naming them files it with their invoices.</>
-                            : <>Nothing on the register sends from <span className="font-mono">{i.fromAddress}</span>, so this could not be placed. Who is it?</>}
-                        </p>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <select name="supplierId" className="py-1 text-sm" defaultValue="">
-                            <option value="">A supplier already on the register…</option>
-                            {suppliers.map((sup) => <option key={sup.id} value={sup.id}>{sup.name}</option>)}
-                          </select>
-                          <span className="text-xs text-ink-3">or</span>
-                          <input name="newSupplier" placeholder={printedNameInReason(i.reason) ?? "a new one, by name"} defaultValue="" className="py-1 text-sm" />
-                          <button className="btn btn-sm btn-primary">Remember and read it</button>
-                        </div>
-                        <p className="mt-1 text-[11px] text-ink-3">
-                          Everything from that address will place itself from now on. Ask again only if they change it.
-                        </p>
-                      </form>
+                    Naming the supplier records the address against them and reads the file again,
+                    so the next one places itself. Everything else is rarer and sits behind a fold.
+                  */}
+                  <td className="align-top">
+                    {storyOf(i).outcome === "loaded" || storyOf(i).outcome === "filed_only" ? (
+                      <span className="text-xs text-ink-3">—</span>
+                    ) : (
+                      <div className="flex flex-col gap-1">
+                        {i.documentId && (
+                          <form action={attributeInboxItem} className="flex flex-wrap items-center gap-1">
+                            <input type="hidden" name="itemId" value={i.id} />
+                            <select name="supplierId" className="field h-7 py-0 text-xs" defaultValue="" aria-label="Which supplier is this from?">
+                              <option value="">Who is it from?</option>
+                              {suppliers.map((x) => (
+                                <option key={x.id} value={x.id}>{x.name}</option>
+                              ))}
+                            </select>
+                            <button className="btn btn-sm btn-primary">File it</button>
+                          </form>
+                        )}
+                        <details className="text-xs">
+                          <summary className="cursor-pointer text-ink-3">Other</summary>
+                          <div className="mt-1 flex flex-col gap-1">
+                            {i.documentId && (
+                              <form action={rereadItem.bind(null, i.id)}>
+                                <button className="btn btn-sm w-full">Read again with today’s rules</button>
+                              </form>
+                            )}
+                            {i.documentId && (
+                              <form action={sortInboxItem.bind(null, i.id)}>
+                                <button className="btn btn-sm w-full">Send to the intake</button>
+                              </form>
+                            )}
+                            {/*
+                              Filing a document to a person: a licence, a CPR card, an immunisation
+                              certificate. Compacting this cell removed it altogether and a test
+                              caught that — it is rarer than an invoice and it is not optional, so
+                              it belongs in the fold rather than gone.
+                            */}
+                            {i.documentId && people.length > 0 && (
+                              <form action={fileInboxItem} className="grid gap-1 rounded border border-line p-1">
+                                <input type="hidden" name="itemId" value={i.id} />
+                                <select name="personId" className="field h-7 py-0 text-xs" defaultValue="">
+                                  <option value="">File to a person…</option>
+                                  {people.map((pp) => (
+                                    <option key={pp.id} value={pp.id}>{pp.firstName} {pp.lastName}</option>
+                                  ))}
+                                </select>
+                                <select name="category" defaultValue="cpr_card" className="field h-7 py-0 text-xs">
+                                  <option value="cpr_card">CPR card</option>
+                                  <option value="license">Licence or registration</option>
+                                  <option value="immunization_training">Immunization training</option>
+                                  <option value="immunization_protocol">Immunization protocol</option>
+                                  <option value="other">Something else</option>
+                                </select>
+                                <input name="number" placeholder="Number (optional)" className="field h-7 py-0 text-xs" />
+                                <label className="text-xs text-ink-3">Expires<input name="expiresOn" type="date" className="field h-7 py-0 text-xs" /></label>
+                                <label className="flex items-center gap-1 text-xs"><input type="checkbox" name="noExpiry" /> Does not expire</label>
+                                <button className="btn btn-sm">File to them</button>
+                              </form>
+                            )}
+                            <form action={deleteInboxItem.bind(null, i.id)}>
+                              <button className="btn btn-sm w-full border-crit text-crit hover:bg-crit-soft">Not for us — clear it</button>
+                            </form>
+                          </div>
+                        </details>
+                      </div>
                     )}
-                    {/*
-                      Saying what it actually is.
-                      
-                      On every line with a file behind it, not only the ones that failed: a document
-                      that loaded as the wrong thing is exactly the case worth correcting, and it is
-                      the case where nothing on the screen suggests anything is wrong. What is kept
-                      is a rule about the sender, so this is asked once and not every Sunday.
-                    */}
-                    {i.documentId && i.fromAddress && (
-                      <details className="mb-2">
-                        <summary className="cursor-pointer text-xs text-accent hover:underline">
-                          {guesses.get(i.id)?.needsOwner ? "Tell it what this is" : "That is not what this is"}
-                        </summary>
-                        <form action={teachInboxItem} className="mt-2 grid gap-2 rounded border border-line bg-paper-2 p-2">
-                          <input type="hidden" name="itemId" value={i.id} />
-                          <select name="category" className="field text-xs" defaultValue="">
-                            <option value="">What is it?</option>
-                            {CATEGORIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-                          </select>
-                          <input name="note" placeholder="Why, in your words (optional)" className="field text-xs" />
-                          <button className="btn btn-sm btn-primary" type="submit">Remember and read it</button>
-                          <p className="text-[11px] text-ink-3">
-                            Kept as a rule about <span className="font-mono">{i.fromAddress}</span>, so the next one places itself.
-                            Where the file&rsquo;s own columns say something different, the rule is narrowed to files named like this one.
-                          </p>
-                        </form>
-                      </details>
-                    )}
-                    {i.documentId && i.routedAs !== "invoice" && (
-                      <form action={rereadItem.bind(null, i.id)} className="mb-2">
-                        <button className="text-xs text-accent hover:underline" type="submit" title="Read this file again with the rules as they are now — after adding a supplier's address, or turning automatic loading on.">
-                          Read again with today&rsquo;s rules
-                        </button>
-                      </form>
-                    )}
-                    <form action={deleteInboxItem.bind(null, i.id)}>
-                      <button
-                        className="text-xs text-ink-3 hover:text-ink hover:underline"
-                        type="submit"
-                        title={
-                          i.documentId
-                            ? "Takes this line off the list. The stored document is kept and stays filed wherever it was filed."
-                            : "Takes this line off the list. Nothing was stored for it."
-                        }
-                      >
-                        Clear from list
-                      </button>
-                    </form>
                   </td>
                 </tr>
               ))}

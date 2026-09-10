@@ -255,7 +255,7 @@ export async function enrichClaimsFrom(rows: DispensedRow[], stamp: string): Pro
   const { inArray } = await import("drizzle-orm");
   const held = await db.query.claims.findMany({
     where: inArray(schema.claims.rxNumber, rxNumbers),
-    columns: { id: true, rxNumber: true, fillNumber: true, bin: true, status: true, remitCents: true, dateFilled: true },
+    columns: { id: true, rxNumber: true, fillNumber: true, bin: true, status: true, remitCents: true, dateFilled: true, acquisitionCents: true },
   });
   const byKey = new Map<string, typeof held>();
   for (const h of held) {
@@ -290,6 +290,23 @@ export async function enrichClaimsFrom(rows: DispensedRow[], stamp: string): Pro
       soldOn: r.completedOn,
       enrichedFrom: stamp,
     };
+    /*
+     * What the bottle cost, where the claim on file has none.
+     *
+     * The owner, on the one dispensing the books could not check: "how do we solve or fix". The
+     * answer turned out to be that nothing was broken and one field was simply never written. The
+     * pull reads `AcquisitionCost` off the claim — PioneerRx has it exactly, $1,147.31 on the
+     * Adzenys the account could say nothing about — and this enrichment listed every other column
+     * and not that one. So nine September fills carried revenue with no cost against them, were
+     * held out of the account for it, and appeared on the books check as the thing it could not
+     * compare.
+     *
+     * Only where the claim has none. A cost already on the row came from the daily transaction
+     * report, which is the pharmacy's own record of that dispensing; PioneerRx's copy of the same
+     * fact is not better evidence, and quietly replacing one with the other is how two systems stop
+     * agreeing for reasons nobody can reconstruct.
+     */
+    const fillCost = r.acquisitionCents !== null && r.acquisitionCents !== 0 ? { acquisitionCents: r.acquisitionCents } : {};
     if (p) {
       if (p.remitCents !== null && r.primary.remitCents !== null && p.remitCents !== r.primary.remitCents) {
         report.remitDiffers++;
@@ -297,7 +314,16 @@ export async function enrichClaimsFrom(rows: DispensedRow[], stamp: string): Pro
       }
       await db
         .update(schema.claims)
-        .set({ ...shared, basisOfReimbursement: r.basisOfReimbursement ?? undefined, basisOfCostDetermination: r.basisOfCostDetermination ?? undefined, planId: r.primary.planId ?? undefined, contractId: r.primary.contractId ?? undefined, networkId: r.primary.networkId ?? undefined })
+        .set({
+          ...shared,
+          // The bottle's cost, and only if this row does not already carry one of its own.
+          ...(p.acquisitionCents === null || p.acquisitionCents === 0 ? fillCost : {}),
+          basisOfReimbursement: r.basisOfReimbursement ?? undefined,
+          basisOfCostDetermination: r.basisOfCostDetermination ?? undefined,
+          planId: r.primary.planId ?? undefined,
+          contractId: r.primary.contractId ?? undefined,
+          networkId: r.primary.networkId ?? undefined,
+        })
         .where(and(eq(schema.claims.id, p.id)));
       report.primaryEnriched++;
     }
