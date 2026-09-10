@@ -1079,11 +1079,26 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
     let unreadable = 0;
     const multiples: string[] = [];
     let unitDiffers = 0;
+    /* What a person or the FDA file has already settled, keyed by NDC. */
+    const fixed = new Map(
+      (await db.select({ ndc11: schema.ndcPackFixes.ndc11, packSize: schema.ndcPackFixes.packSize }).from(schema.ndcPackFixes)).map(
+        (r) => [r.ndc11, r.packSize] as const,
+      ),
+    );
     let differs = 0;
 
     let multipleCount = 0;
     for (const row of placed) {
-      const v = comparePack(row.packSize, packageOf.get(row.ndc11!));
+      /*
+       * Through the corrections, as everything else reads it.
+       *
+       * This measured the raw catalogue figure while every other consumer reads it through the
+       * overlay in `catalogue-cache`. So 480 corrections applied from the FDA file and 3 settled by
+       * hand moved this row not at all: 628 packages already agreed and were still counted as
+       * disagreeing. Pressing "Apply what the FDA settles" changed the number on every screen except
+       * the one that had asked for it.
+       */
+      const v = comparePack(fixed.get(row.ndc11!) ?? row.packSize, packageOf.get(row.ndc11!));
       if (v.verdict === "agree") agree++;
       else if (v.verdict === "cannot-compare") unreadable++;
       else if (v.verdict === "unit-differs") unitDiffers++;

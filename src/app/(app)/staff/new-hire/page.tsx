@@ -148,7 +148,15 @@ export default async function NewHirePage({
           value={p.daysSinceStart === null ? "—" : `${p.daysSinceStart}d`}
           label="Since they started"
           sub={p.daysSinceStart !== null && p.daysSinceStart > 10 ? "The hepatitis B offer was due within ten working days" : "Ten working days for the hepatitis B offer"}
-          tone={p.daysSinceStart !== null && p.daysSinceStart > 10 && !p.items.find((i) => i.key === "hep-b")?.done ? "crit" : "ok"}
+          /*
+            This looked for an item with the key "hep-b". `onboarding.ts` never creates one — the
+            offer is tracked elsewhere — so the expression was always true and every starter went crit
+            on their eleventh day whatever their record said. A tile that cannot be satisfied teaches
+            people to ignore the colour, which is the colour's only job.
+
+            Until the offer is genuinely tracked on this list, the date is stated and left uncoloured.
+          */
+          tone="ok"
         />
       </div>
 

@@ -202,7 +202,17 @@ export async function invoiceCompliance(): Promise<Requirement[]> {
    */
   const emailed = rows.filter((r) => /@/.test(r.receivedFrom ?? "")).length;
   const uploaded = rows.length - emailed;
-  const unreceipted = rows.filter((r) => !r.receivedOn).length;
+  /*
+   * Counted over the rows the link actually shows.
+   *
+   * This counted every invoice with no receipt recorded — 23 — and offered a link to a list built
+   * by `awaitingReceipt`, which keeps only the controlled ones — 5. So eighteen invoices held this
+   * requirement at "attention" for ever and could not be reached from the button offered to settle
+   * it. The narrowing is right: 21 CFR 1304.22(c) asks for a receipt record for controlled
+   * substances, and a bill for bottles and vitamins needs none. It was only ever the count that
+   * disagreed with it.
+   */
+  const unreceipted = rows.filter((r) => !r.receivedOn && r.schedule !== "none").length;
 
   out.push({
     key: "originals",

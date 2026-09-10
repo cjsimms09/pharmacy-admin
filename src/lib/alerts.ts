@@ -44,6 +44,22 @@ export type Alert = {
   href: string;
   /** What the link does, where a verb is clearer than "open". */
   action?: string;
+  /**
+   * Who or what this is about — a person, a supplier, a drug.
+   *
+   * The owner: "Do I really need an alert for each thing an employee hasn't done? One alert per
+   * employee... Does each specific thing need its own alert or can the alert be more general and
+   * click for specific."
+   *
+   * He is right, and it is the difference between a list of nine things and a list of two. Eight of
+   * the nine rows on his own "Needs you today" were one intern who has done no training at all,
+   * each row naming a different course and every one leading to the same screen and the same
+   * decision. A list is read by how many rows it has, not by how much is on them.
+   *
+   * So an alert says whose problem it is, and anything with several rows about one subject is shown
+   * as one row that opens into them. Null where the alert is about the pharmacy itself.
+   */
+  subject?: string | null;
 };
 
 /** Warning for anything that takes weeks to put right. The pharmacist asked for thirty days. */
@@ -75,6 +91,7 @@ export async function alerts(): Promise<Alert[]> {
     if (d.severity === "overdue") {
       out.push({
         key: `due-${d.id}`,
+        subject: d.personName ?? (d.personIds?.length === 1 ? (d.title.split(" — ").pop() ?? null) : null),
         level: "now",
         title: d.title,
         why:
@@ -100,6 +117,7 @@ export async function alerts(): Promise<Alert[]> {
        */
       out.push({
         key: `undated-${d.id}`,
+        subject: d.personName ?? (d.personIds?.length === 1 ? (d.title.split(" — ").pop() ?? null) : null),
         level: "now",
         title: d.title,
         why: d.action,
@@ -110,6 +128,7 @@ export async function alerts(): Promise<Alert[]> {
     if (d.severity === "due_soon") {
       out.push({
         key: `soon-${d.id}`,
+        subject: d.personName ?? (d.personIds?.length === 1 ? (d.title.split(" — ").pop() ?? null) : null),
         level: "soon",
         title: d.title,
         why: d.dueOn ? `Due ${fmt(d.dueOn)} — ${d.daysLeft} days. ${d.action}` : d.action,
@@ -493,6 +512,41 @@ export async function alerts(): Promise<Alert[]> {
   // Worst first, and within a level the oldest problem first — which is the order somebody would
   // work them in anyway.
   const rank: Record<AlertLevel, number> = { now: 0, soon: 1 };
+  /*
+   * One row per subject.
+   *
+   * Rows that share a subject are folded into one, counted, and the first one's link is kept —
+   * every one of them led to the same screen anyway. The individual sentences are not thrown away:
+   * they become the folded row's own `why`, so the detail is a tap away rather than nine rows deep.
+   */
+  const folded: Alert[] = [];
+  const bySubject = new Map<string, Alert[]>();
+  for (const a of out) {
+    if (!a.subject) {
+      folded.push(a);
+      continue;
+    }
+    const k = `${a.level}|${a.subject}`;
+    bySubject.set(k, [...(bySubject.get(k) ?? []), a]);
+  }
+  for (const [, group] of bySubject) {
+    if (group.length === 1) {
+      folded.push(group[0]);
+      continue;
+    }
+    const subject = group[0].subject as string;
+    folded.push({
+      key: `subject-${group[0].level}-${subject}`,
+      level: group[0].level,
+      subject,
+      title: `${subject} — ${group.length} things outstanding`,
+      why: group.map((g) => g.title.split(" — ")[0]).join(", ") + ".",
+      href: group[0].href,
+      action: group[0].action,
+    });
+  }
+  out.length = 0;
+  out.push(...folded);
   return out.sort((a, b) => rank[a.level] - rank[b.level]);
 }
 
