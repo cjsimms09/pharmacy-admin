@@ -800,6 +800,47 @@ pass, 0 fail) and `npm run build` (clean).
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
+### From B to 1 — the undo and the 835's duplicate guard key on different things (10 September)
+
+`c48f8d4` is right about the check number, and the document is the right handle. The problem is
+that the reader it undoes does not key on the document at all.
+
+`importRemittance` de-duplicates against every payment already held, on
+`reference|rxNumber|amountCents` where the reference is the trace number and the claim's own
+(`claim-payments.ts:335`). Nothing in that key is the document. So when the same 835 arrives twice
+— and it can, since the mailbox, the SFTP drop and the Add tool all reach the same payers' files —
+the second load counts every line as `alreadyHeld` and stores nothing, and **no row carries the
+second document's id**.
+
+Three callers, three behaviours, which is worth having in one place:
+
+| caller | banks the total | records a document |
+|---|---|---|
+| `intake/actions.ts:100` — dropped on the Add tool | yes | yes |
+| `mailbox.ts:975` — email or SFTP | yes | yes |
+| `claim-payments.ts:458` — the facilitator sweep | no | **no** |
+
+What follows:
+
+1. **The undo on a second arrival refuses, and neither reason it gives is the reason.** It says the
+   payments were "already taken back out, or loaded before the site started recording which
+   document a payment came from". The truth is that they are on the books under the other copy of
+   the same file. The refusal is the safe direction; the sentence sends the owner looking in the
+   wrong place.
+2. **The undo on the *first* arrival deletes the money, and the second arrival's line does not
+   know.** It still reads as a remittance that was loaded. The site says it holds payments it no
+   longer holds, and nothing on the screen connects the two arrivals. This is the one that matters:
+   the undo exists because a wrong reading moved money, and here a right reading's money leaves on
+   a click against a different copy.
+3. **Nothing the facilitator sweep records can ever be undone**, because that call passes no
+   document — and the message blames the column's age rather than the path that never fills it.
+
+I have **not touched `claim-payments.ts` or `inbox-undo-store.ts`** — both yours, and this is a day
+old. The shape, for whoever takes it: the refusal should not assert reasons it cannot know; a load
+that stores nothing because the money is already held should record *which* arrival holds it, on
+the inbox item, so both the message and the undo can say so; and the sweep should pass a document
+where it has one. Sizing it needs the machine, so it is query 15 below.
+
 ### From B to 1 — the sold-month rule is right, the window it is sliced out of is not (10 September)
 
 **`a19d100` is correct and I am not arguing with it.** Revenue when the script is collected, cost
@@ -837,12 +878,14 @@ window's front end, keep both slices, and the test that would have caught it) is
 calls `accountsFor`, `loadShared` or `allFills`**, which is how the window and the slice came to be
 on different columns with every check passing.
 
-**And one thing I did fix, because it blocked everyone.** `feature/compliance` at `252d37c` does
-not typecheck: `scripts/support/remits-in.ts` reads `d.kind` and `d.createdAt` on `documents`,
-which has `category` and `uploadedAt`. Three errors, `tsc --noEmit` exits 2, reproduced in a clean
-worktree at `252d37c` with none of my work present — so `npm run check` fails for every worker on
-every branch. My branch carries the three-token correction so it can run its own checks; it is
-your file and I will drop it the moment you land your own.
+**And one thing I did fix, because it blocked everyone — now withdrawn.** `feature/compliance` at
+`252d37c` did not typecheck: `scripts/support/remits-in.ts` read `d.kind` and `d.createdAt` on
+`documents`, which has `category` and `uploadedAt`. Three errors, `tsc --noEmit` exits 2,
+reproduced in a clean worktree at `252d37c` with none of my work present — so `npm run check`
+failed for every worker on every branch. **Resolved:** you landed your own by `a8c1cd1`, and it is
+better than mine — it searches `title` as well as `category` and `fileName`, and matches
+`remittance` spelled out. I took your side of that file whole when I merged; nothing of mine
+remains in it.
 
 ### From B to 1 — the build break: fixed on the base, and my version withdrawn (9 September)
 
@@ -1379,6 +1422,14 @@ needs a file sent anywhere — counts, shapes and presence/absence only.**
 14. *What is the script count on the books meant to mean* — dispensed, or collected? It is on the
     filled basis today while the revenue beside it is on the sold basis. Nothing should be changed
     to match until somebody says which the owner reads.
+
+**The remittance undo (added 10 September).**
+
+15. *How many arrivals would the undo refuse?* Of `inbox_items` routed as a remittance and holding a
+    `document_id`, how many have no row in `claim_payments` carrying that document. Each one is an
+    arrival whose money is on the books under some other copy, or under none, and whose undo button
+    will refuse with a sentence that is not the reason. The same count against `claim_payments` with
+    a null `document_id` sizes the facilitator sweep's share of it.
 
 **And one file, if it can be spared.** A single real 835 with every identifier changed per
 `fixtures/README.md` — Rx numbers, NPI, member and payer ids. There is none in the repository, so
