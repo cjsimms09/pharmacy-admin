@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import "server-only";
-import { and, eq, gte, lte, isNull, sql, inArray } from "drizzle-orm";
+import { and, eq, gte, lte, isNull, or, sql, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "./crypto";
 import { FROM_SUMMARY } from "./invoice-summary-store";
@@ -340,8 +340,29 @@ export function readGoodsSubtotalCents(text: string): number | null {
      * simply not this one.
      */
     /(?:^|[\r\n])\s*sub\s*-?\s*total[^$\n]{0,10}\$\s*(-?[\d,]+\.\d{2})/i,
-    // IPD prints the figure above its label rather than beside it.
-    /([\d,]+\.\d{2})\s*[\r\n]+\s*Sub\s*-?\s*total\b/i,
+    /*
+     * IPD prints the figure above its label rather than beside it — and the figure has to be
+     * alone on its line.
+     *
+     * Without that, this read the tail of the last item row as the subtotal. ParMed prints the
+     * label first and the figure underneath it:
+     *
+     *   61525786068462073329GENTB8411CT 7.67 7.67
+     *           SUB TOTAL
+     *   14.24
+     *
+     * so "the amount immediately before SUB TOTAL" was $7.67, the price of the last item. The
+     * reading of both lines came to $14.24 and was checked against $7.67, disagreed, and was
+     * thrown away — leaving an invoice with a total and no items, which reads on the screen as an
+     * unreadable scan. It was never a scan. The text was all there and this discarded it.
+     */
+    /(?:^|[\r\n])[^\S\r\n]*(-?[\d,]+\.\d{2})[^\S\r\n]*[\r\n]+\s*Sub\s*-?\s*total\b/i,
+    /*
+     * And ParMed's own way round: the label on one line, the figure on the next. Last, because it
+     * is the loosest of the three — an invoice that prints its subtotal beside the label is
+     * answered before this is reached.
+     */
+    /(?:^|[\r\n])\s*sub\s*-?\s*total[^\S\r\n]*[\r\n]+[^\S\r\n]*\$?\s*(-?[\d,(]+\.\d{2}\)?)/i,
   ];
   for (const re of patterns) {
     const m = re.exec(text);
@@ -1200,6 +1221,25 @@ export async function invoiceLines(invoiceId: string) {
 }
 
 /**
+ * An invoice with no item lines on file.
+ *
+ * Both states of `linesRead`, and that is the whole point. Null means nothing ever tried to read
+ * this invoice; nought means something tried and got none. They are different facts and neither is
+ * an invoice whose lines are known — but only null was being looked for.
+ *
+ * The consequence was a screen that could not be believed. The invoice page counted an invoice as
+ * lineless on `(linesRead ?? 0) === 0` and said so on the owner's screen; the counter and the
+ * backfill behind the button looked for null alone and found nothing to do. So the alert said one
+ * invoice worth $14.24 had no lines, and the button that exists to fix exactly that reported
+ * success without touching it, every time it was pressed:
+ *
+ * > "i told system it was parmed invoice and hit read with current rules and it didnt fix"
+ *
+ * He was right, and it was not the reader — the reader had never been asked.
+ */
+const HAS_NO_LINES = or(isNull(schema.supplierInvoices.linesRead), eq(schema.supplierInvoices.linesRead, 0));
+
+/**
  * Reads the lines off every invoice the line reader has not been run on.
  *
  * Every invoice filed before lines were kept has none, and the PDF is still here to ask. The same
@@ -1209,7 +1249,7 @@ export async function invoiceLines(invoiceId: string) {
 export async function backfillInvoiceLines(
   opts: { allowModel?: boolean; user?: { id?: string | null; name: string } } = {},
 ): Promise<{ invoices: number; linesRead: number; unreadable: number; unreconciled: number; byModel: number }> {
-  const rows = await db.query.supplierInvoices.findMany({ where: isNull(schema.supplierInvoices.linesRead) });
+  const rows = await db.query.supplierInvoices.findMany({ where: HAS_NO_LINES });
   const { readFile } = await import("./files");
   let invoicesDone = 0;
   let linesRead = 0;
@@ -1243,7 +1283,7 @@ export async function backfillInvoiceLines(
 
 /** How many invoices the line reader has never been run on. */
 export async function invoicesWithoutLines(): Promise<number> {
-  return (await db.query.supplierInvoices.findMany({ where: isNull(schema.supplierInvoices.linesRead), columns: { id: true } })).length;
+  return (await db.query.supplierInvoices.findMany({ where: HAS_NO_LINES, columns: { id: true } })).length;
 }
 
 /** Corrects, or confirms, what an invoice carries. The one action that must always be available. */
@@ -1516,12 +1556,34 @@ export async function invoiceIssues(): Promise<InvoiceIssue[]> {
       .map((r) => r.createdAt.slice(0, 10))
       .sort()[0];
     const days = daysBetween(oldest, today);
+    /*
+     * Where they actually are, rather than where the cautious ones are.
+     *
+     * This said "each is held with the Schedule II records" of every unconfirmed invoice. That is
+     * true of one the reader could not classify — unknown is filed under Schedule II, because
+     * assuming the other way is the one mistake that breaks the rule — and false of one it read
+     * perfectly well and is merely waiting for a person to agree with it.
+     *
+     * The ParMed invoice was read as carrying nothing controlled and filed as an ordinary business
+     * record, and this told the owner it was sitting with the Schedule IIs. A compliance message
+     * that misstates where a record is kept is worse than no message: it is the one thing on the
+     * page somebody would act on without going and looking.
+     */
+    const held = unconfirmed.filter((r) => r.schedule === "unknown").length;
+    const placed = unconfirmed.length - held;
+    const one = unconfirmed.length === 1;
+    const where =
+      held > 0 && placed > 0
+        ? `${held} could not be read and ${held === 1 ? "is" : "are"} held with the Schedule II records — the safe place, not necessarily the right one. The other ${placed} ${placed === 1 ? "was" : "were"} read and filed by what ${placed === 1 ? "it carries" : "they carry"}. `
+        : held > 0
+          ? `${one ? "It could not be read, so it is" : "None could be read, so they are"} held with the Schedule II records — the safe place, not necessarily the right one. `
+          : `${one ? "It was" : "They were"} read and filed by what ${one ? "it carries" : "they carry"}, and ${one ? "is" : "are"} waiting only for you to agree with the reading. `
     out.push({
       key: "unconfirmed",
-      severity: days >= 7 ? "blocking" : "warn",
-      title: `${unconfirmed.length} invoice${unconfirmed.length === 1 ? "" : "s"} nobody has confirmed`,
+      severity: held > 0 && days >= 7 ? "blocking" : "warn",
+      title: `${unconfirmed.length} invoice${one ? "" : "s"} nobody has confirmed`,
       detail:
-        `Each is held with the Schedule II records, which is the safe place for it but not the right one. ` +
+        where +
         (days >= 7
           ? `The oldest has been waiting ${days} days.`
           : `The oldest arrived ${days === 0 ? "today" : `${days} day${days === 1 ? "" : "s"} ago`}.`),

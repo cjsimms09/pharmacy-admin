@@ -457,25 +457,7 @@ export default async function SuppliersPage({
                         <input type="hidden" name="active" value={sup.active ? "no" : "yes"} />
                         <button className="btn btn-sm">{sup.active ? "Retire" : "Bring back"}</button>
                       </form>
-                      {/*
-                        And whether the pharmacy waits for a document from them at all. Xymogen
-                        never sends one; the receipt PioneerRx already holds is the record.
-                      */}
-                      <form action={receiptIsInvoice}>
-                        <input type="hidden" name="id" value={sup.id} />
-                        <input type="hidden" name="name" value={sup.name} />
-                        <input type="hidden" name="on" value={sup.invoiceFromPioneer ? "0" : "1"} />
-                        <button
-                          className="btn btn-sm"
-                          title={
-                            sup.invoiceFromPioneer
-                              ? "Go back to expecting an invoice by email from them."
-                              : "For a supplier who never emails an invoice: the PioneerRx receipt becomes the record and they are no longer chased for one."
-                          }
-                        >
-                          {sup.invoiceFromPioneer ? "Expect an invoice" : "Receipt is the invoice"}
-                        </button>
-                      </form>
+
                     </span>
                   )
                 }
@@ -487,6 +469,41 @@ export default async function SuppliersPage({
                   A supplier with no address recorded is a supplier whose invoices are quietly not
                   being filed, and nothing else on this page would reveal that.
                 */}
+                {/*
+                  Where their invoice comes from — said as a setting, not hidden in a button.
+
+                  The owner: "on supplier screen. dont see way to toggle on 'treat pioneer receipt as
+                  invoice'". It was there, as a third unlabelled button in the card header beside Edit
+                  and Retire, reading "Receipt is the invoice" — with the word PioneerRx nowhere on it
+                  and nothing saying which way it was currently set. A control that does not say what
+                  it currently is, is not a setting; it is a dare.
+
+                  So the line states the setting, and the button says what pressing it does.
+                */}
+                {canManage && (
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                    <span className="text-ink-3">Their invoice:</span>
+                    <span className={sup.invoiceFromPioneer ? "badge" : "text-ink-2"}>
+                      {sup.invoiceFromPioneer ? "the PioneerRx receipt is the invoice" : "expected by email from them"}
+                    </span>
+                    <form action={receiptIsInvoice}>
+                      <input type="hidden" name="id" value={sup.id} />
+                      <input type="hidden" name="name" value={sup.name} />
+                      <input type="hidden" name="on" value={sup.invoiceFromPioneer ? "0" : "1"} />
+                      <button
+                        className="btn btn-sm"
+                        title={
+                          sup.invoiceFromPioneer
+                            ? "Go back to expecting an invoice by email from them, and chasing any delivery that has none."
+                            : "For a supplier who never emails an invoice: the PioneerRx receipt becomes the record and they stop being chased for one. Their deliveries still count as purchases."
+                        }
+                      >
+                        {sup.invoiceFromPioneer ? "Expect an invoice by email" : "Use the PioneerRx receipt instead"}
+                      </button>
+                    </form>
+                  </div>
+                )}
+
                 {sup.invoiceFromPioneer ? (
                   /*
                    * Not a fault, so not in red. He has said their receipt is the record, and the
@@ -494,8 +511,7 @@ export default async function SuppliersPage({
                    * true, and no longer news. Xymogen had it, and it was the wrong news to give.
                    */
                   <p className="text-xs text-ink-2">
-                    Their PioneerRx receipt is the invoice. Deliveries are counted from PioneerRx and nothing waits
-                    on an email from them.
+                    Deliveries are counted from PioneerRx and nothing waits on an email from them.
                   </p>
                 ) : sup.senderEmails.trim() ? (
                   <p className="text-xs text-ink-2">
