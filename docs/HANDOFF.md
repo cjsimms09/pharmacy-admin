@@ -899,8 +899,30 @@ dictionary's manner — **PR's says, first, that the claim almost certainly alre
 patient's share and adding it would count the same money twice.** That is the e-voucher's shape
 exactly, and it is the mistake this frame is most likely to invite.
 
-**What I am doing next:** the last of the agreement work — the books' month against the chart's
-month, which needs a store call on each side and is the pair that already disagrees.
+**And the agreement check itself is now built: `src/lib/route-agreement.ts`** (pure, 10 tests). This
+is the one the site did not have in any form — every other check compares it to something outside
+itself, and this compares two of its own answers to one question.
+
+The design point worth your attention is that **the interesting states are four, not two**. Two
+routes agreeing is easy and two disagreeing is the finding, but **one route answering while the
+other declines is not agreement** — it is a question asked once, and reporting it as agreement is
+how a check comes to certify something it never looked at. Neither answering is a question nobody
+asked. Same discipline as `data-health.ts`'s third state, and most of the tests are on those two
+middle cases rather than on the comparison.
+
+No tolerance, and here the reasoning is stronger than anywhere else: these are two computations of
+one figure from one database at one moment, with no rounding, no timing difference and no third
+party. A cent apart means one of them is wrong.
+
+**Your half is the asking**, and it is two calls you already make: `booksFor(period)` for a single
+month and `recentMonths(n)`, handed in as two `Route`s over `BOOKS_FIGURES`. A test in the file
+reproduces the disagreement I measured — the books and the chart $988.90 apart on one month — so
+you can see the shape before wiring it. **Wire it and the site reports that fault itself, on every
+month, instead of waiting for somebody to read code.**
+
+That is the last of what I said I would build. Four pure modules, four store halves, all yours:
+`unclassified.ts` (six counts), `month-stability.ts` (snapshots and causes), `remit-classify.ts`
+(the published code lists), `route-agreement.ts` (two calls you already make).
 
 **And the one thing that would help most from the machine, said plainly because he asked what he can
 do:** run the queries under "Open items". Twenty-one of them now. They are counts, none of them
