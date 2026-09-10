@@ -90,10 +90,25 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
    * Everything else is done and folds away behind a count — kept, because "what happened to that
    * file" is a real question, but not competing with the work.
    */
+  /*
+   * What needs him, and what the re-sort can actually touch, are two different questions.
+   *
+   * This list drives both the count beside "Sort N again" and the rows shown. `resortInbox` only
+   * takes arrivals that are stored with a document and unrouted — it cannot touch a rejected or a
+   * held one. So the button could offer to sort three and report that none of them sorted
+   * themselves, which is the fault that had him pressing "read with current rules" for days on the
+   * invoice page.
+   *
+   * Both are true and both are worth showing; they are simply not the same number, and the button
+   * must promise only what it can do.
+   */
   const needsAttention = (i: (typeof items)[number]) => {
     const o = storyOf(i).outcome;
     return o === "not_recognised" || o === "rejected" || o === "held";
   };
+  /** The ones a re-sort would actually re-decide — the same rule `resortInbox` uses. */
+  const resortable = (i: (typeof items)[number]) =>
+    i.status === "stored" && !!i.documentId && (!i.routedAs || i.routedAs === "unrecognised");
   const needsYou = items.filter(needsAttention);
   const done = items.filter((i) => !needsAttention(i));
   const showDone = showDoneParam === "yes";
@@ -126,7 +141,38 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
           No mailbox connected yet. <Link href="/settings/email" className="text-accent underline">Set one up</Link> so scheduled reports land here on their own.
         </Empty>
       ) : shown.length === 0 ? (
-        <Empty>Nothing has arrived yet. {s.mail_last_sweep ? `Last checked ${s.mail_last_sweep.replace("T", " ").slice(0, 16)} UTC.` : "Use “Check for new mail now” to look."}</Empty>
+        /*
+          Two different silences, and this told him the wrong one.
+
+          `shown` is the needs-you list, so when every arrival had been handled it fell to nought and
+          the page printed "Nothing has arrived yet" — directly beneath its own heading saying "53
+          arrivals, 50 loaded, 3 passed over". A page contradicting itself in two lines is a page
+          nobody can trust about anything else on it, and this is the screen he had already called
+          unclear twice.
+
+          An empty mailbox and a cleared one deserve opposite sentences: one is a feed that may have
+          stopped, the other is the work being finished.
+        */
+        <Empty>
+          {items.length === 0 ? (
+            <>
+              Nothing has arrived yet.{" "}
+              {s.mail_last_sweep
+                ? `Last checked ${s.mail_last_sweep.replace("T", " ").slice(0, 16)} UTC.`
+                : "Use “Check for new mail now” to look."}
+            </>
+          ) : (
+            <>
+              Nothing needs you. All {items.length} arrival{items.length === 1 ? " has" : "s have"} been sorted and
+              filed.{" "}
+              {!showDone && (
+                <Link href="/inbox?done=1" className="text-accent underline">
+                  Show them anyway
+                </Link>
+              )}
+            </>
+          )}
+        </Empty>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-line bg-surface">
           <table className="table">

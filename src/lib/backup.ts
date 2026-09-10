@@ -438,8 +438,19 @@ export type RestoreRehearsal = {
 export async function rehearseRestore(destination?: string): Promise<RestoreRehearsal> {
   const s = await backupStatus();
   const dir = destination ?? s.destination;
+  /*
+   * A rehearsal that failed is not a rehearsal.
+   *
+   * Both paths stamped `backup_restore_last`, and `compliance-status.ts` satisfies the duty on the
+   * presence of that key alone — so a restore that could not be performed marked the period covered
+   * while the backups page showed the failure in red. The one thing this duty exists to establish
+   * is that the data can actually be brought back.
+   *
+   * The failure is still recorded, in its own key, because a rehearsal that was attempted and
+   * failed is worth more to know about than one nobody ran.
+   */
   const fail = async (message: string): Promise<RestoreRehearsal> => {
-    await setSetting("backup_restore_last", new Date().toISOString());
+    await setSetting("backup_restore_failed_at", new Date().toISOString());
     await setSetting("backup_restore_result", message);
     return { ok: false, archive: null, takenAt: null, tables: 0, rows: 0, documents: 0, message };
   };

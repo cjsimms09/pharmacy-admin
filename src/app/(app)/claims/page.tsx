@@ -951,6 +951,11 @@ export default async function ClaimsPage({
                   </tr>
                 </thead>
                 <tbody>
+                  {/*
+                    Cut at fifty, and it never said so — on a page whose other table says "the worst
+                    60 of N". Today there are forty-five so nothing is lost; widen the dates and two
+                    hundred and forty become fifty rows with no note.
+                  */}
                   {flags.lossFills.slice(0, 50).map((f) => (
                     <React.Fragment key={f.key}>
                     <tr>
@@ -1099,6 +1104,11 @@ export default async function ClaimsPage({
                   ))}
                 </tbody>
               </table>
+              {flags.lossFills.length > 50 && (
+                <p className="mt-2 text-xs text-ink-3">
+                  The worst 50 of {flags.lossFills.length} are shown.
+                </p>
+              )}
             </div>
           )}
 

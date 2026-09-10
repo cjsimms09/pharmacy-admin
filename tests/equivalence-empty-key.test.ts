@@ -97,3 +97,56 @@ describe("grouping falls back to the printed description", () => {
     assert.equal(holding("68462011233"), holding("68462011299"), "the same product by two packages is one buying choice");
   });
 });
+
+/**
+ * The strength on the carton has to agree, whatever the FDA key says.
+ *
+ * Two products can share an equivalence key and still be different drugs, because the key is only as
+ * good as the file behind it. The owner found both cases within a day of each other.
+ */
+describe("a swap needs the printed strength to match", () => {
+  const src = (ndc11: string, description: string, equivalenceKey: string, teCode: string | null = null) => ({
+    ndc11,
+    description,
+    equivalenceKey,
+    teCode,
+    classification: "G",
+    pricingUnit: "EA",
+    otc: false,
+  });
+  const holding = (groups: Map<string, string[]>, ndc: string) => [...groups.entries()].find(([, v]) => v.includes(ndc))?.[0] ?? null;
+
+  /*
+   * The directory records `strength = "5 mg/g"` for both of these. The 5% row is wrong — seven other
+   * fluorouracil rows carry the correct 50 mg/g — so the key cannot tell them apart. It put "buy the
+   * 0.5% instead of the 5%" at the top of his home page: tenfold strength, different indication,
+   * eighty-three times the cost.
+   */
+  test("a wrong strength in the source file no longer merges two creams", () => {
+    const key = "fluorouracil|5 mg/g|cream|topical";
+    const g = groupProducts([src("75907016911", "FLUOROURACIL CREAM .5%", key), src("00378479106", "FLUOROURACIL 5% CREAM", key)]);
+    assert.notEqual(holding(g, "75907016911"), holding(g, "00378479106"));
+  });
+
+  /*
+   * Every enoxaparin syringe is rated AP and the FDA expresses each by its concentration rather than
+   * the dose in the barrel, so one key and one A-rating covered all five doses — 46 NDCs. The rating
+   * is honest: they are equivalent *at the same dose*. It never said 30 mg may go out for 40 mg.
+   */
+  test("an A-rating does not merge two doses of one concentration", () => {
+    const key = "enoxaparin sodium|100 mg/ml|injection|subcutaneous";
+    const g = groupProducts([src("25021041070", "ENOXAPARIN 30 MG/0.3 ML SYR", key, "AP"), src("16714001610", "ENOXAPARIN 40 MG/0.4 ML SYR", key, "AP")]);
+    assert.notEqual(holding(g, "25021041070"), holding(g, "16714001610"), "the rating cannot help a key that cannot tell them apart");
+  });
+
+  test("two labellers of one strength still group, which is the whole point", () => {
+    const key = "losartan potassium|50 mg/1|tablet, film coated|oral";
+    const g = groupProducts([src("11111111111", "LOSARTAN POTASSIUM 50MG TAB", key, "AB"), src("22222222222", "Losartan Pot Tabs 50mg", key, "AB")]);
+    assert.equal(holding(g, "11111111111"), holding(g, "22222222222"));
+  });
+
+  test("and two strengths of one drug do not", () => {
+    const g = groupProducts([src("11111111111", "LOSARTAN POTASSIUM 50MG TAB", "losartan potassium|50 mg/1|tablet|oral", "AB"), src("33333333333", "LOSARTAN POTASSIUM 100MG TAB", "losartan potassium|50 mg/1|tablet|oral", "AB")]);
+    assert.notEqual(holding(g, "11111111111"), holding(g, "33333333333"));
+  });
+});

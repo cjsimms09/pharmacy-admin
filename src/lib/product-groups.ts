@@ -118,7 +118,38 @@ export function groupKey(src: GroupSource): string | null {
    */
   const fda = namesAnIngredient(src.equivalenceKey) ? (src.equivalenceKey ?? "").trim() : "";
   const rating = isARated(src.teCode ?? null) ? `te:${teGroup(src.teCode ?? null)}` : (src.classification ?? "").trim().toUpperCase() === "B" ? `product:${src.ndc11.slice(0, 9)}` : "generic";
-  const k = fda ? `fda:${fda}|${rating}` : productKey(src.description).key;
+  /*
+   * Where nothing rates the two as equivalent, the printed strength has to agree as well.
+   *
+   * An A-rating is the FDA saying outright that two products may be swapped, and a B classification
+   * confines a brand to its own packages. Everything else falls through to "generic", where the only
+   * thing holding the group together is the equivalence key — and that key is only as good as the
+   * source file behind it.
+   *
+   * Twice now it has not been good enough. The directory records `strength = "5 mg/g"` for
+   * fluorouracil 0.5% cream *and* for fluorouracil 5% cream; the 5% row is simply wrong, and seven
+   * other fluorouracil rows carry the correct 50 mg/g. So the site put "buy the 0.5% instead of the
+   * 5%" at the top of the owner's home page — a tenfold strength difference, a different indication,
+   * eighty-three times the cost. And the FDA expresses every enoxaparin syringe as its concentration,
+   * 100 mg/mL, so one group held 46 NDCs covering all five doses and the advice was to buy 30 mg
+   * instead of 40 mg.
+   *
+   * The strength printed on the carton is what a pharmacist reads, and both wholesaler catalogues and
+   * NADAC print it. Where nothing rates the pair, it must match. Two labellers of the same 50 mg
+   * tablet still group, because both descriptions say 50 mg; a 0.5% cream and a 5% cream no longer do.
+   */
+  /*
+   * Always, not only where nothing rates the pair — because a rating cannot help with a key that
+   * cannot tell the two apart in the first place.
+   *
+   * Enoxaparin is the case that proves it. Every syringe is rated AP, and the FDA expresses each of
+   * them by its *concentration* — 100 mg/mL — rather than the dose in the barrel. So 30 mg/0.3 mL and
+   * 40 mg/0.4 mL carry one key and one A-rating between them, and 46 NDCs covering all five doses sat
+   * in a single group. The rating is honest: those syringes are therapeutically equivalent *at the
+   * same dose*. It was never a statement that 30 mg may be dispensed for 40 mg.
+   */
+  const printed = productKey(src.description).strength ?? "";
+  const k = fda ? `fda:${fda}|${rating}${printed ? `|${printed}` : ""}` : productKey(src.description).key;
   if (!k) return null;
   const cls = (src.classification ?? "").trim().toUpperCase() || "?";
   const unit = (src.pricingUnit ?? "").trim().toUpperCase() || "?";

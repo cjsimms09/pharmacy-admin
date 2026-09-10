@@ -685,7 +685,18 @@ async function loadBuyList(): Promise<BuyListView> {
     missing.push("No claims are held, so nothing has a rate to buy against.");
 
   const { allSuppliers } = await import("./suppliers-registry");
-  const registry = await allSuppliers(true);
+  /*
+   * The ones he still buys from.
+   *
+   * This asked for every supplier including the retired, and `SupplierTerms` carries no `active` field,
+   * so nothing downstream could tell the difference. Seven wholesalers he had retired kept a full card
+   * on the purchasing page, offering to place orders with companies he is finished with. Retiring one
+   * is a decision, and the buy list was the screen that never heard it.
+   *
+   * Their invoices are untouched: those are records the pharmacy must produce for years after it stops
+   * buying, and nothing here goes near them.
+   */
+  const registry = (await allSuppliers(true)).filter((x) => x.active);
   const suppliers: SupplierTerms[] = registry.map((s) => ({
     supplier: s.name,
     supplierId: s.id,
@@ -892,7 +903,19 @@ export async function bandCostOfMoving(
 ): Promise<BandCost | null> {
   if (basketCents <= 0) return null;
   const { allSuppliers } = await import("./suppliers-registry");
-  const registry = await allSuppliers(true);
+  /*
+   * The ones he still buys from.
+   *
+   * This asked for every supplier including the retired, and `SupplierTerms` carries no `active`
+   * field, so nothing downstream could tell the difference. Seven wholesalers he had retired — ABC,
+   * API, BPI Labs, Buyline, DrugZone, HealthSource, SmartSource — kept a full card on the purchasing
+   * page, offering to place orders with companies he has finished with. Retiring one is a decision;
+   * the buy list was the one screen that never heard it.
+   *
+   * Their invoices are untouched: those are records the pharmacy must produce for years after it
+   * stops buying, and nothing here goes near them.
+   */
+  const registry = (await allSuppliers(true)).filter((s) => s.active);
   const primary = registry.find((s) => s.primarySupplier === true);
   if (!primary) return null;
 

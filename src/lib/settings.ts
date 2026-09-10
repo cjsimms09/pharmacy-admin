@@ -252,6 +252,9 @@ export const SETTING_KEYS = [
   // The rehearsal: an archive already on disk, opened and restored to a scratch database, to prove
   // that what was written last month is still what comes back today.
   "backup_restore_last",
+  /* A rehearsal that was attempted and failed. Kept apart from the one that succeeded, because the
+     compliance duty is satisfied only by a restore that actually worked. */
+  "backup_restore_failed_at",
   // When Data health last measured itself. Read by the daily tick so a machine switched off
   // for a week measures on the morning it comes back rather than on a fixed hour it never sees.
   "data_health_last",
