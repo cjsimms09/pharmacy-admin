@@ -327,7 +327,7 @@ async function loadPayerMap(): Promise<{
   };
 
   // ── Per drug, and who pays best and worst for it ──
-  const ndcBy = new Map<string, { r: NdcReimbursement; byPayer: Map<string, { marginCents: number; fills: number }> }>();
+  const ndcBy = new Map<string, { r: NdcReimbursement; byPayer: Map<string, { marginCents: number; fills: number; units: number }> }>();
   for (const f of fills) {
     if (!f.ndc11 || f.marginCents === null) continue;
     let e = ndcBy.get(f.ndc11);
@@ -357,16 +357,37 @@ async function loadPayerMap(): Promise<{
     e.r.costCents += f.acquisitionCents ?? 0;
     e.r.marginCents += f.marginCents;
     const who = nameOf(f);
-    const p = e.byPayer.get(who) ?? { marginCents: 0, fills: 0 };
+    const p = e.byPayer.get(who) ?? { marginCents: 0, fills: 0, units: 0 };
     p.marginCents += f.marginCents;
     p.fills++;
+    p.units += (f.quantityThousandths ?? 0) / 1000;
     e.byPayer.set(who, p);
   }
   const ndcs = [...ndcBy.values()]
     .map(({ r, byPayer }) => {
+      /*
+       * Per unit, because per fill is not a rate.
+       *
+       * This ranked payers on margin divided by fills, which compares a ninety-day script against a
+       * thirty-day one and calls the difference a rate. Eliquis 5mg was the top of the owner's
+       * money list on exactly that: "CapitalRx + RxCrossroads pays $530.83 more per fill than
+       * OptumRx" — a CapitalRx fill of 180 tablets against OptumRx fills of 60. Nobody is paying
+       * better; one prescription is three times the size of the other, and a MAC appeal built on it
+       * points at nothing.
+       *
+       * A payer with no units recorded cannot be rated and is left out of the comparison rather
+       * than ranked at nought, which would make it the worst payer for every drug it touched.
+       */
       const ranked = [...byPayer.entries()]
-        .map(([name, v]) => ({ name, marginCents: v.marginCents, fills: v.fills, perFill: Math.round(v.marginCents / v.fills) }))
-        .sort((a, b) => b.perFill - a.perFill);
+        .filter(([, v]) => v.units > 0)
+        .map(([name, v]) => ({
+          name,
+          marginCents: v.marginCents,
+          fills: v.fills,
+          units: v.units,
+          perUnit: v.marginCents / v.units,
+        }))
+        .sort((a, b) => b.perUnit - a.perUnit);
       const best = ranked[0] ?? null;
       const worst = ranked.length > 1 ? ranked[ranked.length - 1] : null;
       return {
@@ -376,7 +397,13 @@ async function loadPayerMap(): Promise<{
         bestPayer: best ? { name: best.name, marginCents: best.marginCents, fills: best.fills } : null,
         worstPayer: worst ? { name: worst.name, marginCents: worst.marginCents, fills: worst.fills } : null,
         // Only meaningful where two payers have actually been seen for the same drug.
-        spreadPerFillCents: best && worst ? best.perFill - worst.perFill : null,
+        /*
+         * The rate difference, put back onto a fill the size the worse payer actually writes — so it
+         * is comparable across drugs and still means "at your usual quantity", not "because one
+         * script was bigger".
+         */
+        spreadPerFillCents:
+          best && worst ? Math.round((best.perUnit - worst.perUnit) * (worst.units / worst.fills)) : null,
       };
     })
     .sort((a, b) => b.marginCents - a.marginCents);
