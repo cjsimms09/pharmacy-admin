@@ -1131,8 +1131,27 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
     };
   });
 
+  /*
+   * A measurement nobody has taken is not written down.
+   *
+   * The column says so itself: "Not nullable, because a row exists only once it has been measured.
+   * 'Never measured' is the absence of the row, so a measurement nobody took can never be read as a
+   * measurement of zero." The contract was right; the writer broke it with a `!`, which silenced the
+   * compiler about exactly the case that fails at runtime.
+   *
+   * The cost of that was out of all proportion. Every row is written in one pass, so the single row
+   * whose nightly proof had never run — the invoice proof, added hours ago — threw on its insert and
+   * took the whole measurement down with it: the catalogue, the claims, the NDC links, all of them.
+   * The page then had nothing current to show and reported the feeds as unseen for days.
+   *
+   * The owner, reading that: "are we getting catalog info from sql database? ... says we haven't
+   * gotten in a while? just make sure this process is sound." The catalogue had come in the day
+   * before — 211,359 priced lines across 44 suppliers. Nothing was wrong with the feed. The page
+   * could not finish measuring it.
+   */
   const known = new Set(SPECS.map((s) => s.key));
-  const rows = out.filter((m) => known.has(m.key));
+  const measured = out.filter((m) => known.has(m.key));
+  const rows = measured.filter((m) => m.measuredAt != null);
 
   for (const m of rows) {
     await db
@@ -1143,7 +1162,7 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
         denominator: m.denominator,
         gaps: (m.gaps ?? []).join("\n"),
         note: m.note ?? null,
-        measuredAt: m.measuredAt!,
+        measuredAt: m.measuredAt as string,
         tookMs: m.tookMs,
       })
       .onConflictDoUpdate({
@@ -1153,12 +1172,14 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
           denominator: m.denominator,
           gaps: (m.gaps ?? []).join("\n"),
           note: m.note ?? null,
-          measuredAt: m.measuredAt!,
+          measuredAt: m.measuredAt as string,
           tookMs: m.tookMs,
         },
       });
   }
 
+  /* Named, not counted: a row nobody has measured is a job waiting, and its name is the job. */
+  for (const m of measured) if (m.measuredAt == null) skipped.push(m.key);
   return { measured: rows.length, skipped, tookMs: Date.now() - startedAll };
 }
 
