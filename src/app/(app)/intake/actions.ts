@@ -1,5 +1,6 @@
 "use server";
 
+import { asked } from "@/lib/ai-gate";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
@@ -138,7 +139,7 @@ export async function readIntoIntake(
       return;
     }
     const people = await db.query.people.findMany({ where: eq(schema.people.active, true) });
-    const result = await classifyDocument({ buffer: bytes, mimeType: file.mimeType, fileName: file.fileName }, people.map((p) => `${p.firstName} ${p.lastName}`), { userId: user.id, userName: user.name });
+    const result = await asked(user.name, "Recognising a document at the intake", () => classifyDocument({ buffer: bytes, mimeType: file.mimeType, fileName: file.fileName }, people.map((p) => `${p.firstName} ${p.lastName}`), { userId: user.id, userName: user.name }));
     await db.update(schema.intakeItems).set({ resultJson: JSON.stringify({ ...result, businessNotes: doc.notes ?? null }) }).where(eq(schema.intakeItems.id, intakeId));
   } catch (e) {
     await db.update(schema.intakeItems).set({ status: "failed", error: describeError(e) }).where(eq(schema.intakeItems.id, intakeId));

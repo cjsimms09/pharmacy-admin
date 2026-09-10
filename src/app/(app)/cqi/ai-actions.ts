@@ -1,5 +1,6 @@
 "use server";
 
+import { asked } from "@/lib/ai-gate";
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { redirect } from "next/navigation";
@@ -47,7 +48,7 @@ export async function importPacket(fd: FormData) {
   await db.insert(schema.cqiImports).values({ id: importId, documentId: docId, createdBy: user.id });
   try {
     const buf = Buffer.from(await file.arrayBuffer());
-    const result = await extractPacket(buf, { userId: user.id, userName: user.name });
+    const result = await asked(user.name, "Reading a CQI packet", () => extractPacket(buf, { userId: user.id, userName: user.name }));
     await db.update(schema.cqiImports).set({ resultJson: JSON.stringify(result) }).where(eq(schema.cqiImports.id, importId));
   } catch (e) {
     await db.update(schema.cqiImports).set({ status: "failed", error: describeError(e) }).where(eq(schema.cqiImports.id, importId));
@@ -291,7 +292,7 @@ async function draftEvaluationsFor(id: string, user: { id: string; name: string 
     recurrencesSince: all.filter((o) => o.id !== i.id && o.type === i.type && i.capImplementedOn && o.reportCreatedOn > i.capImplementedOn && o.reportCreatedOn <= summary.periodEnd).length,
     priorReview: done.filter((r) => r.summaryId !== id)[0] ? { effective: done[0].effective, comments: done[0].comments } : null,
   }));
-  const evals = await draftCapEvaluations(inputs, await roleNames(), { userId: user.id, userName: user.name });
+  const evals = await asked(user.name, "Drafting CAP evaluations", async () => draftCapEvaluations(inputs, await roleNames(), { userId: user.id, userName: user.name }));
   for (const ev of evals) {
     const p = pending.find((x) => x.incident.incidentNumber === ev.incidentNumber);
     if (!p) continue;

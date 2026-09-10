@@ -1,3 +1,4 @@
+import { asked } from "@/lib/ai-gate";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -276,7 +277,7 @@ export default async function ManualPage({
     const set = await getSettings();
     const p = policies(set.pharmacy_name || "This pharmacy");
     try {
-      const r = await draftPolicy(
+      const r = await asked(u.name, "Rewriting a manual section", () => draftPolicy(
         {
           title: sec.title,
           body: sec.body,
@@ -288,7 +289,7 @@ export default async function ManualPage({
           siteDoes: p.map((x) => `${x.title}: ${x.text[0]}`).join("\n"),
         },
         { userId: u.id, userName: u.name },
-      );
+      ));
       const q = new URLSearchParams({ edit: id, draft: r.body, note: r.changed });
       if (r.concerns.length) q.set("concerns", r.concerns.join(" | "));
       redirect(`/manual?${q.toString()}#${id}`);
@@ -330,7 +331,7 @@ export default async function ManualPage({
     "use server";
     const u = await requireManager();
     try {
-      const r = await runManualAudit(u, { limit: 20 });
+      const r = await asked(u.name, "Auditing the manual", () => runManualAudit(u, { limit: 20 }));
       await audit({
         action: "manual.audit",
         userId: u.id,
@@ -525,7 +526,7 @@ export default async function ManualPage({
       }
       if (!canDraft) continue;
       try {
-        const r = await draftPolicy(
+        const r = await asked(u.name, "Rewriting a manual section", () => draftPolicy(
           {
             title: x.title,
             body: "",
@@ -538,7 +539,7 @@ export default async function ManualPage({
             siteDoes,
           },
           { userId: u.id, userName: u.name },
-        );
+        ));
         // The byline says who wrote it. A manual that cannot tell you which of its policies a
         // model drafted is one nobody can review properly.
         await saveSection(x.id, { body: r.body }, { name: `${u.name} — drafted by Claude, not yet reviewed` });
