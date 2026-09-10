@@ -375,7 +375,6 @@ export async function importRemittance(
       kind: facilitator ? "facilitator" : "third_party",
       amountCents: r.totalPaidCents ?? out.amountCents,
       payer: r.payer ?? null,
-      documentId: opts.documentId ?? null,
       /*
        * The deposit and what stands behind it, in one sentence on the receipt.
        *

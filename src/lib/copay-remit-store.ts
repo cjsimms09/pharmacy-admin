@@ -235,6 +235,17 @@ export async function importCopayRemit(
         revenueCents: claim ? 0 : n.paidCents,
         receivedOn: r.paidOn,
         reference: r.reference,
+        /*
+         * The BIN these adjudicate on, told to the matcher rather than kept to ourselves.
+         *
+         * This reader picks its own claim, on the prescription and the fill date and this BIN, and
+         * then recordClaimPayment picks one again from the prescription alone. Two matchers for one
+         * thing, which is how a payment can be recorded against a claim other than the one the
+         * screen said it settled. Since 1 added the two-payer choosing (match-remittance.ts) the BIN
+         * is the discriminator it wants, and it is the same discriminator this reader already uses —
+         * so passing it is what makes the two agree instead of merely usually agreeing.
+         */
+        bin: COPAY_BIN,
         // The handle an undo is keyed on. Accepted here since this reader was written and, until now, dropped.
         documentId: opts.documentId ?? null,
         notes:

@@ -253,7 +253,6 @@ export async function addCashReceipt(input: {
   /** The day the money landed, which is what the cross-feed check compares. */
   receivedOn?: string | null;
   reference?: string | null;
-  documentId?: string | null;
 }): Promise<{ id: string | null; duplicate: false } | { id: null; duplicate: true; why: string }> {
   const amountCents = Math.round(input.amountCents);
   if (input.sourceKey) {
@@ -293,7 +292,6 @@ export async function addCashReceipt(input: {
     sourceKey: input.sourceKey ?? null,
     receivedOn: input.receivedOn ?? null,
     reference: input.reference ?? null,
-    documentId: input.documentId ?? null,
   });
   return { id, duplicate: false };
 }
