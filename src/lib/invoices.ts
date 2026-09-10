@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import "server-only";
-import { and, eq, gte, lte, isNull, sql } from "drizzle-orm";
+import { and, eq, gte, lte, isNull, sql, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "./crypto";
 import { FROM_SUMMARY } from "./invoice-summary-store";
@@ -261,6 +262,19 @@ export function readTotalCents(text: string): number | null {
      * without this its invoices carried no total at all — so nothing was reconciled against
      * anything, and a dropped line would never have been noticed. One had been: $114.00 of drops.
      */
+    /*
+     * ParMed prints GRAND TOTAL with the figure on the next line and no dollar sign at all.
+     *
+     * The owner: "parmed invoices not being saved." The document reads as an invoice and the
+     * supplier is right; the total simply could not be found, because every pattern here wanted a
+     * dollar sign and every one of them wanted the money beside its label. So the invoice filed
+     * with no amount, which is a row that cannot be reconciled against anything.
+     *
+     * Both orders are read, and the dollar sign is optional — but only ever anchored to the label,
+     * because a bare number on a page of a hundred bare numbers is not a total.
+     */
+    /grand\s+total[^\n]{0,20}?\$?\s*(-?[\d,]+\.\d{2})/i,
+    /grand\s+total\s*[\r\n]+\s*\$?\s*(-?[\d,]+\.\d{2})/i,
     /([\d,]+\.\d{2})\s*[\r\n]+\s*Subtotal\b/i,
   ];
   for (const re of patterns) {
@@ -577,6 +591,41 @@ export type FiledInvoice = {
  * the read fails entirely the invoice is still filed — as unknown, with the Schedule IIs — because
  * losing a supplier invoice is not an improvement on filing it cautiously.
  */
+/**
+ * Who billed the pharmacy: the sender, where the register knows them.
+ *
+ * The owner: "there is a parmed invoice in the inbox that says not recognized." It was on file all
+ * along — under CARDINAL, because ParMed's invoice carries the line "DISTRIBUTED BY CARDINAL
+ * HEALTH 110" in its footer and the text reader took that as the supplier, over the address it
+ * came from.
+ *
+ * The name printed on a page is a name printed on a page: a distributor in the small print, a
+ * remit-to on the payment slip, a parent company on the letterhead. The address it was sent from
+ * is the pharmacy's own record of who it buys from, matched to a row the owner created. So where
+ * the register matched the sender, that wins; where it did not, the page's own name is still
+ * better than nothing.
+ */
+function supplierOf(meta: { supplier: string | null; supplierId?: string | null }, fromPage: string | null): string | null {
+  if (meta.supplierId && meta.supplier) return meta.supplier;
+  return fromPage || meta.supplier;
+}
+
+/**
+ * The invoice number the wholesaler put in the file name or the subject, where the page hides it.
+ *
+ * ParMed sends "Invoice 7490985814.PDF" with the subject "Invoice 7490985814" and prints the
+ * number nowhere the reader could find it. Filed with no number, the row can never be matched to a
+ * credit, to a PioneerRx purchase, or to itself arriving a second time — which is how the same
+ * document got onto the account twice under two different names.
+ *
+ * Six digits at least, so an order quantity or a date fragment is not mistaken for one.
+ */
+function numberInName(meta: { fileName: string; subject?: string | null }): string | null {
+  const from = `${meta.fileName} ${meta.subject ?? ""}`;
+  const m = /\b(?:invoice|inv)[^0-9a-z]{0,4}([0-9]{6,})\b/i.exec(from) ?? /\b([0-9]{7,})\b/.exec(from);
+  return m ? m[1] : null;
+}
+
 export async function fileInvoice(
   buf: Buffer,
   meta: {
@@ -618,15 +667,15 @@ export async function fileInvoice(
     basis = `Read from the invoice itself. ${fromText.basis}`;
     controlled = fromText.controlledItems;
     items = fromText.allItems;
-    supplier = fromText.supplier || meta.supplier;
-    invoiceNumber = fromText.invoiceNumber;
+    supplier = supplierOf(meta, fromText.supplier);
+    invoiceNumber = fromText.invoiceNumber ?? numberInName(meta);
     invoiceDate = fromText.invoiceDate;
     totalCents = fromText.totalCents;
   } else {
     // Anything the rule could not settle, including a disagreement it spotted, goes to the model
     // — and if that is unavailable or unsure too, the invoice waits for a person.
-    supplier = fromText?.supplier || meta.supplier;
-    invoiceNumber = fromText?.invoiceNumber ?? null;
+    supplier = supplierOf(meta, fromText?.supplier ?? null);
+    invoiceNumber = fromText?.invoiceNumber ?? numberInName(meta);
     invoiceDate = fromText?.invoiceDate ?? null;
     totalCents = fromText?.totalCents ?? null;
     controlled = fromText?.controlledItems ?? [];
@@ -676,6 +725,34 @@ export async function fileInvoice(
    * would look wrong. Identity is the supplier's own number and date, which is what makes two PDFs
    * the same bill however many times they arrive.
    */
+  /*
+   * The same bytes are the same bill, whatever the page does or does not print.
+   *
+   * The check below needs a number, a date and a supplier, and skips entirely without all three —
+   * so a wholesaler that prints no invoice number had no duplicate protection at all. IPD prints
+   * none, and its 5995-SO#1176673 arrived twice: two rows, one file, $3,255.70 counted twice, and
+   * nothing anywhere could see it because there was no number for anything to match on.
+   *
+   * A document's SHA is exact and needs nothing printed on the page. It is checked first, because a
+   * file already on record is already on record however it is labelled.
+   */
+  const sha = createHash("sha256").update(buf).digest("hex");
+  const sameFile = await db.query.documents.findMany({ where: eq(schema.documents.sha256, sha), columns: { id: true } });
+  if (sameFile.length > 0) {
+    const already = await db.query.supplierInvoices.findFirst({
+      where: inArray(schema.supplierInvoices.documentId, sameFile.map((d) => d.id)),
+    });
+    if (already) {
+      await audit({
+        action: "invoice.duplicate",
+        userId: ctx.userId,
+        userName: ctx.userName,
+        details: `${supplier ?? "A supplier"}'s ${meta.fileName} is byte for byte a document already filed${already.invoiceNumber ? ` as invoice ${already.invoiceNumber}` : ""}; this copy was not counted again.`,
+      });
+      return { id: already.id, documentId: already.documentId, schedule: already.schedule, needsReview: already.needsReview, duplicateOf: already.id };
+    }
+  }
+
   if (invoiceNumber && invoiceDate && supplier) {
     const already = await db.query.supplierInvoices.findFirst({
       where: and(

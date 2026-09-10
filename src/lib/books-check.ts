@@ -69,6 +69,43 @@ export type CountedTwice = {
  * branch. Where both routes carried a figure, the amount that was kept out is stated: that is the
  * money the books would have counted twice.
  */
+/**
+ * The same bill on file twice.
+ *
+ * Every other rule in this module is about two *feeds* carrying one dollar. This one is about a
+ * single feed carrying it twice, which is the version nothing was watching for — and the version
+ * that actually happened: an IPC invoice appeared on file twice at \$1,530.89 while a credit from
+ * the same wholesaler was being filed, and by the time anyone looked it was gone again. Something
+ * removed it and nothing recorded what.
+ *
+ * A question about money that cannot be answered afterwards has to be answerable continuously, so
+ * this runs on every draw of the account. A wholesaler issues one number once; two rows carrying
+ * it are one purchase counted twice, and the second is not evidence of anything.
+ *
+ * Matched on the number alone, deliberately. The two systems spell the same wholesaler three ways
+ * — 'IPC', 'Independent Pharmacy Cooperative', 'Independent Pharmacy Cooperative (IPC)' — and
+ * keying on the name as well is how the last matching bug hid.
+ */
+export function invoicesFiledTwice(invoices: { invoiceNumber: string | null; totalCents: number | null; invoiceDate: string | null }[]): {
+  number: string;
+  copies: number;
+  overCents: number;
+}[] {
+  const by = new Map<string, typeof invoices>();
+  for (const v of invoices) {
+    const n = (v.invoiceNumber ?? "").trim().toUpperCase();
+    if (!n) continue; // No number is not a duplicate; it is a document nothing can match, which the invoice page names.
+    by.set(n, [...(by.get(n) ?? []), v]);
+  }
+  const out: { number: string; copies: number; overCents: number }[] = [];
+  for (const [n, rows] of by) {
+    if (rows.length < 2) continue;
+    // The first is the bill; every further copy is money the month is carrying twice.
+    out.push({ number: n, copies: rows.length, overCents: rows.slice(1).reduce((sum, r) => sum + (r.totalCents ?? 0), 0) });
+  }
+  return out.sort((a, b) => Math.abs(b.overCents) - Math.abs(a.overCents));
+}
+
 export function countedTwice(i: PLInputs, pl: MonthlyPL): CountedTwice[] {
   const out: CountedTwice[] = [];
   const line = (label: string) => pl.revenue.concat(pl.costOfGoods, pl.operating, pl.offsets).find((l) => l.label === label) ?? null;
@@ -77,6 +114,20 @@ export function countedTwice(i: PLInputs, pl: MonthlyPL): CountedTwice[] {
    * Prescription revenue. The System Sales Summary carries the whole till including the front of
    * shop; the claims carry every fill exactly. Both know what the prescriptions took.
    */
+  const twice = invoicesFiledTwice(i.invoicesInMonth ?? []);
+  const twiceOver = twice.reduce((n, t) => n + t.overCents, 0);
+  out.push({
+    what: "A wholesaler's bill, filed twice",
+    routes: ["The invoice as it arrived", "The same invoice number on a second row"],
+    rule: "A wholesaler issues one number once. Two rows carrying it are one purchase counted twice, and the cash account adds both.",
+    bothPresent: twice.length > 0,
+    keptOutCents: null,
+    says:
+      twice.length === 0
+        ? "No invoice number is on file more than once."
+        : `${twice.length} invoice number${twice.length === 1 ? " is" : "s are"} on file more than once — ${twice.map((t) => `${t.number} (${t.copies} copies)`).join(", ")} — carrying ${dollars(twiceOver)} the month counts twice.`,
+  });
+
   const tillRx = i.sales ? (i.sales.rxRemitCents ?? 0) + (i.sales.rxPatientCents ?? 0) : 0;
   const claimsRx = i.claimsRevenueCents ?? 0;
   out.push({
