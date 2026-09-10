@@ -78,7 +78,15 @@ export type PayerLine = {
   receivedCents: number;
   /** Billed less received, floored at nought: an overpayment is its own state, not a negative debt. */
   outstandingCents: number;
-  /** The fill date of the oldest claim still unsettled, where there is one. */
+  /**
+   * The fill date of the oldest claim billed to this payer.
+   *
+   * Not the oldest *unsettled* one, which this shape cannot know: what has arrived is summed per
+   * payer, not matched claim by claim, so there is no telling which of a payer's claims a payment
+   * covered. Where a payer has part-paid, this is therefore the longest anything of its could have
+   * been waiting rather than the longest anything has — it errs towards chasing, which is the safe
+   * direction, but it is not the stronger claim the name suggests.
+   */
   oldestOn: string | null;
   daysWaiting: number | null;
   state: PayerState;
