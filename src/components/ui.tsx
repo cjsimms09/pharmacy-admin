@@ -67,6 +67,49 @@ export function PageHeader({
 }
 
 /**
+ * A question that has been answered: one line, with the reasoning behind a disclosure.
+ *
+ * The owner, on a page whose every section explains itself at full length whether or not anything
+ * is wrong: "this site is so hard to look at and follow."
+ *
+ * He is right, and the cause is that being fine costs as much room as being broken. The Money
+ * page spends seven subsections of two paragraphs each to say nothing is counted twice, and
+ * fourteen more to say where each feed lands. The invoice page gives four paragraphs to a card
+ * headed "Delivered, and no invoice for it" whose content is that every delivery has one. On a
+ * phone, between patients, that is minutes of scrolling past prose to reach a number.
+ *
+ * The prose is worth keeping — it is what makes a figure auditable, and he does audit. It is just
+ * not what he came for. So a settled question collapses to its answer and opens on a tap.
+ *
+ * Only for states that ask nothing. A card with something to do stays open: hiding a job behind a
+ * disclosure is the opposite mistake and a worse one.
+ */
+export function Settled({
+  says,
+  id,
+  className,
+  children,
+}: {
+  /** The answer, in one line. Not the question. */
+  says: string;
+  id?: string;
+  className?: string;
+  /** The reasoning, shown on a tap. */
+  children?: React.ReactNode;
+}) {
+  return (
+    <details id={id} className={`group rounded-lg border border-line bg-surface ${className ?? ""}`}>
+      <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm text-ink-2">
+        <span aria-hidden className="text-accent">&#10003;</span>
+        <span className="min-w-0 flex-1">{says}</span>
+        {children && <span className="shrink-0 text-xs text-ink-3 group-open:hidden">why</span>}
+      </summary>
+      {children && <div className="border-t border-line px-3 py-2 text-xs text-ink-3">{children}</div>}
+    </details>
+  );
+}
+
+/**
  * A section of a page.
  *
  * Always has a header bar, because a heading that sits inside the same padding as its content

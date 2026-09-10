@@ -626,7 +626,22 @@ export function classifyInvoiceText(text: string): TextVerdict {
       ...head,
       schedule: "unknown",
       confident: false,
-      basis: "No item lines could be read from this document, so nothing can be said about what it carries.",
+      /*
+       * A record of what was decided and when, not a live claim about the document.
+       *
+       * This used to read "No item lines could be read from this document, so nothing can be said
+       * about what it carries." True at the moment of filing, and stored for ever. When the reader
+       * later learned the layout and the lines were read, nothing rewrote it — so a McKesson
+       * invoice with fifty-seven lines on file went on saying not one could be read, and an IPC
+       * invoice said both "no item lines could be read" and "1 item line were read and add up to
+       * the printed total" in the same paragraph, because a repair had appended the truth to the
+       * falsehood instead of replacing it.
+       *
+       * `basis` exists to say why a schedule was chosen, which is a decision taken on a day. So it
+       * says that, in the past tense, and makes no claim about how the document reads today. What
+       * is true today is computed today, on the row, from the lines actually on file.
+       */
+      basis: "Filed as unknown: nothing readable on it named a controlled item when it arrived.",
     };
   }
 
@@ -1014,11 +1029,18 @@ export async function fileInvoice(
     // same two readers. Both have now had this document and neither could place a line on it.
     modelTried: worthReading,
   });
+  /*
+   * The row is held for a person, and the reason is not written down.
+   *
+   * `emptyInvoiceWarning` is computed and says nothing the moment an invoice has lines. Writing
+   * its sentence into `basis` froze a fact that then changed, and every attempt to unfreeze it was
+   * a search-and-replace against prose — which missed the model path, missed the scanned-document
+   * wording, and missed a second sentence saying the same thing from somewhere else entirely.
+   *
+   * A derived sentence has one home. This one is computed where it is shown.
+   */
   if (why) {
-    await db
-      .update(schema.supplierInvoices)
-      .set({ needsReview: true, basis: `${basis} ${why}`.trim() })
-      .where(eq(schema.supplierInvoices.id, id));
+    await db.update(schema.supplierInvoices).set({ needsReview: true }).where(eq(schema.supplierInvoices.id, id));
   }
 
   return { id, documentId, schedule, needsReview: !confident || why !== null };
@@ -1119,49 +1141,15 @@ export async function writeInvoiceLines(
    * on it would quietly replace figures that reconciled with figures that might not.
    */
   /*
-   * The row stops saying the lines could not be read, once they have been.
+   * Reading the lines answers the review it asked for, where the schedule was never in doubt.
    *
-   * `emptyInvoiceWarning` is computed and correct — it returns nothing the moment an invoice has
-   * lines. But its sentence is written into `basis` at filing time, and nothing ever took it back
-   * out. So when the ParMed reader started working, the two lines were read, stored and
-   * reconciled, and the invoice went on telling him in his own words: "no item line could be read
-   * from it... reading it again will give the same answer. It has to be entered by hand."
-   *
-   * He read that after the fix had shipped and reasonably concluded nothing had shipped. A stored
-   * sentence about a computed fact is a fact with two homes, and the stale one is the one on the
-   * screen.
+   * No prose to repair any more: the sentence about item lines is computed on the row rather than
+   * stored, so it corrects itself the moment the lines land. A schedule that could not be read
+   * still wants a person, and that question is untouched here.
    */
-  if (r.stored > 0 && inv) {
-    const stale = emptyInvoiceWarning({
-      linesStored: 0,
-      totalCents: inv.totalCents,
-      hasTextLayer: true,
-      modelTried: true,
-    });
-    const staleNoModel = emptyInvoiceWarning({
-      linesStored: 0,
-      totalCents: inv.totalCents,
-      hasTextLayer: true,
-      modelTried: false,
-    });
-    let basis = inv.basis ?? "";
-    for (const gone of [stale, staleNoModel]) if (gone && basis.includes(gone)) basis = basis.replace(gone, "").replace(/\s{2,}/g, " ").trim();
-    const said = `${r.stored} item line${r.stored === 1 ? "" : "s"} were read and add up to the printed total.`;
-    /*
-     * And the review it asked for is answered, where the only thing in question was the lines. A
-     * schedule that could not be read files as "unknown" and still wants a person — that question
-     * is untouched here, because it is a different one and the safe answer to it is to keep asking.
-     */
-    const settled = inv.schedule !== "unknown";
-    await db
-      .update(schema.supplierInvoices)
-      .set({
-        basis: `${basis} ${said}`.trim(),
-        ...(settled ? { needsReview: false } : {}),
-      })
-      .where(eq(schema.supplierInvoices.id, invoiceId));
+  if (r.stored > 0 && inv && inv.schedule !== "unknown") {
+    await db.update(schema.supplierInvoices).set({ needsReview: false }).where(eq(schema.supplierInvoices.id, invoiceId));
   }
-
   let readBy: "rule" | "model" | null = r.stored > 0 ? "rule" : null;
   let out = r;
   if (r.stored === 0 && opts.allowModel && inv) {
