@@ -63,6 +63,23 @@ export type SupplierInvoice = typeof schema.supplierInvoices.$inferSelect;
 export type SupplierDocumentKind = "invoice" | "statement" | "rebate_report" | "credit_memo" | "purchase_report" | "unknown";
 
 /**
+ * Which of those belong in the invoice file, decided in one place.
+ *
+ * This was written out twice and the two copies disagreed within a day of each other. The filing
+ * rule learned that a credit memo belongs here — it is money counted nowhere else, on a document
+ * the wholesaler issues in the same series as its invoices — and the sweep that re-checks the
+ * folder did not, so it proposed deleting the credit the filing rule had just accepted. The owner
+ * saw both on one screen: the credit filed, and a button offering to take it out.
+ *
+ * A statement of account and a rebate breakdown restate money already counted somewhere else, so
+ * they are the ones that have to leave. `unknown` stays because refusing what cannot be read is
+ * how invoices get lost.
+ */
+export function belongsInTheInvoiceFile(kind: SupplierDocumentKind): boolean {
+  return kind === "invoice" || kind === "unknown" || kind === "credit_memo";
+}
+
+/**
  * What a supplier actually sent, read off the document rather than off the subject line.
  *
  * A wholesaler sends four kinds of paper and they are not interchangeable. An **invoice** is a
@@ -176,7 +193,7 @@ export function looksLikeInvoice(opts: {
      * Filed as an invoice with a negative total it nets against the month by the ordinary
      * arithmetic, and needs no separate machinery to be right.
      */
-    if (kind !== "invoice" && kind !== "unknown" && kind !== "credit_memo") return false;
+    if (!belongsInTheInvoiceFile(kind)) return false;
   }
   return /invoice|inv\b|statement of account|packing (list|slip)/i.test(`${opts.subject} ${opts.fileName}`);
 }
@@ -391,6 +408,26 @@ export function classifyInvoiceText(text: string): TextVerdict {
     // A date printed without leading zeros, which is how one supplier writes it.
     isoFrom(
       (text.match(/Invoice Date:?\s*(\d{1,2}\/\d{1,2}\/\d{4})/i)?.[1] ?? "")
+        .split("/")
+        .map((x, i) => (i < 2 ? x.padStart(2, "0") : x))
+        .join("/"),
+    ) ??
+    /*
+     * The label and its value separated by the rest of the column headings.
+     *
+     * ParMed prints a header row and then a value row, so the page reads "INVOICE DATE PAYER #
+     * SHIPPED ON 09/09/2026 2057167199 09/09/2026" — the label is there, the date is there, and
+     * every pattern above wanted them adjacent. So the invoice filed with no date, which puts it in
+     * the archive but out of reach of a date range, and a date range is exactly what an inspector
+     * asks for.
+     *
+     * The gap may not contain a digit. That is what keeps this honest: it can cross "PAYER #" and
+     * "SHIPPED ON" to reach the first value, and it cannot skip over one number to land on a later
+     * one. The same page carries 08/31/2028 and 04/30/2028 as item expiry dates and 10/10/2026 as
+     * the payment due date, and none of them is reachable from this label without passing a digit.
+     */
+    isoFrom(
+      (text.match(/Invoice\s*Date\b[^0-9]{0,80}?(\d{1,2}\/\d{1,2}\/\d{4})/i)?.[1] ?? "")
         .split("/")
         .map((x, i) => (i < 2 ? x.padStart(2, "0") : x))
         .join("/"),
@@ -2188,6 +2225,21 @@ export async function storeInvoiceLines(
     controlled: l.controlled ?? null,
   }));
   for (let i = 0; i < rows.length; i += 200) await db.insert(schema.invoiceLines).values(rows.slice(i, i + 200));
+  /*
+   * The count on the invoice is written here, with the lines it counts.
+   *
+   * It used to be the caller's job, so a path that stored lines and forgot the count left the
+   * invoice saying nought while fifty-seven rows sat under it — the screen reporting a fault that
+   * had already been fixed, which is the same shape of lie as the inbox marking filed invoices
+   * unrecognised. Two facts about one thing, kept in two places, by two different pieces of code.
+   *
+   * Written together now, so they cannot disagree.
+   */
+  await db
+    .update(schema.supplierInvoices)
+    .set({ linesRead: rows.length, linesUnread: parsed.unreadable.length })
+    .where(eq(schema.supplierInvoices.id, invoiceId));
+
   return { stored: rows.length, unread: parsed.unreadable.length, reconciles: parsed.reconciles, readCents: parsed.totalCents };
 }
 
@@ -2423,7 +2475,7 @@ export async function recheckFiledInvoices(
     // The stored item text is a better witness than a re-extraction that came back empty.
     const words = text.trim() ? text : inv.itemsText;
     const c = classifySupplierDocument(words, doc.fileName, doc.title);
-    if (c.kind === "invoice" || c.kind === "unknown") continue;
+    if (belongsInTheInvoiceFile(c.kind)) continue;
     found.push({ id: inv.id, supplier: inv.supplier, kind: c.kind, why: c.why });
     if (opts.apply) {
       await unfileInvoice(inv.id, { kind: c.kind as "statement" | "rebate_report" | "credit_memo" }, user);

@@ -109,7 +109,14 @@ const MCK = new RegExp(
     // front-end ones, so its absence is a fact about the item rather than a line this cannot read.
     String.raw`(?:\s+([A-Z]))?` +
     String.raw`\s+(${MONEY})` + // unit price
-    String.raw`(\s+K)?` + // the contract rebate flag
+    // The contract rebate flag, which is not always one letter.
+    //
+    // Two lines on a real McKesson invoice print KI and KD rather than K — a sodium chloride vial
+    // and a tacrolimus capsule. The pattern wanted exactly K, so both lines failed to parse; the
+    // fifty-five that did parse then came to $172.91 less than the printed total, and the
+    // all-or-nothing rule threw away all fifty-five. One letter cost the site every item line on a
+    // $9,890.97 invoice, and with them what the pharmacy paid per NDC on any of it.
+    String.raw`(\s+K[A-Z]?)?` + // the contract rebate flag
     String.raw`\s+(${MONEY})` + // extended amount
     // Some lines carry one more figure after the extended amount — a pack multiple on the
     // testosterone gel line of a real invoice. It is not a field this needs, but a pattern
