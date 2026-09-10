@@ -377,13 +377,27 @@ export default async function ClaimsPage({
               }
             : flags.balance.unchecked > 0
               ? {
+                  /*
+                    The books balance. That is the headline, and it was not the headline.
+
+                    This tile showed "$35.00" in the amount slot in a warning colour, and the owner read
+                    it — twice — as the books being $35.00 out. They are not: 260 dispensings agree to
+                    the cent and nothing disagrees. The $35.00 is what PioneerRx calls gross profit on
+                    one prescription whose acquisition cost was never recorded, which is the whole of
+                    the payment precisely because it has no cost to take off either.
+
+                    A money figure in the amount slot of a warning tile means money at risk everywhere
+                    else on this page. So it is not one here, the tone says the books hold, and the
+                    prescription is named — because a number with nothing to act on is a number that
+                    gets asked about again.
+                  */
                   key: "balance",
-                  tone: "warn" as const,
-                  amount: formatCents(flags.balance.uncheckedReportMarginCents),
-                  title: `The books balance on everything that can be checked — ${flags.balance.unchecked} dispensing${flags.balance.unchecked === 1 ? "" : "s"} cannot be`,
+                  tone: "ok" as const,
+                  amount: "",
+                  title: `The books balance — ${(flags.balance.checkedFills ?? 0).toLocaleString("en-US")} dispensings agree to the cent, ${flags.balance.unchecked} has no cost to check`,
                   href: "#loss",
                   action: "See them",
-                  why: `This site and the report agree to the cent on ${(flags.balance.checkedFills ?? 0).toLocaleString("en-US")} dispensings. The other ${flags.balance.unchecked} carry no acquisition cost on the report, so there is nothing to compare — PioneerRx shows ${formatCents(flags.balance.uncheckedReportMarginCents)} of gross profit on them, which is the whole of the revenue because it has no cost either. That is a missing figure, not a disagreement, and the fix is the cost rather than the account.`,
+                  why: `Nothing is out of balance. This site and the report agree to the cent on ${(flags.balance.checkedFills ?? 0).toLocaleString("en-US")} dispensings, and none disagrees. ${flags.balance.uncheckedNamed.map((u) => `${u.itemName ?? "One prescription"} (Rx ${u.rxNumber}${u.fillNumber !== null ? `-${u.fillNumber}` : ""}, ${u.dateFilled})`).join("; ")} went out with no acquisition cost recorded, so this site will not claim a margin on it — a bottle of unknown cost is not a free one. PioneerRx shows ${formatCents(flags.balance.uncheckedReportMarginCents)} of gross profit on it, which is the whole of the payment because it has no cost to take off either. It settles itself when the wholesaler's cost for that bottle comes through; nothing needs correcting in the account.`,
                 }
             : {
                 key: "balance",
@@ -749,6 +763,12 @@ export default async function ClaimsPage({
                 on a different plan altogether. Grouped into the fill they belong to, most turn out to have been paid;
                 what is listed here is the fill, not the row, so a cost leg that was settled elsewhere is not reported
                 as a debt.
+                {flags.onAccount.receivableCents === 0 && flags.onAccount.unbilled.length === 0 && (
+                  <>
+                    {" "}
+                    <b>Every one of them has been paid</b> — nothing on this list is owed to the pharmacy.
+                  </>
+                )}
                 {flags.onAccount.unbilled.length > 0 && (
                   <>
                     {" "}
@@ -769,7 +789,8 @@ export default async function ClaimsPage({
                       <th>Filled</th>
                       <th>Plan</th>
                       <th className="text-right">Cost</th>
-                      <th className="text-right">Billed</th>
+                      <th className="text-right">Came in</th>
+                      <th className="text-right">Still owed</th>
                       <th>What it is</th>
                     </tr>
                   </thead>
@@ -784,15 +805,34 @@ export default async function ClaimsPage({
                         <td className="whitespace-nowrap text-xs">{f.dateFilled}</td>
                         <td className="text-xs">{f.payers[0]?.name ?? f.payers[0]?.bin ?? "—"}</td>
                         <td className="text-right">{f.acquisitionCents === null ? "—" : formatCents(f.acquisitionCents)}</td>
-                        <td className="text-right">{formatCents(f.receivableCents)}</td>
+                        <td className="text-right">{formatCents(f.revenueCents)}</td>
+                        <td className={`text-right ${f.receivableCents > 0 ? "text-crit" : ""}`}>{formatCents(f.receivableCents)}</td>
                         <td className="text-xs">
+                          {/*
+                            The row used to read "Billed. Not cash until it is collected." beside a nought, on a
+                            fill that had been paid in full. The owner asked what he was looking at, which is the
+                            right question: a $1,147.17 cost, nothing in the billed column and a sentence about
+                            money not yet collected says a four-figure debt, and there was none. The paragraph
+                            above the table had it right all along — most of these turn out to have been paid —
+                            and the row underneath it disagreed.
+
+                            Three different states, three different sentences, each drawn from this fill's own
+                            arithmetic rather than from the status on its cost leg.
+                          */}
                           {(f.unbilledCostCents ?? 0) > 0 ? (
                             <span className="text-crit">
                               Cost out of the door and nothing billed on any leg. Raise the charge, or find out which
                               plan should have had it.
                             </span>
+                          ) : f.receivableCents > 0 ? (
+                            <>Billed to the account and not yet collected.</>
                           ) : (
-                            <>Billed. Not cash until it is collected.</>
+                            <>
+                              Paid. The cost sits on the {f.payers[0]?.name ?? f.payers[0]?.bin ?? "account"} leg and the
+                              money arrived on{" "}
+                              {f.payers.filter((x) => x.remitCents > 0).map((x) => x.name ?? x.bin).join(" and ") || "another transmission"}
+                              {f.marginCents !== null && <> &mdash; {formatCents(f.marginCents)} on the bottle</>}. Nothing is owed.
+                            </>
                           )}
                         </td>
                       </tr>
