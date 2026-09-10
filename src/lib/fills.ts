@@ -492,9 +492,24 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
      * The distinction that matters, and the one the $5,071.34 bug turned on: a fill that shipped
      * units and printed no cost is unknown and stays null. Only a fill that shipped none is zero.
      */
-    const dispensedNothing = quantityThousandths === 0;
-    const acquisitionCents =
-      costs.length > 0 ? (duplicated ? costs[0] : costs.reduce((n, c) => n + c, 0)) : dispensedNothing ? 0 : null;
+    /*
+     * REVERTED, and the reason is worth keeping.
+     *
+     * This briefly read: a leg that dispensed no units costs nothing, because the QULIPTA copay-card
+     * leg is a payment rather than a bottle. That is true of QULIPTA and false of everything else it
+     * caught. PioneerRx also reports quantity nought with no cost on legs that plainly did dispense —
+     * a Zepbound at $491.67, two Adzenys at $1,171.91 and $597.20, one of them with a reversed
+     * sibling leg carrying $984.00 of cost, so the bottle certainly went out the door.
+     *
+     * Calling those free put $2,295.78 of invented gross profit into September and emptied the
+     * caveat that had been holding five unpriced prescriptions out of the account. It is the
+     * $5,071.34 phantom-profit bug again, wearing a quantity of nought instead of a cost of nought,
+     * and it lasted one morning because the audit measured the figure instead of trusting the fix.
+     *
+     * A cost nobody recorded is unknown whatever the quantity says. The tile that prompted the change
+     * is answered where it belongs — in what counts as a dispensing — not by inventing a cost.
+     */
+    const acquisitionCents = costs.length > 0 ? (duplicated ? costs[0] : costs.reduce((n, c) => n + c, 0)) : null;
     // Quantity likewise sits on the dispensing row; the coordination rows print zero.
 
 
