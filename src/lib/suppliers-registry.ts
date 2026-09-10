@@ -171,6 +171,20 @@ export async function updateSupplier(id: string, input: SupplierInput): Promise<
 }
 
 /**
+ * Records one more address a supplier sends invoices from, and touches nothing else.
+ *
+ * Deliberately not `updateSupplier`, which writes every column: called with a partial it would
+ * blank the account number, the DEA number, the phone, the aliases and the notes — the fields the
+ * owner typed in by hand. Learning an address must never cost him one of those.
+ */
+export async function rememberSenderEmails(id: string, senderEmails: string): Promise<void> {
+  await db
+    .update(schema.suppliers)
+    .set({ senderEmails: normaliseAddresses(senderEmails), updatedAt: new Date().toISOString() })
+    .where(eq(schema.suppliers.id, id));
+}
+
+/**
  * Retires a supplier without losing the invoices filed against them.
  *
  * Never deleted. The invoices are records the pharmacy must produce for years after it stops

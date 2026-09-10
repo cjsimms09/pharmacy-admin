@@ -391,8 +391,19 @@ export default async function SuppliersPage({
           No supplier is recorded, so nothing arriving by email will be filed as an invoice. Add the wholesalers below.
         </Empty>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-2">
-          {suppliers.map((sup) => {
+        <>
+          {/*
+            The owner: "when I retire a supplier they should be removed from the list. We can still
+            have an inactive section below but they take up so much room.. I have to do too much
+            scrolling on this site!!"
+
+            Retired suppliers are the ones he has said he is done with, and they were rendering as
+            full cards beside the ones he buys from every day — same size, same detail, same space.
+            Nothing is deleted and everything comes back with one press; they are simply not what
+            the page is for.
+          */}
+          <div className="grid gap-4 lg:grid-cols-2">
+            {suppliers.filter((x) => x.active).map((sup) => {
             const theirs = all.filter((i) => (i.supplier ?? "").toLowerCase().includes(sup.name.toLowerCase().slice(0, 8)));
             const last = theirs.map((i) => i.invoiceDate).filter(Boolean).sort().at(-1) ?? null;
             const quiet = last ? daysBetween(last, today) : null;
@@ -543,8 +554,32 @@ export default async function SuppliersPage({
                 )}
               </Card>
             );
-          })}
-        </div>
+            })}
+          </div>
+
+          {suppliers.some((x) => !x.active) && (
+            <details className="mt-4 rounded-lg border border-line bg-surface">
+              <summary className="cursor-pointer px-3 py-2 text-sm">
+                Retired ({suppliers.filter((x) => !x.active).length}) — kept, not deleted
+              </summary>
+              <ul className="divide-y divide-line">
+                {suppliers.filter((x) => !x.active).map((sup) => (
+                  <li key={sup.id} className="flex items-center justify-between gap-3 px-3 py-2">
+                    <span>
+                      <Link href={`/suppliers/${sup.id}/terms`} className="text-sm underline">{sup.name}</Link>
+                      {sup.accountNumber ? <span className="ml-2 text-xs text-ink-2">acct {sup.accountNumber}</span> : null}
+                    </span>
+                    <form action={retire}>
+                      <input type="hidden" name="id" value={sup.id} />
+                      <input type="hidden" name="active" value="yes" />
+                      <button className="btn btn-sm">Bring back</button>
+                    </form>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </>
       )}
 
       {canManage && (

@@ -410,7 +410,7 @@ export async function applyBusiness(id: string, fd: FormData) {
   let outcome = "";
 
   if (kind === "wholesaler_invoice") {
-    const { allSuppliers, addSupplier } = await import("@/lib/suppliers-registry");
+    const { allSuppliers, addSupplier, rememberSenderEmails } = await import("@/lib/suppliers-registry");
     const { fileInvoice, writeInvoiceLines } = await import("@/lib/invoices");
     const { readFile, deleteFile } = await import("@/lib/files");
     let supplierId = orNull(g("supplierId"));
@@ -437,6 +437,39 @@ export async function applyBusiness(id: string, fd: FormData) {
     if (total !== null && total > 0) set.totalCents = total;
     if (dateOk(paidOn)) set.paidOn = paidOn;
     if (Object.keys(set).length) await db.update(schema.supplierInvoices).set(set).where(eq(schema.supplierInvoices.id, filed.id));
+
+    /*
+     * Where it came from is learned here, rather than typed on a settings page later.
+     *
+     * The owner: "Once we get an invoice from a supplier and I tell the system it's an invoice from
+     * that supplier it should automatically save that email as where invoices come from." The site
+     * has both halves at this exact moment — the message the attachment arrived on knows the sender,
+     * and he has just said which wholesaler it is. Asking him to go and type it in is asking him to
+     * tell the site something it watched happen.
+     *
+     * The rule is in `learn-sender.ts`: the full address and never the bare domain, nothing already
+     * covered, and nothing another supplier already claims. Filing an invoice must not fail because
+     * the register could not be updated, so this cannot throw the filing over.
+     */
+    let learned: string | null = null;
+    try {
+      const arrival = await db.query.inboxItems.findFirst({ where: eq(schema.inboxItems.documentId, doc.id) });
+      if (arrival?.fromAddress) {
+        const { learnSender } = await import("@/lib/learn-sender");
+        const all = await allSuppliers(true);
+        const mine = all.find((x) => x.id === supplierId);
+        if (mine) {
+          const r = learnSender({ id: mine.id, name: mine.name, senderEmails: mine.senderEmails }, arrival.fromAddress, all.map((x) => ({ id: x.id, name: x.name, senderEmails: x.senderEmails })));
+          if (r.learn) {
+            await rememberSenderEmails(mine.id, r.senderEmails);
+            learned = r.why;
+            await audit({ action: "supplier.sender.learned", userId: user.id, userName: user.name, entity: "supplier", entityId: mine.id, details: r.why });
+          }
+        }
+      }
+    } catch {
+      // The invoice is filed either way; a register that could not be updated is not a filing failure.
+    }
     try {
       const { pdfText } = await import("@/lib/pdf-text");
       const text = doc.mimeType === "application/pdf" ? pdfText(buf) : "";
