@@ -41,6 +41,15 @@ export type ClaimRow = {
   rxNumber: string;
   fillNumber: number | null;
   dateFilled: string;
+  /**
+   * The day the patient took it away, or null while it is still in the bin.
+   *
+   * PioneerRx's completed date, which the daily transaction report already prints — a paid row
+   * with no completed date is transmitted and not yet picked up. It is the date the money is
+   * earned on, and `dateFilled` is not: 386 of September's fills were billed and never
+   * collected.
+   */
+  soldOn?: string | null;
   ndc11: string | null;
   itemName: string | null;
   bin: string | null;
@@ -95,6 +104,8 @@ export type Fill = {
   rxNumber: string;
   fillNumber: number | null;
   dateFilled: string;
+  /** The day it was picked up, or null while it is still in the bin and nobody has paid for it. */
+  soldOn: string | null;
   ndc11: string | null;
   itemName: string | null;
   /** Every payer that priced this fill, in the order the rows arrived. */
@@ -525,6 +536,7 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
       rxNumber: first.rxNumber,
       fillNumber: first.fillNumber,
       dateFilled: first.dateFilled,
+      soldOn: rows.map((r) => r.soldOn).find((d) => d) ?? null,
       ndc11: first.ndc11,
       itemName: rows.find((r) => r.itemName)?.itemName ?? null,
       payers,

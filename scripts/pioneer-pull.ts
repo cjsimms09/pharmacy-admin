@@ -378,6 +378,12 @@ async function pullClaims(): Promise<string> {
       basisOfCostDetermination: f.basisOfCostDetermination,
       filledOn: f.filledOn,
       completedOn: f.soldOn,
+      /*
+       * Every fill in this pull had its till looked at, so an empty sale date here means the
+       * script is still in the bin rather than that nobody asked. Stamped with the day the copy
+       * is current to, not today: the copy is a day behind, and claiming to have checked the
+       * till up to this morning would make today's fills look unsold rather than unknown.
+       */
       netProfitCents: null,
     })),
     stamp,
