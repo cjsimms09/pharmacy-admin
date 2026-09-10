@@ -39,6 +39,7 @@ import {
   money,
   invoicesStillOwed,
   invoicesOnFileTwice,
+  settleDeliveriesOnReceipt,
 } from "@/lib/invoices";
 import { stillToChase, fromBeforeWeWatched } from "@/lib/invoices-owed";
 import { invoiceCompliance, RETENTION_YEARS } from "@/lib/invoice-compliance";
@@ -402,6 +403,29 @@ export default async function InvoicesPage({
     const { message } = await purgeFromInvoiceFile(id, u);
     revalidatePath("/inventory/invoices");
     redirect("/inventory/invoices?ok=" + encodeURIComponent(message));
+  }
+
+  /*
+   * Closes what is outstanding today, without settling the supplier for ever.
+   *
+   * "parmed needs to use receipt as invoice this time but not going forward." Two different
+   * decisions, so two different buttons: this one answers for the deliveries on the list now, and
+   * the one beside it answers for the supplier from here on.
+   */
+  async function settleTheseOnes(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const id = String(fd.get("id") ?? "");
+    const { settled, cents, supplier } = await settleDeliveriesOnReceipt(id, u);
+    revalidatePath("/inventory/invoices");
+    redirect(
+      "/inventory/invoices?ok=" +
+        encodeURIComponent(
+          settled === 0
+            ? "Nothing of theirs was outstanding, so nothing changed."
+            : `${supplier}: ${settled} deliver${settled === 1 ? "y" : "ies"} worth ${money(cents)} closed on their PioneerRx receipts. Their next delivery is still expected to bring an invoice.`,
+        ),
+    );
   }
 
   /*
@@ -988,6 +1012,17 @@ export default async function InvoicesPage({
                   )}
                   <p className="mt-0.5 text-xs text-ink-3">{l.says}</p>
                 </div>
+                {canManage && l.supplierId && l.waiting > 0 && (
+                  <form action={settleTheseOnes} className="shrink-0">
+                    <input type="hidden" name="id" value={l.supplierId} />
+                    <button
+                      className="btn btn-sm"
+                      title="Closes the deliveries listed here on their PioneerRx receipts and nothing after them. Their next delivery is still expected to bring an invoice."
+                    >
+                      Close these on the receipt
+                    </button>
+                  </form>
+                )}
                 {canManage && l.supplierId && (
                   <form action={receiptIsInvoice} className="shrink-0">
                     <input type="hidden" name="id" value={l.supplierId} />

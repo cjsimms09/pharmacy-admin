@@ -259,3 +259,65 @@ describe("the one line above the list", () => {
     );
   });
 });
+
+/**
+ * One delivery closed on its receipt, without settling the supplier.
+ *
+ * The owner: "parmed needs to use receipt as invoice this time but not going forward". Two
+ * different decisions that had only one control between them — settle the supplier and every
+ * future delivery of theirs goes quiet too, including the ones he does want chased.
+ */
+describe("a delivery closed on its receipt, this time only", () => {
+  const settled = (supplier: string, invoiceNumber: string, totalCents: number): PurchaseRow => ({
+    ...buy(supplier, invoiceNumber, totalCents),
+    receiptSettles: true,
+  });
+
+  const par: SupplierRow = { id: "par", name: "ParMed", invoiceFromPioneer: false };
+
+  test("it is not chased", () => {
+    const l = invoicesOwed([settled("ParMed", "111", 40_584)], [filed("ParMed", "999", "2026-09-01")], [par]);
+    assert.equal(l[0].waiting, 0);
+    assert.equal(l[0].settledOne, 1);
+    assert.equal(l[0].settledOneCents, 40_584);
+    assert.deepEqual(stillToChase(l), { suppliers: 0, invoices: 0, cents: 0 });
+  });
+
+  test("and the money is still counted, because the switch was never about the arithmetic", () => {
+    const l = invoicesOwed([settled("ParMed", "111", 40_584)], [filed("ParMed", "999", "2026-09-01")], [par]);
+    assert.equal(l[0].received, 1);
+    assert.equal(l[0].receivedCents, 40_584);
+  });
+
+  /* The whole point of it: the next delivery is still expected to bring an invoice. */
+  test("the supplier is not settled by it — their next delivery is still chased", () => {
+    const l = invoicesOwed(
+      [settled("ParMed", "111", 40_584), buy("ParMed", "222", 10_000)],
+      [filed("ParMed", "999", "2026-09-01")],
+      [par],
+    );
+    assert.equal(l[0].receiptIsTheInvoice, false, "the standing decision is untouched");
+    assert.equal(l[0].settledOne, 1);
+    assert.equal(l[0].waiting, 1, "the one he did not close is still on the list");
+    assert.equal(l[0].waitingCents, 10_000);
+  });
+
+  test("what he closed by hand is said out loud, not quietly dropped", () => {
+    const l = invoicesOwed(
+      [settled("ParMed", "111", 40_584), buy("ParMed", "222", 10_000)],
+      [filed("ParMed", "999", "2026-09-01")],
+      [par],
+    );
+    assert.match(l[0].says, /closed on their receipt/);
+  });
+
+  /*
+   * A supplier settled for good and a delivery closed once are different answers, and the second
+   * must not quietly become the first.
+   */
+  test("closing every outstanding delivery is still not the standing switch", () => {
+    const l = invoicesOwed([settled("ParMed", "111", 40_584)], [filed("ParMed", "999", "2026-09-01")], [par]);
+    assert.equal(l[0].receiptIsTheInvoice, false);
+    assert.doesNotMatch(l[0].says, /You have said their receipt is the invoice/);
+  });
+});

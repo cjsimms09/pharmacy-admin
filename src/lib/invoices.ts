@@ -2728,10 +2728,24 @@ export type Misfiled = {
   belongsIn: "supplier_statement" | "report" | null;
 };
 
+/*
+ * What does not belong in the invoice file — and a credit memo is not on this list.
+ *
+ * It was, and that put this module in disagreement with itself. `belongsInTheInvoiceFile` above
+ * says a credit memo belongs, because it is a wholesaler's own document about goods and it carries
+ * money the account has to know: IPC's CM107761 is −$199.00 the pharmacy is owed back. This table
+ * said the same document belongs under supplier statements. So the site filed the credit, counted
+ * it, and then offered him a button to take it out again — with a sentence explaining that it is
+ * "money coming back, not goods going out", which is true and is exactly why it has to stay.
+ *
+ * The owner, looking at that: "credit invoice not filed".
+ *
+ * A statement records no receipt of anything and a purchase drill-down is a summary this site
+ * produced. Neither is evidence of a transaction with a wholesaler. A credit memo is.
+ */
 const NOT_AN_INVOICE: Record<string, { belongsIn: Misfiled["belongsIn"]; word: string }> = {
   statement: { belongsIn: "supplier_statement", word: "statement of account" },
   rebate_report: { belongsIn: "supplier_statement", word: "rebate breakdown" },
-  credit_memo: { belongsIn: "supplier_statement", word: "credit memo" },
   purchase_report: { belongsIn: "report", word: "purchase drill down" },
 };
 
@@ -2784,7 +2798,13 @@ export async function misfiledInVault(): Promise<Misfiled[]> {
       continue;
     }
     const c = classifySupplierDocument(words, d.fileName, d.title);
-    if (c.kind === "invoice") continue;
+    /*
+     * An invoice and a credit memo are both evidence of a transaction with a wholesaler, and both
+     * carry money the account has to know, so neither is misfiled here. `unknown` is deliberately
+     * not skipped even though it may stay in the folder: it is the group that let a statement
+     * survive every sweep, and being shown is the whole point of it.
+     */
+    if (c.kind === "invoice" || c.kind === "credit_memo") continue;
     const where = NOT_AN_INVOICE[c.kind];
     out.push({
       id: d.id,
@@ -2954,6 +2974,7 @@ export async function invoicesStillOwed(): Promise<OwedLine[]> {
       invoiceNumber: schema.pioneerPurchases.invoiceNumber,
       invoiceDate: schema.pioneerPurchases.invoiceDate,
       totalCents: schema.pioneerPurchases.totalCents,
+      receiptSettles: schema.pioneerPurchases.receiptSettles,
     })
     .from(schema.pioneerPurchases);
   const filed = await db
@@ -3055,4 +3076,54 @@ export async function invoicesOnFileTwice(): Promise<
     });
   }
   return out.sort((a, b) => Math.abs(b.overCents) - Math.abs(a.overCents));
+}
+
+/**
+ * Closes the deliveries of one supplier that have no invoice, on their receipts — this time only.
+ *
+ * The owner: "parmed needs to use receipt as invoice this time but not going forward". The
+ * supplier-wide switch would have silenced ParMed for ever, including deliveries he does want
+ * chased; leaving it alone would have kept a row on the list nobody intends to act on. This marks
+ * the deliveries that are outstanding right now and nothing after them.
+ *
+ * The money is untouched either way — every PioneerRx purchase no invoice covers is already in the
+ * cash account — so this changes only what he is asked about.
+ */
+export async function settleDeliveriesOnReceipt(
+  supplierId: string,
+  user: { id?: string | null; name: string },
+): Promise<{ settled: number; cents: number; supplier: string | null }> {
+  const owed = await invoicesStillOwed();
+  const line = owed.find((l) => l.supplierId === supplierId);
+  if (!line || line.waiting === 0) return { settled: 0, cents: 0, supplier: line?.supplier ?? null };
+
+  const suppliers = await allSuppliers(true);
+  const reg = suppliers.find((x) => x.id === supplierId) ?? null;
+  const filed = await db.select({ invoiceNumber: schema.supplierInvoices.invoiceNumber }).from(schema.supplierInvoices);
+  const have = new Set(filed.map((f) => (f.invoiceNumber ?? "").trim().toUpperCase()).filter(Boolean));
+  const fold = (v: string | null) => (v ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  const purchases = await db.select().from(schema.pioneerPurchases);
+  let settled = 0;
+  let cents = 0;
+  for (const p of purchases) {
+    if (p.receiptSettles) continue;
+    const mine = p.supplierId === supplierId || (reg !== null && fold(p.supplier) === fold(reg.name));
+    if (!mine) continue;
+    const number = (p.invoiceNumber ?? "").trim().toUpperCase();
+    // Only the ones actually outstanding. A delivery whose invoice is on file needs no settling.
+    if (!number || have.has(number)) continue;
+    await db.update(schema.pioneerPurchases).set({ receiptSettles: true }).where(eq(schema.pioneerPurchases.id, p.id));
+    settled++;
+    cents += p.totalCents ?? 0;
+  }
+  await audit({
+    action: "purchase.receipt_settles",
+    userId: user.id ?? null,
+    userName: user.name,
+    entity: "supplier",
+    entityId: supplierId,
+    details: `${line.supplier}: ${settled} deliver${settled === 1 ? "y" : "ies"} closed on their receipts, this time only`,
+  });
+  return { settled, cents, supplier: line.supplier };
 }

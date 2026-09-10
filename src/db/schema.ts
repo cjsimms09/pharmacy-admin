@@ -959,6 +959,14 @@ export const pioneerPurchases = sqliteTable(
     totalCents: integer("total_cents"),
     lines: integer("lines"),
     itemsText: text("items_text").notNull().default(""),
+    /**
+     * True where he has said this one delivery is closed on its receipt.
+     *
+     * "parmed needs to use receipt as invoice this time but not going forward". Per delivery, so it
+     * settles this one and says nothing about the next. The supplier-wide switch is a different
+     * decision and lives on the supplier.
+     */
+    receiptSettles: integer("receipt_settles", { mode: "boolean" }).notNull().default(false),
     readAt: text("read_at").notNull().default(now()),
   },
   (t) => [uniqueIndex("pioneer_purchases_number_idx").on(t.invoiceNumber), index("pioneer_purchases_date_idx").on(t.invoiceDate)],
