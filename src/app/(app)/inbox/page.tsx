@@ -11,7 +11,32 @@ import { isUnknownSenderInvoice, printedNameInReason } from "@/lib/autoroute";
 import { CATEGORIES } from "@/lib/intake-recognise";
 import { senderRules, describeRule, recogniseStored } from "@/lib/intake-recognise-store";
 import type { Recognition } from "@/lib/intake-recognise";
-import { fileInboxItem, deleteInboxItem, sweepNow, rereadItem, sortInboxItem, attributeInboxItem, teachInboxItem, forgetIntakeRule } from "./actions";
+import { reRouteInboxItem, fileInboxItem, deleteInboxItem, sweepNow, rereadItem, sortInboxItem, attributeInboxItem, teachInboxItem, forgetIntakeRule } from "./actions";
+
+
+/**
+ * What a person may tell the Inbox a document is.
+ *
+ * Every kind the loader can actually do something with, in the owner's words rather than the
+ * recogniser's. "unrecognised" is not offered: it is what the site says when it does not know,
+ * and there is nothing for a person to gain by asserting it.
+ */
+const ROUTE_CHOICES: { kind: string; label: string }[] = [
+  { kind: "rx_transactions", label: "Daily claims — Rx Transaction Details" },
+  { kind: "claims", label: "Claims export" },
+  { kind: "on_hand", label: "Balance on hand / inventory count" },
+  { kind: "pioneer_catalog", label: "Wholesaler catalogue (PioneerRx export)" },
+  { kind: "supplier_catalog", label: "Wholesaler catalogue (supplier's own file)" },
+  { kind: "nadac", label: "NADAC pricing file" },
+  { kind: "rebate_report", label: "McKesson rebate breakdown" },
+  { kind: "purchase_drilldown", label: "McKesson Purchase Drill Down" },
+  { kind: "return_policy", label: "Returned goods policy" },
+  { kind: "remittance_835", label: "835 remittance from a plan" },
+  { kind: "copay_remit", label: "Copay-card voucher remittance (RedSail)" },
+  { kind: "rxrescue_credit", label: "RxRescue credit memo" },
+  { kind: "payer_payments", label: "Payer payments report" },
+  { kind: "accrual_sales", label: "System sales summary" },
+];
 
 export const metadata = { title: "Inbox" };
 export const dynamic = "force-dynamic";
@@ -147,6 +172,36 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
                     })()}
                   </td>
                   <td>
+                    {/*
+                      Overruling the recogniser, which is the fix the owner asked for first.
+                      Asked which of the things that can go wrong worries him most, he chose a
+                      document filed as the wrong kind — and until now that was a dead end: the
+                      line explained what it had decided and there was nothing to press.
+
+                      Every kind the loader can actually handle is offered, the one it chose
+                      included, so "it is right, load it again" is as available as "it is wrong".
+                    */}
+                    {i.documentId && (
+                      <details className="mb-2">
+                        <summary className="cursor-pointer text-xs text-accent hover:underline">
+                          {i.routedAs && i.routedAs !== "unrecognised" ? "Wrong? Re-route it" : "Tell it what this is"}
+                        </summary>
+                        <form action={reRouteInboxItem} className="mt-2 grid gap-2">
+                          <input type="hidden" name="itemId" value={i.id} />
+                          <select name="kind" defaultValue="" className="field text-xs">
+                            <option value="">What is this document?</option>
+                            {ROUTE_CHOICES.map((c) => (
+                              <option key={c.kind} value={c.kind}>{c.label}</option>
+                            ))}
+                          </select>
+                          <button className="btn btn-primary text-xs" type="submit">Load it as this</button>
+                          <p className="text-[11px] leading-snug text-ink-3">
+                            Runs the same loader the sweep runs, told the answer. It loads the right thing; it does
+                            not undo what a wrong reading already changed.
+                          </p>
+                        </form>
+                      </details>
+                    )}
                     {/* An emailed CPR card is useless sitting here. This is where it becomes a
                         record: whose it is, what it is, and when it expires are all known to the
                         person reading the email and to nobody else. */}
