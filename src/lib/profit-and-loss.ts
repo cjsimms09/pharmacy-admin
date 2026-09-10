@@ -184,7 +184,7 @@ export type PLInputs = {
    */
   billedPurchasesCents: number | null;
   /** The month's invoices as filed, so the register can see a bill that is on file twice. */
-  invoicesInMonth?: { invoiceNumber: string | null; totalCents: number | null; invoiceDate: string | null }[];
+  invoicesInMonth?: { invoiceNumber: string | null; totalCents: number | null; invoiceDate: string | null; fingerprint?: string | null }[];
   /**
    * The part of that which is PioneerRx's receiving record standing in for an invoice that never came.
    *
@@ -718,7 +718,7 @@ export type SharedInputs = {
   cats: Awaited<ReturnType<typeof import("./expenses").categories>>;
   fills: Awaited<ReturnType<typeof import("./claims").allFills>>;
   suppliers: Awaited<ReturnType<typeof import("./suppliers-registry").allSuppliers>>;
-  invoices: { totalCents: number | null; paidOn: string | null; invoiceDate: string | null; supplierId: string | null; supplier: string | null; invoiceNumber: string | null }[];
+  invoices: { totalCents: number | null; paidOn: string | null; invoiceDate: string | null; supplierId: string | null; supplier: string | null; invoiceNumber: string | null; fingerprint: string | null }[];
   /**
    * What PioneerRx recorded receiving. Not invoices — see the table comment — but the only evidence
    * of a purchase whose invoice never reached the pharmacy.
@@ -763,7 +763,7 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
     categories(true),
     allFills({ from, to }),
     allSuppliers(true),
-    db.query.supplierInvoices.findMany({ columns: { totalCents: true, paidOn: true, invoiceDate: true, supplierId: true, supplier: true, invoiceNumber: true } }),
+    db.query.supplierInvoices.findMany({ columns: { totalCents: true, paidOn: true, invoiceDate: true, supplierId: true, supplier: true, invoiceNumber: true, documentId: true } }),
     db.query.invoiceLines.findMany({ where: and(gte(schema.invoiceLines.invoiceDate, from), lte(schema.invoiceLines.invoiceDate, to)), columns: { invoiceDate: true, extendedCents: true } }),
     /*
      * Every count, not just the ones inside the months asked for: a month opens on the last count
@@ -791,7 +791,29 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
       driverCents,
     });
   }
-  return { basis, sales, cats, fills, suppliers, invoices, lines, counts, payments, byMonth, standing, pioneerPurchases, today: todayIso() };
+  /*
+   * What each invoice's document actually is, so a bill filed twice can be seen when neither copy
+   * carries a number. IPD's two rows are the same PDF byte for byte and the duplicate check was
+   * blind to them, which put $3,255.70 into the cash account twice.
+   */
+  const shas = new Map(
+    (await db.query.documents.findMany({ columns: { id: true, sha256: true } })).map((d) => [d.id, d.sha256]),
+  );
+  return {
+    basis,
+    sales,
+    cats,
+    fills,
+    suppliers,
+    invoices: invoices.map((v) => ({ ...v, fingerprint: shas.get(v.documentId) ?? null })),
+    lines,
+    counts,
+    payments,
+    byMonth,
+    standing,
+    pioneerPurchases,
+    today: todayIso(),
+  };
 }
 
 /** One month's inputs, sliced from what was loaded. Nothing here computes; `monthlyPL` does. */
@@ -990,7 +1012,7 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
     dispensedCostCents,
     purchasesCents,
     billedPurchasesCents,
-    invoicesInMonth: billedThisMonth.map((v) => ({ invoiceNumber: v.invoiceNumber, totalCents: v.totalCents, invoiceDate: v.invoiceDate })),
+    invoicesInMonth: billedThisMonth.map((v) => ({ invoiceNumber: v.invoiceNumber, totalCents: v.totalCents, invoiceDate: v.invoiceDate, fingerprint: v.fingerprint })),
     uninvoicedPurchasesCents,
     uninvoicedPurchases: uninvoiced.length,
 

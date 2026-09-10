@@ -828,6 +828,18 @@ export const suppliers = sqliteTable(
      */
     paymentTermsDays: integer("payment_terms_days"),
     /**
+     * True where this wholesaler's PioneerRx receipt is the invoice, because no invoice is coming.
+     *
+     * The owner: "there are a couple suppliers where I'd rather just use the pioneers invoice as
+     * the invoice." The money never depended on it — the cash account already counts every
+     * PioneerRx purchase no invoice covers — but the chasing did. A supplier that never emails one
+     * left a permanent row on the list of invoices to go and find, and a list that always has
+     * something unactionable on it is a list nobody reads.
+     *
+     * His decision, not a rule: it says which suppliers he is not waiting on.
+     */
+    invoiceFromPioneer: integer("invoice_from_pioneer", { mode: "boolean" }).notNull().default(false),
+    /**
      * The wholesaler whose compliance ratio moving spend away from costs a rebate band.
      *
      * Exactly one supplier is the primary. It is not inferred from spend: the pharmacy's contract

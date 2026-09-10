@@ -14,6 +14,8 @@ import { isDrillDownText } from "./drill-down-read";
 import { allSuppliers, supplierForSender, supplierRecordFor } from "./suppliers-registry";
 import { scheduleFromNames, linesMatching } from "./controlled-names";
 import { audit } from "./audit";
+import { invoicesOwed, type OwedLine } from "./invoices-owed";
+import { duplicateKey } from "./books-check";
 import type { InvoiceSchedule, DocumentCategory } from "@/db/schema";
 
 /**
@@ -2810,4 +2812,131 @@ export async function markNotAnInvoice(documentId: string, user: { id?: string |
     `“${doc.title}” is filed under supplier statements` +
     (invoices.length ? `, and ${lines ? `${lines} line${lines === 1 ? "" : "s"} and ` : ""}its invoice record no longer count as purchases.` : ".")
   );
+}
+
+/**
+ * The deliveries with no invoice behind them, by supplier.
+ *
+ * The owner: "are we using pioneers receipts to make sure we are getting invoices from suppliers?
+ * If it was received by pioneer than we should be receiving the invoice."
+ *
+ * PioneerRx records every delivery booked in at the counter, so its purchase list is the
+ * independent count of what the pharmacy was billed for. An invoice file that agrees with it is
+ * complete; one that does not names the wholesaler that has not sent something. Nothing else in
+ * this system can tell the difference between "no invoice arrived" and "no invoice exists",
+ * because until now the only evidence of an invoice was the invoice.
+ *
+ * Matched on the wholesaler's own invoice number and nothing else — the two systems spell the
+ * same wholesaler three ways, and keying on the name as well is how the last matching bug hid.
+ * The arithmetic is in `invoices-owed.ts`, where it is tested.
+ */
+export async function invoicesStillOwed(): Promise<OwedLine[]> {
+  const purchases = await db
+    .select({
+      supplier: schema.pioneerPurchases.supplier,
+      supplierId: schema.pioneerPurchases.supplierId,
+      invoiceNumber: schema.pioneerPurchases.invoiceNumber,
+      invoiceDate: schema.pioneerPurchases.invoiceDate,
+      totalCents: schema.pioneerPurchases.totalCents,
+    })
+    .from(schema.pioneerPurchases);
+  const filed = await db
+    .select({
+      supplier: schema.supplierInvoices.supplier,
+      invoiceNumber: schema.supplierInvoices.invoiceNumber,
+      invoiceDate: schema.supplierInvoices.invoiceDate,
+      totalCents: schema.supplierInvoices.totalCents,
+    })
+    .from(schema.supplierInvoices);
+  const suppliers = await allSuppliers(true);
+
+  /*
+   * Both sides resolved through the register's own matcher.
+   *
+   * The invoice file spells IPC three ways — "IPC", "Independent Pharmacy Cooperative" and
+   * "Independent Pharmacy Cooperative (IPC)" — and matching on the squashed name alone attached
+   * none of the seven IPC invoices on file to IPC. The list then said no invoice from them had ever
+   * arrived while four of their delivery numbers had plainly matched one, which is a screen
+   * disagreeing with itself in front of him.  is the rule the rest of the site
+   * already uses, aliases and all, so this uses it rather than growing a second copy of it.
+   */
+  const idOf = (name: string | null) => supplierRecordFor(suppliers, name)?.id ?? null;
+  /*
+   * The day this mailbox started catching invoices from anybody.
+   *
+   * The owner, on the deliveries from before it: "We are going to ignore those alerts for invoices
+   * from beginning of this month.. that was just to get them in from before this site was setup."
+   * So a supplier who has never sent an invoice here is still judged against this date rather than
+   * against nothing — before it, nothing was being caught from anyone, and their silence proves
+   * nothing about them.
+   */
+  const watchingSince = filed.map((f) => f.invoiceDate).filter((d): d is string => !!d).sort()[0] ?? null;
+  return invoicesOwed(
+    purchases.map((p) => ({ ...p, supplierId: p.supplierId ?? idOf(p.supplier) })),
+    filed.map((f) => ({ supplier: f.supplier, supplierId: idOf(f.supplier), invoiceNumber: f.invoiceNumber, invoiceDate: f.invoiceDate, totalCents: f.totalCents })),
+    suppliers.map((s) => ({ id: s.id, name: s.name, invoiceFromPioneer: s.invoiceFromPioneer })),
+    watchingSince,
+  );
+}
+
+/**
+ * Invoices on file more than once, with the rows themselves so one press removes a copy.
+ *
+ * The owner, in September: "there is a duplicate ipd invoice in there and I dont have a way to
+ * delete.." He was right, and worse than the missing button was that nothing was telling him: the
+ * duplicate check keyed on the invoice number, IPD's invoices carry none, and the two rows are the
+ * same PDF byte for byte — so $3,255.70 sat in the cash account twice with every check on the site
+ * reporting the books in balance.
+ *
+ * Grouped by `duplicateKey`, which is the register's own rule, so this page and the money agree.
+ */
+export async function invoicesOnFileTwice(): Promise<
+  {
+    key: string;
+    says: string;
+    overCents: number;
+    copies: { id: string; supplier: string | null; invoiceNumber: string | null; invoiceDate: string | null; totalCents: number | null; linesRead: number | null; sameDocument: boolean }[];
+  }[]
+> {
+  const rows = await db.select().from(schema.supplierInvoices);
+  const shas = new Map(
+    (await db.query.documents.findMany({ columns: { id: true, sha256: true } })).map((d) => [d.id, d.sha256]),
+  );
+  const by = new Map<string, typeof rows>();
+  for (const r of rows) {
+    const key = duplicateKey({ invoiceNumber: r.invoiceNumber, fingerprint: shas.get(r.documentId) ?? null });
+    if (!key) continue;
+    by.set(key, [...(by.get(key) ?? []), r]);
+  }
+
+  const out = [];
+  for (const [key, group] of by) {
+    if (group.length < 2) continue;
+    /*
+     * Oldest first, so the copy he is offered to remove is the later one. Both are identical where
+     * the fingerprint matched, so it makes no difference to the file — it makes a difference to
+     * being able to explain afterwards which one was kept.
+     */
+    const sorted = [...group].sort((a, b) => (a.invoiceDate ?? "").localeCompare(b.invoiceDate ?? "") || a.id.localeCompare(b.id));
+    const sha = shas.get(sorted[0].documentId) ?? null;
+    const overCents = sorted.slice(1).reduce((n, r) => n + (r.totalCents ?? 0), 0);
+    const named = (sorted[0].invoiceNumber ?? "").trim();
+    out.push({
+      key,
+      overCents,
+      says: named
+        ? `Invoice ${named} from ${sorted[0].supplier ?? "an unnamed supplier"} is on file ${sorted.length} times.`
+        : `The same document from ${sorted[0].supplier ?? "an unnamed supplier"}, dated ${sorted[0].invoiceDate ?? "no date"}, is on file ${sorted.length} times. Neither copy carries an invoice number, so they were matched on the file itself being identical.`,
+      copies: sorted.map((r) => ({
+        id: r.id,
+        supplier: r.supplier,
+        invoiceNumber: r.invoiceNumber,
+        invoiceDate: r.invoiceDate,
+        totalCents: r.totalCents,
+        linesRead: r.linesRead,
+        sameDocument: !named && (shas.get(r.documentId) ?? null) === sha,
+      })),
+    });
+  }
+  return out.sort((a, b) => Math.abs(b.overCents) - Math.abs(a.overCents));
 }

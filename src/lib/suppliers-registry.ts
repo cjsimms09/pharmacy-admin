@@ -195,6 +195,20 @@ export async function retireSupplier(id: string, active: boolean): Promise<void>
 }
 
 /**
+ * Whether this wholesaler's PioneerRx receipt counts as the invoice.
+ *
+ * The owner: "there are a couple suppliers where I'd rather just use the pioneers invoice as the
+ * invoice." It changes no arithmetic — the cash account already counts every PioneerRx purchase no
+ * invoice covers — only whether the pharmacy is still going to go and ask for one.
+ */
+export async function useReceiptAsInvoice(id: string, on: boolean): Promise<void> {
+  await db
+    .update(schema.suppliers)
+    .set({ invoiceFromPioneer: on, updatedAt: new Date().toISOString() })
+    .where(eq(schema.suppliers.id, id));
+}
+
+/**
  * One alias per line, trimmed, de-duplicated, and never the empty string.
  *
  * Case and punctuation are left exactly as typed: the matcher squashes both sides before it

@@ -70,6 +70,21 @@ export type CountedTwice = {
  * money the books would have counted twice.
  */
 /**
+ * What makes two rows the same bill.
+ *
+ * The number where there is one, and the document's own fingerprint where there is not. The
+ * supplier name is never part of it: the two systems spell the same wholesaler three ways and
+ * keying on the name is how the last matching bug hid.
+ *
+ * Exported because the screen that removes a duplicate has to agree with the register that found
+ * it, to the row. Two copies of this rule would drift, and the drift would show up as a page
+ * offering to delete something the books do not think is there.
+ */
+export function duplicateKey(v: { invoiceNumber: string | null; fingerprint?: string | null }): string {
+  return (v.invoiceNumber ?? "").trim().toUpperCase() || (v.fingerprint ?? "").trim().toLowerCase();
+}
+
+/**
  * The same bill on file twice.
  *
  * Every other rule in this module is about two *feeds* carrying one dollar. This one is about a
@@ -82,11 +97,21 @@ export type CountedTwice = {
  * this runs on every draw of the account. A wholesaler issues one number once; two rows carrying
  * it are one purchase counted twice, and the second is not evidence of anything.
  *
- * Matched on the number alone, deliberately. The two systems spell the same wholesaler three ways
- * — 'IPC', 'Independent Pharmacy Cooperative', 'Independent Pharmacy Cooperative (IPC)' — and
- * keying on the name as well is how the last matching bug hid.
+ * Matched on the number, and failing that on the document itself. The two systems spell the same
+ * wholesaler three ways — 'IPC', 'Independent Pharmacy Cooperative', 'Independent Pharmacy
+ * Cooperative (IPC)' — and keying on the name is how the last matching bug hid, so the name is
+ * never part of the key.
+ *
+ * This used to skip anything with no number, on the reasoning that a document nothing can match is
+ * not a duplicate. That was wrong, and IPD is the proof: both of its invoices on file carry no
+ * number this reader can find, and the two rows are the same PDF byte for byte — same SHA-256,
+ * same eight item lines, $3,255.70 each. The check that exists to catch one bill counted twice
+ * could not see the one instance of it in the file, and the cash account added both.
+ *
+ * So where there is no number, the document's own fingerprint is the number. Two rows pointing at
+ * identical bytes are one invoice, whatever the reader could or could not read off the front.
  */
-export function invoicesFiledTwice(invoices: { invoiceNumber: string | null; totalCents: number | null; invoiceDate: string | null }[]): {
+export function invoicesFiledTwice(invoices: { invoiceNumber: string | null; totalCents: number | null; invoiceDate: string | null; fingerprint?: string | null }[]): {
   number: string;
   copies: number;
   overCents: number;
@@ -94,14 +119,24 @@ export function invoicesFiledTwice(invoices: { invoiceNumber: string | null; tot
   const by = new Map<string, typeof invoices>();
   for (const v of invoices) {
     const n = (v.invoiceNumber ?? "").trim().toUpperCase();
-    if (!n) continue; // No number is not a duplicate; it is a document nothing can match, which the invoice page names.
-    by.set(n, [...(by.get(n) ?? []), v]);
+    /*
+     * The number where there is one, and the document's fingerprint where there is not. A row with
+     * neither is genuinely unmatchable and is named on the invoice page instead.
+     */
+    const key = duplicateKey(v);
+    if (!key) continue;
+    by.set(key, [...(by.get(key) ?? []), v]);
   }
   const out: { number: string; copies: number; overCents: number }[] = [];
-  for (const [n, rows] of by) {
+  for (const [key, rows] of by) {
     if (rows.length < 2) continue;
-    // The first is the bill; every further copy is money the month is carrying twice.
-    out.push({ number: n, copies: rows.length, overCents: rows.slice(1).reduce((sum, r) => sum + (r.totalCents ?? 0), 0) });
+    /*
+     * The first is the bill; every further copy is money the month is carrying twice. Named by its
+     * number where it has one — a fingerprint means nothing to anybody, so a row matched that way
+     * is described by what he can actually see on it.
+     */
+    const number = (rows[0].invoiceNumber ?? "").trim().toUpperCase() || `the same document, ${rows[0].invoiceDate ?? "undated"}, with no number on it`;
+    out.push({ number, copies: rows.length, overCents: rows.slice(1).reduce((sum, r) => sum + (r.totalCents ?? 0), 0) });
   }
   return out.sort((a, b) => Math.abs(b.overCents) - Math.abs(a.overCents));
 }
@@ -118,14 +153,14 @@ export function countedTwice(i: PLInputs, pl: MonthlyPL): CountedTwice[] {
   const twiceOver = twice.reduce((n, t) => n + t.overCents, 0);
   out.push({
     what: "A wholesaler's bill, filed twice",
-    routes: ["The invoice as it arrived", "The same invoice number on a second row"],
-    rule: "A wholesaler issues one number once. Two rows carrying it are one purchase counted twice, and the cash account adds both.",
+    routes: ["The invoice as it arrived", "The same invoice on a second row"],
+    rule: "A wholesaler issues one number once, and the same PDF is the same bill however it arrived. Two rows carrying either are one purchase counted twice, and the cash account adds both.",
     bothPresent: twice.length > 0,
     keptOutCents: null,
     says:
       twice.length === 0
-        ? "No invoice number is on file more than once."
-        : `${twice.length} invoice number${twice.length === 1 ? " is" : "s are"} on file more than once — ${twice.map((t) => `${t.number} (${t.copies} copies)`).join(", ")} — carrying ${dollars(twiceOver)} the month counts twice.`,
+        ? "No invoice is on file more than once."
+        : `${twice.length} invoice${twice.length === 1 ? " is" : "s are"} on file more than once — ${twice.map((t) => `${t.number} (${t.copies} copies)`).join(", ")} — carrying ${dollars(twiceOver)} the month counts twice.`,
   });
 
   const tillRx = i.sales ? (i.sales.rxRemitCents ?? 0) + (i.sales.rxPatientCents ?? 0) : 0;
