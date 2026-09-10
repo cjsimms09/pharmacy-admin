@@ -25,6 +25,22 @@ async function main() {
   console.log(`  settled by evidence : ${r.settled.length} pairs, ${t.settledClaims.toLocaleString("en-US")} claims (${pct(t.settledClaims, t.claims)}), ${money(t.settledCents)}`);
   console.log(`  still open          : ${t.plans - r.settled.length} pairs, ${t.openClaims.toLocaleString("en-US")} claims (${pct(t.openClaims, t.claims)}), ${money(t.openCents)}`);
 
+  /*
+   * The middle number, which is the one the headline hides.
+   *
+   * A plan is either classified or it is not, and by that measure the open pile looks untouched.
+   * But "nothing on file says what BIN 610455 PCN BCBSKS is" and "Prime Therapeutics' commercial
+   * payer sheet names it as Blue Cross Blue Shield of Kansas commercial, and the only question left
+   * is whether this employer funds its own plan" are not the same problem at all. The first is an
+   * afternoon of research; the second is a question he can answer about his own patients.
+   */
+  const { payerSheetFor } = await import("../src/lib/payer-sheets");
+  const named = r.open.filter((o) => payerSheetFor(o.bin, o.pcn));
+  console.log(
+    `  of the open: ${named.reduce((n, o) => n + o.claims, 0).toLocaleString("en-US")} claims (${money(named.reduce((n, o) => n + o.receivedCents, 0))}) ` +
+      `on ${named.length} pairs now have a named payer and line of business from a payer sheet — only the ERISA question is left on those.`,
+  );
+
   const byClass = new Map<string, { n: number; c: number }>();
   const bySource = new Map<string, { n: number; c: number }>();
   for (const s of r.settled) {

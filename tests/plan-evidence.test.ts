@@ -14,8 +14,18 @@ import { needsBasis } from "../src/lib/plans";
  * each classifying hundreds of real claims under the wrong law. They are marked.
  */
 
+/*
+ * A BIN nothing publishes a payer sheet for.
+ *
+ * These tests are about the sources BELOW the payer sheet — PioneerRx, the PCN, the BIN listing —
+ * and they were written against real routings that the payer-sheet table has since settled. A test
+ * pinned to a real BIN silently stops testing what it says it tests the moment a stronger source
+ * learns that BIN's answer, so they use a number nobody will ever publish.
+ */
+const FICTION = "900001";
+
 const ev = (over: Partial<Parameters<typeof findPlanClass>[0]> = {}) => ({
-  bin: "610455",
+  bin: FICTION,
   pcn: null,
   groupNumber: null,
   payerLabel: null,
@@ -25,7 +35,7 @@ const ev = (over: Partial<Parameters<typeof findPlanClass>[0]> = {}) => ({
 });
 
 const row = (over: Partial<PioneerPlanRow> = {}): PioneerPlanRow => ({
-  bin: "610455",
+  bin: FICTION,
   pcn: "",
   source: "plan_file",
   planName: null,
@@ -105,7 +115,7 @@ describe('THE TRAP: "Standard" is PioneerRx\'s default, not an answer', () => {
       row({ pcn: "ADV", planName: "Silverscript Plus Pdp", planType: "Part D" }),
       row({ pcn: "ADV", planName: "Care Improvement + Pdp", planType: "Part D" }),
     ];
-    const r = findPlanClass(ev({ bin: "004336", pcn: "ADV", pioneer: many }));
+    const r = findPlanClass(ev({ pcn: "ADV", pioneer: many }));
     assert.equal(r.classification, null);
     assert.match((r as { why: string }).why, /5 plans/);
     assert.match((r as { why: string }).why, /2 filed as medicare and 3 not filed as anything/);
@@ -188,10 +198,10 @@ describe("THE TRAP: many plan names joined together name nothing", () => {
         bin: "610014",
         pcn: null,
         pioneer: [
-          row({ bin: "610014", planName: "General Motors" }),
-          row({ bin: "610014", planName: "Geha Plan" }),
-          row({ bin: "610014", planName: "Aarp / Paid Pdp", planType: "Part D" }),
-          row({ bin: "610014", planName: "Oklahoma State Employees" }),
+          row({ planName: "General Motors" }),
+          row({ planName: "Geha Plan" }),
+          row({ planName: "Aarp / Paid Pdp", planType: "Part D" }),
+          row({ planName: "Oklahoma State Employees" }),
         ],
       }),
     );
@@ -199,7 +209,7 @@ describe("THE TRAP: many plan names joined together name nothing", () => {
   });
 
   test("but one name, standing alone, still counts", () => {
-    const r = findPlanClass(ev({ bin: "610097", pcn: null, pioneer: [row({ bin: "610097", planName: "Aarp Medicare Pdp" })] }));
+    const r = findPlanClass(ev({ pcn: null, pioneer: [row({ planName: "Aarp Medicare Pdp" })] }));
     assert.ok(isFinding(r));
     assert.equal(r.classification, "medicare");
     assert.equal(r.source, "payer_name");
@@ -279,7 +289,7 @@ describe("when nothing is known, nothing is offered", () => {
   test("an unrevealing BIN says so, and names itself", () => {
     const r = findPlanClass(ev({ payerLabel: "OptumRx", linesOfBusiness: null }));
     assert.equal(r.classification, null);
-    assert.match((r as { why: string }).why, /610455/);
+    assert.match((r as { why: string }).why, new RegExp(FICTION));
   });
 
   test("a plan with no BIN says that, rather than blaming the listing", () => {

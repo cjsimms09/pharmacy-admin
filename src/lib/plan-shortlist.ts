@@ -77,9 +77,27 @@ const cents = (n: number) => `$${(n / 100).toLocaleString("en-US", { minimumFrac
  */
 export function askFor(p: PlanAggregate, why: string): string {
   const who = p.planName ?? p.payerLabel ?? p.pbmName ?? `BIN ${p.bin ?? "—"}`;
-  if (/bought insurance or funds the plan/.test(why)) {
-    return `${who}: is the employer behind this group insured, or does it fund its own plan? (A Form 5500 or the plan document settles it. Insured means the Kansas floor reaches these ${p.claims} claims; self-funded means ERISA preempts it and they are out.)`;
+
+  /*
+   * The FEHB question, which is a lawyer's and not a pharmacist's.
+   *
+   * A federal employee plan is not an ERISA plan, so the obvious reading is that state law reaches
+   * it. It is very likely wrong: 5 U.S.C. §8902(m)(1) preempts state law relating to FEHB benefits.
+   * Asked as "insured or self-funded" it would get the wrong answer confidently, so it is asked as
+   * what it is.
+   */
+  if (/Federal employee health benefits/.test(why)) {
+    return `${who}: this is the Blue Cross federal employee programme, and whether the Kansas floor reaches an FEHB plan is a preemption question under 5 U.S.C. §8902(m)(1) rather than an ERISA one. Worth an opinion before ${p.claims} claims (${cents(p.receivedCents)}) go into a filing either way.`;
   }
+
+  /*
+   * The one question that decides a commercial plan, and the reason the payer sheets were worth
+   * gathering: it can now be asked about a named payer rather than about a BIN.
+   */
+  if (/bought insurance or funds the plan/.test(why) || /as Commercial —/.test(why)) {
+    return `${who}: is the employer behind this group insured, or does it fund its own plan? (A Form 5500 or the plan document settles it. Insured means the Kansas floor reaches these ${p.claims} claims, ${cents(p.receivedCents)}; self-funded means ERISA preempts it and they are out.)`;
+  }
+
   return `${who}: what is this — commercial, Part D, Medicare Advantage, Medicaid, workers' comp, or a card? ${p.claims} claims, ${cents(p.receivedCents)}${p.exampleDrug ? `, e.g. ${p.exampleDrug}` : ""}.`;
 }
 

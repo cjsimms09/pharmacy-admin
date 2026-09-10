@@ -701,6 +701,34 @@
       "when": 1788807808029,
       "tag": "0099_pioneer_plan_types",
       "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "6",
+      "when": 1788807868029,
+      "tag": "0100_plan_proposal_source",
+      "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "6",
+      "when": 1788807928029,
+      "tag": "0101_plan_proposal_confidence",
+      "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "6",
+      "when": 1788807988029,
+      "tag": "0102_pioneer_plan_type_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "6",
+      "when": 1788808048029,
+      "tag": "0103_pioneer_plan_type_source_index",
+      "breakpoints": true
     }
   ]
 }

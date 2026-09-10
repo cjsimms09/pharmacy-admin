@@ -1,4 +1,5 @@
 import type { PlanClass } from "@/db/schema";
+import { payerSheetFor, LOB_CLASS, LOB_LABEL } from "./payer-sheets";
 
 /**
  * What kind of plan this is, from every source that has anything to say — and how good each answer
@@ -31,6 +32,8 @@ import type { PlanClass } from "@/db/schema";
 
 /** Where an answer came from. Stored, shown, and the first thing anybody will question. */
 export type EvidenceSource =
+  /** The payer's own published pharmacy payer sheet, or a CMS file, naming this BIN and PCN. */
+  | "payer_sheet"
   /** PioneerRx's shipped plan reference, `ThirdParty.ThirdPartyPlan`. Nobody at this pharmacy typed it. */
   | "pioneer_plan_file"
   /** This pharmacy's own third-party record in PioneerRx, set by somebody here when the payer was first billed. */
@@ -43,6 +46,7 @@ export type EvidenceSource =
   | "payer_name";
 
 export const SOURCE_LABEL: Record<EvidenceSource, string> = {
+  payer_sheet: "the payer's own payer sheet",
   pioneer_plan_file: "PioneerRx's plan file",
   pioneer_pharmacy: "PioneerRx, set at this pharmacy",
   pcn: "the PCN on the claim",
@@ -368,6 +372,28 @@ export function findPlanClass(e: PlanEvidence): PlanFinding | NoFinding {
   const allNames = [names, planNames.length === 1 ? planNames[0] : ""].filter(Boolean).join(" | ");
 
   const split: string[] = [];
+
+  /*
+   * The payer's own published payer sheet, which outranks everything else here.
+   *
+   * Everything else this file reads is somebody's summary: the BIN listing is a third party's
+   * index, PioneerRx's plan file is a software vendor's reference, the PCN is a code that has to be
+   * interpreted. A payer sheet is the payer stating, in a document it publishes for pharmacies,
+   * which BIN and PCN carries which business — and a CMS file is the same for Part D.
+   *
+   * It is also the only source that can say "commercial" usefully. A commercial entry classifies
+   * nothing, because the sheet does not say whether the employer bought insurance or funds its own
+   * plan; what it does is replace "nothing on file says what BIN 610455 PCN BCBSKS is" with "this
+   * is Blue Cross Blue Shield of Kansas commercial, and the only question left is this employer".
+   * That is the difference between an afternoon and a quarter of an hour.
+   */
+  const sheet = payerSheetFor(e.bin, e.pcn);
+  if (sheet) {
+    const cls = LOB_CLASS[sheet.lineOfBusiness];
+    const cited = `${sheet.publisher} names BIN ${sheet.bin} / PCN ${sheet.pcn || "(blank)"} as ${LOB_LABEL[sheet.lineOfBusiness]} — ${sheet.name}. ${sheet.quote}${sheet.caveat ? ` (${sheet.caveat})` : ""} [${sheet.url}]`;
+    if (cls) return { classification: cls, source: "payer_sheet", confidence: "stated", from: cited, detail: LOB_LABEL[sheet.lineOfBusiness] };
+    return { classification: null, why: cited };
+  }
 
   for (const which of ["plan_file", "pharmacy"] as const) {
     const r = fromPioneer(rows, which, e.bin, e.pcn);

@@ -9,9 +9,18 @@ import { shortlist, askFor, MAX_ROWS, type PlanAggregate } from "../src/lib/plan
  * without anybody being told. The tail count is what makes the second one impossible.
  */
 
+/*
+ * A BIN nothing publishes a payer sheet for.
+ *
+ * These tests are about ranking and cutting a list, not about what settles a plan, and pinning them
+ * to a real routing means they change meaning the day a stronger source learns that routing's
+ * answer. So they use a number nobody will ever publish.
+ */
+const FICTION = "900001";
+
 const plan = (over: Partial<PlanAggregate> = {}): PlanAggregate => ({
-  bin: "610455",
-  pcn: "BCBSKS",
+  bin: FICTION,
+  pcn: "A4",
   claims: 1,
   receivedCents: 100,
   payerLabel: null,
@@ -26,16 +35,16 @@ const plan = (over: Partial<PlanAggregate> = {}): PlanAggregate => ({
 
 /** Settled by PioneerRx's plan file, so it lands in `settled` rather than the questions. */
 const settledPlan = (over: Partial<PlanAggregate> = {}) =>
-  plan({ pioneer: [{ bin: "610455", pcn: "KSPARTD", source: "plan_file", planName: "Bc/bs Kansas Pdp", processor: null, planType: "Part D", isActive: true }], pcn: "KSPARTD", ...over });
+  plan({ pioneer: [{ bin: FICTION, pcn: "KSPARTD", source: "plan_file", planName: "Bc/bs Kansas Pdp", processor: null, planType: "Part D", isActive: true }], pcn: "KSPARTD", ...over });
 
 describe("what goes on the list", () => {
   test("what the evidence settles is separated from what he has to answer", () => {
-    const r = shortlist([settledPlan({ claims: 10 }), plan({ pcn: "A4", claims: 5 })]);
+    const r = shortlist([settledPlan({ claims: 10 }), plan({ pcn: "ZZ", claims: 5 })]);
     assert.equal(r.settled.length, 1);
     assert.equal(r.open.length, 1);
     assert.equal(r.settled[0].classification, "medicare");
     assert.equal(r.settled[0].confidence, "stated");
-    assert.equal(r.open[0].pcn, "A4");
+    assert.equal(r.open[0].pcn, "ZZ");
   });
 
   test("every settled row carries its source and confidence, not just an answer", () => {
@@ -108,14 +117,14 @@ describe("the question actually put to him", () => {
   });
 
   test("a plan with no name is asked about by its BIN, not by nothing", () => {
-    assert.match(askFor(plan({ bin: "019158", planName: null, payerLabel: null, pbmName: null }), "unknown"), /BIN 019158/);
+    assert.match(askFor(plan({ planName: null, payerLabel: null, pbmName: null }), "unknown"), new RegExp(`BIN ${FICTION}`));
   });
 });
 
 describe("a Government filing is surfaced, because it is the one that puts a plan in scope", () => {
   test("the hint rides along with the question", () => {
     const r = shortlist([
-      plan({ pcn: "G", pioneer: [{ bin: "610455", pcn: "G", source: "pharmacy", planName: "City of Wichita", processor: null, planType: "Government", isActive: true }] }),
+      plan({ pcn: "G", pioneer: [{ bin: FICTION, pcn: "G", source: "pharmacy", planName: "City of Wichita", processor: null, planType: "Government", isActive: true }] }),
     ]);
     assert.equal(r.open.length, 1);
     assert.ok(r.open[0].governmentHint);
