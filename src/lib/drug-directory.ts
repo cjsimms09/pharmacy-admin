@@ -55,9 +55,24 @@ export type DirectoryPackage = {
   ndc11: string;
   productNdc: string;
   packageDescription: string;
+  /**
+   * Null means the site does not know, and it is not the same as knowing there is none.
+   *
+   * Both of these are read out of the FDA package file and neither is stored, so the rebuild in
+   * `drug-directory-store.ts` — which runs on any refresh that does not replace the directory —
+   * has nothing to put back. It used to put back `sample: false` and `marketedFrom: null`, which
+   * made the two paths disagree in silence and, worse, turned an unmeasured thing into a measured
+   * negative. Nothing reads either field yet; the type is `| null` so that the first thing that
+   * does cannot be told a confident no by a rebuild that never had the column.
+   *
+   * The owner, asked this week: "We do not keep samples." That makes `sample` a claim somebody
+   * could one day check against what is on the shelf, and a sample package in a retail pharmacy's
+   * stock is not a lawful thing to hold — so the field is worth keeping honest rather than
+   * dropping.
+   */
   marketedFrom: string | null;
   marketedTo: string | null;
-  sample: boolean;
+  sample: boolean | null;
 };
 
 export type OrangeBookProduct = {

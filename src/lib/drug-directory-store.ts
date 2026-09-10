@@ -205,7 +205,15 @@ function heldProducts(held: (typeof schema.drugDirectory.$inferSelect)[]) {
   return [...seen.values()];
 }
 function heldPackages(held: (typeof schema.drugDirectory.$inferSelect)[]) {
-  return held.map((r) => ({ ndc11: r.ndc11, productNdc: r.productNdc, packageDescription: r.packageDescription, marketedFrom: null, marketedTo: r.marketedTo, sample: false }));
+  /*
+   * Rebuilt from the stored copy, which does not carry every column the FDA file has.
+   *
+   * `sample` and `marketedFrom` are not stored, so they come back null — unknown — rather than
+   * as a confident false and a confident nothing. A rebuild that invents an answer is worse than
+   * one that admits the column is missing, because the invention is indistinguishable from a
+   * measurement.
+   */
+  return held.map((r) => ({ ndc11: r.ndc11, productNdc: r.productNdc, packageDescription: r.packageDescription, marketedFrom: null, marketedTo: r.marketedTo, sample: null }));
 }
 function heldOrangeBook(held: (typeof schema.drugDirectory.$inferSelect)[]) {
   // The held code, re-expressed as one Orange Book product per application so the join finds it again.
