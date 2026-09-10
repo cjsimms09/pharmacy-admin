@@ -1,0 +1,11 @@
+-- The second half of 0100, which drizzle silently discarded.
+--
+-- Drizzle splits a migration file on `--> statement-breakpoint` and runs what it finds; a file
+-- without those markers runs its FIRST statement and drops the rest on the floor with no error.
+-- 0100 asked for proposed_source and proposed_confidence and got only the first. The slot cannot be
+-- reused — drizzle records an applied migration by its `when` timestamp, so a slot that has ever
+-- run is spent whatever the file now says — so the missing column lands here.
+--
+-- "stated" where a record says it in words, "indicated" where a code or a listing points at it hard
+-- enough to be worth offering. See Confidence in src/lib/plan-evidence.ts.
+alter table plan_groups add column proposed_confidence text;

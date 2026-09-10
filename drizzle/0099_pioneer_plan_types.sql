@@ -36,10 +36,3 @@ create table if not exists pioneer_plan_types (
 
 create index if not exists pioneer_plan_types_key_idx on pioneer_plan_types (bin, pcn);
 create index if not exists pioneer_plan_types_source_idx on pioneer_plan_types (source);
-
--- A proposal already carried the sentence it came from. It did not carry which source produced it
--- or how well that source settles it, so a Part D plan named as such in PioneerRx's own plan file
--- and a Part D guessed from four letters of a PCN were stored identically. That is precisely the
--- fault this register exists to prevent, and it had crept into the register's own proposals.
-alter table plan_groups add column proposed_source text;
-alter table plan_groups add column proposed_confidence text;
