@@ -50,6 +50,18 @@ export default async function ClaimsPage({
     getSettings(),
     hasMailPassword(),
   ]);
+  /*
+   * The fills that sentence below is about, counted and totalled from the same list.
+   *
+   * The count was filtered to the fills showing a loss and the money was not — it was every awaiting
+   * fill's outstanding, profitable ones included. Two halves of one sentence describing two
+   * different populations. On the single day the page shows, both awaiting fills happen to be losses,
+   * so the two figures agree by luck and the fault is invisible; across September it is nine fills
+   * quoted with a ten-fill total.
+   */
+  const promisedLosses = flags.awaitingFacilitator.filter((f) => (f.marginCents ?? 0) < 0);
+  const promisedLossCents = promisedLosses.reduce((n, f) => n + (f.facilitatorOutstandingCents ?? 0), 0);
+
   /* From the fills already grouped, rather than reading every claim and grouping them a second time. */
   const byPayer = await claimsByPayer({ fills: flags.fills, networks: flags.networks });
 
@@ -905,9 +917,18 @@ export default async function ClaimsPage({
           {flags.awaitingFacilitator.length > 0 && (
             <p className="mt-2 rounded-lg border border-warn/40 bg-warn/5 p-3 text-xs">
               <b>
-                {flags.awaitingFacilitator.filter((f) => (f.marginCents ?? 0) < 0).length} of these are waiting on a
-                facilitator payment the plan already promised — {formatCents(flags.awaitingFacilitatorCents)} between
-                them.
+                {/*
+                  And it carries its scope. The page shows one day — the last dispensed — and says so
+                  higher up, but this sentence did not, so "2 ... $193.78" read as the whole feed:
+                  "im pretty sure we have more than 2 MTF claims from 09/01, whats going on here."
+                  He was right about the pharmacy and the page was right about the day; nothing on
+                  this line said which was being answered.
+                */}
+                {promisedLosses.length} of these are waiting on a facilitator payment the plan already promised —{" "}
+                {formatCents(promisedLossCents)} between them, on{" "}
+                {flags.scope.from && flags.scope.to && flags.scope.from !== flags.scope.to
+                  ? `${flags.scope.from} to ${flags.scope.to}`
+                  : (flags.scope.from ?? "the day shown")}.
               </b>{" "}
               They are marked <span className="badge badge-warn">MTF promised</span> below, with what each becomes once
               it is paid. Nothing about them is a rate to argue over, and nothing needs doing to them: the payment posts

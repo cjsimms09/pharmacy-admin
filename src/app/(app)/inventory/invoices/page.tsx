@@ -193,7 +193,23 @@ export default async function InvoicesPage({
    * seven rows at the top, and what is left is a wholesaler that owes a document, plus the ones he
    * has already settled — those stay visible so the decision can be seen and undone.
    */
-  const owedRows = owed.filter((l) => l.waiting > 0 || l.receiptIsTheInvoice);
+  /*
+   * Only the ones still waiting on a document.
+   *
+   * A supplier he has answered for kept its row here so the decision stayed visible and undoable.
+   * That was the wrong call. The row still sits under a heading that reads "Delivered, and no
+   * invoice for it" with a four-figure sum beside it, and no amount of explanatory text under it
+   * changes what a heading and a number say together:
+   *
+   * > "Jams and xymogen say delivered no invoice, I need way to select no invoice expected to make
+   * > them go away. they are now set not to expect invoices so shouldnt have this going forward"
+   *
+   * They are gone from the list, counted in one line at the foot, and the switch that put them there
+   * is on their own card on the Suppliers page — which is where somebody goes to change their mind
+   * about a supplier, not a list of things to chase.
+   */
+  const owedRows = owed.filter((l) => l.waiting > 0);
+  const settledSuppliers = owed.filter((l) => l.receiptIsTheInvoice);
   const unreceipted = await awaitingReceipt();
   const onlyUnreceipted = sp.unreceipted === "1";
   const compliance = complianceRows;
@@ -989,7 +1005,7 @@ export default async function InvoicesPage({
         complete because it is consistent with itself. PioneerRx booked the delivery in at the
         counter, which makes its purchase list the only independent record of what was billed.
       */}
-      {(owedRows.length > 0 || backlog.invoices > 0) && (
+      {(owedRows.length > 0 || backlog.invoices > 0 || settledSuppliers.length > 0) && (
         <Card
           tone={chase.invoices > 0 ? "warn" : "ok"}
           title="Delivered, and no invoice for it"
@@ -1051,6 +1067,14 @@ export default async function InvoicesPage({
                 )}
               </li>
             ))}          </ul>
+          {settledSuppliers.length > 0 && (
+            <p className="mt-2 text-xs text-ink-3">
+              {settledSuppliers.map((l) => l.supplier).join(" and ")}{" "}
+              {settledSuppliers.length === 1 ? "is" : "are"} not on this list: you have said their PioneerRx receipt is the
+              invoice. Change that on their card under{" "}
+              <Link href="/suppliers" className="underline">Suppliers</Link>.
+            </p>
+          )}
           {backlog.invoices > 0 && (
             <p className="mt-2 text-xs text-ink-3">
               {backlog.invoices} deliveries from before this started catching invoices, worth{" "}

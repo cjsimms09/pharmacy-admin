@@ -229,6 +229,18 @@ export function strengthNumbers(s: string): number[] {
 }
 
 /**
+ * Whether an equivalence key actually names an ingredient.
+ *
+ * Keys are stored, and every key written before this was fixed is still on disk — `||kit|` and its
+ * kind. So the guard is applied where keys are read as well as where they are made: a stored key
+ * whose first field is empty is treated as no key at all, without waiting for the directory to be
+ * rebuilt.
+ */
+export function namesAnIngredient(key: string | null | undefined): boolean {
+  return ((key ?? "").split("|")[0] ?? "").trim() !== "";
+}
+
+/**
  * Ingredients, strength, form and route as one normalised string. Salt forms are not collapsed
  * (amlodipine besylate is not amlodipine maleate here), release profiles live in the form, and
  * the route stays: the Orange Book's AB rating is the thing that says two of these are
@@ -236,6 +248,25 @@ export function strengthNumbers(s: string): number[] {
  */
 export function equivalenceKey(p: Pick<DirectoryProduct, "substances" | "strength" | "strengthUnit" | "form" | "route">): string {
   const subs = p.substances.split(";").map(fold).filter(Boolean).sort().join("; ");
+  /*
+   * A key with no ingredient in it equates nothing, and must not be a key.
+   *
+   * The FDA file leaves substances and strength empty on a great many kits — the ingredients are
+   * on the components rather than the package — so every one of them came out as `||kit|` and
+   * every one of them matched every other. 2,094 NDCs across 678 unrelated drugs shared that one
+   * key: apixaban with aprepitant with somatropin with temsirolimus.
+   *
+   * What that produced was not a quiet mis-grouping. It is the buying advice on the front page:
+   * the owner was told to buy aprepitant instead of the drospirenone he actually dispenses,
+   * because both are Glenmark kits with no ingredients parsed. He said it plainly — "the 'worth
+   * the most this morning' section is showing drugs I have never ordered for dispensed" — and then
+   * "thats a massive issue", which it is: acting on one of those would have bought a drug the
+   * pharmacy does not stock to replace one it does.
+   *
+   * So an empty key is returned empty, and every caller already treats an empty key as "no FDA
+   * answer" and falls back to matching on the printed description, which tells these two apart.
+   */
+  if (!subs) return "";
   const strengths = p.strength.split(";").map((x) => x.trim());
   const units = p.strengthUnit.split(";").map((x) => fold(x));
   const strength = strengths.map((s, i) => `${Number(s) || s}${units[i] ? ` ${units[i]}` : ""}`).join("; ");
@@ -345,6 +376,11 @@ export const teGroup = (teCode: string | null): string | null => {
  * and still not called substitutable here, because nothing has said they are.
  */
 export function substitutable(a: Pick<DrugDirectoryRow, "equivalenceKey" | "teCode">, b: Pick<DrugDirectoryRow, "equivalenceKey" | "teCode">): boolean {
+  /*
+   * Two products with no key are not the same product; they are two products nothing could read.
+   * Equality on emptiness is how 678 drugs became interchangeable with one another.
+   */
+  if (!namesAnIngredient(a.equivalenceKey) || !namesAnIngredient(b.equivalenceKey)) return false;
   if (a.equivalenceKey !== b.equivalenceKey) return false;
   if (!isARated(a.teCode) || !isARated(b.teCode)) return false;
   // The same rating, suffix and all: AB1 is not AB2, and neither is a bare AB.
