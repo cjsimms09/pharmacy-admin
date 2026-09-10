@@ -526,14 +526,39 @@ export async function applyBusiness(id: string, fd: FormData) {
     }
     const total = parseCents(g("totalCents")) ?? read?.remittance?.totalPaidCents ?? sum;
     let banked = false;
+    let bankRefused: string | null = null;
     if (g("bank") === "on" && dateOk(paidOn) && total > 0) {
-      await addCashReceipt({ month: paidOn.slice(0, 7), kind: facilitator ? "facilitator" : "third_party", amountCents: total, payer, notes: `From ${doc.fileName}${trace ? `, trace ${trace}` : ""}.`, createdBy: user.id });
-      banked = true;
+      /*
+       * Filed by hand, and gated like anything else a reader produces.
+       *
+       * This path used to pass no `sourceKey`, no `receivedOn` and no `documentId`. Both gates in
+       * `addCashReceipt` are keyed on the source key, so both were skipped: filing the same
+       * remittance twice through this screen banked it twice, unconditionally, and with no document
+       * on the row the undo could not take it back out again. The automated path has always passed a
+       * proper key; this one is the same money arriving through a person.
+       *
+       * The key is built the same way `importRemittance` builds it, so a remittance filed here and
+       * the same remittance arriving later by mailbox are one deposit and not two.
+       */
+      const r = await addCashReceipt({
+        month: paidOn.slice(0, 7),
+        kind: facilitator ? "facilitator" : "third_party",
+        amountCents: total,
+        payer,
+        notes: `From ${doc.fileName}${trace ? `, trace ${trace}` : ""}.`,
+        documentId: doc.id,
+        sourceKey: `835|${(payer ?? "").trim().toLowerCase()}|${trace ?? doc.fileName}|${paidOn}`,
+        receivedOn: paidOn,
+        reference: trace ?? null,
+        createdBy: user.id,
+      });
+      if (r.duplicate) bankRefused = r.why;
+      else banked = true;
     }
     await db.update(schema.documents).set({ category: "remittance", title: `Remittance ${payer} ${paidOn || ""}`.trim().slice(0, 200), effectiveOn: dateOk(paidOn) ? paidOn : null }).where(eq(schema.documents.id, doc.id));
     await audit({ action: "remittance.filed", userId: user.id, userName: user.name, entity: "document", entityId: doc.id, details: `${payer} ${money(total)} ${posted} payments from the intake` });
     where = "/claims";
-    outcome = `${posted} payments from ${payer} posted, ${matched} matched to a claim${banked ? `; ${money(total)} banked against ${paidOn.slice(0, 7)}` : ""}${facilitator ? "" : ". A plan's own remittance settles what the claims already carry, so nothing is counted twice"}.`;
+    outcome = `${posted} payments from ${payer} posted, ${matched} matched to a claim${banked ? `; ${money(total)} banked against ${paidOn.slice(0, 7)}` : bankRefused ? `; not banked — ${bankRefused}` : ""}${facilitator ? "" : ". A plan's own remittance settles what the claims already carry, so nothing is counted twice"}.`;
   } else if (kind === "rebate_statement") {
     const { saveExpense, categories, addCategory, addCashReceipt } = await import("@/lib/expenses");
     const { allSuppliers } = await import("@/lib/suppliers-registry");
