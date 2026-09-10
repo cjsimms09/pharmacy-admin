@@ -4,6 +4,9 @@ import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { planCandidates, refreshProposals, confirmProposal } from "@/lib/plan-proposals-store";
 import { CLASS_INFO } from "@/lib/plans";
+import { SOURCE_LABEL } from "@/lib/plan-evidence";
+import { planShortlist } from "@/lib/plan-shortlist-store";
+import { formatCents } from "@/lib/money";
 import { PageHeader, Card, Figure, Notice, Empty } from "@/components/ui";
 
 /**
@@ -63,7 +66,7 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
     revalidatePath("/payers/plans");
   }
 
-  const rows = await planCandidates({ includeClassified: showAll });
+  const [rows, list] = await Promise.all([planCandidates({ includeClassified: showAll }), planShortlist()]);
   const offered = rows.filter((r) => r.proposed !== null);
   const needDocument = rows.filter((r) => r.proposed === null && r.classification === "unknown");
   const fillsOffered = offered.reduce((n, r) => n + r.fills, 0);
@@ -103,7 +106,18 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
       <div className="mb-4 grid gap-3 sm:grid-cols-3">
         <Figure value={offered.length.toLocaleString("en-US")} label="Ready to confirm" sub="Read from a document" tone={offered.length ? "warn" : "ok"} />
         <Figure value={fillsOffered.toLocaleString("en-US")} label="Fills behind them" sub="What confirming these decides" />
-        <Figure value={needDocument.length.toLocaleString("en-US")} label="Need a document" sub="A Form 5500 or the plan document" />
+        {/*
+          * The money still unclassified, rather than a count of rows.
+          *
+          * A count says how much typing is left. This says what the Kansas floor cannot yet be run
+          * against, which is the only reason any of it is being done.
+          */}
+        <Figure
+          value={formatCents(list.totals.openCents)}
+          label="Still unclassified"
+          sub={`${list.totals.openClaims.toLocaleString("en-US")} claims on ${(list.totals.plans - list.settled.length).toLocaleString("en-US")} plans the floor cannot reach yet`}
+          tone={list.totals.openCents ? "warn" : "ok"}
+        />
       </div>
 
       {offered.length === 0 && needDocument.length === 0 ? (
@@ -119,7 +133,8 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
                   <th>Plan</th>
                   <th className="whitespace-nowrap">Fills</th>
                   <th>Proposed</th>
-                  <th>Read from</th>
+                  <th className="whitespace-nowrap">Read from</th>
+                  <th>What it says</th>
                   {canConfirm && <th />}
                 </tr>
               </thead>
@@ -134,6 +149,20 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
                     <td className="whitespace-nowrap align-top tabular-nums">{r.fills.toLocaleString("en-US")}</td>
                     <td className="whitespace-nowrap align-top">
                       <span className="badge badge-muted">{CLASS_INFO[r.proposed!].label}</span>
+                    </td>
+                    {/*
+                     * The source and how well it settles it, beside the offer rather than buried in
+                     * the sentence. A class read out of PioneerRx's own plan file and a class read
+                     * out of four letters of a PCN are not the same offer, and a register where the
+                     * two look identical is a register of guesses.
+                     */}
+                    <td className="whitespace-nowrap align-top text-xs">
+                      {r.proposedSource && (
+                        <>
+                          <span className={r.proposedConfidence === "stated" ? "badge badge-ok" : "badge badge-muted"}>{r.proposedConfidence}</span>
+                          <p className="mt-0.5 text-ink-3">{SOURCE_LABEL[r.proposedSource]}</p>
+                        </>
+                      )}
                     </td>
                     <td className="max-w-[30rem] align-top text-xs text-ink-2">{r.proposedFrom}</td>
                     {canConfirm && (
@@ -152,39 +181,76 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
         </Card>
       )}
 
-      {needDocument.length > 0 && (
+      {/*
+        * The short list, which is the part of this page that is actually a job.
+        *
+        * The register is keyed on BIN, PCN and group, and that is 280 rows of this pharmacy's
+        * September. Nobody answers 280 questions. But the group number is the employer and almost
+        * nothing turns on it — the PCN selects the line of business — so BIN and PCN together is
+        * the level at which the question has one answer, and that is a list you can finish.
+        *
+        * Ranked by money, cut where what is left below stops mattering, and the tail counted out
+        * loud underneath so that stopping the list is a decision he can see and disagree with.
+        */}
+      {list.open.length > 0 && (
         <Card
-          title="Nothing can be proposed for these"
-          count={needDocument.length}
-          subtitle="Not a failure to read them — a statement that no document on file says what they are."
+          title="The short list"
+          count={list.open.length}
+          subtitle={`${list.totals.openClaims.toLocaleString("en-US")} claims and ${formatCents(list.totals.openCents)} sit on plans nothing on file can classify. These are the questions that decide most of it.`}
         >
           <Notice kind="warn">
-            These are where the money is decided and where a guess would do the most harm. Each one needs a Form 5500,
-            the plan document, or the employer&rsquo;s own answer before it can be classified.
+            Nothing here can be proposed, and that is a statement rather than a failure: no document on file says what
+            these are. Each row says which document would settle it. Answer them on{" "}
+            <a className="link" href="/plans">the register</a>, where the basis is recorded with the finding.
           </Notice>
           <div className="overflow-x-auto">
             <table className="table">
               <thead>
                 <tr>
                   <th>Plan</th>
-                  <th className="whitespace-nowrap">Fills</th>
-                  <th>Why not</th>
+                  <th className="whitespace-nowrap">Claims</th>
+                  <th className="whitespace-nowrap">Received</th>
+                  <th>The question</th>
                 </tr>
               </thead>
               <tbody>
-                {needDocument.map((r) => (
-                  <tr key={r.id}>
+                {list.open.map((o) => (
+                  <tr key={`${o.bin}|${o.pcn}`}>
                     <td className="align-top">
-                      <span className="font-mono text-xs">{r.bin ?? "no BIN"} / {r.pcn ?? "no PCN"} / {r.groupNumber ?? "no group"}</span>
-                      {r.payerLabel && <p className="mt-0.5 text-xs text-ink-3">{r.payerLabel}</p>}
+                      <span className="font-mono text-xs">{o.bin ?? "no BIN"} / {o.pcn || "no PCN"}</span>
+                      {/* The name and one drug he actually dispensed, because "003858 / A4" is not
+                          a thing anybody recognises and "94 claims, alprazolam" is. */}
+                      {o.planName && <p className="mt-0.5 text-xs">{o.planName}</p>}
+                      <p className="mt-0.5 text-xs text-ink-3">
+                        {o.pbmName ?? "unknown PBM"}
+                        {o.exampleDrug ? ` · e.g. ${o.exampleDrug}` : ""}
+                      </p>
+                      {o.groups.length > 0 && (
+                        <p className="mt-0.5 font-mono text-[0.65rem] text-ink-3">
+                          {o.groups.slice(0, 3).join(", ")}{o.groups.length > 3 ? ` +${o.groups.length - 3}` : ""}
+                        </p>
+                      )}
                     </td>
-                    <td className="whitespace-nowrap align-top tabular-nums">{r.fills.toLocaleString("en-US")}</td>
-                    <td className="max-w-[34rem] align-top text-xs text-ink-2">{r.why}</td>
+                    <td className="whitespace-nowrap align-top tabular-nums">{o.claims.toLocaleString("en-US")}</td>
+                    <td className="whitespace-nowrap align-top tabular-nums">{formatCents(o.receivedCents)}</td>
+                    <td className="max-w-[34rem] align-top text-xs">
+                      <p>{o.ask}</p>
+                      <p className="mt-1 text-ink-3">{o.why}</p>
+                      {/* A Government filing is the one lead that puts a plan *in* reach of the
+                          floor rather than out of it, so it is never buried. */}
+                      {o.governmentHint && <p className="mt-1 text-warn">{o.governmentHint}</p>}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+          {list.tail.plans > 0 && (
+            <p className="mt-2 text-xs text-ink-3">
+              Below the line: {list.tail.plans} more BIN and PCN pairs, {list.tail.claims.toLocaleString("en-US")} claims,{" "}
+              {formatCents(list.tail.receivedCents)} between them. Worth doing one day; not worth doing first.
+            </p>
+          )}
         </Card>
       )}
     </>
