@@ -20,13 +20,17 @@
  * Every one of those is visible in a minute's arithmetic against the file, and none of them was
  * visible on any screen until a person went looking. That is what this is for.
  *
- * ── The four questions, and why the last one is the new lesson ──
+ * ── The five questions, and why the last two are the lesson ──
  *
  *   Does it reconcile?     The item lines sum to the total the invoice prints. The reader's own
  *                          gate asks this before storing; this asks it again, of what was stored.
  *   Are there lines?       An invoice with a total and no lines is money the site cannot attribute
  *                          to any drug. It looks complete on the screen that lists invoices.
  *   Is it dated?           An undated invoice cannot be produced for a period.
+ *   Who sent it?           The wholesaler the page names, where that is not the one it is filed
+ *                          under. ParMed is a Cardinal Health company and was not on the name list
+ *                          at all, so its invoices filed as Cardinal — and the supplier is what
+ *                          decides which returned goods policy times that stock.
  *   Has the reader moved?  A fresh read finding **more** lines than are stored means the reader has
  *                          improved since this invoice landed and nobody went back for it. That is
  *                          exactly what happened after the KI/KD fix, and it is the failure that no
@@ -55,6 +59,8 @@ export type InvoiceProofRow = {
   /** What the reader finds in the file today, and what that sums to. */
   freshLines: number;
   freshCents: number;
+  /** Who the page names as the sender today, where that is not who the invoice is filed under. */
+  supplierNow: string | null;
   /** True where the file could not be re-read at all: a scan, or the file is gone. */
   unreadable: boolean;
   why: string | null;
@@ -74,6 +80,8 @@ export type InvoiceProof = {
   undated: number;
   /** The reader now finds lines this invoice does not have. The KI/KD case. */
   readerMovedOn: number;
+  /** The page names a different wholesaler than the invoice is filed under. The ParMed case. */
+  supplierDiffers: number;
   /** No text to re-read. Not a failure. */
   unreadable: number;
   /** Money on invoices whose lines reach no drug: what the buy list is blind to. */
@@ -109,6 +117,7 @@ export function parseInvoiceProof(raw: string | undefined | null): InvoiceProof 
           storedCents: num(r.storedCents),
           freshLines: num(r.freshLines),
           freshCents: num(r.freshCents),
+          supplierNow: str(r.supplierNow),
           unreadable: r.unreadable === true,
           why: str(r.why),
         }),
@@ -122,6 +131,7 @@ export function parseInvoiceProof(raw: string | undefined | null): InvoiceProof 
     noLines: num(j.noLines),
     undated: num(j.undated),
     readerMovedOn: num(j.readerMovedOn),
+    supplierDiffers: num(j.supplierDiffers),
     unreadable: num(j.unreadable),
     unattributedCents: num(j.unattributedCents),
     rows,
@@ -160,6 +170,16 @@ export function invoiceProofGaps(p: InvoiceProof): string[] {
   if (p.readerMovedOn > 0) {
     out.push(
       `${plural(p.readerMovedOn, "invoice", "invoices")} can be read better now than when ${p.readerMovedOn === 1 ? "it" : "they"} arrived — a fresh read finds lines the tables do not hold. The reader has improved and nobody went back. Press Read again on ${p.readerMovedOn === 1 ? "it" : "them"}.`,
+    );
+  }
+  if (p.supplierDiffers > 0) {
+    /*
+     * Said before the arithmetic, because it is not an arithmetic fault and the arithmetic can be
+     * perfect while it is true. The supplier decides which returned goods policy times the stock,
+     * which catalogue the price is compared against, and whose record the invoice is filed under.
+     */
+    out.push(
+      `${plural(p.supplierDiffers, "invoice is", "invoices are")} filed under a different wholesaler than the page now names. A ParMed invoice reads as Cardinal until the reader knows ParMed is a Cardinal company — and the supplier decides which returns policy times the stock. Read ${p.supplierDiffers === 1 ? "it" : "them"} again.`,
     );
   }
   if (p.disagreed > 0) {

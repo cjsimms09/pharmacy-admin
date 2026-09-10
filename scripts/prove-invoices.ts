@@ -43,9 +43,24 @@ type Row = {
   storedCents: number;
   freshLines: number;
   freshCents: number;
+  supplierNow: string | null;
   unreadable: boolean;
   why: string | null;
 };
+
+/**
+ * Whether two supplier names are the same wholesaler.
+ *
+ * Loose on purpose: the page prints "PARMED PHARMACEUTICALS" and the register may hold "ParMed",
+ * and a difference in punctuation or a trading suffix is not a different company. Only a genuine
+ * disagreement should reach the screen, or the row cries wolf and stops being read.
+ */
+const fold = (v: string) => v.toUpperCase().replace(/[^A-Z]/g, "");
+function sameSupplier(a: string, b: string): boolean {
+  const x = fold(a);
+  const y = fold(b);
+  return x === y || x.startsWith(y) || y.startsWith(x);
+}
 
 const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -54,6 +69,7 @@ async function main() {
   const { readFile } = await import("../src/lib/files");
   const { pdfText } = await import("../src/lib/pdf-text");
   const { parseInvoiceLines } = await import("../src/lib/invoice-lines");
+  const { supplierNamedOn } = await import("../src/lib/invoices");
 
   const invoices = await db
     .select({
@@ -114,6 +130,12 @@ async function main() {
       storedCents,
       freshLines: fresh?.lines.length ?? 0,
       freshCents: fresh?.totalCents ?? 0,
+      /*
+       * Who the page names today. Compared with what the invoice is filed under, because a reader
+       * taught a new wholesaler's name does not reach backwards: every ParMed invoice filed before
+       * 10 September reads as Cardinal, and nothing about its arithmetic is wrong.
+       */
+      supplierNow: text ? supplierNamedOn(text) : null,
       unreadable: fresh === null,
       why,
     });
@@ -124,6 +146,7 @@ async function main() {
   let noLines = 0;
   let undated = 0;
   let readerMovedOn = 0;
+  let supplierDiffers = 0;
   let unreadable = 0;
   let unattributedCents = 0;
   const lines: string[] = [];
@@ -153,6 +176,18 @@ async function main() {
     }
 
     /*
+     * The page names somebody else. Only where both names are known: an invoice filed under the
+     * sender's registered name and printing no wholesaler on the page is not a disagreement, and a
+     * page naming one the register never matched is the register's gap rather than this one's.
+     */
+    if (r.supplierNow && r.supplier && !sameSupplier(r.supplierNow, r.supplier)) {
+      supplierDiffers++;
+      lines.push(
+        `${r.invoiceNumber ?? "(no number)"} is filed under ${r.supplier} and the page names ${r.supplierNow}. The supplier decides which returns policy times this stock; read it again.`,
+      );
+    }
+
+    /*
      * The reader has moved on. Counted apart from everything above, and deliberately not made into
      * a failure of the tables: the tables hold what the reader could read on the day. It is a job
      * to do — press Read again — rather than a figure to distrust.
@@ -173,6 +208,7 @@ async function main() {
     noLines,
     undated,
     readerMovedOn,
+    supplierDiffers,
     unreadable,
     unattributedCents,
     rows,
@@ -185,7 +221,7 @@ async function main() {
   console.log(
     `${rows.length} invoices: ${reconciled} reconcile, ${disagreed} disagree, ${noLines} hold no lines` +
       `${unattributedCents ? ` (${money(unattributedCents)} reaching no drug)` : ""}, ${undated} undated, ` +
-      `${readerMovedOn} readable better now, ${unreadable} unreadable.`,
+      `${readerMovedOn} readable better now, ${supplierDiffers} under the wrong wholesaler, ${unreadable} unreadable.`,
   );
   for (const l of lines.slice(0, 12)) console.log("  " + l);
 }
