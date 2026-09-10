@@ -497,5 +497,19 @@ export function findPlanClass(e: PlanEvidence): PlanFinding | NoFinding {
  * document. The guard is the point: adding "commercial_fully_insured" or "governmental" here would
  * turn a register of findings into a register of guesses, and every appeal built on it would
  * collapse.
+ *
+ * ── Why copay_card had to be added ──
+ *
+ * This list was written before the register had a `copay_card` class, and it was never revisited.
+ * The result was a refusal with a false reason: `proposePlanClass` fell through to its guard and
+ * told the owner that a manufacturer copay card "decides whether the Kansas floor reaches this plan
+ * — so it needs the plan document or a Form 5500". It decides nothing of the sort. `needsBasis`
+ * has never included copay_card, and `plans.ts` treats a card as self-evident precisely because
+ * the payer on the claim names itself.
+ *
+ * It cost the largest single item on the register: BIN 019158 PCN CNRX, 28 claims and $35,476,
+ * established outright by the manufacturer's own card documents, was silently unofferable. A list
+ * of exceptions that is not revisited when the thing it excepts from grows is how a guard starts
+ * blocking the work it was built to protect.
  */
-export const PROPOSABLE: PlanClass[] = ["medicare", "medicaid", "workers_comp", "discount_card"];
+export const PROPOSABLE: PlanClass[] = ["medicare", "medicaid", "workers_comp", "discount_card", "copay_card"];

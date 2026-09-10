@@ -169,7 +169,31 @@ export async function planCandidates(opts: { includeClassified?: boolean } = {})
   return out.sort((a, b) => b.fills - a.fills || Number(b.proposed !== null) - Number(a.proposed !== null));
 }
 
-/** Stores the proposals so the page can show them without recomputing, and so a run is a record. */
+/**
+ * Records what the last run offered. A LOG, not the answer — do not render from these columns.
+ *
+ * The docstring here used to say "so the page can show them without recomputing", and that sentence
+ * was an instruction to reintroduce a bug this file has already had once. The page does not show
+ * them. It calls `planCandidates`, which recomputes from the evidence as it stands right now, and
+ * `confirmProposal` recomputes again before it writes anything. The columns are written here and
+ * read by nothing.
+ *
+ * That is deliberate and it must stay that way. These rows are only as fresh as the last time
+ * somebody pressed "Look again", while the evidence behind them moves whenever the PioneerRx feed
+ * runs or a payer sheet is added. Rendering the stored value would put a figure on the screen that
+ * disagrees with the finding the Confirm button is about to record — which is exactly what happened
+ * before: the page listed proposals computed live, `confirmProposal` read the stale column, and so
+ * on a register nobody had refreshed every button silently refused.
+ *
+ * The same fault in a different costume cost the owner his Inbox on the same day this was written:
+ * a training reply was handled correctly, the outcome was written into one field, and the list that
+ * renders it read another — so six replies that had been dealt with perfectly were the entire
+ * contents of his needs-you list. Two facts about one event, written by two pieces of code, is how
+ * both of these happened. One fact here, computed in one place, is the whole defence.
+ *
+ * What the columns ARE for: a record that a run happened and what it said at the time, so a
+ * classification made last week can be read back against the evidence that was in front of it.
+ */
 export async function refreshProposals(): Promise<{ proposed: number; unproposable: number }> {
   const candidates = await planCandidates();
   let proposed = 0;

@@ -2482,8 +2482,15 @@ export const planGroups = sqliteTable(
     /** The sentence that produced it, quoting the document. A proposal with no source is a guess. */
     proposedFrom: text("proposed_from"),
     /**
-     * Which source produced it, named: PioneerRx's plan file, PioneerRx as set here, the PCN, the
-     * BIN listing, the payer's name. See EvidenceSource in plan-evidence.ts.
+     * Which source produced it, named: the payer's own payer sheet, PioneerRx's plan file,
+     * PioneerRx as set here, the PCN, the BIN listing, the payer's name. See EvidenceSource in
+     * plan-evidence.ts.
+     *
+     * A LOG of what the last run said, never the answer. Nothing renders these four proposal
+     * columns and nothing may start: they are only as fresh as the last "Look again", while the
+     * evidence behind them moves every time the PioneerRx feed runs or a payer sheet is added. The
+     * page and the Confirm button both recompute. See refreshProposals for the two occasions this
+     * exact divergence has already cost real work.
      */
     proposedSource: text("proposed_source"),
     /**
