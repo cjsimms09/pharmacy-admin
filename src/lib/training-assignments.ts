@@ -590,7 +590,16 @@ export async function recordGroupTraining(
   personIds: string[],
   type: TrainingType,
   user: { id: string; name: string },
-  opts: { completedOn?: string; how?: string } = {},
+  /**
+   * `documents` maps a person to the document filed as their evidence for this session.
+   *
+   * The owner: "I have their training, done on paper. cant figure out how to upload as their tech
+   * training". He could not, because this route took no document at all and the route that did was
+   * folded shut behind the words "They did an outside course" — which his own paper session is
+   * not. So the strongest evidence the pharmacy held, a sheet his technicians actually signed, had
+   * nowhere to go.
+   */
+  opts: { completedOn?: string; how?: string; documents?: Record<string, string> } = {},
 ): Promise<{ recorded: number; names: string[] }> {
   const people = (await db.query.people.findMany()).filter((p) => personIds.includes(p.id));
   if (people.length === 0) throw new Error("Nobody was selected.");
@@ -601,11 +610,23 @@ export async function recordGroupTraining(
   const course = courseFor(type);
   const how = (opts.how ?? "").trim();
 
+  /*
+   * Which kind of record this is, in the record itself.
+   *
+   * "they did not sign individually" is the honest weakness of an attestation, and it is exactly
+   * what makes the two kinds tellable apart by an inspector. It is also flatly untrue of a session
+   * where the pharmacy holds a sheet each of them signed — and a record that understates its own
+   * evidence is not a cautious record, it is a wrong one. It invites somebody to go looking for a
+   * signature the file already has.
+   */
+  const signed = Object.keys(opts.documents ?? {}).length > 0;
   const statement =
     `On ${fmt(on)} I, ${user.name}, delivered ${TRAINING_LABEL[type].toLowerCase()} to ${names.join(", ")} ` +
     `and confirmed that each of them understood it.` +
     (how ? ` ${how}` : "") +
-    ` Recorded by me as pharmacist-in-charge; they did not sign individually.`;
+    (signed
+      ? ` The record they signed at the session is filed with each of their training records.`
+      : ` Recorded by me as pharmacist-in-charge; they did not sign individually.`);
 
   // The paper form this site prints carries the manual's revision on it, so a session recorded
   // here was delivered against the manual as it stands today.
@@ -624,8 +645,9 @@ export async function recordGroupTraining(
       completedOn: on,
       cycleYear: Number(on.slice(0, 4)),
       expiresOn: months ? addMonths(on, months) : null,
-      provider: "In-house, attested by the PIC",
+      provider: signed ? "In-house, signed record on file" : "In-house, attested by the PIC",
       minutes: course?.minutes ?? null,
+      documentId: opts.documents?.[p.id] ?? null,
       notes: statement,
       manualRevision,
       createdBy: user.name,

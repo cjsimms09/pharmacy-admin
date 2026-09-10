@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import "server-only";
-import { and, eq, gte, lte, isNull, sql, inArray } from "drizzle-orm";
+import { and, eq, gte, lte, isNull, or, sql, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "./crypto";
 import { FROM_SUMMARY } from "./invoice-summary-store";
@@ -340,8 +340,29 @@ export function readGoodsSubtotalCents(text: string): number | null {
      * simply not this one.
      */
     /(?:^|[\r\n])\s*sub\s*-?\s*total[^$\n]{0,10}\$\s*(-?[\d,]+\.\d{2})/i,
-    // IPD prints the figure above its label rather than beside it.
-    /([\d,]+\.\d{2})\s*[\r\n]+\s*Sub\s*-?\s*total\b/i,
+    /*
+     * IPD prints the figure above its label rather than beside it — and the figure has to be
+     * alone on its line.
+     *
+     * Without that, this read the tail of the last item row as the subtotal. ParMed prints the
+     * label first and the figure underneath it:
+     *
+     *   61525786068462073329GENTB8411CT 7.67 7.67
+     *           SUB TOTAL
+     *   14.24
+     *
+     * so "the amount immediately before SUB TOTAL" was $7.67, the price of the last item. The
+     * reading of both lines came to $14.24 and was checked against $7.67, disagreed, and was
+     * thrown away — leaving an invoice with a total and no items, which reads on the screen as an
+     * unreadable scan. It was never a scan. The text was all there and this discarded it.
+     */
+    /(?:^|[\r\n])[^\S\r\n]*(-?[\d,]+\.\d{2})[^\S\r\n]*[\r\n]+\s*Sub\s*-?\s*total\b/i,
+    /*
+     * And ParMed's own way round: the label on one line, the figure on the next. Last, because it
+     * is the loosest of the three — an invoice that prints its subtotal beside the label is
+     * answered before this is reached.
+     */
+    /(?:^|[\r\n])\s*sub\s*-?\s*total[^\S\r\n]*[\r\n]+[^\S\r\n]*\$?\s*(-?[\d,(]+\.\d{2}\)?)/i,
   ];
   for (const re of patterns) {
     const m = re.exec(text);
@@ -1097,6 +1118,50 @@ export async function writeInvoiceLines(
    * Only where nothing was read. A partial read is a different problem and a model second opinion
    * on it would quietly replace figures that reconciled with figures that might not.
    */
+  /*
+   * The row stops saying the lines could not be read, once they have been.
+   *
+   * `emptyInvoiceWarning` is computed and correct — it returns nothing the moment an invoice has
+   * lines. But its sentence is written into `basis` at filing time, and nothing ever took it back
+   * out. So when the ParMed reader started working, the two lines were read, stored and
+   * reconciled, and the invoice went on telling him in his own words: "no item line could be read
+   * from it... reading it again will give the same answer. It has to be entered by hand."
+   *
+   * He read that after the fix had shipped and reasonably concluded nothing had shipped. A stored
+   * sentence about a computed fact is a fact with two homes, and the stale one is the one on the
+   * screen.
+   */
+  if (r.stored > 0 && inv) {
+    const stale = emptyInvoiceWarning({
+      linesStored: 0,
+      totalCents: inv.totalCents,
+      hasTextLayer: true,
+      modelTried: true,
+    });
+    const staleNoModel = emptyInvoiceWarning({
+      linesStored: 0,
+      totalCents: inv.totalCents,
+      hasTextLayer: true,
+      modelTried: false,
+    });
+    let basis = inv.basis ?? "";
+    for (const gone of [stale, staleNoModel]) if (gone && basis.includes(gone)) basis = basis.replace(gone, "").replace(/\s{2,}/g, " ").trim();
+    const said = `${r.stored} item line${r.stored === 1 ? "" : "s"} were read and add up to the printed total.`;
+    /*
+     * And the review it asked for is answered, where the only thing in question was the lines. A
+     * schedule that could not be read files as "unknown" and still wants a person — that question
+     * is untouched here, because it is a different one and the safe answer to it is to keep asking.
+     */
+    const settled = inv.schedule !== "unknown";
+    await db
+      .update(schema.supplierInvoices)
+      .set({
+        basis: `${basis} ${said}`.trim(),
+        ...(settled ? { needsReview: false } : {}),
+      })
+      .where(eq(schema.supplierInvoices.id, invoiceId));
+  }
+
   let readBy: "rule" | "model" | null = r.stored > 0 ? "rule" : null;
   let out = r;
   if (r.stored === 0 && opts.allowModel && inv) {
@@ -1200,6 +1265,25 @@ export async function invoiceLines(invoiceId: string) {
 }
 
 /**
+ * An invoice with no item lines on file.
+ *
+ * Both states of `linesRead`, and that is the whole point. Null means nothing ever tried to read
+ * this invoice; nought means something tried and got none. They are different facts and neither is
+ * an invoice whose lines are known — but only null was being looked for.
+ *
+ * The consequence was a screen that could not be believed. The invoice page counted an invoice as
+ * lineless on `(linesRead ?? 0) === 0` and said so on the owner's screen; the counter and the
+ * backfill behind the button looked for null alone and found nothing to do. So the alert said one
+ * invoice worth $14.24 had no lines, and the button that exists to fix exactly that reported
+ * success without touching it, every time it was pressed:
+ *
+ * > "i told system it was parmed invoice and hit read with current rules and it didnt fix"
+ *
+ * He was right, and it was not the reader — the reader had never been asked.
+ */
+const HAS_NO_LINES = or(isNull(schema.supplierInvoices.linesRead), eq(schema.supplierInvoices.linesRead, 0));
+
+/**
  * Reads the lines off every invoice the line reader has not been run on.
  *
  * Every invoice filed before lines were kept has none, and the PDF is still here to ask. The same
@@ -1209,7 +1293,7 @@ export async function invoiceLines(invoiceId: string) {
 export async function backfillInvoiceLines(
   opts: { allowModel?: boolean; user?: { id?: string | null; name: string } } = {},
 ): Promise<{ invoices: number; linesRead: number; unreadable: number; unreconciled: number; byModel: number }> {
-  const rows = await db.query.supplierInvoices.findMany({ where: isNull(schema.supplierInvoices.linesRead) });
+  const rows = await db.query.supplierInvoices.findMany({ where: HAS_NO_LINES });
   const { readFile } = await import("./files");
   let invoicesDone = 0;
   let linesRead = 0;
@@ -1243,7 +1327,7 @@ export async function backfillInvoiceLines(
 
 /** How many invoices the line reader has never been run on. */
 export async function invoicesWithoutLines(): Promise<number> {
-  return (await db.query.supplierInvoices.findMany({ where: isNull(schema.supplierInvoices.linesRead), columns: { id: true } })).length;
+  return (await db.query.supplierInvoices.findMany({ where: HAS_NO_LINES, columns: { id: true } })).length;
 }
 
 /** Corrects, or confirms, what an invoice carries. The one action that must always be available. */
@@ -1516,12 +1600,34 @@ export async function invoiceIssues(): Promise<InvoiceIssue[]> {
       .map((r) => r.createdAt.slice(0, 10))
       .sort()[0];
     const days = daysBetween(oldest, today);
+    /*
+     * Where they actually are, rather than where the cautious ones are.
+     *
+     * This said "each is held with the Schedule II records" of every unconfirmed invoice. That is
+     * true of one the reader could not classify — unknown is filed under Schedule II, because
+     * assuming the other way is the one mistake that breaks the rule — and false of one it read
+     * perfectly well and is merely waiting for a person to agree with it.
+     *
+     * The ParMed invoice was read as carrying nothing controlled and filed as an ordinary business
+     * record, and this told the owner it was sitting with the Schedule IIs. A compliance message
+     * that misstates where a record is kept is worse than no message: it is the one thing on the
+     * page somebody would act on without going and looking.
+     */
+    const held = unconfirmed.filter((r) => r.schedule === "unknown").length;
+    const placed = unconfirmed.length - held;
+    const one = unconfirmed.length === 1;
+    const where =
+      held > 0 && placed > 0
+        ? `${held} could not be read and ${held === 1 ? "is" : "are"} held with the Schedule II records — the safe place, not necessarily the right one. The other ${placed} ${placed === 1 ? "was" : "were"} read and filed by what ${placed === 1 ? "it carries" : "they carry"}. `
+        : held > 0
+          ? `${one ? "It could not be read, so it is" : "None could be read, so they are"} held with the Schedule II records — the safe place, not necessarily the right one. `
+          : `${one ? "It was" : "They were"} read and filed by what ${one ? "it carries" : "they carry"}, and ${one ? "is" : "are"} waiting only for you to agree with the reading. `
     out.push({
       key: "unconfirmed",
-      severity: days >= 7 ? "blocking" : "warn",
-      title: `${unconfirmed.length} invoice${unconfirmed.length === 1 ? "" : "s"} nobody has confirmed`,
+      severity: held > 0 && days >= 7 ? "blocking" : "warn",
+      title: `${unconfirmed.length} invoice${one ? "" : "s"} nobody has confirmed`,
       detail:
-        `Each is held with the Schedule II records, which is the safe place for it but not the right one. ` +
+        where +
         (days >= 7
           ? `The oldest has been waiting ${days} days.`
           : `The oldest arrived ${days === 0 ? "today" : `${days} day${days === 1 ? "" : "s"} ago`}.`),
@@ -2666,10 +2772,24 @@ export type Misfiled = {
   belongsIn: "supplier_statement" | "report" | null;
 };
 
+/*
+ * What does not belong in the invoice file — and a credit memo is not on this list.
+ *
+ * It was, and that put this module in disagreement with itself. `belongsInTheInvoiceFile` above
+ * says a credit memo belongs, because it is a wholesaler's own document about goods and it carries
+ * money the account has to know: IPC's CM107761 is −$199.00 the pharmacy is owed back. This table
+ * said the same document belongs under supplier statements. So the site filed the credit, counted
+ * it, and then offered him a button to take it out again — with a sentence explaining that it is
+ * "money coming back, not goods going out", which is true and is exactly why it has to stay.
+ *
+ * The owner, looking at that: "credit invoice not filed".
+ *
+ * A statement records no receipt of anything and a purchase drill-down is a summary this site
+ * produced. Neither is evidence of a transaction with a wholesaler. A credit memo is.
+ */
 const NOT_AN_INVOICE: Record<string, { belongsIn: Misfiled["belongsIn"]; word: string }> = {
   statement: { belongsIn: "supplier_statement", word: "statement of account" },
   rebate_report: { belongsIn: "supplier_statement", word: "rebate breakdown" },
-  credit_memo: { belongsIn: "supplier_statement", word: "credit memo" },
   purchase_report: { belongsIn: "report", word: "purchase drill down" },
 };
 
@@ -2722,7 +2842,13 @@ export async function misfiledInVault(): Promise<Misfiled[]> {
       continue;
     }
     const c = classifySupplierDocument(words, d.fileName, d.title);
-    if (c.kind === "invoice") continue;
+    /*
+     * An invoice and a credit memo are both evidence of a transaction with a wholesaler, and both
+     * carry money the account has to know, so neither is misfiled here. `unknown` is deliberately
+     * not skipped even though it may stay in the folder: it is the group that let a statement
+     * survive every sweep, and being shown is the whole point of it.
+     */
+    if (c.kind === "invoice" || c.kind === "credit_memo") continue;
     const where = NOT_AN_INVOICE[c.kind];
     out.push({
       id: d.id,
@@ -2892,6 +3018,7 @@ export async function invoicesStillOwed(): Promise<OwedLine[]> {
       invoiceNumber: schema.pioneerPurchases.invoiceNumber,
       invoiceDate: schema.pioneerPurchases.invoiceDate,
       totalCents: schema.pioneerPurchases.totalCents,
+      receiptSettles: schema.pioneerPurchases.receiptSettles,
     })
     .from(schema.pioneerPurchases);
   const filed = await db
@@ -2993,4 +3120,54 @@ export async function invoicesOnFileTwice(): Promise<
     });
   }
   return out.sort((a, b) => Math.abs(b.overCents) - Math.abs(a.overCents));
+}
+
+/**
+ * Closes the deliveries of one supplier that have no invoice, on their receipts — this time only.
+ *
+ * The owner: "parmed needs to use receipt as invoice this time but not going forward". The
+ * supplier-wide switch would have silenced ParMed for ever, including deliveries he does want
+ * chased; leaving it alone would have kept a row on the list nobody intends to act on. This marks
+ * the deliveries that are outstanding right now and nothing after them.
+ *
+ * The money is untouched either way — every PioneerRx purchase no invoice covers is already in the
+ * cash account — so this changes only what he is asked about.
+ */
+export async function settleDeliveriesOnReceipt(
+  supplierId: string,
+  user: { id?: string | null; name: string },
+): Promise<{ settled: number; cents: number; supplier: string | null }> {
+  const owed = await invoicesStillOwed();
+  const line = owed.find((l) => l.supplierId === supplierId);
+  if (!line || line.waiting === 0) return { settled: 0, cents: 0, supplier: line?.supplier ?? null };
+
+  const suppliers = await allSuppliers(true);
+  const reg = suppliers.find((x) => x.id === supplierId) ?? null;
+  const filed = await db.select({ invoiceNumber: schema.supplierInvoices.invoiceNumber }).from(schema.supplierInvoices);
+  const have = new Set(filed.map((f) => (f.invoiceNumber ?? "").trim().toUpperCase()).filter(Boolean));
+  const fold = (v: string | null) => (v ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  const purchases = await db.select().from(schema.pioneerPurchases);
+  let settled = 0;
+  let cents = 0;
+  for (const p of purchases) {
+    if (p.receiptSettles) continue;
+    const mine = p.supplierId === supplierId || (reg !== null && fold(p.supplier) === fold(reg.name));
+    if (!mine) continue;
+    const number = (p.invoiceNumber ?? "").trim().toUpperCase();
+    // Only the ones actually outstanding. A delivery whose invoice is on file needs no settling.
+    if (!number || have.has(number)) continue;
+    await db.update(schema.pioneerPurchases).set({ receiptSettles: true }).where(eq(schema.pioneerPurchases.id, p.id));
+    settled++;
+    cents += p.totalCents ?? 0;
+  }
+  await audit({
+    action: "purchase.receipt_settles",
+    userId: user.id ?? null,
+    userName: user.name,
+    entity: "supplier",
+    entityId: supplierId,
+    details: `${line.supplier}: ${settled} deliver${settled === 1 ? "y" : "ies"} closed on their receipts, this time only`,
+  });
+  return { settled, cents, supplier: line.supplier };
 }

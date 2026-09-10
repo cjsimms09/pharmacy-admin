@@ -54,7 +54,7 @@ export type InvoiceLineRead = {
 
 export type LineParse = {
   lines: InvoiceLineRead[];
-  format: "mckesson" | "ipc" | "ipd" | null;
+  format: "mckesson" | "ipc" | "ipd" | "parmed" | null;
   /**
    * The two halves of an invoice that separates Schedule II from the rest, as it printed them.
    *
@@ -190,6 +190,36 @@ const IPD_NAMED = new RegExp(
 );
 
 /** "CII Subtotal:$3,022.32" and "Non-CII Subtotal:$233.38", which close each half of an IPD invoice. */
+/**
+ * ParMed's own printed invoice, which prints every column with nothing between them.
+ *
+ *   21598389572888014938GENSN3011ea 6.57 6.57
+ *
+ * The header names eighteen columns — LINE, ITEM#, NDC/UPC, TYPE, FORM, CLASS, SIZE, MSG, SOM,
+ * IT, NOTE, DESCRIPTION/LOT/EXPIRATION, ORDER, QTY, UOM, UNIT $, EXTENDED $ — and the only
+ * separators on the whole row are the two spaces before the money. So the row cannot be split by
+ * position and is read from its two fixed ends instead.
+ *
+ * The NDC is the last eleven digits of the leading run, the same reasoning as IPD above: the item
+ * number's length is not fixed and the NDC's is. Here that gives 72888-0149-38, which is the
+ * labeller's real code — taking the first eleven would have given a number belonging to nobody.
+ *
+ * The quantity is not read from the page at all. SIZE, ORDER and QTY run together into one digit
+ * run ("3011" is a pack of 30, one ordered, one shipped) with nothing to say where each ends, and
+ * a wrong split here is not a visible error — it is a wrong price per unit on a drug, which is
+ * the figure this whole reader exists to produce. So it is taken from the arithmetic, where there
+ * is only one answer: extended divided by unit. A line where that does not divide exactly is left
+ * unread rather than guessed at.
+ */
+const PARMED = new RegExp(
+  String.raw`^(\d{13,})` + // line, item number and NDC, run together
+    String.raw`([A-Z]{3,})` + // type, form and class, run together
+    String.raw`(\d+)` + // size, ordered and shipped, run together
+    String.raw`([A-Za-z]{1,4})` + // unit of measure
+    String.raw`\s+(${MONEY})` + // unit price
+    String.raw`\s+(${MONEY})\s*$`, // extended amount
+);
+
 const IPD_SUBTOTAL = new RegExp(String.raw`^(Non-)?CII\s+Subtotal:\s*\$?(${MONEY})`, "i");
 
 /** An eleven-digit NDC to the hyphenated form's digits, unchanged; a hyphenated one padded to 11. */
@@ -363,6 +393,46 @@ export function parseInvoiceLines(text: string, printedTotalCents: number | null
         awpCents: money(awp),
         itemClass: cls ?? null,
         rebated: Boolean(k),
+        controlled: null,
+      });
+      continue;
+    }
+
+    const par = PARMED.exec(line);
+    if (par) {
+      const [, run, , , uom, unit, ext] = par;
+      const unitCostCents = money(unit);
+      const extendedCents = money(ext);
+      const key = ndc11(run.slice(-11));
+      /*
+       * Only where the money divides exactly. The page gives no honest way to tell the shipped
+       * quantity from the pack size beside it, so the arithmetic is the only source — and where
+       * the arithmetic has no whole answer there is nothing to fall back on.
+       */
+      const quantity = unitCostCents > 0 ? Math.round(extendedCents / unitCostCents) : 0;
+      if (!key || quantity <= 0 || !lineAddsUp(quantity, unitCostCents, extendedCents)) {
+        unreadable.push(line.slice(0, 200));
+        continue;
+      }
+      format = format ?? "parmed";
+      out.push({
+        ndc11: key,
+        // The product name is not on the row. The line above it carries the lot and expiry only.
+        description: null,
+        /*
+         * The row opens with the line number and the item number run together and nothing marks
+         * the join, so neither can be had without inventing the other. Null says that; a number
+         * here would be read as ParMed's catalogue reference and used to order from them.
+         */
+        itemNumber: null,
+        quantity,
+        unitOfMeasure: uom.toUpperCase(),
+        unitCostCents,
+        extendedCents,
+        // This invoice prints no AWP and no contract marking, so neither is claimed.
+        awpCents: null,
+        itemClass: null,
+        rebated: null,
         controlled: null,
       });
       continue;

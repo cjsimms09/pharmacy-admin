@@ -39,6 +39,7 @@ import {
   money,
   invoicesStillOwed,
   invoicesOnFileTwice,
+  settleDeliveriesOnReceipt,
 } from "@/lib/invoices";
 import { stillToChase, fromBeforeWeWatched } from "@/lib/invoices-owed";
 import { invoiceCompliance, RETENTION_YEARS } from "@/lib/invoice-compliance";
@@ -212,7 +213,16 @@ export default async function InvoicesPage({
   const registered = await allSuppliers();
   const withSenders = registered.filter((x) => addressesOf(x).length > 0);
   const noSenders = withSenders.length === 0;
-  const missingSenders = registered.filter((x) => addressesOf(x).length === 0);
+  /*
+   * Suppliers whose invoices would be missed for want of an address.
+   *
+   * Not the ones whose receipt he has said is the invoice. The banner tells him their invoices
+   * "will not be recognised", which for Xymogen and JamsRX is true, already known, and exactly
+   * what he decided — so it is not news, it is the site arguing with his own setting. He had five
+   * things to settle on this page and six of the ten names in that sentence were suppliers he had
+   * already answered for.
+   */
+  const missingSenders = registered.filter((x) => addressesOf(x).length === 0).filter((x) => !x.invoiceFromPioneer);
   const filtered = Boolean(
     sp.q || sp.month || sp.supplier || sp.from || sp.to || sp.on || sp.min || sp.max || onlyUnconfirmed || onlyUndated || onlyNoAmount || onlyNoLines,
   );
@@ -402,6 +412,29 @@ export default async function InvoicesPage({
     const { message } = await purgeFromInvoiceFile(id, u);
     revalidatePath("/inventory/invoices");
     redirect("/inventory/invoices?ok=" + encodeURIComponent(message));
+  }
+
+  /*
+   * Closes what is outstanding today, without settling the supplier for ever.
+   *
+   * "parmed needs to use receipt as invoice this time but not going forward." Two different
+   * decisions, so two different buttons: this one answers for the deliveries on the list now, and
+   * the one beside it answers for the supplier from here on.
+   */
+  async function settleTheseOnes(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const id = String(fd.get("id") ?? "");
+    const { settled, cents, supplier } = await settleDeliveriesOnReceipt(id, u);
+    revalidatePath("/inventory/invoices");
+    redirect(
+      "/inventory/invoices?ok=" +
+        encodeURIComponent(
+          settled === 0
+            ? "Nothing of theirs was outstanding, so nothing changed."
+            : `${supplier}: ${settled} deliver${settled === 1 ? "y" : "ies"} worth ${money(cents)} closed on their PioneerRx receipts. Their next delivery is still expected to bring an invoice.`,
+        ),
+    );
   }
 
   /*
@@ -988,6 +1021,17 @@ export default async function InvoicesPage({
                   )}
                   <p className="mt-0.5 text-xs text-ink-3">{l.says}</p>
                 </div>
+                {canManage && l.supplierId && l.waiting > 0 && (
+                  <form action={settleTheseOnes} className="shrink-0">
+                    <input type="hidden" name="id" value={l.supplierId} />
+                    <button
+                      className="btn btn-sm"
+                      title="Closes the deliveries listed here on their PioneerRx receipts and nothing after them. Their next delivery is still expected to bring an invoice."
+                    >
+                      Close these on the receipt
+                    </button>
+                  </form>
+                )}
                 {canManage && l.supplierId && (
                   <form action={receiptIsInvoice} className="shrink-0">
                     <input type="hidden" name="id" value={l.supplierId} />

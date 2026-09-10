@@ -57,6 +57,8 @@ export type PurchaseRow = {
   invoiceNumber: string | null;
   invoiceDate: string | null;
   totalCents: number | null;
+  /** True where he has closed this one delivery on its receipt. Says nothing about the next. */
+  receiptSettles?: boolean;
 };
 
 /** An invoice the pharmacy holds. The date is what says when their invoices started arriving. */
@@ -94,6 +96,9 @@ export type OwedLine = {
   filingSince: string | null;
   /** Deliveries covered by an invoice of theirs that carries no number, matched on the amount. */
   matchedByAmount: number;
+  /** Deliveries he has closed one at a time, on their receipt. */
+  settledOne: number;
+  settledOneCents: number;
   /** True where he has said not to wait: counted, listed, never chased. */
   receiptIsTheInvoice: boolean;
   says: string;
@@ -188,6 +193,8 @@ export function invoicesOwed(purchases: PurchaseRow[], filed: FiledRow[], suppli
         before: 0,
         beforeCents: 0,
         matchedByAmount: 0,
+        settledOne: 0,
+        settledOneCents: 0,
         neverFiled: !since.has(key),
         filingSince,
         receiptIsTheInvoice: reg?.invoiceFromPioneer ?? false,
@@ -205,6 +212,21 @@ export function invoicesOwed(purchases: PurchaseRow[], filed: FiledRow[], suppli
      * the sentence beside it says nothing is waiting on them, so the count has to agree with both.
      */
     if (!line.receiptIsTheInvoice && norm(p.invoiceNumber) && !have.has(norm(p.invoiceNumber))) {
+      /*
+       * A delivery he has closed on its receipt, one at a time.
+       *
+       * "parmed needs to use receipt as invoice this time but not going forward" — so it settles
+       * this delivery and says nothing about ParMed. Counted in `received` like any other, kept
+       * off the chase list, and counted separately so the line can say how many he has closed
+       * this way rather than quietly dropping them.
+       */
+      if (p.receiptSettles) {
+        line.settledOne++;
+        line.settledOneCents += p.totalCents ?? 0;
+        lines.set(key, line);
+        continue;
+      }
+
       /* One of their unnumbered invoices, for exactly this, spent once. */
       const pool = unnumbered.get(key);
       const at = p.totalCents === null ? -1 : (pool?.indexOf(p.totalCents) ?? -1);
@@ -227,6 +249,8 @@ export function invoicesOwed(purchases: PurchaseRow[], filed: FiledRow[], suppli
   }
 
   for (const l of lines.values()) {
+    /* What he closed by hand, said out loud, because a figure he cannot see is a figure he audits twice. */
+    const closed = l.settledOne > 0 ? ` ${l.settledOne} further deliver${l.settledOne === 1 ? "y was" : "ies were"} closed on their receipt.` : "";
     l.says = l.receiptIsTheInvoice
       ? `${l.received} deliveries, ${money(l.receivedCents)}. You have said their receipt is the invoice, so nothing here is waiting on them.`
       : l.neverFiled && (l.waiting > 0 || l.before > 0)
@@ -238,6 +262,7 @@ export function invoicesOwed(purchases: PurchaseRow[], filed: FiledRow[], suppli
             : l.before > 0
               ? `${l.before} of ${l.received} deliveries predate ${day(l.filingSince)}, when their invoices started arriving here — ${money(l.beforeCents)}, recoverable from their portal. Everything since has an invoice on file.`
               : `${l.received} deliveries, ${money(l.receivedCents)}, and an invoice on file for every one.`;
+    l.says += closed;
   }
 
   /*

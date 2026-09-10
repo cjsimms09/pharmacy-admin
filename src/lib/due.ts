@@ -132,6 +132,45 @@ export const TRAINING_CADENCE: Partial<Record<TrainingType, Cadence>> = {
 };
 
 /**
+ * When a completed training next falls due. Null where it never does.
+ *
+ * The owner: "saying my techs are late on their training when I have uploaded their training and
+ * it is a one time thing". He had uploaded it, it was on file with its document, and the screen
+ * called all three of his technicians late — one of them by a thousand days.
+ *
+ * The training page carried its own copy of this rule and it read:
+ *
+ *   last.expiresOn ?? addMonths(last.completedOn, TRAINING_CADENCE[type]?.months ?? 12)
+ *
+ * The Kansas technician course is completed once and never repeated, so its cadence is `months:
+ * 0, once: true` and a record of it carries no expiry — null there means *never expires*. The
+ * fallback took that null as "work one out", and `0 ?? 12` is 0 rather than 12 because `??` only
+ * catches null, so the next due date came out as the day it was completed. A one-time course was
+ * therefore late from the moment it was done, and one day later every day after.
+ *
+ * `dueList` below has always had this right — "Once it is done it disappears from this list for
+ * good — chasing somebody annually for their initial training would be the kind of false alarm
+ * that teaches people to stop reading the list." Two copies of a rule, and the screen he actually
+ * opens had the wrong one. So there is one copy now, and it is this.
+ */
+export function nextTrainingDue(
+  type: TrainingType,
+  last: { completedOn: string; expiresOn: string | null },
+): string | null {
+  const cadence = TRAINING_CADENCE[type];
+  // Done is done. Not even an expiry date written on the record reopens it.
+  if (cadence?.once) return null;
+  if (last.expiresOn) return last.expiresOn;
+  /*
+   * A type with no cadence entry at all is assumed annual, which is what this always did and is
+   * the safe way to be wrong. A type whose cadence says no interval does not recur — saying it is
+   * due today would be the bug above wearing a different hat.
+   */
+  const months = cadence ? cadence.months : 12;
+  return months > 0 ? addMonths(last.completedOn, months) : null;
+}
+
+/**
  * Who a training applies to.
  *
  * Was an inline check for one special case. A second one — the Kansas technician course, which is
@@ -303,7 +342,8 @@ export async function dueList(opts: { horizonDays?: number } = {}): Promise<DueI
         outstanding.push({ person: p, due: null, last: null });
         continue;
       }
-      const due = last.expiresOn ?? addMonths(last.completedOn, cadence.months);
+      const due = nextTrainingDue(type, last);
+      if (due === null) continue;
       if (daysBetween(today, due) <= HORIZON.training) outstanding.push({ person: p, due, last: last.completedOn });
     }
     if (outstanding.length === 0) continue;

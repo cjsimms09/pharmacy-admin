@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { TRAINING_CADENCE, addMonths, trainingApplies } from "@/lib/due";
+import { TRAINING_CADENCE, addMonths, trainingApplies, nextTrainingDue } from "@/lib/due";
 import { TRAINING_LABEL, TRAINING_SHORT, PERSON_ROLE_LABEL } from "@/lib/labels";
 import { type TrainingType } from "@/db/schema";
 import { todayIso, fmt, daysUntil } from "@/lib/dates";
@@ -97,7 +97,15 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
     // The certificate is the evidence behind the badge, and the badge is where somebody looks.
     const certificate = last ? `/certificates/${last.id}` : null;
     if (!last) return { label: "never", tone: "badge-crit", due: true, sent, certificate };
-    const dueOn = last.expiresOn ?? addMonths(last.completedOn, TRAINING_CADENCE[type]?.months ?? 12);
+    const dueOn = nextTrainingDue(type, last);
+    /*
+     * A course completed once and never repeated. It is done, and it stays done.
+     *
+     * The date shown is the day it was completed rather than a deadline, because there is no
+     * deadline — and a green badge with no date on it invites somebody to go and check whether it
+     * is really covered.
+     */
+    if (dueOn === null) return { label: `done ${last.completedOn}`, tone: "badge-ok", due: false, sent, certificate };
     const left = daysUntil(dueOn)!;
     if (left < 0) return { label: `${-left}d late`, tone: "badge-crit", due: true, sent, certificate };
     if (left <= 45) return { label: `due ${dueOn.slice(5)}`, tone: "badge-warn", due: true, sent, certificate };
@@ -229,8 +237,38 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
     const u = await requireManager();
     const type = String(fd.get("type") ?? "") as TrainingType;
     const ids = fd.getAll("personIds").map(String).filter(Boolean);
+    const completedOn = String(fd.get("completedOn") ?? "") || todayIso();
+    /*
+     * The paper, where there is paper.
+     *
+     * One sheet covers the session, and each person gets their own copy of it against their own
+     * record — a training file is read one person at a time, and a record pointing at a document
+     * filed under somebody else is not that person's evidence.
+     */
+    const sheet = fd.get("file");
+    const documents: Record<string, string> = {};
+    if (sheet instanceof File && sheet.size > 0) {
+      for (const person of ids) {
+        const stored = await storeFile(sheet, { allowReportTypes: true });
+        const documentId = newId();
+        await db.insert(schema.documents).values({
+          id: documentId,
+          category: "training_record",
+          title: `${TRAINING_LABEL[type]} — ${completedOn}`,
+          fileName: sheet.name,
+          mimeType: stored.mimeType,
+          sizeBytes: stored.sizeBytes,
+          sha256: stored.sha256,
+          storageKey: stored.storageKey,
+          personId: person,
+          effectiveOn: completedOn,
+          uploadedBy: u.id,
+        });
+        documents[person] = documentId;
+      }
+    }
     try {
-      const r = await recordGroupTraining(ids, type, u, { how: String(fd.get("how") ?? "") });
+      const r = await recordGroupTraining(ids, type, u, { how: String(fd.get("how") ?? ""), completedOn, documents });
       await audit({ action: "training.attest", userId: u.id, userName: u.name, details: `${type} for ${r.recorded}` });
       revalidatePath("/compliance/training");
       revalidatePath("/compliance");
@@ -245,49 +283,77 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
   async function record(fd: FormData) {
     "use server";
     const u = await requireManager();
-    const personId = String(fd.get("personId") ?? "");
     const type = String(fd.get("type") ?? "") as TrainingType;
     const completedOn = String(fd.get("completedOn") ?? "") || todayIso();
     const provider = String(fd.get("provider") ?? "").trim() || null;
-    if (!personId || !type) redirect("/compliance/training?error=" + encodeURIComponent("Pick a person and a training."));
-
-    let documentId: string | null = null;
+    if (!type) redirect("/compliance/training?error=" + encodeURIComponent("Pick which training it was."));
+    /*
+     * One document, everybody it covers.
+     *
+     * The owner: "need way to upload tech training document for techs who already completed". This
+     * took one person at a time, which for three technicians and seven required courses is
+     * twenty-one uploads of paperwork he already holds — and the control was folded shut behind
+     * the words "They did an outside course", which is not what somebody with a completed course
+     * in their hand goes looking for.
+     *
+     * Each person still gets their own document row and their own training record: a training file
+     * is read one person at a time by whoever is auditing it, and a record that points at somebody
+     * else's certificate is not that person's evidence.
+     */
+    const personIds = fd.getAll("personId").map(String).filter(Boolean);
+    if (personIds.length === 0) {
+      redirect("/compliance/training?error=" + encodeURIComponent("Nobody was ticked, so nothing was filed."));
+    }
     const file = fd.get("file");
-    if (file instanceof File && file.size > 0) {
-      const stored = await storeFile(file, { allowReportTypes: true });
-      documentId = newId();
-      await db.insert(schema.documents).values({
-        id: documentId,
-        category: "training_record",
-        title: `${TRAINING_LABEL[type]} — ${completedOn}`,
-        fileName: file.name,
-        mimeType: stored.mimeType,
-        sizeBytes: stored.sizeBytes,
-        sha256: stored.sha256,
-        storageKey: stored.storageKey,
-        personId,
-        effectiveOn: completedOn,
-        uploadedBy: u.id,
+    const hasFile = file instanceof File && file.size > 0;
+    const months = TRAINING_CADENCE[type]?.months;
+
+    for (const person of personIds) {
+      let documentId: string | null = null;
+      if (hasFile) {
+        const stored = await storeFile(file, { allowReportTypes: true });
+        documentId = newId();
+        await db.insert(schema.documents).values({
+          id: documentId,
+          category: "training_record",
+          title: `${TRAINING_LABEL[type]} — ${completedOn}`,
+          fileName: file.name,
+          mimeType: stored.mimeType,
+          sizeBytes: stored.sizeBytes,
+          sha256: stored.sha256,
+          storageKey: stored.storageKey,
+          personId: person,
+          effectiveOn: completedOn,
+          uploadedBy: u.id,
+        });
+      }
+      await db.insert(schema.trainings).values({
+        id: newId(),
+        personId: person,
+        type,
+        completedOn,
+        cycleYear: Number(completedOn.slice(0, 4)),
+        expiresOn: months ? addMonths(completedOn, months) : null,
+        provider,
+        documentId,
+        createdBy: u.name,
       });
     }
-
-    const months = TRAINING_CADENCE[type]?.months;
-    await db.insert(schema.trainings).values({
-      id: newId(),
-      personId,
-      type,
-      completedOn,
-      cycleYear: Number(completedOn.slice(0, 4)),
-      expiresOn: months ? addMonths(completedOn, months) : null,
-      provider,
-      documentId,
-      createdBy: u.name,
+    await audit({
+      action: "training.record",
+      userId: u.id,
+      userName: u.name,
+      details: `${type} on ${completedOn} for ${personIds.length} ${personIds.length === 1 ? "person" : "people"}${hasFile ? " with a document" : ", no document"}`,
     });
-    await audit({ action: "training.record", userId: u.id, userName: u.name, details: `${type} for ${personId} on ${completedOn}` });
     revalidatePath("/compliance/training");
     revalidatePath("/compliance");
     revalidatePath("/");
-    redirect("/compliance/training?ok=" + encodeURIComponent("Recorded."));
+    redirect(
+      "/compliance/training?ok=" +
+        encodeURIComponent(
+          `Filed for ${personIds.length} ${personIds.length === 1 ? "person" : "people"}${hasFile ? "" : " — no document was attached, so the record says so"}.`,
+        ),
+    );
   }
 
   /**
@@ -645,7 +711,7 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
         <h2 className="font-semibold">If they did it another way</h2>
         <div className="mt-3 grid gap-4 lg:grid-cols-2">
           <details className="rounded-md border border-line bg-ground p-3">
-            <summary className="cursor-pointer text-sm font-medium">I trained them myself</summary>
+            <summary className="cursor-pointer text-sm font-medium">I trained them myself &mdash; on paper or in person</summary>
             <form action={attestGroup} className="mt-3 space-y-3">
               <label className="block text-sm">
                 Training
@@ -665,24 +731,47 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
                 </div>
               </fieldset>
               <input name="how" placeholder="How it was done — a staff meeting, one to one, the vendor's slides" className="field" />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block text-sm">
+                  Completed on
+                  <input type="date" name="completedOn" defaultValue={today} className="field mt-1" />
+                </label>
+                <label className="block text-sm">
+                  The paper, if you have it
+                  <input type="file" name="file" className="field mt-1" />
+                </label>
+              </div>
               <p className="text-xs text-ink-3">
-                This records that you delivered it and that each of them understood it — in those words, and that they
-                did not sign individually. An inspector can tell the two kinds of record apart, which is what keeps
-                both of them worth having.
+                This records that you delivered it and that each of them understood it, in those words. Attach the
+                sheet they signed and the record says so and keeps a copy against each of them; leave it empty and
+                the record says plainly that they did not sign individually. An inspector can tell the two kinds
+                apart, which is what keeps both worth having &mdash; and why the stronger one should not be filed as
+                the weaker.
               </p>
               <button className="btn">Record it</button>
             </form>
           </details>
 
-          <details className="rounded-md border border-line bg-ground p-3">
-            <summary className="cursor-pointer text-sm font-medium">They did an outside course — file the certificate</summary>
+          <div className="rounded-md border border-line bg-ground p-3">
+            <p className="text-sm font-medium">Already completed it? File the record here</p>
+            <p className="mt-0.5 text-xs text-ink-3">
+              For training done anywhere but this screen &mdash; an outside course, a class you ran before this
+              site existed, a certificate somebody brought in. Tick everybody the document covers and it is filed
+              against each of them.
+            </p>
             <form action={record} className="mt-3 space-y-3">
-              <label className="block text-sm">
-                Person
-                <select name="personId" className="field mt-1">
-                  {people.map((p) => <option key={p.id} value={p.id}>{p.firstName} {p.lastName}</option>)}
-                </select>
-              </label>
+              <fieldset className="block text-sm">
+                <legend className="text-ink-3">Who completed it</legend>
+                <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+                  {people.map((p) => (
+                    <label key={p.id} className="flex items-center gap-1.5 text-sm font-normal">
+                      <input type="checkbox" name="personId" value={p.id} />
+                      {p.firstName} {p.lastName}
+                      {p.role && <span className="text-xs text-ink-3">({p.role})</span>}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
               <label className="block text-sm">
                 Training
                 <select name="type" className="field mt-1">
@@ -700,12 +789,17 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
                 </label>
               </div>
               <label className="block text-sm">
-                Their certificate
+                The document
                 <input type="file" name="file" className="field mt-1" />
+                <span className="mt-0.5 block text-xs text-ink-3">
+                  A certificate, a sign-in sheet, a course completion &mdash; whatever you hold. One file, filed
+                  against each person ticked. Leave it empty to record the completion with no document; the file
+                  will say plainly that there is none.
+                </span>
               </label>
-              <button className="btn">File it</button>
+              <button className="btn btn-primary">File it</button>
             </form>
-          </details>
+          </div>
         </div>
       </section>
 
