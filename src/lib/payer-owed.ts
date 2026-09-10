@@ -29,9 +29,15 @@
  *
  * That anything is late. No remittance cycle is on file for any payer — not in the contracts that
  * have been read, not on the payer register — so "30 days" would be a number this pharmacy invented
- * and then believed. It says how long the oldest unsettled claim has been waiting and leaves the
+ * and then believed. It says how long the payer's oldest claim has been waiting and leaves the
  * judgement to somebody who knows the contract. A deadline nobody imposed has already cost this
  * project once.
+ *
+ * Nor that the age it prints is the age of anything *unsettled*. Payments are summed per payer, not
+ * matched claim by claim, so where a payer has part-paid there is no telling which of its claims the
+ * money covered. See `oldestOn`: this said the stronger thing until 1 caught it on review, which is
+ * the fault this codebase is least able to afford — a comment asserting an invariant its code does
+ * not enforce, where the comments are how the rules are known.
  *
  * Pure. `payer-owed-store.ts` loads the rows.
  */
