@@ -274,6 +274,14 @@ export const SPECS: LinkSpec[] = [
       "The catalogue is what every buying decision here is made from: which supplier is cheapest, what an add-on costs, what the shelf is worth. A price the table holds that the wholesaler's file does not state is a purchase made on a number nobody sent. Counted per NDC because a wholesaler lists the same NDC several times in one file — McKesson 539 of them — and the table keeps one. Prices carried over from an earlier file are outside the figure and named in the gaps with their age: the newest file says nothing about them, so there is nothing to agree or disagree with, and counting them against the score would make a wholesaler who trimmed their catalogue look like one whose prices are wrong.",
   },
   {
+    key: "invoice-proof",
+    group: "Datasets",
+    title: "Every supplier invoice proved against its own file",
+    of: "invoices whose stored lines sum to the total printed on them, out of the invoices that carry text to re-read",
+    why:
+      "What the pharmacy paid for a drug is the invoice, and an invoice the reader half-read is a cost the buy list, the margins and every appeal are working without. On 9 September one $9,890.97 McKesson invoice held no item lines at all — the reader found 55 summing $9,718.06 against the printed total, and because they did not reconcile it discarded all 55; the missing $172.91 was two lines whose rebate flag printed \"KI\" and \"KD\" where the pattern wanted \"K\". Nothing on any screen said so. This re-reads the file rather than trusting the reader's own account of itself, which is the only way the fault is visible, and it counts an invoice the reader can now read better than when it arrived — because fixing a reader does not reach backwards, and that invoice went on reporting no lines after the fix landed. Scanned invoices are outside the figure: they carry no text, so there is nothing to agree or disagree with, and counting them against the score would make a photographed delivery note look like a fault.",
+  },
+  {
     key: "nadac-proof",
     group: "Datasets",
     title: "NADAC proved against the CMS files it came from",

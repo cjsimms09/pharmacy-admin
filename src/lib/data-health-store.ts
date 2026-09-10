@@ -495,6 +495,31 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
   });
 
   /*
+   * ── Every supplier invoice against the file it was read from ──────
+   *
+   * Read back from what the nightly script left behind. The fraction excludes scanned invoices
+   * deliberately: a scan carries no text, so nothing about it can be agreed or disagreed with, and
+   * putting it in the denominator would make the number fall whenever somebody photographs a
+   * delivery note — which is how a health figure gets ignored.
+   */
+  await timed("invoice-proof", async () => {
+    const { parseInvoiceProof, invoiceProofFraction, invoiceProofGaps, invoiceProofNote } = await import("./data-health-invoice-proof");
+    const proof = parseInvoiceProof((await getSettings()).invoice_proof);
+    if (!proof) {
+      return {
+        numerator: 0,
+        denominator: 0,
+        measuredAt: null,
+        gaps: [],
+        note: "The nightly invoice proof has not run, so no invoice on this site has been set against the file it was read from.",
+      };
+    }
+    const { numerator, denominator } = invoiceProofFraction(proof);
+    // The proof's own date. An ageing row here is the nightly job having stopped, not a stale file.
+    return { numerator, denominator, measuredAt: proof.provedOn, gaps: invoiceProofGaps(proof), note: invoiceProofNote(proof) };
+  });
+
+  /*
    * ── NADAC against the CMS files, and the prune that keeps it trimmed ──
    *
    * Both read back from what the nightly scripts left behind. Two rows rather than one because they

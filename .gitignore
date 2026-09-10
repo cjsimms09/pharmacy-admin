@@ -56,7 +56,9 @@ Thumbs.db
 
 # ── Generated ────────────────────────────────────────────────────────
 next-env.d.ts
-tsconfig.tsbuildinfo
+# Any tsc --noEmit against a second config writes its own; -p tsconfig.script.json writes
+# tsconfig.script.tsbuildinfo, which reached a commit on 10 September through git add -A.
+*.tsbuildinfo
 
 # This machine's own Claude Code permissions - never shared
 .claude/settings.local.json
