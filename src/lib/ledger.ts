@@ -241,7 +241,20 @@ export type Pace = {
   /** Dispensing figures scaled to the whole month. Null under three days: too little to call a pace. */
   netRevenueCents: number | null;
   grossProfitCents: number | null;
-  /** Paced gross profit less the bills already in. Not a forecast of the bills. */
+  /**
+   * Paced gross profit less a whole month of bills.
+   *
+   * The standing costs are taken at their full monthly figure, because they are known in full and
+   * the pharmacy will pay all of them. One-off bills are taken as they stand: rent lands on the
+   * first and payroll twice, and there is no honest way to forecast an invoice nobody has sent.
+   * So this leans optimistic on the bills that have not arrived and is exact on the ones that
+   * cannot surprise anybody.
+   *
+   * It used to subtract the bills *accrued so far* from a revenue figure scaled to the whole
+   * month. On the tenth of September that was 10/30 of the payroll against 30/30 of the gross,
+   * and it reported $35,542.43 where the honest figure was $643.95 — fifty-five times over, on
+   * the tile the owner reads first.
+   */
   netAfterBillsSoFarCents: number | null;
   says: string;
 };
@@ -253,7 +266,7 @@ export type Pace = {
  * open, so what the month has done so far says what it is doing. Bills do not — rent lands on the
  * first and payroll twice — so operating costs are shown as they stand and never multiplied.
  */
-export function pace(pl: Pick<MonthlyPL, "month" | "netRevenueCents" | "grossProfitCents" | "operatingCents">, daysElapsed: number): Pace {
+export function pace(pl: Pick<MonthlyPL, "month" | "netRevenueCents" | "grossProfitCents" | "operatingCents" | "standingWholeMonthCents">, daysElapsed: number): Pace {
   const days = daysInMonth(pl.month);
   const elapsed = Math.max(0, Math.min(days, daysElapsed));
   const share = elapsed / days;
@@ -261,6 +274,12 @@ export function pace(pl: Pick<MonthlyPL, "month" | "netRevenueCents" | "grossPro
     return { daysElapsed: elapsed, daysInMonth: days, share, netRevenueCents: null, grossProfitCents: null, netAfterBillsSoFarCents: null, says: "Too early in the month to call a pace." };
   }
   const scale = (c: number) => Math.round((c * days) / elapsed);
+  /*
+   * How much of the standing costs `operatingCents` already carries, so it can be swapped for the
+   * whole month's. By the day on accrual, and on cash a standing cost is nought until its paid day
+   * — either way `standingWholeMonthCents` is what the month will really cost.
+   */
+  const accruedStanding = Math.round((pl.standingWholeMonthCents * elapsed) / days);
   const netRevenueCents = scale(pl.netRevenueCents);
   const grossProfitCents = scale(pl.grossProfitCents);
   return {
@@ -269,7 +288,12 @@ export function pace(pl: Pick<MonthlyPL, "month" | "netRevenueCents" | "grossPro
     share,
     netRevenueCents,
     grossProfitCents,
-    netAfterBillsSoFarCents: grossProfitCents - pl.operatingCents,
+    /*
+     * The bills for a whole month: every standing cost in full, plus whatever one-off bills have
+     * already been entered. `operatingCents` holds the accrued share of the standing costs, so it
+     * is removed before the full figure is added back — otherwise the part is counted twice.
+     */
+    netAfterBillsSoFarCents: grossProfitCents - (pl.operatingCents - accruedStanding + pl.standingWholeMonthCents),
     says: `${elapsed} of ${days} days in. At this pace the month takes ${dollars(netRevenueCents)} and makes ${dollars(grossProfitCents)} before bills.`,
   };
 }

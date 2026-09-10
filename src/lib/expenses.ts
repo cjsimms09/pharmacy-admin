@@ -1,3 +1,4 @@
+import { DEPOSIT_WINDOW_DAYS, gateDeposit, shiftDays } from "./deposit-gate";
 import "server-only";
 import { db, schema } from "@/db";
 import { and, desc, eq, gte, isNull, lte } from "drizzle-orm";
@@ -255,30 +256,25 @@ export async function addCashReceipt(input: {
   reference?: string | null;
 }): Promise<{ id: string | null; duplicate: false } | { id: null; duplicate: true; why: string }> {
   const amountCents = Math.round(input.amountCents);
-  if (input.sourceKey) {
-    const same = await db.query.cashReceipts.findFirst({ where: eq(schema.cashReceipts.sourceKey, input.sourceKey) });
-    if (same) return { id: null, duplicate: true, why: `already banked from ${same.createdBy} on ${same.month}` };
-  }
   /*
-   * The cross-feed gate applies to feeds and not to people.
+   * The rule is in `deposit-gate.ts`, pure and tested; this part is only the lookup.
    *
-   * A `sourceKey` is what an automatic reader supplies, so its presence is how this tells the two
-   * apart. Money typed in from a bank statement is trusted outright: the bank is the record, and if
-   * it shows two deposits of the same amount on the same day then there were two, and refusing the
-   * second would be this function overruling the statement it exists to agree with.
+   * Everything inside the window, plus anything already carrying this source key, because a
+   * re-read of the same file can be any age at all. Loading less than the gate needs is how a
+   * duplicate gets through, so the query is deliberately wider than the comparison.
    */
-  if (input.sourceKey && input.receivedOn) {
-    const sameDay = await db.query.cashReceipts.findMany({ where: eq(schema.cashReceipts.receivedOn, input.receivedOn) });
-    const head = (s: string | null | undefined) => (s ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 8);
-    const clash = sameDay.find((r) => r.amountCents === amountCents && (!input.payer || !r.payer || head(r.payer) === head(input.payer)));
-    if (clash) {
-      return {
-        id: null,
-        duplicate: true,
-        why: `${(amountCents / 100).toFixed(2)} from ${input.payer ?? "a payer"} on ${input.receivedOn} is already banked${clash.reference ? ` as ${clash.reference}` : ""}`,
-      };
-    }
-  }
+  const near = input.receivedOn
+    ? await db.query.cashReceipts.findMany({
+        where: and(
+          gte(schema.cashReceipts.receivedOn, shiftDays(input.receivedOn, -DEPOSIT_WINDOW_DAYS)),
+          lte(schema.cashReceipts.receivedOn, shiftDays(input.receivedOn, DEPOSIT_WINDOW_DAYS)),
+        ),
+      })
+    : [];
+  const sameKey = input.sourceKey ? await db.query.cashReceipts.findMany({ where: eq(schema.cashReceipts.sourceKey, input.sourceKey) }) : [];
+  const verdict = gateDeposit([...sameKey, ...near], { ...input, amountCents });
+  if (!verdict.bank) return { id: null, duplicate: true, why: verdict.why };
+
   const id = newId();
   await db.insert(schema.cashReceipts).values({
     id,

@@ -452,11 +452,24 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
      */
     const costs = rows.map((r) => r.acquisitionCents).filter((x): x is number => x !== null && x !== undefined && x !== 0);
     const duplicated = costs.length > 1 && costs.every((c) => c === costs[0]);
-    const acquisitionCents = rows.some((r) => r.acquisitionCents !== null && r.acquisitionCents !== undefined)
-      ? duplicated
-        ? costs[0]
-        : costs.reduce((n, c) => n + c, 0)
-      : null;
+    /*
+     * No cost on any row means the cost is unknown, not nought.
+     *
+     * The line above says so outright — a zero is filtered out because the coordination rows print
+     * one — and then the presence test used to ask only whether some row was non-null. So a fill
+     * whose every row printed 0.00 came out with a confident cost of zero, and the bottle read as
+     * free. Thirty-nine fills sold in September were in that state, carrying $5,071.34 of revenue
+     * and, with nothing against it, $5,071.34 of gross profit: a third of the month's gross and
+     * twenty-six times its bottom line. An Adzenys at $1,171.91 and a Zepbound pen at $491.67 both
+     * sat there costing nothing.
+     *
+     * Two other checks were blinded by the same zero and come back with this one. `monthInputs`
+     * leaves a fill out of both sides where the cost is null — its comment promises exactly that,
+     * "left out of both sides rather than counted as free" — and could not, because zero is not
+     * null. And `fillsAtALoss` lists fills by a negative margin, which a fill with no cost can
+     * never have, so the below-cost report was blind to precisely the fills whose cost nobody knew.
+     */
+    const acquisitionCents = costs.length > 0 ? (duplicated ? costs[0] : costs.reduce((n, c) => n + c, 0)) : null;
     // Quantity likewise sits on the dispensing row; the coordination rows print zero.
     const quantities = rows.map((r) => r.quantityThousandths).filter((x): x is number => x !== null && x !== undefined);
     const quantityThousandths = quantities.length ? Math.max(...quantities) : null;

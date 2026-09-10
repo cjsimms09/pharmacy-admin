@@ -68,6 +68,7 @@ export type MoneyPosition = {
     rxRemitCents: number | null;
     rxCents: number | null;
     totalCents: number | null;
+    fileName: string | null;
     /** True where the month on file is not the month now running: last month's close, not this one. */
     isCurrentMonth: boolean;
   } | null;
@@ -292,6 +293,9 @@ async function loadMoneyPosition(today: Date): Promise<MoneyPosition> {
           rxCents: filed.rxCents,
           totalCents: filed.totalCents,
           isCurrentMonth: filed.month === month,
+          // Which document filled the row, so the sentence can say whether the missing halves were
+          // ever going to be there. A till reconstruction and a Sales Summary are not the same news.
+          fileName: filed.fileName,
         }
       : null,
     ratio,

@@ -17,6 +17,7 @@ function pl(month: string, a: Partial<MonthlyPL> = {}): MonthlyPL {
     month,
     basis: "accrual",
     claimsCount: 0,
+    standingWholeMonthCents: 0,
     revenue: [],
     revenueCents: 0,
     offsets: [],

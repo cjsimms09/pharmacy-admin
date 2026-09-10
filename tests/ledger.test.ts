@@ -85,25 +85,58 @@ describe("a quarter is its months added line by line", () => {
 });
 
 describe("month to date, at this pace", () => {
-  test("dispensing is scaled to the month; the bills are not", () => {
-    // Ten days in: $60,000 net so far becomes $180,000 for a thirty-day month.
-    const p = pace({ month: "2026-09", netRevenueCents: 6_000_000, grossProfitCents: 1_500_000, operatingCents: 1_000_000 }, 10);
+  test("dispensing is scaled to the month, and so are the bills that are known in full", () => {
+    /*
+     * Ten days into a thirty-day month. $60,000 of net revenue so far paces to $180,000, and
+     * $15,000 of gross paces to $45,000. The bills: $30,000 a month of standing costs, of which
+     * $10,000 has accrued, and that accrued share is the whole of `operatingCents` here. A month's
+     * gross must be measured against a month's bills, so the answer is $45,000 - $30,000.
+     */
+    const p = pace({ month: "2026-09", netRevenueCents: 6_000_000, grossProfitCents: 1_500_000, operatingCents: 1_000_000, standingWholeMonthCents: 3_000_000 }, 10);
     assert.equal(p.daysInMonth, 30);
     assert.equal(p.netRevenueCents, 18_000_000);
     assert.equal(p.grossProfitCents, 4_500_000);
-    assert.equal(p.netAfterBillsSoFarCents, 4_500_000 - 1_000_000, "the bills already in, not tripled");
+    assert.equal(p.netAfterBillsSoFarCents, 1_500_000, "a whole month of gross less a whole month of standing costs");
     assert.match(p.says, /10 of 30 days/);
   });
 
+  /*
+   * The fault this replaces. Paced gross less the bills *accrued so far* took 30/30 of the revenue
+   * against 10/30 of the payroll. On the real September that reported $35,542.43 where the honest
+   * figure was $643.95 — fifty-five times over, on the tile the owner reads first.
+   */
+  test("the accrued share of a standing cost is never what a paced month is measured against", () => {
+    const p = pace({ month: "2026-09", netRevenueCents: 6_000_000, grossProfitCents: 1_500_000, operatingCents: 1_000_000, standingWholeMonthCents: 3_000_000 }, 10);
+    assert.notEqual(p.netAfterBillsSoFarCents, 4_500_000 - 1_000_000, "that is the fifty-five-times answer");
+    assert.ok((p.netAfterBillsSoFarCents ?? 0) < 4_500_000 - 1_000_000, "and it is the flattering direction");
+  });
+
+  test("a one-off bill already entered is counted once, on top of the standing costs", () => {
+    // $10,000 of accrued standing plus a $5,000 invoice that has arrived.
+    const p = pace({ month: "2026-09", netRevenueCents: 6_000_000, grossProfitCents: 1_500_000, operatingCents: 1_500_000, standingWholeMonthCents: 3_000_000 }, 10);
+    assert.equal(p.netAfterBillsSoFarCents, 1_000_000, "$45,000 less $30,000 of standing less the $5,000 invoice");
+  });
+
+  test("no standing costs on file leaves the bills exactly as they stand", () => {
+    const p = pace({ month: "2026-09", netRevenueCents: 6_000_000, grossProfitCents: 1_500_000, operatingCents: 800_000, standingWholeMonthCents: 0 }, 10);
+    assert.equal(p.netAfterBillsSoFarCents, 4_500_000 - 800_000, "nothing to project, so nothing is projected");
+  });
+
   test("under three days is not a pace", () => {
-    const p = pace({ month: "2026-09", netRevenueCents: 500_000, grossProfitCents: 100_000, operatingCents: 0 }, 2);
+    const p = pace({ month: "2026-09", netRevenueCents: 500_000, grossProfitCents: 100_000, operatingCents: 0, standingWholeMonthCents: 0 }, 2);
     assert.equal(p.netRevenueCents, null);
   });
 
   test("more days than the month has is the month", () => {
-    const p = pace({ month: "2026-02", netRevenueCents: 2_800_000, grossProfitCents: 700_000, operatingCents: 0 }, 40);
+    const p = pace({ month: "2026-02", netRevenueCents: 2_800_000, grossProfitCents: 700_000, operatingCents: 0, standingWholeMonthCents: 0 }, 40);
     assert.equal(p.daysElapsed, 28);
     assert.equal(p.netRevenueCents, 2_800_000);
+  });
+
+  test("at the end of the month the accrued share is the whole, and nothing moves", () => {
+    const p = pace({ month: "2026-09", netRevenueCents: 6_000_000, grossProfitCents: 1_500_000, operatingCents: 3_000_000, standingWholeMonthCents: 3_000_000 }, 30);
+    assert.equal(p.grossProfitCents, 1_500_000, "a full month is not scaled");
+    assert.equal(p.netAfterBillsSoFarCents, 1_500_000 - 3_000_000);
   });
 });
 
