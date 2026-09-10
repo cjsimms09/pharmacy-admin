@@ -227,6 +227,8 @@ export async function importCopayRemit(
         ndc11: n.ndc11,
         source: "copay_card",
         payer: COPAY_PAYER,
+        // The voucher's own BIN, so a fill billed to two payers settles against the right one.
+        bin: COPAY_BIN,
         amountCents: n.paidCents,
         /*
          * A matched line settles what the claim already carries, so none of it is new revenue. A

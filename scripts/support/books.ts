@@ -14,6 +14,7 @@ async function main() {
     console.log(`revenue ${money(p.revenueCents)}  cogs ${money(p.costOfGoodsCents)}  gross ${money(p.grossProfitCents)}  operating ${money(p.operatingCents)}  net ${money(p.netProfitCents)}`);
     for (const l of p.operating) console.log(`   ${l.label.padEnd(32)} ${money(l.amountCents)}`);
     for (const m of p.missing) console.log(`   missing: ${m}`);
+    for (const c of p.caveats) console.log(`   caveat: ${c}`);
   }
   console.log(`\nbalances accrual ${JSON.stringify(b.balances.accrual)}`);
   console.log(`balances cash    ${JSON.stringify(b.balances.cash)}`);

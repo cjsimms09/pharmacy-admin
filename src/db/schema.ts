@@ -2134,6 +2134,24 @@ export const claims = sqliteTable(
     wacCents: integer("wac_cents"),
     nadacDispensedCents: integer("nadac_dispensed_cents"),
     dirFeeCents: integer("dir_fee_cents"),
+    /**
+     * A manufacturer e-voucher, and it is ALREADY INSIDE `remitCents`. Do not add it to revenue.
+     *
+     * This column says how much of the payer money came from a voucher rather than from the plan.
+     * It is not money the account is missing, and the temptation to treat it as such is real: the
+     * site stores it, nothing reads it, and it looks exactly like a forgotten figure.
+     *
+     * Measured on September, on the 25 fills that carry one. What each payer paid plus what the
+     * patient owes equals the price of the fill on all 25, to the cent, with no voucher term at
+     * all. Add the voucher and all 25 break, by $4,804.48. It is a component, not an addition.
+     *
+     * On a cash plan the whole of the payer figure is the voucher — RxLocal claims where
+     * `remitCents` equals this to the penny. On a plan that pays, the two sit together and the
+     * remit is both: Rx 327712 is $913.47 in all, of which $100.00 came from a voucher.
+     *
+     * When the voucher money actually arrives it settles what the claim already carries, so
+     * `copay-remit-store.ts` records it with `revenueCents: 0`. That is what keeps it counted once.
+     */
     evoucherCents: integer("evoucher_cents"),
     /** The contract id the plan returned on the claim, as the export prints it. */
     contractId: text("contract_id"),

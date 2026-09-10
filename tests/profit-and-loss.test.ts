@@ -333,6 +333,38 @@ describe("what the cash account is allowed to carry", () => {
     assert.ok(cash.missing.some((m) => m.startsWith("Wages and salaries")));
   });
 
+  /*
+   * The owner: "no one paid those prices no one paid for those drugs". 386 of September's fills
+   * were billed and never collected. A bin full of scripts is not a bad month, and the account has
+   * to be able to say which it is looking at.
+   */
+  test("prescriptions still in the bin are named, with the stock behind them", () => {
+    const r = monthlyPL({ ...base, waitingFills: 386, waitingRevenueCents: 7_270_449, waitingCostCents: 6_660_444 });
+    const said = r.caveats.join(" ");
+    assert.ok(said.includes("386 prescriptions filled this month are still in the bin"));
+    assert.ok(said.includes("$72,704.49 of them"), "the money waiting");
+    assert.ok(said.includes("$66,604.44 of stock behind them is on the shelf"), "and the stock behind it");
+    assert.ok(said.includes("reversed"), "and that some will never be revenue");
+  });
+
+  /*
+   * Both halves of the retail line, because I got this wrong once by guarding the revenue push
+   * instead of the caveat and silently dropped a month's front-of-shop takings.
+   */
+  test("retail revenue is counted whether or not its cost is known", () => {
+    const withCost = monthlyPL({ ...base, sales: { ...base.sales!, retailCostCents: 300_000 } });
+    const without = monthlyPL({ ...base, sales: { ...base.sales!, retailCostCents: null } });
+    for (const r of [withCost, without]) assert.ok(r.revenue.some((l) => l.label === "Retail and over the counter" && l.amountCents === 545_888), "the takings are revenue either way");
+    assert.ok(withCost.costOfGoods.some((l) => l.amountCents === 300_000), "and the cost is a cost when it is known");
+    assert.equal(withCost.caveats.some((c) => c.includes("goods cost to buy")), false, "no warning about a figure the account has");
+    assert.ok(without.caveats.some((c) => c.includes("goods cost to buy")), "and a warning when it really is missing");
+  });
+
+  test("an empty bin says nothing at all", () => {
+    const r = monthlyPL({ ...base, waitingFills: 0, waitingRevenueCents: 0, waitingCostCents: 0 });
+    assert.equal(r.caveats.some((c) => c.includes("still in the bin")), false);
+  });
+
   test("loan principal, draws, equipment and tax are cash out and never a cost", () => {
     const below = [
       { categoryId: "lp", categoryName: "Loan principal", kind: "balance_sheet", amountCents: 800_000 },

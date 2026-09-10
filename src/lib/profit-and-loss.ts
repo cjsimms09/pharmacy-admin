@@ -143,6 +143,16 @@ export type PLInputs = {
   claimsRemitCents?: number | null;
   claimsPatientCents?: number | null;
   claimsCount?: number;
+  /**
+   * Filled this month and still in the will-call bin: not revenue, and not a shortfall either.
+   *
+   * Named on the account so a full bin is never read as a bad month. The cost is stated with it
+   * because that stock is still on the shelf — it is inventory, not cost of goods, and the two
+   * figures move together.
+   */
+  waitingFills?: number;
+  waitingRevenueCents?: number | null;
+  waitingCostCents?: number | null;
   /** The value on the shelf at the first and last count of the month, for the independent check. */
   openingStockCents?: number | null;
   closingStockCents?: number | null;
@@ -399,7 +409,12 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
      * for, but that is purchases rather than cost of sales and it is not stored. Until it is, the
      * honest thing is to refuse to let the number pass unremarked.
      */
-    if (i.sales?.retailCents) {
+    /*
+     * Only where the cost really is missing. The till supplies it now, so a month that has it must
+     * not still be warned that it has not — a caveat that fires when it is untrue teaches the
+     * reader to skip the ones that are.
+     */
+    if (i.sales?.retailCents && !i.sales.retailCostCents) {
       caveats.push(
         `What the retail and over-the-counter goods cost to buy. $${(i.sales.retailCents / 100).toFixed(2)} of front-of-shop sales is ` +
           "counted as revenue and nothing is counted against it, because cost of goods here is the acquisition cost on each " +
@@ -477,6 +492,22 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
    * Wages are the test. In an independent pharmacy they are commonly more than half of gross profit,
    * so a month without them does not look slightly optimistic — it looks profitable when it was not.
    */
+  /*
+   * A full bin is not a bad month, and the account has to say so.
+   *
+   * Revenue is counted when the script is collected, so a month that dispensed heavily on its last
+   * few days reads low until those scripts are picked up. Without this line the reader has no way
+   * to tell that from trade actually falling away.
+   */
+  if (i.waitingFills && (i.waitingRevenueCents ?? 0) > 0) {
+    caveats.push(
+      `${i.waitingFills.toLocaleString("en-US")} prescriptions filled this month are still in the bin, ` +
+        `${formatCents(i.waitingRevenueCents ?? 0)} of them. None of it is revenue until somebody collects them, and the ` +
+        `${formatCents(i.waitingCostCents ?? 0)} of stock behind them is on the shelf rather than in cost of goods. ` +
+        "A script unclaimed for a fortnight is reversed, so some of this will never be revenue at all.",
+    );
+  }
+
   const spent = new Set(operating.filter((l) => l.amountCents !== 0).map((l) => l.label));
   /*
    * A cost the pharmacy has told the site about is not a cost the site has forgotten.
@@ -730,7 +761,38 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
    * This is the figure that makes a stocktake unnecessary — see the note at the top of this file.
    * A fill with no acquisition cost on it is left out of both sides rather than counted as free.
    */
-  const monthFills = fills.filter((f) => f.dateFilled.startsWith(month));
+  /*
+   * A prescription is revenue when the patient takes it away, not when it is filled.
+   *
+   * The owner: "I still don't think those scripts were picked up or paid at all.. no one paid those
+   * prices." He was right, and it was not three scripts. 386 of September's fills were billed to a
+   * plan and never collected — $55,713.96 of payer money and $16,990.53 of patient money, 43% of
+   * the month, booked as revenue while the drugs sat in the will-call bin and their cost was
+   * charged against them as though they had been sold.
+   *
+   * A fill in the bin has earned nothing. The plan will pay when it pays, the patient has handed
+   * over nothing, and an unclaimed script is reversed after a fortnight — so booking it is not
+   * early, it is wrong in the direction that flatters. Its stock is inventory, not cost of goods.
+   *
+   * So a fill belongs to the month it was *sold* in. PioneerRx's completed date says when that was
+   * and the daily transaction report already prints it, so this needs nothing new to arrive: a paid
+   * row with no completed date is transmitted and not yet picked up.
+   *
+   * Two consequences worth stating plainly. A fill dispensed in one month and collected in the next
+   * is revenue in the second, which is correct and will make a month's figure move after it looked
+   * finished. And a month in progress always understates, because today's fills have not been
+   * collected yet — that is not a fault to be corrected but the point of the basis.
+   */
+  const monthFills = fills.filter((f) => (f.soldOn ?? "").startsWith(month));
+  /*
+   * Filled this month and still in the bin: named, never counted.
+   *
+   * Reported rather than dropped in silence, because the difference between "we sold less" and "we
+   * have not been paid for it yet" is the difference between a bad month and a full bin.
+   */
+  const waiting = fills.filter((f) => !f.soldOn && f.dateFilled.startsWith(month));
+  const waitingRevenueCents = waiting.reduce((n, f) => n + f.remitCents + f.patientPaidCents, 0);
+  const waitingCostCents = waiting.reduce((n, f) => n + (f.acquisitionCents ?? 0), 0);
   const mine = monthFills.filter((f) => f.acquisitionCents !== null);
   /*
    * What the month's dispensing actually brought in, per fill rather than per transmission, so a
@@ -834,6 +896,9 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
     claimsRevenueCents,
     claimsRemitCents,
     claimsPatientCents,
+    waitingFills: waiting.length,
+    waitingRevenueCents,
+    waitingCostCents,
     claimsCount: monthFills.length,
     dispensedCostCents,
     purchasesCents,
