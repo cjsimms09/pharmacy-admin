@@ -60,13 +60,41 @@ async function termsByPbm(): Promise<Map<string, AppealTerms>> {
 async function invoicesFor(claims: { claimId: string; ndc11: string; dateFilled: string }[]): Promise<Map<string, Invoice>> {
   const ndcs = [...new Set(claims.map((c) => c.ndc11))];
   if (ndcs.length === 0) return new Map();
+  const { catalogueRows } = await import("./catalogue-cache");
   const [lines, items, invoices] = await Promise.all([
     db.query.invoiceLines.findMany({ where: inArray(schema.invoiceLines.ndc11, ndcs), columns: { ndc11: true, invoiceId: true, invoiceDate: true, supplier: true, unitCostCents: true, quantity: true } }),
-    db.query.supplierItems.findMany({ where: inArray(schema.supplierItems.ndc11, ndcs), columns: { ndc11: true, packSize: true } }),
+    /*
+     * The levelled catalogue, not the table under it.
+     *
+     * This read `supplier_items.pack_size` raw and handed it to `packQtyOf`, whose expression drops
+     * the bracket — "(5) 1 ML" reads as 1. That is the right reading of a levelled row, where there
+     * is no bracket left to drop, and the wrong reading of a raw one: McKesson, ANDA and ParMed
+     * write a multi-pack as "(5) 1 ML" and the package is five, which the catalogue proof settled on
+     * 9 September against NADAC on 1,593 rows. Dividing the invoice's per-package price by one
+     * instead of five states an acquisition cost five times what the pharmacy paid.
+     *
+     * On this page that is not a mispriced order, which the next catalogue corrects. It is the
+     * figure the pharmacy submits to a PBM as what the drug cost it. The comment four lines below
+     * already says a per-package price offered as a per-unit acquisition cost is the one error an
+     * appeal cannot survive; this was that error, in the other direction.
+     *
+     * `catalogueRows` levels every row to the whole package, applies the pharmacy's own pack fixes
+     * and the majority rule, and withholds rows that fail the price check — the same reading the
+     * shelf, the buy list and the planner get.
+     */
+    catalogueRows(),
     db.query.supplierInvoices.findMany({ columns: { id: true, invoiceNumber: true, supplier: true } }),
   ]);
+  const wanted = new Set(ndcs);
   const packBy = new Map<string, number>();
   for (const it of items) {
+    if (!wanted.has(it.ndc11)) continue;
+    /*
+     * A pack still carrying a bracket is one levelling could not settle — it printed no pack total,
+     * so there was nothing to divide by. `packQtyOf` now refuses those rather than answering with
+     * the inner pack, and a claim with no pack size the site can state is dropped from the packet
+     * four lines below, which is what this page already does for that case.
+     */
     const q = packQtyOf(it.packSize);
     if (q && q > 0 && !packBy.has(it.ndc11)) packBy.set(it.ndc11, q);
   }

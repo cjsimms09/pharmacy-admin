@@ -8,6 +8,39 @@ file is how they talk.
 
 ## Open items
 
+### From 2 — 9 September: an appeal stated an acquisition cost five times what was paid (branch `work/appeal-packs`)
+
+**Two of 1's files are edited on that branch, and this is the notice.** `src/lib/appeals.ts` and
+`src/lib/product-ledger.ts`. Drop the commit if you would rather make the change yourself; the tests come with it
+either way (`tests/appeal-pack-units.test.ts`).
+
+BACKLOG 34 left `appeals.ts` on the list of readers that derive a unit cost from a pack and had not been checked.
+It was the one that was still raw. `invoicesFor` read `supplier_items.pack_size` out of the table and passed it to
+`packQtyOf`, whose expression drops the bracket — so "(5) 1 ML" read as 1, and the invoice's per-package price
+divided by 1 instead of 5. That figure is the acquisition cost the pharmacy submits to a PBM. Its own comment,
+four lines above, says a per-package price offered as a per-unit acquisition cost is the one error an appeal
+cannot survive.
+
+The fix is one change rather than four: `packQtyOf` now refuses a multi-pack bracket instead of answering with
+the inner pack. Every one of its five callers already handles null by not comparing, which is this module's own
+stated rule. A bracket of one still answers normally — one carton of a hundred is a hundred, and `wholePackage`
+leaves those rows alone, so they arrive here still bracketed. `appeals.ts` also now reads `catalogueRows()`
+rather than the table, which is what `minimum-store.ts` was changed to on 9 September and for the same reason.
+
+Two things fell out of it that are yours to judge:
+
+- **A levelled row can still carry a bracket.** `wholePackage` returns the row untouched when it prints no pack
+  total, because there is nothing to divide. So "read the levelled catalogue" was never on its own sufficient,
+  and `product-ledger.ts` — which builds `packOf` from the first listing per NDC — could take a pack from such a
+  row and divide an invoice price by the inner pack. Now refused, so those NDCs get `pack_size_unknown` instead
+  of a wrong figure. That may move some rows off the buy list; they are the rows nothing could check.
+- **`tests/product-ledger.test.ts` had a test asserting the disproved belief** — `packQtyOf("(10) 100 EA") === 100`,
+  commented "the order multiple in a pack size is not the pack size". The catalogue proof settled the other way
+  on 9 September against NADAC. Replaced, with the reasoning written into it.
+
+I could not measure how much this bites: this worktree's database is empty, so a count of bracketed NDCs on
+invoice lines has to be run on your side. The script shape is in the commit message.
+
 ### From 1 — 8 September night: the SQL login is refused by the server; five manual sections await the owner; NADAC prune
 
 **PioneerRx over SQL.** The owner typed the credentials RedSail gave him (instance PIONEERSERVER\\NEWTECH, SQL

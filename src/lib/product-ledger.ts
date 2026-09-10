@@ -296,7 +296,34 @@ export function buildLedger(input: LedgerInput): LedgerRow[] {
  */
 export function packQtyOf(packSize: string | null): number | null {
   if (!packSize) return null;
-  const m = /(?:\(\d+\)\s*)?([\d.]+)\s*(EA|ML|GM)\b/i.exec(packSize);
+  /*
+   * A bracket means this pack was never levelled, and the answer is refused rather than guessed.
+   *
+   * McKesson, ANDA and ParMed write a multi-pack as "(5) 1 ML", and the package is five: settled by
+   * the catalogue proof on 9 September against NADAC, on 1,593 of 2,147 multi-pack rows. Every
+   * caller here is supposed to be reading `catalogueRows()`, where `wholePackage` has already
+   * turned that into "5 ML" and there is no bracket left — so a bracket arriving means the caller
+   * read the raw table, or read a row printing no pack total that levelling could not settle.
+   *
+   * This used to skip the bracket and answer with the inner pack: 1, for a package of 5. It is the
+   * wrong number and it does not look wrong, and what is done with it is division — the invoice's
+   * per-package price over this — so the cost comes out five times too high with nothing to show
+   * for it. `appeals.ts` divided by it to state what a drug cost the pharmacy, in the document that
+   * exists to state what a drug cost the pharmacy.
+   *
+   * Null is the answer every caller already handles, and handles by not comparing: this module's
+   * own rule is that where no pack size is known the comparison is not made at all, because a
+   * recommendation nobody can check is worse than no recommendation.
+   */
+  const br = /\((\d+)\)\s*[\d.]+\s*(?:EA|ML|GM)\b/i.exec(packSize);
+  /*
+   * A bracket of one is not a multi-pack and is answered normally: one carton of a hundred is a
+   * hundred, the printed unit cost is per that hundred, and there was never anything for levelling
+   * to settle. `wholePackage` leaves those rows untouched for the same reason, which is why they
+   * reach here still carrying the bracket.
+   */
+  if (br && Number(br[1]) > 1) return null;
+  const m = /([\d.]+)\s*(EA|ML|GM)\b/i.exec(packSize);
   const n = m ? Number(m[1]) : NaN;
   return Number.isFinite(n) && n > 0 ? n : null;
 }

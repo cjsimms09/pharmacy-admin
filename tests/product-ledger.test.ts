@@ -263,10 +263,21 @@ describe("a package is not a unit", () => {
     assert.ok(!rows[0].flags.includes("buying_above_nadac"));
   });
 
-  test("the order multiple in a pack size is not the pack size", () => {
-    // "(10) 100 EA" is ten packs of a hundred, not a pack of ten. Reading the bracket would
-    // divide every price by ten and make the drug look a tenth of its cost.
-    assert.equal(packQtyOf("(10) 100 EA"), 100);
+  test("a pack this cannot state is refused, not answered with the inner one", () => {
+    /*
+     * This used to assert 100, on the reading that the bracket is an order multiple and the
+     * package is the hundred. The catalogue proof settled otherwise on 9 September: for a bracketed
+     * pack the printed unit cost is the carton's cost over the inner pack alone, and the package is
+     * cartons times inner — matched against NADAC on 1,593 of 2,147 multi-pack rows.
+     *
+     * Rather than answer 1,000 here, this refuses. `wholePackage` in catalogue-cache is the one
+     * place that settles a package, and every caller of this is meant to be reading its output,
+     * where no bracket survives. A bracket arriving means the caller read the raw table — which
+     * `appeals.ts` did, dividing an invoice's per-package price by the inner pack and stating an
+     * acquisition cost five times what was paid, to a PBM.
+     */
+    assert.equal(packQtyOf("(10) 100 EA"), null);
+    assert.equal(packQtyOf("(5) 1 ML"), null);
     assert.equal(packQtyOf("30 EA"), 30);
     assert.equal(packQtyOf("2.5 ML"), 2.5);
     assert.equal(packQtyOf(null), null);
