@@ -90,6 +90,16 @@ Keep these in view; do not rediscover them.
   understates on purpose. A full will-call bin is not a bad month and the account says which it is.
 - **Two invoice formats are unread**: the IPC credit memo (bracketed negatives) and ParMed (columns
   run together without spaces). Both real, neither a scan.
+- **A copay-card processor is a payer.** The owner, correcting the plan-classification work:
+  "Technically cnrx is a payor!! They will reimburse us for that remit amount." He is right and the
+  distinction has to be kept in two halves. DST Pharmacy Solutions (SS&C Health), BIN 019158/CNRX,
+  is his **second largest receivable for September at $29,218.82** — more than CVS Caremark — and on
+  26 of its 28 claims it is the *only* payer on the fill, not a secondary. It remits, so it belongs
+  in what payers owe. What it is not is a health *plan*: no benefit design, not ERISA-governed, out
+  of the Kansas floor's reach. Classify it as a payer of manufacturer-assistance type; never drop it
+  from the owed list. The DST/Argus GLP-1 bridge ($7,722.06) is the same family. Nothing has ever
+  been received from either — $0.00 of copay-card money all time.
+
 - **Nothing calls the model without a person pressing something** — `src/lib/ai-gate.ts`, default
   deny. Do not route around it. If an automatic reader needs the model, that is a design problem to
   raise with him, not a gate to loosen.
