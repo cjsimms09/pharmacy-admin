@@ -52,6 +52,11 @@ Work down this list. Each line names what "wrong" looks like.
 3. **Do the invoices carry their item lines?** An invoice with a total and no lines contributes
    nothing to what any drug cost. If lines are read but refused, they did not reconcile — find the
    difference, it is usually one line the pattern missed, not a scan.
+4. **Did every invoice arrive?** Supplier invoices → "Delivered, and no invoice for it". PioneerRx
+   books in every delivery at the counter, so it is the only independent count of what the pharmacy
+   was billed — every other figure on that page is read off the invoices and cannot tell an invoice
+   that never came from one that does not exist. Chase only what is listed; see the backlog note
+   below.
 4. **Does the money hold?** Draw the books both ways (`scripts/support/books.ts 2026-09`). Both bases
    must balance to $0.00. Check the double-count register. Check no invoice number is on file twice.
 5. **Is what the site says true?** Open the pages he actually opens — the home page, Money, the
@@ -76,6 +81,17 @@ Every fault found so far has been one of six shapes. Look for the shape, not the
   per-package into per-unit. A silent factor of 25 lives here.
 - **A date deciding a period.** Filled, sold, paid, deposited, invoiced, posted. Mixing two inside
   one figure is invisible and wrong.
+
+## Decisions he has made, so nobody reopens them
+
+- **The pre-September backlog is not chased.** 59 PioneerRx deliveries worth about $149,500 have no
+  invoice because they predate the mailbox catching any. He was explicit: *"We are going to ignore
+  those alerts for invoices from beginning of this month.. that was just to get them in from before
+  this site was setup."* The money is counted; the documents are not being collected. The site keeps
+  them off the list and says so in one line at the foot. Do not turn this back into a finding.
+- **A supplier can be settled.** *"there are a couple suppliers where I'd rather just use the pioneers
+  invoice as the invoice (ie Xymogen)."* The switch is on the supplier card and on the line itself. It
+  changes no arithmetic — only whether he is asked to go and get a document that is not coming.
 
 ## What is knowingly still open
 
