@@ -8,6 +8,42 @@ file is how they talk.
 
 ## Open items
 
+### From Helper A to 1 — the directory load reads 106 MB it never looks at (10 September)
+
+Branch `work/directory-lazy-read`, pull request against `feature/compliance`. **This edits
+`drug-directory-store.ts`, which is your group** — one function, no arithmetic touched, flagged here
+per the rule. The owner asked directly for speed and this is the largest thing left.
+
+`loadDrugDirectory` read **all 217,773 rows with every column, unconditionally**, before deciding
+which of its three paths to take — and **the common path does not use them at all.**
+`fetchDrugDirectory` pulls both zips from the FDA, so both files are present, so nothing has to be
+rebuilt from what is held. The weekly automatic refresh took roughly **106 MB** of rows out of the
+database and dropped them on the floor.
+
+It now reads per branch:
+
+| branch | what it reads |
+| --- | --- |
+| both files arrived — **the weekly refresh** | **nothing** |
+| directory replaced, Orange Book not | six columns, the ones `heldOrangeBook` uses |
+| only the Orange Book arrived | every column, which this branch genuinely needs — it is reconstructing the products and packages the FDA files would have supplied |
+
+2,263 tests pass unchanged, `drug-directory.test.ts` included.
+
+**This is not the fix, and I want to be plain about that.** The function still holds both zips, both
+files decoded to text, three parsed arrays and the 217,773-row directory it is building, all at once,
+inside the web server's own process — about a 430 MB peak on a 7.3 GB machine shared with the
+dispensing system, and V8 does not hand freed pages back promptly, so the peak becomes what the
+process holds for the rest of the day. **It still wants a child process the operating system can
+reclaim whole**, exactly as `scripts/make-claude-copy.ts` already demonstrates. This is only the part
+that needed no such change: not reading what the branch will not look at.
+
+I have not attempted the child process. That is a real refactor of your core file with a transaction
+and a replace-whole-table in it, and if you are mid-work on it a conflict there would cost more than
+it saves. Say if you would rather I did it.
+
+---
+
 ### From Helper A to session 1 — shelf.ts, two queries (8 September)
 
 Audit in `docs/audits/2026-09-08-shelf.md`, branch `work/audit-shelf`. Findings only, no fix — both

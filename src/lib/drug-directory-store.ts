@@ -60,14 +60,45 @@ export async function loadDrugDirectory(files: { ndcDirectoryZip?: Buffer; orang
    * Whichever file did not arrive this time is rebuilt from what is held, so a refresh of one
    * file alone never blanks the other's contribution. The Orange Book is rebuilt from the held
    * rows' codes only where the directory itself is not being replaced.
+   *
+   * ── Read only where a branch actually needs it, and only the columns that branch uses ──
+   *
+   * This read all 217,773 rows with every column, unconditionally, before deciding which of three
+   * paths to take — and **the common path does not use them at all**. `fetchDrugDirectory` pulls
+   * both zips from the FDA, so both files are present, so nothing has to be rebuilt from what is
+   * held; the weekly automatic refresh took about 106 MB of rows out of the database and dropped
+   * them on the floor.
+   *
+   * That matters here more than almost anywhere else in the site. This function already holds the
+   * two zips, both files decoded to text, three parsed arrays and the 217,773-row directory it is
+   * building, all at once, inside the web server's own process — roughly a 430 MB peak, on a 7.3 GB
+   * machine shared with the dispensing system, and V8 does not hand freed pages back promptly, so
+   * the peak becomes what the process is holding for the rest of the day. See
+   * `docs/audits/2026-09-08-memory.md`.
+   *
+   * The right answer is still to run this in a child process the operating system can reclaim
+   * whole. This is the part of it that needs no such change: not reading what the branch will not
+   * look at.
    */
-  const held = await db.query.drugDirectory.findMany();
-  const rows: DrugDirectoryRow[] =
-    products && packages
-      ? buildDirectory(products, packages, orangeBook ?? heldOrangeBook(held))
-      : orangeBook
-        ? buildDirectory(heldProducts(held), heldPackages(held), orangeBook)
-        : [];
+  let rows: DrugDirectoryRow[] = [];
+  if (products && packages && orangeBook) {
+    // Every file arrived. Nothing is rebuilt, so nothing held is read.
+    rows = buildDirectory(products, packages, orangeBook);
+  } else if (products && packages) {
+    // The directory is being replaced and the Orange Book is not: six columns rebuild its codes.
+    const held = await db.query.drugDirectory.findMany({
+      columns: { application: true, teCode: true, strength: true, substances: true, brandName: true, labeler: true },
+    });
+    rows = buildDirectory(products, packages, heldOrangeBook(held));
+  } else if (orangeBook) {
+    /*
+     * Only the Orange Book arrived, so the directory itself is rebuilt from the held rows — and
+     * this is the one branch that genuinely wants every column, because it is reconstructing the
+     * products and packages the FDA files would have supplied.
+     */
+    const held = await db.query.drugDirectory.findMany();
+    rows = buildDirectory(heldProducts(held), heldPackages(held), orangeBook);
+  }
   if (rows.length === 0) return { ok: false, why: "The files joined to nothing: no package matched a product." };
 
   await db.transaction(async (tx) => {
@@ -97,7 +128,9 @@ function heldProducts(held: (typeof schema.drugDirectory.$inferSelect)[]) {
 function heldPackages(held: (typeof schema.drugDirectory.$inferSelect)[]) {
   return held.map((r) => ({ ndc11: r.ndc11, productNdc: r.productNdc, packageDescription: r.packageDescription, marketedFrom: null, marketedTo: r.marketedTo, sample: false }));
 }
-function heldOrangeBook(held: (typeof schema.drugDirectory.$inferSelect)[]) {
+type HeldForOrangeBook = Pick<typeof schema.drugDirectory.$inferSelect, "application" | "teCode" | "strength" | "substances" | "brandName" | "labeler">;
+
+function heldOrangeBook(held: HeldForOrangeBook[]) {
   // The held code, re-expressed as one Orange Book product per application so the join finds it again.
   const out: ReturnType<typeof parseOrangeBook> = [];
   const seen = new Set<string>();
