@@ -529,10 +529,17 @@ async function loadMoneyFound(): Promise<MoneyFound> {
           `${money(m.monthToDateCents)} has come in from the Medicare Transaction Facilitator this month` +
           (m.allTimeCents !== m.monthToDateCents ? `, ${money(m.allTimeCents)} since it started` : "") +
           ". It is already counted against the fills it paid.",
+        /*
+         * "Load the days they belong to" was an instruction that could not be carried out: those
+         * prescriptions were dispensed before the daily feed begins, some of them in January, and
+         * no day exists to load. A job nobody can do is worse on a list than no job at all.
+         */
         todo:
           m.unmatched > 0
             ? `${m.unmatched} of those payments name a prescription this site has not loaded, so ${money(m.unmatchedCents)} is not yet against a claim. Load the days they belong to.`
-            : "Nothing to do — it is collected and posted. Shown here so a channel that is working is not mistaken for one that is silent.",
+            : m.beforeTheFeed > 0
+              ? `Nothing to do. ${m.beforeTheFeed} of these were dispensed before the claims feed began, so they will never match a claim here — the money is collected and counted either way.`
+              : "Nothing to do — it is collected and posted. Shown here so a channel that is working is not mistaken for one that is silent.",
         href: "/remits/mtf",
       });
     }

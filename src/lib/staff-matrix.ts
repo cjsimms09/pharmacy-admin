@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { onSiteToday } from "./roster";
 import { todayIso, daysBetween } from "./dates";
-import { addMonths, TRAINING_CADENCE } from "./due";
+import { addMonths, TRAINING_CADENCE, nextTrainingDue } from "./due";
 import { TRAINING_SHORT } from "./labels";
 import { openRequests } from "./credential-requests";
 import type { CredentialType, TrainingType } from "@/db/schema";
@@ -269,7 +269,19 @@ export async function staffMatrix(): Promise<StaffMatrix> {
         };
         continue;
       }
-      const due = last.expiresOn ?? (cadence ? addMonths(last.completedOn, cadence.months) : null);
+      /*
+       * The third and fourth copies of this rule, and both had it wrong.
+       *
+       * A course completed once carries no expiry, and its cadence is `months: 0`. So this read
+       * `addMonths(completedOn, 0)` — the completion date itself — which is a truthy string, so the
+       * "does not repeat" branch immediately below never fired and the course was late from the
+       * moment it was done. One technician showed 1,084 days late for a course finished in 2023,
+       * on the dashboard, on /staff, in the gaps count and in the self-inspection — while the one
+       * screen that can actually send the training said "done".
+       *
+       * `nextTrainingDue` is the authority and says so in its own comment. There is one rule.
+       */
+      const due = nextTrainingDue(col.type, { completedOn: last.completedOn, expiresOn: last.expiresOn });
       if (!due) {
         cells[col.key] = {
           state: "ok",

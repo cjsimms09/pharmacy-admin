@@ -534,6 +534,8 @@ export type FacilitatorMoney = {
   thisMonth: { rxNumber: string; dateFilled: string | null; ndc11: string | null; itemName: string | null; amountCents: number; receivedOn: string | null; reference: string | null }[];
   /** Payments naming a prescription this site has not loaded — money real but unattached. */
   unmatchedCents: number;
+  /** Payments for prescriptions dispensed before the feed began: never matchable, so never pending. */
+  beforeTheFeed: number;
   unmatched: number;
   /** Payments with no received date, which cannot be put in a month. */
   undatedCents: number;
@@ -553,6 +555,13 @@ export async function facilitatorMoney(source = "mtf", today = new Date()): Prom
   let unmatched = 0;
   let undatedCents = 0;
 
+  /* The first day the claims feed covers. Read from the imports, which is what actually defines it. */
+  const earliest =
+    (await db.query.claimImports.findMany({ columns: { periodFrom: true } }))
+      .map((i) => i.periodFrom)
+      .filter((d): d is string => !!d)
+      .sort()[0] ?? null;
+  let beforeTheFeed = 0;
   for (const r of rows) {
     const m = monthOf(r.receivedOn);
     if (m === null) undatedCents += r.amountCents;
@@ -562,9 +571,26 @@ export async function facilitatorMoney(source = "mtf", today = new Date()): Prom
       e.amountCents += r.amountCents;
       by.set(m, e);
     }
+    /*
+     * "Not yet" is the wrong tense for a payment there was never a claim for.
+     *
+     * The owner asked for this once already — "can we have it stop alerting if looking for a claim
+     * before 09/01?? this system will never get anything before 09/01" — and it was given to
+     * `laterPaymentSummary` alone. The dashboard, the MTF page and the money list read this figure
+     * instead, so all three went on saying "24 not yet matched to a claim" while /claims correctly
+     * reported none outstanding, over the very same rows. Money found even offered an instruction
+     * for it: "Load the days they belong to." There are no such days to load.
+     *
+     * Every one of the 24 is for a prescription dispensed before the daily claims feed begins, some
+     * as far back as January. They are counted apart, and the money is still shown.
+     */
     if (!r.claimId) {
-      unmatched++;
-      unmatchedCents += r.amountCents;
+      const older = earliest !== null && r.dateFilled !== null && r.dateFilled < earliest;
+      if (older) beforeTheFeed++;
+      else {
+        unmatched++;
+        unmatchedCents += r.amountCents;
+      }
     }
   }
 
@@ -578,6 +604,8 @@ export async function facilitatorMoney(source = "mtf", today = new Date()): Prom
     lastMonthCents: by.get(lastMonth)?.amountCents ?? 0,
     allTimeCents: rows.reduce((n, r) => n + r.amountCents, 0),
     allTimePayments: rows.length,
+    /** Payments for prescriptions dispensed before the feed began. Never matchable, so never pending. */
+    beforeTheFeed,
     months,
     thisMonth: rows
       .filter((r) => monthOf(r.receivedOn) === thisMonth)

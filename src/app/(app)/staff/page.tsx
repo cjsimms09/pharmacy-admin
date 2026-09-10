@@ -8,7 +8,7 @@ import { PageHeader, Empty, StatusBadge, Notice } from "@/components/ui";
 import { endEmploymentAction, reinstateAction } from "./actions";
 import { todayIso } from "@/lib/dates";
 import { trainingsFor } from "@/lib/onboarding";
-import { TRAINING_CADENCE, addMonths } from "@/lib/due";
+import { TRAINING_CADENCE, addMonths, nextTrainingDue } from "@/lib/due";
 
 export const metadata = { title: "Staff & licenses" };
 
@@ -75,8 +75,8 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
                     .filter((t) => t.type === type)
                     .sort((a, b) => b.completedOn.localeCompare(a.completedOn))[0];
                   if (!last) return false;
-                  const cadence = TRAINING_CADENCE[type];
-                  const expires = last.expiresOn ?? (cadence ? addMonths(last.completedOn, cadence.months) : null);
+                  /* One rule, in `due.ts`. A course that never repeats is covered for good. */
+                  const expires = nextTrainingDue(type, { completedOn: last.completedOn, expiresOn: last.expiresOn });
                   return !expires || expires >= today;
                 });
                 const manual = mine

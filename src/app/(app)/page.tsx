@@ -462,7 +462,12 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                   ? `${money.facilitator.payments} payment${money.facilitator.payments === 1 ? "" : "s"} this month`
                   : "nothing received this month",
                 money.facilitator.lastMonthCents > 0 ? `${formatCents(money.facilitator.lastMonthCents)} last month` : null,
-                money.facilitator.unmatched > 0 ? `${money.facilitator.unmatched} not yet matched to a claim` : null,
+                /* Only what can still be matched. The rest predate the feed and never will be. */
+                money.facilitator.unmatched > 0
+                  ? `${money.facilitator.unmatched} not yet matched to a claim`
+                  : money.facilitator.beforeTheFeed > 0
+                    ? `all matched, bar ${money.facilitator.beforeTheFeed} filled before this feed began`
+                    : null,
               ]
                 .filter(Boolean)
                 .join(" · ")

@@ -110,6 +110,8 @@ export type MoneyPosition = {
     lastMonthCents: number;
     /** Payments that name a prescription this site has not loaded — they attach when it arrives. */
     unmatched: number;
+    /** Payments filled before the claims feed began: never matchable, so never pending. */
+    beforeTheFeed: number;
   };
   /**
    * Revenue the daily report booked that this site has not found in the claim rows.
@@ -306,6 +308,7 @@ async function loadMoneyPosition(today: Date): Promise<MoneyPosition> {
       payments: mtf.monthToDatePayments,
       lastMonthCents: mtf.lastMonthCents,
       unmatched: mtf.unmatched,
+      beforeTheFeed: mtf.beforeTheFeed,
     },
     unreconciled: { cents: gaps.reduce((n, f) => n + (f.unreconciledCents ?? 0), 0), fills: gaps.length },
   };

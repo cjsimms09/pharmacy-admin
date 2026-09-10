@@ -157,10 +157,21 @@ export default async function MtfPage({ searchParams }: { searchParams: Promise<
           <Money value={money.monthToDateCents} label="This month so far" sub={`${money.monthToDatePayments} payment${money.monthToDatePayments === 1 ? "" : "s"}`} strong />
           <Money value={money.lastMonthCents} label="Last month" sub="The whole of it" />
           <Money value={money.allTimeCents} label="Since this started" sub={`${money.allTimePayments} payment${money.allTimePayments === 1 ? "" : "s"}`} />
+          {/*
+            Amber only for what can still be matched. A payment for a prescription dispensed before
+            the feed began is not pending; it is simply older than the record, and colouring it as a
+            job made a tile that could never go quiet.
+          */}
           <Money
             value={money.unmatchedCents}
             label="Not yet on a claim"
-            sub={money.unmatched ? `${money.unmatched} name a prescription not loaded` : "All of it is matched"}
+            sub={
+              money.unmatched
+                ? `${money.unmatched} name a prescription not loaded`
+                : money.beforeTheFeed > 0
+                  ? `${money.beforeTheFeed} were filled before this feed began`
+                  : "All of it is matched"
+            }
             warn={money.unmatched > 0}
           />
         </div>
