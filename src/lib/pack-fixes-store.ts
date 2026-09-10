@@ -130,6 +130,8 @@ export async function applyFdaCorrections(user: { name: string }): Promise<{
   corrected: number;
   alreadyRight: number;
   needsPerson: number;
+  /** NDCs the FDA file has no package row for, so nothing can be compared. A different job entirely. */
+  noDescription: number;
   settledByPerson: number;
   examples: string[];
 }> {
@@ -138,6 +140,7 @@ export async function applyFdaCorrections(user: { name: string }): Promise<{
   let alreadyRight = 0;
   let needsPerson = 0;
   let settledByPerson = 0;
+  let noDescription = 0;
   const examples: string[] = [];
   const now = new Date().toISOString();
 
@@ -167,7 +170,20 @@ export async function applyFdaCorrections(user: { name: string }): Promise<{
   }
   for (const [ndc11, rows] of byNdc) {
     const description = packageOf.get(ndc11);
-    if (!description) continue;
+    /*
+     * No FDA package description, so there is nothing to compare against — and this said nothing about
+     * it. The health row counted 12,328 NDCs as "need a person" while this button could reach about
+     * 2,369 of them; the other 10,287 were skipped here, silently, and the run reported success
+     * without mentioning them. Somebody pressing it would watch the number barely move and have no
+     * way to know why.
+     *
+     * They are a real group with a real cause — the FDA file has no package row for that NDC — and a
+     * different remedy from a package the reader could not parse. Counted and named as their own line.
+     */
+    if (!description) {
+      noDescription++;
+      continue;
+    }
     const existing = fixes.get(ndc11);
 
     if (existing && isFromPerson(existing.correctedBy)) {
@@ -250,7 +266,7 @@ export async function applyFdaCorrections(user: { name: string }): Promise<{
   }
 
   void user;
-  return { corrected, alreadyRight, needsPerson, settledByPerson, examples };
+  return { corrected, alreadyRight, needsPerson, noDescription, settledByPerson, examples };
 }
 
 /**

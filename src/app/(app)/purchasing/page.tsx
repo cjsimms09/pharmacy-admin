@@ -268,7 +268,18 @@ export default async function WhatToBuyPage({ searchParams }: { searchParams: Pr
 
       <Card
         title={`Before you send ${primaryName}'s order`}
-        count={topAlerts.length ? `${topAlerts.length} thing${topAlerts.length === 1 ? "" : "s"} it would get wrong` : undefined}
+        /*
+          The worst eight of however many there are, and it said so as though it were all of them.
+          `topAlerts` is `alerts.slice(0, 8)` after sorting by dollars a month, and around eighty-five
+          clear the gate. "8 things it would get wrong" is a count of a whole; this is a shortlist.
+        */
+        count={
+          alerts.length === 0
+            ? undefined
+            : alerts.length > topAlerts.length
+              ? `the worst ${topAlerts.length} of ${alerts.length} it would get wrong`
+              : `${alerts.length} thing${alerts.length === 1 ? "" : "s"} it would get wrong`
+        }
         tone={topAlerts.length ? "warn" : undefined}
         className="mb-4"
       >

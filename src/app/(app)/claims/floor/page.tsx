@@ -74,7 +74,14 @@ export default async function FloorPage() {
             className="mb-6"
           >
             {r.blockers.length === 0 ? (
-              <p className="text-sm text-ink-2">Nothing. Every claim on file has been decided one way or the other.</p>
+              /*
+                Every *paid* claim. `floorReview` reads `status = "paid"` and skips rows with no NDC,
+                which is 1,932 of the 2,523 on file. Reversed claims arguably should not be
+                floor-tested at all — the sentence simply should not have said "every claim on file".
+              */
+              <p className="text-sm text-ink-2">
+                Nothing. Every paid claim with an NDC on it has been decided one way or the other.
+              </p>
             ) : (
               <ul className="rows">
                 {r.blockers.map((b) => (

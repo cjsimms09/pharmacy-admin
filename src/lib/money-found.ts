@@ -485,7 +485,19 @@ async function loadMoneyFound(): Promise<MoneyFound> {
       rows.push({
         key: "payer-spread",
         says: `${money(worthMonthly)} a month is the gap between what your best and worst plans pay for the same drugs.`,
-        todo: `${top.name ?? top.ndc11}: ${top.bestPayer!.name} pays ${money(top.spreadPerFillCents!)} more per fill than ${top.worstPayer!.name}. That difference is what a MAC appeal points at.`,
+        /*
+         * An appeal lies against a plan, and the site cannot yet say which of these is one.
+         *
+         * Subsidies are excluded from this ranking — a manufacturer copay card pays a patient share,
+         * not a plan benefit — but the exclusion reads `plan_groups.classification`, and all but nine
+         * of the four hundred and seventy-three are still "unknown". So the filter is correct and
+         * cannot act: the top of this list is currently two copay-card processors of the same company,
+         * and an appeal against either points at nothing.
+         *
+         * Until the plans are classified the difference is still worth knowing and still worth acting
+         * on — it is the instruction to write an appeal that has to wait for the classification.
+         */
+        todo: `${top.name ?? top.ndc11}: ${top.bestPayer!.name} pays ${money(top.spreadPerFillCents!)} more per fill than ${top.worstPayer!.name}. An appeal only lies against a plan, so check both are plans rather than manufacturer cards before writing one — most plans here are still unclassified.`,
         amountCents: worthMonthly,
         cadence: "recurring_monthly",
         confidence: "worth checking",

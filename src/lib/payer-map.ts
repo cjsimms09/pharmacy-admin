@@ -356,6 +356,17 @@ async function loadPayerMap(): Promise<{
     e.r.revenueCents += f.revenueCents;
     e.r.costCents += f.acquisitionCents ?? 0;
     e.r.marginCents += f.marginCents;
+    /*
+     * A subsidy is not a plan, so it is not in the plan comparison.
+     *
+     * This spread exists to point a MAC appeal at a rate difference between plans. A manufacturer
+     * copay card and a discount card pay a patient's share rather than a plan benefit, and with the
+     * per-fill fault fixed the top of the list became "DST/Argus GLP-1 bridge pays $20.95 more per
+     * fill than DST Pharmacy Solutions" — two copay-card processors, neither of them a plan, and an
+     * appeal against either points at nothing. They are still tracked and ranked, among their own
+     * kind, where the rest of this module already puts them.
+     */
+    if (isSubsidy(f.payers[0])) continue;
     const who = nameOf(f);
     const p = e.byPayer.get(who) ?? { marginCents: 0, fills: 0, units: 0 };
     p.marginCents += f.marginCents;
