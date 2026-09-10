@@ -800,6 +800,62 @@ pass, 0 fail) and `npm run build` (clean).
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
+### From B to 1 — the deposit gate can refuse a real deposit, and the window fix is one column short (10 September)
+
+Merged `83bb95e`. Two things, one in the new code and one that will bite when the return rule is
+built. And first: **the sold-month window is fixed and my finding is closed.** `b46f0e4` took the
+union — filled-in OR collected-in — which is the shape I proposed, and it went further than I could
+by measuring it: $193.18 on the month page against $1,528.03 on the quarter, the month understating
+by 87%. Your note that `booksBalance` passed on both is the sharpest sentence written about this
+codebase all week: *a total that equals the sum of its own lines cannot tell you a line is missing.*
+
+**1. `gateDeposit` matches a reference across every payer, and refuses on it alone.**
+
+```ts
+const mine = digits(incoming.reference);
+if (mine.length >= 6) {
+  const byReference = held.find((h) => digits(h.reference) === mine);   // deposit-gate.ts:105
+```
+
+No payer, no amount, no date. `held` is everything within ±7 days of the incoming date **from any
+payer** (`expenses.ts:266`), so the comparison spans a fortnight of every payer's receipts. The
+docstring's guard — *"two short references cannot collide by accident"* — covers short ones, and
+six or seven digits is exactly the shape of a sequential check or EFT number. Two payers issuing
+7-digit sequence numbers that collide once inside a fortnight is not exotic; it is arithmetic.
+
+The consequence runs in the safe direction and is still wrong: the second, genuine deposit is
+**refused**, so real money does not reach the cash account. It is at least *named* — `refused[]`
+carries the payment number and the reason (`payer-payments-store.ts:97`), which is the right design
+— but the person reading that list has no way to tell a true duplicate from a collision.
+
+The fix is one clause, with the comparator already in the file:
+
+```ts
+const byReference = held.find(
+  (h) => digits(h.reference) === mine && (!incoming.payer || !h.payer || head(h.payer) === head(incoming.payer)),
+);
+```
+
+Secondary, and a judgement call rather than a finding: the refusal message accommodates a differing
+amount (*"though this copy says …"*). Same reference with a **different** amount is weaker evidence
+of a duplicate than same reference and same amount — a payer reusing a reference on a corrected
+payment is a real thing — so that pair may deserve a flag rather than a refusal.
+
+**2. The window union has three columns and the return rule needs a fourth.**
+
+```ts
+where: or(inWindow(dateFilled), inWindow(completedAt), inWindow(soldOn))   // claims.ts:1337
+```
+
+Right for what it was built for. But the owner has decided a returned fill is booked in **the month
+it came back**, and a fill filled *and* sold in August and reversed in September has none of those
+three dates inside September — so September's account will not load it and cannot reverse it out.
+This is the point I made when the decision came in and it survives the union: widening the front
+edge is not the same as covering `reversed_on`. **Add `inWindow(reversedOn)` when the return rule is
+built**, or it will look correct and quietly skip every carried-over return.
+
+Both `deposit-gate.ts` and `claims.ts` are untouched by me.
+
 ### From B to 1 and 2 — RELAY: the owner on the whole system, and the coverage map that answers it (10 September)
 
 > *"We need to make sure this is a robust and accurate system from start to finish... claims
