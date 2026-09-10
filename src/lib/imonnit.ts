@@ -424,6 +424,8 @@ export type MonthSummary = {
   rangeMax: number;
   /** True when every excursion in the month has a note against it. */
   allExplained: boolean;
+  /** Excursions with no note against them — what the badge should count. */
+  unexplainedCount: number;
   reviewed: boolean;
 };
 
@@ -473,6 +475,8 @@ export async function monthSummary(sensorId: string, periodKey: string): Promise
     rangeMin: sensor.minTenthsF,
     rangeMax: sensor.maxTenthsF,
     allExplained: excursions.every((e) => noted.has(e.id)),
+    /** How many of them nobody has written a note against. The list below shows these. */
+    unexplainedCount: excursions.filter((e) => !noted.has(e.id)).length,
     reviewed: notes.some((n) => n.reviewed && !n.readingId),
   };
 }
@@ -641,7 +645,15 @@ export async function monthsAwaitingSignOff(
         sensorName: sensor.name,
         periodKey: p,
         readings: m.readings,
-        unexplained: m.allExplained ? 0 : m.excursions,
+        /*
+         * The unexplained ones, not every one.
+         *
+         * This reported the month's whole excursion count the moment a single one lacked a note, so
+         * a badge reading "N to explain first" could say eight when seven were already explained,
+         * beside a list showing the one. Eight excursions are on file today and all are explained,
+         * so it reads nought and the fault is invisible — until the next one arrives.
+         */
+        unexplained: m.unexplainedCount,
       });
     }
   }

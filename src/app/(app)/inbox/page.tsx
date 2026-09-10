@@ -90,10 +90,25 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
    * Everything else is done and folds away behind a count — kept, because "what happened to that
    * file" is a real question, but not competing with the work.
    */
+  /*
+   * What needs him, and what the re-sort can actually touch, are two different questions.
+   *
+   * This list drives both the count beside "Sort N again" and the rows shown. `resortInbox` only
+   * takes arrivals that are stored with a document and unrouted — it cannot touch a rejected or a
+   * held one. So the button could offer to sort three and report that none of them sorted
+   * themselves, which is the fault that had him pressing "read with current rules" for days on the
+   * invoice page.
+   *
+   * Both are true and both are worth showing; they are simply not the same number, and the button
+   * must promise only what it can do.
+   */
   const needsAttention = (i: (typeof items)[number]) => {
     const o = storyOf(i).outcome;
     return o === "not_recognised" || o === "rejected" || o === "held";
   };
+  /** The ones a re-sort would actually re-decide — the same rule `resortInbox` uses. */
+  const resortable = (i: (typeof items)[number]) =>
+    i.status === "stored" && !!i.documentId && (!i.routedAs || i.routedAs === "unrecognised");
   const needsYou = items.filter(needsAttention);
   const done = items.filter((i) => !needsAttention(i));
   const showDone = showDoneParam === "yes";

@@ -130,7 +130,17 @@ body { @apply bg-ground text-ink antialiased; font-size: 0.9375rem; line-height:
   .kpi-crit::before { background: var(--color-crit); }
   .kpi-ok::before { background: var(--color-accent); }
   .kpi-crit .kpi-value { @apply text-crit; }
-  .kpi-warn .kpi-value { @apply text-warn; }
+  /*
+    Amber marks the tile, not the number.
+
+    A warn tile means the reading is qualified — the account has lines not yet in, a feed is stale —
+    and painting the figure itself amber made a perfectly good profit of $2,180.29 read as a bad
+    number. Three different meanings were arriving in one colour: money at risk, a decision waiting,
+    and a caveat on the arithmetic.
+
+    The bar down the left carries the state, the sub-line says what the caveat is, and the number stays
+    legible. Crit still colours the value, because there it is the number that is bad.
+  */
   a.kpi { @apply transition-shadow; }
   a.kpi:hover { box-shadow: var(--shadow-lift); }
 
