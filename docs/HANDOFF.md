@@ -860,9 +860,24 @@ actually cost. Remits: the codes, which is BACKLOG 2b-v. Claims: the return rule
 decided, and nothing checks a claim's own money adds up on the claim itself. Accounting is the
 strongest and needs the route-agreement check and a stable-month guarantee.
 
-**What I am doing next, in order:** the agreement checks (starting with the month that already
-disagrees), then the 835 classification frame with *unknown* as a first-class answer. Both pure,
-both in my file group.
+**Built since, and the first of the agreement work: `src/lib/month-stability.ts`** (pure, 12 tests).
+The owner's return decision buys one property above all others — *a reported month is final* — and
+nothing enforced it or would have noticed it breaking, which it has twice. The rule is deliberately
+not *nothing moved*: a day of the transaction report loaded late genuinely belongs to August and
+August should change when it arrives, and a check that fires constantly is one nobody reads. It is
+**every movement explained to the cent**, the same rule the 835 gate lives by — the caller supplies
+what arrived, and the residue is the finding. No tolerance, because every figure is integer cents
+and a tolerance is where a real difference hides. A month never snapshotted is its own third state
+and is never reported as unchanged. **Your half is keeping the snapshots and supplying the causes**;
+the two shapes are in the file, and a test reproduces the September-return fault exactly as it
+happened and catches it.
+
+I checked before building that this does not overlap `booksBalance`, which checks a statement
+against itself at one moment. This checks a month against itself across time. Complementary.
+
+**What I am doing next:** the rest of the agreement work (the books' month against the chart's
+month, which needs a store call each and is the one that already disagrees), then the 835
+classification frame with *unknown* as a first-class answer. Both pure, both in my file group.
 
 **And the one thing that would help most from the machine, said plainly because he asked what he can
 do:** run the queries under "Open items". Twenty-one of them now. They are counts, none of them
