@@ -286,6 +286,16 @@ export async function register() {
           // Then the catalogue proof (2, BACKLOG 30): each wholesaler's table against the file it came from, one file in memory at a time.
           nadac.on("exit", () => {
             const cat = spawn(process.execPath, ["--max-old-space-size=500", tsx, "--tsconfig", path.join(root, "tsconfig.script.json"), path.join(root, "scripts", "prove-catalogue.ts")], { cwd: root, detached: true, stdio: "ignore", env: process.env });
+            /*
+             * Last in the chain: every supplier invoice re-read from its own file (2, BACKLOG 30).
+             * It opens one PDF at a time and there are tens of invoices rather than millions of
+             * rows, so it is the cheapest of the five — but it goes last anyway, because the rule
+             * on this machine is one reader at a time and the reason for it has not changed.
+             */
+            cat.on("exit", () => {
+              const inv = spawn(process.execPath, [tsx, "--tsconfig", path.join(root, "tsconfig.script.json"), path.join(root, "scripts", "prove-invoices.ts")], { cwd: root, detached: true, stdio: "ignore", env: process.env });
+              inv.unref();
+            });
             cat.unref();
           });
           nadac.unref();
