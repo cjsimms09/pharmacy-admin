@@ -6,7 +6,7 @@ import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { addCashReceipt, deleteCashReceipt, cashReceiptsFor } from "@/lib/expenses";
 import { readBankStatement, lastStatementLines } from "./bank";
-import { Field } from "@/components/ui";
+import { Field, Settled } from "@/components/ui";
 import { formatCents, parseCents } from "@/lib/money";
 import { todayIso } from "@/lib/dates";
 import { parsePeriod, periodOf, neighbours, type PeriodKind } from "@/lib/ledger";
@@ -516,11 +516,20 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
           branch nobody will read.
         */}
         <Card title="Counted once" subtitle="Money this pharmacy has on file in two places, which record the books believe, and what that kept out of this period.">
+          {/*
+            The checks that found nothing are one line between them.
+
+            Seven of these run every draw and each printed two paragraphs to say "one record only".
+            That is seven subsections of prose to report that nothing happened, above the one or two
+            where a decision was actually taken and money was actually kept out. The reasoning is
+            still here, a tap away, because it is what makes the figure auditable — but a question
+            with no answer to give does not get the same room as one that does.
+          */}
           {countedOnce.length === 0 ? (
             <p className="text-sm text-ink-3">Nothing recorded in this period, so there is nothing that could have been counted twice.</p>
           ) : (
             <ul className="rows">
-              {[...countedOnce].sort((a, b) => Number(b.bothPresent) - Number(a.bothPresent)).map((r) => (
+              {[...countedOnce].filter((r) => r.bothPresent).map((r) => (
                 <li key={r.what} className="row">
                   <div className="min-w-0">
                     <div className="row-title">
@@ -540,6 +549,20 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
               ))}
             </ul>
           )}
+          {countedOnce.some((r) => !r.bothPresent) && (
+            <Settled
+              className="mt-2"
+              says={`${countedOnce.filter((r) => !r.bothPresent).length} more checked, each with one record only — nothing to decide between.`}
+            >
+              <ul className="space-y-2">
+                {countedOnce.filter((r) => !r.bothPresent).map((r) => (
+                  <li key={r.what}>
+                    <b>{r.what}.</b> {r.says}
+                  </li>
+                ))}
+              </ul>
+            </Settled>
+          )}
         </Card>
 
         {/*
@@ -557,7 +580,12 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
           actions={<span className="text-xs text-ink-3">{feeds.filter((f) => f.reaches === "none").length} reach neither</span>}
         >
           <ul className="rows">
-            {[...feeds].sort((a, b) => Number(a.reaches !== "none") - Number(b.reaches !== "none") || Number(!!b.gap) - Number(!!a.gap)).map((f) => (
+            {/*
+              A feed that reaches an account is doing its job. Fourteen of them explaining that at
+              two paragraphs each buried the four that reach neither, which are the only ones that
+              cost anything.
+            */}
+            {[...feeds].filter((f) => f.reaches === "none" || f.gap).sort((a, b) => Number(!!b.gap) - Number(!!a.gap)).map((f) => (
               <li key={f.name} className="row">
                 <div className="min-w-0">
                   <div className="row-title">
@@ -572,6 +600,22 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
               </li>
             ))}
           </ul>
+          {feeds.some((f) => f.reaches !== "none" && !f.gap) && (
+            <Settled
+              className="mt-2"
+              says={`${feeds.filter((f) => f.reaches !== "none" && !f.gap).length} more feeds, each landing where it should.`}
+            >
+              <ul className="space-y-2">
+                {feeds
+                  .filter((f) => f.reaches !== "none" && !f.gap)
+                  .map((f) => (
+                    <li key={f.name}>
+                      <b>{f.name}</b> &mdash; {f.carries}, {f.reaches}. {f.how}
+                    </li>
+                  ))}
+              </ul>
+            </Settled>
+          )}
         </Card>
       </div>
 

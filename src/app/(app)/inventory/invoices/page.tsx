@@ -46,7 +46,7 @@ import { invoiceCompliance, RETENTION_YEARS } from "@/lib/invoice-compliance";
 import { setSetting } from "@/lib/settings";
 import { getSettings } from "@/lib/settings";
 import { allSuppliers, addressesOf, useReceiptAsInvoice } from "@/lib/suppliers-registry";
-import { PageHeader, Card, Figure, Notice, Empty } from "@/components/ui";
+import { PageHeader, Card, Figure, Notice, Empty, Settled } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import { INVOICE_SCHEDULES, type InvoiceSchedule } from "@/db/schema";
 
@@ -193,7 +193,23 @@ export default async function InvoicesPage({
    * seven rows at the top, and what is left is a wholesaler that owes a document, plus the ones he
    * has already settled — those stay visible so the decision can be seen and undone.
    */
-  const owedRows = owed.filter((l) => l.waiting > 0 || l.receiptIsTheInvoice);
+  /*
+   * Only the ones still waiting on a document.
+   *
+   * A supplier he has answered for kept its row here so the decision stayed visible and undoable.
+   * That was the wrong call. The row still sits under a heading that reads "Delivered, and no
+   * invoice for it" with a four-figure sum beside it, and no amount of explanatory text under it
+   * changes what a heading and a number say together:
+   *
+   * > "Jams and xymogen say delivered no invoice, I need way to select no invoice expected to make
+   * > them go away. they are now set not to expect invoices so shouldnt have this going forward"
+   *
+   * They are gone from the list, counted in one line at the foot, and the switch that put them there
+   * is on their own card on the Suppliers page — which is where somebody goes to change their mind
+   * about a supplier, not a list of things to chase.
+   */
+  const owedRows = owed.filter((l) => l.waiting > 0);
+  const settledSuppliers = owed.filter((l) => l.receiptIsTheInvoice);
   const unreceipted = await awaitingReceipt();
   const onlyUnreceipted = sp.unreceipted === "1";
   const compliance = complianceRows;
@@ -989,7 +1005,35 @@ export default async function InvoicesPage({
         complete because it is consistent with itself. PioneerRx booked the delivery in at the
         counter, which makes its purchase list the only independent record of what was billed.
       */}
-      {(owedRows.length > 0 || backlog.invoices > 0) && (
+      {/*
+        Nothing outstanding is one line. The check still ran, and still says so.
+      */}
+      {owedRows.length === 0 && (backlog.invoices > 0 || settledSuppliers.length > 0) && (
+        <Settled className="mt-4 mb-6" says="Every delivery PioneerRx recorded has an invoice on file.">
+          <p>
+            PioneerRx records every delivery booked in at the counter, so anything it holds that the invoice file
+            does not is a wholesaler that has not sent one. It is the only check here that does not read the
+            invoices to ask about the invoices.
+          </p>
+          {settledSuppliers.length > 0 && (
+            <p className="mt-2">
+              {settledSuppliers.map((l) => l.supplier).join(" and ")}{" "}
+              {settledSuppliers.length === 1 ? "is" : "are"} not counted: you have said their PioneerRx receipt is
+              the invoice. Change that on their card under{" "}
+              <Link href="/suppliers" className="underline">Suppliers</Link>.
+            </p>
+          )}
+          {backlog.invoices > 0 && (
+            <p className="mt-2">
+              {backlog.invoices} deliveries from before this started catching invoices, worth{" "}
+              <span className="tabular-nums">{money(backlog.cents)}</span>, are left off. Loading them was how the
+              money from before September got counted, and it is counted.
+            </p>
+          )}
+        </Settled>
+      )}
+
+      {owedRows.length > 0 && (
         <Card
           tone={chase.invoices > 0 ? "warn" : "ok"}
           title="Delivered, and no invoice for it"
@@ -1051,6 +1095,14 @@ export default async function InvoicesPage({
                 )}
               </li>
             ))}          </ul>
+          {settledSuppliers.length > 0 && (
+            <p className="mt-2 text-xs text-ink-3">
+              {settledSuppliers.map((l) => l.supplier).join(" and ")}{" "}
+              {settledSuppliers.length === 1 ? "is" : "are"} not on this list: you have said their PioneerRx receipt is the
+              invoice. Change that on their card under{" "}
+              <Link href="/suppliers" className="underline">Suppliers</Link>.
+            </p>
+          )}
           {backlog.invoices > 0 && (
             <p className="mt-2 text-xs text-ink-3">
               {backlog.invoices} deliveries from before this started catching invoices, worth{" "}
@@ -1319,6 +1371,19 @@ export default async function InvoicesPage({
                   <span className="text-xs text-ink-3">{i.invoiceDate ? fmt(i.invoiceDate) : "no date read"}</span>
                 </div>
                 {i.basis && <p className="mt-1 text-xs text-ink-3">{i.basis}</p>}
+                {/*
+                  What is true now, worked out now.
+
+                  The line above is a record of a decision taken on a day. This is the state of the
+                  document today, and the two can no longer disagree, because only one of them is
+                  stored.
+                */}
+                {(i.linesRead ?? 0) === 0 && (i.totalCents ?? 0) > 0 && (
+                  <p className="mt-1 text-xs text-warn">
+                    The total was read off the page and no item line under it was, so nothing on this invoice reaches
+                    the cost of any drug.
+                  </p>
+                )}
                 {i.controlledItems && <p className="mt-1 whitespace-pre-wrap text-xs text-ink-2">{i.controlledItems}</p>}
                 {canManage && (
                   <>

@@ -450,6 +450,9 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
      * is counted once. On the real file this guard never fires; it is here so that if the report
      * ever starts repeating the cost, the answer degrades to right rather than to double.
      */
+    const quantities = rows.map((r) => r.quantityThousandths).filter((x): x is number => x !== null && x !== undefined);
+    const quantityThousandths = quantities.length ? Math.max(...quantities) : null;
+
     const costs = rows.map((r) => r.acquisitionCents).filter((x): x is number => x !== null && x !== undefined && x !== 0);
     const duplicated = costs.length > 1 && costs.every((c) => c === costs[0]);
     /*
@@ -469,10 +472,46 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
      * null. And `fillsAtALoss` lists fills by a negative margin, which a fill with no cost can
      * never have, so the below-cost report was blind to precisely the fills whose cost nobody knew.
      */
+    /*
+     * Nothing dispensed costs nothing, and that is a measurement rather than a gap.
+     *
+     * A leg that shipped no units is not a bottle whose cost nobody recorded — it is a payment
+     * attached to a prescription, and the commonest one is a manufacturer copay card. QULIPTA
+     * 60MG carries exactly this shape: the drug went out on the commercial plan at $1,127.88, and
+     * a second leg on BIN 019158 brought $35.00 with a quantity of nought. There is no second
+     * bottle, so there is no second cost, and calling it "a dispensing whose cost cannot be
+     * checked" made a tile on the owner's screen that he could neither act on nor dismiss:
+     *
+     * > "still seeing the books balance — 260 dispensings agree to the cent, 1 has no cost to
+     * > check still see this!!!"
+     *
+     * He was right to keep asking. Both sides agree about that leg and always did: PioneerRx puts
+     * $35.00 of gross profit on it, this site now puts $35.00 of margin on it, and the reason they
+     * agreed to the cent was that neither of them thinks a bottle was involved.
+     *
+     * The distinction that matters, and the one the $5,071.34 bug turned on: a fill that shipped
+     * units and printed no cost is unknown and stays null. Only a fill that shipped none is zero.
+     */
+    /*
+     * REVERTED, and the reason is worth keeping.
+     *
+     * This briefly read: a leg that dispensed no units costs nothing, because the QULIPTA copay-card
+     * leg is a payment rather than a bottle. That is true of QULIPTA and false of everything else it
+     * caught. PioneerRx also reports quantity nought with no cost on legs that plainly did dispense —
+     * a Zepbound at $491.67, two Adzenys at $1,171.91 and $597.20, one of them with a reversed
+     * sibling leg carrying $984.00 of cost, so the bottle certainly went out the door.
+     *
+     * Calling those free put $2,295.78 of invented gross profit into September and emptied the
+     * caveat that had been holding five unpriced prescriptions out of the account. It is the
+     * $5,071.34 phantom-profit bug again, wearing a quantity of nought instead of a cost of nought,
+     * and it lasted one morning because the audit measured the figure instead of trusting the fix.
+     *
+     * A cost nobody recorded is unknown whatever the quantity says. The tile that prompted the change
+     * is answered where it belongs — in what counts as a dispensing — not by inventing a cost.
+     */
     const acquisitionCents = costs.length > 0 ? (duplicated ? costs[0] : costs.reduce((n, c) => n + c, 0)) : null;
     // Quantity likewise sits on the dispensing row; the coordination rows print zero.
-    const quantities = rows.map((r) => r.quantityThousandths).filter((x): x is number => x !== null && x !== undefined);
-    const quantityThousandths = quantities.length ? Math.max(...quantities) : null;
+
 
     /*
      * What arrived after the day, matched on the fill rather than on the claim row.

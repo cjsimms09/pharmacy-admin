@@ -50,6 +50,18 @@ export default async function ClaimsPage({
     getSettings(),
     hasMailPassword(),
   ]);
+  /*
+   * The fills that sentence below is about, counted and totalled from the same list.
+   *
+   * The count was filtered to the fills showing a loss and the money was not — it was every awaiting
+   * fill's outstanding, profitable ones included. Two halves of one sentence describing two
+   * different populations. On the single day the page shows, both awaiting fills happen to be losses,
+   * so the two figures agree by luck and the fault is invisible; across September it is nine fills
+   * quoted with a ten-fill total.
+   */
+  const promisedLosses = flags.awaitingFacilitator.filter((f) => (f.marginCents ?? 0) < 0);
+  const promisedLossCents = promisedLosses.reduce((n, f) => n + (f.facilitatorOutstandingCents ?? 0), 0);
+
   /* From the fills already grouped, rather than reading every claim and grouping them a second time. */
   const byPayer = await claimsByPayer({ fills: flags.fills, networks: flags.networks });
 
@@ -433,7 +445,12 @@ export default async function ClaimsPage({
                 key: "later",
                 tone: "ok" as const,
                 amount: formatCents(laterMoney.reduce((n, x) => n + x.amountCents, 0)),
-                title: `has reached these claims since they were transmitted${laterMoney.some((x) => x.unmatched > 0) ? ` — ${laterMoney.reduce((n, x) => n + x.unmatched, 0)} not yet matched to a claim` : ""}`,
+                                /*
+                  Only what can still be matched. A payment against a prescription filled before the
+                  claims feed began has nothing to match to and never will, so counting it as
+                  pending made a number that could only go up.
+                */
+                title: `has reached these claims since they were transmitted${laterMoney.some((x) => x.unmatched > 0) ? ` — ${laterMoney.reduce((n, x) => n + x.unmatched, 0)} not yet matched to a claim` : laterMoney.some((x) => x.beforeTheFeed > 0) ? ` — every one matched, bar ${laterMoney.reduce((n, x) => n + x.beforeTheFeed, 0)} for prescriptions filled before this feed began` : ""}`,
                 why: `From ${laterMoney.map((x) => `${x.payments} ${x.source.toUpperCase()}`).join(", ")}. Added to the fill it belongs to and kept apart from what the plan itself paid. Anything naming a prescription this site has not loaded attaches itself when it arrives.`,
               }
             : null,
@@ -754,7 +771,19 @@ export default async function ClaimsPage({
             is a charge nobody raised. Reading it as a bad rate sends somebody to argue with a payer
             about money that was never claimed from one.
           */}
-          {flags.onAccount.count > 0 && (
+          {/*
+            Shown only when it is a question.
+            
+            The owner: "you still havent fixed any of these.. including on account??" The rows had
+            been corrected to say what each fill actually did — both were paid, both made money, and
+            nothing was owed — and he was still looking at a section headed "On account" with two
+            four-figure costs under it. A heading that names a problem is read as a problem however
+            carefully the small print underneath explains that there is not one.
+            
+            So when nothing is owed and nothing went out unbilled, there is nothing here. What the
+            fills were is on the dispensing itself for anyone who goes looking.
+          */}
+          {flags.onAccount.count > 0 && (flags.onAccount.receivableCents > 0 || flags.onAccount.unbilled.length > 0) && (
             <>
               <h2 id="on-account" className="mt-8 text-sm font-semibold">On account</h2>
               <p className="mt-1 text-xs text-ink-2">
@@ -888,9 +917,18 @@ export default async function ClaimsPage({
           {flags.awaitingFacilitator.length > 0 && (
             <p className="mt-2 rounded-lg border border-warn/40 bg-warn/5 p-3 text-xs">
               <b>
-                {flags.awaitingFacilitator.filter((f) => (f.marginCents ?? 0) < 0).length} of these are waiting on a
-                facilitator payment the plan already promised — {formatCents(flags.awaitingFacilitatorCents)} between
-                them.
+                {/*
+                  And it carries its scope. The page shows one day — the last dispensed — and says so
+                  higher up, but this sentence did not, so "2 ... $193.78" read as the whole feed:
+                  "im pretty sure we have more than 2 MTF claims from 09/01, whats going on here."
+                  He was right about the pharmacy and the page was right about the day; nothing on
+                  this line said which was being answered.
+                */}
+                {promisedLosses.length} of these are waiting on a facilitator payment the plan already promised —{" "}
+                {formatCents(promisedLossCents)} between them, on{" "}
+                {flags.scope.from && flags.scope.to && flags.scope.from !== flags.scope.to
+                  ? `${flags.scope.from} to ${flags.scope.to}`
+                  : (flags.scope.from ?? "the day shown")}.
               </b>{" "}
               They are marked <span className="badge badge-warn">MTF promised</span> below, with what each becomes once
               it is paid. Nothing about them is a rate to argue over, and nothing needs doing to them: the payment posts

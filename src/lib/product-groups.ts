@@ -42,6 +42,7 @@
  */
 
 import { productKey } from "./product-key";
+import { namesAnIngredient } from "./drug-directory";
 import { isARated, teGroup } from "./drug-directory";
 
 export type GroupSource = {
@@ -109,7 +110,13 @@ export function groupKey(src: GroupSource): string | null {
    * product, which is a real buying choice and a safe one. That is the case Ozempic and Wegovy fall
    * into, and Mounjaro and Zepbound, and Cymbalta and Drizalma Sprinkle.
    */
-  const fda = (src.equivalenceKey ?? "").trim();
+  /*
+   * Only a key that names an ingredient. The directory leaves substances empty on most kits, and
+   * those keys were all `||kit|` — one group holding 2,094 NDCs and 678 unrelated drugs, which is
+   * where "buy aprepitant instead of your drospirenone" came from. Falling back to the printed
+   * description tells them apart.
+   */
+  const fda = namesAnIngredient(src.equivalenceKey) ? (src.equivalenceKey ?? "").trim() : "";
   const rating = isARated(src.teCode ?? null) ? `te:${teGroup(src.teCode ?? null)}` : (src.classification ?? "").trim().toUpperCase() === "B" ? `product:${src.ndc11.slice(0, 9)}` : "generic";
   const k = fda ? `fda:${fda}|${rating}` : productKey(src.description).key;
   if (!k) return null;

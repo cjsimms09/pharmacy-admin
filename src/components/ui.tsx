@@ -67,6 +67,49 @@ export function PageHeader({
 }
 
 /**
+ * A question that has been answered: one line, with the reasoning behind a disclosure.
+ *
+ * The owner, on a page whose every section explains itself at full length whether or not anything
+ * is wrong: "this site is so hard to look at and follow."
+ *
+ * He is right, and the cause is that being fine costs as much room as being broken. The Money
+ * page spends seven subsections of two paragraphs each to say nothing is counted twice, and
+ * fourteen more to say where each feed lands. The invoice page gives four paragraphs to a card
+ * headed "Delivered, and no invoice for it" whose content is that every delivery has one. On a
+ * phone, between patients, that is minutes of scrolling past prose to reach a number.
+ *
+ * The prose is worth keeping — it is what makes a figure auditable, and he does audit. It is just
+ * not what he came for. So a settled question collapses to its answer and opens on a tap.
+ *
+ * Only for states that ask nothing. A card with something to do stays open: hiding a job behind a
+ * disclosure is the opposite mistake and a worse one.
+ */
+export function Settled({
+  says,
+  id,
+  className,
+  children,
+}: {
+  /** The answer, in one line. Not the question. */
+  says: string;
+  id?: string;
+  className?: string;
+  /** The reasoning, shown on a tap. */
+  children?: React.ReactNode;
+}) {
+  return (
+    <details id={id} className={`group rounded-lg border border-line bg-surface ${className ?? ""}`}>
+      <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm text-ink-2">
+        <span aria-hidden className="text-accent">&#10003;</span>
+        <span className="min-w-0 flex-1">{says}</span>
+        {children && <span className="shrink-0 text-xs text-ink-3 group-open:hidden">why</span>}
+      </summary>
+      {children && <div className="border-t border-line px-3 py-2 text-xs text-ink-3">{children}</div>}
+    </details>
+  );
+}
+
+/**
  * A section of a page.
  *
  * Always has a header bar, because a heading that sits inside the same padding as its content
@@ -132,7 +175,28 @@ export function Figure({
     <>
       <div className="kpi-label">{label}</div>
       <div className={`kpi-value ${size === "sm" ? "text-xl" : ""}`}>{value}</div>
-      {sub && <div className="kpi-sub">{sub}</div>}
+      {/*
+        One fact to a line.
+        
+        Every caller builds this from two or three separate facts and joins them with a dot, so it
+        arrived as "on $203,308.66 dispensed across 1,881 fills · $4,678.00 of it from cash ·
+        $2,355.59 promised and unpaid" — a run-on in small grey type under a number somebody is
+        trying to read at a glance. The owner: "this site is so hard to look at and follow."
+        
+        Split here rather than at each caller, so every figure on the site gains it at once. The
+        first fact is the one that qualifies the number and stays legible; the rest step back.
+      */}
+      {sub && (
+        <div className="kpi-sub">
+          {String(sub)
+            .split(" · ")
+            .map((part, i) => (
+              <span key={part} className={i === 0 ? "block" : "block text-ink-3"}>
+                {part}
+              </span>
+            ))}
+        </div>
+      )}
     </>
   );
   if (!href) return <div className={`kpi ${state}`}>{body}</div>;

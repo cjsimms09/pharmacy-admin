@@ -143,6 +143,38 @@ const IPC = new RegExp(
 );
 
 /**
+ * IPC's credit note, which is its invoice with the signs turned round.
+ *
+ * The owner: "we got an invoice credit from IPC did we read it right and apply credit?" The total
+ * was read — −$199.00, and it is in the account — but not one of its eleven item lines was, so
+ * nothing about which drugs went back reached the cost of any drug. Pressing "read the lines off
+ * the invoices" answered "0 item lines read off 1 invoice", every time, for ever.
+ *
+ * The layout is the ordinary IPC one and two columns differ:
+ *
+ *   5269337Betamethasone Dip Oint 0.05% Vio 1572578009301$49.10$61.37-1-1$2.51($2.51)
+ *
+ * The quantities are negative and run together the same way — `-1-1` is one ordered back, one
+ * shipped back — and the extended amount is in brackets, which is accountant's notation for money
+ * going the other way. The ordinary reader expects `(\d+)` and `\$`, and got `-1-1` and `($`.
+ *
+ * Read as negatives, the eleven lines come to exactly the −$214.00 the note prints as its Sub
+ * Total, which is what lets them be stored at all: the goods subtotal, not the −$199.00 due,
+ * because $15.00 of shipping was not credited back.
+ */
+const IPC_CREDIT = new RegExp(
+  String.raw`^(\d{6,8})` + // item number
+    String.raw`(.*?)` + // description, with the pack size run onto its end
+    String.raw`(\d{11})` + // NDC, eleven digits, unhyphenated
+    String.raw`\$(${MONEY})` + // WAC
+    String.raw`\$(${MONEY})` + // AWP
+    String.raw`([A-Za-z]{0,2})` + // note code, often absent
+    String.raw`-(\d+)-(\d+)` + // ordered and shipped, both going back
+    String.raw`\$(${MONEY})` + // unit price, printed positive
+    String.raw`\(\$(${MONEY})\)\s*$`, // extended amount, in brackets: money back
+);
+
+/**
  * IPD's own printed invoice: item number and NDC run together, then the quantities, the unit and
  * the money.
  *
@@ -432,6 +464,49 @@ export function parseInvoiceLines(text: string, printedTotalCents: number | null
         // This invoice prints no AWP and no contract marking, so neither is claimed.
         awpCents: null,
         itemClass: null,
+        rebated: null,
+        controlled: null,
+      });
+      continue;
+    }
+
+    const credit = IPC_CREDIT.exec(line);
+    if (credit) {
+      const [, item, desc, ndc, , awp, , , shipped, unit, ext] = credit;
+      const unitCostCents = money(unit);
+      /*
+       * Both negative, because both went the other way. A credit whose lines were stored positive
+       * would add the returned stock to what the pharmacy bought — the drugs it sent back would
+       * read as drugs it received, at a price it did not pay.
+       */
+      const quantity = -Number(shipped);
+      const extendedCents = -money(ext);
+      const key = ndc11(ndc);
+      /*
+       * Checked on the size of it, with the sign carried separately.
+       *
+       * `lineAddsUp` refuses a quantity of nought or less, which is right for a bill — a line that
+       * ships minus one of something is a misread. On a credit note it is the whole point, so the
+       * arithmetic is proved on the magnitudes and the direction is kept out of it.
+       */
+      if (!key || !Number.isFinite(quantity) || quantity === 0 || !lineAddsUp(Math.abs(quantity), unitCostCents, Math.abs(extendedCents))) {
+        unreadable.push(line.slice(0, 200));
+        continue;
+      }
+      format = format ?? "ipc";
+      out.push({
+        ndc11: key,
+        description: desc.trim() || null,
+        itemNumber: item,
+        quantity,
+        unitOfMeasure: null,
+        // The price per unit is what it was bought at and is printed positive. Only the direction
+        // of the line is negative, which the quantity and the extended amount already carry.
+        unitCostCents,
+        extendedCents,
+        awpCents: money(awp),
+        itemClass: null,
+        // This note prints no contract marking, so nothing is claimed either way.
         rebated: null,
         controlled: null,
       });
