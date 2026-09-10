@@ -141,6 +141,30 @@ export async function applyFdaCorrections(user: { name: string }): Promise<{
   const examples: string[] = [];
   const now = new Date().toISOString();
 
+  /*
+   * What the pharmacy actually dispenses, which settles a disagreement neither file can.
+   *
+   * The FDA package file counts what is in the box; a wholesaler catalogue counts what it sells
+   * you; and for a GSK Ellipta inhaler those are different numbers for an honest reason — the
+   * device holds two blister strips, one per drug reservoir, so thirty doses are sixty blisters.
+   * The catalogues count blisters, the FDA counts doses.
+   *
+   * Correcting 60 down to 30 halved the pack and so doubled every per-unit cost built on it, which
+   * is where a Trelegy loss of $1,436.21 came from against a real one of about $79 — PioneerRx put
+   * it at $12.97. Fifty-seven corrections had made a pack smaller than every catalogue said, one of
+   * them by a factor of a hundred.
+   *
+   * The owner settled it in three words: "trelegy we bill 60". The claim is in the unit the
+   * pharmacy buys and bills in, so where a correction would put the pack below a quantity actually
+   * dispensed, the catalogue is describing the real world and the correction is not applied.
+   */
+  const dispensed = new Map<string, number>();
+  for (const c of await db
+    .select({ ndc11: schema.claims.ndc11, q: schema.claims.quantityThousandths, status: schema.claims.status })
+    .from(schema.claims)) {
+    if (!c.ndc11 || c.status !== "paid" || !c.q || c.q <= 0) continue;
+    dispensed.set(c.ndc11, Math.max(dispensed.get(c.ndc11) ?? 0, c.q / 1000));
+  }
   for (const [ndc11, rows] of byNdc) {
     const description = packageOf.get(ndc11);
     if (!description) continue;
@@ -195,6 +219,20 @@ export async function applyFdaCorrections(user: { name: string }): Promise<{
 
     if (existing?.packSize === p.packSize) {
       alreadyRight++;
+      continue;
+    }
+
+    /*
+     * Never below what has actually gone out of the door.
+     *
+     * A pack the pharmacy has dispensed more than in a single fill is not the pack it buys. Left
+     * for a person rather than dropped silently, because the disagreement is real and worth
+     * somebody knowing about — it is just not one this can settle from two files.
+     */
+    const most = dispensed.get(ndc11) ?? 0;
+    const proposed = Number((p.packSize.match(/[\d.]+/) ?? ["0"])[0]);
+    if (most > 0 && proposed > 0 && proposed < most) {
+      needsPerson++;
       continue;
     }
 
