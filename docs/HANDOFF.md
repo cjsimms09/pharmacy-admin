@@ -800,6 +800,75 @@ pass, 0 fail) and `npm run build` (clean).
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
+### From B to 1 and 2 — RELAY: the owner on the whole system, and the coverage map that answers it (10 September)
+
+> *"We need to make sure this is a robust and accurate system from start to finish... claims
+> tracking, remit tracking, correct ordering, complete pharmacy accounting, understanding pharmacy
+> rebates, remits. We need to do whatever we have to to make sure that happens. My family's
+> livelihood depends on it. I don't want to have to babysit everything. I need you and other
+> sessions to help me build it. Have your own good ideas, do your own research, do your own checks
+> and audits."*
+
+I read the whole self-checking surface of the site rather than answering him from impression.
+**`docs/audits/2026-09-10-coverage-map.md`.** The headline is that this is in better shape than his
+fear suggests and the gap is narrower than "everything" — but it is a specific gap, and it is the
+one that has been producing findings all week.
+
+**What already exists** (and none of it needs rebuilding): 30 link-and-dataset measurements with a
+health per row and gaps in words; five nightly proofs; `books-check.ts`'s four invariants — nothing
+counted twice, nothing forgotten, the statement adds up, the two bases reconcile in four named
+parts; `reconcile.ts`'s three sources of cost of goods and revenue against the till and the bank;
+`remit-check.ts` adjudicated against paid; the 835 balance gate that refuses to post; the invoice
+reader that refuses a document that does not add up; `sharesReconcile`; `packDisagreement`;
+`report-check.ts`'s three states per field. That is a serious amount, and the principle is already
+written down in `reconcile.ts`: *every figure has a source, and the ones with two sources are
+checked against each other.*
+
+**The gap: every one of those compares the site to something outside it** — a file, the till, the
+bank, a stocktake, the payer's own total. **Not one compares two of the site's own answers to the
+same question.** And that is exactly the class of every finding this week: the books and the chart
+disagreeing about one month; a reported month changing when a fill is returned; the undo removing
+payments the Inbox still claims; an 820 refused by the router and called "a remittance, certain" by
+the recogniser. Four faults, four different files, one shape — and all four found by a person
+reading code, which is the babysitting he is asking to stop.
+
+So the check the site does not have is: **the same question, asked two ways, must give the same
+answer.** A month's revenue on the books and in the chart. A period's total and the sum of its
+months. A document's kind by the router and by the recogniser. The shape is `reconcileCogs`'s
+exactly, and it slots in beside it.
+
+**The second gap, and this commit closes the pure half of it.** His rule — *"identify when we don't
+[know] or when something is wrong"* — is implemented in exactly one place, the 835 balance gate.
+Everywhere else, money the site cannot place goes quiet in a different way each time: a sentence on
+a receipt for PLB money, a note on a payment that matched no claim, a flag nobody renders for an
+invoice with a total and no lines, `unplacedNames` for a supplier that matched nothing, a held
+remittance. Each is true and stated somewhere. **None of them is a number.**
+
+`src/lib/unclassified.ts` (new, pure, 11 tests) is that number: *money this site has seen and cannot
+put under a heading*, in six named kinds, each with its cause and what would clear it. The rule that
+makes it worth having is that **a total is a floor unless every part was measured** — a kind nobody
+has counted is not a kind with nothing in it, and rows whose money is unknown are still rows. It
+says "at least $X, and two kinds have never been counted" rather than presenting an incomplete
+figure as a figure. **The store half — the queries that count the real rows — is yours**, and it is
+six counts; I have written the shape it hands back.
+
+**Per area, what is thinnest** (detail in the map): rebates are the weakest — the ladder estimates
+and the statement replaces it, and nothing ever compares the two, so nobody learns whether the
+estimate the buy list optimises against is any good. Ordering is well covered on inputs and
+unmeasured on outcome — nothing checks whether what the site recommended was bought or what it
+actually cost. Remits: the codes, which is BACKLOG 2b-v. Claims: the return rule he has just
+decided, and nothing checks a claim's own money adds up on the claim itself. Accounting is the
+strongest and needs the route-agreement check and a stable-month guarantee.
+
+**What I am doing next, in order:** the agreement checks (starting with the month that already
+disagrees), then the 835 classification frame with *unknown* as a first-class answer. Both pure,
+both in my file group.
+
+**And the one thing that would help most from the machine, said plainly because he asked what he can
+do:** run the queries under "Open items". Twenty-one of them now. They are counts, none of them
+moves a file or sends anything anywhere, and each turns a finding I can only describe into a finding
+with a size. Half of what I have written this week is unranked purely because nobody has run them.
+
 ### From B to 1 — THE OWNER HAS DECIDED: a return is booked in the month it came back (10 September)
 
 Asked whether a fill sold in one month and returned in another belongs to the month of the sale or
