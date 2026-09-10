@@ -86,12 +86,23 @@ export async function alerts(): Promise<Alert[]> {
       continue;
     }
     if (d.severity === "no_date") {
-      // On file, and nothing can say whether it is still valid. That is not a future problem.
+      /*
+       * Nothing has established a date, and there are two quite different reasons for that.
+       *
+       * This printed one sentence for both: "On file with no expiry date, so nothing here can tell
+       * you whether it is still current." True of a certificate whose expiry nobody recorded. Flatly
+       * false of a training that has never been done — and eight of the nine rows on the owner's
+       * "Needs you today" list were the second kind, every one of them telling him a record was on
+       * file when the section below said, correctly, "Never recorded".
+       *
+       * The right sentence already exists on the item: `action` is written per row and says which
+       * case it is. Throwing it away for a canned line was the whole fault.
+       */
       out.push({
         key: `undated-${d.id}`,
         level: "now",
         title: d.title,
-        why: "On file with no expiry date, so nothing here can tell you whether it is still current.",
+        why: d.action,
         href: d.href,
       });
       continue;

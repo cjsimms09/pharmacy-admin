@@ -175,7 +175,28 @@ export function Figure({
     <>
       <div className="kpi-label">{label}</div>
       <div className={`kpi-value ${size === "sm" ? "text-xl" : ""}`}>{value}</div>
-      {sub && <div className="kpi-sub">{sub}</div>}
+      {/*
+        One fact to a line.
+        
+        Every caller builds this from two or three separate facts and joins them with a dot, so it
+        arrived as "on $203,308.66 dispensed across 1,881 fills · $4,678.00 of it from cash ·
+        $2,355.59 promised and unpaid" — a run-on in small grey type under a number somebody is
+        trying to read at a glance. The owner: "this site is so hard to look at and follow."
+        
+        Split here rather than at each caller, so every figure on the site gains it at once. The
+        first fact is the one that qualifies the number and stays legible; the rest step back.
+      */}
+      {sub && (
+        <div className="kpi-sub">
+          {String(sub)
+            .split(" · ")
+            .map((part, i) => (
+              <span key={part} className={i === 0 ? "block" : "block text-ink-3"}>
+                {part}
+              </span>
+            ))}
+        </div>
+      )}
     </>
   );
   if (!href) return <div className={`kpi ${state}`}>{body}</div>;
