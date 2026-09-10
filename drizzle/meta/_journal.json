@@ -687,6 +687,13 @@
       "when": 1788807688029,
       "tag": "0097_pioneer_purchases",
       "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "6",
+      "when": 1788807748029,
+      "tag": "0098_training_sent_to",
+      "breakpoints": true
     }
   ]
 }

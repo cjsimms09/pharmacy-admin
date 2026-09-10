@@ -2602,6 +2602,14 @@ export const trainingAssignments = sqliteTable(
      * unmatchable when someone has three trainings outstanding.
      */
     replyCode: text("reply_code"),
+    /**
+     * The address the last email actually went to.
+     *
+     * The send reads the person record live, so it has always used the current address — but the
+     * owner changed a technician's email and had no way to confirm where the mail went, and
+     * "the code reads it fresh" is an argument rather than evidence. This is the evidence.
+     */
+    sentTo: text("sent_to"),
     assignedOn: text("assigned_on").notNull(),
     dueOn: text("due_on").notNull(),
     /** Where the material lives, if it is not being read on the page itself. */

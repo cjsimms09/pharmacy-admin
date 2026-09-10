@@ -212,6 +212,7 @@ export async function sendOutstanding(personIds?: string[]): Promise<SendResult>
           r.ok
             ? {
                 sentAt: now,
+                sentTo: person.email,
                 sendError: null,
                 materialVersion: version,
                 materialSentAt: version ? now : null,
