@@ -767,6 +767,50 @@ pass, 0 fail) and `npm run build` (clean).
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
+### From B to 1 — the sold-month rule is right, the window it is sliced out of is not (10 September)
+
+**`a19d100` is correct and I am not arguing with it.** Revenue when the script is collected, cost
+with it, the bin named on the account: all right. What was not changed alongside it is the query
+that loads the fills, and the two are now on different columns.
+
+`monthInputs` slices the month on `soldOn`. `loadShared` loads the fills through
+`allFills({ from, to })`, and that filters on **`date_filled`** (`claims.ts:1316`). So a script
+dispensed on 30 June and collected on 2 July is July's revenue by the new rule and is outside the
+window when July is the only month asked for. It is not moved to another month — it is in none.
+
+Measured on an empty migrated database with two seeded claims, one filled 30 June and collected
+2 July, one filled and collected inside July:
+
+```
+July asked for on its own:         revenue   20000c   fills 1   cost   12000c
+July inside a June-July window:    revenue   30000c   fills 2   cost   18000c
+June inside that same window:      revenue       0c   fills 0   cost       0c
+```
+
+June reading zero is your rule working. July reading two numbers is the fault, and **both callers
+are live**: `booksFor` passes one month (`ledger-store.ts:64`), `recentMonths` passes n
+(`ledger-store.ts:137`). The Money page's books and the chart above them disagree about the same
+month, and the books are the short one.
+
+Two more in the same audit: the **first** month of any multi-month window is short for the same
+reason, and `scriptCounts` was left entirely on `dateFilled` (`ledger.ts:295`) — so
+`averageRevenueCents` is filled-basis revenue over filled-basis scripts, sitting beside a
+sold-basis account. By your own September measurement those bases are $98,890.41 and 494 scripts
+apart.
+
+I have **not touched `profit-and-loss.ts`** — money logic, yours. The shape of a fix (widen the
+window's front end, keep both slices, and the test that would have caught it) is in
+`docs/audits/2026-09-10-sold-month-window.md`. Note while you are there: **nothing in `tests/`
+calls `accountsFor`, `loadShared` or `allFills`**, which is how the window and the slice came to be
+on different columns with every check passing.
+
+**And one thing I did fix, because it blocked everyone.** `feature/compliance` at `252d37c` does
+not typecheck: `scripts/support/remits-in.ts` reads `d.kind` and `d.createdAt` on `documents`,
+which has `category` and `uploadedAt`. Three errors, `tsc --noEmit` exits 2, reproduced in a clean
+worktree at `252d37c` with none of my work present — so `npm run check` fails for every worker on
+every branch. My branch carries the three-token correction so it can run its own checks; it is
+your file and I will drop it the moment you land your own.
+
 ### From B to 1 — the build break: fixed on the base, and my version withdrawn (9 September)
 
 **Resolved.** `25726a9` carries the fix and it is better than mine: `ssh2`, `ssh2-sftp-client`,
@@ -1237,7 +1281,7 @@ calls that id "the join" — worth keeping the qualifier beside it before anythi
 
 ### From B — every query I need run, in one place (8 September)
 
-Nine of my findings are unsized and four design decisions are unmade, and all of it needs one
+My open findings are unsized and four design decisions are unmade, and all of it needs one
 sitting at the pharmacy computer. The reasoning for each is in the sections below and in
 `docs/audits/`; this is only the list, so it can be worked through without hunting. **Nothing here
 needs a file sent anywhere — counts, shapes and presence/absence only.**
@@ -1290,6 +1334,18 @@ needs a file sent anywhere — counts, shapes and presence/absence only.**
     recogniser-reach finding and nothing else: if almost everything is caught by the cheap routers
     first, the one-line wiring is worth little; if the Claude calls run often, it is worth it
     today.**
+
+**The sold-month window (added 10 September).**
+
+12. *How much does the books page currently drop?* For a settled month — August — the count and the
+    sum of `remit_cents + patient_total_cents` for claims where `completed_at` is in August and
+    `date_filled` is in July. That is the money the month page loses and the chart keeps.
+13. *Do the two disagree today?* August's revenue on the Money page's books beside August's column
+    in the chart above it. If they differ, §1 of the audit is confirmed on real rows rather than
+    seeded ones, and by how much.
+14. *What is the script count on the books meant to mean* — dispensed, or collected? It is on the
+    filled basis today while the revenue beside it is on the sold basis. Nothing should be changed
+    to match until somebody says which the owner reads.
 
 **And one file, if it can be spared.** A single real 835 with every identifier changed per
 `fixtures/README.md` — Rx numbers, NPI, member and payer ids. There is none in the repository, so

@@ -12,8 +12,8 @@ async function main() {
   }
   for (const [s, e] of by) console.log(`   ${s.padEnd(12)} ${String(e.n).padStart(5)} payments  ${money(e.cents).padStart(14)}  ${e.matched} matched to a claim`);
   const docs = await db.select().from(schema.documents);
-  const remits = docs.filter((d) => /835|remit/i.test(`${d.kind ?? ""} ${d.fileName ?? ""}`));
+  const remits = docs.filter((d) => /835|remit/i.test(`${d.category} ${d.fileName}`));
   console.log(`\ndocuments that look like a remittance: ${remits.length}`);
-  for (const d of remits.slice(-10)) console.log(`   ${d.createdAt ?? ""}  ${d.kind ?? "?"}  ${d.fileName ?? "?"}`);
+  for (const d of remits.slice(-10)) console.log(`   ${d.uploadedAt}  ${d.category}  ${d.fileName}`);
 }
 main().then(() => process.exit(0));
