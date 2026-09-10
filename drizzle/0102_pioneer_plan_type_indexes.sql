@@ -1,0 +1,11 @@
+-- One of the two indexes 0099 asked for and, for a while, did not get.
+--
+-- Both were lost to the same mistake, recorded here because it cost an hour and will cost the next
+-- person the same: drizzle splits a migration file on a marker line, and the comments in the
+-- original 0099 and 0100 wrote that marker out in prose while explaining it. Drizzle split on the
+-- prose, cut the SQL in half mid-sentence, and libsql reported "not an error". The rules are:
+-- separate statements with the marker line, and never write the marker inside a comment.
+--
+-- 0099 now creates these itself, so this is a no-op on a database built from scratch. It stays
+-- because it has already run on the pharmacy's database and its slot cannot be given back.
+create index if not exists pioneer_plan_types_key_idx on pioneer_plan_types (bin, pcn);

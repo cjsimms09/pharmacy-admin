@@ -355,6 +355,9 @@ export const SETTING_KEYS = [
   "pioneer_pull_catalogue_result",
   // PioneerRx’s supplier catalogue set against the site’s own: how much it prices that the site does not.
   "pioneer_catalogue_compare",
+  // What PioneerRx says each plan is. Weekly, with the other reference data.
+  "pioneer_pull_plan_types_on",
+  "pioneer_pull_plan_types_result",
 ] as const;
 export type SettingKey = (typeof SETTING_KEYS)[number];
 export type Settings = Record<SettingKey, string>;

@@ -1,7 +1,8 @@
 import "server-only";
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
-import { proposePlanClass, isProposal, type PlanEvidence } from "./plan-proposals";
+import { proposePlanClass, isProposal, findPlanClass, isFinding, governmentHint, type PlanEvidence, type PioneerPlanRow, type EvidenceSource, type Confidence } from "./plan-proposals";
+import { allPioneerPlanRows, pioneerRowsFor } from "./pioneer-plans";
 import { classifyPlan } from "./plans";
 import type { PlanClass } from "@/db/schema";
 
@@ -35,6 +36,16 @@ export type PlanCandidate = {
   proposedFrom: string | null;
   /** Why nothing is proposed, where nothing is. Worth reading: it says what document is needed. */
   why: string | null;
+  /**
+   * Which source produced the proposal, and how well it settles it.
+   *
+   * Shown beside the offer, because a class read out of PioneerRx's own plan file and a class read
+   * out of four letters of a PCN are not the same offer and must never look like the same offer.
+   */
+  proposedSource: EvidenceSource | null;
+  proposedConfidence: Confidence | null;
+  /** Set where PioneerRx has this filed as a Government plan — which would put it *in* scope. */
+  governmentHint: string | null;
   /** Insured paid fills on this plan's triple, which is what orders the list. */
   fills: number;
 };
@@ -87,7 +98,7 @@ type BinRowT = { bin: string; linesOfBusiness: string | null; pbmName: string };
  * column only written when somebody pressed "Look again", so on a register nobody had refreshed
  * every button failed. Two paths to one answer is the fault this project keeps finding.
  */
-function evidenceFor(p: PlanRowT, bins: BinRowT[], lobByBin: Map<string, string | null>): PlanEvidence {
+function evidenceFor(p: PlanRowT, bins: BinRowT[], lobByBin: Map<string, string | null>, pioneer: PioneerPlanRow[]): PlanEvidence {
   return {
     bin: p.bin,
     pcn: p.pcn,
@@ -95,6 +106,12 @@ function evidenceFor(p: PlanRowT, bins: BinRowT[], lobByBin: Map<string, string 
     payerLabel: p.payerLabel,
     pbmName: p.pbmName ?? (p.bin ? (bins.find((b) => b.bin === p.bin)?.pbmName ?? null) : null),
     linesOfBusiness: p.bin ? (lobByBin.get(p.bin) ?? null) : null,
+    /*
+     * PioneerRx's own answer, which is the strongest source here and was not being read at all.
+     * Passed in already loaded rather than fetched per plan: the register is 211 rows and the
+     * landing table is a couple of thousand, so one read and a filter beats 211 queries.
+     */
+    pioneer: pioneerRowsFor(pioneer, p.bin, p.pcn),
   };
 }
 
@@ -117,14 +134,17 @@ const allBins = () =>
   db.select({ bin: schema.payerBins.bin, linesOfBusiness: schema.payerBins.linesOfBusiness, pbmName: schema.payerBins.pbmName }).from(schema.payerBins);
 
 export async function planCandidates(opts: { includeClassified?: boolean } = {}): Promise<PlanCandidate[]> {
-  const [plans, bins, fills] = await Promise.all([db.select().from(schema.planGroups), allBins(), fillsByTriple()]);
+  const [plans, bins, fills, pioneer] = await Promise.all([db.select().from(schema.planGroups), allBins(), fillsByTriple(), allPioneerPlanRows()]);
   const lobByBin = linesOfBusinessByBin(bins);
 
   const out: PlanCandidate[] = [];
   for (const p of plans) {
     if (!opts.includeClassified && p.classification !== "unknown") continue;
-    const evidence = evidenceFor(p, bins, lobByBin);
+    const evidence = evidenceFor(p, bins, lobByBin, pioneer);
     const r = proposePlanClass(evidence);
+    // The same pure decision, kept whole, so the source and confidence shown beside the offer are
+    // the ones that produced it rather than a second opinion computed some other way.
+    const finding = findPlanClass(evidence);
     out.push({
       id: p.id,
       bin: p.bin,
@@ -137,6 +157,9 @@ export async function planCandidates(opts: { includeClassified?: boolean } = {})
       proposed: isProposal(r) ? r.classification : null,
       proposedFrom: isProposal(r) ? r.from : null,
       why: isProposal(r) ? null : r.why,
+      proposedSource: isProposal(r) && isFinding(finding) ? finding.source : null,
+      proposedConfidence: isProposal(r) && isFinding(finding) ? finding.confidence : null,
+      governmentHint: governmentHint(evidence.pioneer),
       fills: fills.get(tripleKey(p.bin, p.pcn, p.groupNumber)) ?? 0,
     });
   }
@@ -146,7 +169,31 @@ export async function planCandidates(opts: { includeClassified?: boolean } = {})
   return out.sort((a, b) => b.fills - a.fills || Number(b.proposed !== null) - Number(a.proposed !== null));
 }
 
-/** Stores the proposals so the page can show them without recomputing, and so a run is a record. */
+/**
+ * Records what the last run offered. A LOG, not the answer — do not render from these columns.
+ *
+ * The docstring here used to say "so the page can show them without recomputing", and that sentence
+ * was an instruction to reintroduce a bug this file has already had once. The page does not show
+ * them. It calls `planCandidates`, which recomputes from the evidence as it stands right now, and
+ * `confirmProposal` recomputes again before it writes anything. The columns are written here and
+ * read by nothing.
+ *
+ * That is deliberate and it must stay that way. These rows are only as fresh as the last time
+ * somebody pressed "Look again", while the evidence behind them moves whenever the PioneerRx feed
+ * runs or a payer sheet is added. Rendering the stored value would put a figure on the screen that
+ * disagrees with the finding the Confirm button is about to record — which is exactly what happened
+ * before: the page listed proposals computed live, `confirmProposal` read the stale column, and so
+ * on a register nobody had refreshed every button silently refused.
+ *
+ * The same fault in a different costume cost the owner his Inbox on the same day this was written:
+ * a training reply was handled correctly, the outcome was written into one field, and the list that
+ * renders it read another — so six replies that had been dealt with perfectly were the entire
+ * contents of his needs-you list. Two facts about one event, written by two pieces of code, is how
+ * both of these happened. One fact here, computed in one place, is the whole defence.
+ *
+ * What the columns ARE for: a record that a run happened and what it said at the time, so a
+ * classification made last week can be read back against the evidence that was in front of it.
+ */
 export async function refreshProposals(): Promise<{ proposed: number; unproposable: number }> {
   const candidates = await planCandidates();
   let proposed = 0;
@@ -154,7 +201,7 @@ export async function refreshProposals(): Promise<{ proposed: number; unproposab
   for (const c of candidates) {
     await db
       .update(schema.planGroups)
-      .set({ proposedClassification: c.proposed, proposedFrom: c.proposedFrom ?? c.why })
+      .set({ proposedClassification: c.proposed, proposedFrom: c.proposedFrom ?? c.why, proposedSource: c.proposedSource, proposedConfidence: c.proposedConfidence })
       .where(eq(schema.planGroups.id, c.id));
     if (c.proposed) proposed++;
     else unproposable++;
@@ -193,8 +240,8 @@ export async function confirmProposal(
     return { ok: false, why: `This plan is already classified as ${plan.classification.replace(/_/g, " ")}.` };
   }
 
-  const bins = await allBins();
-  const proposal = proposePlanClass(evidenceFor(plan, bins, linesOfBusinessByBin(bins)));
+  const [bins, pioneer] = await Promise.all([allBins(), allPioneerPlanRows()]);
+  const proposal = proposePlanClass(evidenceFor(plan, bins, linesOfBusinessByBin(bins), pioneer));
   if (!isProposal(proposal)) return { ok: false, why: proposal.why };
 
   await classifyPlan(
@@ -209,7 +256,7 @@ export async function confirmProposal(
   // The offer is spent: it has become a finding, and leaving it would offer it again.
   await db
     .update(schema.planGroups)
-    .set({ proposedClassification: null, proposedFrom: null })
+    .set({ proposedClassification: null, proposedFrom: null, proposedSource: null, proposedConfidence: null })
     .where(eq(schema.planGroups.id, planId));
   return { ok: true, classification: proposal.classification };
 }
