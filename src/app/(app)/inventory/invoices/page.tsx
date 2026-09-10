@@ -213,7 +213,16 @@ export default async function InvoicesPage({
   const registered = await allSuppliers();
   const withSenders = registered.filter((x) => addressesOf(x).length > 0);
   const noSenders = withSenders.length === 0;
-  const missingSenders = registered.filter((x) => addressesOf(x).length === 0);
+  /*
+   * Suppliers whose invoices would be missed for want of an address.
+   *
+   * Not the ones whose receipt he has said is the invoice. The banner tells him their invoices
+   * "will not be recognised", which for Xymogen and JamsRX is true, already known, and exactly
+   * what he decided — so it is not news, it is the site arguing with his own setting. He had five
+   * things to settle on this page and six of the ten names in that sentence were suppliers he had
+   * already answered for.
+   */
+  const missingSenders = registered.filter((x) => addressesOf(x).length === 0).filter((x) => !x.invoiceFromPioneer);
   const filtered = Boolean(
     sp.q || sp.month || sp.supplier || sp.from || sp.to || sp.on || sp.min || sp.max || onlyUnconfirmed || onlyUndated || onlyNoAmount || onlyNoLines,
   );

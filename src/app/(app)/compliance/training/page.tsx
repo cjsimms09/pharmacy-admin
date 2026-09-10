@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { TRAINING_CADENCE, addMonths, trainingApplies } from "@/lib/due";
+import { TRAINING_CADENCE, addMonths, trainingApplies, nextTrainingDue } from "@/lib/due";
 import { TRAINING_LABEL, TRAINING_SHORT, PERSON_ROLE_LABEL } from "@/lib/labels";
 import { type TrainingType } from "@/db/schema";
 import { todayIso, fmt, daysUntil } from "@/lib/dates";
@@ -97,7 +97,15 @@ export default async function TrainingPage({ searchParams }: { searchParams: Pro
     // The certificate is the evidence behind the badge, and the badge is where somebody looks.
     const certificate = last ? `/certificates/${last.id}` : null;
     if (!last) return { label: "never", tone: "badge-crit", due: true, sent, certificate };
-    const dueOn = last.expiresOn ?? addMonths(last.completedOn, TRAINING_CADENCE[type]?.months ?? 12);
+    const dueOn = nextTrainingDue(type, last);
+    /*
+     * A course completed once and never repeated. It is done, and it stays done.
+     *
+     * The date shown is the day it was completed rather than a deadline, because there is no
+     * deadline — and a green badge with no date on it invites somebody to go and check whether it
+     * is really covered.
+     */
+    if (dueOn === null) return { label: `done ${last.completedOn}`, tone: "badge-ok", due: false, sent, certificate };
     const left = daysUntil(dueOn)!;
     if (left < 0) return { label: `${-left}d late`, tone: "badge-crit", due: true, sent, certificate };
     if (left <= 45) return { label: `due ${dueOn.slice(5)}`, tone: "badge-warn", due: true, sent, certificate };

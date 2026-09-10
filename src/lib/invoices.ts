@@ -1118,6 +1118,50 @@ export async function writeInvoiceLines(
    * Only where nothing was read. A partial read is a different problem and a model second opinion
    * on it would quietly replace figures that reconciled with figures that might not.
    */
+  /*
+   * The row stops saying the lines could not be read, once they have been.
+   *
+   * `emptyInvoiceWarning` is computed and correct — it returns nothing the moment an invoice has
+   * lines. But its sentence is written into `basis` at filing time, and nothing ever took it back
+   * out. So when the ParMed reader started working, the two lines were read, stored and
+   * reconciled, and the invoice went on telling him in his own words: "no item line could be read
+   * from it... reading it again will give the same answer. It has to be entered by hand."
+   *
+   * He read that after the fix had shipped and reasonably concluded nothing had shipped. A stored
+   * sentence about a computed fact is a fact with two homes, and the stale one is the one on the
+   * screen.
+   */
+  if (r.stored > 0 && inv) {
+    const stale = emptyInvoiceWarning({
+      linesStored: 0,
+      totalCents: inv.totalCents,
+      hasTextLayer: true,
+      modelTried: true,
+    });
+    const staleNoModel = emptyInvoiceWarning({
+      linesStored: 0,
+      totalCents: inv.totalCents,
+      hasTextLayer: true,
+      modelTried: false,
+    });
+    let basis = inv.basis ?? "";
+    for (const gone of [stale, staleNoModel]) if (gone && basis.includes(gone)) basis = basis.replace(gone, "").replace(/\s{2,}/g, " ").trim();
+    const said = `${r.stored} item line${r.stored === 1 ? "" : "s"} were read and add up to the printed total.`;
+    /*
+     * And the review it asked for is answered, where the only thing in question was the lines. A
+     * schedule that could not be read files as "unknown" and still wants a person — that question
+     * is untouched here, because it is a different one and the safe answer to it is to keep asking.
+     */
+    const settled = inv.schedule !== "unknown";
+    await db
+      .update(schema.supplierInvoices)
+      .set({
+        basis: `${basis} ${said}`.trim(),
+        ...(settled ? { needsReview: false } : {}),
+      })
+      .where(eq(schema.supplierInvoices.id, invoiceId));
+  }
+
   let readBy: "rule" | "model" | null = r.stored > 0 ? "rule" : null;
   let out = r;
   if (r.stored === 0 && opts.allowModel && inv) {
