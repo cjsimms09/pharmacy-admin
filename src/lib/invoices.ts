@@ -161,7 +161,21 @@ export function looksLikeInvoice(opts: {
    */
   if (opts.text) {
     const kind = classifySupplierDocument(opts.text, opts.fileName, opts.subject).kind;
-    if (kind !== "invoice" && kind !== "unknown") return false;
+    /*
+     * A credit memo files here too, and is the one exception worth making.
+     *
+     * The others this refuses — a statement of account, a rebate breakdown — restate money that is
+     * already counted somewhere else, so filing them as invoices counts it twice. A credit memo is
+     * the opposite: it is money the pharmacy has not counted at all, on a document the wholesaler
+     * issues in the same series as its invoices and applies against one of them by number. IPC's
+     * sits against invoice 11490216 for $199.00 of returned goods.
+     *
+     * With nowhere to go it went nowhere: refused here, handled by nothing else, and absent from
+     * cost of goods entirely — so the pharmacy paid $199.00 less than its own books said it did.
+     * Filed as an invoice with a negative total it nets against the month by the ordinary
+     * arithmetic, and needs no separate machinery to be right.
+     */
+    if (kind !== "invoice" && kind !== "unknown" && kind !== "credit_memo") return false;
   }
   return /invoice|inv\b|statement of account|packing (list|slip)/i.test(`${opts.subject} ${opts.fileName}`);
 }
@@ -299,8 +313,14 @@ export function readGoodsSubtotalCents(text: string): number | null {
   for (const re of patterns) {
     const m = re.exec(text);
     if (!m) continue;
-    const n = Number(m[1].replace(/,/g, ""));
-    if (Number.isFinite(n) && n >= 0) return Math.round(n * 100);
+    /*
+     * Signed, like the total. A credit memo's lines are all negative and its subtotal with them —
+     * IPC prints them in brackets — and reading that as a positive made the goods disagree with the
+     * total by twice the credit, which then refused the whole reading for not adding up.
+     */
+    const at = m.index + m[0].lastIndexOf(m[1]);
+    const cents = signedCents(m[1], text, at);
+    if (cents !== null) return cents;
   }
   return null;
 }
