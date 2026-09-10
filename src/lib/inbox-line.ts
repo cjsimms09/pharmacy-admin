@@ -55,6 +55,7 @@ export function sourceOf(row: Pick<InboxRow, "fromAddress">): { source: ArrivalS
 
 /** The kinds the loader knows, in the owner's words. Anything unlisted is shown as it is stored. */
 const KIND_WORDS: Record<string, string> = {
+  training_reply: "A member of staff replying to a training email",
   rx_transactions: "Daily claims report",
   claims: "Claims export",
   on_hand: "Balance on hand",

@@ -341,6 +341,18 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
               }
             }
             if (closed.length > 0) {
+              /*
+               * Say what it was handled as, not only that something happened.
+               *
+               * This recorded a perfectly good outcome in `reason` — seven attestations closed, the
+               * reply filed as the evidence — and left `routedAs` empty. The inbox reads an empty
+               * `routedAs` as "filed, not recognised", so six replies that had been handled exactly
+               * right sat on the owner's needs-you list, and they were the whole of that list.
+               *
+               * It is the third time today the same shape has turned up: work that succeeded and a
+               * record of it that said otherwise. Invoices marked unrecognised after being filed, an
+               * invoice reporting no item lines over fifty-seven stored rows, and this.
+               */
               await db.insert(schema.inboxItems).values({
                 id: newId(),
                 messageId,
@@ -348,6 +360,8 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
                 fromAddress: from,
                 subject,
                 status: "stored",
+                routedAs: "training_reply",
+                routeResult: `${closed.join("; ")}. The reply itself is filed as the evidence.`,
                 reason: `Training reply handled — ${closed.join("; ")}. The reply itself is filed as the evidence.`,
               });
               result.stored++;
