@@ -875,9 +875,32 @@ happened and catches it.
 I checked before building that this does not overlap `booksBalance`, which checks a statement
 against itself at one moment. This checks a month against itself across time. Complementary.
 
-**What I am doing next:** the rest of the agreement work (the books' month against the chart's
-month, which needs a store call each and is the one that already disagrees), then the 835
-classification frame with *unknown* as a first-class answer. Both pure, both in my file group.
+**And the 835 classification frame is now built too: `src/lib/remit-classify.ts`** (pure, 13 tests),
+which is the recogniser half of BACKLOG 2b-v.
+
+The line it holds is which decisions the code may make. **The five CAS groups are structural to the
+835 — part of the shape of the segment, not a list anybody republishes — so they are decided here,
+and they place the money on their own with no code list at all.** CO is a contractual write-off, PR
+is the patient's share, and between them that is most of the adjustments on a pharmacy remittance.
+PI and OA say they want the reason code; a sixth group is refused outright, because a group outside
+the five means the file was misread rather than that the money is unusual.
+
+**CARC, RARC and the PLB reasons are not decided here.** They are revised three times a year, so
+they arrive as a `Dictionary` loaded as data, every entry carrying which list, which version and
+when it was loaded. **Loading them is yours** — my network reaches GitHub and the registries and
+nothing else. Until one is loaded, provider-level money is `unplaced` and says so, which is exactly
+the money the receipt currently describes as "not yet on either account". A claim-level entry never
+answers a provider-level code and a test holds that apart: same string, different code set, and
+mixing them is how a fee becomes a write-off.
+
+`unplaced` carries its amount, so it feeds straight into `unclassified.ts` and shrinks as the
+dictionary grows. And every classification says what it must never be used for, in the data
+dictionary's manner — **PR's says, first, that the claim almost certainly already carries the
+patient's share and adding it would count the same money twice.** That is the e-voucher's shape
+exactly, and it is the mistake this frame is most likely to invite.
+
+**What I am doing next:** the last of the agreement work — the books' month against the chart's
+month, which needs a store call on each side and is the pair that already disagrees.
 
 **And the one thing that would help most from the machine, said plainly because he asked what he can
 do:** run the queries under "Open items". Twenty-one of them now. They are counts, none of them
