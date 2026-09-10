@@ -20,7 +20,7 @@ import {
 const proof = (o: Partial<InvoiceProof> = {}): InvoiceProof => ({
   provedOn: "2026-09-10",
   invoices: 10, reconciled: 10, disagreed: 0, noLines: 0, undated: 0,
-  readerMovedOn: 0, unreadable: 0, unattributedCents: 0, rows: [], lines: [],
+  readerMovedOn: 0, supplierDiffers: 0, unreadable: 0, unattributedCents: 0, rows: [], lines: [],
   ...o,
 });
 
@@ -52,7 +52,7 @@ describe("what it will not count as a failure", () => {
   });
 });
 
-describe("the three faults off one page", () => {
+describe("the faults off the owner's own printouts", () => {
   test("an invoice with a total and no lines is the first thing said, because it is invisible", () => {
     const gaps = invoiceProofGaps(proof({ noLines: 1, unattributedCents: 989_097, reconciled: 9 }));
     assert.match(gaps[0], /1 invoice has a total and no item lines/);
@@ -69,6 +69,18 @@ describe("the three faults off one page", () => {
     assert.match(gaps[0], /2 invoices can be read better now/);
     assert.match(gaps[0], /The reader has improved and nobody went back/);
     assert.match(gaps[0], /Press Read again/);
+  });
+
+  test("the wholesaler the page names, where it is not the one it is filed under", () => {
+    /*
+     * The owner, 10 September: "I believe it labeled the parmed invoice as cardinal." ParMed is a
+     * Cardinal Health company and was not on the name list at all. Teaching the reader does not
+     * reach backwards, so every ParMed invoice already filed still reads as Cardinal — and the
+     * supplier is what decides which returns policy times that stock.
+     */
+    const gaps = invoiceProofGaps(proof({ supplierDiffers: 2, reconciled: 8 }));
+    assert.match(gaps.join(" "), /2 invoices are filed under a different wholesaler/);
+    assert.match(gaps.join(" "), /which returns policy times the stock/);
   });
 
   test("an undated invoice is named for the reason it matters", () => {
