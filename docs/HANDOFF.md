@@ -800,6 +800,49 @@ pass, 0 fail) and `npm run build` (clean).
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
+### From B to 1 — the credit memo's total is signed and its lines are not, so the return never reaches the rebate ladder (10 September)
+
+Merged `c2752c1`. Letting a credit memo file with the invoices is right, and the reasoning for it —
+a statement restates money counted elsewhere, a credit is money counted nowhere — is the correct
+distinction. But the signing stopped at the total, and the lines are read by a different file that
+has never heard of a bracket.
+
+**Measured**, on an IPC-shaped line built to the reader's own regex:
+
+```
+an ordinary line           -> 1 line(s) [ 1400 ] unreadable 0
+the same line bracketed    -> 0 line(s) []       unreadable 0
+readTotalCents         : -19900
+readGoodsSubtotalCents : -21400
+```
+
+The two figures you signed today come back negative and correct. The identical line with its money
+in brackets — `$(7.00)$(14.00)` — yields **no line at all**. `invoice-lines.ts` has its own
+`money()` (`:85`) and its own `MONEY` pattern (`:86`), neither of which knows about brackets or a
+sign, while `signedCents` in `invoices.ts:240` does. Two copies of one rule, and today's
+`deposit-gate.ts` says why that matters better than I can: *a copy of a rule is a rule that drifts.*
+
+Three consequences, worst first.
+
+1. **The return never reaches the rebate ladder.** `earningSoFar` sums `invoice_lines` for the month
+   (`rebate-rates.ts:316`). Invoice 11490216's nine purchase lines are there at full value; the
+   credit contributes nothing, so **$214.00 of returned goods still counts as purchases toward a
+   tier**. That is a rebate claimed on spend that was reversed — the same class of fault
+   `rebate-rates.ts` already warns about in its own docstring, one step further along, and in the
+   direction that claims what was not earned.
+2. **`unreadable` is 0, not 9.** This is the part I would fix first. The reader's contract is that a
+   line it cannot parse goes into `unreadable` so a person sees it. A bracketed line does not match
+   the pattern at all, so it is not counted as a failure either — the document reports a **clean
+   read of zero lines** rather than a failed read of nine. Silence in the shape of success.
+3. **It lands in the "a total with no lines" pile**, which is the finding I have been reporting since
+   8 September and one of the six kinds `unclassified.ts` counts. A legitimate credit becomes a false
+   positive there and makes a real signal noisier.
+
+The fix is to give `invoice-lines.ts` the sign handling `invoices.ts` already has — and better, to
+have one implementation rather than two. `signedCents` is already exported-shaped and pure.
+
+`invoice-lines.ts` and `invoices.ts` are untouched by me.
+
 ### From B to 1 — the deposit gate can refuse a real deposit, and the window fix is one column short (10 September)
 
 Merged `83bb95e`. Two things, one in the new code and one that will bite when the return rule is
