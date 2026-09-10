@@ -1033,7 +1033,23 @@ async function loadClaimFlags(scope: ClaimScope) {
       onAccount: c.onAccount,
       status: c.status,
       // A reversal kept because it matched nothing: negative money against a fill never counted.
-      unmatchedReversal: (c.remitCents ?? 0) < 0 && !c.reversalKey,
+      /*
+       * A negative remit is money going to the plan, and there are two reasons for that.
+       *
+       * The plan taking back what it paid — a reversal — or the plan charging a fee it never paid
+       * anything to offset. Only the first cancels a fill. The second leaves a real dispensing
+       * where the patient paid at the counter and the plan billed the pharmacy for the privilege:
+       * $2.25, $3.00, $4.00, $5.00 a claim, on Clonazepam and Pantoprazole and a Dotti patch.
+       *
+       * The sign alone cannot tell them apart, and it was being asked to. Fourteen live fills were
+       * being dropped from every figure in the building — the script count, the payer table, the
+       * loss list, the NADAC comparison, the Kansas floor check — on the strength of it. Together
+       * they carry $382.14 of patient money against $78.30 of plan fees.
+       *
+       * The status is what says a fill was reversed, because that is what it is for. A row still
+       * marked paid is a fill, whatever its remit column does.
+       */
+      unmatchedReversal: (c.remitCents ?? 0) < 0 && !c.reversalKey && c.status !== "paid",
     })),
     later,
   );
@@ -1363,7 +1379,23 @@ async function loadFills(from: string, to: string) {
       onAccount: c.onAccount,
       status: c.status,
       // A reversal kept because it matched nothing: negative money against a fill never counted.
-      unmatchedReversal: (c.remitCents ?? 0) < 0 && !c.reversalKey,
+      /*
+       * A negative remit is money going to the plan, and there are two reasons for that.
+       *
+       * The plan taking back what it paid — a reversal — or the plan charging a fee it never paid
+       * anything to offset. Only the first cancels a fill. The second leaves a real dispensing
+       * where the patient paid at the counter and the plan billed the pharmacy for the privilege:
+       * $2.25, $3.00, $4.00, $5.00 a claim, on Clonazepam and Pantoprazole and a Dotti patch.
+       *
+       * The sign alone cannot tell them apart, and it was being asked to. Fourteen live fills were
+       * being dropped from every figure in the building — the script count, the payer table, the
+       * loss list, the NADAC comparison, the Kansas floor check — on the strength of it. Together
+       * they carry $382.14 of patient money against $78.30 of plan fees.
+       *
+       * The status is what says a fill was reversed, because that is what it is for. A row still
+       * marked paid is a fill, whatever its remit column does.
+       */
+      unmatchedReversal: (c.remitCents ?? 0) < 0 && !c.reversalKey && c.status !== "paid",
     })),
     await laterPayments(),
   );

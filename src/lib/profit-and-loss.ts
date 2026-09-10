@@ -184,6 +184,14 @@ export type PLInputs = {
    */
   billedPurchasesCents: number | null;
   /**
+   * The part of that which is PioneerRx's receiving record standing in for an invoice that never came.
+   *
+   * Named on the account because it is weaker evidence than a document the wholesaler sent, and
+   * because the fix is chasing an invoice rather than accepting the figure.
+   */
+  uninvoicedPurchasesCents?: number | null;
+  uninvoicedPurchases?: number;
+  /**
    * The standing costs the month carries so far: payroll and rent by the day, each already reduced
    * to the month's share. Dropped where a real bill from the same vendor is entered for the month.
    */
@@ -441,7 +449,12 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
     costOfGoods.push({
       label: "Billed by the wholesalers",
       amountCents: i.billedPurchasesCents,
-      note: "Every wholesaler invoice dated in this month, at its own total. The accrual account counts something different on purpose — what the month's dispensings cost to buy — so a month with a big buy-in reads worse here and better there, which is the gap between the two bases doing its job.",
+      note:
+        "Every wholesaler invoice dated in this month, at its own total." +
+        (i.uninvoicedPurchases
+          ? ` ${i.uninvoicedPurchases} of these have no invoice on file — ${formatCents(i.uninvoicedPurchasesCents ?? 0)} taken from PioneerRx's own record of receiving them, which is what the pharmacy has until the wholesaler's document turns up.`
+          : "") +
+        " The accrual account counts something different on purpose — what the month's dispensings cost to buy — so a month with a big buy-in reads worse here and better there, which is the gap between the two bases doing its job.",
     });
   } else {
     missing.push(
@@ -703,7 +716,12 @@ export type SharedInputs = {
   cats: Awaited<ReturnType<typeof import("./expenses").categories>>;
   fills: Awaited<ReturnType<typeof import("./claims").allFills>>;
   suppliers: Awaited<ReturnType<typeof import("./suppliers-registry").allSuppliers>>;
-  invoices: { totalCents: number | null; paidOn: string | null; invoiceDate: string | null; supplierId: string | null; supplier: string | null }[];
+  invoices: { totalCents: number | null; paidOn: string | null; invoiceDate: string | null; supplierId: string | null; supplier: string | null; invoiceNumber: string | null }[];
+  /**
+   * What PioneerRx recorded receiving. Not invoices — see the table comment — but the only evidence
+   * of a purchase whose invoice never reached the pharmacy.
+   */
+  pioneerPurchases: { invoiceNumber: string | null; invoiceDate: string | null; totalCents: number | null; supplier: string | null }[];
   /** Every standing cost on file; which apply to a month is decided per month. */
   standing: { id: string; name: string; categoryId: string | null; vendorId: string | null; amountCents: number; fromMonth: string; toMonth: string | null; paidDay: number | null }[];
   /** The day the account is drawn, which decides how much of a standing cost a month in progress carries. */
@@ -737,12 +755,13 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
   const to = `${sorted[sorted.length - 1]}-31`;
 
   const { allStandingCosts } = await import("./standing-costs");
+  const pioneerPurchases = await db.select().from(schema.pioneerPurchases);
   const [sales, cats, fills, suppliers, invoices, lines, counts, payments, standing] = await Promise.all([
     salesMonths(),
     categories(true),
     allFills({ from, to }),
     allSuppliers(true),
-    db.query.supplierInvoices.findMany({ columns: { totalCents: true, paidOn: true, invoiceDate: true, supplierId: true, supplier: true } }),
+    db.query.supplierInvoices.findMany({ columns: { totalCents: true, paidOn: true, invoiceDate: true, supplierId: true, supplier: true, invoiceNumber: true } }),
     db.query.invoiceLines.findMany({ where: and(gte(schema.invoiceLines.invoiceDate, from), lte(schema.invoiceLines.invoiceDate, to)), columns: { invoiceDate: true, extendedCents: true } }),
     /*
      * Every count, not just the ones inside the months asked for: a month opens on the last count
@@ -770,7 +789,7 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
       driverCents,
     });
   }
-  return { basis, sales, cats, fills, suppliers, invoices, lines, counts, payments, byMonth, standing, today: todayIso() };
+  return { basis, sales, cats, fills, suppliers, invoices, lines, counts, payments, byMonth, standing, pioneerPurchases, today: todayIso() };
 }
 
 /** One month's inputs, sliced from what was loaded. Nothing here computes; `monthlyPL` does. */
@@ -881,7 +900,28 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
    * cannot contribute and is left out rather than counted as nought.
    */
   const billedThisMonth = invoices.filter((v) => v.totalCents !== null && v.invoiceDate?.startsWith(month));
-  const billedPurchasesCents = billedThisMonth.length ? billedThisMonth.reduce((n, v) => n + (v.totalCents ?? 0), 0) : null;
+  /*
+   * The purchases PioneerRx recorded and no invoice ever arrived for.
+   *
+   * The owner: "I more just wanted to use it to catch the money from invoices we didn't get before
+   * this was setup in September... it was for the money section." Invoices began arriving by email
+   * partway through September, so the month's earlier purchases have no document at all — and the
+   * pharmacy system's own receiving record is the only evidence they happened.
+   *
+   * Matched on the wholesaler's own invoice number, which both sides carry, so a purchase with a
+   * real invoice is counted once from the invoice and never again from here. Where PioneerRx and the
+   * invoice disagree on the figure the invoice wins: it is the document the pharmacy was billed on
+   * and the one it has to pay.
+   */
+  const invoiceNumbers = new Set(invoices.map((v) => (v.invoiceNumber ?? "").trim().toUpperCase()).filter(Boolean));
+  const uninvoiced = shared.pioneerPurchases.filter(
+    (p) => p.totalCents !== null && p.invoiceDate?.startsWith(month) && !invoiceNumbers.has((p.invoiceNumber ?? "").trim().toUpperCase()),
+  );
+  const uninvoicedPurchasesCents = uninvoiced.length ? uninvoiced.reduce((n, p) => n + (p.totalCents ?? 0), 0) : null;
+  const billedPurchasesCents =
+    billedThisMonth.length || uninvoiced.length
+      ? billedThisMonth.reduce((n, v) => n + (v.totalCents ?? 0), 0) + (uninvoicedPurchasesCents ?? 0)
+      : null;
 
 
   /*
@@ -948,6 +988,8 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
     dispensedCostCents,
     purchasesCents,
     billedPurchasesCents,
+    uninvoicedPurchasesCents,
+    uninvoicedPurchases: uninvoiced.length,
 
     standing,
     openingStockCents,
