@@ -1,3 +1,4 @@
+import { tillLine } from "@/lib/till-line";
 import Link from "next/link";
 import { cqiSnapshot, csInventoryStatus } from "@/lib/compliance";
 import { dueList, type DueItem } from "@/lib/due";
@@ -525,19 +526,21 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           against the bank, and it is labelled with the month it actually covers rather than being
           quietly presented as this one.
         */}
-        {money.sales && (
-          <p className="mt-3 rounded-lg border border-line bg-surface p-3 text-xs text-ink-2">
-            <b>
-              {formatCents(money.sales.totalCents ?? 0)} taken in {money.sales.month}
-              {money.sales.isCurrentMonth ? "" : " — the last month closed"}
-            </b>{" "}
-            — the whole till, retail and prescriptions together, from the System Sales Summary. Of that,{" "}
-            {formatCents(money.sales.rxRemitCents ?? 0)} came from the plans,{" "}
-            {formatCents(money.sales.rxPatientCents ?? 0)} from patients at the counter and{" "}
-            {formatCents(money.sales.retailCents ?? 0)} over the counter. This is the only figure on this
-            page that includes the front of shop; everything above it is dispensing.
-          </p>
-        )}
+        {money.sales && (() => {
+          /*
+           * Built rather than templated, because three of these five figures can be absent and a
+           * `?? 0` turns "nobody has told us" into "nothing was taken". This line used to lead with a
+           * bold $0.00 and then list $2,115.07 of counter takings underneath it, from a document that
+           * has never been filed.
+           */
+          const line = tillLine(money.sales);
+          return (
+            <p className="mt-3 rounded-lg border border-line bg-surface p-3 text-xs text-ink-2">
+              <b>{line.headline}</b> — {line.detail} This is the only figure on this page that
+              includes the front of shop; everything above it is dispensing.
+            </p>
+          );
+        })()}
 
         {/*
           The report's own bottom line, which nothing on this site computed.

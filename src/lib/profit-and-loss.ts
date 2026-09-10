@@ -75,6 +75,14 @@ export type MonthlyPL = {
 
   operating: PLLine[];
   operatingCents: number;
+  /**
+   * What the standing costs come to for the WHOLE month, not the part accrued so far.
+   *
+   * `operatingCents` is the month to date — payroll accrued by the day, rent likewise — which is
+   * the right figure for an account of what has happened. It is the wrong one to subtract from a
+   * revenue figure that has been scaled to the whole month, and `pace` was doing exactly that.
+   */
+  standingWholeMonthCents: number;
   netProfitCents: number;
 
   /**
@@ -603,6 +611,7 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
     grossMarginPercent,
     operating,
     operatingCents,
+    standingWholeMonthCents: (i.standing ?? []).filter((st) => !(i.basis === "cash" && st.noPaidDay)).reduce((n, st) => n + st.amountCents, 0),
     netProfitCents,
     otherCashOut,
     otherCashOutCents,
