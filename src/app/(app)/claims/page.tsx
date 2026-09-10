@@ -433,7 +433,12 @@ export default async function ClaimsPage({
                 key: "later",
                 tone: "ok" as const,
                 amount: formatCents(laterMoney.reduce((n, x) => n + x.amountCents, 0)),
-                title: `has reached these claims since they were transmitted${laterMoney.some((x) => x.unmatched > 0) ? ` — ${laterMoney.reduce((n, x) => n + x.unmatched, 0)} not yet matched to a claim` : ""}`,
+                                /*
+                  Only what can still be matched. A payment against a prescription filled before the
+                  claims feed began has nothing to match to and never will, so counting it as
+                  pending made a number that could only go up.
+                */
+                title: `has reached these claims since they were transmitted${laterMoney.some((x) => x.unmatched > 0) ? ` — ${laterMoney.reduce((n, x) => n + x.unmatched, 0)} not yet matched to a claim` : laterMoney.some((x) => x.beforeTheFeed > 0) ? ` — every one matched, bar ${laterMoney.reduce((n, x) => n + x.beforeTheFeed, 0)} for prescriptions filled before this feed began` : ""}`,
                 why: `From ${laterMoney.map((x) => `${x.payments} ${x.source.toUpperCase()}`).join(", ")}. Added to the fill it belongs to and kept apart from what the plan itself paid. Anything naming a prescription this site has not loaded attaches itself when it arrives.`,
               }
             : null,
@@ -754,7 +759,19 @@ export default async function ClaimsPage({
             is a charge nobody raised. Reading it as a bad rate sends somebody to argue with a payer
             about money that was never claimed from one.
           */}
-          {flags.onAccount.count > 0 && (
+          {/*
+            Shown only when it is a question.
+            
+            The owner: "you still havent fixed any of these.. including on account??" The rows had
+            been corrected to say what each fill actually did — both were paid, both made money, and
+            nothing was owed — and he was still looking at a section headed "On account" with two
+            four-figure costs under it. A heading that names a problem is read as a problem however
+            carefully the small print underneath explains that there is not one.
+            
+            So when nothing is owed and nothing went out unbilled, there is nothing here. What the
+            fills were is on the dispensing itself for anyone who goes looking.
+          */}
+          {flags.onAccount.count > 0 && (flags.onAccount.receivableCents > 0 || flags.onAccount.unbilled.length > 0) && (
             <>
               <h2 id="on-account" className="mt-8 text-sm font-semibold">On account</h2>
               <p className="mt-1 text-xs text-ink-2">
