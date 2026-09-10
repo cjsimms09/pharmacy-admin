@@ -227,8 +227,6 @@ export async function importCopayRemit(
         ndc11: n.ndc11,
         source: "copay_card",
         payer: COPAY_PAYER,
-        // The voucher's own BIN, so a fill billed to two payers settles against the right one.
-        bin: COPAY_BIN,
         amountCents: n.paidCents,
         /*
          * A matched line settles what the claim already carries, so none of it is new revenue. A
@@ -237,6 +235,19 @@ export async function importCopayRemit(
         revenueCents: claim ? 0 : n.paidCents,
         receivedOn: r.paidOn,
         reference: r.reference,
+        /*
+         * The BIN these adjudicate on, told to the matcher rather than kept to ourselves.
+         *
+         * This reader picks its own claim, on the prescription and the fill date and this BIN, and
+         * then recordClaimPayment picks one again from the prescription alone. Two matchers for one
+         * thing, which is how a payment can be recorded against a claim other than the one the
+         * screen said it settled. Since 1 added the two-payer choosing (match-remittance.ts) the BIN
+         * is the discriminator it wants, and it is the same discriminator this reader already uses —
+         * so passing it is what makes the two agree instead of merely usually agreeing.
+         */
+        bin: COPAY_BIN,
+        // The handle an undo is keyed on. Accepted here since this reader was written and, until now, dropped.
+        documentId: opts.documentId ?? null,
         notes:
           `From ${fileName}${r.reference ? `, check/ACH ${r.reference}` : ""}. ${n.drug}, ${n.rows > 1 ? `${n.rows} rows netted` : "one row"}.` +
           (early ? " The fill predates 1 September 2026, when this site's records begin, so no claim for it exists." : ""),
@@ -276,6 +287,7 @@ export async function importCopayRemit(
       kind: "third_party",
       amountCents: r.paymentAmountCents ?? r.totals.paidCents ?? amountCents,
       payer: COPAY_PAYER,
+      documentId: opts.documentId ?? null,
       notes: `From ${fileName}${r.reference ? `, check/ACH ${r.reference}` : ""}, ${payments} payment${payments === 1 ? "" : "s"}${empty.reversedPairs ? `, ${empty.reversedPairs} paid and reversed in the same period` : ""}.`,
       createdBy: user.id ?? user.name,
       // See expenses.ts: a statement read twice is one deposit, and a voucher payment the payer

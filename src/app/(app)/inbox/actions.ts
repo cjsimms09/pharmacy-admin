@@ -455,3 +455,105 @@ export async function forgetIntakeRule(id: string) {
   revalidatePath("/inbox");
   redirect("/inbox?ok=" + encodeURIComponent("Forgotten. Mail from that sender will be worked out from scratch again."));
 }
+
+/**
+ * A document the recogniser placed wrongly, loaded again as what a person says it is.
+ *
+ * The owner: "I NEED TO BE ABLE TO MAKE SURE IT DID THE RIGHT THING WITH THE DOCUMENT AND NEED TO
+ * BE ABLE TO FIX ANY ISSUES WITH HOW IT WAS RECEIVED OR SORTED." Until now a wrong decision was a
+ * dead end — the line explained what it had done and there was nothing to press. Asked which of
+ * the things that could go wrong worries him most, he said this one: a document filed as the wrong
+ * kind.
+ *
+ * It runs the same loading path the sweep runs, told the answer rather than asked for one, against
+ * the file already stored. So a catalogue read as an invoice becomes a catalogue by the same code
+ * that would have loaded it correctly in the first place, and there is no second implementation of
+ * loading to keep in step with the first.
+ *
+ * What it does not do is undo. Where the wrong reading already changed the tables — a catalogue
+ * loaded as claims — re-routing loads the right thing and leaves the wrong thing where it is. That
+ * is the harder half and it is honest to say so on the screen rather than imply a repair that did
+ * not happen.
+ */
+export async function reRouteInboxItem(fd: FormData) {
+  const itemId = String(fd.get("itemId") ?? "");
+  const kind = String(fd.get("kind") ?? "").trim();
+  if (!itemId || !kind) fail("/inbox", "Choose what the document is before re-routing it.");
+
+  const { requireManager } = await import("@/lib/auth");
+  const { db, schema } = await import("@/db");
+  const { eq } = await import("drizzle-orm");
+  const { readFile } = await import("@/lib/files");
+  const { importDropped } = await import("@/lib/mailbox");
+  const { audit } = await import("@/lib/audit");
+  const user = await requireManager();
+
+  const item = await db.query.inboxItems.findFirst({ where: eq(schema.inboxItems.id, itemId) });
+  if (!item?.documentId) fail("/inbox", "Nothing was stored for that line, so there is nothing to re-route.");
+  const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, item!.documentId!) });
+  if (!doc) fail("/inbox", "The file behind that line is missing.");
+
+  try {
+    const buf = await readFile(doc!.storageKey);
+    const was = item!.routedAs ?? "unrecognised";
+    const r = await importDropped(
+      buf,
+      doc!.fileName,
+      { userId: user.id, userName: user.name },
+      doc!.id,
+      kind as Parameters<typeof importDropped>[4],
+    );
+    /*
+     * The line records that a person decided this, and what it was before. An inbox that quietly
+     * rewrites its own history is one nobody can audit — and "it always said catalogue" is exactly
+     * what somebody would remember afterwards.
+     */
+    await db
+      .update(schema.inboxItems)
+      .set({
+        routedAs: r.routedAs,
+        routeResult: `Re-routed by ${user.name} from "${was}". ${r.routeResult ?? ""}`.trim(),
+        status: r.imported ? "stored" : item!.status,
+      })
+      .where(eq(schema.inboxItems.id, itemId));
+    await audit({
+      action: "inbox.rerouted",
+      userId: user.id,
+      userName: user.name,
+      entity: "document",
+      entityId: doc!.id,
+      details: `${doc!.fileName}: ${was} → ${kind}. ${r.routeResult ?? "nothing loaded"}`.slice(0, 300),
+    });
+    revalidatePath("/inbox");
+    redirect(`/inbox?ok=${encodeURIComponent(`Re-routed as ${kind}. ${r.routeResult ?? "Nothing was loaded."}`)}`);
+  } catch (e) {
+    if (e && typeof e === "object" && "digest" in e) throw e;
+    fail("/inbox", e instanceof Error ? e.message : "Could not re-route that document.");
+  }
+}
+
+/**
+ * The other half of the fix: taking a wrong reading back out.
+ *
+ * `reRouteInboxItem` above loads the document as what it really is and leaves what the wrong
+ * reading wrote where it stands, which is honest and, for a remittance, not good enough — an 835
+ * or a copay statement read out of the wrong file puts money against fills and a deposit in the
+ * bank account, and no screen in this site lists a claim payment or removes one.
+ *
+ * It is deliberately not offered for anything else. `inbox-undo.ts` holds, kind by kind, what a
+ * load actually wrote and whether it can be reached; the screen says that sentence, and this
+ * refuses anything the screen did not promise.
+ */
+export async function undoInboxItem(fd: FormData) {
+  const itemId = String(fd.get("itemId") ?? "");
+  if (!itemId) fail("/inbox", "Nothing was chosen to take back out.");
+
+  const { requireManager } = await import("@/lib/auth");
+  const { undoInboxItem: run } = await import("@/lib/inbox-undo-store");
+  const user = await requireManager();
+
+  const r = await run(itemId, { id: user.id, name: user.name });
+  revalidatePath("/inbox");
+  if (!r.ok) fail("/inbox", r.said);
+  redirect(`/inbox?ok=${encodeURIComponent(`Taken back out. ${r.said}`)}`);
+}

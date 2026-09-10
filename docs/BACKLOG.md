@@ -922,8 +922,14 @@ count). `catalogue-cache.ts wholePackage` already levels every row to the whole 
 shelf, the buy list and the planner were right. `minimum-store.ts` — the secondary-supplier add-on list on What
 to add — read the raw table and so priced every multi-pack add-on up to thirty times too high, in the direction
 that sends the order to whoever printed the pack without a bracket. Fixed the same night: it reads the levelled
-catalogue like everything else. Still raw, and to check: `appeals.ts` and the invoice-side readers that derive a
-unit cost from a pack. Also from that run, settled: every "price differs" the proof reported was a second listing
+catalogue like everything else. Settled the same day by 2 (`work/appeal-packs`): `appeals.ts` was the one still raw, and it is the worst place
+for it — the per-unit figure it derives is what the pharmacy submits to a PBM as what the drug cost. It now reads
+the levelled catalogue, and `packQtyOf` refuses a multi-pack bracket instead of answering with the inner pack, so
+every caller is safe rather than only the ones that were looked at. The invoice readers themselves derive nothing:
+`invoice-lines.ts` takes the per-package price as printed and proves it against quantity times unit equals extended,
+so the only place that divides by a pack is the appeal. Also found: `wholePackage` leaves a row untouched when it
+prints no pack total, so a levelled row can still carry a bracket and "read the levelled catalogue" was never on its
+own enough — which is what the refusal in `packQtyOf` covers. Also from that run, settled: every "price differs" the proof reported was a second listing
 of the same NDC in the same file (539 NDCs in McKesson's, 19 in IPC's); the importer keeps the cheapest
 full-dated listing, and 2's proof now proves an NDC against any of its lines. The tables match their files.
 

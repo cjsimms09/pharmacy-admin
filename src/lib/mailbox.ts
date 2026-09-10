@@ -8,7 +8,7 @@ import { db, schema } from "@/db";
 import { getSettings, setSetting } from "./settings";
 import { decryptText, encryptText, newId } from "./crypto";
 import { storeFile, ALLOWED_MIME, MAX_FILE_BYTES } from "./files";
-import { classify, parseSupplierRules, supplierFor, unknownSenderInvoiceReason } from "./autoroute";
+import { classify, parseSupplierRules, supplierFor, unknownSenderInvoiceReason, type RouteKind } from "./autoroute";
 import { importClaims } from "./claims";
 import { importPioneerCatalog } from "./suppliers";
 import { importRxTransactions, describeTransactionImport } from "./claims";
@@ -649,11 +649,24 @@ export async function importDropped(
   fileName: string,
   ctx: { userId?: string | null; userName?: string | null },
   documentId?: string | null,
+  /*
+   * What a person says this is, overriding what the recogniser made of it.
+   *
+   * The owner: "I NEED TO BE ABLE TO MAKE SURE IT DID THE RIGHT THING WITH THE DOCUMENT AND NEED TO
+   * BE ABLE TO FIX ANY ISSUES WITH HOW IT WAS RECEIVED OR SORTED." Until now a wrong decision was a
+   * dead end — the line explained itself and there was nothing to press. This is what makes the
+   * Inbox's re-route possible: the same loading path the sweep uses, told the answer rather than
+   * asked for one.
+   *
+   * Absent, everything behaves exactly as before. Present, the recogniser is not consulted at all,
+   * because the whole point is that a person is overruling it.
+   */
+  forceKind?: RouteKind,
 ): Promise<{ recognised: boolean; routedAs: string; routeResult: string | null; imported: boolean }> {
-  const cls = classify(fileName, buf);
+  const cls = forceKind ? { kind: forceKind, why: "", headers: [] } : classify(fileName, buf);
   if (cls.kind === "unrecognised") return { recognised: false, routedAs: cls.kind, routeResult: cls.why, imported: false };
   const s = await getSettings();
-  const r = await importRecognised(buf, fileName, "", fileName, s, ctx, { documentId: documentId ?? null });
+  const r = await importRecognised(buf, fileName, "", fileName, s, ctx, { documentId: documentId ?? null }, forceKind);
   return { recognised: true, ...r };
 }
 
@@ -672,6 +685,8 @@ async function importRecognised(
    * not kept". Without the supplier the ladder went to whichever row matched /mckesson/i.
    */
   filed?: { documentId?: string | null; supplierId?: string | null; supplierName?: string | null },
+  /** Set where a person has overruled the recogniser from the Inbox. See `importDropped`. */
+  forceKind?: RouteKind,
 ): Promise<{ routedAs: string; routeResult: string | null; imported: boolean }> {
   /* Who, if anybody, has claimed this sender as their own. */
   const vendorBill = async (addr: string) => {
@@ -679,7 +694,8 @@ async function importRecognised(
     return vendorForSender(addr, await vendors());
   };
 
-  const cls = classify(fileName, buf);
+  // A person's answer if there is one, the recogniser's otherwise. See `importDropped`.
+  const cls = forceKind ? { kind: forceKind, why: "", headers: [] } : classify(fileName, buf);
   const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   let routeResult: string | null = null;
   let imported = false;

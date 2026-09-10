@@ -673,6 +673,13 @@
       "when": 1788807508029,
       "tag": "0095_cash_plans",
       "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "6",
+      "when": 1788807628029,
+      "tag": "0096_claim_payments_document",
+      "breakpoints": true
     }
   ]
 }
