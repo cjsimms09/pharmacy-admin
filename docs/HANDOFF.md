@@ -800,6 +800,77 @@ pass, 0 fail) and `npm run build` (clean).
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
+### From B to 1 — RELAY FROM THE OWNER: remits, 835s and the whole of how this pharmacy is run (10 September)
+
+**This is the owner's instruction, passed to you because he asked me to pass it on.** His words,
+across two messages this morning:
+
+> *"We need to make sure we are ready to handle weird/different circumstances for claims and remits.
+> Ie a claim gets submitted and sold then gets returned. How do we handle this from a claim
+> perspective, from an 835 perspective, from a money perspective. I also want to make sure we have a
+> way to understand codes that come over on 835s. How do we handle them. Both in terms of claims and
+> profit or bookkeeping. Have we searched all the contracts and manuals we have to make sure we can
+> understand all the different codes"*
+
+> *"You need to relay this info to pharmacy session 1, we need to do research on remit and 835
+> pharmacy tracking. We need to have a sound/logical/correct way to handle everything. We should
+> also [know] more things about running a pharmacy, buying, rebates, 835s, handling remits. We need
+> to have a thorough understanding of and solid plan to handle everything correctly, and identify
+> when we don't or when something is wrong."*
+
+I have answered the first message as far as the code can be read from here:
+**`docs/audits/2026-09-10-reversals-and-835-codes.md`**. Four findings, in short:
+
+1. **A reversal in the bin is handled correctly; a return after the sale is not.** `groupIntoFills`
+   drops a reversed row with no test of when it was reversed (`fills.ts:360`), so a September return
+   removes revenue *and* its cost from August — a month already reported, changed with no note.
+   `reversedOn` is written on every path that reverses a claim and **read by nothing**, and it is the
+   one field that would let the return be booked in the period it happened.
+2. **A payer's reversal cannot attach to the claim it reverses.** `findClaim` refuses a reversed
+   claim (`claim-payments.ts:131`), which is right for a plan settling a fill the pharmacy reversed
+   and wrong for the one case where the reversed claim is the correct home. The discriminator is
+   CLP02 and it is already parsed and already discarded.
+3. **No code on an 835 is understood.** CLP02 decides one word in a skip message; claim-level CAS
+   adjustments are parsed at `x12-835.ts:368` and read nowhere; LQ/MOA remark codes are not parsed
+   at all; PLB codes reach a sentence that says in the site's own words that the money "is not yet
+   on either account". `grep -rn "CARC\|RARC" src/` matches nothing.
+4. **The contracts cannot have been searched for codes.** `TransactionFee` and
+   `PostPointOfSaleDiscount` (`contract-terms.ts:117,196`) have no field for the code a fee is
+   printed under, so the join BACKLOG 2b-v describes has no key on the contract side. One field on
+   each shape plus a line in the extraction prompt — your file.
+
+**On the second message, the division as I see it.** Almost all of the research he is asking for is
+yours, not because it is harder but because it needs the machine:
+
+- **Only you can read the contracts and the manuals.** 357 documents, and the question "does any of
+  them name a code beside a fee" cannot be asked from here at all.
+- **Only you can fetch the published code sets.** CARC and RARC are maintained externally and
+  revised three times a year; the PLB codes are in the 835 guide. My network reaches GitHub and the
+  package registries and nothing else. **A dictionary written from memory is exactly the inference
+  this repository forbids**, so I will not write one — I will build the frame it loads into.
+- **Only you can size any of it.** Queries 16-20 below.
+
+What I will build, pure and tested, in my own file group, unless you tell me otherwise: the
+classification frame (group code + reason code + level → bookkeeping heading, with *unknown* as a
+first-class result rather than a fallback), the reversal decision as a pure function of CLP02 and
+the sign, and the code table's shape and loader with a provenance on every row so a list can be
+dropped in on the machine and proved against a real 835.
+
+**And the sentence of his I think should become a rule with a name:** *"identify when we don't [know]
+or when something is wrong."* The site already does this in one place and it is the best thing in
+the 835 reader — a remittance whose arithmetic does not close posts nothing and says what is
+missing. The same posture generalises: an adjustment code the table does not hold should produce a
+visible "$X on this remittance is unclassified", never a quiet "other". A dictionary that maps an
+unknown code to a heading is worse than no dictionary, because it launders a gap into a figure.
+Worth stating once in `docs/reference/` and then held to everywhere, the way the data dictionary is.
+
+The wider list he named — buying, rebates, running the pharmacy — I have deliberately not written a
+plan for. A plan for those written from here would be an essay: the buying logic, the rebate ladders
+and the supplier terms all turn on documents and figures only the machine can see, and he has asked
+for something *correct*, not something comprehensive. My suggestion is one document per area in the
+shape of the 835 one — what happens today, traced; where it is wrong; what needs deciding; what
+needs measuring — and that you take the ones that need the real data first.
+
 ### From B to 1 — the undo and the 835's duplicate guard key on different things (10 September)
 
 `c48f8d4` is right about the check number, and the document is the right handle. The problem is
@@ -1430,6 +1501,24 @@ needs a file sent anywhere — counts, shapes and presence/absence only.**
     arrival whose money is on the books under some other copy, or under none, and whose undo button
     will refuse with a sentence that is not the reason. The same count against `claim_payments` with
     a null `document_id` sizes the facilitator sweep's share of it.
+
+**Reversals and 835 codes (added 10 September, from the owner's question).**
+
+16. *How big is the sold-and-returned case?* `select count(*) from claims where status = 'reversed'
+    and completed_at is not null` — and of those, how many have `reversed_on` in a later month than
+    `completed_at`. The second number is the count of months whose figures have silently changed.
+17. *How much money is it?* The same rows, summing `remit_cents + patient_total_cents` and
+    `acquisition_cents`, by the month they were sold in.
+18. *How many payments could not find their claim?* `select count(*) from claim_payments where
+    claim_id is null`, and separately `where amount_cents < 0`. The overlap is the reversals that
+    the "never a reversed claim" rule turned away.
+19. *What codes does this pharmacy actually receive?* Every distinct CAS group and reason code, and
+    every PLB reason code, across the 835s read so far, with a count and a total for each. This is
+    the dictionary that matters — the published list is thousands of codes and this pharmacy sees
+    perhaps thirty.
+20. *Does any contract name a code beside a fee?* On a sample of contracts already extracted, does
+    the text near a named fee carry a code the remittance would use. If none do, the contract half
+    of BACKLOG 2b-v is not the answer and the codes have to come from the payer manuals instead.
 
 **And one file, if it can be spared.** A single real 835 with every identifier changed per
 `fixtures/README.md` — Rx numbers, NPI, member and payer ids. There is none in the repository, so
