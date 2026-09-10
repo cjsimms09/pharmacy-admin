@@ -150,6 +150,14 @@ export type PLInputs = {
    * because that stock is still on the shelf — it is inventory, not cost of goods, and the two
    * figures move together.
    */
+  /**
+   * Fills sold this month whose acquisition cost the report never printed.
+   *
+   * Held out of revenue and cost together. Named because the fix is somebody chasing a cost, not
+   * the account guessing one.
+   */
+  costUnknownFills?: number;
+  costUnknownRevenueCents?: number | null;
   waitingFills?: number;
   waitingRevenueCents?: number | null;
   waitingCostCents?: number | null;
@@ -508,6 +516,13 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
     );
   }
 
+  if (i.costUnknownFills && (i.costUnknownRevenueCents ?? 0) > 0) {
+    caveats.push(
+      `${i.costUnknownFills.toLocaleString("en-US")} prescriptions sold this month carry no acquisition cost, so ${formatCents(i.costUnknownRevenueCents ?? 0)} of revenue is held out of this account along with the cost that would have gone against it. ` +
+        "Counting the revenue with nothing behind it would put the whole of it into gross profit. The figure is missing from the report, not from the pharmacy — the fills are real and so is the money.",
+    );
+  }
+
   const spent = new Set(operating.filter((l) => l.amountCents !== 0).map((l) => l.label));
   /*
    * A cost the pharmacy has told the site about is not a cost the site has forgotten.
@@ -793,17 +808,36 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
   const waiting = fills.filter((f) => !f.soldOn && f.dateFilled.startsWith(month));
   const waitingRevenueCents = waiting.reduce((n, f) => n + f.remitCents + f.patientPaidCents, 0);
   const waitingCostCents = waiting.reduce((n, f) => n + (f.acquisitionCents ?? 0), 0);
+  /*
+   * A fill whose cost nobody knows is left out of both sides, which is what this file has always
+   * said it does and did not do.
+   *
+   * The rule is stated a few lines above — "A fill with no acquisition cost on it is left out of
+   * both sides rather than counted as free" — and only the cost side honoured it. Revenue came from
+   * every fill, so a bottle of unknown cost contributed its whole price to gross profit and nothing
+   * against it. Thirty-nine September fills were in that state: an Adzenys, a Zepbound pen, an
+   * Auvelity, $5,071.34 of revenue and $5,071.34 of profit, a third of the month's gross and
+   * twenty-six times its bottom line.
+   *
+   * Both directions are wrong by the same amount, so the choice is which way to be wrong. Dropping
+   * the revenue understates the month; keeping it flatters the month. This account has said in half
+   * a dozen places that it must never quietly err in the flattering direction, so the revenue goes
+   * out with the cost and the pair is named below with the figure, which is the only version
+   * somebody can act on.
+   */
+  const costUnknown = monthFills.filter((f) => f.acquisitionCents === null);
+  const costUnknownRevenueCents = costUnknown.reduce((n, f) => n + f.remitCents + f.patientPaidCents, 0);
   const mine = monthFills.filter((f) => f.acquisitionCents !== null);
   /*
    * What the month's dispensing actually brought in, per fill rather than per transmission, so a
    * coordinated claim is one bottle's revenue and not two.
    */
-  const claimsRevenueCents = monthFills.length ? monthFills.reduce((n, f) => n + f.remitCents + f.patientPaidCents, 0) : null;
+  const claimsRevenueCents = mine.length ? mine.reduce((n, f) => n + f.remitCents + f.patientPaidCents, 0) : null;
   // Kept apart as well as together: the summary can supply one side of the prescription revenue
   // and not the other, and an account that could only take all three figures or none of them was
   // one retail-only summary away from dropping every prescription. See the revenue block above.
-  const claimsRemitCents = monthFills.length ? monthFills.reduce((n, f) => n + f.remitCents, 0) : null;
-  const claimsPatientCents = monthFills.length ? monthFills.reduce((n, f) => n + f.patientPaidCents, 0) : null;
+  const claimsRemitCents = mine.length ? mine.reduce((n, f) => n + f.remitCents, 0) : null;
+  const claimsPatientCents = mine.length ? mine.reduce((n, f) => n + f.patientPaidCents, 0) : null;
   const onAccount = {
     receivableCents: monthFills.reduce((n, f) => n + f.receivableCents, 0),
     unbilledCostCents: monthFills.reduce((n, f) => n + (f.unbilledCostCents ?? 0), 0),
@@ -896,6 +930,8 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
     claimsRevenueCents,
     claimsRemitCents,
     claimsPatientCents,
+    costUnknownFills: costUnknown.length,
+    costUnknownRevenueCents,
     waitingFills: waiting.length,
     waitingRevenueCents,
     waitingCostCents,

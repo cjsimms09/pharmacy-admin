@@ -1312,8 +1312,30 @@ export async function allFills(range?: { from?: string; to?: string }) {
 }
 
 async function loadFills(from: string, to: string) {
-  const { and, gte, lte } = await import("drizzle-orm");
-  const rows = await db.query.claims.findMany({ where: and(gte(schema.claims.dateFilled, from), lte(schema.claims.dateFilled, to)) });
+  /*
+   * A fill is in the window if it was filled in it OR collected in it, and the two are not the same
+   * set.
+   *
+   * Since revenue began to follow the day the script was collected, the account slices the month on
+   * `soldOn` while this loader selected on `dateFilled` — so a fill dispensed on 31 August and
+   * collected on 2 September was loaded only when somebody happened to ask for both months. Asked
+   * for September alone it was in no account at all: not in September, because September never
+   * loaded it, and not in August, because August's slice wants a September sale.
+   *
+   * It made the same month give two answers from the same database. September's profit read $193.18
+   * on the month page and $1,528.03 on the quarter page — the month understating by $1,334.85, or
+   * 87% of it — and `booksBalance` passed on both, because each was internally consistent. A total
+   * that equals the sum of its own lines cannot tell you a line is missing.
+   *
+   * The union is exactly what the account needs and nothing more: fills sold in the window are its
+   * revenue, and fills filled in the window but not yet collected are the ones it holds back and
+   * names. Both halves are wanted, so both halves are loaded.
+   */
+  const { and, gte, lte, or } = await import("drizzle-orm");
+  const inWindow = (col: Parameters<typeof gte>[0]) => and(gte(col, from), lte(col, to));
+  const rows = await db.query.claims.findMany({
+    where: or(inWindow(schema.claims.dateFilled), inWindow(schema.claims.completedAt), inWindow(schema.claims.soldOn)),
+  });
   const { groupIntoFills } = await import("./fills");
   const { laterPayments } = await import("./claim-payments");
   return groupIntoFills(
