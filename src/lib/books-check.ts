@@ -243,12 +243,15 @@ export function countedTwice(i: PLInputs, pl: MonthlyPL): CountedTwice[] {
   out.push({
     what: "Payroll and rent",
     routes: ["The standing cost, accrued by the day", "The real bill for the month, filed on Spending"],
-    rule: "The bill wins. A standing cost whose vendor has already billed the month is dropped before the account is built, so the month reads the same whether the bill has come or not — and never carries both.",
+    rule:
+      "The bills win as far as they go, and the estimate covers the rest. A standing cost stands down by what has been billed rather than for the first bill that arrives: " +
+      "$45,000 of payroll with one $12,000 run filed carries $12,000 of bill and $33,000 of estimate, never both in full and never only the part that happens to be in. " +
+      "It disappears entirely once the bills reach the month's figure.",
     bothPresent: false,
     keptOutCents: null,
     says:
       replaced > 0
-        ? `${replaced} standing cost${replaced === 1 ? "" : "s"} carried this month; any whose real bill is already filed were dropped before the account was built.`
+        ? `${replaced} standing cost${replaced === 1 ? "" : "s"} carried this month, each net of whatever its real bills already cover.`
         : "No standing costs apply to this month.",
   });
 
@@ -278,11 +281,73 @@ export function countedTwice(i: PLInputs, pl: MonthlyPL): CountedTwice[] {
   const driver = line("Delivery round");
   out.push({
     what: "The delivery round",
-    routes: ["The driver's invoices, as an operating cost", "The same invoices, raised on the driver's behalf and billed to the clinic"],
-    rule: "The setting decides, and one setting governs both the account and the note about it. Where the clinic pays him the round is not the pharmacy's money and is named as excluded rather than silently dropped.",
+    routes: ["The round accrued from the days entered, at his rate", "The driver's own invoice for the month"],
+    rule:
+      "The invoice where there is one, the days entered where there is not — never both, because an invoice is the same round the days describe. " +
+      "An invoice is only raised on a finished month, so a month in progress carries the days: it used to carry nothing at all, and September showed $0.00 with $486.00 owed. " +
+      "And where the setting says the clinic pays him, neither is the pharmacy's money and the account names it as excluded rather than dropping it in silence.",
     bothPresent: false,
     keptOutCents: null,
-    says: driver ? `${dollars(driver.amountCents)} counted as an operating cost: the pharmacy pays the driver.` : "Not counted: the setting says the round is billed to the clinic, and it is named on the month's account as excluded.",
+    says: driver
+      ? `${dollars(driver.amountCents)} counted as an operating cost, from ${i.basis === "cash" ? "the invoices sent this month" : "the days entered, until his invoice for the month is raised"}.`
+      : "Not counted: the setting says the round is billed to the clinic, and it is named on the month's account as excluded.",
+  });
+
+  /*
+   * What actually left the bank for goods. Three records know it and only one may be believed.
+   */
+  out.push({
+    what: "What was paid to the wholesalers",
+    routes: ["The wholesaler's own ledger — what cleared, and under which ACH", "Their invoices by date, and their deliveries in PioneerRx"],
+    rule:
+      "A supplier whose own ledger arrives is counted ONLY from it: not their invoices by date, not their PioneerRx deliveries, either of which on top would be the same purchase twice. " +
+      "Everyone else is counted from invoice dates exactly as before. Only what has actually CLEARED counts — an invoice still pending is money in the bank, however certain its due date. " +
+      "`countedTwiceInCash` proves it by counting rather than by reasoning, which is what catches the case nobody thought of.",
+    /* Only a question on the cash side; on the accrual one the two records are not alternatives at all. */
+    bothPresent: i.basis === "cash" && Boolean(i.cashCogsSays && /actually taken by/.test(i.cashCogsSays)),
+    keptOutCents: null,
+    says: i.basis === "cash" ? (i.cashCogsSays ?? "Nothing left the bank for goods that the site can see.") : "Not a cash-account question: the accrual side counts what the month's dispensings cost to buy, whenever they were paid for.",
+  });
+
+  /*
+   * The PSAO's money, which the payment report itemises and the bank statement shows as a lump.
+   */
+  out.push({
+    what: "The PSAO's payments",
+    routes: ["The ProviderPay payment report, itemised by payer and payment number", "The deposit on the bank statement"],
+    rule:
+      "The report wins: it names which payer sent what, and the deposit is that same money swept across. August's file matches every deposit to exactly one payment — " +
+      "$40,084.14 to Health Mart Atlas EFT-31312459 — so whichever is banked, the other must not be. Each payment is keyed on the payer and their own payment number, so the same report read twice banks nothing twice.",
+    bothPresent: false,
+    keptOutCents: null,
+    says: "Banked from the report, by payer. The deposits on the statement are recognised as the same money and add nothing.",
+  });
+
+  /*
+   * Postage, which arrives as a confirmation email and again as a card purchase on the statement.
+   */
+  out.push({
+    what: "Postage bought by card",
+    routes: ["Endicia's purchase confirmation, read from the email itself", "The STAMPS.COM purchase on the bank statement"],
+    rule:
+      "The confirmation wins, because it arrives first and carries the order number the booking is keyed on. The bank line is recognised as the same money and books nothing. " +
+      "The confirmation has no attachment — the whole charge is four fields of text — which is why the sweep used to drop it and $200.00 reached neither account.",
+    bothPresent: false,
+    keptOutCents: null,
+    says: "Booked once, from the email, keyed on Endicia's own order number.",
+  });
+
+  /*
+   * The fills themselves: the nightly report, and PioneerRx, which holds the same fills.
+   */
+  out.push({
+    what: "The month's fills",
+    routes: ["The nightly Rx transaction report", "PioneerRx's own record of the same fills"],
+    rule:
+      "The report is the source and PioneerRx fills its gaps. Only fills whose Rx and refill number appear in PioneerRx and NOT in the claims are written, so a fill the report delivers tomorrow is never added again — it is already here. Backfilled rows are stamped `pioneer_sql` so what came from where is visible on any row.",
+    bothPresent: false,
+    keptOutCents: null,
+    says: "One row per fill, keyed on the prescription and its refill, whichever feed brought it.",
   });
 
   return out;

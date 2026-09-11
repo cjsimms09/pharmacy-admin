@@ -4,6 +4,7 @@ import { requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { PageHeader, Notice, Card } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
+import { GetRemits } from "@/components/get-remits";
 import { formatCents } from "@/lib/money";
 import { todayIso } from "@/lib/dates";
 import { monthLabel } from "@/lib/deliveries";
@@ -199,13 +200,14 @@ export default async function RemitsPage({ searchParams }: { searchParams: Promi
       >
         <ol className="ml-4 list-decimal space-y-3 text-sm">
           <li>
-            <b>Open the portal</b> and sign in.{" "}
-            <a className="text-accent underline" href={PORTAL} target="_blank" rel="noopener noreferrer">
-              providerpay.ah.mckesson.com
-            </a>
-            <div className="mt-1 text-xs text-ink-3">
-              Filter it to {monthLabel(wanted)}. The portal has no bulk download, so each remittance is its own click — that is
-              its design, not a setting anybody can change here.
+            <b>Press this, then sign in.</b> It opens the portal and copies the instruction for Claude, with the month already
+            in it — paste that one line and the clicking through every remittance is done for you.
+            <div className="mt-2">
+              <GetRemits portal={PORTAL} month={monthLabel(wanted)} folder={folder} />
+            </div>
+            <div className="mt-2 text-xs text-ink-3">
+              The portal has no bulk download — each remittance is its own click, which is its design and not a setting anybody
+              can change here. That is exactly the part worth handing to Claude.
             </div>
           </li>
           <li>
