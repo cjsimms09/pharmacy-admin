@@ -155,8 +155,19 @@ const RULES: Rule[] = [
   {
     kind: "wholesaler_payment",
     counterparty: "IPC",
-    /* "Independent Phar/WAREHOUSE", which the scan also renders WAREHOU S[ and WAREH0U SE. */
-    test: /INDEPENDENTPHAR|INDEPENDENTPHARMACY/,
+    /*
+     * "Independent Phar/WAREHOUSE 10689648" — and the number is the point.
+     *
+     * The owner: "are we able to see difference between IPD and IPC on bank statement?" On August's
+     * statement only one of them appears: every one of these eleven debits carries 10689648, which
+     * is this pharmacy's customer number with IPC — it is printed on their own credit memo. IPD is
+     * not on the statement at all under any descriptor the scan could read.
+     *
+     * So the number is required where the line carries one. Two wholesalers whose names both begin
+     * "Independent Pharmacy" is exactly the collision that would put IPD's money against IPC's
+     * invoices, and the account would balance while every supplier total was wrong.
+     */
+    test: /INDEPENDENTPHAR(?!.*\d)|INDEPENDENTPHAR[A-Z0-9]*?10689648/,
     side: "out",
     lands: "cost_of_goods",
     category: null,
@@ -208,7 +219,24 @@ const RULES: Rule[] = [
     alreadyCounted: "Postage and shipping, booked from Endicia's own emailed confirmation",
     why: "Postage bought by card. The confirmation email already books it, so the bank line is the same money.",
   },
-  { kind: "software", counterparty: "PioneerRx", test: /PIONEERRX/, side: "out", lands: "operating", category: "Software and systems", feed: "the PioneerRx invoices", why: "The pharmacy system's own charge." },
+  {
+    /*
+     * The owner: "pioneer should match invoice we willr eceive from them for previous month".
+     *
+     * So their monthly invoice and this debit are one charge seen twice, and whichever arrives
+     * first must be the one counted. Not certain, because no PioneerRx bill is on file yet — the
+     * moment one is, this is the same money and must not be added to it.
+     */
+    kind: "software",
+    counterparty: "PioneerRx",
+    test: /PIONEERRX/,
+    side: "out",
+    lands: "operating",
+    category: "Software and systems",
+    feed: "the PioneerRx invoice for the month before",
+    mayAlreadyBeCounted: "Software and systems, wherever their monthly invoice has been filed as a bill",
+    why: "The pharmacy system's own charge, billed monthly in arrears.",
+  },
   {
     /*
      * Not the PSAO fee, which is a separate standing cost of its own.
@@ -224,9 +252,31 @@ const RULES: Rule[] = [
     lands: "operating",
     category: "Professional fees",
     feed: null,
+    /* If a CPESN invoice is ever filed as a bill, this debit is the same money and not more of it. */
+    mayAlreadyBeCounted: "Professional fees, wherever a CPESN invoice has been filed as a bill",
     why: "Membership of the CPESN pharmacy network. A separate arrangement from the PSAO, and a separate cost.",
   },
-  { kind: "security", counterparty: "Alert 360", test: /ALERT360/, side: "out", lands: "operating", category: "Software and systems", feed: "the Alert 360 standing cost", why: "The alarm monitoring contract." },
+  {
+    /*
+     * A standing cost, so the card purchase is the same money the account already carries.
+     *
+     * The owner: "alert 360 and wages shouldnt duplicate (already set in the site)". He is right,
+     * and wages were guarded and this was not — the alarm contract is on file at $207.33 a month
+     * and accrues by the day, so booking the card purchase on top would be the alarm twice.
+     *
+     * Worth him knowing: the card was charged $214.69 in August against the $207.33 on file. The
+     * standing figure is stale, not the guard.
+     */
+    kind: "security",
+    counterparty: "Alert 360",
+    test: /ALERT360/,
+    side: "out",
+    lands: "operating",
+    category: "Software and systems",
+    feed: "the Alert 360 standing cost",
+    alreadyCounted: "Software and systems, which the Alert 360 standing cost already carries by the day",
+    why: "The alarm monitoring contract, which is a standing cost on file.",
+  },
   { kind: "software", counterparty: "Square", test: /SQUAREUP/, side: "out", lands: "operating", category: "Software and systems", feed: null, why: "A Square charge." },
   { kind: "software", counterparty: "Jotform", test: /JOTFORM/, side: "out", lands: "operating", category: "Software and systems", feed: null, why: "A Jotform subscription." },
 

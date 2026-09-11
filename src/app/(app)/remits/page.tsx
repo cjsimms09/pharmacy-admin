@@ -263,8 +263,8 @@ export default async function RemitsPage({ searchParams }: { searchParams: Promi
       >
         <ol className="ml-4 list-decimal space-y-3 text-sm">
           <li>
-            <b>Press this, then sign in.</b> It opens the portal and copies the instruction for Claude, with the month already
-            in it — paste that one line and the clicking through every remittance is done for you.
+            <b>Press this, then paste it into Claude.</b> It copies the request with the month already
+            in it. Claude opens the portal in a tab it can actually drive, you sign in there, and the clicking through every remittance is done for you.
             <div className="mt-2">
               <GetRemits portal={PORTAL} month={monthLabel(wanted)} folder={folder} />
             </div>
