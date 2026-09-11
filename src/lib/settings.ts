@@ -20,6 +20,14 @@ export const SETTING_KEYS = [
   "pharmacy_phone",
   "pharmacy_npi",
   "pharmacy_ncpdp", // NCPDP / NABP provider number
+  /**
+   * The address a PBM writes back to.
+   *
+   * Every appeal and enrolment form asks for it as a required field, and the site had no field for
+   * it at all — the Caremark portal knew it and this pharmacy's own records did not. Not the mailbox
+   * the site sends from, which is `mail_user`: a PBM replying to that would be answering a machine.
+   */
+  "pharmacy_email",
   "pharmacy_tin", // Federal tax id, which an ERA/EFT enrollment asks for and nothing else on the site does
   "pharmacy_dea",
   "pharmacy_chain_code", // PSAO-assigned; gates which rate exhibit governs a claim
