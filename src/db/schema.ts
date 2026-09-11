@@ -1782,6 +1782,15 @@ export const macAppealTerms = sqliteTable(
     submissionTarget: text("submission_target"),
     appealWindowDays: integer("appeal_window_days"),
     windowBasis: text("window_basis"),
+    /**
+     * Who the agreement says may file: "pharmacy", "either", "psao", "none", or null if unread.
+     *
+     * The first gate on any appeal, ahead of the deadline. Several agreements say the PSAO files and
+     * the pharmacy does not — Blue Eagle, Argus, MC-Rx, PDMI — and for Express Scripts the PSAO
+     * already sends a weekly below-cost list. Filing into those is wasted work at best, and at worst
+     * a duplicate submission from a pharmacy arguing it was underpaid.
+     */
+    whoFiles: text("who_files"),
     requiredFields: text("required_fields"),
     invoiceRequired: text("invoice_required"),
     responseSlaDays: integer("response_sla_days"),

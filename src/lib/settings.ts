@@ -40,6 +40,15 @@ export const SETTING_KEYS = [
    * The owner, 11 September 2026: "my chain affiliation code is A605 for caremark btw".
    */
   "caremark_chain_code",
+  /**
+   * The day the MAC appeal worklist was last worked through.
+   *
+   * Weekly filing is safe only because PioneerRx is one day behind and the tightest window -
+   * Caremark, ten calendar days from the fill - leaves three days of slack. A *skipped* week puts
+   * the next run on day fourteen and the whole batch out of time, so a missed run has to be
+   * noticed rather than quietly filing nothing.
+   */
+  "mac_appeal_last_run",
   "psao_name", // Pharmacy Services Administrative Organization — not the PSO below
   "psao_member_id",
   "pso_member", // "yes" | "no"
