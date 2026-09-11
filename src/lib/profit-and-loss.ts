@@ -992,7 +992,7 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
     .filter((l) => !l.replacedByBill)
     .map((l) => {
       const c = l.categoryId ? byId.get(l.categoryId) : undefined;
-      return { name: l.name, categoryId: l.categoryId, categoryName: c?.name ?? "Uncategorised", kind: c?.kind ?? "operating", accruedCents: l.accruedCents, amountCents: l.amountCents, days: l.days, of: l.of, noPaidDay: l.noPaidDay };
+      return { name: l.name, categoryId: l.categoryId, categoryName: c?.name ?? "Uncategorised", kind: c?.kind ?? "operating", accruedCents: l.toAccrueCents, amountCents: l.amountCents, days: l.days, of: l.of, noPaidDay: l.noPaidDay };
     });
   return {
     month,

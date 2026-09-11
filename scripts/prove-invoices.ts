@@ -70,6 +70,9 @@ async function main() {
   const { pdfText } = await import("../src/lib/pdf-text");
   const { parseInvoiceLines } = await import("../src/lib/invoice-lines");
   const { supplierNamedOn } = await import("../src/lib/invoices");
+  /* The same neutral party the reader itself uses, so the proof reads what the reader would read. */
+  const { knownNdcs } = await import("../src/lib/drug-directory-store");
+  const known = await knownNdcs();
 
   const invoices = await db
     .select({
@@ -119,7 +122,7 @@ async function main() {
       why = (why ? why + " " : "") + "Re-read from the extract stored at import rather than from the file itself.";
     }
 
-    const fresh = text ? parseInvoiceLines(text, inv.totalCents) : null;
+    const fresh = text ? parseInvoiceLines(text, inv.totalCents, known) : null;
     rows.push({
       invoiceId: inv.id,
       supplier: inv.supplier,

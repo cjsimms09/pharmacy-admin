@@ -152,3 +152,47 @@ describe("the two supplier layouts, on real files with the identifiers changed",
     assert.equal(r.format, null);
   });
 });
+
+/**
+ * McKesson's front-end lines carry a UPC, not an NDC.
+ *
+ * These five rows are copied from the $12,998.31 invoice of 8 September. Each was read as eleven
+ * digits that are not any drug — "305361-32710" taken as the NDC 30536-1327-10, which does not
+ * exist — and the purchase sat against nothing. A drug UPC is a prefix digit and then the NDC in
+ * its ten-digit form, and the ten-digit form has to be padded back in one of three places.
+ *
+ * PioneerRx booked in four of these independently, off the bottle rather than off the page, and
+ * agrees with every answer here.
+ */
+describe("a front-end UPC is not an NDC", () => {
+  const UPC_LINES = [
+    "305361-32710137-9593973485930            1EA ACETAM TAB 325MG RUG 1000@       21.80 R       21.80        21.80",
+    "316714-79902137-9593973485930            1EA CETIRIZINE HCI TB10MG 100NSTR@        6.99 R        6.99         6.99",
+    "041167-05877137-9593973485930            1EA ASPERCREME LIDCNE CREME 2.7OZ         5.84 R        5.84         5.84",
+  ].join("\n");
+
+  /* What the FDA directory actually holds for these three, and nothing else. */
+  const known = (n: string) => ["00536132710", "16714079902", "41167058707"].includes(n);
+
+  test("resolves each UPC to the drug the FDA lists", () => {
+    const got = parseInvoiceLines(UPC_LINES, null, known).lines.map((l) => l.ndc11);
+    assert.deepEqual(got, ["00536132710", "16714079902", "41167058707"]);
+  });
+
+  test("with no directory to ask, the digits stand rather than a guess replacing them", () => {
+    const got = parseInvoiceLines(UPC_LINES, null).lines.map((l) => l.ndc11);
+    assert.deepEqual(got, ["30536132710", "31671479902", "04116705877"]);
+  });
+
+  test("a code that is already a drug is left alone", () => {
+    /* 5-4-2 is an NDC and is read as one; only the 6-5 form is a UPC. */
+    assert.equal(ndc11("00002-1436-11"), "00002143611");
+  });
+
+  test("a device UPC resolves to nothing and keeps its digits", () => {
+    /* Pen needles and sensors have no NDC at all. Guessing one would be worse than none. */
+    const line = "094030-00211137-9593973485930            1EA EMBRACE PEN NEEDLE 31G 5MM 100        8.50 R        8.50         8.50";
+    const got = parseInvoiceLines(line, null, () => false).lines.map((l) => l.ndc11);
+    assert.deepEqual(got, ["09403000211"]);
+  });
+});

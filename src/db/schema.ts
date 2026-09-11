@@ -802,6 +802,21 @@ export const suppliers = sqliteTable(
     noRebates: integer("no_rebates", { mode: "boolean" }).notNull().default(false),
     noRebatesBy: text("no_rebates_by"),
     noRebatesAt: text("no_rebates_at"),
+
+    /**
+     * They publish no catalogue, and that is an answer.
+     *
+     * The same shape as `noRebates` above, in a second place. A supplier with no price file reads as
+     * "none filed under this supplier" on their card and counts against catalogue coverage on the
+     * health page for ever — whether or not one is ever coming. Several wholesalers simply do not
+     * publish one: a compounder, a one-line vendor, a co-op that quotes by email.
+     *
+     * It changes no arithmetic. Their invoice prices are read from the invoice and their NDCs priced
+     * from NADAC either way. It changes what the site says about them.
+     */
+    noCatalogue: integer("no_catalogue", { mode: "boolean" }).notNull().default(false),
+    noCatalogueBy: text("no_catalogue_by"),
+    noCatalogueAt: text("no_catalogue_at"),
     /**
      * The order value they will not ship under, in cents.
      *
@@ -959,6 +974,14 @@ export const pioneerPurchases = sqliteTable(
     totalCents: integer("total_cents"),
     lines: integer("lines"),
     itemsText: text("items_text").notNull().default(""),
+    /**
+     * The same lines as figures: ndc11, description, quantity, unitCostCents, extendedCents, packSize.
+     *
+     * `itemsText` is the delivery as a person reads it. This is the delivery as the price check
+     * reads it, and the two are written from the same rows in the same pass. Empty on every row
+     * pulled before this existed; the check falls back to reading the text for those.
+     */
+    itemsJson: text("items_json").notNull().default(""),
     /**
      * True where he has said this one delivery is closed on its receipt.
      *

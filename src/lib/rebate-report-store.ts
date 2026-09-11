@@ -4,7 +4,8 @@ import { eq } from "drizzle-orm";
 import { getSettings, setSetting } from "./settings";
 import { allSuppliers } from "./suppliers-registry";
 import { saveRebateProgram } from "./supplier-terms-store";
-import { parseRebateReport, termsFromReport, gprTermsFromReport, brandTermsFromReport, bandFor, looksLikeRebateReport, type RebateReport } from "./rebate-report";
+import { parseRebateReport, termsFromReport, gprTermsFromReport, brandTermsFromReport, bandFor, looksLikeRebateReport, type RebateReport, type Statement } from "./rebate-report";
+import { newId } from "./crypto";
 
 /**
  * Filing a rebate breakdown: the ladder as terms, and the month's rate as the one the comparison uses.
@@ -237,6 +238,7 @@ export async function fileRebateReport(
   // And against the supplier it belongs to, which is where every screen now reads it from.
   if (supplier) {
     await db.update(schema.suppliers).set({ rebateStatementJson: settlement }).where(eq(schema.suppliers.id, supplier.id));
+    await postRebateToTheBooks(s, supplier, meta.documentId ?? null, user);
   }
 
   return {
@@ -298,4 +300,145 @@ export async function fileRebateReportFromDocument(documentId: string, user: { n
   const text = pdfText(await readFile(doc.storageKey));
   if (!looksLikeRebateReport(text)) throw new Error("That document does not look like a McKesson rebate breakdown.");
   return fileRebateReport(text, { documentId, supplierId }, user);
+}
+
+/**
+ * Puts a rebate statement onto both accounts, in the month each one belongs to.
+ *
+ * The owner, sending McKesson's July statement: "for accural accounting this one should count in
+ * July (replace estimate) and for cash it should count in month paid."
+ *
+ * That is what `business-docs.ts` has always said should happen — "rebate_statement → Spending under
+ * 'Wholesaler rebates' (replaces the estimate) and, where the money arrived, the bank" — and what
+ * the account already knows how to consume: `profit-and-loss.ts` zeroes the ladder's estimate the
+ * moment a stated rebate exists for the month, and takes only receipts on the cash side. The reader
+ * parses every field needed. Nothing posted it. Filing a statement wrote it onto the supplier and
+ * stopped, so the estimate stood until somebody typed the real figure on Spending by hand.
+ *
+ * The statement carries both dates itself, which is what makes this possible without guessing:
+ * "Start: Jul 01 2026 End: Jul 31 2026" and "Paid: Aug 19 2026".
+ *
+ *   accrual — an expense dated the last day of the period it was earned in, so it lands in July.
+ *   cash    — a receipt dated the day it was paid, so it lands in August.
+ *
+ * Entered negative, as the category's own note insists: a rebate is a reduction in what the generics
+ * cost, never revenue. Booked as income it would overstate both sales and cost of goods and leave
+ * every margin below it wrong.
+ *
+ * Both sides are keyed on the statement's own identity — supplier and period — so the same statement
+ * arriving twice, or being re-read, never posts twice.
+ */
+export async function postRebateToTheBooks(
+  statement: Statement,
+  supplier: { id: string; name: string },
+  documentId: string | null,
+  user: { name: string },
+): Promise<{ accrual: string | null; cash: string | null; why: string }> {
+  const total = statement.totalPaidCents;
+  if (total === null || total === 0) return { accrual: null, cash: null, why: "The statement prints no total paid." };
+  if (!statement.periodTo) return { accrual: null, cash: null, why: "The statement prints no period, so there is no month to put it in." };
+
+  /* The statement's own identity. Two statements for one supplier and period are the same statement. */
+  const key = `REBATE|${supplier.id}|${statement.periodFrom ?? "?"}|${statement.periodTo}`;
+
+  const { expenseCategories, expenses } = schema;
+  const category = await db.query.expenseCategories.findFirst({ where: eq(expenseCategories.name, "Wholesaler rebates") });
+
+  let accrual: string | null = null;
+  let superseded: number | null = null;
+  const already = await db.query.expenses.findFirst({ where: eq(expenses.invoiceNumber, key) });
+  if (already) {
+    accrual = already.id;
+    /*
+     * A second statement for the same period is a correction, not a duplicate.
+     *
+     * The key is supplier and period, which is right: it is what stops one statement posting twice
+     * when it arrives twice or is re-read. But treating everything matching the key as already done
+     * meant a preliminary statement could never be replaced by a final one, a correction could
+     * never land, and a clawback would be discarded without a word. The books would go on carrying
+     * a figure the wholesaler had already withdrawn and no screen would say so.
+     *
+     * So the same figure is left alone and a different one is written, with what it replaced kept
+     * in the note. A rebate is a reduction in cost of goods either way; what changes is the size of
+     * it, and the size has to be allowed to change.
+     */
+    if (already.amountCents !== -Math.abs(total)) {
+      superseded = already.amountCents;
+      await db
+        .update(expenses)
+        .set({
+          amountCents: -Math.abs(total),
+          paidOn: statement.paidOn ?? already.paidOn,
+          notes:
+            `From the wholesaler's own statement: brand ${((statement.brandRebateCents ?? 0) / 100).toFixed(2)}, ` +
+            `generic ${((statement.genericRebateCents ?? 0) / 100).toFixed(2)}, fees ${((statement.totalFeesCents ?? 0) / 100).toFixed(2)}. ` +
+            `A later statement for the same period, replacing ${(Math.abs(already.amountCents) / 100).toFixed(2)} which the wholesaler has superseded.`,
+          documentId: documentId ?? already.documentId,
+        })
+        .where(eq(expenses.id, already.id));
+    }
+  } else if (category) {
+    accrual = newId();
+    await db.insert(expenses).values({
+      id: accrual,
+      categoryId: category.id,
+      invoiceNumber: key,
+      /* The accrual date is the period it was earned in, not the day it was paid or read. */
+      invoiceDate: statement.periodTo,
+      paidOn: statement.paidOn ?? null,
+      amountCents: -Math.abs(total),
+      description: `${supplier.name} rebate, ${statement.periodFrom ?? "?"} to ${statement.periodTo}`,
+      notes:
+        `From the wholesaler's own statement: brand ${((statement.brandRebateCents ?? 0) / 100).toFixed(2)}, ` +
+        `generic ${((statement.genericRebateCents ?? 0) / 100).toFixed(2)}, fees ${((statement.totalFeesCents ?? 0) / 100).toFixed(2)}. ` +
+        `It replaces the ladder's estimate for this month.`,
+      documentId,
+      source: "email",
+      /* A statement is the wholesaler stating a figure, not a reading of one, so it stands as confirmed. */
+      status: "confirmed",
+      createdBy: user.name,
+    });
+  }
+
+  /* And the cash side, only where the statement says the money has actually been paid. */
+  let cash: string | null = null;
+  if (statement.paidOn) {
+    const { addCashReceipt } = await import("./expenses");
+    const r = await addCashReceipt({
+      month: statement.paidOn.slice(0, 7),
+      kind: "rebate",
+      amountCents: Math.abs(total),
+      payer: supplier.name,
+      notes: `Rebate for ${statement.periodFrom ?? "?"} to ${statement.periodTo}, paid ${statement.paidOn}.`,
+      documentId,
+      createdBy: user.name,
+      sourceKey: key,
+      receivedOn: statement.paidOn,
+    });
+    cash = r.duplicate ? null : r.id;
+    /*
+     * And the same correction on the cash side.
+     *
+     * `addCashReceipt` keys on the same statement identity and refuses a second one, which is what
+     * stops a re-read banking the money twice. A corrected statement is not a re-read: the money
+     * that arrived was a different amount, and the receipt has to say the amount that arrived.
+     */
+    if (r.duplicate && superseded !== null) {
+      const { updateCashReceipt } = await import("./expenses");
+      await updateCashReceipt(key, {
+        amountCents: Math.abs(total),
+        notes: `Rebate for ${statement.periodFrom ?? "?"} to ${statement.periodTo}, paid ${statement.paidOn}. A later statement, replacing ${(Math.abs(superseded) / 100).toFixed(2)}.`,
+      });
+    }
+  }
+
+  const money = (c: number) => (Math.abs(c) / 100).toLocaleString("en-US", { style: "currency", currency: "USD" });
+  return {
+    accrual,
+    cash,
+    why:
+      `${supplier.name}: ${money(total)} against ${statement.periodTo.slice(0, 7)} on the accrual account` +
+      `${statement.paidOn ? `, and ${statement.paidOn.slice(0, 7)} on the cash account` : " — no payment date on it, so nothing is on the cash account yet"}.` +
+      (superseded !== null ? ` It replaces an earlier statement for the same period at ${money(superseded)}.` : ""),
+  };
 }

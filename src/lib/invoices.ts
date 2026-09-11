@@ -824,6 +824,58 @@ export async function fileInvoice(
     }
   }
 
+  /*
+   * One wholesaler, one name — and the address it wrote from, remembered.
+   *
+   * The supplier stored here came from whichever source won: the register, the sender, or the words
+   * on the page. Those disagree about capitalisation and about how much of a name to use, so the
+   * same wholesaler arrived under three spellings — "MCKESSON" fourteen times, "Mckesson" seven,
+   * and IPC as "IPC", "Independent Pharmacy Cooperative" and "Independent Pharmacy Cooperative
+   * (IPC)". Nothing groups them, so every per-supplier figure was split across the spellings and the
+   * money owed to IPC was three separate answers.
+   *
+   * `supplierRecordFor` is the register's own matcher, aliases and all — the same one the rest of the
+   * site uses. Where it places the name, the register's spelling is what gets stored. Where it does
+   * not, the name is left exactly as read, because inventing a canonical form for a wholesaler
+   * nobody has set up would be worse than an odd-looking row.
+   */
+  const registry = await allSuppliers(true);
+  const placed = supplierRecordFor(registry, supplier);
+  if (placed) supplier = placed.name;
+
+  /*
+   * And the address it came from is learned, which is what he asked for months ago:
+   *
+   * > "why do I have to put in the email that invoices come from for each supplier? Once we get an
+   * > invoice from a supplier and I tell the system it's an invoice from that supplier it should
+   * > automatically save that email as where invoices come from."
+   *
+   * `learnSender` was written for exactly this, with tests, and was called from nowhere — so five of
+   * his twenty-two suppliers have an address on file and the rest are recognised by luck. It refuses
+   * a bare domain, an address another supplier already claims, and one already covered, so this is
+   * only ever the narrow case of a known supplier writing from a new mailbox.
+   */
+  if (placed) {
+    const { learnSender } = await import("./learn-sender");
+    const learned = learnSender(
+      { id: placed.id, name: placed.name, senderEmails: placed.senderEmails },
+      meta.from,
+      registry.filter((x) => x.id !== placed.id).map((x) => ({ id: x.id, name: x.name, senderEmails: x.senderEmails })),
+    );
+    if (learned.learn) {
+      const { rememberSenderEmails } = await import("./suppliers-registry");
+      await rememberSenderEmails(placed.id, learned.senderEmails);
+      await audit({
+        action: "supplier.sender_learned",
+        userId: ctx.userId,
+        userName: ctx.userName,
+        entity: "supplier",
+        entityId: placed.id,
+        details: `${placed.name} now also recognised from ${learned.address} — ${learned.why}`,
+      });
+    }
+  }
+
   const filing = FILING[schedule];
   const file = new File([new Uint8Array(buf)], meta.fileName, { type: meta.mimeType || "application/pdf" });
   const stored = await storeFile(file, { allowReportTypes: true, folder: filing.folder });
@@ -1758,6 +1810,40 @@ export async function invoiceIssues(): Promise<InvoiceIssue[]> {
     });
   }
 
+  /*
+   * Where the invoice and the delivery disagree about the same purchase.
+   *
+   * One row however many disagreements there are, because the owner asked for exactly that: "Does
+   * each specific thing need its own alert or can the alert be me general and click for specific."
+   * Four lines on one McKesson invoice would otherwise be four rows on his morning list, all
+   * leading to the same screen.
+   *
+   * Money makes it blocking and everything else is a warning, because being billed above what
+   * arrived is a payment to stop, and the wrong drug against the right money is a correction to
+   * make when there is time.
+   */
+  const prices = await (await import("./invoice-price-check")).checkInvoicePrices();
+  if (prices.disagreements.length > 0) {
+    const n = prices.disagreements.length;
+    const overbilled = prices.overbilledCents > 0;
+    const over = `$${(prices.overbilledCents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    out.push({
+      key: "prices-disagree",
+      severity: overbilled ? "blocking" : "warn",
+      title: overbilled
+        ? `${over} billed above what was booked in`
+        : `${n} purchase${n === 1 ? "" : "s"} where the invoice and the delivery disagree`,
+      detail:
+        `PioneerRx records every delivery as it is booked in, and the wholesaler sends its own invoice. ` +
+        `${prices.agreeing} of ${prices.checked} invoices agree throughout, across ${prices.linesCompared} drugs. ` +
+        (overbilled
+          ? `The rest do not, and ${over} of the difference is money billed for goods that were not booked in.`
+          : `The totals all agree; what differs is which drug the money is against, which every margin below it is computed from.`),
+      href: "/inventory/invoices",
+      action: "See what differs",
+    });
+  }
+
   const rank = { blocking: 0, warn: 1 };
   return out.sort((a, b) => rank[a.severity] - rank[b.severity]);
 }
@@ -2315,7 +2401,12 @@ export async function storeInvoiceLines(
   if (!meta.text || meta.text.length < 200) return { stored: 0, unread: 0, reconciles: null, readCents: 0 };
   // Item lines add up to the goods, not to the amount due: shipping and tax are on the invoice and
   // are not items. Where the invoice prints both, the goods figure is what proves the reading.
-  const parsed = parseInvoiceLines(meta.text, readGoodsSubtotalCents(meta.text) ?? meta.printedTotalCents);
+  /*
+   * The FDA directory goes in with the page, for the one question the page cannot answer: whether
+   * a front-end item's eleven digits are the drug or the UPC that stands for it. See ndcFromUpc.
+   */
+  const { knownNdcs } = await import("./drug-directory-store");
+  const parsed = parseInvoiceLines(meta.text, readGoodsSubtotalCents(meta.text) ?? meta.printedTotalCents, await knownNdcs());
   if (parsed.lines.length === 0) return { stored: 0, unread: parsed.unreadable.length, reconciles: parsed.reconciles, readCents: 0 };
   if (parsed.reconciles === false) return { stored: 0, unread: parsed.lines.length + parsed.unreadable.length, reconciles: false, readCents: parsed.totalCents };
 

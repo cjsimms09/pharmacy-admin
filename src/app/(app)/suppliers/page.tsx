@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { getSettings } from "@/lib/settings";
-import { allSuppliers, addSupplier, updateSupplier, retireSupplier, useReceiptAsInvoice, importLegacyRules, addressesOf, normaliseAddresses } from "@/lib/suppliers-registry";
+import { allSuppliers, addSupplier, updateSupplier, retireSupplier, useReceiptAsInvoice, setNoCatalogue, importLegacyRules, addressesOf, normaliseAddresses } from "@/lib/suppliers-registry";
 import { invoices, filingFor, money } from "@/lib/invoices";
 import { termsSummaryBySupplier } from "@/lib/supplier-terms-store";
 import { describeRebate, describeReturns } from "@/lib/supplier-terms";
@@ -158,6 +158,31 @@ export default async function SuppliersPage({
           active
             ? "Back in use. Their invoices will be recognised again."
             : "Retired. Every invoice already filed against them is kept — they are records the pharmacy has to produce for years after it stops buying.",
+        ),
+    );
+  }
+
+  /*
+   * They publish no catalogue, said once.
+   *
+   * It changes no arithmetic — their invoice prices are read from the invoice and their NDCs priced
+   * from NADAC either way. It changes whether the site goes on reporting an absence as a job.
+   */
+  async function noCatalogue(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const id = String(fd.get("id") ?? "");
+    const name = String(fd.get("name") ?? "that supplier");
+    const none = String(fd.get("none") ?? "") === "1";
+    await setNoCatalogue(id, none, u);
+    await audit({ action: "supplier.no_catalogue", userId: u.id, userName: u.name, entity: "supplier", entityId: id, details: `${name} none=${none}` });
+    revalidatePath("/suppliers");
+    redirect(
+      "/suppliers?ok=" +
+        encodeURIComponent(
+          none
+            ? `${name} publishes no catalogue. Nothing will ask for one again — their prices still come off their invoices.`
+            : `${name}: a catalogue is expected again.`,
         ),
     );
   }
@@ -568,9 +593,34 @@ export default async function SuppliersPage({
                   <dd>
                     {(() => {
                       const c = catalogs.get(sup.id);
-                      if (!c) return <span className="text-ink-3">none filed under this supplier{sup.catalogName ? "" : " — set the catalogue name to tie one"}</span>;
-                      return `${c.items.toLocaleString()} prices, file of ${c.pricedOn ? fmt(c.pricedOn) : fmt(c.lastAt.slice(0, 10))}`;
+                      if (c) return `${c.items.toLocaleString()} prices, file of ${c.pricedOn ? fmt(c.pricedOn) : fmt(c.lastAt.slice(0, 10))}`;
+                      /* "Nobody has loaded one" and "there is none" are different answers. */
+                      if (sup.noCatalogue)
+                        return (
+                          <span className="text-ink-3">
+                            none published{sup.noCatalogueBy ? `, confirmed by ${sup.noCatalogueBy}` : ""} — their prices come off
+                            their invoices
+                          </span>
+                        );
+                      return <span className="text-ink-3">none filed under this supplier{sup.catalogName ? "" : " — set the catalogue name to tie one"}</span>;
                     })()}
+                    {canManage && !catalogs.get(sup.id) && (
+                      <form action={noCatalogue} className="mt-1">
+                        <input type="hidden" name="id" value={sup.id} />
+                        <input type="hidden" name="name" value={sup.name} />
+                        <input type="hidden" name="none" value={sup.noCatalogue ? "0" : "1"} />
+                        <button
+                          className="btn btn-sm"
+                          title={
+                            sup.noCatalogue
+                              ? "Expect a catalogue from them again."
+                              : "For a supplier who does not publish a price file. Nothing asks for one again; their prices still come off their invoices."
+                          }
+                        >
+                          {sup.noCatalogue ? "Expect a catalogue" : "They publish no catalogue"}
+                        </button>
+                      </form>
+                    )}
                   </dd>
                   <dt className="text-ink-3">Rebate</dt>
                   {/* "Nobody has typed it in" and "there are none" are different answers; see suppliers.noRebates. */}

@@ -195,6 +195,27 @@ export async function retireSupplier(id: string, active: boolean): Promise<void>
 }
 
 /**
+ * Whether this supplier publishes a catalogue at all.
+ *
+ * "I NEED AN OPTION ON SUPPLIER OPTIONS TO NOT EXPECT CATALOG!" — the same fault `noRebates` was
+ * added to fix, in a second place. A supplier with no price file read as "none filed under this
+ * supplier" for ever, whether or not one was ever coming.
+ *
+ * Who said so and when, because "nobody has loaded one" and "there is none" are different facts
+ * and only the second is somebody's decision.
+ */
+export async function setNoCatalogue(id: string, none: boolean, user: { name: string }): Promise<void> {
+  await db
+    .update(schema.suppliers)
+    .set(
+      none
+        ? { noCatalogue: true, noCatalogueBy: user.name, noCatalogueAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+        : { noCatalogue: false, noCatalogueBy: null, noCatalogueAt: null, updatedAt: new Date().toISOString() },
+    )
+    .where(eq(schema.suppliers.id, id));
+}
+
+/**
  * Whether this wholesaler's PioneerRx receipt counts as the invoice.
  *
  * The owner: "there are a couple suppliers where I'd rather just use the pioneers invoice as the
