@@ -77,6 +77,15 @@ export type PayerState =
   | "overpaid";
 
 export type PayerLine = {
+  /**
+   * What this row was grouped on, from `payerKey`.
+   *
+   * Carried rather than left to be reconstructed. The month-end report (`ar-report.ts`) has to go
+   * back to the individual receivables to age them, and matching a line to its receivables on the
+   * printed name would merge two payers nothing can identify and split one whose name arrived
+   * spelled two ways. The key is the join, so it travels with the row.
+   */
+  key: string;
   bin: string | null;
   name: string;
   claims: number;
@@ -131,7 +140,7 @@ export function daysBetween(from: string | null, to: string): number | null {
  * all is grouped under its printed name rather than being merged with every other nameless one —
  * two payers nothing can identify are still two payers.
  */
-function keyOf(bin: string | null, name: string | null): string {
+export function payerKey(bin: string | null, name: string | null): string {
   const b = (bin ?? "").trim();
   if (b) return `bin:${b}`;
   return `name:${(name ?? "unnamed").trim().toLowerCase()}`;
@@ -147,7 +156,7 @@ export function owedByPayer(receivables: Receivable[], received: Received[], tod
   const by = new Map<string, Acc>();
 
   for (const r of receivables) {
-    const k = keyOf(r.bin, r.name);
+    const k = payerKey(r.bin, r.name);
     const a = by.get(k) ?? { bin: r.bin, name: r.name ?? r.bin ?? "Unnamed payer", claims: 0, billed: 0, got: 0, oldest: null, cash: r.cashPlan, payments: 0 };
     a.claims++;
     a.billed += r.cents;
@@ -171,7 +180,7 @@ export function owedByPayer(receivables: Receivable[], received: Received[], tod
       unattachedCents += p.cents;
       continue;
     }
-    const k = keyOf(p.bin, p.payer);
+    const k = payerKey(p.bin, p.payer);
     const a = by.get(k);
     /*
      * A matched payment whose payer has no receivable here is still money received, but it belongs
@@ -183,8 +192,8 @@ export function owedByPayer(receivables: Receivable[], received: Received[], tod
     a.payments++;
   }
 
-  const lines: PayerLine[] = [...by.values()]
-    .map((a) => {
+  const lines: PayerLine[] = [...by.entries()]
+    .map(([key, a]) => {
       const outstanding = Math.max(0, a.billed - a.got);
       const days = daysBetween(a.oldest, today);
       const state: PayerState = a.cash
@@ -197,6 +206,7 @@ export function owedByPayer(receivables: Receivable[], received: Received[], tod
               ? "waiting"
               : "owes";
       return {
+        key,
         bin: a.bin,
         name: a.name,
         claims: a.claims,

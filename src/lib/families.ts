@@ -47,6 +47,12 @@ export const FAMILIES = {
   payers: [
     { href: "/payers", label: "Payers" },
     { href: "/payers/owed", label: "What they owe" },
+    /*
+     * The same question asked of a date that has passed. "What they owe" answers it about now, over
+     * a window nobody chose; this answers it as at a month end and stays answered, which is what
+     * makes it a document rather than a screen.
+     */
+    { href: "/payers/ar", label: "Monthly AR report" },
     { href: "/payers/contracts", label: "The contracts" },
     { href: "/payers/sort", label: "Sort the folder" },
     { href: "/payers/networks", label: "Networks to contracts" },

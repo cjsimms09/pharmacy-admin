@@ -86,6 +86,37 @@ Two things to expect:
   after the first file is silently dropped.
 - Give each press about a second. Firing them back to back loses some.
 
+### The loop, and the bug that cost three remittances
+
+A first version of this ticked a row, opened Export, clicked **Export Modified 835**, and counted a
+success. It reported 45 of 45 in April and 49 of 49 in August, with no errors — and delivered 43 and
+48. Three remittances went missing without a word.
+
+The cause: when the checkbox tick does not register in the page's model, **Export Modified 835 stays
+disabled**, and clicking a disabled menu item does nothing at all. The loop counted the click, not
+the export. It was never first or last — August's casualty was row 22 of 49 — so it is a race, and
+any loop that trusts its own clicks will keep losing rows.
+
+**So the loop must verify the request, not the click.** Every export is one GET carrying
+`action=EXPORT835`, so watching `fetch` and `XMLHttpRequest` gives proof. Three rules:
+
+1. After ticking, **wait for the menu item to become enabled** rather than clicking immediately —
+   check `disabled`, `aria-disabled` and any `disabled` class on the item and its ancestors.
+2. Record how many exports have fired before the row, and **check the count went up afterwards**.
+3. If it did not, untick, re-tick and try again — up to about four times — and if it still will not
+   fire, name that remit number as failed. A named failure can be re-pulled in seconds; a silent one
+   is found weeks later, if at all.
+
+Reconciling afterwards is worth the trouble regardless, because it catches anything the loop cannot
+see. The table gives the month's remit numbers; the imported payments give their trace numbers; what
+is in the first and not the second is what to go back for. That is how 912547443 — SS&C Health,
+08/18/2026, $1,168.49 — was found.
+
+Do not reconcile on money alone. A remittance's total includes provider-level (PLB) holdbacks that
+the claim lines do not, so the sum of imported claim payments is legitimately smaller than the sum of
+the remit amounts. August: $533,748.70 of remittances, $518,125.46 of claim lines. The difference is
+mostly real DIR and fee holdbacks, not missing files.
+
 ## The payment report
 
 **Data management → Payments.** One date pair, *Recorded date (from)* and *(to)*, pre-filled with the
