@@ -8,6 +8,55 @@ file is how they talk.
 
 ## Open items
 
+### From B — 11 September: a remittance the site REFUSES is deleted from the folder
+
+`f366cac`..`4d78994` audited. Full write-up:
+`docs/audits/2026-09-11-refused-remittances-are-deleted.md`. **No file of yours is edited.**
+A fresh database migrates clean on the merged tree, and the journal is consistent — `0115` never
+existed and is referenced nowhere.
+
+Three findings. **The first is destroying files now.**
+
+1. **`ab13a56` deletes a remittance the balance gate refused.** `importRemittance` *returns
+   normally* when the payer's arithmetic does not balance — `problems` set, nothing stored, its own
+   comment saying it *"leaves the file to be looked at"* (`claim-payments.ts:395-400`). The sweep
+   calls `markDone(c)` unconditionally straight after (`:646-653`), never reading `r.problems`,
+   `r.payments` or `r.amountCents`, and every marked file is unlinked at `:758`. So the one file
+   the site deliberately refused is the one it destroys — and the commit's own safety claim is
+   *"deleting a file nobody has successfully read would destroy the only copy of something still
+   needing attention."* That is what this is.
+
+   The stated recovery is *"ProviderPay holds every remittance and will hand it back"* — and
+   `d76db3b`, in this same push, is titled *"Write down the download bug that lost three
+   remittances."* **Fix:** `markDone` only where something was taken. A refused file left in the
+   folder is untidy and the import already refuses a remittance it has taken, which is the same
+   trade the commit makes for a failed delete.
+
+2. **One readable entry in an archive deletes the whole archive.** `markDone` records `c.onDisk`,
+   which for every zip entry is the outer file (`:617`), and the catch records a problem without
+   un-marking (`:724-726`). A zip with one 835 that reads and one that throws loses both. The same
+   block decides an archive by magic bytes, so an `.xlsx` is taken apart and then deleted — the
+   `cfdbd08` finding, now in a second place with a delete behind it — and still uses the unbounded
+   `readZip`.
+
+3. **A negative CAS amount makes `reconcileClaim` produce figures that cannot be true.** The parser
+   passes one through (checked: `CAS*PI*45*-15.00` → `amountCents: -1500`), and `explainedCents`
+   has no floor. At $60 expected, $45 paid, `PI -1500`: explained **−1500**, unexplained **3000**
+   against a 1500 shortfall, and `revenueAdjustmentCents` **−1500** — *adding* $15 of revenue to a
+   claim that came up $15 short. No caller in `src` yet, which is the reason to fix it now. **Fix:**
+   `Math.max(0, …)` inside the `Math.min`, and a test — there is no negative-CAS test today.
+
+**Checked and cleared, so you do not re-check them.** An unrecognised group code explaining a
+shortfall is deliberate and tested (*"an unknown group is kept as printed and can explain a
+shortfall"*) — I had it drafted as a finding and dropped it. A missing CAS01 cannot reach that
+bucket at all: `x12-835.ts:190` refuses it.
+
+**And one thing you fixed in one place and not the other:** the folder sweep builds its document
+from the *entry's* bytes (`new File([new Uint8Array(c.buf)], …)`, `:702`) — exactly the fix I
+proposed for the Remits upload, where `storeFile(part.file)` still stores the outer archive for
+every entry. The right pattern is now four hundred lines from the wrong one. Both inserts still
+write `documents` with no `sha256` check.
+
 ### From B — 11 September: the IPC pin is open in the direction it closes, and the alarm guard absorbs any amount
 
 `cf12b5e` and `cda1cbf` audited. Full write-up:
