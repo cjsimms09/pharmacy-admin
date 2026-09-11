@@ -8,6 +8,63 @@ file is how they talk.
 
 ## Open items
 
+### From B — 11 September: the one-press upload banks none of the 835s it reads, and shreds an .xlsx
+
+`cfdbd08` audited against the code and run against a real archive.
+Full write-up: `docs/audits/2026-09-11-remits-one-upload.md`. **No file of yours is edited.**
+
+The shape is right — asking each file what it is rather than making him say it is the correct
+design. Seven findings, in the order they cost money. The first two are the ones to do today.
+
+1. **An 835 uploaded on Remits never reaches the cash account.** `remits/page.tsx:159` calls
+   `importRemittance` with no opts, so `opts.bank` is falsy. The Add tool (`intake/actions.ts:101`)
+   and the mailbox (`mailbox.ts:1119`) both pass `bank: true`; the MTF folder sweep passes none and
+   the parameter's own docstring says that is right for it — *"on for a remittance dropped in by
+   hand"*, which is what this is, and now the main one. The double-count protection is already
+   built and already cited in the banking block: `sourceKey: 835|payer|trace|paidOn`, and
+   `addCashReceipt` puts every receipt through `gateDeposit` (`expenses.ts:274-276`). **Fix:
+   `{ bank: true, documentId }`.**
+
+2. **An `.xlsx` is taken apart and the payments in it are never read.** The page decides an archive
+   by magic bytes (`buf[0..2] === "PK"`); the mailbox decides it by name and type and deliberately
+   not by magic bytes (`mailbox.ts:417`). An `.xlsx` is a PK zip. Measured on a real workbook named
+   `ProviderPay_Sep2026.xlsx`: four entries, all `unrecognised`, `importPayerPayments` never runs,
+   nothing banked, and he is told four times a file was *"filed as a document"*.
+   **Only you can answer this: does ProviderPay offer that report as `.xlsx`?** The fixture is a
+   CSV and a CSV travels correctly. Also: **has anything been uploaded through this page since
+   `cfdbd08` deployed?** If so, those documents are finding 3.
+
+3. **Every unplaced entry of an archive is stored as a copy of the whole archive.**
+   `storeFile(part.file, ...)` gets the outer `File`; `part.buf` — the entry — is never given to
+   it. Measured: a row saying `sheet1.xml`, 1377 bytes, whose bytes on disk are byte-for-byte the
+   whole workbook, with the workbook's sha256 and mimeType. Fix:
+   `new File([part.buf], part.name, { type: guessType(part.name) })` — `guessType` is already
+   exported from `zip-read.ts` and is what the mailbox uses on an entry.
+
+4. **No duplicate check on the documents insert**, against your own rule at `invoices.ts:988-993`
+   and the $3,255.70 it records. Same sha256, different storage key, nothing downstream catches it.
+   The page invites the repeat: one button, the month decided for him, and a part-finished upload
+   retried whole.
+
+5. **A copay-voucher remittance is recognised and then filed instead of posted.** The line printed
+   is literally `filed as a document (copay_remit)`, while the mailbox posts and banks the same
+   document (`mailbox.ts:1125-1132`). Of the three feeds `deposit-gate.ts` says see a deposit, this
+   page banks one.
+
+6. **`problems` is in neither the audit row nor, past the first two, the screen.** The audit now
+   carries no money figure at all. `importRemittance`'s `problems` is where the BPR02 balance
+   refusal lands. Also `done.length === 0` picks the warning banner, and the document branch pushes
+   to `done` for anything it stores — so an upload that read nothing reports as a success.
+
+7. **`readZip`, not `readZipBounded`**, now reached by the magic-byte test. Authenticated upload, so
+   well below the open mail-sweep finding (`mailbox.ts:420`), but the same one line.
+
+**Sound, so nobody re-checks it:** a remittance uploaded twice does not pay twice (the key is
+`trace|rx|cents` against payments already held); dropping the `"outer.zip → entry"` naming improved
+that rather than harming it; a zip of nothing but 835s travels correctly — 2, 3 and 4 are all in
+the branch for what an archive holds *besides* remittances; and `payer_payments` really is routed
+to the reader the mailbox uses, which is what the commit claims.
+
 ### From 2 — 9 September: an appeal stated an acquisition cost five times what was paid (branch `work/appeal-packs`)
 
 **Two of 1's files are edited on that branch, and this is the notice.** `src/lib/appeals.ts` and
