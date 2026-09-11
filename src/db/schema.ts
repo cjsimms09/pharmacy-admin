@@ -1432,8 +1432,19 @@ export const inboxItems = sqliteTable(
     documentId: text("document_id"), // set when the attachment was stored
     status: text("status", { enum: ["stored", "rejected", "ignored"] }).notNull(),
     reason: text("reason"), // why rejected or ignored
-    /** What the sweep recognised the attachment as, and what happened when it was loaded. */
-    routedAs: text("routed_as"),
+    /**
+     * What the sweep recognised the attachment as, and what happened when it was loaded.
+     *
+     * Required, and with no default, so every insert has to say. An empty one read as "not
+     * recognised" on the inbox, so a sweep that forgot to set it turned its own success into a
+     * failure on the screen — three times, in this one file: handled training replies, seven McKesson
+     * invoices filed at 03:40, and postage receipts deliberately passed over. Each time it was fixed
+     * at the one call site that had shown up.
+     *
+     * "unrecognised" is a real value and a real outcome: the reader looked and could not place it.
+     * What is not allowed any more is nobody saying.
+     */
+    routedAs: text("routed_as").notNull(),
     routeResult: text("route_result"),
     scanned: integer("scanned", { mode: "boolean" }).notNull().default(false),
     sweptAt: text("swept_at").notNull().default(now()),

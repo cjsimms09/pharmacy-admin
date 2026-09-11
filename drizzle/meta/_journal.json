@@ -743,6 +743,20 @@
       "when": 1788808168029,
       "tag": "0105_receipt_settles_delivery",
       "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "6",
+      "when": 1788808228029,
+      "tag": "0106_inbox_routed_as_required",
+      "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "6",
+      "when": 1788808288029,
+      "tag": "0107_inbox_routed_as_not_null",
+      "breakpoints": true
     }
   ]
 }
