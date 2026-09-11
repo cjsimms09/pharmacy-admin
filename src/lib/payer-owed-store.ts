@@ -60,7 +60,14 @@ export async function owedNow(range?: { from?: string; to?: string }): Promise<O
         claimPayer: schema.claims.pbmName,
       })
       .from(schema.claimPayments)
-      .leftJoin(schema.claims, eq(schema.claimPayments.claimId, schema.claims.id)),
+      .leftJoin(schema.claims, eq(schema.claimPayments.claimId, schema.claims.id))
+      /*
+       * Never test money. This is the receivables list — what payers still owe — and it is the
+       * report the owner named: "these are test only and should not show up on any AR reports or
+       * anything." A payment from before the books begin settles nothing here, because the fill it
+       * settled is not in here either.
+       */
+      .where(eq(schema.claimPayments.outOfBooks, false)),
   ]);
 
   const { payerShares } = await import("./fills");

@@ -398,7 +398,26 @@ export function parse835(text: string): Remittance {
         push();
         break;
       default:
-        if (current) current.raw.push(seg);
+        /*
+         * An unread segment is not kept, because one of them names the patient.
+         *
+         * This used to be `if (current) current.raw.push(seg)` — a catch-all that swept every
+         * segment inside a claim loop into `raw`. NM1 sits inside that loop, and NM1*QC carries the
+         * member's surname, first name and member id. So every payment object this parser returned
+         * held a patient identifier, verbatim.
+         *
+         * Nothing stored it: `importRemittance` records the prescription, the NDC, the amounts, the
+         * payer and the trace number, and never touches `raw`. No name has reached the database. But
+         * the owner's rule is not "do not store names", it is — 11 September 2026 — "i do not want
+         * the site to get patient names.. or at least to retain them." A name sitting in a live
+         * object is one log line, one error report, one JSON.stringify away from being retained, and
+         * it was being carried for nothing: no code outside this file reads `raw`.
+         *
+         * So `raw` now holds only what the parser understands — CLP, SVC, CAS and DTM — none of
+         * which names a person. Everything else is read for its meaning where it has one, and
+         * otherwise dropped, which is where a patient's name belongs.
+         */
+        break;
     }
   }
   push();

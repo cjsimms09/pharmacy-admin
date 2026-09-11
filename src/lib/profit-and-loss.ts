@@ -757,7 +757,7 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
   const { earningSoFar } = await import("./rebate-rates");
   const { allSuppliers } = await import("./suppliers-registry");
   const { db, schema } = await import("@/db");
-  const { and, gte, lte } = await import("drizzle-orm");
+  const { and, gte, lte, eq } = await import("drizzle-orm");
 
   const sorted = [...months].sort();
   const from = `${sorted[0]}-01`;
@@ -787,7 +787,16 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
      * than working out which single earlier row is wanted.
      */
     db.query.onHandImports.findMany({ columns: { countedOn: true, valueCents: true, rxValueCents: true } }),
-    db.query.claimPayments.findMany({ columns: { source: true, receivedOn: true, amountCents: true, revenueCents: true } }),
+    /*
+     * Only money inside the books. A remittance pulled for an old month to test claim matching
+     * is real money that was really received — and it was received before these books begin, so it
+     * is not revenue here. The owner: "I do not want to track or keep track of payments from before
+     * 09/01.. these are test only and should not show up on any AR reports or anything."
+     */
+    db.query.claimPayments.findMany({
+      where: eq(schema.claimPayments.outOfBooks, false),
+      columns: { source: true, receivedOn: true, amountCents: true, revenueCents: true },
+    }),
     allStandingCosts(),
   ]);
 

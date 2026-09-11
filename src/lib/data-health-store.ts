@@ -1,6 +1,6 @@
 import "server-only";
 import { db, schema } from "@/db";
-import { count, desc } from "drizzle-orm";
+import { count, desc, eq } from "drizzle-orm";
 import { todayIso } from "./dates";
 import { SPECS, type Measurement } from "./data-health";
 import { comparePack } from "./data-health-packages";
@@ -875,9 +875,15 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
   });
 
   // ── Money that actually arrived ──────────────────────────────────
+  /*
+   * In-books money only. This panel tells the owner how much has arrived and how much of it is
+   * still waiting to be tied to a deposit — so a test month pulled from the portal would show as
+   * real money needing real work.
+   */
   const payments = await db
     .select({ rxNumber: schema.claimPayments.rxNumber, fillNumber: schema.claimPayments.fillNumber, dateFilled: schema.claimPayments.dateFilled, source: schema.claimPayments.source })
-    .from(schema.claimPayments);
+    .from(schema.claimPayments)
+    .where(eq(schema.claimPayments.outOfBooks, false));
   const bank = await db.select({ id: schema.bankLines.id }).from(schema.bankLines);
 
   const facilitator = payments.filter((p) => (p.source ?? "").trim().toLowerCase() === "mtf").length;

@@ -2065,10 +2065,18 @@ export const cashReceipts = sqliteTable(
     claimMatchCents: integer("claim_match_cents"),
     noClaimMatchCents: integer("no_claim_match_cents"),
     adjustmentsCents: integer("adjustments_cents"),
+    /**
+     * Cash that arrived before the books begin: kept as evidence, never counted.
+     *
+     * The same rule as on a claim payment, for the same reason — the owner pulls a real payment
+     * report for an old month to test the matching, and none of that money is his September cash.
+     * See `claimPayments.outOfBooks`.
+     */
+    outOfBooks: integer("out_of_books", { mode: "boolean" }).notNull().default(false),
     createdBy: text("created_by").notNull(),
     createdAt: text("created_at").notNull().default(now()),
   },
-  (t) => [index("cash_receipts_month_idx").on(t.month), index("cash_receipts_received_idx").on(t.receivedOn)],
+  (t) => [index("cash_receipts_month_idx").on(t.month), index("cash_receipts_received_idx").on(t.receivedOn), index("cash_receipts_out_of_books_idx").on(t.outOfBooks)],
 );
 
 /**
@@ -2506,11 +2514,23 @@ export const claimPayments = sqliteTable(
      * payment rather than deleting on a guess.
      */
     documentId: text("document_id"),
+    /**
+     * Money that arrived before the books begin: kept as evidence, never counted as revenue.
+     *
+     * The owner, 11 September 2026: "I do not want to track or keep track of payments from before
+     * 09/01.. these are test only and should not show up on any AR reports or anything." He pulls
+     * real remittances for old months to prove claim matching works, so the rows have to exist and
+     * have to be matchable — and must not reach a total.
+     *
+     * Set from when the money was RECEIVED, not when the fill happened. A September remittance
+     * paying an August fill is real September money; a fill-date rule would discard it.
+     */
+    outOfBooks: integer("out_of_books", { mode: "boolean" }).notNull().default(false),
     notes: text("notes"),
     recordedBy: text("recorded_by").notNull(),
     createdAt: text("created_at").notNull().default(now()),
   },
-  (t) => [index("claim_payments_claim_idx").on(t.claimId), index("claim_payments_rx_idx").on(t.rxNumber), index("claim_payments_received_idx").on(t.receivedOn), index("claim_payments_document_idx").on(t.documentId)],
+  (t) => [index("claim_payments_claim_idx").on(t.claimId), index("claim_payments_rx_idx").on(t.rxNumber), index("claim_payments_received_idx").on(t.receivedOn), index("claim_payments_document_idx").on(t.documentId), index("claim_payments_out_of_books_idx").on(t.outOfBooks)],
 );
 
 export const planGroups = sqliteTable(
