@@ -3335,3 +3335,46 @@ export const intakeRules = sqliteTable(
   },
   (t) => [index("intake_rules_address_idx").on(t.address)],
 );
+
+/**
+ * A wholesaler's statement of account, line by line.
+ *
+ * Nothing here is a cost and nothing here reaches an account as one — every line is an invoice the
+ * site already holds, and booking a statement would count a month's buying twice. See
+ * `supplier-statement.ts`. What these rows carry is the two facts an invoice does not: the day the
+ * money is actually taken, and the net figure after the prompt-pay discount.
+ */
+export const supplierStatementLines = sqliteTable(
+  "supplier_statement_lines",
+  {
+    id: text("id").primaryKey(),
+    supplier: text("supplier").notNull(),
+    supplierId: text("supplier_id"),
+    /** The wholesaler's own invoice number, which is what ties this to an invoice on file. */
+    invoiceNumber: text("invoice_number").notNull(),
+    billedOn: text("billed_on").notNull(),
+    /** Every line sharing this day is one ACH debit. No bank line will ever equal a single invoice. */
+    dueOn: text("due_on").notNull(),
+    grossCents: integer("gross_cents").notNull(),
+    /** The prompt-pay discount taken off. 2.00% on the first statement read. */
+    discountCents: integer("discount_cents").notNull(),
+    /** What actually leaves the bank. */
+    netCents: integer("net_cents").notNull(),
+    kind: text("kind").notNull().default("Invoice"),
+    /** The ACH reference every invoice in one debit shares. The bank-matching key. */
+    checkNumber: text("check_number"),
+    clearingDate: text("clearing_date"),
+    clearingDocument: text("clearing_document"),
+    /** "Closed - Cleared" against "Open - Pending Approval". */
+    status: text("status"),
+    statementDate: text("statement_date"),
+    documentId: text("document_id"),
+    readAt: text("read_at").notNull().default(now()),
+  },
+  (t) => [
+    /* The duplicate guard. A statement repeats everything not yet taken, so they overlap by design. */
+    uniqueIndex("supplier_statement_line_idx").on(t.supplier, t.invoiceNumber, t.dueOn),
+    index("supplier_statement_due_idx").on(t.dueOn),
+    index("supplier_statement_check_idx").on(t.checkNumber),
+  ],
+);

@@ -1,4 +1,5 @@
 import "server-only";
+import { looksLikeReturnsDetail, looksLikeApTransactions } from "./ap-transactions";
 import { looksLikeCopayRemit } from "./copay-remit";
 import { parseCsvRows } from "./reference";
 import { readSheet } from "./xlsx";
@@ -30,7 +31,7 @@ import { ALLOWED_MIME } from "./files";
  * behaviour we already had and is never wrong, only unhelpful.
  */
 
-export type RouteKind = "claims" | "rx_transactions" | "payer_payments" | "accrual_sales" | "on_hand" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "return_policy" | "nadac" | "remittance_835" | "copay_remit" | "unrecognised";
+export type RouteKind = "claims" | "rx_transactions" | "payer_payments" | "accrual_sales" | "on_hand" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "ap_transactions" | "mck_returns" | "report_summary" | "return_policy" | "nadac" | "remittance_835" | "copay_remit" | "unrecognised";
 
 export type Classification = {
   kind: RouteKind;
@@ -238,6 +239,48 @@ export function classify(fileName: string, buf: Buffer): Classification {
       headers: ["Payment number", "Payer name", "Deposit date", "Payment amt", "Payment type"],
     };
   }
+  /*
+   * McKesson's Accounts Payable Open & Closed Transactions, which arrives weekly inside a zip.
+   *
+   * The one report that says when money actually leaves for an invoice, and which invoices left
+   * together: every one cleared under a single ACH shares a check number. Nothing else this
+   * pharmacy receives can tie a bank debit to the invoices inside it.
+   *
+   * Known by its columns rather than its file name, because the name carries a timestamp and the
+   * zip entry is named for the dashboard that produced it.
+   */
+  /* The other half of the same weekly ledger: what went back, and what was credited for it. */
+  if (looksLikeReturnsDetail(buf.subarray(0, 4096).toString("utf8"))) {
+    return {
+      kind: "mck_returns",
+      why: "McKesson's Returns Details: every credit note with what went back, why, and what was credited. Money coming in, settled like an invoice.",
+      headers: ["Invoice/Credit Number", "Net Returned Price ($)", "Returned Quantity", "Return Reason Description", "Original Invoice Number"],
+    };
+  }
+  /*
+   * The summary sheets that ride along in the same zip.
+   *
+   * Each of these reports ships a detail CSV and one or two totals of it. The totals are the same
+   * money added up, so reading them would be the detail counted twice — but they are not
+   * unrecognised either, and saying so put three lines on his inbox that needed a person and had
+   * nothing wrong with them. Recognised, filed, and deliberately not read.
+   */
+  if (looksLikeReportSummary(headersOf(fileName, buf))) {
+    return {
+      kind: "report_summary",
+      why: "A totals sheet from a report whose detail is read separately. Filed, and deliberately not read — the same money added up is not more of it.",
+      headers: [],
+    };
+  }
+  if (looksLikeApTransactions(buf.subarray(0, 4096).toString("utf8"))) {
+    return {
+      kind: "ap_transactions",
+      why:
+        "McKesson's Accounts Payable transactions: every invoice with what was billed, the cash discount, what is actually paid, " +
+        "and the ACH it cleared under. Not a bill — every row is an invoice already counted — so nothing on it reaches an account as a cost.",
+      headers: ["Receivable Number", "Due Date", "Transaction Status", "Check Number", "Gross Amount ($)", "Cash Discount ($)", "Net Amount ($)"],
+    };
+  }
   if (looksLikeSystemSales(buf.subarray(0, 8192).toString("utf8"), fileName)) {
     return {
       kind: "accrual_sales",
@@ -382,7 +425,6 @@ export function acceptableAttachment(att: { filename?: string | null; contentTyp
   return { ok: false, why: `${name} (no file extension, sent as ${type || "an unknown type"})` };
 }
 
-
 /**
  * The sentence an inbox line carries when a PDF reads as a supplier invoice and nobody knows whose.
  *
@@ -437,4 +479,26 @@ export function printedSupplierSuggestion(name: string | null | undefined): stri
   const t = (name ?? "").replace(/\s+/g, " ").trim();
   if (t.length < 2 || t.length > 60) return null;
   return t;
+}
+
+/**
+ * Whether a CSV is a totals sheet belonging to a report whose detail arrives beside it.
+ *
+ * Deliberately narrow: a short header with a money column and a grouping column, and none of the
+ * identifiers a detail row has. A detail sheet always names the transaction — a receivable, a
+ * credit number, an Rx — and a summary never does.
+ */
+export function looksLikeReportSummary(headers: string[]): boolean {
+  if (headers.length === 0 || headers.length > 10) return false;
+  const has = (re: RegExp) => headers.some((h) => re.test(h));
+  const hasMoney = has(/^(Gross )?Returns \(\$\)$/i) || has(/^Gross Document Amount/i) || has(/^Net Returned Price/i);
+  /*
+   * The exact column, not a word inside one.
+   *
+   * A summary counts the things a detail sheet lists, so it names them: "Count of Receivable
+   * Number" is a summary column and matching it as a detail key made the totals sheet read as
+   * unrecognised and land on his inbox needing a person.
+   */
+  const hasDetailKey = has(/^(Receivable Number|Invoice\/Credit Number|Rx Number|Reference Number)$/i);
+  return hasMoney && !hasDetailKey;
 }

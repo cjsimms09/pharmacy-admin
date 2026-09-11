@@ -40,6 +40,7 @@
  * printing a confident total over a hole.
  */
 import { reconcileCogs, reconcileRevenue, type Check as ReconCheck } from "./reconcile";
+import { cashCostOfGoods } from "./cash-cogs";
 import { standingLines } from "./standing-math";
 import { todayIso } from "./dates";
 import { formatCents } from "./money";
@@ -193,6 +194,10 @@ export type PLInputs = {
    */
   uninvoicedPurchasesCents?: number | null;
   uninvoicedPurchases?: number;
+  /** What the cash figure is actually made of, in the words the account prints. From cash-cogs.ts. */
+  cashCogsSays?: string | null;
+  /** Billed by a supplier whose payments the site can see, and not taken yet. Owed, not spent. */
+  notYetTakenCents?: number;
   /**
    * The standing costs the month carries so far: payroll and rent by the day, each already reduced
    * to the month's share. Dropped where a real bill from the same vendor is entered for the month.
@@ -452,11 +457,11 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
       label: "Billed by the wholesalers",
       amountCents: i.billedPurchasesCents,
       note:
-        "Every wholesaler invoice dated in this month, at its own total." +
-        (i.uninvoicedPurchases
-          ? ` ${i.uninvoicedPurchases} of these have no invoice on file — ${formatCents(i.uninvoicedPurchasesCents ?? 0)} taken from PioneerRx's own record of receiving them, which is what the pharmacy has until the wholesaler's document turns up.`
-          : "") +
-        " The accrual account counts something different on purpose — what the month's dispensings cost to buy — so a month with a big buy-in reads worse here and better there, which is the gap between the two bases doing its job.",
+        (i.cashCogsSays ?? "Every wholesaler invoice dated in this month, at its own total.") +
+        " The accrual account counts something different on purpose — what the month's dispensings cost to buy — so a month with a big buy-in reads worse here and better there, which is the gap between the two bases doing its job." +
+        (i.notYetTakenCents
+          ? ` A further ${formatCents(i.notYetTakenCents)} is billed and not yet taken, so it is owed rather than spent.`
+          : ""),
     });
   } else {
     missing.push(
@@ -733,7 +738,9 @@ export type SharedInputs = {
   /** Money received against fills, by the day it arrived, for the cash account. */
   payments: { source: string; receivedOn: string | null; amountCents: number; revenueCents: number | null }[];
   /** Per month: the bills on the basis asked for, the receipts entered, the rebate earned, and the driver's invoices where the pharmacy pays them. */
-  byMonth: Map<string, { bills: Awaited<ReturnType<typeof import("./expenses").expensesIn>>; receipts: { kind: string; amountCents: number }[]; rebatesCents: number | null; driverCents: number }>;
+  byMonth: Map<string, { bills: Awaited<ReturnType<typeof import("./expenses").expensesIn>>; receipts: { kind: string; amountCents: number }[]; rebatesCents: number | null; driverCents: number }>;
+  /** The wholesalers' own ledgers: what cleared, when, and under which ACH. */
+  statementLines: { supplier: string; invoiceNumber: string; netCents: number; clearingDate: string | null; checkNumber: string | null }[];
 };
 
 export async function loadShared(months: string[], basis: "accrual" | "cash"): Promise<SharedInputs> {
@@ -758,6 +765,14 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
 
   const { allStandingCosts } = await import("./standing-costs");
   const pioneerPurchases = await db.select().from(schema.pioneerPurchases);
+  /*
+   * The wholesalers' own ledgers, where the site receives one.
+   *
+   * McKesson's weekly Accounts Payable report says when each invoice actually cleared and under
+   * which ACH. Where that exists it is the authority for what left the bank, and the cash account
+   * stops guessing from invoice dates. See cash-cogs.ts.
+   */
+  const statementLines = await db.select().from(schema.supplierStatementLines);
   const [sales, cats, fills, suppliers, invoices, lines, counts, payments, standing] = await Promise.all([
     salesMonths(),
     categories(true),
@@ -812,6 +827,7 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
     byMonth,
     standing,
     pioneerPurchases,
+    statementLines,
     today: todayIso(),
   };
 }
@@ -925,27 +941,22 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
    */
   const billedThisMonth = invoices.filter((v) => v.totalCents !== null && v.invoiceDate?.startsWith(month));
   /*
-   * The purchases PioneerRx recorded and no invoice ever arrived for.
+   * What actually left the bank for goods, which is a different question from what was invoiced.
    *
-   * The owner: "I more just wanted to use it to catch the money from invoices we didn't get before
-   * this was setup in September... it was for the money section." Invoices began arriving by email
-   * partway through September, so the month's earlier purchases have no document at all — and the
-   * pharmacy system's own receiving record is the only evidence they happened.
-   *
-   * Matched on the wholesaler's own invoice number, which both sides carry, so a purchase with a
-   * real invoice is counted once from the invoice and never again from here. Where PioneerRx and the
-   * invoice disagree on the figure the invoice wins: it is the document the pharmacy was billed on
-   * and the one it has to pay.
+   * The owner: "we need to make sure the report of mckesson is authority on cash accounting, we
+   * need to make sure we are not duplicating". Where a wholesaler's own ledger is arriving, their
+   * money comes from it alone — not their invoices by date, and not their PioneerRx deliveries,
+   * either of which on top of it would be the same purchase twice. Everyone else is unchanged.
    */
-  const invoiceNumbers = new Set(invoices.map((v) => (v.invoiceNumber ?? "").trim().toUpperCase()).filter(Boolean));
-  const uninvoiced = shared.pioneerPurchases.filter(
-    (p) => p.totalCents !== null && p.invoiceDate?.startsWith(month) && !invoiceNumbers.has((p.invoiceNumber ?? "").trim().toUpperCase()),
-  );
-  const uninvoicedPurchasesCents = uninvoiced.length ? uninvoiced.reduce((n, p) => n + (p.totalCents ?? 0), 0) : null;
-  const billedPurchasesCents =
-    billedThisMonth.length || uninvoiced.length
-      ? billedThisMonth.reduce((n, v) => n + (v.totalCents ?? 0), 0) + (uninvoicedPurchasesCents ?? 0)
-      : null;
+  const cash = cashCostOfGoods({
+    month,
+    settled: shared.statementLines,
+    invoices,
+    receiving: shared.pioneerPurchases,
+  });
+  const uninvoicedPurchasesCents = cash.fromReceivingCents || null;
+  const uninvoiced = { length: cash.fromReceivingCents > 0 ? 1 : 0 };
+  const billedPurchasesCents = cash.cents;
 
 
   /*
@@ -1014,6 +1025,8 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
     billedPurchasesCents,
     invoicesInMonth: billedThisMonth.map((v) => ({ invoiceNumber: v.invoiceNumber, totalCents: v.totalCents, invoiceDate: v.invoiceDate, fingerprint: v.fingerprint })),
     uninvoicedPurchasesCents,
+    cashCogsSays: cash.says,
+    notYetTakenCents: cash.notYetTakenCents,
     uninvoicedPurchases: uninvoiced.length,
 
     standing,

@@ -72,6 +72,10 @@ const KIND_WORDS: Record<string, string> = {
   accrual_sales: "System sales summary",
   /* A charge that arrives as a sentence rather than a document. See postage-email.ts. */
   postage: "Postage bought",
+  /* Not a bill: every row is an invoice already counted. It says when the money leaves. */
+  ap_transactions: "McKesson accounts payable",
+  mck_returns: "McKesson returns and credits",
+  report_summary: "A totals sheet",
   unrecognised: "Not recognised",
 };
 
