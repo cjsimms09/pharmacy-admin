@@ -18,8 +18,36 @@ export function driverPaidBy(setting: string | null | undefined): DriverPaidBy {
   return setting === "clinic" ? "clinic" : "pharmacy";
 }
 
-export function driverCostOf(invoices: DriverInvoiceLike[], month: string, basis: "accrual" | "cash", paidBy: DriverPaidBy): number {
+export function driverCostOf(
+  invoices: DriverInvoiceLike[],
+  month: string,
+  basis: "accrual" | "cash",
+  paidBy: DriverPaidBy,
+  /**
+   * What the days already entered come to, at the agreed rate — deliveries and mail trips alike.
+   *
+   * The running total the note above has always described and nothing ever supplied. An invoice
+   * is only raised on a finished month, so a month in progress had no invoice, and no invoice
+   * meant no cost: September carried $0.00 of delivery on the accrual account with 47 deliveries
+   * and 7 mail trips already recorded and $486.00 owed to the driver.
+   *
+   * Passed in rather than computed here, from `monthState`, which is the same arithmetic the
+   * invoice itself is built from. Two ways of adding up one round is how they come to differ.
+   */
+  accruedCents = 0,
+): number {
   if (paidBy !== "pharmacy") return 0;
-  if (basis === "accrual") return invoices.filter((i) => i.month === month && i.status !== "superseded").reduce((n, i) => n + i.totalCents, 0);
+  if (basis === "accrual") {
+    const billed = invoices.filter((i) => i.month === month && i.status !== "superseded").reduce((n, i) => n + i.totalCents, 0);
+    /*
+     * The invoice where there is one, the days entered where there is not.
+     *
+     * Never both: once the month is invoiced, that document is the cost, and adding the days to
+     * it would count the same round twice. The same rule a standing cost follows when its real
+     * bill arrives.
+     */
+    return billed > 0 ? billed : accruedCents;
+  }
+  /* Cash is unchanged: an invoice is money out on the day it was sent, and a day driven is not. */
   return invoices.filter((i) => i.status === "sent" && (i.sentAt ?? "").startsWith(month)).reduce((n, i) => n + i.totalCents, 0);
 }

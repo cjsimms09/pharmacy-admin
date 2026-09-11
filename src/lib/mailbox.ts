@@ -3,6 +3,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
+import { readPostageEmail } from "./postage-email";
+import { bookPostage } from "./expenses";
 import { eq, like } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { getSettings, setSetting } from "./settings";
@@ -401,6 +403,36 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
           const verdicts = (parsed.attachments ?? []).map((a) => ({ a, v: acceptableAttachment({ filename: a.filename, contentType: a.contentType, content: a.content as Buffer }) }));
           const attachments = verdicts.filter((x) => x.v.ok).map((x) => x.a);
           if (attachments.length === 0) {
+            /*
+             * A bill that is not a document, before the message is passed over.
+             *
+             * Endicia's Purchase Confirmation carries the whole transaction in its text and nothing
+             * attached, so the sweep — which files attachments — dropped it. Two $100.00 purchases
+             * arrived that way in September and neither reached the books. Nothing was broken; there
+             * was no path for a charge that arrives as a sentence.
+             *
+             * Read and booked here, before "nothing was attached" is written down, because for these
+             * senders that statement is true and beside the point.
+             */
+            const postage = readPostageEmail(from, subject, parsed.text ?? "");
+            if (postage) {
+              const booked = await bookPostage(postage, messageId);
+              await db.insert(schema.inboxItems).values({
+                id: newId(),
+                messageId,
+                receivedAt,
+                fromAddress: from,
+                subject,
+                status: "stored",
+                routedAs: "postage",
+                routeResult: booked.says,
+                reason: booked.says,
+              });
+              result.stored++;
+              await client.messageFlagsAdd(String(uid), ["\Seen"], { uid: true });
+              continue;
+            }
+
             // Say what was on the message, not just that nothing usable was. On the first Sunday
             // the scheduled files arrive, this line is how somebody finds out they came as a zip.
             const declined = verdicts.filter((x) => !x.v.ok).map((x) => (x.v as { why: string }).why);

@@ -70,6 +70,8 @@ const KIND_WORDS: Record<string, string> = {
   rxrescue_credit: "RxRescue credit memo",
   payer_payments: "Third-party payments report",
   accrual_sales: "System sales summary",
+  /* A charge that arrives as a sentence rather than a document. See postage-email.ts. */
+  postage: "Postage bought",
   unrecognised: "Not recognised",
 };
 
