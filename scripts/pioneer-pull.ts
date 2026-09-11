@@ -413,8 +413,9 @@ async function pullClaims(): Promise<string> {
    *
    * The owner asked to know "how much to expect from each payer", and the reconciliation is the
    * only part of this worth reading: PioneerRx's own figure for the month beside what the site
-   * holds. A gap here is not an error in this feed — the claims themselves come from the daily
-   * transaction report — but it is the number that says whether the account is complete.
+   * holds. A gap is not an error in this feed — the claims come from the daily transaction report
+   * the pharmacy uploads — but it is the number that says whether the account is complete, and it
+   * is only worth reading if both sides cover the same days.
    */
   const { db, schema } = await import("../src/db");
   const { and, gte, eq } = await import("drizzle-orm");
@@ -422,65 +423,50 @@ async function pullClaims(): Promise<string> {
     .select({ rxNumber: schema.claims.rxNumber, fillNumber: schema.claims.fillNumber, dateFilled: schema.claims.dateFilled, remitCents: schema.claims.remitCents, copayCents: schema.claims.copayCents })
     .from(schema.claims)
     .where(and(gte(schema.claims.dateFilled, "2026-09-01"), eq(schema.claims.status, "paid")));
-  const heldRemit = onFile.reduce((n, c) => n + (c.remitCents ?? 0), 0);
-  const heldCopay = onFile.reduce((n, c) => n + (c.copayCents ?? 0), 0);
-
   /*
-   * Which day is short, which is the only form of this that anybody can act on.
+   * Which day is short, which is the only form of this anybody can act on. A month-level figure
+   * sends somebody hunting; "7 September is 25 fills short, send that day's report again" is a job.
    *
-   * The claims themselves come from the daily transaction report the pharmacy uploads, and the gap
-   * between that and PioneerRx is almost always one report run before its day had finished: on
-   * 7 September the site holds 76 of the day's 101 fills. A month-level "short by $3,942.61" sends
-   * somebody hunting; "7 September is 25 fills short, send that day's report again" is a job.
+   * Compared over the window both sides can see, which is what this did not do.
    *
-   * Fills the site holds and PioneerRx does not are counted too. That direction should be empty,
-   * and a figure in it means the site is carrying a claim the pharmacy system has since reversed or
-   * replaced — the opposite error, and the one that overstates a month.
+   * `onFile` above is every site claim from the first of the month with no upper bound, and the
+   * PioneerRx side stops wherever the day-old copy stops. Setting one against the other made the
+   * site 'over' by about a day's billing every morning — $31,888.56 on 11 September, against a
+   * 10 September that billed $37,517.10 — while like for like it was short. See reconcileClaims.
    */
-  const heldKeys = new Set(onFile.map((c) => `${c.rxNumber}|${c.fillNumber ?? 0}`));
-  const pioneerKeys = new Set(built.fills.map((f) => `${f.rxNumber}|${f.fillNumber}`));
-  const byDay = new Map<string, { missing: number; missingCents: number }>();
-  for (const f of built.fills) {
-    if (heldKeys.has(`${f.rxNumber}|${f.fillNumber}`)) continue;
-    const day = f.filledOn ?? "no fill date";
-    const e = byDay.get(day) ?? { missing: 0, missingCents: 0 };
-    byDay.set(day, { missing: e.missing + 1, missingCents: e.missingCents + f.insuranceCents });
-  }
-  const shortDays = [...byDay].sort((a, b) => b[1].missing - a[1].missing);
-  const onlyOnSite = onFile.filter((c) => !pioneerKeys.has(`${c.rxNumber}|${c.fillNumber ?? 0}`)).length;
-  const insurance = built.fills.reduce((n, f) => n + f.insuranceCents, 0);
-  const patient = built.fills.reduce((n, f) => n + f.patientCents, 0);
-  const dollars = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const { reconcileClaims } = await import("../src/lib/pioneer-claims");
+  const recon = reconcileClaims(
+    built.fills.map((f) => ({ rxNumber: f.rxNumber, fillNumber: f.fillNumber, filledOn: f.filledOn, insuranceCents: f.insuranceCents, patientCents: f.patientCents })),
+    onFile.map((c) => ({ rxNumber: c.rxNumber, fillNumber: c.fillNumber ?? 0, filledOn: c.dateFilled, insuranceCents: c.remitCents ?? 0, patientCents: c.copayCents ?? 0 })),
+  );
 
   const { setSetting } = await import("../src/lib/settings");
   await setSetting(
     "pioneer_claims_reconcile",
     JSON.stringify({
       readAt: new Date().toISOString(),
+      coverTo: recon.coverTo,
       fills: built.fills.length,
       payers: built.payerCounts,
-      pioneerInsuranceCents: insurance,
-      pioneerPatientCents: patient,
-      siteRemitCents: heldRemit,
-      siteCopayCents: heldCopay,
+      pioneerInsuranceCents: recon.pioneer.remitCents,
+      pioneerPatientCents: recon.pioneer.patientCents,
+      siteRemitCents: recon.site.remitCents,
+      siteCopayCents: recon.site.patientCents,
+      gapCents: recon.gapCents,
       fillsThatDoNotAddUp: built.disagree.length,
-      daysShort: shortDays.map(([day, e]) => ({ day, fills: e.missing, cents: e.missingCents })),
-      fillsOnlyOnSite: onlyOnSite,
+      daysShort: recon.missingFromSite,
+      missingTotal: recon.missingTotal,
+      fillsOnlyOnSite: recon.onlyOnSite.fills,
+      aheadOfTheCopy: recon.aheadOfTheCopy,
       problems: built.problems.slice(0, 20),
     }),
   );
 
-  const gap = insurance - heldRemit;
   return (
     `${built.fills.length.toLocaleString("en-US")} fills (${built.payerCounts.twoPayers} with two payers` +
     `${built.payerCounts.more ? `, ${built.payerCounts.more} with more` : ""}); ` +
-    `PioneerRx says ${dollars(insurance)} from payers and ${dollars(patient)} from patients; ` +
-    `the site holds ${dollars(heldRemit)} and ${dollars(heldCopay)}` +
-    `${gap === 0 ? ", which agrees" : `, ${dollars(Math.abs(gap))} ${gap > 0 ? "short" : "over"}`}; ` +
-    `${e.primaryEnriched} primary and ${e.secondaryEnriched} secondary claims filled in` +
-    `${shortDays.length ? `; short on ${shortDays.map(([day, x]) => `${day} (${x.missing} fill${x.missing === 1 ? "" : "s"}, ${dollars(x.missingCents)})`).join(", ")} — send those days' transaction reports again` : ""}` +
-    `${onlyOnSite ? `; ${onlyOnSite} fill${onlyOnSite === 1 ? "" : "s"} the site holds that PioneerRx does not` : ""}` +
-    `${built.disagree.length ? `; ${built.disagree.length} fill${built.disagree.length === 1 ? "" : "s"} where the payers and the patient do not add to the fill's price` : ""}`
+    `${recon.says}` +
+    `${built.disagree.length ? ` ${built.disagree.length} fills where the payers and the patient do not add to the fill's price.` : ""}`
   );
 }
 

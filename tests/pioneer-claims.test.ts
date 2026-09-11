@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { fillsFromClaimRows, type PioneerClaimRow } from "../src/lib/pioneer-claims";
+import { fillsFromClaimRows, reconcileClaims, type PioneerClaimRow, type ClaimSide } from "../src/lib/pioneer-claims";
 
 /**
  * One fill, two payers, and the money has to land exactly once.
@@ -165,5 +165,82 @@ describe("fills are kept apart", () => {
   test("two prescriptions are two fills", () => {
     const r = fillsFromClaimRows([claim({ rxNumber: "1000001" }), claim({ rxNumber: "1000002" })]);
     assert.equal(r.fills.length, 2);
+  });
+});
+
+/**
+ * The copy is a day behind, and a comparison that forgets it says the opposite of the truth.
+ *
+ * The figures here are 11 September's, rounded to the fills that matter. PioneerRx's copy stopped
+ * on the 9th; the site had the 10th from the nightly transaction report. The old comparison set
+ * everything the site held against everything PioneerRx held and announced the site was "over" by
+ * roughly the 10th's billing — while inside the window they both covered, the site was short.
+ */
+describe("reconciling the claims against a day-old copy", () => {
+  const f = (rx: string, day: string, cents: number): ClaimSide => ({ rxNumber: rx, fillNumber: 0, filledOn: day, insuranceCents: cents, patientCents: 0 });
+
+  /* PioneerRx stops on the 9th. Four fills, one of which the site never received. */
+  const pioneer = [f("1", "2026-09-08", 10_000), f("2", "2026-09-09", 20_000), f("3", "2026-09-09", 5_000), f("4", "2026-09-09", 1_500)];
+  /* The site has three of those, and a whole day the copy has not reached. */
+  const site = [f("1", "2026-09-08", 10_000), f("2", "2026-09-09", 20_000), f("3", "2026-09-09", 5_000), f("9", "2026-09-10", 90_000)];
+
+  test("the window closes at the newest fill PioneerRx returned", () => {
+    assert.equal(reconcileClaims(pioneer, site).coverTo, "2026-09-09");
+  });
+
+  test("the day the copy has not reached is not a discrepancy", () => {
+    const r = reconcileClaims(pioneer, site);
+    assert.deepEqual(r.aheadOfTheCopy, { fills: 1, cents: 90_000 });
+    assert.equal(r.onlyOnSite.fills, 0);
+  });
+
+  test("the site reads short, not over, once the windows match", () => {
+    const r = reconcileClaims(pioneer, site);
+    /* $365.00 against $350.00 inside the window: short by the one fill it never got. */
+    assert.equal(r.gapCents, 1_500);
+    assert.deepEqual(r.missingTotal, { fills: 1, cents: 1_500 });
+    assert.match(r.says, /short/);
+    assert.doesNotMatch(r.says, /\$900\.00 (short|more)/);
+  });
+
+  test("the missing fill is named by its day, so it is a job rather than a hunt", () => {
+    assert.deepEqual(reconcileClaims(pioneer, site).missingFromSite, [{ day: "2026-09-09", fills: 1, cents: 1_500 }]);
+  });
+
+  test("a claim the site holds that PioneerRx has dropped inside the window is the opposite error", () => {
+    const reversed = [...site.slice(0, 3), f("8", "2026-09-09", 4_000), f("9", "2026-09-10", 90_000)];
+    const r = reconcileClaims(pioneer, reversed);
+    assert.deepEqual(r.onlyOnSite, { fills: 1, cents: 4_000 });
+    assert.deepEqual(r.aheadOfTheCopy, { fills: 1, cents: 90_000 });
+  });
+
+  test("two sides holding the same days agree", () => {
+    const r = reconcileClaims(pioneer, pioneer);
+    assert.equal(r.gapCents, 0);
+    assert.equal(r.missingTotal.fills, 0);
+    assert.match(r.says, /which agrees/);
+  });
+
+  test("a coordinated fill is one fill on both sides, however the caller holds it", () => {
+    /*
+     * The site's claims table is one row per claim, so a fill billed to two payers is two rows.
+     * PioneerRx's side is already one entry a fill. Counting rows against fills made the site
+     * appear to hold more fills than PioneerRx while also missing some of them.
+     */
+    const twoRows = [f("5", "2026-09-09", 6_000), f("5", "2026-09-09", 2_000)];
+    const oneFill = [f("5", "2026-09-09", 8_000)];
+    const r = reconcileClaims(oneFill, twoRows);
+    assert.equal(r.site.fills, 1);
+    assert.equal(r.site.remitCents, 8_000);
+    assert.equal(r.gapCents, 0);
+    assert.equal(r.missingTotal.fills, 0);
+    assert.equal(r.onlyOnSite.fills, 0);
+  });
+
+  test("an empty copy compares nothing rather than declaring everything missing", () => {
+    const r = reconcileClaims([], site);
+    assert.equal(r.coverTo, null);
+    assert.equal(r.missingTotal.fills, 0);
+    assert.equal(r.site.fills, 4);
   });
 });
