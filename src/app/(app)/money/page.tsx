@@ -8,9 +8,10 @@ import { addCashReceipt, deleteCashReceipt, cashReceiptsFor } from "@/lib/expens
 import { readBankStatement, lastStatementLines } from "./bank";
 import { Field, Settled } from "@/components/ui";
 import { formatCents, parseCents } from "@/lib/money";
-import { todayIso } from "@/lib/dates";
+import { todayIso, fmt } from "@/lib/dates";
 import { parsePeriod, periodOf, neighbours, type PeriodKind } from "@/lib/ledger";
 import { booksFor, recentMonths } from "@/lib/ledger-store";
+import { claimsCompleteness } from "@/lib/claims-completeness";
 import { moneyFound } from "@/lib/money-found";
 import { PageHeader, Card, Notice } from "@/components/ui";
 import { Bars } from "@/components/bars";
@@ -73,6 +74,8 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
   const period = (periodParam && parsePeriod(periodParam)) || periodOf("month", today.slice(0, 7));
   const [books, recent, found, banked, bankLines] = await Promise.all([booksFor(period, today), recentMonths(6, today), moneyFound().catch(() => null), cashReceiptsFor(period.months), lastStatementLines(period.months)]);
   const { accrual, cash, scripts, gap, pace, sources, countedOnce, feeds, difference, balances } = books;
+  /* Read back from the last pull, so this can never disagree with the feed that computed it. */
+  const completeness = await claimsCompleteness();
   const KINDS: { key: "third_party" | "patient" | "retail" | "facilitator" | "rebate" | "other"; label: string }[] = [
     { key: "third_party", label: "Plan remittances" },
     { key: "patient", label: "Patient payments" },
@@ -564,6 +567,84 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
             </Settled>
           )}
         </Card>
+
+        {/*
+          Whether the account has every fill the pharmacy system does.
+
+          The owner: "are we confident every dollar that comes into and leaves pioneer is accounted
+          for?" The pull has answered that every night for weeks, into a settings row nothing read.
+          The answer is no, and a no nobody can see is the same as not having asked.
+
+          PioneerRx is the independent count here. The claims on this site come from the nightly
+          transaction report; PioneerRx booked the same fills at the counter. Where it holds a fill
+          this site does not, that is revenue earned and not on any account.
+        */}
+        {completeness && (
+          <Card
+            tone={completeness.missingFills > 0 ? "warn" : "ok"}
+            title="Every fill PioneerRx has, against every fill here"
+            subtitle="The claims here come from the nightly transaction report. PioneerRx booked the same fills at the counter, so it is the one count that does not depend on the report arriving complete."
+          >
+            <p className="text-sm">
+              {completeness.missingFills === 0 ? (
+                <>
+                  Through {fmt(completeness.coverTo ?? "")}, every one of the{" "}
+                  {completeness.pioneerFills.toLocaleString()} fills PioneerRx holds is here.
+                </>
+              ) : (
+                <>
+                  <b className="tabular-nums">{formatCents(completeness.missingCents)}</b> of billing PioneerRx has is not on
+                  this site &mdash; <b>{completeness.missingFills}</b> fill
+                  {completeness.missingFills === 1 ? "" : "s"} the nightly report never delivered. That is revenue the
+                  pharmacy earned and no account here knows about.
+                </>
+              )}
+            </p>
+            {completeness.missingByDay.length > 0 && (
+              <ul className="rows mt-2">
+                {completeness.missingByDay.slice(0, 6).map((d) => (
+                  <li key={d.day} className="flex items-center justify-between gap-3 py-1.5">
+                    <span className="text-sm font-medium">{fmt(d.day)}</span>
+                    <span className="text-xs text-ink-3">
+                      {d.fills} fill{d.fills === 1 ? "" : "s"}
+                    </span>
+                    <span className="tabular-nums text-sm">{formatCents(d.cents)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {completeness.missingFills > 0 && (
+              /*
+                The fix is one action, and it is his, so it is said as one sentence rather than as a
+                procedure. Re-running those days in PioneerRx regenerates them complete, because the
+                report is drawn from the same data this was compared against.
+              */
+              <p className="mt-2 text-xs text-ink-3">
+                Send those days&rsquo; Rx transaction reports again from PioneerRx. They are drawn from the same records
+                this was compared against, so a fresh run carries the fills the first one missed.
+              </p>
+            )}
+            <p className="mt-2 text-xs text-ink-3">
+              Measured through {fmt(completeness.coverTo ?? "")}, which is as far as the day-old copy reaches.
+              {completeness.aheadFills > 0 && (
+                <>
+                  {" "}
+                  A further {completeness.aheadFills.toLocaleString()} fills worth{" "}
+                  <span className="tabular-nums">{formatCents(completeness.aheadCents)}</span> are dated after it and are not
+                  counted either way &mdash; the copy has not got to them.
+                </>
+              )}
+              {completeness.onlyOnSite > 0 && (
+                <>
+                  {" "}
+                  {completeness.onlyOnSite} fill{completeness.onlyOnSite === 1 ? "" : "s"} here{" "}
+                  {completeness.onlyOnSite === 1 ? "is" : "are"} no longer in PioneerRx for those days &mdash; reversed
+                  or replaced since, and {completeness.onlyOnSite === 1 ? "it overstates" : "they overstate"} the month.
+                </>
+              )}
+            </p>
+          </Card>
+        )}
 
         {/*
           What is not in the books, said out loud.

@@ -104,8 +104,15 @@ Keep these in view; do not rediscover them.
   of reimbursement cannot be followed to a contract. Work is on `work/plan-types`.
 - **Revenue is recognised when a script is collected**, not when it is filled. A month in progress
   understates on purpose. A full will-call bin is not a bad month and the account says which it is.
-- **Two invoice formats are unread**: the IPC credit memo (bracketed negatives) and ParMed (columns
-  run together without spaces). Both real, neither a scan.
+- ~~Two invoice formats are unread~~ — **both now read**, 11 September. The IPC credit memo parses its
+  bracketed negatives (CM107761: 11 lines, −$214.00 of goods, less $15.00 shipping, netting the −$199.00
+  the header prints) and ParMed parses its run-together columns. Every invoice on file now carries both a
+  total and its item lines; the count of invoices with a total and no lines is 0.
+- **McKesson prints front-end items with a UPC, not an NDC.** A drug UPC is a prefix digit and then the
+  ten-digit NDC, which pads back to eleven in one of three places; `ndcFromUpc` asks the FDA directory
+  which padding is a real drug and takes only an unambiguous answer. A device — a pen needle, a Dexcom
+  sensor — resolves to none and keeps its digits, which is correct. Do not "simplify" this back to taking
+  the last eleven digits.
 - **A copay-card processor is a payer.** The owner, correcting the plan-classification work:
   "Technically cnrx is a payor!! They will reimburse us for that remit amount." He is right and the
   distinction has to be kept in two halves. DST Pharmacy Solutions (SS&C Health), BIN 019158/CNRX,
@@ -119,6 +126,16 @@ Keep these in view; do not rediscover them.
 - **Nothing calls the model without a person pressing something** — `src/lib/ai-gate.ts`, default
   deny. Do not route around it. If an automatic reader needs the model, that is a design problem to
   raise with him, not a gate to loosen.
+
+## What today's check keeps finding
+
+One shape has now cost real money twice, and it is worth naming on its own: **a check that runs into a
+settings row nobody reads.** `pioneer_invoice_compare` compared every invoice total against PioneerRx
+nightly and reached no screen; `pioneer_claims_reconcile` did the same for the claims, and was also
+*wrong* — it set the site's whole month against a PioneerRx copy that stops a day short, so it announced
+an overage every morning while the site was actually short. Both are now on a page.
+
+Before adding any check: decide which screen it lands on. If the answer is "a setting", it is not a check.
 
 ## The standard for anything you build or change
 
