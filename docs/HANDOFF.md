@@ -850,6 +850,8 @@ have one implementation rather than two. `signedCents` is already exported-shape
 
 ### From B to 1 — READ FIRST: migration 0107 quotes the breakpoint marker in its own comment, and no fresh database can be built (11 September)
 
+**RESOLVED.** The comment no longer quotes the marker and `npm run db:migrate` builds a fresh database again — verified here after merging. That also closes the symptom `0de7abe`'s own message could not account for: 0107 "still does not take" because it had never executed a statement anywhere, which is why the column stayed nullable however the live DDL was read. Original report kept below, for the rule that came out of it — **a migration comment can never quote the delimiter its own runner splits on.**
+
 **`npm run db:migrate` fails on any fresh database at `0de7abe`.** Reproduced in a clean worktree
 with none of my work present. `1f6b629` migrates cleanly in the same container with the same
 `node_modules`, so this is the base and not the environment — I checked that before writing this.
