@@ -373,8 +373,20 @@ export function feedsInTheBooks(): Feed[] {
       name: "Supplier invoices",
       carries: "What the wholesalers billed, line by line, and when each invoice was paid.",
       reaches: "both",
-      how: "Accrual: the purchases figure, for the stock comparison only — never as cost of goods. Cash: the cost of goods, by the date each invoice was paid.",
-      gap: "An invoice with no recorded payment date is counted on its date plus the supplier's terms, and the account says how many are on that footing rather than on a bank record.",
+      /*
+       * What the cash account actually does, which stopped being what this said.
+       *
+       * It described a cascade — a recorded payment date, else the invoice date plus the supplier's
+       * terms — that the account no longer runs. The owner: "Let's simplify it.. let's just use
+       * invoices in September." Not one of September's invoices carried a payment date and not one
+       * supplier had terms on file, so all three branches arrived at the same figure while leaving a
+       * standing instruction to key in 71 payment dates. The cascade went; this sentence did not.
+       *
+       * A page that describes a method the code does not use is worse than one that says nothing:
+       * somebody auditing the books would have checked payment dates that play no part in them.
+       */
+      how: "Accrual: the purchases figure, for the stock comparison only — never as cost of goods. Cash: the cost of goods, at each invoice's own date.",
+      gap: "The invoice's date, not the day the money left the bank — which is what the pharmacy means by a September bill, and is not the same thing. Where no invoice arrived at all, PioneerRx's own record of receiving the delivery stands in, and the account says how much of the figure is on that footing.",
       href: "/inventory/invoices",
     },
     {
