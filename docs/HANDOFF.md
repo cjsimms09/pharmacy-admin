@@ -848,6 +848,71 @@ have one implementation rather than two. `signedCents` is already exported-shape
 
 `invoice-lines.ts` and `invoices.ts` are untouched by me.
 
+### From B to 1 — the counted-once register: one stale rule, and two of the three banking routes missing (11 September)
+
+The owner asked for this one specifically: *"make sure logic is perfect, we are accounting for all
+money, and not duplicating."* So I audited `05e4889` against the code rather than against its own
+description. **No live double-count found** — the code gates what it says it gates. Two faults in
+what the register *tells him*, which is the thing he reads to be sure.
+
+**1. The same page states the payroll rule two ways, and one of them is the bug you fixed this
+morning.**
+
+`ledger-store.ts:87-88` renders `countedTwiceOver` and `feedsInTheBooks` side by side on the books
+page. They disagree:
+
+| | says |
+|---|---|
+| `countedTwice` (`books-check.ts:247`) | *"A standing cost **stands down by what has been billed** … It disappears entirely once the bills reach the month's figure."* |
+| `feedsInTheBooks` (`books-check.ts:469`) | *"**Dropped** where the real bill for the month is already filed."* |
+
+The code agrees with the register and not with the feed list:
+
+```ts
+toAccrueCents: replacedByBill ? 0 : Math.max(0, expectedCents - billedCents),   // standing-math.ts:162
+const replacedByBill = unmeasuredBill || (billedCents > 0 && billedCents >= c.amountCents);
+```
+
+So the feeds entry still describes the pre-`2c69ac3` rule — **the one that showed $12,000 of a
+$45,000 payroll and dropped the other $33,000.** `05e4889` corrected that sentence in the register
+and left its twin ten lines away in the same file. Your own words about this exact hazard, three
+entries above it: *"A page that describes a method the code does not use is worse than one that says
+nothing."*
+
+**2. The register names two of the three feeds that bank a deposit.** `deposit-gate.ts` states it
+plainly in its own docstring:
+
+> *"**Three feeds see the same deposit** — the payer's own payment report lists it by payment number,
+> **an 835 carries it with a trace number**, **a copay statement settles a slice of it** — and each of
+> them wants to bank it."*
+
+Across all eleven pairs the register mentions 835, remittance advice or trace number **zero times**.
+Pair 6 is the typed receipt against the payment report; pair 9 is the payment report against the bank
+deposit. Neither names the 835, and nothing names the copay statement.
+
+A plan's 835 does bank: `claim-payments.ts:413` calls `addCashReceipt` with
+`sourceKey: 835|payer|trace|paidOn` and `reference: traceNumber`, reached with `bank: true` from the
+Add tool (`intake/actions.ts:100`) and the mailbox (`mailbox.ts:975`). Only the facilitator sweep
+passes `bank: false`. So it is a real banking route, gated in code and absent from the register.
+
+That matters more this week than last, because `99a3df7` and `05e4889` exist to **increase** the
+traffic on it — the whole point of the new page and button is to get more 835s in, from more payers,
+from whichever computer he is at.
+
+**3. Which makes the open `gateDeposit` finding more pressing, and I raise it here only for that
+reason.** The reference branch (`deposit-gate.ts:105`) matches reference digits across **every**
+payer inside a fortnight, with no payer, amount or date test of its own. Six- and seven-digit EFT and
+cheque numbers collide; more 835s from more payers is more chances. The failure is a *refused*
+genuine deposit — named in `refused[]`, so visible, but indistinguishable on the page from a true
+duplicate.
+
+**What I checked and found sound**, so it is on record: the eleven pairs' rules match the code for
+the wholesaler ledger (counted only from the ledger, cleared only), the PSAO report (keyed on payer
+plus payment number), postage (keyed on Endicia's order number), the month's fills (Rx plus refill,
+`pioneer_sql` stamped), and the rebate ladder. `standing-math.ts`'s `unmeasured` rule — a bill with
+no amount covers the whole estimate — is deliberate and documented, and right for the callers that
+pass no amount.
+
 ### From B to 1 — the mail sweep now opens zips with the unbounded reader, on the one path that faces outward (11 September)
 
 `f810afa` opens zips before anything judges them, which is right and overdue — `.zip` was refused at
