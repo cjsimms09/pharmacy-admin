@@ -146,3 +146,39 @@ Each of these has been got wrong at least once:
 | Bank statement lines and what they mean | `src/lib/bank-descriptors.ts`, `src/lib/bank-statement.ts` |
 | The register of things that must be counted once | `src/lib/books-check.ts` |
 | Getting the month out of ProviderPay | `docs/PROVIDERPAY.md` |
+
+## Two different problems that look identical on a claim
+
+A generic dispensed below cost is either an underpayment or a bad buy, and the claim alone does not
+say which. Splitting September's first eleven days three ways:
+
+| | Claims | Amount | What it is |
+|---|---|---|---|
+| Paid **below** NADAC | 101 | $1,077.74 | A MAC underpayment. Worth appealing. |
+| Paid **at or above** NADAC, cost above NADAC | 87 | $1,777.17 | A buying gap. Not appealable. |
+| Bought above NADAC, all causes | — | **$2,582.56** | Eleven days. Order of $85,000 a year. |
+
+The second column is the one that matters, and it is the one a MAC appeal cannot fix. Asking a PBM
+to pay above the national average because this pharmacy's buying is expensive gets declined, and
+rightly.
+
+Worst of it, September 1–11:
+
+| Drug | Cost | NADAC | Over |
+|---|---|---|---|
+| Dextroamphetamine-amphetamine ER 10mg | $124.07 | $31.63 | +292% |
+| Buprenorphine/naloxone 2mg | $178.57 | $77.20 | +131% |
+| Lisdexamfetamine 60mg chewable | $239.24 | $105.30 | +127% |
+| Enoxaparin 40mg syringe | $202.89 | $97.50 | +108% |
+| Lisdexamfetamine 40mg and 50mg | ~$165 | ~$80 | +106%, across five fills |
+| Ivermectin 3mg | $482.31 | $247.59 | +95% |
+
+Two caveats that stop this being a simple win: some of it is unavoidable, because lisdexamfetamine
+has had real supply problems and controlled substances have fewer suppliers, and NADAC is a national
+average nobody beats every time. But lisdexamfetamine appearing five times at 106% over NADAC is a
+purchasing decision somebody can check, not bad luck.
+
+`product-ledger.ts` already flags `buying_above_nadac` and `cheaper_elsewhere`, and
+`/purchasing/products` shows them as badges. What is missing is the ranking: nothing puts these in
+order of the money actually lost on claims actually dispensed, which is why $2,582.56 in eleven days
+was invisible until somebody went looking for it while filing appeals.
