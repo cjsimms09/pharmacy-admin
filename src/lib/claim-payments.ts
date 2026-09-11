@@ -2,7 +2,7 @@ import { chooseClaimForRemittance } from "./match-remittance";
 import "server-only";
 import nodePath from "node:path";
 import { db, schema } from "@/db";
-import { eq, isNull } from "drizzle-orm";
+import { eq, inArray, isNull } from "drizzle-orm";
 import { newId } from "./crypto";
 import type { LaterPayment } from "./fills";
 import { formatCents } from "./money";
@@ -159,13 +159,45 @@ async function findClaim(
  */
 export async function laterPayments(): Promise<LaterPayment[]> {
   const rows = await db.query.claimPayments.findMany({ where: eq(schema.claimPayments.outOfBooks, false) });
+  /*
+   * ── Who paid, which is not who the remittance says sent it ──
+   *
+   * The owner, 11 September: "Provider pay being the payor is a technicality we are going to
+   * ignore. The payor is the person actually paying."
+   *
+   * Every 835 that arrives through ProviderPay names ProviderPay as the payer in its envelope — all
+   * 9,550 of them — because ProviderPay is the entity cutting the cheque. It is a settlement
+   * service, not a plan, and nothing about this pharmacy's business is described by the answer
+   * "ProviderPay owes us $518,125". Worse, it cannot be unpicked at the remittance level: of the 62
+   * traces with matched claims, 32 carry claims from several PBMs at once — one contained Caremark,
+   * OptumRx and Maxor Plus together — so the remittance genuinely has no single payer to name.
+   *
+   * The claim does. `claim_payments` holds no BIN of its own, so the payer is taken from the claim
+   * this money settled, through the BIN the pharmacy billed — the same rule `payer-owed-store.ts`
+   * already applies to receivables, and for the same reason: it is what was billed rather than what
+   * the sender called itself.
+   *
+   * The envelope name is kept as the fallback rather than discarded. Where a payment has no claim
+   * behind it there is nothing to resolve through, and "ProviderPay" is then the only true thing
+   * that can be said about it — the alternative is a blank, which reads as missing data rather than
+   * as money whose prescription this site does not hold.
+   */
+  const claimIds = [...new Set(rows.map((r) => r.claimId).filter((id): id is string => id !== null))];
+  const payerOfClaim = new Map<string, string | null>();
+  for (let i = 0; i < claimIds.length; i += 500) {
+    const batch = await db.query.claims.findMany({
+      where: inArray(schema.claims.id, claimIds.slice(i, i + 500)),
+      columns: { id: true, pbmName: true },
+    });
+    for (const c of batch) payerOfClaim.set(c.id, c.pbmName);
+  }
   return rows.map((r) => ({
     rxNumber: r.rxNumber,
     fillNumber: r.fillNumber,
     dateFilled: r.dateFilled,
     ndc11: r.ndc11,
     source: r.source,
-    payer: r.payer,
+    payer: (r.claimId ? payerOfClaim.get(r.claimId) : null) ?? r.payer,
     /*
      * What the pharmacy actually received, for the record and for the screen.
      */
