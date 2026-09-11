@@ -4,6 +4,7 @@ import { and, eq, gte, lte, isNull, or, sql, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "./crypto";
 import { FROM_SUMMARY } from "./invoice-summary-store";
+import { scheduleFromDea } from "./invoice-lines";
 import { todayIso, daysBetween } from "./dates";
 import { storeFile, readFile as readStoredFile } from "./files";
 import { readInvoice } from "./ai";
@@ -48,6 +49,43 @@ const FILING: Record<InvoiceSchedule, { folder: string; category: DocumentCatego
   // breaks the rule; keeping it here is only ever over-cautious.
   unknown: { folder: "controlled-schedule-2", category: "invoice_schedule_2", label: "Not yet read" },
 };
+
+/**
+ * What the pharmacy's own receiving record says an invoice carried.
+ *
+ * The owner: "We need to find way to do this without using api, if we need to use more info from
+ * pioneer and just use invoice for image than do that but we still need to separate c2, c3-5, non
+ * controlled invoices."
+ *
+ * PioneerRx records the DEA schedule of every item booked in against the wholesaler's own invoice
+ * number. That is the receiving pharmacy's determination of what actually arrived, and it beats
+ * reading a class letter off a wholesaler's layout on every count that matters: it is the same
+ * answer every time, it costs nothing, it works on a scan and on a format nobody has seen before,
+ * and it does not decline. All four invoices that reached a person this month did so because the
+ * model had hit its monthly ceiling, not because the answer was unknowable — PioneerRx had two of
+ * them booked in as wholly non-controlled at the time.
+ *
+ * The wholesaler's PDF remains the record and is still what gets filed. This decides the drawer.
+ *
+ * One function rather than two, because there are two paths that file an invoice — one for a
+ * document arriving in the post, one for a document adopted out of the vault — and each already
+ * carried its own copy of the model fallback.
+ */
+export async function scheduleFromPioneer(invoiceNumber: string | null | undefined): Promise<{ schedule: InvoiceSchedule; basis: string } | null> {
+  const number = invoiceNumber?.trim();
+  if (!number) return null;
+  const booked = await db.query.pioneerPurchases.findFirst({ where: eq(schema.pioneerPurchases.invoiceNumber, number) });
+  if (!booked?.deaSchedules) return null;
+  const schedule = scheduleFromDea(booked.deaSchedules.split(","));
+  if (schedule === "unknown") return null;
+  return {
+    schedule,
+    basis:
+      `PioneerRx booked ${booked.lines ?? 0} items in against invoice ${number}, carrying DEA ` +
+      `schedule${booked.deaSchedules.includes(",") ? "s" : ""} ${booked.deaSchedules}. That is the pharmacy's own record of ` +
+      `what arrived, so the filing follows it.`,
+  };
+}
 
 export function filingFor(schedule: InvoiceSchedule) {
   return FILING[schedule];
@@ -810,7 +848,41 @@ export async function fileInvoice(
     controlled = fromText?.controlledItems ?? [];
     items = fromText?.allItems ?? [];
     basis = fromText?.basis ?? "The invoice could not be read as text.";
-    try {
+
+    /*
+     * The pharmacy's own receiving record, before any model is asked.
+     *
+     * The owner: "We need to find way to do this without using api, if we need to use more info
+     * from pioneer and just use invoice for image than do that but we still need to separate c2,
+     * c3-5, non controlled invoices."
+     *
+     * PioneerRx holds the DEA schedule of every item booked in against this invoice number. That
+     * is the receiving pharmacy's own determination of what arrived — better evidence than a class
+     * letter read off a wholesaler's layout, and available on a scan, on an unfamiliar format, and
+     * from a supplier who prints no class at all. It is also free, and it never declines: the four
+     * invoices this month that reached a person did so because the model had hit its monthly
+     * ceiling, not because the answer was unknowable.
+     *
+     * The wholesaler's PDF is still the record and is still what gets filed. This only decides
+     * which drawer.
+     */
+    const booked = await scheduleFromPioneer(invoiceNumber);
+    if (booked) {
+      schedule = booked.schedule;
+      confident = true;
+      basis = `${basis} ${booked.basis}`;
+    }
+
+    /*
+     * And only then a model, for an invoice PioneerRx has not booked in either.
+     *
+     * A delivery entered at the counter reaches the day-old copy the next morning, so an invoice
+     * that arrives ahead of its own receiving record still lands here. It waits rather than costing
+     * anything, and the next pull settles it — see `settleSchedulesFromPioneer`.
+     */
+    if (confident) {
+      /* Nothing further to ask. */
+    } else try {
       const r = await readInvoice(buf, ctx);
       schedule = r.confident ? r.schedule : "unknown";
       confident = r.confident && r.schedule !== "unknown";
@@ -2165,7 +2237,20 @@ export async function adoptDocument(documentId: string, ctx: { userId: string; u
   let invoiceDate = fromText?.invoiceDate ?? doc.effectiveOn ?? null;
   const totalCents = fromText?.totalCents ?? null;
 
-  if (!fromText?.confident) {
+  /*
+   * The same order as the other filing path: the pharmacy's own receiving record before a model.
+   *
+   * Both paths file an invoice and both had their own copy of the model fallback. They now share
+   * `scheduleFromPioneer`, so a change to how the schedule is decided cannot apply to one of them
+   * and not the other.
+   */
+  const bookedIn = fromText?.confident ? null : await scheduleFromPioneer(invoiceNumber);
+  if (bookedIn) {
+    schedule = bookedIn.schedule;
+    basis = `${basis} ${bookedIn.basis}`;
+  }
+
+  if (!fromText?.confident && !bookedIn) {
     try {
       const r = await readInvoice(buf, ctx);
       if (r.confident && r.schedule !== "unknown") {
@@ -3249,4 +3334,76 @@ export async function settleDeliveriesOnReceipt(
     details: `${line.supplier}: ${settled} deliver${settled === 1 ? "y" : "ies"} closed on their receipts, this time only`,
   });
   return { settled, cents, supplier: line.supplier };
+}
+
+/**
+ * Settles invoices whose schedule was unknown, now that PioneerRx has booked the delivery in.
+ *
+ * An invoice often arrives before its own receiving record. McKesson emails at 03:40; the delivery
+ * is entered at the counter during the day and reaches the day-old copy the morning after. So an
+ * invoice filed overnight has no PioneerRx record to consult and waits — correctly, with the
+ * Schedule II records, which is the cautious drawer.
+ *
+ * Without this it would wait for a person for ever, which is the chore this was meant to remove.
+ * The pull runs this once it has written the deliveries, and the invoice settles itself.
+ *
+ * Only ones nobody has answered. An invoice a person has confirmed is left exactly as it is, even
+ * where PioneerRx disagrees: a pharmacist looking at the document outranks a database, and quietly
+ * overturning their determination is worse than any filing error this would fix. Where the two
+ * disagree the invoice is named instead, so somebody can look.
+ */
+export async function settleSchedulesFromPioneer(user = "the PioneerRx pull"): Promise<{ settled: number; disagreed: { invoiceNumber: string; wasSaid: InvoiceSchedule; pioneerSays: InvoiceSchedule }[]; says: string }> {
+  const rows = await db.query.supplierInvoices.findMany({
+    columns: { id: true, invoiceNumber: true, supplier: true, schedule: true, needsReview: true, reviewedAt: true, documentId: true, basis: true },
+  });
+  let settled = 0;
+  const disagreed: { invoiceNumber: string; wasSaid: InvoiceSchedule; pioneerSays: InvoiceSchedule }[] = [];
+
+  for (const inv of rows) {
+    const booked = await scheduleFromPioneer(inv.invoiceNumber);
+    if (!booked) continue;
+
+    /* Somebody has answered for this one. Their answer stands; a disagreement is reported, never applied. */
+    if (inv.reviewedAt) {
+      if (inv.schedule !== booked.schedule) {
+        disagreed.push({ invoiceNumber: inv.invoiceNumber ?? inv.id, wasSaid: inv.schedule, pioneerSays: booked.schedule });
+      }
+      continue;
+    }
+    /* And ones already settled the same way, or read confidently off their own page, need nothing. */
+    if (inv.schedule !== "unknown" && !inv.needsReview) continue;
+    if (inv.schedule === booked.schedule && !inv.needsReview) continue;
+
+    const filing = FILING[booked.schedule];
+    await db.update(schema.documents).set({ category: filing.category }).where(eq(schema.documents.id, inv.documentId));
+    await db
+      .update(schema.supplierInvoices)
+      .set({
+        schedule: booked.schedule,
+        needsReview: false,
+        basis: `${inv.basis ?? ""} ${booked.basis} Filed as ${filing.label} on ${todayIso()} without anyone having to look.`.trim(),
+      })
+      .where(eq(schema.supplierInvoices.id, inv.id));
+    await audit({
+      action: "invoice.schedule.from_pioneer",
+      userId: "system",
+      userName: user,
+      entity: "invoice",
+      entityId: inv.id,
+      details: `${inv.supplier ?? "an invoice"} ${inv.invoiceNumber ?? ""}: ${inv.schedule} → ${booked.schedule}. ${booked.basis}`,
+    });
+    settled++;
+  }
+
+  return {
+    settled,
+    disagreed,
+    says:
+      settled === 0 && disagreed.length === 0
+        ? "no invoice was waiting on a schedule PioneerRx could settle"
+        : `${settled} invoice${settled === 1 ? "" : "s"} filed by what PioneerRx booked in` +
+          (disagreed.length
+            ? `; ${disagreed.length} where a person's answer differs from PioneerRx and was left alone: ${disagreed.map((d) => `${d.invoiceNumber} (filed ${d.wasSaid}, PioneerRx says ${d.pioneerSays})`).join(", ")}`
+            : ""),
+  };
 }

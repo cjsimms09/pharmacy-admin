@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { parseInvoiceLines, splitQuantities, ndc11 } from "../src/lib/invoice-lines";
+import { parseInvoiceLines, splitQuantities, ndc11, scheduleFromDea } from "../src/lib/invoice-lines";
 import { readFileSync } from "node:fs";
 
 /**
@@ -194,5 +194,51 @@ describe("a front-end UPC is not an NDC", () => {
     const line = "094030-00211137-9593973485930            1EA EMBRACE PEN NEEDLE 31G 5MM 100        8.50 R        8.50         8.50";
     const got = parseInvoiceLines(line, null, () => false).lines.map((l) => l.ndc11);
     assert.deepEqual(got, ["09403000211"]);
+  });
+});
+
+/**
+ * Which drawer an invoice goes in, decided from what the pharmacy actually booked in.
+ *
+ * 21 CFR 1304.04(h)(1) keeps the Schedule II records apart, so one CII line decides the whole
+ * document. The rule that matters most here is the last one: nothing is a guess. A schedule nobody
+ * recorded is unknown, and filing an unknown as an ordinary business record is the single mistake
+ * that breaks the separation.
+ */
+describe("the schedule, from what PioneerRx booked in", () => {
+  test("any Schedule II line makes the whole invoice a Schedule II record", () => {
+    assert.equal(scheduleFromDea(["0", "0", "2"]), "schedule_2");
+    assert.equal(scheduleFromDea(["2"]), "schedule_2");
+    /* A CII alongside a CIV is still a CII record; the strictest drawer wins. */
+    assert.equal(scheduleFromDea(["4", "2", "0"]), "schedule_2");
+  });
+
+  test("anything else controlled makes it a III-V record", () => {
+    assert.equal(scheduleFromDea(["0", "4"]), "schedule_3_5");
+    assert.equal(scheduleFromDea(["3"]), "schedule_3_5");
+    assert.equal(scheduleFromDea(["5", "0", "0"]), "schedule_3_5");
+  });
+
+  test("only a delivery that is wholly non-controlled is an ordinary record", () => {
+    assert.equal(scheduleFromDea(["0"]), "none");
+    assert.equal(scheduleFromDea(["0", "0", "0"]), "none");
+  });
+
+  test("nothing recorded is unknown, never none", () => {
+    /* A delivery whose schedules were never recorded has not been shown to be free of controls. */
+    assert.equal(scheduleFromDea([]), "unknown");
+    assert.equal(scheduleFromDea([null, undefined, ""]), "unknown");
+  });
+
+  test("a code this does not recognise is unknown, never none", () => {
+    /* Treating an unrecognised code as a nought would file an unknown schedule as an ordinary one. */
+    assert.equal(scheduleFromDea(["0", "X"]), "unknown");
+    assert.equal(scheduleFromDea(["9"]), "unknown");
+  });
+
+  test("the lettered forms are read too, in case a source writes them", () => {
+    assert.equal(scheduleFromDea(["CII"]), "schedule_2");
+    assert.equal(scheduleFromDea(["cIV", "0"]), "schedule_3_5");
+    assert.equal(scheduleFromDea(["2N"]), "schedule_2");
   });
 });

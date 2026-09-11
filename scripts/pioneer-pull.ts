@@ -596,8 +596,15 @@ async function pullInvoices(): Promise<string> {
         if (notes.length < 8) notes.push(`${inv.supplier} ${inv.number}: the site holds ${(existing.totalCents / 100).toFixed(2)}, PioneerRx has ${((goodsCents + inv.shippingCents) / 100).toFixed(2)}`);
       } else agree++;
     } else created++;
-    const two = inv.lines.some((l) => l.dea === "2");
-    const lower = inv.lines.some((l) => l.dea === "3" || l.dea === "4" || l.dea === "5");
+    /*
+     * The schedules actually on the delivery, kept rather than reduced to two booleans.
+     *
+     * These two lines computed exactly this and were then never used — the answer was worked out
+     * every night and thrown away, while invoices went to a model to have the same question
+     * answered from the wholesaler's typography. `scheduleFromDea` turns them into the filing
+     * decision, and the distinct codes are stored so the decision can be checked against them.
+     */
+    const deaSchedules = [...new Set(inv.lines.map((l) => (l.dea ?? "").trim()).filter((d) => d !== ""))].sort().join(",");
     /*
      * The schedule, from what is actually on the invoice.
      *
@@ -645,6 +652,7 @@ async function pullInvoices(): Promise<string> {
        * unit cost, which the sentence never carried, and it needs the description separable from
        * the numbers around it, which a space-joined line cannot give back.
        */
+      deaSchedules: deaSchedules || null,
       itemsJson: JSON.stringify(
         inv.lines.map((l) => ({
           ndc11: l.ndc11,
@@ -660,9 +668,20 @@ async function pullInvoices(): Promise<string> {
     if (held) await db.update(schema.pioneerPurchases).set(values).where(eq(schema.pioneerPurchases.id, held.id));
     else await db.insert(schema.pioneerPurchases).values({ id: newId(), ...values });
   }
+  /*
+   * Now the deliveries are in, settle any invoice that was waiting on one.
+   *
+   * McKesson emails at 03:40 and the delivery is entered at the counter during the day, so an
+   * invoice routinely arrives a day before its own receiving record. It waits with the Schedule II
+   * records until this runs, which is the cautious drawer and the right one to wait in.
+   */
+  const { settleSchedulesFromPioneer } = await import("../src/lib/invoices");
+  const settled = await settleSchedulesFromPioneer();
+
   const { setSetting } = await import("../src/lib/settings");
   await setSetting("pioneer_invoice_compare", JSON.stringify({ readAt: new Date().toISOString(), invoices: invoices.size, created, alreadyHeld, agree, differ, notes }));
   return (
+    `${settled.says}. ` +
     `${invoices.size} September purchases in PioneerRx, all recorded; ` +
     `${alreadyHeld} of them have the supplier's own invoice on file (${agree} agreeing on the total${differ ? `, ${differ} differing` : ""}), ` +
     `${created} do not and are what the cash account draws on until an invoice turns up`

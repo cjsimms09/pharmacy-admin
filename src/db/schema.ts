@@ -983,6 +983,15 @@ export const pioneerPurchases = sqliteTable(
      */
     itemsJson: text("items_json").notNull().default(""),
     /**
+     * The DEA schedules PioneerRx recorded on this delivery, distinct, sorted, comma-separated.
+     *
+     * "0" is non-controlled; "2" a Schedule II; "3", "4", "5" the lower schedules. This is the
+     * receiving pharmacy's own determination of what arrived, which is a better source than reading
+     * a class letter off the wholesaler's layout and the only one that never declines to answer.
+     * Null on deliveries pulled before the column existed.
+     */
+    deaSchedules: text("dea_schedules"),
+    /**
      * True where he has said this one delivery is closed on its receipt.
      *
      * "parmed needs to use receipt as invoice this time but not going forward". Per delivery, so it
