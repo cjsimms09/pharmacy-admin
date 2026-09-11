@@ -29,10 +29,28 @@ export const CLASS_INFO: Record<PlanClass, { label: string; inScope: boolean; wh
     inScope: true,
     why: "A state-regulated insurer bears the risk, so Kansas can set the floor and the Insurance Department can enforce it.",
   },
+  /*
+   * Out of scope because the Kansas legislature put it out of scope, which is not the same reason.
+   *
+   * I changed this to `true` on the strength of Rutledge v. PCMA, 592 U.S. 80 (2020) — unanimous that
+   * ERISA does not preempt a state law setting the rate a PBM must pay a pharmacy, expressly including
+   * as applied to self-funded plans. That case is good law and the 10th Circuit left it standing in
+   * PCMA v. Mulready, which struck down network-design rules and distinguished Rutledge on rates.
+   *
+   * The owner corrected it: "Kansas SB 20 specifically exempted ERISA plans." He is right, and it is
+   * the question I failed to ask. Rutledge says what a state *may* reach. SB 20 says what Kansas
+   * *chose* to reach, and it wrote the carve-out into the statute: the floor is NADAC plus the greater
+   * of $10.50 or the Medicaid professional dispensing fee, in the commercial market, for plans not
+   * subject to ERISA preemption.
+   *
+   * So the distinction is load-bearing after all, and in the dangerous direction — over-including a
+   * self-funded plan in a filing is what gets a schedule dismissed. It cannot be read off a claim, and
+   * the site is right to keep refusing to guess it.
+   */
   commercial_self_funded: {
     label: "Commercial — self-funded (ERISA)",
     inScope: false,
-    why: "The employer bears the risk and ERISA preempts state regulation of the plan. The floor does not reach it.",
+    why: "Kansas SB 20 sets its floor for the commercial market only where the plan is not subject to ERISA preemption. Rutledge v. PCMA (2020) holds a state could reach these plans; Kansas did not.",
   },
   governmental: {
     label: "Governmental plan",

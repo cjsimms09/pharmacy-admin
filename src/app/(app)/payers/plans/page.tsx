@@ -46,6 +46,59 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
     revalidatePath("/payers/plans");
   }
 
+  /*
+   * Confirms every plan proposed as one class, in one press.
+   *
+   * Sixty-nine plans carry a live proposal — forty-two Medicare, eleven copay cards, ten discount
+   * cards, five Medicaid, one workers' comp — and between them they classify 870 of the 2,523
+   * claims on file and $95,072.46 of reimbursement. Every one of them was a separate press, so
+   * none of them had been done, and 464 plan groups sat at "unknown" blocking the Kansas floor,
+   * the payer spread and anything else that needs to know what a plan is.
+   *
+   * The owner: "Does each specific thing need its own alert or can the alert be more general and
+   * click for specific." The same is true of the answer. A class is one decision — "these are the
+   * ones PioneerRx's own plan file calls Part D" — not forty-two.
+   *
+   * Each plan is still confirmed individually underneath, with its own evidence sentence recorded
+   * as its basis and its own audit line, so the file reads exactly as it would have done pressing
+   * them one at a time. Any that refuses is counted and named rather than silently skipped.
+   */
+  async function confirmAll(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const want = String(fd.get("classification") ?? "");
+    if (!want) redirect("/payers/plans?error=" + encodeURIComponent("No class was named."));
+
+    const all = await planCandidates();
+    const mine = all.filter((r) => r.proposed === want);
+    let done = 0;
+    const refused: string[] = [];
+    for (const r of mine) {
+      const res = await confirmProposal(r.id, u);
+      if (!res.ok) {
+        refused.push(`${r.payerLabel ?? r.bin}: ${res.why}`);
+        continue;
+      }
+      done++;
+      await audit({
+        action: "plan.classified",
+        userId: u.id,
+        userName: u.name,
+        entity: "plan",
+        entityId: r.id,
+        details: `confirmed as ${res.classification} (with ${mine.length - 1} others of the same class)`,
+      });
+    }
+    revalidatePath("/payers/plans");
+    redirect(
+      "/payers/plans?error=" +
+        encodeURIComponent(
+          refused.length === 0
+            ? `${done} plan${done === 1 ? "" : "s"} confirmed as ${want.replace(/_/g, " ")}.`
+            : `${done} confirmed; ${refused.length} refused — ${refused.slice(0, 2).join("; ")}`,
+        ),
+    );
+  }
   async function confirm(fd: FormData) {
     "use server";
     const u = await requireManager();
@@ -125,7 +178,32 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
       ) : null}
 
       {offered.length > 0 && (
-        <Card className="mb-4" title="Proposed, biggest first" count={offered.length} subtitle="Each one quotes what it was read from. Confirming records that sentence as the basis.">
+        <Card
+          className="mb-4"
+          title="Proposed, biggest first"
+          count={offered.length}
+          subtitle="Each one quotes what it was read from. Confirming records that sentence as the basis."
+          actions={
+            canConfirm && offered.length > 1 ? (
+              <span className="flex flex-wrap items-center gap-1">
+                {[...new Set(offered.map((r) => r.proposed))].flatMap((c) => (c ? [c] : [])).map((c) => {
+                  const n = offered.filter((r) => r.proposed === c).length;
+                  return (
+                    <form action={confirmAll} key={c}>
+                      <input type="hidden" name="classification" value={c} />
+                      <button
+                        className="btn btn-sm"
+                        title={`Confirms all ${n}, each with its own evidence recorded as its basis.`}
+                      >
+                        Confirm {n} {c.replace(/_/g, " ")}
+                      </button>
+                    </form>
+                  );
+                })}
+              </span>
+            ) : undefined
+          }
+        >
           <div className="overflow-x-auto">
             <table className="table">
               <thead>

@@ -366,7 +366,31 @@ async function loadPayerMap(): Promise<{
      * appeal against either points at nothing. They are still tracked and ranked, among their own
      * kind, where the rest of this module already puts them.
      */
-    if (isSubsidy(f.payers[0])) continue;
+    /*
+     * A subsidy is not a plan, so it is not in the plan comparison.
+     *
+     * This spread exists to point a MAC appeal at a rate difference between plans. A manufacturer
+     * copay card and a discount card pay a patient's share rather than a plan benefit, and the top of
+     * the list was two DST copay-card processors — an appeal against either points at nothing.
+     *
+     * A confirmed classification settles it; where there is none, a *proposal* is enough to withhold
+     * the recommendation, though never enough to make one. 019158/CNRX has carried a quoted proposal
+     * of `copay_card` the whole time while its classification waited for him. Using that to keep it
+     * out makes the site claim less, not more, and the Kansas floor still waits for a real answer.
+     *
+     * Deliberately local. The shared `isSubsidy` feeds the payer league table and the product ledger,
+     * and widening it there removed twenty-three genuinely loss-making products from the money list —
+     * a real signal worth $2,797.74 a month. Withholding one recommendation is not a reason to change
+     * what counts as a subsidy everywhere.
+     */
+    const spreadSubsidy = (() => {
+      const row = planOf(f.payers[0]);
+      const cls = row?.classification;
+      if (cls !== undefined && cls !== "unknown") return SUBSIDY_CLASSES.has(cls);
+      const offered = row?.proposedClassification;
+      return offered != null && SUBSIDY_CLASSES.has(offered);
+    })();
+    if (spreadSubsidy) continue;
     const who = nameOf(f);
     const p = e.byPayer.get(who) ?? { marginCents: 0, fills: 0, units: 0 };
     p.marginCents += f.marginCents;

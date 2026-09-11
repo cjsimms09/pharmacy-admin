@@ -227,12 +227,61 @@ function fromPioneer(rows: PioneerPlanRow[], which: "plan_file" | "pharmacy", bi
  * excluded from ERISA by definition. That is the most valuable unanswered question on the register,
  * and it is worth telling the owner which rows to go and look at rather than burying it.
  */
-export function governmentHint(rows: PioneerPlanRow[] | undefined): string | null {
-  const gov = (rows ?? []).filter((r) => r.isActive && norm(r.planType) === "GOVERNMENT");
-  if (gov.length === 0) return null;
-  const name = gov.find((r) => (r.planName ?? "").trim())?.planName?.trim();
+/**
+ * The words a plan's name uses when the employer is a government.
+ *
+ * Read from a *name*, never a group number: a group number is a code, and "COUNTY" inside one says
+ * nothing about who the employer is. "University of" is left out on purpose — a private university
+ * is an ordinary ERISA employer and only a state one is governmental, and the name does not say
+ * which.
+ */
+const GOVERNMENT_EMPLOYER =
+  /\b(?:city of|county of|state of|board of education|school district|unified school district|public (?:employees?|schools?)|state employees?)\b/i;
+
+/** True where a name says, in words, that the employer is a government. */
+export function namesAGovernmentEmployer(name: string | null | undefined): boolean {
+  return GOVERNMENT_EMPLOYER.test(name ?? "");
+}
+
+export function governmentHint(rows: PioneerPlanRow[] | undefined, payerLabel?: string | null): string | null {
+  /*
+   * The name counts as well as the filing, and on this pharmacy's data only the name ever fires.
+   *
+   * This looked for `planType === "Government"` alone. Not one of the 2,136 rows in PioneerRx's
+   * plan file carries that type — every one of them is "Standard" — so the hint had never once
+   * appeared, on a register where it is the most valuable thing that could. Meanwhile six plan names
+   * say it outright ("City Of Alexandria", "County Of El Paso") and the pharmacy's own claims carry
+   * "City of Wichita" in the payer label on twenty-three plan groups.
+   *
+   * Still a hint and still not a classification: `governmental` decides whether the floor reaches a
+   * plan, so it needs a document and stays out of `PROPOSABLE`. What changes is that the lead now
+   * reaches him at all.
+   */
+  const active = (rows ?? []).filter((r) => r.isActive);
+  /*
+   * A routing that names many plans names none of them — the same guard `findPlanClass` applies to the
+   * plan file, for the same reason.
+   *
+   * BIN 610014 carries several plans and one of them is "Oklahoma State Employees". Reading that as a
+   * lead about every claim on the BIN is how joining thirteen names under 004336/ADV once classified
+   * 151 commercial claims as Part D. So a name from the plan file counts only where the file names
+   * exactly one plan for this routing; a name on the claim's own payer label always counts, because
+   * that label is about this claim and nothing else.
+   */
+  const named = [...new Set(active.map((r) => (r.planName ?? "").trim()).filter(Boolean))];
+  const single = named.length === 1;
+  const gov = active.filter(
+    (r) => norm(r.planType) === "GOVERNMENT" || (single && namesAGovernmentEmployer(r.planName)),
+  );
+  const labelSays = namesAGovernmentEmployer(payerLabel);
+  if (gov.length === 0 && !labelSays) return null;
+  const name = gov.find((r) => (r.planName ?? "").trim())?.planName?.trim() ?? (labelSays ? (payerLabel ?? "").trim() : undefined);
   return (
-    `PioneerRx has this filed as a Government plan${name ? ` ("${name}")` : ""}. If that is right the Kansas floor ` +
+    `${
+      gov.some((r) => norm(r.planType) === "GOVERNMENT")
+        ? "PioneerRx has this filed as a Government plan"
+        : "This plan is named for a government employer"
+    }${name ? ` ("${name}")` : ""}. If that is right the Kansas floor ` +
     `reaches it — a city, county, school district or state plan is excluded from ERISA by definition, so preemption ` +
     `does not apply even when the plan is self-funded. That is worth confirming from the plan document, because it ` +
     `is one of the few findings that puts a plan in scope rather than out of it.`

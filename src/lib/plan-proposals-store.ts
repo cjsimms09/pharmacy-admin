@@ -159,7 +159,7 @@ export async function planCandidates(opts: { includeClassified?: boolean } = {})
       why: isProposal(r) ? null : r.why,
       proposedSource: isProposal(r) && isFinding(finding) ? finding.source : null,
       proposedConfidence: isProposal(r) && isFinding(finding) ? finding.confidence : null,
-      governmentHint: governmentHint(evidence.pioneer),
+      governmentHint: governmentHint(evidence.pioneer, evidence.payerLabel),
       fills: fills.get(tripleKey(p.bin, p.pcn, p.groupNumber)) ?? 0,
     });
   }
