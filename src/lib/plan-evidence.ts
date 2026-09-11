@@ -288,6 +288,54 @@ export function governmentHint(rows: PioneerPlanRow[] | undefined, payerLabel?: 
   );
 }
 
+/**
+ * The PCN a register row predates, read back off its own claims.
+ *
+ * ── Why this had to exist ──
+ *
+ * 481 of the register's 491 plans are unclassified, and 211 of those rows carry no PCN at all: they
+ * were made when the register was keyed on BIN and group alone, and `plan-key.ts` still lets them
+ * stand as the fallback for every PCN under that BIN and group. That fallback is doing real work —
+ * `planLookup` hands a claim to the PCN-less row whenever the exact row is still undecided — so on
+ * this pharmacy's 2,350 paid claims those 206 PCN-less rows govern 1,237 claims and $179,029.56.
+ *
+ * And nothing could propose a class for any of them. Every strong source here is looked up by BIN
+ * *and PCN*: the payer sheets, PioneerRx's plan file, the PCN patterns themselves. A row with no PCN
+ * matched none of them, so the largest block of unclassified money on the register was the block the
+ * evidence could not be pointed at — while the claims underneath it were carrying the PCN the whole
+ * time.
+ *
+ * ── The guard, which is the same guard three other places in this file apply ──
+ *
+ * The PCN selects the line of business, so borrowing one is only honest where there is one to
+ * borrow. Where a row's claims route on two PCNs, this returns nothing: a BIN and group carrying a
+ * commercial PCN and a Part D PCN is precisely the case the register was re-keyed to stop treating
+ * as one plan, and reading a majority off it would be the "silent majority" fault that once filed
+ * 151 commercial claims as Part D. On these claims 197 of the 211 PCN-less rows route on exactly one
+ * PCN and 9 route on several; the 9 get nothing, and the reason says so.
+ *
+ * A claim carrying no PCN counts as its own routing, for the same reason: "no PCN" is a routing the
+ * payer chose, not a blank to be filled in from its neighbours.
+ */
+export type ClaimRouting = { pcn: string | null; claims: number };
+
+export function routingFromClaims(rowPcn: string | null | undefined, seen: ClaimRouting[]): { pcn: string; from: string } | null {
+  if (norm(rowPcn) !== "") return null;
+  const live = seen.filter((r) => r.claims > 0);
+  const total = live.reduce((n, r) => n + r.claims, 0);
+  if (total === 0) return null;
+  const distinct = [...new Set(live.map((r) => norm(r.pcn)))];
+  if (distinct.length !== 1) return null;
+  const pcn = distinct[0];
+  if (pcn === "") return null;
+  return {
+    pcn,
+    from:
+      `This register row predates the PCN being kept, so it carries none. All ${total} claim${total === 1 ? "" : "s"} on ` +
+      `its BIN and group route on PCN ${pcn}, so that is the routing its evidence is read against.`,
+  };
+}
+
 /*
  * The words each class is recognised by in a BIN listing.
  *

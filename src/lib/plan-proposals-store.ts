@@ -1,9 +1,24 @@
 import "server-only";
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
-import { proposePlanClass, isProposal, findPlanClass, isFinding, governmentHint, type PlanEvidence, type PioneerPlanRow, type EvidenceSource, type Confidence } from "./plan-proposals";
+import {
+  proposePlanClass,
+  isProposal,
+  findPlanClass,
+  isFinding,
+  governmentHint,
+  routingFromClaims,
+  confirmGroups,
+  type PlanEvidence,
+  type PioneerPlanRow,
+  type EvidenceSource,
+  type Confidence,
+  type ConfirmGroup,
+} from "./plan-proposals";
 import { allPioneerPlanRows, pioneerRowsFor } from "./pioneer-plans";
 import { classifyPlan } from "./plans";
+import { planLookup } from "./plan-key";
+import { receivedCents } from "./money";
 import type { PlanClass } from "@/db/schema";
 
 /**
@@ -48,6 +63,36 @@ export type PlanCandidate = {
   governmentHint: string | null;
   /** Insured paid fills on this plan's triple, which is what orders the list. */
   fills: number;
+  /**
+   * The best name anybody has for this routing: PioneerRx's plan file where it names exactly one
+   * plan, then the payer label. "003858 / A4" is not a thing anybody recognises and "Cigna
+   * Commercial" is.
+   */
+  planName: string | null;
+  /**
+   * The PCN the evidence was actually read against.
+   *
+   * The row's own PCN, except on a row that predates the PCN being kept, where it is the PCN every
+   * one of that row's claims carries. Null where the row has none and its claims do not agree on
+   * one. See `routingFromClaims`.
+   */
+  routingPcn: string | null;
+  /** Set where the PCN was borrowed from the claims, saying so in words. Recorded in the basis. */
+  routingNote: string | null;
+  /**
+   * Paid claims this row GOVERNS, and what came in on them — counted once each.
+   *
+   * Not the claims whose BIN, PCN and group match this row: those double count, badly. A claim on
+   * BIN 019158 / PCN CNRX matches both the CNRX row and the PCN-less row for the same BIN and group,
+   * so summing per-row matches over the register gives 4,084 claims against 2,350 that exist and
+   * $41,263 of DST money twice. "The same money down two roads" is the fault this site keeps
+   * finding, and a total on a bulk-confirm button is the worst place to have it.
+   *
+   * So each paid claim is handed to exactly one row — the one `planLookup` says governs it, which is
+   * also the row whose classification the claim will actually inherit — and the counts add up.
+   */
+  claims: number;
+  receivedCents: number;
 };
 
 /** The claims' own count of fills per BIN/PCN/group, by prescription, fill number, date and NDC. */
@@ -98,21 +143,81 @@ type BinRowT = { bin: string; linesOfBusiness: string | null; pbmName: string };
  * column only written when somebody pressed "Look again", so on a register nobody had refreshed
  * every button failed. Two paths to one answer is the fault this project keeps finding.
  */
-function evidenceFor(p: PlanRowT, bins: BinRowT[], lobByBin: Map<string, string | null>, pioneer: PioneerPlanRow[]): PlanEvidence {
+function evidenceFor(
+  p: PlanRowT,
+  bins: BinRowT[],
+  lobByBin: Map<string, string | null>,
+  pioneer: PioneerPlanRow[],
+  routings: Map<string, { pcn: string | null; claims: number }[]>,
+): { evidence: PlanEvidence; routingNote: string | null } {
+  /*
+   * The PCN this row is read against.
+   *
+   * Its own, normally. On a row made before the PCN was kept — 211 of the 481 unclassified ones —
+   * there is none, and every source worth anything here is looked up by BIN *and PCN*. So the PCN is
+   * borrowed from the row's own claims, but only where all of them agree on one; where they do not,
+   * `routingFromClaims` returns nothing and the row keeps its blank, which is the honest answer.
+   */
+  const borrowed = routingFromClaims(p.pcn, routings.get(binGroupKey(p.bin, p.groupNumber)) ?? []);
+  const pcn = borrowed ? borrowed.pcn : p.pcn;
   return {
-    bin: p.bin,
-    pcn: p.pcn,
-    groupNumber: p.groupNumber,
-    payerLabel: p.payerLabel,
-    pbmName: p.pbmName ?? (p.bin ? (bins.find((b) => b.bin === p.bin)?.pbmName ?? null) : null),
-    linesOfBusiness: p.bin ? (lobByBin.get(p.bin) ?? null) : null,
-    /*
-     * PioneerRx's own answer, which is the strongest source here and was not being read at all.
-     * Passed in already loaded rather than fetched per plan: the register is 211 rows and the
-     * landing table is a couple of thousand, so one read and a filter beats 211 queries.
-     */
-    pioneer: pioneerRowsFor(pioneer, p.bin, p.pcn),
+    routingNote: borrowed ? borrowed.from : null,
+    evidence: {
+      bin: p.bin,
+      pcn,
+      groupNumber: p.groupNumber,
+      payerLabel: p.payerLabel,
+      pbmName: p.pbmName ?? (p.bin ? (bins.find((b) => b.bin === p.bin)?.pbmName ?? null) : null),
+      linesOfBusiness: p.bin ? (lobByBin.get(p.bin) ?? null) : null,
+      /*
+       * PioneerRx's own answer, which is the strongest source here and was not being read at all.
+       * Passed in already loaded rather than fetched per plan: the register is 211 rows and the
+       * landing table is a couple of thousand, so one read and a filter beats 211 queries.
+       */
+      pioneer: pioneerRowsFor(pioneer, p.bin, pcn),
+    },
   };
+}
+
+const binGroupKey = (bin: string | null, group: string | null) => [bin ?? "", group ?? ""].join("|").toUpperCase();
+
+/**
+ * What the claims say about each register row: which PCNs run under a BIN and group, and which row
+ * governs each paid claim.
+ *
+ * Read in one pass because both answers come off the same rows and the second one is the reason the
+ * first is safe to use: a row's money is counted where the claim will actually inherit its class.
+ */
+async function claimFacts(plans: PlanRowT[]) {
+  const claims = await db.query.claims.findMany({
+    columns: { bin: true, pcn: true, groupNumber: true, remitCents: true, copayCents: true, status: true, cashPlan: true },
+  });
+  const routings = new Map<string, { pcn: string | null; claims: number }[]>();
+  const governed = new Map<string, { claims: number; receivedCents: number }>();
+  const lookup = planLookup(plans);
+  for (const c of claims) {
+    if (c.cashPlan || c.status !== "paid") continue;
+    const k = binGroupKey(c.bin, c.groupNumber);
+    const list = routings.get(k) ?? [];
+    const hit = list.find((r) => (r.pcn ?? "").trim().toUpperCase() === (c.pcn ?? "").trim().toUpperCase());
+    if (hit) hit.claims++;
+    else list.push({ pcn: c.pcn, claims: 1 });
+    routings.set(k, list);
+
+    const g = lookup({ bin: c.bin, pcn: c.pcn, groupNumber: c.groupNumber });
+    if (!g) continue;
+    const e = governed.get(g.id) ?? { claims: 0, receivedCents: 0 };
+    e.claims++;
+    e.receivedCents += receivedCents(c.remitCents, c.copayCents) ?? 0;
+    governed.set(g.id, e);
+  }
+  return { routings, governed };
+}
+
+/** The name the plan file gives this routing, where it names exactly one. See `findPlanClass`. */
+function planNameFor(pioneer: PioneerPlanRow[], bin: string | null, pcn: string | null): string | null {
+  const named = [...new Set(pioneerRowsFor(pioneer, bin, pcn).filter((r) => r.isActive).map((r) => (r.planName ?? "").trim()).filter(Boolean))];
+  return named.length === 1 ? named[0] : null;
 }
 
 /**
@@ -136,15 +241,17 @@ const allBins = () =>
 export async function planCandidates(opts: { includeClassified?: boolean } = {}): Promise<PlanCandidate[]> {
   const [plans, bins, fills, pioneer] = await Promise.all([db.select().from(schema.planGroups), allBins(), fillsByTriple(), allPioneerPlanRows()]);
   const lobByBin = linesOfBusinessByBin(bins);
+  const { routings, governed } = await claimFacts(plans);
 
   const out: PlanCandidate[] = [];
   for (const p of plans) {
     if (!opts.includeClassified && p.classification !== "unknown") continue;
-    const evidence = evidenceFor(p, bins, lobByBin, pioneer);
+    const { evidence, routingNote } = evidenceFor(p, bins, lobByBin, pioneer, routings);
     const r = proposePlanClass(evidence);
     // The same pure decision, kept whole, so the source and confidence shown beside the offer are
     // the ones that produced it rather than a second opinion computed some other way.
     const finding = findPlanClass(evidence);
+    const mine = governed.get(p.id) ?? { claims: 0, receivedCents: 0 };
     out.push({
       id: p.id,
       bin: p.bin,
@@ -155,18 +262,38 @@ export async function planCandidates(opts: { includeClassified?: boolean } = {})
       linesOfBusiness: evidence.linesOfBusiness,
       classification: p.classification,
       proposed: isProposal(r) ? r.classification : null,
-      proposedFrom: isProposal(r) ? r.from : null,
+      // The borrowed routing is part of how the class was established, so it travels with the
+      // sentence rather than only living on the screen — it is what somebody checking this a year
+      // from now needs in order to see why a row with no PCN was read against one.
+      proposedFrom: isProposal(r) ? [r.from, routingNote].filter(Boolean).join(" ") : null,
       why: isProposal(r) ? null : r.why,
       proposedSource: isProposal(r) && isFinding(finding) ? finding.source : null,
       proposedConfidence: isProposal(r) && isFinding(finding) ? finding.confidence : null,
       governmentHint: governmentHint(evidence.pioneer, evidence.payerLabel),
       fills: fills.get(tripleKey(p.bin, p.pcn, p.groupNumber)) ?? 0,
+      planName: planNameFor(pioneer, p.bin, evidence.pcn),
+      routingPcn: evidence.pcn,
+      routingNote,
+      claims: mine.claims,
+      receivedCents: mine.receivedCents,
     });
   }
 
   // Biggest first, then the ones with something on offer, so an evening's work starts where the
   // money is rather than where the alphabet does.
   return out.sort((a, b) => b.fills - a.fills || Number(b.proposed !== null) - Number(a.proposed !== null));
+}
+
+/**
+ * The proposals gathered into one press each — the list the owner actually works.
+ *
+ * 481 plans is not a job anybody does. 13 groups is. Every plan inside a group carries the same
+ * class, from the same named document, for the same BIN and PCN, so the group is one thing to read
+ * and one thing to agree to — and the money on it is counted once, because each claim is attributed
+ * to the single row that governs it.
+ */
+export async function proposalGroups(): Promise<ConfirmGroup<PlanCandidate>[]> {
+  return confirmGroups(await planCandidates());
 }
 
 /**
@@ -240,16 +367,20 @@ export async function confirmProposal(
     return { ok: false, why: `This plan is already classified as ${plan.classification.replace(/_/g, " ")}.` };
   }
 
-  const [bins, pioneer] = await Promise.all([allBins(), allPioneerPlanRows()]);
-  const proposal = proposePlanClass(evidenceFor(plan, bins, linesOfBusinessByBin(bins), pioneer));
+  const [bins, pioneer, plans] = await Promise.all([allBins(), allPioneerPlanRows(), db.select().from(schema.planGroups)]);
+  const { routings } = await claimFacts(plans);
+  const { evidence, routingNote } = evidenceFor(plan, bins, linesOfBusinessByBin(bins), pioneer, routings);
+  const proposal = proposePlanClass(evidence);
   if (!isProposal(proposal)) return { ok: false, why: proposal.why };
 
   await classifyPlan(
     planId,
     {
       classification: proposal.classification,
-      // The proposal's own sentence becomes the basis, because it quotes the document it came from.
-      basis: `${proposal.from} Confirmed by ${user.name}.`,
+      // The proposal's own sentence becomes the basis, because it quotes the document it came from —
+      // and, where the PCN was borrowed from this row's own claims, the sentence that says so, so
+      // the record shows what was read and what it was read against.
+      basis: [proposal.from, routingNote, `Confirmed by ${user.name}.`].filter(Boolean).join(" "),
     },
     user,
   );
@@ -259,4 +390,44 @@ export async function confirmProposal(
     .set({ proposedClassification: null, proposedFrom: null, proposedSource: null, proposedConfidence: null })
     .where(eq(schema.planGroups.id, planId));
   return { ok: true, classification: proposal.classification };
+}
+
+/**
+ * The owner adopting one document's answer for every plan it settles, in one press.
+ *
+ * ── What it does not do, and why that is the whole design ──
+ *
+ * It confirms each plan *individually*, through `confirmProposal`, which recomputes the evidence for
+ * that plan and writes through `classifyPlan`. So every rule already in force applies unchanged: a
+ * class that needs a Form 5500 or the plan document is refused, the sentence the class was read from
+ * is recorded as that plan's own basis, and the audit line names that plan. The file afterwards
+ * reads exactly as it would have done pressing them one at a time.
+ *
+ * What is bulk here is the *asking*, not the deciding. The group is one class from one named
+ * document for one BIN and PCN — and every class that can appear in one is `inScope: false`, so
+ * confirming a group can only ever take plans out of the Kansas floor's reach. It cannot put one in.
+ * That is deliberate and there is a test on it: the four findings that decide scope stay one plan,
+ * one document, one person, and a previous attempt to make them bulk was caught by tests and
+ * reverted.
+ *
+ * A group is re-derived here rather than taken from the caller, so the press acts on what the
+ * evidence says now — the same reason `confirmProposal` recomputes.
+ */
+export async function confirmGroup(
+  key: string,
+  user: { id: string; name: string },
+): Promise<{ confirmed: number; refused: { plan: string; why: string }[]; classification: PlanClass | null; claims: number; receivedCents: number }> {
+  const group = (await proposalGroups()).find((g) => g.key === key);
+  if (!group) return { confirmed: 0, refused: [], classification: null, claims: 0, receivedCents: 0 };
+
+  let confirmed = 0;
+  const refused: { plan: string; why: string }[] = [];
+  for (const p of group.plans) {
+    const r = await confirmProposal(p.id, user);
+    // Any refusal is named rather than silently skipped — a bulk press that quietly did four of
+    // seven is the "button that appears to do nothing" fault multiplied by the size of the group.
+    if (!r.ok) refused.push({ plan: `${p.bin ?? "—"} / ${p.routingPcn || "no PCN"} / ${p.groupNumber ?? "no group"}`, why: r.why });
+    else confirmed++;
+  }
+  return { confirmed, refused, classification: group.classification, claims: group.claims, receivedCents: group.receivedCents };
 }

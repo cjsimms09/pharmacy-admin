@@ -290,3 +290,51 @@ describe("wages, funded by transfer", () => {
     assert.equal(readBankDescriptor("Ref AMIDQSP To *6728 Medications Aug 202", -1_591_281).kind, "practice_medications");
   });
 });
+
+/**
+ * The costs the site already carries, which a bank line must not add a second time.
+ *
+ * The owner: "alert 360 and wages shouldnt duplicate (already set in the site)". Wages were
+ * guarded and the alarm was not — it is a standing cost accruing by the day, so booking the card
+ * purchase on top of it would have been the alarm contract twice, every month, quietly.
+ */
+describe("a standing cost paid by card is not a second cost", () => {
+  test("Alert 360 is already counted, so the card purchase adds nothing", () => {
+    const m = readBankDescriptor("Purch ALERT 360 TULSA OK", -21_469);
+    assert.equal(m.category, "Software and systems");
+    assert.equal(wouldDoubleCount("Purch ALERT 360 TULSA OK", -21_469), true);
+    assert.match(m.alreadyCounted ?? "", /standing cost already carries/);
+  });
+
+  test("PioneerRx is a caution, because their invoice has not arrived yet", () => {
+    /* "pioneer should match invoice we willr eceive from them for previous month" — so the two are
+       one charge, and whichever is on file first is the one counted. */
+    const m = readBankDescriptor("PIONEERRX/EPAY N510-230 WEST WICHITA FAMILY PH", -223_312);
+    assert.equal(wouldDoubleCount("PIONEERRX/EPAY N510-230 WEST WICHITA FAMILY PH", -223_312), false);
+    assert.match(m.mayAlreadyBeCounted ?? "", /monthly invoice/);
+  });
+});
+
+/**
+ * Two wholesalers whose names both begin "Independent Pharmacy".
+ *
+ * The owner: "are we able to see difference between IPD and IPC on bank statement?" Only by the
+ * customer number — every one of August's eleven debits carries 10689648, which is this pharmacy's
+ * number with IPC and is printed on IPC's own credit memo.
+ */
+describe("telling IPC from IPD", () => {
+  test("a debit carrying IPC's own customer number is IPC", () => {
+    assert.equal(readBankDescriptor("Independent Phar/WAREHOUSE 10689648 WEST WICHITA FAMILY PH", -157_18).counterparty, "IPC");
+    /* The scan renders the same line several ways; all of them carry the number. */
+    assert.equal(readBankDescriptor("Independent P ha r/WAREHOU S[ 10689648 WEST WICHITA FAMILY PH", -314_093).counterparty, "IPC");
+  });
+
+  test("a similarly named wholesaler with a different number is not claimed as IPC", () => {
+    /*
+     * The collision that would put IPD's money against IPC's invoices. The account would still
+     * balance and every supplier total would be wrong, which is the kind of error nobody finds.
+     */
+    const other = readBankDescriptor("Independent Phar/WAREHOUSE 99887766 WEST WICHITA FAMILY PH", -300_000);
+    assert.notEqual(other.counterparty, "IPC");
+  });
+});

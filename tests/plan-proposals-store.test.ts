@@ -87,3 +87,93 @@ describe("the stored proposal columns are a log, not the answer", () => {
     assert.equal(row?.proposedFrom, null);
   });
 });
+
+/**
+ * The two things that turned 481 unclassified plans into a job somebody finishes.
+ *
+ * 481 of the register's 491 plans carry no class, and 1,751 paid claims and $226,094.82 of
+ * reimbursement sit behind that — the whole Kansas SB 20 programme blocked on it. Two facts about
+ * the shape of the register were doing most of the damage, and both are pinned here.
+ *
+ * 1. 211 of those rows carry no PCN at all: they predate the PCN being kept, and `planLookup` still
+ *    hands them every claim under their BIN and group. Every strong source here — the payer sheets,
+ *    PioneerRx's plan file, the PCN patterns — is looked up by BIN *and PCN*, so nothing could
+ *    propose a class for the rows holding most of the money, while their claims carried the PCN the
+ *    whole time. 197 of the 211 route on exactly one PCN.
+ *
+ * 2. The register is keyed on the group number as well, and the group number is the employer. So one
+ *    document settling one routing shows up as a dozen rows and a dozen buttons.
+ */
+const FALLBACK = { id: "plan-test-fallback", bin: "019158", pcn: null, groupNumber: "AC20029004" };
+const WITHPCN = { id: "plan-test-withpcn", bin: "019158", pcn: "CNRX", groupNumber: "AC20029005" };
+
+describe("a row that predates the PCN is read against the PCN its own claims carry", () => {
+  before(async () => {
+    await db.insert(schema.claimImports).values({ id: "imp-1", fileName: "test.csv", createdBy: "test" });
+    await db.insert(schema.planGroups).values([
+      { ...FALLBACK, classification: "unknown" },
+      { ...WITHPCN, classification: "unknown" },
+    ]);
+    // Two claims on the PCN-less row's BIN and group, both routing on CNRX, and one on the row that
+    // already has the PCN. Same routing, three register rows, one fact.
+    await db.insert(schema.claims).values([
+      { id: "c1", importId: "imp-1", rxNumber: "1", dateFilled: "2026-09-01", bin: "019158", pcn: "CNRX", groupNumber: FALLBACK.groupNumber, status: "paid", remitCents: 10_000 },
+      { id: "c2", importId: "imp-1", rxNumber: "2", dateFilled: "2026-09-02", bin: "019158", pcn: "CNRX", groupNumber: FALLBACK.groupNumber, status: "paid", remitCents: 20_000 },
+      { id: "c3", importId: "imp-1", rxNumber: "3", dateFilled: "2026-09-03", bin: "019158", pcn: "CNRX", groupNumber: WITHPCN.groupNumber, status: "paid", remitCents: 5_000 },
+    ]);
+  });
+
+  test("the PCN-less row becomes proposable, and says where the PCN came from", async () => {
+    const c = (await store.planCandidates()).find((x) => x.id === FALLBACK.id);
+    assert.ok(c);
+    assert.equal(c.proposed, "copay_card", "the row holds the money and was unproposable before this");
+    assert.equal(c.routingPcn, "CNRX");
+    assert.match(c.routingNote ?? "", /predates the PCN/);
+    assert.match(c.proposedFrom ?? "", /predates the PCN/, "the borrowed routing travels with the sentence, because it is part of how the class was established");
+  });
+
+  test("money is counted where the claim will actually inherit its class, not on every row that matches", async () => {
+    /*
+     * "The same money down two roads" is the fault this site keeps finding, and a total printed on a
+     * bulk-confirm button is the worst place for it. A claim on BIN 019158 / PCN CNRX matches both
+     * the CNRX row and the PCN-less row for its BIN and group; summing per-row matches over the
+     * whole register gives 4,084 claims against the 2,350 that exist. So each claim is attributed to
+     * the single row `planLookup` says governs it.
+     */
+    const cs = await store.planCandidates();
+    const total = cs.reduce((n, c) => n + c.claims, 0);
+    assert.equal(total, 3, "three claims exist, so the register's rows must account for three");
+    assert.equal(cs.reduce((n, c) => n + c.receivedCents, 0), 35_000);
+  });
+
+  test("one press confirms every plan the same document settles, each with its own basis", async () => {
+    const groups = await store.proposalGroups();
+    const g = groups.find((x) => x.bin === "019158" && x.pcn === "CNRX");
+    assert.ok(g, "the PCN-less row and the row with the PCN are one routing and must be one group");
+    assert.equal(g.plans.length, 2);
+    assert.equal(g.claims, 3);
+    assert.equal(g.receivedCents, 35_000);
+
+    const r = await store.confirmGroup(g.key, { id: "u1", name: "Cory Simms" });
+    assert.equal(r.confirmed, 2);
+    assert.deepEqual(r.refused, []);
+    assert.equal(r.classification, "copay_card");
+
+    for (const id of [FALLBACK.id, WITHPCN.id]) {
+      const row = await db.query.planGroups.findFirst({ where: eq(schema.planGroups.id, id) });
+      assert.equal(row?.classification, "copay_card", id);
+      // Each plan carries its own recorded reason, so the file reads as it would pressing them one
+      // at a time — a bulk press must leave no row whose basis is "somebody pressed a button".
+      assert.match(row?.basis ?? "", /019158/, id);
+      assert.match(row?.basis ?? "", /Confirmed by Cory Simms/, id);
+    }
+    // And the one whose PCN was borrowed says so in the record, where it can be checked a year on.
+    const fb = await db.query.planGroups.findFirst({ where: eq(schema.planGroups.id, FALLBACK.id) });
+    assert.match(fb?.basis ?? "", /predates the PCN/);
+  });
+
+  test("a group already confirmed is no longer on offer", async () => {
+    const groups = await store.proposalGroups();
+    assert.equal(groups.find((x) => x.bin === "019158" && x.pcn === "CNRX"), undefined);
+  });
+});
