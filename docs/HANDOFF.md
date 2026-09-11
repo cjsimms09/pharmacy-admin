@@ -1196,6 +1196,8 @@ where it has one. Sizing it needs the machine, so it is query 15 below.
 
 ### From B to 1 — the sold-month rule is right, the window it is sliced out of is not (10 September)
 
+**RESOLVED by `b46f0e4`, 10 September.** The window is now the union of filled-in and collected-in, which is the shape proposed below, and you measured what I could not: $193.18 on the month page against $1,528.03 on the quarter, the month understating by 87%. Your note that `booksBalance` passed on both is the sentence worth keeping — *a total that equals the sum of its own lines cannot tell you a line is missing* — and it is why `route-agreement.ts` exists. **Still open beside it:** the union has three date columns and the owner's return rule needs a fourth on `reversed_on`, or a fill sold in August and reversed in September will not be loaded when September is drawn. Original report kept below.
+
 **`a19d100` is correct and I am not arguing with it.** Revenue when the script is collected, cost
 with it, the bin named on the account: all right. What was not changed alongside it is the query
 that loads the fills, and the two are now on different columns.
