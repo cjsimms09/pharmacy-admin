@@ -197,3 +197,66 @@ describe("the PSAO, and the drugs sold to the practice", () => {
     assert.equal(own.lands, "transfer");
   });
 });
+
+/**
+ * The one line on a statement that arrives with no payee.
+ *
+ * The bank prints "Check 2451" and an amount. Nothing else — no name, no reference. August's six
+ * cheques would every one of them have landed unplaced, and one of them was the rent.
+ */
+describe("naming a cheque by what it is for", () => {
+  const standing = [
+    { name: "Rent", amountCents: 262_544, paidDay: 18 },
+    { name: "Payroll", amountCents: 4_500_000, paidDay: 30 },
+    { name: "Accounting", amountCents: 140_340, paidDay: 30 },
+  ];
+  const ctx = { payers: [], suppliers: [], vendors: [], unpaidBills: [], unpaidInvoices: [], standing };
+  const cheque = (cents: number, no = "2451") => ({ on: "2026-09-18", description: `Check ${no}`, amountCents: -cents, key: `k${no}` });
+
+  test("an exact match names the cost and books nothing", () => {
+    const p = placeLine(cheque(262_544), ctx);
+    assert.equal(p.kind, "confirms_standing");
+    if (p.kind !== "confirms_standing") return;
+    assert.equal(p.name, "Rent");
+    assert.equal(p.exact, true);
+    assert.match(p.why, /nothing is booked from this line/);
+  });
+
+  test("the delivery round is a candidate only in its own month", () => {
+    /* The driver is paid for the trips he drove, so his cheque is a different figure every month. */
+    const withRound = [...standing, { name: "The delivery round for September 2026", amountCents: 48_600, paidDay: null, month: "2026-09" }];
+    const p = placeLine(cheque(48_600), { ...ctx, standing: withRound });
+    assert.equal(p.kind, "confirms_standing");
+    if (p.kind !== "confirms_standing") return;
+    assert.match(p.name, /delivery round/);
+    /* The same cheque in October must not confirm September's round. */
+    const october = placeLine({ ...cheque(48_600), on: "2026-10-18" }, { ...ctx, standing: withRound });
+    assert.equal(october.kind, "unplaced");
+  });
+
+  test("a figure near a standing cost is NOT taken for it", () => {
+    /*
+     * Cheque 2449 for $1,449.00 sits 3.2% from the accountant's $1,403.40 and is not the accountant
+     * at all — it is drugs sold to the practice at cost. A tolerance wide enough to catch a rent
+     * rise is wide enough to swallow this, and the wrong answer would have had somebody change a
+     * standing cost that was correct.
+     */
+    const p = placeLine(cheque(144_900, "2449"), ctx);
+    assert.equal(p.kind, "unplaced");
+    assert.match(p.why, /yours to categorise/);
+  });
+
+
+
+  test("two costs at the same figure is refused rather than guessed", () => {
+    const twins = [...standing, { name: "Something else", amountCents: 262_544, paidDay: 1 }];
+    const p = placeLine(cheque(262_544), { ...ctx, standing: twins });
+    assert.equal(p.kind, "unplaced");
+    assert.match(p.why, /cannot be told from the amount alone/);
+  });
+
+  test("a line that is not a cheque is left to the ordinary rules", () => {
+    const p = placeLine({ on: "2026-09-18", description: "MCKESSON DRUG/AUTO ACH ACH07227740", amountCents: -262_544, key: "x" }, ctx);
+    assert.notEqual(p.kind, "confirms_standing");
+  });
+});

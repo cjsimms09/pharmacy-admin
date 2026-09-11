@@ -136,6 +136,14 @@ export type Placement =
   | { kind: "already_counted"; what: string; where: string; why: string }
   /** A transfer between the pharmacy's own accounts: neither a cost nor revenue, on either basis. */
   | { kind: "own_transfer"; why: string }
+  /**
+   * A cheque recognised as one of the standing costs, by its amount.
+   *
+   * A confirmation rather than a booking: the cash account already carries a standing cost on its
+   * paid day, so booking the cheque as well would be rent twice. What this adds is the proof it
+   * really was paid, and the day it really left — and, where the figure has moved, that it has.
+   */
+  | { kind: "confirms_standing"; name: string; exact: boolean; why: string }
   | { kind: "settles_ach"; supplier: string; reference: string; invoices: string[]; why: string }
   | { kind: "unplaced"; why: string };
 
@@ -153,6 +161,26 @@ export type MatchContext = {
    * ACH07172717 is twenty-seven invoices; no amount of matching by value will ever find them.
    */
   settled?: { supplier: string; invoiceNumber: string; checkNumber: string | null; netCents: number }[];
+  /**
+   * The costs that recur every month at a known figure: rent, payroll, the accountant.
+   *
+   * A cheque is the one line on a statement with no payee on it — the bank prints the number and
+   * the amount and nothing else. So the amount is the only thing that can name it, and the only
+   * amounts worth testing against are the ones that repeat.
+   */
+  /**
+   * Every figure this pharmacy pays that the site can work out for itself.
+   *
+   * The costs that repeat at the same amount — rent, payroll, the accountant — carry no month.
+   * The ones that change every month carry the month they belong to, and are only candidates in
+   * it: the delivery round is 54 trips in one month and 47 in the next, and the drugs passed to
+   * the practice at cost are a different figure again. Matching September's cheque against
+   * August's round would confirm a payment that never happened.
+   *
+   * The owner: "checks should match what they can (ie WWFP meds or delivery driver, or other
+   * things it seems like it matches.) the rest of the checks should allow me to categorize."
+   */
+  standing?: { name: string; amountCents: number; paidDay: number | null; month?: string }[];
 };
 
 const RETAIL = /\b(square|clover|toast|stripe|merchant|card\s*(services|settlement|deposit)|visa|mastercard|amex|american express|discover|bankcard|worldpay|heartland|elavon|fiserv|cash deposit|counter deposit|mobile deposit|atm deposit)\b/i;
@@ -231,6 +259,62 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
     return { kind: "unplaced", why: "a deposit from nobody the site knows; bank it by hand with the payer" };
   }
   const out = -line.amountCents;
+
+  /*
+   * A cheque, which is the one line that arrives with no payee at all.
+   *
+   * The bank prints "Check 2451" and the amount. Nothing else — no name, no reference, nothing
+   * for any of the rules below to match on. August's six cheques would every one of them have
+   * landed unplaced, and two of them were the rent and the accountant.
+   *
+   * So the amount does the naming, and only against figures that repeat. An exact match is the
+   * cost; a near miss is reported as a near miss rather than quietly accepted, because a rent
+   * cheque that has changed by forty dollars is worth knowing about and is exactly what a
+   * tolerance would hide.
+   */
+  if (/^(CHECK|CHQ|CHEQUE|DRAFT)\s*#?\s*\d+$/i.test(d.trim()) && ctx.standing?.length) {
+    /*
+     * Only the figures that could be this month's.
+     *
+     * Most recurring costs are the same every month and carry no month of their own. The delivery
+     * round is not: the owner pays the driver for the trips he actually drove, so his cheque is a
+     * different figure every month — 54 trips at $9.00 in one, 47 in the next. A candidate carrying
+     * a month is only a candidate in that month, or September's cheque would be matched against
+     * August's round and confirm a payment that never happened.
+     */
+    const candidates = ctx.standing.filter((c) => !c.month || c.month === line.on.slice(0, 7));
+    const exact = candidates.filter((c) => c.amountCents === out);
+    if (exact.length === 1) {
+      return {
+        kind: "confirms_standing",
+        name: exact[0].name,
+        exact: true,
+        why: `${exact[0].name}, paid by cheque. The standing cost already carries it, so nothing is booked from this line — what it adds is that the money really left, and on ${line.on}.`,
+      };
+    }
+    if (exact.length > 1) {
+      return { kind: "unplaced", why: `${exact.length} standing costs are for exactly this amount, so which cheque this is cannot be told from the amount alone.` };
+    }
+    /*
+     * Exactly, or not at all. There is deliberately no "close enough" here.
+     *
+     * There was, at a twentieth either way, and a real cheque broke it the day it was written.
+     * Cheque 2449 for $1,449.00 sat 3.2% from the accountant's $1,403.40 and would have been
+     * reported as the accountant's fee having gone up. It is not the accountant at all — the owner:
+     * "the 1449 is for drugs sold to WWFP at cost". The two were never related.
+     *
+     * No tolerance can separate those, because the thing that distinguishes them is not how far
+     * apart the figures are; it is that they are different things. A window wide enough to catch a
+     * rent rise is wide enough to swallow an unrelated cheque of similar size, and the wrong answer
+     * is worse than none: it would have had somebody change a standing cost that was correct.
+     */
+    return {
+      kind: "unplaced",
+      why:
+        "A cheque. The bank prints no payee on one, and its amount matches nothing the site can work out for this month, " +
+        "so it is yours to categorise — and once you have, the account has it.",
+    };
+  }
   const bills = ctx.unpaidBills.filter((b) => b.amountCents === out);
   const billByName = bills.filter((b) => b.vendorName && mentions(d, b.vendorName));
   if (billByName.length === 1) return { kind: "pays_bill", expenseId: billByName[0].id, vendorName: billByName[0].vendorName!, why: `the ${billByName[0].vendorName} bill for exactly this amount` };
@@ -257,5 +341,44 @@ export function placeLines(lines: BankLine[], ctx: MatchContext): { line: BankLi
     if (placement.kind === "pays_invoice") invoices.splice(invoices.findIndex((v) => v.id === placement.invoiceId), 1);
     out.push({ line, placement });
   }
+  return out;
+}
+
+/**
+ * Every amount this pharmacy pays that the site can work out for itself, for naming a cheque by.
+ *
+ * A cheque is the only line on a statement with no payee on it — the bank prints its number and its
+ * amount and nothing else. So the amount has to do the naming, and the only amounts safe to name it
+ * with are ones the site derived rather than guessed.
+ *
+ * Three sources, and each is exact:
+ *
+ *   the standing costs   rent, payroll, the accountant. The same every month, so no month is
+ *                        attached and they are candidates in all of them.
+ *   the delivery round   what the driver is owed for the trips he actually drove, at his own rate.
+ *                        A different figure every month, so it carries the month it belongs to.
+ *   the practice's drugs what was passed to West Wichita Family Physicians at cost. Also monthly,
+ *                        and also exact — it comes from PioneerRx's own report of what was sold to
+ *                        them, not from anything inferred.
+ */
+export async function chequeCandidates(month: string): Promise<{ name: string; amountCents: number; paidDay: number | null; month?: string }[]> {
+  const { db, schema } = await import("@/db");
+  const out: { name: string; amountCents: number; paidDay: number | null; month?: string }[] = [];
+
+  for (const c of await db.select().from(schema.standingCosts)) {
+    if (c.fromMonth > month || (c.toMonth !== null && c.toMonth < month)) continue;
+    out.push({ name: c.name, amountCents: c.amountCents, paidDay: c.paidDay ?? null });
+  }
+
+  /*
+   * The driver's round, from the days entered — the same arithmetic his invoice is built from, so
+   * the figure the cheque is tested against is the figure he was actually owed.
+   */
+  const { monthState } = await import("./deliveries");
+  const round = await monthState(month);
+  if (round.totalCents > 0) {
+    out.push({ name: `The delivery round for ${round.label}`, amountCents: round.totalCents, paidDay: null, month });
+  }
+
   return out;
 }
