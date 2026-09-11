@@ -104,7 +104,21 @@ const MCK = new RegExp(
     String.raw`(\d{3}-\d{4})` + // McKesson item number
     String.raw`\d{9}` + // document number, not kept
     String.raw`\s+(\d+)\*?([A-Z]{2})\s+` + // quantity, an optional asterisk, unit of measure
-    String.raw`(.*?)\s+(${MONEY})` + // description, then AWP
+    String.raw`(.*?)` + // description
+    /*
+     * The AWP column, where the line prints one.
+     *
+     * Two lines on a $12,998.31 McKesson invoice carry no AWP at all — a febuxostat and a warfarin,
+     * which print only the unit price and the extended amount. The pattern required the column, so
+     * both failed; the fifty-six that parsed then came to $11.59 less than the printed total, and
+     * the all-or-nothing rule threw away all fifty-six.
+     *
+     * That is the second time one optional column has cost a whole invoice — the last was the
+     * rebate flag printing KI and KD, which cost $9,890.97 of item lines. The lesson is the same
+     * both times: on this layout a column that is usually there is not always there, so each one
+     * has to be optional except the two the line's own arithmetic is checked on.
+     */
+    String.raw`(?:\s+(${MONEY}))?` + // AWP, where it prints
     // The item class — R for legend, X for Schedule II — prints on prescription lines and not on
     // front-end ones, so its absence is a fact about the item rather than a line this cannot read.
     String.raw`(?:\s+([A-Z]))?` +
@@ -422,7 +436,8 @@ export function parseInvoiceLines(text: string, printedTotalCents: number | null
         unitOfMeasure: uom,
         unitCostCents,
         extendedCents,
-        awpCents: money(awp),
+        /* Null where the line prints no AWP, which is a fact about the line and not a nought. */
+        awpCents: awp ? money(awp) : null,
         itemClass: cls ?? null,
         rebated: Boolean(k),
         controlled: null,

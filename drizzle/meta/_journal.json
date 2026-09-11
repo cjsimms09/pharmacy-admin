@@ -757,6 +757,13 @@
       "when": 1788808288029,
       "tag": "0107_inbox_routed_as_not_null",
       "breakpoints": true
+    },
+    {
+      "idx": 108,
+      "version": "6",
+      "when": 1788808348029,
+      "tag": "0108_no_catalogue",
+      "breakpoints": true
     }
   ]
 }
