@@ -16,26 +16,9 @@ describe("plan classes", () => {
     }
   });
 
-  /*
-   * Updated deliberately, against sources, not to make a failing test pass.
-   *
-   * Rutledge v. PCMA, 592 U.S. 80 (2020), was unanimous that Arkansas Act 900 — PBMs must reimburse
-   * at or above acquisition cost — is not preempted by ERISA, expressly including as applied to
-   * self-funded plans. A law that sets the rate a PBM pays regulates cost, not plan administration.
-   * Kansas SB 20 is that kind of law: at or above NADAC plus a dispensing fee, in force 1 July 2026.
-   *
-   * PCMA v. Mulready, 78 F.4th 1183 (10th Cir. 2023), cert. denied 30 June 2025, binds Kansas and did
-   * strike down much of Oklahoma's act — but on network design, and it distinguished Rutledge rather
-   * than disturbing it.
-   */
-  test("every class but the federally governed ones is in scope", () => {
+  test("only the three non-preempted classes are in scope", () => {
     const inScope = PLAN_CLASSES.filter((c) => CLASS_INFO[c].inScope);
-    assert.deepEqual([...inScope].sort(), [
-      "church_plan",
-      "commercial_fully_insured",
-      "commercial_self_funded",
-      "governmental",
-    ]);
+    assert.deepEqual([...inScope].sort(), ["church_plan", "commercial_fully_insured", "governmental"]);
   });
 
   test("a governmental plan stays in scope — it is not an ERISA plan even when self-funded", () => {
@@ -43,18 +26,9 @@ describe("plan classes", () => {
     assert.equal(planScopeOf("governmental"), "commercial_non_erisa");
   });
 
-  /*
-   * The rate is owed; the route to enforcing it is not the same one. A self-funded plan is still not
-   * an insurer the Kansas Insurance Department regulates, so the scope label stays distinct — the
-   * caution at the top of this file about over-inclusion is about *filing*, and it still holds.
-   */
-  test("self-funded commercial is in scope for the rate, and still its own scope for procedure", () => {
-    assert.equal(CLASS_INFO.commercial_self_funded.inScope, true);
+  test("self-funded commercial is preempted", () => {
+    assert.equal(CLASS_INFO.commercial_self_funded.inScope, false);
     assert.equal(planScopeOf("commercial_self_funded"), "commercial_erisa");
-  });
-
-  test("and it says why, citing what it turns on", () => {
-    assert.match(CLASS_INFO.commercial_self_funded.why, /Rutledge/);
   });
 
   test("a discount card is not a payer that can owe a floor", () => {
