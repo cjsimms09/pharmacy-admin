@@ -245,7 +245,7 @@ export function countedTwice(i: PLInputs, pl: MonthlyPL): CountedTwice[] {
     routes: ["The standing cost, accrued by the day", "The real bill for the month, filed on Spending"],
     rule:
       "The bills win as far as they go, and the estimate covers the rest. A standing cost stands down by what has been billed rather than for the first bill that arrives: " +
-      "$45,000 of payroll with one $12,000 run filed carries $12,000 of bill and $33,000 of estimate, never both in full and never only the part that happens to be in. " +
+      "A cost half covered by a filed bill carries that bill plus the remainder as estimate — never both in full, and never only the part that happens to be in. " +
       "It disappears entirely once the bills reach the month's figure.",
     bothPresent: false,
     keptOutCents: null,

@@ -92,11 +92,15 @@ export type StandingCostInput = {
  * already on the basis asked for (by invoice date, or by the day paid).
  *
  * How much, not whether. This used to drop the whole estimate the moment any bill from that vendor
- * appeared, which is right where the bill is the month's payroll and badly wrong where it is one
- * run of two: $45,000 a month with a single $12,000 run entered showed $12,000 and dropped the
- * rest, understating the month by $33,000 with nothing on any screen to say so. An estimate exists
- * precisely because the real figure may not all be in yet, so it stands down by what has arrived
- * rather than for the first thing that arrives.
+ * appeared, which is right where the bill covers the month and wrong where it is one part of it —
+ * a fortnightly payroll, a rent invoice split across two documents, an accountant who bills twice.
+ * The estimate exists precisely because the real figure may not all be in yet, so it stands down by
+ * what has arrived rather than for the first thing that arrives.
+ *
+ * No such bill has ever been filed here: this pharmacy's payroll is a flat $45,000 paid by transfer
+ * and its rent one cheque, so the rule is inert today. It is written this way because the failure it
+ * prevents is silent — a standing cost that has been replaced looks exactly like one that was never
+ * there, and nothing on any screen would say which.
  *
  * So the estimate tops the bills up to what the month is expected to carry, and only disappears
  * once the bills reach it. A month billed above its estimate keeps the bills and adds nothing,

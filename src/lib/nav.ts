@@ -85,6 +85,14 @@ export const NAV: NavGroup[] = [
       { href: "/claims/floor", label: "Kansas floor", blurb: "Claims paid under NADAC plus the fee, the plans the floor reaches, and the appeals filed", gated: true },
       { href: "/payers", label: "Payers and contracts", blurb: "Every BIN we bill, its contract read once, its appeal route and its 835 routing", gated: true },
       { href: "/payers/performance", label: "Who pays best", blurb: "Every plan ranked by what it actually pays", gated: true, hidden: true },
+      /*
+       * The 835s, which is where a deposit becomes a claim.
+       *
+       * Visible rather than hidden, and above the facilitator's own page: it is the route in for
+       * every payer's remittance, and a page nothing links to is a page nobody can find. The owner
+       * pressed for the button on it and then asked where it lived, which is the whole answer.
+       */
+      { href: "/remits", label: "Remittances (835s)", blurb: "What each payer decided to pay, claim by claim — and the one press that fetches the month's", gated: true },
       { href: "/remits/mtf", label: "Facilitator payments", blurb: "What the Medicare Transaction Facilitator has paid after the claim, and what is still awaited", gated: true, hidden: true },
     ],
   },
