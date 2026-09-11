@@ -343,7 +343,19 @@ const RULES: Rule[] = [
     side: "in",
     lands: "revenue",
     category: "third_party",
-    feed: "the PSAO's 835 remittances",
+    feed: "the ProviderPay payment report, by payment number",
+    /*
+     * Two routes to one dollar, now that the payment report is arriving.
+     *
+     * The report itemises every payment into the ProviderPay account by payer and payment number,
+     * and the deposit on the bank statement is that same money swept across. August's file matches
+     * every deposit tested to exactly one payment — $40,084.14 to Health Mart Atlas EFT-31312459,
+     * $1,454.22 to Argus 101000014541748 — so whichever is banked, the other must not be.
+     *
+     * The report is the better source: itemised, by payer, with a payment number to match on. So
+     * the deposit carries the caution and the report carries the money.
+     */
+    mayAlreadyBeCounted: "third-party revenue, wherever the ProviderPay payment report for the same month has been read",
     why:
       "Remits from the PSAO — the largest deposits here. One covers many claims across many plans, so it will never equal any single figure the site holds; " +
       "the 835 behind it is what says which claims it paid.",
@@ -355,7 +367,19 @@ const RULES: Rule[] = [
     side: "in",
     lands: "revenue",
     category: "third_party",
-    feed: "the PSAO's 835 remittances",
+    feed: "the ProviderPay payment report, by payment number",
+    /*
+     * Two routes to one dollar, now that the payment report is arriving.
+     *
+     * The report itemises every payment into the ProviderPay account by payer and payment number,
+     * and the deposit on the bank statement is that same money swept across. August's file matches
+     * every deposit tested to exactly one payment — $40,084.14 to Health Mart Atlas EFT-31312459,
+     * $1,454.22 to Argus 101000014541748 — so whichever is banked, the other must not be.
+     *
+     * The report is the better source: itemised, by payer, with a payment number to match on. So
+     * the deposit carries the caution and the report carries the money.
+     */
+    mayAlreadyBeCounted: "third-party revenue, wherever the ProviderPay payment report for the same month has been read",
     why: "The PSAO paying. Consolidated across many claims, so only its 835 can break it down.",
   },
   {
@@ -365,7 +389,19 @@ const RULES: Rule[] = [
     side: "out",
     lands: "revenue",
     category: "third_party",
-    feed: "the PSAO's 835 remittances",
+    feed: "the ProviderPay payment report, by payment number",
+    /*
+     * Two routes to one dollar, now that the payment report is arriving.
+     *
+     * The report itemises every payment into the ProviderPay account by payer and payment number,
+     * and the deposit on the bank statement is that same money swept across. August's file matches
+     * every deposit tested to exactly one payment — $40,084.14 to Health Mart Atlas EFT-31312459,
+     * $1,454.22 to Argus 101000014541748 — so whichever is banked, the other must not be.
+     *
+     * The report is the better source: itemised, by payer, with a payment number to match on. So
+     * the deposit carries the caution and the report carries the money.
+     */
+    mayAlreadyBeCounted: "third-party revenue, wherever the ProviderPay payment report for the same month has been read",
     why:
       "The PSAO taking money back — a reversal, a clawback or a fee withheld. It reduces revenue rather than adding a cost, " +
       "so it lands on the revenue side negative and never inflates what the pharmacy appears to spend.",

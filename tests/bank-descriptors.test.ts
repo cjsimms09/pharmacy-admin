@@ -174,11 +174,15 @@ describe("the PSAO, and the drugs sold to the practice", () => {
     assert.equal(pp.category, "third_party");
   });
 
-  test("a PSAO remittance points at the 835, because nothing else can break it down", () => {
+  test("a PSAO remittance points at the payment report, which names it exactly", () => {
     const m = readBankDescriptor("ACCESS HEALTH/ACCESS HEA L722734 West Wichita Family Ph", 4_008_414);
-    assert.equal(m.matchTo?.feed, "the PSAO's 835 remittances");
-    /* $40,084.14 equals no claim and no day's claims. Matching by amount is not merely hard, it is impossible. */
-    assert.match(m.says, /one covers many claims/i);
+    /*
+     * August's ProviderPay report matches this deposit to exactly one payment: Health Mart Atlas
+     * EFT-31312459 for $40,084.14. So it is the report, not the 835, that places these.
+     */
+    assert.match(m.matchTo?.feed ?? "", /ProviderPay payment report/);
+    /* And two routes to one dollar, so the deposit carries the caution and the report carries the money. */
+    assert.match(m.mayAlreadyBeCounted ?? "", /third-party revenue/);
   });
 
   test("the PSAO taking money back reduces revenue rather than adding a cost", () => {
