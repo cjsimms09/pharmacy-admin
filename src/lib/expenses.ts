@@ -303,3 +303,25 @@ export async function cashReceiptsFor(months: string[]) {
   const set = new Set(months);
   return rows.filter((r) => set.has(r.month));
 }
+
+/**
+ * Changes a receipt already banked under a known source key.
+ *
+ * `addCashReceipt` refuses a second receipt for the same key, which is what stops one remittance
+ * being banked twice when a file is re-read. That rule has one exception: a wholesaler's corrected
+ * rebate statement is not a re-read of the first one — the money that arrived was a different
+ * amount, and the receipt has to carry the amount that arrived rather than the one first stated.
+ *
+ * Only the figure and the note. The key, the month and the kind are the receipt's identity and are
+ * not changed here; a correction that moved the money to a different month would be a different
+ * receipt, and this is deliberately unable to make that mistake quietly.
+ */
+export async function updateCashReceipt(sourceKey: string, change: { amountCents: number; notes?: string | null }): Promise<boolean> {
+  const held = await db.query.cashReceipts.findFirst({ where: eq(schema.cashReceipts.sourceKey, sourceKey) });
+  if (!held) return false;
+  await db
+    .update(schema.cashReceipts)
+    .set({ amountCents: change.amountCents, notes: change.notes ?? held.notes })
+    .where(eq(schema.cashReceipts.id, held.id));
+  return true;
+}

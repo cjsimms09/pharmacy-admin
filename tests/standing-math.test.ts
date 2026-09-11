@@ -56,3 +56,74 @@ describe("on the cash basis", () => {
     assert.equal(other[0].replacedByBill, false);
   });
 });
+
+/**
+ * An estimate stands down by what has arrived, not for the first thing that arrives.
+ *
+ * The rule used to be "any bill from this vendor replaces the estimate", which is right when the
+ * bill is the month's payroll and wrong when it is one run of two. $45,000 a month with a single
+ * $12,000 run entered showed $12,000 and dropped the rest — a $33,000 understatement that nothing
+ * on the account would have questioned, because a standing cost that has been replaced looks
+ * exactly like one that was never there.
+ */
+describe("a partly billed standing cost", () => {
+  const payroll = {
+    id: "s1",
+    name: "Payroll",
+    categoryId: "wages",
+    vendorId: "v-payroll",
+    amountCents: 4_500_000,
+    fromMonth: "2026-01",
+    toMonth: null,
+  };
+  /* A whole month, so the accrued share is the whole figure and the arithmetic is easy to check. */
+  const whole = (bills: { vendorId: string | null; categoryId?: string | null; amountCents?: number }[]) =>
+    standingLines([payroll], "2026-09", "2026-09-30", bills)[0];
+
+  test("one payroll run of two tops up to the month's figure rather than replacing it", () => {
+    const l = whole([{ vendorId: "v-payroll", amountCents: 1_200_000 }]);
+    assert.equal(l.replacedByBill, false);
+    assert.equal(l.partlyBilled, true);
+    assert.equal(l.billedCents, 1_200_000);
+    assert.equal(l.toAccrueCents, 3_300_000);
+  });
+
+  test("bills reaching the whole figure drop the estimate", () => {
+    const l = whole([{ vendorId: "v-payroll", amountCents: 3_000_000 }, { vendorId: "v-payroll", amountCents: 1_500_000 }]);
+    assert.equal(l.replacedByBill, true);
+    assert.equal(l.toAccrueCents, 0);
+  });
+
+  test("billed above the estimate adds nothing on top", () => {
+    const l = whole([{ vendorId: "v-payroll", amountCents: 5_000_000 }]);
+    assert.equal(l.replacedByBill, true);
+    assert.equal(l.toAccrueCents, 0);
+  });
+
+  test("no bill at all carries the whole estimate", () => {
+    const l = whole([]);
+    assert.equal(l.partlyBilled, false);
+    assert.equal(l.billedCents, 0);
+    assert.equal(l.toAccrueCents, 4_500_000);
+  });
+
+  test("a bill with no amount given still replaces the estimate outright", () => {
+    /* Older callers pass only the vendor. "There is a bill" has to keep meaning what it meant. */
+    const l = whole([{ vendorId: "v-payroll" }]);
+    assert.equal(l.replacedByBill, true);
+    assert.equal(l.toAccrueCents, 0);
+  });
+
+  test("the top-up follows the month's share, not the whole figure, part way through", () => {
+    /* On the 10th of a 30-day month the month expects $15,000; $12,000 is billed, so $3,000 is left. */
+    const l = standingLines([payroll], "2026-09", "2026-09-10", [{ vendorId: "v-payroll", amountCents: 1_200_000 }])[0];
+    assert.equal(l.toAccrueCents, 300_000);
+  });
+
+  test("a category match measures the category, not the vendor", () => {
+    const noVendor = { ...payroll, vendorId: null };
+    const l = standingLines([noVendor], "2026-09", "2026-09-30", [{ vendorId: null, categoryId: "wages", amountCents: 1_000_000 }])[0];
+    assert.equal(l.toAccrueCents, 3_500_000);
+    assert.equal(l.partlyBilled, true);
+  });
+});

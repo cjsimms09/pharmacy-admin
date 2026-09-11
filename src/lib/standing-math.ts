@@ -27,8 +27,14 @@ export type StandingLine = {
   of: number;
   /** The day of the month the money leaves, where the owner has said. */
   paidDay: number | null;
-  /** True where a real bill from the same vendor is entered for the month, and this line is dropped for it. */
+  /** True where real bills from the same vendor reach the whole month's figure, and this line is dropped for them. */
   replacedByBill: boolean;
+  /** What the account should add on top of the bills already in it. Nought where the bills cover the month. */
+  toAccrueCents: number;
+  /** What real bills against the same vendor or category already carry for the month. */
+  billedCents: number;
+  /** True where bills exist but fall short of the month's figure, so this line is the top-up. */
+  partlyBilled: boolean;
   /** Cash basis only: true where the cost has no paid day, so the cash account cannot place it. */
   noPaidDay: boolean;
 };
@@ -76,37 +82,82 @@ export type StandingCostInput = {
 };
 
 /**
- * Every standing cost that applies to the month, with its share, and whether a real bill has
- * taken its place.
+ * Every standing cost that applies to the month, with its share, and how much of it a real bill
+ * has already taken.
  *
  * A bill from the cost's vendor entered for the month is the fact; the standing figure was the
  * estimate of it, and both on the account would count payroll twice. A cost with no vendor is
- * replaced by a bill in its category instead, for the same reason: payroll typed as a standing
- * cost under Wages and the payroll run entered under Wages are the same money. The bills passed
- * in are already on the basis asked for (by invoice date, or by the day paid).
+ * matched by its category instead, for the same reason: payroll typed as a standing cost under
+ * Wages and the payroll run entered under Wages are the same money. The bills passed in are
+ * already on the basis asked for (by invoice date, or by the day paid).
+ *
+ * How much, not whether. This used to drop the whole estimate the moment any bill from that vendor
+ * appeared, which is right where the bill is the month's payroll and badly wrong where it is one
+ * run of two: $45,000 a month with a single $12,000 run entered showed $12,000 and dropped the
+ * rest, understating the month by $33,000 with nothing on any screen to say so. An estimate exists
+ * precisely because the real figure may not all be in yet, so it stands down by what has arrived
+ * rather than for the first thing that arrives.
+ *
+ * So the estimate tops the bills up to what the month is expected to carry, and only disappears
+ * once the bills reach it. A month billed above its estimate keeps the bills and adds nothing,
+ * which is the same rule read from the other end.
  */
 export function standingLines(
   costs: StandingCostInput[],
   month: string,
   today: string,
-  billsInMonth: { vendorId: string | null; categoryId?: string | null }[],
+  billsInMonth: { vendorId: string | null; categoryId?: string | null; amountCents?: number }[],
   basis: Basis = "accrual",
 ): StandingLine[] {
-  const billed = new Set(billsInMonth.map((b) => b.vendorId).filter((v): v is string => !!v));
-  const billedCategories = new Set(billsInMonth.map((b) => b.categoryId ?? null).filter((c): c is string => !!c));
+  /* What has actually been billed against each vendor and each category, not merely that something was. */
+  const byVendor = new Map<string, number>();
+  const byCategory = new Map<string, number>();
+  for (const b of billsInMonth) {
+    const cents = b.amountCents ?? 0;
+    if (b.vendorId) byVendor.set(b.vendorId, (byVendor.get(b.vendorId) ?? 0) + cents);
+    if (b.categoryId) byCategory.set(b.categoryId, (byCategory.get(b.categoryId) ?? 0) + cents);
+  }
+  /*
+   * A bill with no amount given still counts as covering the whole estimate.
+   *
+   * Every caller in the application passes real amounts. Tests and older callers pass only the
+   * vendor, and for those "there is a bill" has to keep meaning what it used to mean, or the change
+   * would quietly start accruing payroll on top of a payroll bill it cannot measure.
+   */
+  const unmeasured = new Set(
+    billsInMonth.filter((b) => b.amountCents === undefined).flatMap((b) => [b.vendorId, b.categoryId ?? null].filter((x): x is string => !!x)),
+  );
+
   return costs
     .filter((c) => c.fromMonth <= month && (c.toMonth === null || c.toMonth >= month))
     .map((c) => {
       const { days, of } = shareOfMonth(month, today);
       const paidDay = c.paidDay ?? null;
-      const replacedByBill = c.vendorId !== null ? billed.has(c.vendorId) : c.categoryId !== null && billedCategories.has(c.categoryId);
+      const against = c.vendorId !== null ? c.vendorId : c.categoryId;
+      const billedCents = against === null ? 0 : (c.vendorId !== null ? byVendor.get(c.vendorId) : byCategory.get(c.categoryId ?? "")) ?? 0;
+      const unmeasuredBill = against !== null && unmeasured.has(against);
+      const expectedCents = basis === "cash" ? paidCents(c.amountCents, paidDay, month, today) : Math.round((c.amountCents * days) / of);
+      /* Covered once the bills reach the whole month's figure — not the share accrued to today, which would drop it early. */
+      const replacedByBill = unmeasuredBill || (billedCents > 0 && billedCents >= c.amountCents);
       return {
         id: c.id,
         name: c.name,
         categoryId: c.categoryId,
         vendorId: c.vendorId,
         amountCents: c.amountCents,
-        accruedCents: basis === "cash" ? paidCents(c.amountCents, paidDay, month, today) : Math.round((c.amountCents * days) / of),
+        /* The month's share of the standing figure, on its own terms and before any bill is considered. */
+        accruedCents: expectedCents,
+        /*
+         * And what is left for it to actually put on the account once the bills are counted.
+         *
+         * Two figures because they answer two questions: the first is what this cost is expected to
+         * come to by today, which the Spending page shows beside the cost itself, and the second is
+         * what the account should add on top of the bills already in it. They differ only where a
+         * bill has arrived and does not cover the whole month.
+         */
+        toAccrueCents: replacedByBill ? 0 : Math.max(0, expectedCents - billedCents),
+        billedCents,
+        partlyBilled: !replacedByBill && billedCents > 0,
         days,
         of,
         paidDay,

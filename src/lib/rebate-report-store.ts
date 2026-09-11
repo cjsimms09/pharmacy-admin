@@ -345,9 +345,38 @@ export async function postRebateToTheBooks(
   const category = await db.query.expenseCategories.findFirst({ where: eq(expenseCategories.name, "Wholesaler rebates") });
 
   let accrual: string | null = null;
+  let superseded: number | null = null;
   const already = await db.query.expenses.findFirst({ where: eq(expenses.invoiceNumber, key) });
   if (already) {
     accrual = already.id;
+    /*
+     * A second statement for the same period is a correction, not a duplicate.
+     *
+     * The key is supplier and period, which is right: it is what stops one statement posting twice
+     * when it arrives twice or is re-read. But treating everything matching the key as already done
+     * meant a preliminary statement could never be replaced by a final one, a correction could
+     * never land, and a clawback would be discarded without a word. The books would go on carrying
+     * a figure the wholesaler had already withdrawn and no screen would say so.
+     *
+     * So the same figure is left alone and a different one is written, with what it replaced kept
+     * in the note. A rebate is a reduction in cost of goods either way; what changes is the size of
+     * it, and the size has to be allowed to change.
+     */
+    if (already.amountCents !== -Math.abs(total)) {
+      superseded = already.amountCents;
+      await db
+        .update(expenses)
+        .set({
+          amountCents: -Math.abs(total),
+          paidOn: statement.paidOn ?? already.paidOn,
+          notes:
+            `From the wholesaler's own statement: brand ${((statement.brandRebateCents ?? 0) / 100).toFixed(2)}, ` +
+            `generic ${((statement.genericRebateCents ?? 0) / 100).toFixed(2)}, fees ${((statement.totalFeesCents ?? 0) / 100).toFixed(2)}. ` +
+            `A later statement for the same period, replacing ${(Math.abs(already.amountCents) / 100).toFixed(2)} which the wholesaler has superseded.`,
+          documentId: documentId ?? already.documentId,
+        })
+        .where(eq(expenses.id, already.id));
+    }
   } else if (category) {
     accrual = newId();
     await db.insert(expenses).values({
@@ -387,11 +416,29 @@ export async function postRebateToTheBooks(
       receivedOn: statement.paidOn,
     });
     cash = r.duplicate ? null : r.id;
+    /*
+     * And the same correction on the cash side.
+     *
+     * `addCashReceipt` keys on the same statement identity and refuses a second one, which is what
+     * stops a re-read banking the money twice. A corrected statement is not a re-read: the money
+     * that arrived was a different amount, and the receipt has to say the amount that arrived.
+     */
+    if (r.duplicate && superseded !== null) {
+      const { updateCashReceipt } = await import("./expenses");
+      await updateCashReceipt(key, {
+        amountCents: Math.abs(total),
+        notes: `Rebate for ${statement.periodFrom ?? "?"} to ${statement.periodTo}, paid ${statement.paidOn}. A later statement, replacing ${(Math.abs(superseded) / 100).toFixed(2)}.`,
+      });
+    }
   }
 
+  const money = (c: number) => (Math.abs(c) / 100).toLocaleString("en-US", { style: "currency", currency: "USD" });
   return {
     accrual,
     cash,
-    why: `${supplier.name}: ${(Math.abs(total) / 100).toLocaleString("en-US", { style: "currency", currency: "USD" })} against ${statement.periodTo.slice(0, 7)} on the accrual account${statement.paidOn ? `, and ${statement.paidOn.slice(0, 7)} on the cash account` : " — no payment date on it, so nothing is on the cash account yet"}.`,
+    why:
+      `${supplier.name}: ${money(total)} against ${statement.periodTo.slice(0, 7)} on the accrual account` +
+      `${statement.paidOn ? `, and ${statement.paidOn.slice(0, 7)} on the cash account` : " — no payment date on it, so nothing is on the cash account yet"}.` +
+      (superseded !== null ? ` It replaces an earlier statement for the same period at ${money(superseded)}.` : ""),
   };
 }
