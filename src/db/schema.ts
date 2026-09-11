@@ -2065,10 +2065,18 @@ export const cashReceipts = sqliteTable(
     claimMatchCents: integer("claim_match_cents"),
     noClaimMatchCents: integer("no_claim_match_cents"),
     adjustmentsCents: integer("adjustments_cents"),
+    /**
+     * Cash that arrived before the books begin: kept as evidence, never counted.
+     *
+     * The same rule as on a claim payment, for the same reason — the owner pulls a real payment
+     * report for an old month to test the matching, and none of that money is his September cash.
+     * See `claimPayments.outOfBooks`.
+     */
+    outOfBooks: integer("out_of_books", { mode: "boolean" }).notNull().default(false),
     createdBy: text("created_by").notNull(),
     createdAt: text("created_at").notNull().default(now()),
   },
-  (t) => [index("cash_receipts_month_idx").on(t.month), index("cash_receipts_received_idx").on(t.receivedOn)],
+  (t) => [index("cash_receipts_month_idx").on(t.month), index("cash_receipts_received_idx").on(t.receivedOn), index("cash_receipts_out_of_books_idx").on(t.outOfBooks)],
 );
 
 /**
@@ -2111,6 +2119,19 @@ export const claimImports = sqliteTable("claim_imports", {
   unmappedColumns: text("unmapped_columns").notNull().default("[]"),
   periodFrom: text("period_from"),
   periodTo: text("period_to"),
+  /**
+   * Claims loaded as a test: kept, matchable, and counted nowhere.
+   *
+   * The owner pulls an old month of claims so that month's remittances have something to match
+   * against, and those months are not his books: "this site is starting clean as of 09/01/.."
+   *
+   * Flagged on the import, not on each claim, because it is a fact about where the rows came from.
+   * A date rule on the claim would be wrong the way the fill-date rule was wrong for payments — a
+   * fill dispensed on 31 August and collected on 2 September is real September revenue, and a rule
+   * keyed on when it was filled would discard it. Provenance has no such edge: an import pulled to
+   * test matching is a test, whatever dates its rows carry.
+   */
+  outOfBooks: integer("out_of_books", { mode: "boolean" }).notNull().default(false),
   /*
    * The report's own bottom line for this file — the only figures here nobody computed.
    *
@@ -2506,13 +2527,99 @@ export const claimPayments = sqliteTable(
      * payment rather than deleting on a guess.
      */
     documentId: text("document_id"),
+    /**
+     * Money that arrived before the books begin: kept as evidence, never counted as revenue.
+     *
+     * The owner, 11 September 2026: "I do not want to track or keep track of payments from before
+     * 09/01.. these are test only and should not show up on any AR reports or anything." He pulls
+     * real remittances for old months to prove claim matching works, so the rows have to exist and
+     * have to be matchable — and must not reach a total.
+     *
+     * Set from when the money was RECEIVED, not when the fill happened. A September remittance
+     * paying an August fill is real September money; a fill-date rule would discard it.
+     */
+    outOfBooks: integer("out_of_books", { mode: "boolean" }).notNull().default(false),
     notes: text("notes"),
     recordedBy: text("recorded_by").notNull(),
     createdAt: text("created_at").notNull().default(now()),
   },
-  (t) => [index("claim_payments_claim_idx").on(t.claimId), index("claim_payments_rx_idx").on(t.rxNumber), index("claim_payments_received_idx").on(t.receivedOn), index("claim_payments_document_idx").on(t.documentId)],
+  (t) => [index("claim_payments_claim_idx").on(t.claimId), index("claim_payments_rx_idx").on(t.rxNumber), index("claim_payments_received_idx").on(t.receivedOn), index("claim_payments_document_idx").on(t.documentId), index("claim_payments_out_of_books_idx").on(t.outOfBooks)],
 );
 
+/**
+ * Why a payer paid less than the claim said it would, one row per CAS adjustment.
+ *
+ * The 835 explains itself and the site used to discard the explanation. Without these rows a short
+ * payment is only "short" — a contractual write-off, a copay and money genuinely withheld all look
+ * identical, and the owner cannot tell a fee from an underpayment.
+ *
+ * With them a claim is reconciled when paid plus adjustments equals adjudicated, and the reasons sit
+ * beside it. The owner: "should be easy to see claim is reconciled and here is the reason we didnt
+ * get what we expected."
+ *
+ * Codes are stored exactly as the payer printed them and interpreted only when shown. A payer that
+ * invents a code should appear as that code, not be quietly rounded to the nearest one we know.
+ */
+export const paymentAdjustments = sqliteTable(
+  "payment_adjustments",
+  {
+    id: text("id").primaryKey(),
+    paymentId: text("payment_id")
+      .notNull()
+      .references(() => claimPayments.id, { onDelete: "cascade" }),
+    /** CAS01: CO contractual, PR patient responsibility, PI payer initiated, OA other. */
+    groupCode: text("group_code").notNull(),
+    reasonCode: text("reason_code").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    quantity: integer("quantity"),
+    /**
+     * "claim" or "service".
+     *
+     * A CAS in the claim loop and one in the service loop for the same reason are different money.
+     * A reader that flattens them adds the same deduction twice, on exactly the files where a
+     * deduction is large enough to matter.
+     */
+    loop: text("loop", { enum: ["claim", "service"] }).notNull(),
+    createdAt: text("created_at").notNull().default(now()),
+  },
+  (t) => [index("payment_adjustments_payment_idx").on(t.paymentId), index("payment_adjustments_group_idx").on(t.groupCode)],
+);
+
+/**
+ * Money taken off a whole remittance that belongs to no single claim.
+ *
+ * DIR fees, GER reconciliation, recoupments, transaction fees, interest. Real money, and the whole
+ * difference between what the claims add up to and what the bank receives.
+ *
+ * Kept apart from the claim-level adjustments because it cannot be put on a claim without inventing
+ * the allocation. It reconciles the deposit, never a prescription. It has a booking month and no
+ * service month, and that is a fact about the money rather than a gap in the data — which is also
+ * why it can never be shown "by service month" however much a report might want to.
+ */
+export const remittanceHoldbacks = sqliteTable(
+  "remittance_holdbacks",
+  {
+    id: text("id").primaryKey(),
+    /** The remittance trace number, tying it to the payments that arrived with it. */
+    traceNumber: text("trace_number"),
+    payer: text("payer"),
+    reasonCode: text("reason_code").notNull(),
+    /** PLB03-2: the payer's own reference, which is what somebody quotes when they ring to ask. */
+    reference: text("reference"),
+    /** As printed. A positive amount REDUCES what the payer sent. */
+    amountCents: integer("amount_cents").notNull(),
+    receivedOn: text("received_on"),
+    documentId: text("document_id"),
+    fileName: text("file_name"),
+    outOfBooks: integer("out_of_books", { mode: "boolean" }).notNull().default(false),
+    createdAt: text("created_at").notNull().default(now()),
+  },
+  (t) => [
+    index("remittance_holdbacks_trace_idx").on(t.traceNumber),
+    index("remittance_holdbacks_received_idx").on(t.receivedOn),
+    uniqueIndex("remittance_holdbacks_once_idx").on(t.traceNumber, t.reasonCode, t.reference, t.amountCents),
+  ],
+);
 export const planGroups = sqliteTable(
   "plan_groups",
   {

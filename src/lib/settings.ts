@@ -319,6 +319,22 @@ export const SETTING_KEYS = [
   // vials by emailing a rep, so the address is the whole of the integration.
   "supplies_rep_email",
 
+  // ── The month-end accounts receivable report (ar-report.ts) ──
+  /**
+   * Who gets a copy of the AR report each month, if anybody.
+   *
+   * The owner: "i should also be able to setup auto email of this report to another email." One
+   * address, because that is what he asked for and because a list of them is a list somebody has to
+   * maintain. Empty means nobody is nominated and nothing is sent — which is also the off switch a
+   * pharmacy will actually find.
+   */
+  "ar_report_email",
+  /* Whether the monthly copy goes on its own. Anything but "no" means it does. */
+  "ar_report_auto",
+  /* The last month that actually went out. It is what stops a restart sending the same one twice. */
+  "ar_report_last_month",
+  "ar_report_last_result",
+
   // ── PioneerRx, read directly (pioneer-sql.ts) ──
   // The server as the owner was given it ("HOST\INSTANCE" or "HOST,port"), the database and the
   // user in the clear; the password encrypted like every other credential. The site only reads.

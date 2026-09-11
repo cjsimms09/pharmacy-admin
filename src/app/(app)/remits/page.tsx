@@ -4,7 +4,6 @@ import { requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { PageHeader, Notice, Card } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
-import { GetRemits } from "@/components/get-remits";
 import { formatCents } from "@/lib/money";
 import { todayIso } from "@/lib/dates";
 import { monthLabel } from "@/lib/deliveries";
@@ -40,11 +39,31 @@ export const dynamic = "force-dynamic";
  * The download itself is one login and then a click per remittance — which is the portal's design,
  * not ours, and is the part a person or a browser session has to do.
  */
-const PORTAL = "https://providerpay.ah.mckesson.com/providerpay/remittances";
 
-/** The folder his browser downloads into, which is the same one the reader watches. */
+/**
+ * The folder to point his browser at, which is the one the reader actually watches.
+ *
+ * The synced folder where there is one, because he is usually not at the machine the site runs
+ * on — "I just realized I am on a different computer than where the repo is stored" — and a page
+ * that names a folder on a machine he is not sitting at is a page that sends him to an empty
+ * window. Both machines share a OneDrive, so a download on his lands within reach of the reader
+ * here without an upload.
+ *
+ * Falls back to the folder beside the database, which is right when he is at this machine and is
+ * what this always used to say.
+ */
 function downloadFolder(): string {
   const path = require("node:path") as typeof import("node:path");
+  const fs = require("node:fs") as typeof import("node:fs");
+  const oneDrive = process.env.OneDrive ?? process.env.ONEDRIVE;
+  if (oneDrive) {
+    const synced = path.join(oneDrive, "ProviderPay");
+    try {
+      if (fs.statSync(synced).isDirectory()) return synced;
+    } catch {
+      // Not created yet. The folder beside the database is still true, so say that instead.
+    }
+  }
   const base = path.dirname(path.resolve(process.env.DATABASE_PATH ?? "./data/pharmacy-admin.db"));
   return path.join(base, "remittances");
 }
@@ -259,22 +278,22 @@ export default async function RemitsPage({ searchParams }: { searchParams: Promi
         tone={wantedHas.payments === 0 ? "warn" : "ok"}
         title={`Get ${monthLabel(wanted)}'s remittances and reports`}
         className="mt-4"
-        subtitle="One press, one sign-in, one upload — and the month is in."
+        subtitle="Ask Claude, and the month is in."
       >
         <ol className="ml-4 list-decimal space-y-3 text-sm">
           <li>
-            <b>Press this, then paste it into Claude.</b> It copies the request with the month already
-            in it. Claude opens the portal in a tab it can actually drive, you sign in there, and the clicking through every remittance is done for you.
-            <div className="mt-2">
-              <GetRemits portal={PORTAL} month={monthLabel(wanted)} folder={folder} />
+            <b>Ask Claude for it.</b> Say:
+            <div className="mt-2 select-all rounded-lg border border-line bg-surface-sunk px-3 py-2 font-medium">
+              Get {monthLabel(wanted)}&rsquo;s remits
             </div>
             <div className="mt-2 text-xs text-ink-3">
-              The portal has no bulk download — each remittance is its own click, which is its design and not a setting anybody
-              can change here. That is exactly the part worth handing to Claude.
+              Claude opens the portal, signs in as you, and works through every remittance, the payment report and the Wells
+              Fargo history. The portal has no bulk download — each remittance is its own click, which is its design and not a
+              setting anybody can change here. That is exactly the part worth not doing by hand.
             </div>
           </li>
           <li>
-            <b>Download them into this folder</b>, which is where the reader looks:
+            <b>They land in this folder</b>, which is where the reader looks:
             <div className="mt-1 overflow-x-auto">
               <code className="inline-block whitespace-nowrap rounded bg-surface-sunk px-2 py-1 text-xs">{folder}</code>
             </div>

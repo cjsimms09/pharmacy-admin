@@ -1,4 +1,5 @@
 import { DEPOSIT_WINDOW_DAYS, gateDeposit, shiftDays } from "./deposit-gate";
+import { isOutOfBooks, monthIsOutOfBooks } from "./books-start";
 import "server-only";
 import { db, schema } from "@/db";
 import { and, desc, eq, gte, isNull, lte } from "drizzle-orm";
@@ -212,7 +213,10 @@ export async function missingThisMonth(month = todayIso().slice(0, 7)): Promise<
 
 /** Money banked in a month, entered by hand from the remittance statements. */
 export async function cashReceiptsIn(month: string) {
-  return db.query.cashReceipts.findMany({ where: eq(schema.cashReceipts.month, month) });
+  // In-books cash only: this is what the month's books are built from.
+  return db.query.cashReceipts.findMany({
+    where: and(eq(schema.cashReceipts.month, month), eq(schema.cashReceipts.outOfBooks, false)),
+  });
 }
 
 /**
@@ -288,6 +292,15 @@ export async function addCashReceipt(input: {
     sourceKey: input.sourceKey ?? null,
     receivedOn: input.receivedOn ?? null,
     reference: input.reference ?? null,
+    /*
+     * Cash that arrived before the books begin is kept as a row and never counted in a total.
+     *
+     * The owner pulls a real payment report for an old month to test that payments match claims:
+     * "these are test only and should not show up on any AR reports or anything." The received
+     * date decides it where one is known; where it is not, the month the receipt was filed under
+     * does, which is the case for anything carrying only "YYYY-MM".
+     */
+    outOfBooks: input.receivedOn ? isOutOfBooks(input.receivedOn) : monthIsOutOfBooks(input.month),
   });
   return { id, duplicate: false };
 }
@@ -299,7 +312,14 @@ export async function deleteCashReceipt(id: string): Promise<void> {
 
 /** What was banked across a run of months, newest first, for the books page. */
 export async function cashReceiptsFor(months: string[]) {
-  const rows = await db.query.cashReceipts.findMany({ orderBy: [desc(schema.cashReceipts.month), desc(schema.cashReceipts.createdAt)] });
+  /*
+   * In-books cash only. This is the list on the money page, and a payment report pulled for an
+   * old month to test matching is not money this pharmacy is accounting for.
+   */
+  const rows = await db.query.cashReceipts.findMany({
+    where: eq(schema.cashReceipts.outOfBooks, false),
+    orderBy: [desc(schema.cashReceipts.month), desc(schema.cashReceipts.createdAt)],
+  });
   const set = new Set(months);
   return rows.filter((r) => set.has(r.month));
 }

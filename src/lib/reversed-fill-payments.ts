@@ -1,5 +1,6 @@
 import "server-only";
-import { db } from "@/db";
+import { db, schema } from "@/db";
+import { eq } from "drizzle-orm";
 
 /**
  * Money a plan paid for a fill the pharmacy reversed, and whether the plan has taken it back yet.
@@ -45,7 +46,11 @@ export type ReversedFillPayment = {
  */
 export async function paymentsOnReversedFills(today = new Date()): Promise<ReversedFillPayment[]> {
   const [payments, claims] = await Promise.all([
-    db.query.claimPayments.findMany(),
+    /*
+     * In-books money only. A plan clawing back a payment on a reversed fill is a real problem the
+     * owner has to act on; a test remittance from before the books begin is not one.
+     */
+    db.query.claimPayments.findMany({ where: eq(schema.claimPayments.outOfBooks, false) }),
     db.query.claims.findMany({ columns: { rxNumber: true, fillNumber: true, status: true } }),
   ]);
 

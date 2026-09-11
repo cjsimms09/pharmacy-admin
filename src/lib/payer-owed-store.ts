@@ -35,8 +35,17 @@ import { owedByPayer, type Receivable, type Received, type OwedSummary } from ".
  * Nothing is recomputed from remit columns here; if that convention changes, this changes with it.
  */
 
-/** What arrived and what was billed, for the payer page. `from`/`to` are fill dates. */
-export async function owedNow(range?: { from?: string; to?: string }): Promise<OwedSummary & { from: string; to: string; basis: "filled" }> {
+/**
+ * The two lists the answer is made of, loaded once.
+ *
+ * Split out from `owedNow` so the month-end report (`ar-report.ts`) can ask its own questions of the
+ * same rows rather than rebuild them. It has to: a report as at 30 September must not be settled by
+ * a payment that arrived in October, and it ages the balance claim by claim, neither of which can be
+ * done from a summary that has already added everything up. The alternative was a second loader
+ * beside this one, which is the exact mistake the note above this function warns against — two
+ * matchers for one thing, disagreeing quietly.
+ */
+export async function owedRows(range?: { from?: string; to?: string }): Promise<{ receivables: Receivable[]; received: Received[]; from: string; to: string }> {
   const { addDays, todayIso } = await import("./dates");
   const today = todayIso();
   const from = range?.from ?? addDays(today, -400).slice(0, 7) + "-01";
@@ -60,7 +69,14 @@ export async function owedNow(range?: { from?: string; to?: string }): Promise<O
         claimPayer: schema.claims.pbmName,
       })
       .from(schema.claimPayments)
-      .leftJoin(schema.claims, eq(schema.claimPayments.claimId, schema.claims.id)),
+      .leftJoin(schema.claims, eq(schema.claimPayments.claimId, schema.claims.id))
+      /*
+       * Never test money. This is the receivables list — what payers still owe — and it is the
+       * report the owner named: "these are test only and should not show up on any AR reports or
+       * anything." A payment from before the books begin settles nothing here, because the fill it
+       * settled is not in here either.
+       */
+      .where(eq(schema.claimPayments.outOfBooks, false)),
   ]);
 
   const { payerShares } = await import("./fills");
@@ -104,5 +120,12 @@ export async function owedNow(range?: { from?: string; to?: string }): Promise<O
     matched: p.claimId !== null,
   }));
 
-  return { ...owedByPayer(receivables, received, today), from, to, basis: "filled" };
+  return { receivables, received, from, to };
+}
+
+/** What arrived and what was billed, for the payer page. `from`/`to` are fill dates. */
+export async function owedNow(range?: { from?: string; to?: string }): Promise<OwedSummary & { from: string; to: string; basis: "filled" }> {
+  const { todayIso } = await import("./dates");
+  const { receivables, received, from, to } = await owedRows(range);
+  return { ...owedByPayer(receivables, received, todayIso()), from, to, basis: "filled" };
 }

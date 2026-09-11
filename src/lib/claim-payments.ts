@@ -6,6 +6,8 @@ import { eq, isNull } from "drizzle-orm";
 import { newId } from "./crypto";
 import type { LaterPayment } from "./fills";
 import { formatCents } from "./money";
+import { todayIso } from "./dates";
+import { isOutOfBooks } from "./books-start";
 
 /**
  * Money that reaches a claim after it was adjudicated.
@@ -69,7 +71,7 @@ export type RecordPayment = {
  * loaded yet is still recorded, and picks up its claim when the claim arrives. Losing money because
  * the remittance beat the daily report would be an ordering nobody outside this code knows about.
  */
-export async function recordClaimPayment(p: RecordPayment, user: { name: string }): Promise<{ id: string; matched: boolean; settledReversed: boolean; ambiguous: { count: number; why: string } | null }> {
+export async function recordClaimPayment(p: RecordPayment, user: { name: string }): Promise<{ id: string; matched: boolean; settledReversed: boolean; ambiguous: { count: number; why: string } | null; outOfBooks: boolean }> {
   const rx = p.rxNumber.trim();
   if (!rx) throw new Error("A payment has to name the prescription it is for.");
   if (!Number.isFinite(p.amountCents) || p.amountCents === 0) throw new Error("Give the amount received.");
@@ -90,10 +92,21 @@ export async function recordClaimPayment(p: RecordPayment, user: { name: string 
     receivedOn: p.receivedOn ?? null,
     reference: p.reference ?? null,
     documentId: p.documentId ?? null,
+    /*
+     * Money that arrived before the books begin is recorded and not counted.
+     *
+     * Every payment this site takes — a remittance, a facilitator file, a hand-typed one — comes
+     * through here, which is why the rule is applied here and not at each reader. Put it in the
+     * readers and the next reader written will forget it.
+     *
+     * The owner: "I do not want to track or keep track of payments from before 09/01.. these are
+     * test only and should not show up on any AR reports or anything."
+     */
+    outOfBooks: isOutOfBooks(p.receivedOn),
     notes: [p.notes, onlyReversed ? "The only claim this pharmacy holds for that fill was reversed, so the payment is recorded against no claim. Worth asking the plan what it paid for." : null].filter(Boolean).join(" ") || null,
     recordedBy: user.name,
   });
-  return { id, matched: claim !== null, settledReversed: onlyReversed, ambiguous };
+  return { id, matched: claim !== null, settledReversed: onlyReversed, ambiguous, outOfBooks: isOutOfBooks(p.receivedOn) };
 }
 
 /**
@@ -137,9 +150,15 @@ async function findClaim(
   return { claim: chosen.claim, onlyReversed: false, ambiguous: chosen.ambiguous };
 }
 
-/** Every later payment, in the shape the fill grouping takes. */
+/**
+ * Every later payment, in the shape the fill grouping takes.
+ *
+ * Money from before the books begin is left out. This is what the fill grouping is built from,
+ * and the fill grouping is what AR, the money page and the payer judgements all read — so a test
+ * remittance included here would reach every figure on the site at once.
+ */
 export async function laterPayments(): Promise<LaterPayment[]> {
-  const rows = await db.query.claimPayments.findMany();
+  const rows = await db.query.claimPayments.findMany({ where: eq(schema.claimPayments.outOfBooks, false) });
   return rows.map((r) => ({
     rxNumber: r.rxNumber,
     fillNumber: r.fillNumber,
@@ -169,6 +188,14 @@ export async function laterPayments(): Promise<LaterPayment[]> {
  * quietly sitting against nothing.
  */
 export async function matchOrphanPayments(): Promise<{ matched: number }> {
+  /*
+   * Test money included, deliberately.
+   *
+   * This is the matching itself, not a total. Pulling a real month of 835s to see whether they
+   * find their claims is exactly what the owner is doing, and a payment excluded here would never
+   * match anything — which would make the test always pass by never running. Nothing this writes
+   * reaches a figure: the out-of-books flag travels with the row.
+   */
   const orphans = await db.query.claimPayments.findMany({ where: isNull(schema.claimPayments.claimId) });
   let matched = 0;
   for (const p of orphans) {
@@ -201,7 +228,8 @@ export async function matchOrphanPayments(): Promise<{ matched: number }> {
 export async function laterPaymentSummary(): Promise<
   { source: string; payments: number; amountCents: number; unmatched: number; beforeTheFeed: number }[]
 > {
-  const rows = await db.query.claimPayments.findMany();
+  // In-books money only: this is a total the owner reads, not a matching exercise.
+  const rows = await db.query.claimPayments.findMany({ where: eq(schema.claimPayments.outOfBooks, false) });
   /*
    * The first day the claims feed covers. Read from the claims themselves rather than set as a
    * date in the code, so it stays true if an earlier month is ever loaded.
@@ -462,32 +490,94 @@ export async function remittanceDir(): Promise<string> {
 }
 
 /**
- * Reads every remittance in the watched folder that has not been read before.
+ * The synced drop folder, whether or not it exists yet — so a page can say where to point a browser.
  *
- * A folder rather than an email, because that is what the CLI produces: it is given a download
- * directory and it fills it on a schedule. Point it at this one and the money appears here without
- * anybody carrying a file across.
+ * Named rather than guessed at the call site: two places need to agree about it, and a folder that
+ * the instructions and the reader disagree about is a folder the owner fills for nothing.
  */
-export async function sweepRemittances(user: { name: string }): Promise<{
+export function syncedRemittanceDir(): string | null {
+  const oneDrive = process.env.OneDrive ?? process.env.ONEDRIVE;
+  return oneDrive ? nodePath.join(oneDrive, "ProviderPay") : null;
+}
+
+/**
+ * Every folder a remittance might land in.
+ *
+ * There is more than one because the owner is usually not at the machine the site runs on. He said
+ * it plainly — *"I just realized I am on a different computer than where the repo is stored"* — and
+ * again, of the 835s: *"it would really be nice if these could somehow download right into the site
+ * without me having to do anything"*. One folder beside the database serves him only when he
+ * happens to be sitting at this machine, and leaves every other month needing an upload by hand.
+ *
+ * So a synced folder is watched as well. Both machines sign into the same OneDrive, so a browser on
+ * either one pointed at `OneDrive\ProviderPay` puts the file within reach of the reader here
+ * without anybody carrying it across.
+ *
+ * It is included only when it exists. Reading a folder that was never created is not an error worth
+ * reporting every sweep, and naming it as watched when it is absent would be a lie the owner acts
+ * on.
+ *
+ * A file is read from wherever it is found, and the import refuses a remittance it has already
+ * taken — so the same 835 arriving down two paths is read once, not twice.
+ */
+export async function remittanceDirs(): Promise<string[]> {
+  const fs = await import("node:fs/promises");
+  const out: string[] = [await remittanceDir()];
+
+  const synced = syncedRemittanceDir();
+  if (synced && !out.includes(synced)) {
+    try {
+      if ((await fs.stat(synced)).isDirectory()) out.push(synced);
+    } catch {
+      // Not created yet. Offered on /remits rather than invented here.
+    }
+  }
+  return out;
+}
+
+/**
+ * Reads everything in the watched folders that has not been read before.
+ *
+ * A folder rather than an email, because that is what a browser produces: point its download
+ * location at one of these and the month arrives here without anybody carrying a file across.
+ *
+ * ── Why this reads more than 835s ──
+ *
+ * It used to take remittances and complain about everything else. But a month from ProviderPay is
+ * three different things, not one — the 835s, the payment report, and the Wells Fargo account
+ * history — and they come down in a single sitting from a single portal into a single folder. A
+ * sweep that understood only the first left the other two sitting there looking ignored, and the
+ * owner having to upload by hand the very files that had already arrived.
+ *
+ * So a file dropped here is routed exactly as a file handed to the upload button is routed: the
+ * bytes decide what it is. Dropping a folder and pressing Send them up now do the same work, which
+ * is the only way the two can be relied on to agree.
+ */
+export async function sweepRemittances(user: { id?: string; name: string }): Promise<{
   files: number;
   read: number;
   payments: number;
   amountCents: number;
   matched: number;
   unmatched: number;
+  /** Files that were not 835s but were still dealt with — the payment report, the bank history. */
+  alsoRead: string[];
   problems: string[];
 }> {
   const fs = await import("node:fs/promises");
   const path = await import("node:path");
-  const dir = await remittanceDir();
-  const out = { files: 0, read: 0, payments: 0, amountCents: 0, matched: 0, unmatched: 0, problems: [] as string[] };
-  let entries: string[];
-  try {
-    entries = await fs.readdir(dir);
-  } catch {
-    // Not created yet. Said plainly by the caller rather than treated as an error here.
-    return out;
-  }
+  const dirs = await remittanceDirs();
+  const out = {
+    files: 0,
+    read: 0,
+    payments: 0,
+    amountCents: 0,
+    matched: 0,
+    unmatched: 0,
+    alsoRead: [] as string[],
+    problems: [] as string[],
+  };
+
   /*
    * Everything in the folder is looked at, and the bytes decide — not the name.
    *
@@ -499,76 +589,210 @@ export async function sweepRemittances(user: { name: string }): Promise<{
    * A zip is opened rather than refused, because portals send them and one level costs nothing.
    */
   const { readZip } = await import("./zip-read");
-  const candidates: { name: string; onDisk: string; text: string }[] = [];
-  for (const entry of entries) {
-    if (entry === FILED || entry.startsWith(".")) continue;
-    const full = path.join(dir, entry);
+  const candidates: { name: string; dir: string; onDisk: string; buf: Buffer }[] = [];
+  for (const dir of dirs) {
+    let entries: string[];
     try {
-      if ((await fs.stat(full)).isDirectory()) continue;
-      const buf = await fs.readFile(full);
-      if (/\.zip$/i.test(entry) || buf.subarray(0, 2).toString("latin1") === "PK") {
-        for (const e of readZip(buf)) {
-          if (e.data.length === 0) continue;
-          candidates.push({ name: `${entry} → ${e.name.split("/").pop() ?? e.name}`, onDisk: entry, text: e.data.toString("utf8") });
+      entries = await fs.readdir(dir);
+    } catch {
+      // Not created yet. Said plainly by the caller rather than treated as an error here.
+      continue;
+    }
+    for (const entry of entries) {
+      /*
+       * The folder explains itself to whoever opens it, and that note is not a report.
+       *
+       * The first sweep of the synced folder read the README, could make nothing of it, filed it as
+       * a document and moved it into `filed` — so the instructions vanished from the folder they
+       * were written for. Skipped by name, like the dotfiles above.
+       */
+      if (entry === FILED || entry.startsWith(".") || /^read ?me/i.test(entry)) continue;
+      const full = path.join(dir, entry);
+      try {
+        if ((await fs.stat(full)).isDirectory()) continue;
+        const buf = await fs.readFile(full);
+        if (/\.zip$/i.test(entry) || buf.subarray(0, 2).toString("latin1") === "PK") {
+          for (const e of readZip(buf)) {
+            if (e.data.length === 0 || e.name.endsWith("/")) continue;
+            candidates.push({ name: `${entry} → ${e.name.split("/").pop() ?? e.name}`, dir, onDisk: entry, buf: e.data });
+          }
+        } else {
+          candidates.push({ name: entry, dir, onDisk: entry, buf });
         }
-      } else {
-        candidates.push({ name: entry, onDisk: entry, text: buf.toString("utf8") });
+      } catch (e) {
+        out.problems.push(`${entry}: ${e instanceof Error ? e.message : String(e)}`);
       }
-    } catch (e) {
-      out.problems.push(`${entry}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
   out.files = candidates.length;
 
-  const done = new Set<string>();
+  const { classify } = await import("./autoroute");
+  /** Files that were dealt with, by the folder they came from, so each is filed where it landed. */
+  const done = new Map<string, Set<string>>();
+  const markDone = (c: { dir: string; onDisk: string }) => {
+    const set = done.get(c.dir) ?? new Set<string>();
+    set.add(c.onDisk);
+    done.set(c.dir, set);
+  };
+
   for (const c of candidates) {
     try {
-      /*
-       * An 835 is known by its own segments, the same test an emailed one gets. A file without them
-       * is named rather than passed over in silence: this folder is where he puts things, so
-       * anything he puts here that nothing happens to is worth a sentence.
-       */
-      if (!/\bCLP\b/.test(c.text)) {
-        out.problems.push(`${c.name}: not a remittance — it carries no claim segments, so nothing was read from it.`);
+      const text = c.buf.toString("utf8");
+
+      /* An 835 is known by its own claim segments, the same test an emailed one gets. */
+      if (/\bCLP\b/.test(text)) {
+        const r = await importRemittance(text, c.name, user);
+        out.read++;
+        out.payments += r.payments;
+        out.amountCents += r.amountCents;
+        out.matched += r.matched;
+        out.unmatched += r.unmatched;
+        out.problems.push(...r.problems);
+        markDone(c);
         continue;
       }
-      const r = await importRemittance(c.text, c.name, user);
-      out.read++;
-      out.payments += r.payments;
-      out.amountCents += r.amountCents;
-      out.matched += r.matched;
-      out.unmatched += r.unmatched;
-      out.problems.push(...r.problems);
-      done.add(c.onDisk);
+
+      const kind = classify(c.name, c.buf);
+
+      /* The payment report — what each payer actually sent. Banks the cash side. */
+      if (kind.kind === "payer_payments") {
+        const { importPayerPayments } = await import("./payer-payments-store");
+        const r = await importPayerPayments(text, { userId: user.id ?? "", userName: user.name, fileName: c.name });
+        out.alsoRead.push(
+          r.ok
+            ? `${c.name}: ${r.banked} payment${r.banked === 1 ? "" : "s"} banked${r.alreadyHeld ? `, ${r.alreadyHeld} already held` : ""}`
+            : `${c.name}: ${r.why}`,
+        );
+        if (r.ok) markDone(c);
+        else out.problems.push(`${c.name}: ${r.why}`);
+        continue;
+      }
+
+      /*
+       * A remittance that did not parse is refused, never filed.
+       *
+       * The owner, 11 September 2026: "i do not want the site to get patient names.. or at least to
+       * retain them." An 835 carries the member name in its NM1 segments. The parser never reads
+       * those — it handles nine segment types and NM1 is not one of them — so an 835 that imports
+       * normally leaves no name behind. Filing the raw bytes as a document would undo exactly that,
+       * writing the whole file, names included, to disk.
+       *
+       * Anything that looks like X12 therefore stops here. A truncated or malformed 835 is a thing
+       * to go and look at, not a thing to keep a copy of.
+       */
+      if (looksLikeX12(text)) {
+        out.problems.push(
+          `${c.name}: this looks like a remittance but no claim lines could be read from it, so nothing was stored. ` +
+            `It is not filed as a document either — an 835 names patients and the site does not keep those. ` +
+            `The file is still in the folder if it needs looking at.`,
+        );
+        continue;
+      }
+
+      /*
+       * Everything else is kept as a document rather than refused.
+       *
+       * The Wells Fargo account history is the case in point: nothing reads it into the ledger yet,
+       * and it is still the only thing that breaks a lump deposit on the bank statement back into
+       * the payers behind it. It carries payers, payment numbers and amounts, and no patient.
+       */
+      const { storeFile } = await import("./files");
+      const { db, schema } = await import("@/db");
+      const { newId } = await import("./crypto");
+      const asFile = new File([new Uint8Array(c.buf)], c.name.split(" → ").pop() ?? c.name);
+      const stored = await storeFile(asFile, { allowReportTypes: true });
+      await db.insert(schema.documents).values({
+        id: newId(),
+        category: "report",
+        title: c.name,
+        fileName: c.name.split(" → ").pop() ?? c.name,
+        mimeType: stored.mimeType,
+        sizeBytes: stored.sizeBytes,
+        sha256: stored.sha256,
+        storageKey: stored.storageKey,
+        effectiveOn: todayIso(),
+        /*
+         * The id where a person pressed the button, the name where the scheduler did.
+         *
+         * The nightly sweep runs as "Automatic check" and has no user row behind it. The column
+         * only has to say who put the file here, and appeals.ts already stores a name for the
+         * same reason — better than refusing to file a report because nobody was logged in.
+         */
+        uploadedBy: user.id ?? user.name,
+      });
+      out.alsoRead.push(`${c.name}: filed as a document (${kind.kind === "unrecognised" ? "nothing reads it yet" : kind.kind})`);
+      markDone(c);
     } catch (e) {
       out.problems.push(`${c.name}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
   /*
-   * Read files are moved aside rather than left where they are.
+   * A file that has been read is deleted, not kept.
    *
-   * The import refuses a remittance it has already taken, so leaving them would be safe — and would
-   * also mean every sweep re-reads every 835 this pharmacy has ever downloaded. Moving them keeps
-   * the folder as what it looks like: the things not yet dealt with. They are kept rather than
-   * deleted, because an 835 is the evidence behind a payment and is not ours to throw away.
+   * The owner, 11 September 2026: "can we have it delete remits from onedrive folder once it gathers
+   * them? we need to keep computer storage as clean as possible."
+   *
+   * This used to move them into a `filed` folder, on the reasoning that an 835 is the evidence
+   * behind a payment and is not ours to throw away. That reasoning was wrong twice over:
+   *
+   *   — The evidence is not lost. ProviderPay holds every remittance and will hand it back; the
+   *     download is a copy, not the original. What the site needs from it — the prescription, the
+   *     NDC, the amounts, the payer and the trace number — is in the database before this runs.
+   *   — An 835 names patients. Keeping one is keeping a copy of PHI, in a folder that syncs to a
+   *     second machine and to cloud storage. Every copy is a place it can leak from, and a copy kept
+   *     for no reason is the easiest kind to forget about. "At least to retain them" cuts this way
+   *     too: the fewer copies, the better.
+   *
+   * Only files that were actually read reach here. A remittance that failed to parse, or one refused
+   * as unreadable X12, is left exactly where it is — deleting a file nobody has successfully read
+   * would destroy the only copy of something still needing attention.
+   *
+   * A delete that fails is reported rather than swallowed. The import refuses a remittance it has
+   * already taken, so a file left behind is untidy and not dangerous; silence about it is worse,
+   * because a folder that never empties is how somebody concludes the sweep has stopped working.
    */
-  if (done.size > 0) {
-    const filed = path.join(dir, FILED);
-    await fs.mkdir(filed, { recursive: true });
-    for (const name of done) {
+  for (const [dir, names] of done) {
+    for (const name of names) {
       try {
-        await fs.rename(path.join(dir, name), path.join(filed, name));
+        await fs.unlink(path.join(dir, name));
       } catch (e) {
-        out.problems.push(`${name} was read but could not be moved aside: ${e instanceof Error ? e.message : String(e)}`);
+        out.problems.push(
+          `${name} was read but could not be removed from ${dir}: ${e instanceof Error ? e.message : String(e)}. ` +
+            `Nothing was lost — it has been read — but it will sit in the folder until it is deleted by hand.`,
+        );
       }
     }
   }
   return out;
 }
 
-/** Where a remittance goes once it has been read. Kept, never deleted: it is the evidence. */
+/**
+ * The folder read files used to be moved into. Nothing is put here any more — they are deleted.
+ *
+ * Still skipped when reading, because folders left over from before the change are full of 835s
+ * that have already been imported. Sweeping them again would do no harm — the import refuses a
+ * remittance it has already taken — but it would re-read every remittance this pharmacy has ever
+ * downloaded on every pass, and quietly undo the point of deleting them.
+ */
 const FILED = "filed";
+
+/**
+ * Whether a file is X12 — an 835 or one of its relatives — judged by its opening envelope.
+ *
+ * Used to refuse, not to accept. A remittance that parsed is already handled by the time this is
+ * asked; what reaches it is something that looks like an 835 and yielded no claim lines. That file
+ * must not be written to disk, because an 835 names patients in segments this site deliberately
+ * never reads, and storing the raw bytes would retain exactly what the parser was careful to drop.
+ *
+ * `ISA` and `GS` are the interchange and functional-group envelopes; `ST` opens the transaction set
+ * and survives a file that was split or truncated above it. Any of the three, at the start of a line
+ * or after a segment terminator, is enough.
+ */
+function looksLikeX12(text: string): boolean {
+  const head = text.slice(0, 4000);
+  return /(^|[~\r\n])(ISA|GS|ST)\*/.test(head);
+}
 
 /**
  * What the Medicare Transaction Facilitator has actually paid, and when.
@@ -603,7 +827,10 @@ export type FacilitatorMoney = {
 };
 
 export async function facilitatorMoney(source = "mtf", today = new Date()): Promise<FacilitatorMoney> {
-  const rows = (await db.query.claimPayments.findMany()).filter((r) => r.source === source);
+  // In-books money only. These are the month-to-date and all-time figures on the dashboard.
+  const rows = (await db.query.claimPayments.findMany({ where: eq(schema.claimPayments.outOfBooks, false) })).filter(
+    (r) => r.source === source,
+  );
   const claims = await db.query.claims.findMany({ columns: { id: true, itemName: true } });
   const nameOf = new Map(claims.map((c) => [c.id, c.itemName]));
 

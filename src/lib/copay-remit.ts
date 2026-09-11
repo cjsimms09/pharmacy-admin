@@ -390,13 +390,15 @@ export function copayRemitSummary(r: CopayRemit): string {
 /**
  * The day the site's own records begin.
  *
- * The owner, 8 September 2026: "i will not be uploading claims from before sept.. or anything.
- * this site is starting clean as of 09/01/.." So a voucher line for a fill before that date will
- * never match a claim, however long anybody waits, and it is not a failure to match — it is money
- * for a dispensing this site was not keeping records for. Reported apart from the unmatched, which
- * are the ones worth chasing.
+ * A voucher line for a fill before that date will never match a claim, however long anybody waits,
+ * and it is not a failure to match — it is money for a dispensing this site was not keeping records
+ * for. Reported apart from the unmatched, which are the ones worth chasing.
+ *
+ * Re-exported rather than declared: the date now lives in `books-start`, because keeping it in here
+ * meant only this reader could see it, and remittance import and payment-report import both went on
+ * counting money from before the books began.
  */
-export const SITE_STARTS_ON = "2026-09-01";
+export { SITE_STARTS_ON } from "./books-start";
 
 /**
  * Whether a file is one of these statements, judged by what is in it rather than what it is called.

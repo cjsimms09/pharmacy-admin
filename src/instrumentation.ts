@@ -376,6 +376,7 @@ export async function register() {
     await whenIdle("updates", updateTick);
     await whenIdle("manual-audit", manualAuditTick);
     await whenIdle("deliveries", deliveryTick);
+    await whenIdle("ar-report", arReportTick);
     await whenIdle("mtf", mtfTick);
   };
 
@@ -563,6 +564,28 @@ export async function register() {
       await mtfCycle({ name: "Automatic check" });
     } catch {
       // Never allowed to stop the app. The outcome is on the Medicare MFP refunds page either way.
+    }
+  };
+
+  /**
+   * Posts the month-end accounts receivable report to whoever the pharmacy nominated.
+   *
+   * The owner asked for the report and then for this: "i should also be able to setup auto email of
+   * this report to another email." It is deliberately the least clever job in this file — it reads
+   * the claims already on file and hands the result to the pharmacy's own mail server. Nothing on
+   * the path reaches out for money, which is the standing rule about anything that runs unattended.
+   *
+   * The month it is due for, and the reason it waits a few days into the new one, are in
+   * `ar-report.ts`. Checked on the half-hourly beat like the backup and for the same reason: this
+   * runs on a computer that is switched off overnight, so a job pinned to an hour on the 5th would
+   * miss any month whose 5th falls on a Sunday.
+   */
+  const arReportTick = async () => {
+    try {
+      const { monthlyArTick } = await import("./lib/ar-report-store");
+      await monthlyArTick();
+    } catch {
+      // The outcome is recorded in settings and shown on the AR report page. Never stops the app.
     }
   };
 

@@ -1391,11 +1391,30 @@ async function loadFills(from: string, to: string) {
    * revenue, and fills filled in the window but not yet collected are the ones it holds back and
    * names. Both halves are wanted, so both halves are loaded.
    */
-  const { and, gte, lte, or } = await import("drizzle-orm");
+  const { and, gte, lte, or, eq } = await import("drizzle-orm");
   const inWindow = (col: Parameters<typeof gte>[0]) => and(gte(col, from), lte(col, to));
-  const rows = await db.query.claims.findMany({
-    where: or(inWindow(schema.claims.dateFilled), inWindow(schema.claims.completedAt), inWindow(schema.claims.soldOn)),
+  /*
+   * Claims from a test import are left out, and this is the one place that has to do it.
+   *
+   * Everything that reports money reads through here — the receivables list, the month's account,
+   * profit and loss, the payer judgements, the dispensed-at-a-loss watch. Filtering at each of them
+   * would mean the next one written forgets, which is exactly how pre-September payments went on
+   * being counted after the rule for them already existed.
+   *
+   * Matching is deliberately not filtered: `findClaim` reads the claims table directly, so a test
+   * remittance can still find the test claim it settles. That is the whole point of loading the
+   * month. Nothing it finds reaches a total, because the payment carries its own out-of-books flag
+   * and the claim never appears in a fill.
+   */
+  const testImports = await db.query.claimImports.findMany({
+    where: eq(schema.claimImports.outOfBooks, true),
+    columns: { id: true },
   });
+  const rows = (
+    await db.query.claims.findMany({
+      where: or(inWindow(schema.claims.dateFilled), inWindow(schema.claims.completedAt), inWindow(schema.claims.soldOn)),
+    })
+  ).filter((c) => !testImports.some((t) => t.id === c.importId));
   const { groupIntoFills } = await import("./fills");
   const { laterPayments } = await import("./claim-payments");
   return groupIntoFills(
