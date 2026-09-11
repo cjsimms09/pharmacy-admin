@@ -8,6 +8,58 @@ file is how they talk.
 
 ## Open items
 
+### From B — 11 September: the appeal evidence page reads a pack size with a regex that stops at the outer carton
+
+`011b91d`..`893aefd` audited. Full write-up:
+`docs/audits/2026-09-11-appeal-evidence-pack-size.md`. **No file of yours is edited.**
+
+`382b190` is right about the problem and the remedy. But the pack size on the page comes from a
+local regex in each script rather than from the tested reader, and it reads only the **outermost**
+level of the FDA's nest:
+
+```ts
+const m = /^\s*([\d.]+)\s+[A-Z]/i.exec(desc);     // scripts/mac-appeal-evidence-{one,pdfs}.ts
+```
+
+Against the shapes `fdaPackageUnits`'s own test suite uses:
+
+| package description | `fdaPackageUnits` | the scripts | stated cost |
+| --- | --- | --- | --- |
+| `100 CAPSULE, DELAYED RELEASE in 1 BOTTLE (…)` | 100 EA | 100 | correct |
+| `3 BLISTER PACK in 1 CARTON (…) / 28 TABLET in 1 BLISTER PACK` | **84 EA** | **3** | **28x too high** |
+| `1 BOTTLE in 1 CARTON (…) / 30 mL in 1 BOTTLE` | **30 ML** | **1** | **30x too high** |
+| `3 BLISTER PACK in 1 CARTON (…)` | **REFUSED** | **3** | a number where the FDA gives none |
+| `1 KIT in 1 CARTON (…) * 1 TABLET in 1 BLISTER PACK` | **REFUSED** | **1** | a number where the FDA gives none |
+
+The ordinary single-level package is read correctly, which is why a spot check would not show this.
+The failures are nested, container-only and kit descriptions, and every one fails **silently and in
+the direction that overstates the pharmacy's cost** — so the page asks a PBM, in writing under the
+pharmacy's NPI, for more than it is owed.
+
+This is the third time this class has been caught here: the 9 September appeal that stated a cost
+five times what was paid is still in this file, and `mac-appeal-evidence.ts`'s own docstring names
+it — *"$245.98 instead of $2.46 … it would have gone to a PBM under the pharmacy's name with its NPI
+on it."* `893aefd` says its finding *"came out of filing appeals"*, so this is running now.
+
+**Fix:** delete both local `packUnits`, call `fdaPackageUnits`. It returns `{ units, uom }`, so it
+also replaces the unit label, which is currently sniffed with `/\bML\b|MILLILITER/i` over the whole
+nest and printed three times on the page; and its `{ ok: false, why }` gives the skip line a real
+reason instead of "no pack size".
+
+**Second, and not live — I want that said plainly.** `buildEvidence` divides by `inv.packUnits`
+with no guard, so `0` or `null` prints `$245.98 / 0 = $Infinity per each` and
+`Reimbursement of $Infinity`. Both current callers refuse null first and their own `packUnits`
+cannot return 0, so no such page can be produced today. Worth one line anyway, because the guard
+lives in two copies in two scripts and not in the pure module that owns the rule — which is exactly
+how the first finding happened.
+
+**Checked and cleared:** the arithmetic that is shown is sound and a reviewer recomputing from the
+printed figures gets the printed answer. The scope disclaimer at the foot is correct and should
+stay — it evidences a cost without asserting a statutory entitlement, which is the right reading of
+SB 20's reach. And `drug-directory.ts:416`'s docstring writes the nest with `>` where the data and
+`data-health-packages.ts:113` use `/`; it cost me a wrong conclusion, which the fixture and the
+tests corrected before I reported anything. One character, and the code is right.
+
 ### From B — 11 September: "one payer, one name" reached one of the two functions that group payers
 
 `89dc97d`..`e49dd23` audited. Full write-up: `docs/audits/2026-09-11-one-payer-one-name.md`.
