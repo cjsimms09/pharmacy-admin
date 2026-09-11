@@ -102,58 +102,121 @@ export default async function RemitsPage({ searchParams }: { searchParams: Promi
    * up the wire and one that appeared in the folder are read identically and neither can be
    * taken twice.
    */
+  /*
+   * Everything the month needs, in one upload, each file routed by what it actually is.
+   *
+   * The owner: "the fetch remit button might as well got fetch all payments and the wells fargo
+   * report as well... I can teach it how to do each of these the first time but then I would like to
+   * just hit the button, it to do everything and we me just upload the things it downloaded. system
+   * should allow me to upload all at once."
+   *
+   * So this takes the whole month's download in one go — 835s, the ProviderPay payment report, the
+   * account history, in any mixture and in any order, zipped or not — and asks each file what it is
+   * rather than being told. `classify` is the same reader the mailbox uses on an attachment, so a
+   * file that arrives by email and the same file dragged in here are treated identically.
+   *
+   * Anything it cannot place is still filed as a document and named in the result, because a file he
+   * uploaded and heard nothing about is the one thing worse than a file he has to upload twice.
+   */
   async function uploadThem(fd: FormData) {
     "use server";
     const u = await requireManager();
     const files = fd.getAll("files").filter((f): f is File => f instanceof File && f.size > 0);
-    if (files.length === 0) redirect("/remits?error=" + encodeURIComponent("Choose the remittance files first."));
+    if (files.length === 0) redirect("/remits?error=" + encodeURIComponent("Choose the files first."));
+
     const { importRemittance } = await import("@/lib/claim-payments");
+    const { importPayerPayments } = await import("@/lib/payer-payments-store");
     const { readZip } = await import("@/lib/zip-read");
-    let read = 0;
-    let payments = 0;
-    let cents = 0;
-    let matched = 0;
+    const { classify } = await import("@/lib/autoroute");
+    const { storeFile } = await import("@/lib/files");
+    const { db, schema } = await import("@/db");
+    const { newId } = await import("@/lib/crypto");
+
+    const done: string[] = [];
     const problems: string[] = [];
+    let remits = 0;
+    let remitPayments = 0;
+    let remitCents = 0;
+    let matched = 0;
+
+    /* A zip is one level of wrapping, not a kind of file. Opened here so each entry is judged alone. */
+    const parts: { name: string; buf: Buffer; file: File }[] = [];
     for (const file of files) {
       const buf = Buffer.from(await file.arrayBuffer());
-      /* A zip of remittances is opened, one level, exactly as the folder sweep opens one. */
-      const parts =
-        /.zip$/i.test(file.name) || buf.subarray(0, 2).toString("latin1") === "PK"
-          ? readZip(buf).filter((e) => e.data.length > 0).map((e) => ({ name: `${file.name} → ${e.name.split("/").pop() ?? e.name}`, text: e.data.toString("utf8") }))
-          : [{ name: file.name, text: buf.toString("utf8") }];
-      for (const part of parts) {
-        try {
-          if (!/CLP/.test(part.text)) {
-            problems.push(`${part.name} carries no claim segments, so it is not a remittance.`);
-            continue;
-          }
-          const r = await importRemittance(part.text, part.name, u);
-          read++;
-          payments += r.payments;
-          cents += r.amountCents;
+      if (/.zip$/i.test(file.name) || buf.subarray(0, 2).toString("latin1") === "PK") {
+        for (const e of readZip(buf)) {
+          if (e.data.length === 0 || e.name.endsWith("/")) continue;
+          parts.push({ name: e.name.split("/").pop() ?? e.name, buf: e.data, file });
+        }
+      } else parts.push({ name: file.name, buf, file });
+    }
+
+    for (const part of parts) {
+      try {
+        const text = part.buf.toString("utf8");
+        /* A remittance is known by its own claim segments, whatever it is called. */
+        if (/CLP/.test(text)) {
+          const r = await importRemittance(text, part.name, u);
+          remits++;
+          remitPayments += r.payments;
+          remitCents += r.amountCents;
           matched += r.matched;
           problems.push(...r.problems);
-        } catch (e) {
-          problems.push(`${part.name}: ${e instanceof Error ? e.message : String(e)}`);
+          done.push(`${part.name}: remittance`);
+          continue;
         }
+        const kind = classify(part.name, part.buf);
+        if (kind.kind === "payer_payments") {
+          const r = await importPayerPayments(text, { userId: u.id, userName: u.name, fileName: part.name });
+          done.push(
+            r.ok
+              ? `${part.name}: ${r.banked} payment${r.banked === 1 ? "" : "s"} banked${r.alreadyHeld ? `, ${r.alreadyHeld} already held` : ""}`
+              : `${part.name}: ${r.why}`,
+          );
+          continue;
+        }
+        /*
+         * Everything else is kept as a document rather than refused.
+         *
+         * The ProviderPay account history is the case in point: nothing reads it yet, and it is still
+         * the thing that proves the deposits on the bank statement are the payments on the report.
+         * Filed, named, and on the month's checklist as done.
+         */
+        const stored = await storeFile(part.file, { allowReportTypes: true });
+        await db.insert(schema.documents).values({
+          id: newId(),
+          category: "report",
+          title: part.name,
+          fileName: part.name,
+          mimeType: stored.mimeType,
+          sizeBytes: stored.sizeBytes,
+          sha256: stored.sha256,
+          storageKey: stored.storageKey,
+          effectiveOn: todayIso(),
+          uploadedBy: u.id,
+        });
+        done.push(`${part.name}: filed as a document (${kind.kind === "unrecognised" ? "nothing reads it yet" : kind.kind})`);
+      } catch (e) {
+        problems.push(`${part.name}: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
-    await audit({ action: "remits.upload", userId: u.id, userName: u.name, details: `${files.length} files, ${read} read, ${payments} payments, ${cents}c` });
+
+    await audit({ action: "remits.upload", userId: u.id, userName: u.name, details: `${parts.length} files: ${done.join("; ")}` });
     for (const path of ["/remits", "/claims", "/payers/performance", "/money"]) revalidatePath(path);
     redirect(
       "/remits?" +
         new URLSearchParams(
-          read === 0
-            ? { error: `Nothing was read from ${files.length} file${files.length === 1 ? "" : "s"}. ${problems.slice(0, 2).join(" ")}` }
+          done.length === 0
+            ? { error: `Nothing could be read from ${parts.length} file${parts.length === 1 ? "" : "s"}. ${problems.slice(0, 2).join(" ")}` }
             : {
                 ok:
-                  `${read} remittance${read === 1 ? "" : "s"} read: ${payments} payment${payments === 1 ? "" : "s"} worth ${formatCents(cents)}, ` +
-                  `${matched} matched to a claim.` + (problems.length ? ` ${problems.slice(0, 2).join(" ")}` : ""),
+                  (remits > 0
+                    ? `${remits} remittance${remits === 1 ? "" : "s"}: ${remitPayments} payment${remitPayments === 1 ? "" : "s"} worth ${formatCents(remitCents)}, ${matched} matched to a claim. `
+                    : "") + done.join("; ") + (problems.length ? ` ${problems.slice(0, 2).join(" ")}` : ""),
               },
         ).toString(),
     );
   }
-
   async function readThem() {
     "use server";
     const u = await requireManager();
@@ -194,9 +257,9 @@ export default async function RemitsPage({ searchParams }: { searchParams: Promi
       */}
       <Card
         tone={wantedHas.payments === 0 ? "warn" : "ok"}
-        title={`Get ${monthLabel(wanted)}'s remittances`}
+        title={`Get ${monthLabel(wanted)}'s remittances and reports`}
         className="mt-4"
-        subtitle="Three steps, and only the middle one needs you."
+        subtitle="One press, one sign-in, one upload — and the month is in."
       >
         <ol className="ml-4 list-decimal space-y-3 text-sm">
           <li>

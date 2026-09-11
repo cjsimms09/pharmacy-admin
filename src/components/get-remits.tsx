@@ -24,10 +24,23 @@ import { useState } from "react";
 export function GetRemits({ portal, month, folder }: { portal: string; month: string; folder: string }) {
   const [said, setSaid] = useState("");
 
+  /*
+   * All three, in one sentence, because they come from the same portal in the same sitting.
+   *
+   * The owner: "the fetch remit button might as well got fetch all payments and the wells fargo
+   * report as well... I can teach it how to do each of these the first time but then I would like
+   * to just hit the button, it to do everything."
+   *
+   * The remittances are the slow part — one click each, and there is no bulk download — so they
+   * are named first and the two reports after. Numbered, because a list of three is easier to
+   * check off than a paragraph, and because if one of them fails he can say which.
+   */
   const instruction =
-    `Download every ProviderPay remittance for ${month} from ${portal} — each one separately, the portal has no bulk download. ` +
-    `I am already signed in. Put them in my downloads and tell me when they are all there.`;
-
+    `I am signed in to ${portal}. Please fetch three things for ${month} and tell me when each is done:` +
+    ` (1) every remittance for ${month} — each one separately, the portal has no bulk download;` +
+    ` (2) the ProviderPay payment report for ${month};` +
+    ` (3) the Wells Fargo account transaction history for ${month}.` +
+    ` Put them all in my downloads. If you have not done one of these before, walk through it and I will point you at the right control.`;
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -38,14 +51,14 @@ export function GetRemits({ portal, month, folder }: { portal: string; month: st
             window.open(portal, "_blank", "noopener,noreferrer");
             try {
               await navigator.clipboard.writeText(instruction);
-              setSaid(`The portal is opening. Sign in, then paste the copied line into Claude — it already says ${month}.`);
+              setSaid(`The portal is opening. Sign in, then paste the copied line into Claude — it asks for all three, for ${month}.`);
             } catch {
               /* Clipboard is refused on some machines. The sentence is on the page either way. */
               setSaid("The portal is opening. Sign in, then copy the line below into Claude.");
             }
           }}
         >
-          Get {month}&rsquo;s 835 remittances
+          Get everything for {month}
         </button>
         {said ? <span className="text-xs text-ink-3">{said}</span> : null}
       </div>
@@ -57,10 +70,10 @@ export function GetRemits({ portal, month, folder }: { portal: string; month: st
         clipboard access it is the only copy there is.
       */}
       <details className="text-xs text-ink-3">
-        <summary className="cursor-pointer">What it copies, if you would rather type it</summary>
+        <summary className="cursor-pointer">What it asks for, if you would rather type it</summary>
         <p className="mt-1 select-all rounded bg-surface-sunk p-2 text-[11px] leading-relaxed">{instruction}</p>
         <p className="mt-1">
-          Claude downloads them into whatever folder your browser uses. Bring them back here with{" "}
+          Claude downloads all three into whatever folder your browser uses. Bring them back here together with{" "}
           <b>Send them up</b> below — or, if you are at the machine the site runs on, drop them straight into{" "}
           <code className="break-all">{folder}</code>.
         </p>
