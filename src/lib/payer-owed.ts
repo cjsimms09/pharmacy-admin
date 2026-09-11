@@ -42,6 +42,8 @@
  * Pure. `payer-owed-store.ts` loads the rows.
  */
 
+import { normalisePayerName } from "./payer-name";
+
 /** One payer's claim on one fill: what it said it would pay. */
 export type Receivable = {
   bin: string | null;
@@ -139,11 +141,16 @@ export function daysBetween(from: string | null, to: string): number | null {
  * The BIN, because that is what a claim carries and what a remittance names. A payer with no BIN at
  * all is grouped under its printed name rather than being merged with every other nameless one —
  * two payers nothing can identify are still two payers.
+ *
+ * The name is normalised rather than merely lower-cased. August's remittances arrived from both
+ * "EXPRESS SCRIPTS INC" and "EXPRESS SCRIPTS INC.", and lower-casing leaves the full stop: two
+ * payers, $37,438.32 and $3,867.12, one of which looks small enough to ignore.
  */
 export function payerKey(bin: string | null, name: string | null): string {
   const b = (bin ?? "").trim();
   if (b) return `bin:${b}`;
-  return `name:${(name ?? "unnamed").trim().toLowerCase()}`;
+  const n = normalisePayerName(name);
+  return `name:${n || "unnamed"}`;
 }
 
 /**
