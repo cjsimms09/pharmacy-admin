@@ -205,7 +205,17 @@ describe("THE TRAP: many plan names joined together name nothing", () => {
         ],
       }),
     );
-    assert.equal(r.classification, null);
+    /*
+     * What this regression is about is the *route* to an answer, not the absence of one.
+     *
+     * BIN 610014 has a real Express Scripts payer sheet naming it commercial, so the routing is now
+     * classified — by that document, at `stated`, which is the strongest source here and outranks
+     * everything below it. The fault being guarded against is finding "Aarp / Paid Pdp" among the
+     * names and calling the whole routing Part D on the strength of it. So what must hold is that
+     * the answer is not Medicare and did not come from the names.
+     */
+    assert.notEqual(r.classification, "medicare");
+    if (isFinding(r)) assert.notEqual(r.source, "payer_name");
   });
 
   test("but one name, standing alone, still counts", () => {
@@ -238,14 +248,70 @@ describe("what the claim's own routing says", () => {
   test("Medicaid is tested before Medicare, because a dual plan names both", () => {
     assert.equal((findPlanClass(ev({ pcn: "KSCAID" })) as { classification: string }).classification, "medicaid");
   });
+
+  /*
+   * ── A CMS contract number in the group field ──
+   *
+   * CMS issues every Medicare contract a number, and the letter names the programme: S a standalone
+   * Part D plan, H a Medicare Advantage plan, R a regional PPO, E an employer or union group waiver
+   * plan. The pharmacy's own claims carry them — S5726 and H7063 on BIN 610455, E0136 on 022022 —
+   * sitting in the group number where nothing was reading them.
+   *
+   * Worth having separately from the PCN tests because it is a stronger kind of evidence: a PCN is
+   * a routing code a payer chose and "MEDD" is this reader's inference from it, whereas a contract
+   * number is the federal government's own identifier for the contract being billed. So it is the
+   * one non-document source that may say `stated`.
+   */
+  test("a CMS contract number in the group field is Medicare stating itself", () => {
+    const r = findPlanClass(ev({ groupNumber: "S5726" }));
+    assert.ok(isFinding(r));
+    assert.equal(r.classification, "medicare");
+    assert.equal(r.confidence, "stated");
+    assert.match(r.from, /S5726/);
+    assert.match(r.from, /CMS contract number/);
+  });
+
+  test("the letter says which programme, because the owner asked which", () => {
+    assert.match((findPlanClass(ev({ groupNumber: "S5726" })) as { detail: string }).detail, /Part D/);
+    assert.match((findPlanClass(ev({ groupNumber: "H7063" })) as { detail: string }).detail, /Advantage/);
+    assert.match((findPlanClass(ev({ groupNumber: "E0136" })) as { from: string }).from, /employer or union group waiver/);
+  });
+
+  test("it outranks a PCN, so an unrecognised Part D route is still caught", () => {
+    // The PCN "KS2336" says nothing this reader recognises. The contract number does.
+    const r = findPlanClass(ev({ pcn: "KS2336", groupNumber: "S5726" }));
+    assert.ok(isFinding(r));
+    assert.equal(r.classification, "medicare");
+  });
+
+  /*
+   * And the reason it is confined to the group number.
+   *
+   * "S1234" is also how a self-insured employer numbers a division, and a plan name or a payer
+   * label full of prose would throw up matches constantly. Loosed on those fields this would be the
+   * BIN-listing fault a third time — a plausible answer nobody can trace.
+   */
+  test("an ordinary group code is not mistaken for one", () => {
+    for (const grp of ["RX1606", "KS2336", "S57266", "S572", "SPIRIT", "AC20029003"]) {
+      assert.notEqual((findPlanClass(ev({ groupNumber: grp })) as { classification: string | null }).classification, "medicare", grp);
+    }
+  });
 });
 
 describe("what may never be answered without a document", () => {
-  test("commercial proposes nothing, and says which document would settle it", () => {
+  test("commercial names the benefit type, and says which document would settle the funding", () => {
+    /*
+     * The benefit type is proposed and the funding is not, which is the split the owner asked for:
+     * "we should just treat all as commercial until proven otherwise". The sentence still has to
+     * name the open question and the document that closes it, because that sentence is what tells
+     * him whether a Form 5500 search on this plan is worth the afternoon.
+     */
     const r = findPlanClass(ev({ linesOfBusiness: "Commercial" }));
-    assert.equal(r.classification, null);
-    assert.match((r as { why: string }).why, /bought insurance or funds the plan/);
-    assert.match((r as { why: string }).why, /Form 5500|plan document/);
+    assert.ok(isFinding(r));
+    assert.equal(r.classification, "commercial_unknown_funding");
+    assert.equal(r.confidence, "indicated");
+    assert.match(r.from, /bought insurance or funds its own plan/);
+    assert.match(r.from, /Form 5500|plan document/);
   });
 
   test("a Government filing is a lead, never a classification", () => {
@@ -281,7 +347,17 @@ describe("what may never be answered without a document", () => {
     // returned `governmental` becomes an explanation rather than a one-click ERISA determination.
     const gov = findPlanClass(ev({ pcn: "G", pioneer: [row({ pcn: "G", source: "pharmacy", planType: "Government" })] }));
     assert.equal(gov.classification, null);
-    assert.equal(isProposal(proposePlanClass(ev({ linesOfBusiness: "Commercial" }))), false);
+    assert.equal(isProposal(proposePlanClass(ev({ pcn: "G", pioneer: [row({ pcn: "G", source: "pharmacy", planType: "Government" })] }))), false);
+
+    /*
+     * A commercial listing, by contrast, is now offered — and the reason it may be is that the
+     * class it offers decides nothing about the Kansas floor. `governmental` above would put a plan
+     * *in* reach of it, which is why that one stays an explanation. This is the whole distinction:
+     * not how confident the source is, but whether adopting it could reach a filing.
+     */
+    const commercial = proposePlanClass(ev({ linesOfBusiness: "Commercial" }));
+    assert.equal(isProposal(commercial), true);
+    assert.equal(commercial.classification, "commercial_unknown_funding");
   });
 });
 

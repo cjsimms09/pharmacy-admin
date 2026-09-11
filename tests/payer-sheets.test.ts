@@ -45,15 +45,27 @@ describe("every row can be checked by somebody who doubts it", () => {
 });
 
 describe("THE LINE: a payer sheet says commercial and stops there", () => {
-  test("commercial maps to no class at all", () => {
+  test("commercial maps to the class that asserts no funding", async () => {
     /*
-     * The most important assertion in the file. A commercial payer sheet establishes the payer and
-     * the line of business and says nothing whatever about whether the employer bought insurance or
-     * funds its own plan — which is the only question the Kansas floor turns on. Mapping it to
-     * commercial_fully_insured would be a one-click ERISA determination made from a document that
-     * does not mention ERISA.
+     * Still the most important assertion in the file, and the line it draws has not moved — only
+     * what sits on the near side of it.
+     *
+     * A commercial payer sheet establishes the payer and the line of business and says nothing
+     * whatever about whether the employer bought insurance or funds its own plan, which is the only
+     * question the Kansas floor turns on. Mapping it to `commercial_fully_insured` would be a
+     * one-click ERISA determination made from a document that does not mention ERISA, and that is
+     * still forbidden — the test below asserts it, over the whole table.
+     *
+     * What this used to be was `null`, which also threw away the part the sheet does state. These
+     * are the payer's own words about its own BIN, and Liviniti, SmithRx and RxSense all publish
+     * exactly this. `commercial_unknown_funding` keeps the stated half and asserts nothing about
+     * the funding, so the sheet is recorded for what it says and no more.
      */
-    assert.equal(LOB_CLASS.commercial, null);
+    assert.equal(LOB_CLASS.commercial, "commercial_unknown_funding");
+    // And the class it maps to must be one that cannot reach a filing. If that ever stops being
+    // true, this is the line that catches it.
+    const { planScopeOf } = await import("../src/lib/plans");
+    assert.equal(planScopeOf("commercial_unknown_funding"), "unknown");
   });
 
   test("a federal employee plan maps to no class either", () => {
@@ -94,11 +106,22 @@ describe("looking one up", () => {
 describe("the three routings on Blue Cross Blue Shield of Kansas, which are three different laws", () => {
   const ev = (pcn: string) => ({ bin: "610455", pcn, groupNumber: null, payerLabel: null, pbmName: null, linesOfBusiness: null });
 
-  test("BCBSKS is commercial, and therefore still the owner's question", () => {
+  test("BCBSKS is commercial, and the funding is still the owner's question", () => {
+    /*
+     * The three PCNs on this one BIN are the whole reason the register is keyed on BIN *and* PCN:
+     * BCBSKS is commercial, KSPDP is a standalone Part D plan and KSPARTD is Medicare Advantage.
+     * Three different laws, one BIN.
+     *
+     * This routing is now classified rather than refused — Prime's own sheet names it commercial —
+     * and what stays open is the funding, which is the part a Kansas filing needs. So the sentence
+     * still has to cite the sheet and still has to leave the employer unanswered.
+     */
     const r = findPlanClass(ev("BCBSKS"));
-    assert.equal(r.classification, null);
-    assert.match((r as { why: string }).why, /Prime Therapeutics/);
-    assert.match((r as { why: string }).why, /Commercial/);
+    assert.ok(isFinding(r));
+    assert.equal(r.classification, "commercial_unknown_funding");
+    assert.equal(r.source, "payer_sheet");
+    assert.match(r.from, /Prime Therapeutics/);
+    assert.match(r.from, /Commercial/);
   });
 
   test("KSPDP is a standalone Part D plan", () => {
