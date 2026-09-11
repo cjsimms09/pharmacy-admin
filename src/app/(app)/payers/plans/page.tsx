@@ -2,7 +2,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { planCandidates, refreshProposals, confirmProposal } from "@/lib/plan-proposals-store";
+import { planCandidates, refreshProposals, confirmProposal, confirmGroup } from "@/lib/plan-proposals-store";
+import { confirmGroups } from "@/lib/plan-proposals";
 import { CLASS_INFO } from "@/lib/plans";
 import { SOURCE_LABEL } from "@/lib/plan-evidence";
 import { planShortlist } from "@/lib/plan-shortlist-store";
@@ -47,55 +48,53 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
   }
 
   /*
-   * Confirms every plan proposed as one class, in one press.
+   * Confirms every plan one document settles, in one press.
    *
-   * Sixty-nine plans carry a live proposal — forty-two Medicare, eleven copay cards, ten discount
-   * cards, five Medicaid, one workers' comp — and between them they classify 870 of the 2,523
-   * claims on file and $95,072.46 of reimbursement. Every one of them was a separate press, so
-   * none of them had been done, and 464 plan groups sat at "unknown" blocking the Kansas floor,
-   * the payer spread and anything else that needs to know what a plan is.
+   * ── What this replaced, and why ──
    *
-   * The owner: "Does each specific thing need its own alert or can the alert be more general and
-   * click for specific." The same is true of the answer. A class is one decision — "these are the
-   * ones PioneerRx's own plan file calls Part D" — not forty-two.
+   * There was a "confirm all 33 Medicare" button here, and it was the wrong grouping. Thirty-three
+   * plans read from eleven different payer sheets is not one decision — it is eleven decisions
+   * wearing one button, and nothing on the screen let him check any of them, because the sentence
+   * behind each was different.
    *
-   * Each plan is still confirmed individually underneath, with its own evidence sentence recorded
-   * as its basis and its own audit line, so the file reads exactly as it would have done pressing
-   * them one at a time. Any that refuses is counted and named rather than silently skipped.
+   * A group is now one class, from one named document, for one BIN and PCN: "CMS's Part D BIN-PCN
+   * file names BIN 610097 / PCN 9999 as Medicare Advantage" is twelve register rows and one fact,
+   * because the register is keyed on the group number as well and the group number is the employer.
+   * That is what turns 481 unclassified plans into a list somebody finishes. On today's data it is
+   * 85 plans in 25 presses, and the top five presses are $83,166 of the $87,916.
+   *
+   * Each plan is still confirmed individually underneath, with its own evidence sentence recorded as
+   * its basis and its own audit line, so the file reads exactly as it would pressing them one at a
+   * time. Any that refuses is named rather than silently skipped.
+   *
+   * And it cannot decide scope. Every class that can appear in a group is out of the Kansas floor's
+   * reach, so a press can only ever take plans out; the four findings that put a plan *in* reach
+   * still need a Form 5500 or the plan document, one plan at a time. There is a test on that.
    */
-  async function confirmAll(fd: FormData) {
+  async function confirmOneGroup(fd: FormData) {
     "use server";
     const u = await requireManager();
-    const want = String(fd.get("classification") ?? "");
-    if (!want) redirect("/payers/plans?error=" + encodeURIComponent("No class was named."));
+    const key = String(fd.get("key") ?? "");
+    if (!key) redirect("/payers/plans?error=" + encodeURIComponent("No group was named."));
 
-    const all = await planCandidates();
-    const mine = all.filter((r) => r.proposed === want);
-    let done = 0;
-    const refused: string[] = [];
-    for (const r of mine) {
-      const res = await confirmProposal(r.id, u);
-      if (!res.ok) {
-        refused.push(`${r.payerLabel ?? r.bin}: ${res.why}`);
-        continue;
-      }
-      done++;
-      await audit({
-        action: "plan.classified",
-        userId: u.id,
-        userName: u.name,
-        entity: "plan",
-        entityId: r.id,
-        details: `confirmed as ${res.classification} (with ${mine.length - 1} others of the same class)`,
-      });
+    const r = await confirmGroup(key, u);
+    if (r.classification === null) {
+      redirect("/payers/plans?error=" + encodeURIComponent("That group is no longer on offer — the evidence behind it has moved. Press “Look again”."));
     }
+    await audit({
+      action: "plan.classified",
+      userId: u.id,
+      userName: u.name,
+      entity: "plan",
+      details: `confirmed ${r.confirmed} plan${r.confirmed === 1 ? "" : "s"} as ${r.classification} from one document (${key})`,
+    });
     revalidatePath("/payers/plans");
     redirect(
       "/payers/plans?error=" +
         encodeURIComponent(
-          refused.length === 0
-            ? `${done} plan${done === 1 ? "" : "s"} confirmed as ${want.replace(/_/g, " ")}.`
-            : `${done} confirmed; ${refused.length} refused — ${refused.slice(0, 2).join("; ")}`,
+          r.refused.length === 0
+            ? `${r.confirmed} plan${r.confirmed === 1 ? "" : "s"} confirmed as ${(r.classification ?? "").replace(/_/g, " ")} — ${r.claims.toLocaleString("en-US")} claims and ${formatCents(r.receivedCents)} now follow a class.`
+            : `${r.confirmed} confirmed; ${r.refused.length} refused — ${r.refused.slice(0, 2).map((x) => `${x.plan}: ${x.why}`).join("; ")}`,
         ),
     );
   }
@@ -120,9 +119,33 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
   }
 
   const [rows, list] = await Promise.all([planCandidates({ includeClassified: showAll }), planShortlist()]);
+  /*
+   * Grouped from the rows already loaded, not fetched again.
+   *
+   * `confirmGroups` is pure, so the page reads the register and the claims once. The press does call
+   * `proposalGroups` and recompute — deliberately, for the same reason `confirmProposal` recomputes:
+   * a confirmation adopts the evidence as it stands at the moment of adoption. Here it is only being
+   * drawn, and drawing it twice would be two facts about one thing.
+   *
+   * Filtered to the undecided, because "show all" includes plans somebody has already classified and
+   * a proposal must never be offered against a documented finding.
+   */
+  const groups = confirmGroups(rows.filter((r) => r.classification === "unknown"));
   const offered = rows.filter((r) => r.proposed !== null);
   const needDocument = rows.filter((r) => r.proposed === null && r.classification === "unknown");
-  const fillsOffered = offered.reduce((n, r) => n + r.fills, 0);
+  /*
+   * What one evening of pressing is worth, counted once.
+   *
+   * A group's claims and money are the claims each of its plans GOVERNS, not the claims whose BIN,
+   * PCN and group match it — those double count, because a PCN-less register row and the row for the
+   * PCN both match the same claim. See PlanCandidate.claims.
+   */
+  const readyPlans = groups.reduce((n, g) => n + g.plans.length, 0);
+  const readyClaims = groups.reduce((n, g) => n + g.claims, 0);
+  const readyCents = groups.reduce((n, g) => n + g.receivedCents, 0);
+  const unknownRows = rows.filter((r) => r.classification === "unknown");
+  const unknownCents = unknownRows.reduce((n, r) => n + r.receivedCents, 0);
+  const unknownClaims = unknownRows.reduce((n, r) => n + r.claims, 0);
 
   return (
     <>
@@ -156,9 +179,25 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
 
       {sp.error && <Notice kind="crit">{sp.error}</Notice>}
 
+      {/*
+        * The answer first: what these presses are worth, against what is left.
+        *
+        * The old tiles counted rows and fills. A count of rows says how much typing is left; this
+        * says how much reimbursement stops being unfollowable, which is the only reason any of it
+        * is being done.
+        */}
       <div className="mb-4 grid gap-3 sm:grid-cols-3">
-        <Figure value={offered.length.toLocaleString("en-US")} label="Ready to confirm" sub="Read from a document" tone={offered.length ? "warn" : "ok"} />
-        <Figure value={fillsOffered.toLocaleString("en-US")} label="Fills behind them" sub="What confirming these decides" />
+        <Figure
+          value={formatCents(readyCents)}
+          label={`Settled by ${groups.length} press${groups.length === 1 ? "" : "es"}`}
+          sub={`${readyPlans.toLocaleString("en-US")} plans, ${readyClaims.toLocaleString("en-US")} claims — each group one document`}
+          tone={groups.length ? "warn" : "ok"}
+        />
+        <Figure
+          value={formatCents(unknownCents - readyCents)}
+          label="Still needs your judgement"
+          sub={`${(unknownRows.length - readyPlans).toLocaleString("en-US")} plans, ${(unknownClaims - readyClaims).toLocaleString("en-US")} claims — mostly the one question no document on file answers`}
+        />
         {/*
           * The money still unclassified, rather than a count of rows.
           *
@@ -166,10 +205,10 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
           * against, which is the only reason any of it is being done.
           */}
         <Figure
-          value={formatCents(list.totals.openCents)}
-          label="Still unclassified"
-          sub={`${list.totals.openClaims.toLocaleString("en-US")} claims on ${(list.totals.plans - list.settled.length).toLocaleString("en-US")} plans the floor cannot reach yet`}
-          tone={list.totals.openCents ? "warn" : "ok"}
+          value={formatCents(unknownCents)}
+          label="Unclassified in total"
+          sub={`${unknownClaims.toLocaleString("en-US")} claims on ${unknownRows.length.toLocaleString("en-US")} plans the floor cannot reach yet`}
+          tone={unknownCents ? "warn" : "ok"}
         />
       </div>
 
@@ -177,33 +216,113 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
         <Empty>Every plan on the register is classified. Nothing is waiting.</Empty>
       ) : null}
 
-      {offered.length > 0 && (
+      {/*
+        * One document, one press, biggest money first.
+        *
+        * The register is keyed on BIN, PCN and group number, and the group number is the employer —
+        * so a single fact ("CMS's Part D file names BIN 610097 / PCN 9999 as Medicare Advantage")
+        * arrives as nine separate rows with nine separate buttons, and nobody presses nine buttons
+        * ninety times. Grouped by the document, the same 85 plans are 25 presses and the first five
+        * are $83,166 of the $87,916.
+        *
+        * Every plan in a group is still confirmed on its own underneath, with that sentence recorded
+        * as its own basis and its own audit line. And no class that can appear here is in reach of
+        * the Kansas floor, so a press can only ever take plans out of scope — never put one in.
+        */}
+      {groups.length > 0 && (
         <Card
           className="mb-4"
-          title="Proposed, biggest first"
-          count={offered.length}
-          subtitle="Each one quotes what it was read from. Confirming records that sentence as the basis."
-          actions={
-            canConfirm && offered.length > 1 ? (
-              <span className="flex flex-wrap items-center gap-1">
-                {[...new Set(offered.map((r) => r.proposed))].flatMap((c) => (c ? [c] : [])).map((c) => {
-                  const n = offered.filter((r) => r.proposed === c).length;
-                  return (
-                    <form action={confirmAll} key={c}>
-                      <input type="hidden" name="classification" value={c} />
-                      <button
-                        className="btn btn-sm"
-                        title={`Confirms all ${n}, each with its own evidence recorded as its basis.`}
-                      >
-                        Confirm {n} {c.replace(/_/g, " ")}
-                      </button>
-                    </form>
-                  );
-                })}
-              </span>
-            ) : undefined
-          }
+          title="Settled by a document already on file"
+          count={groups.length}
+          subtitle={`${readyPlans.toLocaleString("en-US")} plans, ${readyClaims.toLocaleString("en-US")} claims and ${formatCents(readyCents)}. Each row is one document and one press; the sentence it was read from is recorded as the basis of every plan in it.`}
         >
+          <div className="overflow-x-auto">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Routing</th>
+                  <th>Is</th>
+                  <th className="whitespace-nowrap">Claims</th>
+                  <th className="whitespace-nowrap">Received</th>
+                  <th>Read from</th>
+                  {canConfirm && <th />}
+                </tr>
+              </thead>
+              <tbody>
+                {groups.map((g) => (
+                  <tr key={g.key}>
+                    <td className="align-top">
+                      <span className="font-mono text-xs">{g.bin ?? "no BIN"} / {g.pcn || "no PCN"}</span>
+                      {g.name && <p className="mt-0.5 text-xs">{g.name}</p>}
+                      {/* The plans the press covers, folded away — the count is the decision, the
+                          list is the audit, and he is usually reading this on a phone. */}
+                      <details className="mt-0.5">
+                        <summary className="cursor-pointer text-xs text-ink-3">
+                          {g.plans.length.toLocaleString("en-US")} plan{g.plans.length === 1 ? "" : "s"} on the register
+                        </summary>
+                        <ul className="mt-1 space-y-0.5">
+                          {g.plans.map((p) => (
+                            <li key={p.id} className="font-mono text-[0.65rem] text-ink-3">
+                              {p.groupNumber ?? "no group"}
+                              {p.pcn ? "" : " (row predates the PCN)"}
+                              {p.claims ? ` · ${p.claims} claims ${formatCents(p.receivedCents)}` : ""}
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    </td>
+                    <td className="whitespace-nowrap align-top">
+                      <span className="badge badge-muted">{CLASS_INFO[g.classification].label}</span>
+                      {/*
+                       * The source and how well it settles it, beside the offer rather than buried
+                       * in the sentence — and for a group it is the weakest member's confidence,
+                       * because a group is only as good as its worst row.
+                       */}
+                      <p className="mt-1">
+                        <span className={g.confidence === "stated" ? "badge badge-ok" : "badge badge-muted"}>{g.confidence}</span>
+                      </p>
+                      <p className="mt-0.5 text-xs text-ink-3">{SOURCE_LABEL[g.source]}</p>
+                    </td>
+                    <td className="whitespace-nowrap align-top tabular-nums">{g.claims.toLocaleString("en-US")}</td>
+                    <td className="whitespace-nowrap align-top tabular-nums">{formatCents(g.receivedCents)}</td>
+                    <td className="max-w-[28rem] align-top text-xs text-ink-2">{g.from}</td>
+                    {canConfirm && (
+                      <td className="whitespace-nowrap align-top">
+                        <form action={confirmOneGroup}>
+                          <input type="hidden" name="key" value={g.key} />
+                          <button
+                            className="btn btn-sm btn-primary"
+                            type="submit"
+                            title={`Confirms all ${g.plans.length}, each with this sentence recorded as its own basis.`}
+                          >
+                            Confirm {g.plans.length}
+                          </button>
+                        </form>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      {/*
+        * The same offers one row at a time, for the occasion where he wants to take one out of a
+        * group rather than the whole group. Folded shut: the groups above are the job.
+        */}
+      {offered.length > 0 && (
+        <details className="mb-4">
+          <summary className="cursor-pointer text-sm text-ink-3">
+            The same {offered.length.toLocaleString("en-US")} plans one at a time
+          </summary>
+          <Card
+            className="mt-2"
+            title="Proposed, biggest first"
+            count={offered.length}
+            subtitle="Each one quotes what it was read from. Confirming records that sentence as the basis."
+          >
           <div className="overflow-x-auto">
             <table className="table">
               <thead>
@@ -256,7 +375,8 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
               </tbody>
             </table>
           </div>
-        </Card>
+          </Card>
+        </details>
       )}
 
       {/*

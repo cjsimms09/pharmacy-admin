@@ -100,8 +100,25 @@ Keep these in view; do not rediscover them.
 - **No real payer 835 has ever arrived.** Every payer therefore reads $0.00 received against what it
   owes. That is the third state — nothing to measure — not a fault. It stops being true the day
   RedSail switches the first payer over, and that day the matcher gets its first real test.
-- **1,436 claims are on unclassified plans.** This blocks the Kansas floor entirely and $191,569.70
-  of reimbursement cannot be followed to a contract. Work is on `work/plan-types`.
+- **481 of the register's 491 plans are unclassified**, and that blocks the Kansas floor entirely:
+  1,751 paid claims and **$226,094.82** of reimbursement cannot be followed to a contract. (The older
+  figure here — 1,436 claims, $191,569.70 — was stale and understated it; the count is now measured by
+  which register row actually governs each claim, so a claim is counted once rather than on every row
+  whose BIN, PCN and group match it.) Work is on `work/plan-types`.
+
+  Plan classification now groups the offers **by the document** rather than by the row: one class,
+  from one named source, for one BIN and PCN, confirmed in a single press. On today's data that is
+  85 plans in 25 presses — 350 claims and $87,916.04, of which the first five presses are $83,166.
+  Two of those groups only exist because a register row that predates the PCN is now read against the
+  PCN its own claims carry (211 rows have no PCN; 197 of them route on exactly one).
+
+  **A press can never decide scope.** Every class a group can carry is out of the Kansas floor's
+  reach, so the worst a wrong press does is leave money out of a filing. The four findings that put a
+  plan *in* reach — fully-insured commercial, governmental, church, and the ERISA exclusion — still
+  need a Form 5500 or the plan document, one plan at a time. There are tests on this; do not loosen
+  it. What is left after the presses is 396 plans, 1,401 claims and $138,178.78, and almost all of it
+  is the one question no document on file answers: is this employer insured, or does it fund its own
+  plan?
 - **Revenue is recognised when a script is collected**, not when it is filled. A month in progress
   understates on purpose. A full will-call bin is not a bad month and the account says which it is.
 - ~~Two invoice formats are unread~~ — **both now read**, 11 September. The IPC credit memo parses its
