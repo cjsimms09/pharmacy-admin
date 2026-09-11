@@ -109,7 +109,7 @@ export async function pullSftp(ctx: { userId: string | null; userName: string | 
       const itemId = newId();
       try {
         if (f.size > MAX_FILE_BYTES) {
-          await db.insert(schema.inboxItems).values({ id: itemId, messageId, receivedAt, fromAddress: from, subject: f.name, fileName: f.name, status: "rejected", reason: "File is larger than 20 MB." });
+          await db.insert(schema.inboxItems).values({ id: itemId, messageId, receivedAt, fromAddress: from, subject: f.name, fileName: f.name, status: "rejected", routedAs: "rejected", reason: "File is larger than 20 MB." });
           result.rejected++;
           continue;
         }
@@ -124,7 +124,7 @@ export async function pullSftp(ctx: { userId: string | null; userName: string | 
         const contentType = head === "ISA*" ? "application/octet-stream" : ext === "csv" ? "text/csv" : ext === "txt" || ext === "tsv" ? "text/plain" : ext === "pdf" ? "application/pdf" : "application/octet-stream";
         const verdict = acceptableAttachment({ filename: f.name, contentType, content: buf });
         if (!verdict.ok) {
-          await db.insert(schema.inboxItems).values({ id: itemId, messageId, receivedAt, fromAddress: from, subject: f.name, fileName: f.name, status: "rejected", reason: verdict.why });
+          await db.insert(schema.inboxItems).values({ id: itemId, messageId, receivedAt, fromAddress: from, subject: f.name, fileName: f.name, status: "rejected", routedAs: "rejected", reason: verdict.why });
           result.rejected++;
           await client.rename(remote, `${c.folder.replace(/\/$/, "")}/done/${f.name}`).catch(() => undefined);
           continue;
@@ -132,7 +132,7 @@ export async function pullSftp(ctx: { userId: string | null; userName: string | 
         // The same gate every emailed file passes: a document that names a patient where none should is held, not loaded.
         const gate = gateFile(f.name, buf);
         if (!gate.ok) {
-          await db.insert(schema.inboxItems).values({ id: itemId, messageId, receivedAt, fromAddress: from, subject: f.name, fileName: f.name, status: "rejected", reason: gate.reason });
+          await db.insert(schema.inboxItems).values({ id: itemId, messageId, receivedAt, fromAddress: from, subject: f.name, fileName: f.name, status: "rejected", routedAs: "rejected", reason: gate.reason });
           result.rejected++;
           await client.rename(remote, `${c.folder.replace(/\/$/, "")}/done/${f.name}`).catch(() => undefined);
           continue;
@@ -153,7 +153,7 @@ export async function pullSftp(ctx: { userId: string | null; userName: string | 
           notes: `Collected from ${from}`,
           uploadedBy: ctx.userId ?? "sftp-pull",
         });
-        let routedAs: string | null = null;
+        let routedAs = "unrecognised"; // stated, never absent — see inbox_items.routedAs
         let routeResult: string | null = null;
         if ((s.mail_auto_import ?? "").toLowerCase() !== "yes") {
           routeResult = "Filed only: automatic loading is switched off under Settings → Email.";

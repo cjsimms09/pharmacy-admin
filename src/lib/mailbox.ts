@@ -231,6 +231,8 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
               fromAddress: from || "(unknown)",
               subject,
               status: "stored",
+              routedAs: "bounce",
+              routeResult: "A message this mailbox sent came back.",
               reason: `Delivery failure. ${note}${attached}`,
             });
             result.stored++;
@@ -266,6 +268,13 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
                   fromAddress: from,
                   subject,
                   status: "ignored",
+                  /*
+                   * A reply about training is a training reply, attachment or not. It was read and
+                   * understood; what is missing is the certificate, and the row says so. Leaving
+                   * `routedAs` empty made it read as a file nobody could recognise.
+                   */
+                  routedAs: "training_reply",
+                  routeResult: `Read, but nothing was attached — the request is still open.`,
                   reason: `${m.personName} replied about their ${m.type} but attached nothing, so the request is still open.`,
                 });
                 result.ignored++;
@@ -304,6 +313,8 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
                 fromAddress: from,
                 subject,
                 status: "stored",
+                routedAs: "certificate",
+                routeResult: `Filed — ${filed.join("; ")}.`,
                 reason: `Certificate filed — ${filed.join("; ")}. The record is created with the dates blank; enter them from the document.`,
               });
               result.stored++;
@@ -378,6 +389,9 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
               fromAddress: from || "(unknown)",
               subject,
               status: "ignored",
+              /* A decision, not a failure to understand: the sender is not one this mailbox reads. */
+              routedAs: "not_for_filing",
+              routeResult: "Sender is not on the allowed list, so it was left unread.",
               reason: "Sender is not on the allowed list, so the message was left unread and nothing was stored.",
             });
             result.ignored++;
@@ -397,6 +411,14 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
               fromAddress: from,
               subject,
               status: "ignored",
+              /*
+               * Looked at and deliberately passed over — a postage receipt, a note with nothing on
+               * it. That is an answer, and it is not "this file was not recognised". Two Endicia
+               * purchase confirmations sat on his needs-you list for three days on the strength of
+               * that one empty field.
+               */
+              routedAs: "not_for_filing",
+              routeResult: declined.length ? "Nothing on it was a type this reads." : "Nothing was attached.",
               reason: declined.length
                 ? `Nothing on this message was a type this reads: ${declined.slice(0, 5).join("; ")}${declined.length > 5 ? "; …" : ""}.`
                 : "No attachment on this message.",
@@ -411,13 +433,13 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
             const buf = att.content as Buffer;
             const itemId = newId();
             if (buf.length > MAX_FILE_BYTES) {
-              await db.insert(schema.inboxItems).values({ id: itemId, messageId: `${messageId}#${fileName}`, receivedAt, fromAddress: from, subject, fileName, status: "rejected", reason: "Attachment is larger than 20 MB." });
+              await db.insert(schema.inboxItems).values({ id: itemId, messageId: `${messageId}#${fileName}`, receivedAt, fromAddress: from, subject, fileName, status: "rejected", routedAs: "rejected", routeResult: "Larger than 20 MB, so it was not stored.", reason: "Attachment is larger than 20 MB." });
               result.rejected++;
               continue;
             }
             const gate = gateFile(fileName, buf);
             if (!gate.ok) {
-              await db.insert(schema.inboxItems).values({ id: itemId, messageId: `${messageId}#${fileName}`, receivedAt, fromAddress: from, subject, fileName, status: "rejected", reason: gate.reason, scanned: true });
+              await db.insert(schema.inboxItems).values({ id: itemId, messageId: `${messageId}#${fileName}`, receivedAt, fromAddress: from, subject, fileName, status: "rejected", routedAs: "rejected", routeResult: gate.reason, reason: gate.reason, scanned: true });
               result.rejected++;
               await audit({ action: "inbox.rejected", userId: ctx.userId, userName: ctx.userName, details: `${fileName}: ${gate.reason}` });
               continue;
@@ -488,6 +510,26 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
                   fileName,
                   documentId: filed.documentId,
                   status: "stored",
+                  /*
+                   * Say what it was filed as, not only that something happened.
+                   *
+                   * This wrote a perfectly good outcome into `reason` — "Supplier invoice, filed under
+                   * Schedule II, kept apart from every other record" — and left `routedAs` empty. The
+                   * inbox reads an empty `routedAs` as "not recognised", so seven McKesson invoices that
+                   * had been read, classified and filed at twenty to four this morning sat on his
+                   * needs-you list saying the file was not recognised:
+                   *
+                   * > "its still not recognizing invoices that get emailed form mckesson. in inbox saying
+                   * > file not recognized"
+                   *
+                   * It is the third time this exact shape has appeared — the handled training replies,
+                   * the ParMed invoice that went on saying its lines could not be read, and now this.
+                   * Work that succeeded, and a record of it that said otherwise.
+                   */
+                  routedAs: "invoice",
+                  routeResult: filed.needsReview
+                    ? `Filed with the Schedule II records until you confirm what it carries.`
+                    : `Filed under ${where}.`,
                   reason: filed.needsReview
                     ? `Supplier invoice, held with the Schedule II records until somebody confirms what it carries.`
                     : `Supplier invoice, filed under ${where}, kept apart from every other record.`,
@@ -583,7 +625,12 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
             // report the site knows how to read, load it now so a scheduled report becomes
             // usable without anyone opening it. Anything unrecognised, or any failure, leaves
             // the document exactly as it was — the fallback is the behaviour we already had.
-            let routedAs: string | null = null;
+            /*
+             * "unrecognised" is the honest starting point: the reader has looked and not yet placed it.
+             * It was null, which the inbox reads the same way but which also covers "nobody said" — and
+             * that ambiguity is what turned three kinds of successful filing into a failure on screen.
+             */
+            let routedAs = "unrecognised";
             let routeResult: string | null = null;
             if ((s.mail_auto_import ?? "").toLowerCase() !== "yes") {
               // Filed, and the line says why it went no further — otherwise a scheduled report that
