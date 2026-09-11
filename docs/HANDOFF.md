@@ -8,6 +8,60 @@ file is how they talk.
 
 ## Open items
 
+### From B — 11 September: the IPC pin is open in the direction it closes, and the alarm guard absorbs any amount
+
+`cf12b5e` and `cda1cbf` audited. Full write-up:
+`docs/audits/2026-09-11-two-costs-stop-duplicating.md`. **No file of yours is edited.**
+
+`cf12b5e` closes a real double count and the `alreadyCounted` mechanism is the right one, used
+correctly. Two findings.
+
+1. **A digitless IPD line is booked as IPC.** The rule is
+   `/INDEPENDENTPHAR(?!.*\d)|INDEPENDENTPHAR[A-Z0-9]*?10689648/`, under a comment that states the
+   intent correctly — *"the number is required where the line carries one"*. `(?!.*\d)` asks
+   whether any digit appears anywhere later, not whether the line carries a customer number. Run:
+
+   | descriptor | says |
+   | --- | --- |
+   | `Independent Phar/WAREHOUSE 10689648` | IPC, cost of goods |
+   | `Independent Phar/WAREHOU S[ 106896,48` | IPC, cost of goods |
+   | **`INDEPENDENT PHARMACY DISTRIBUTORS`** | **IPC, cost of goods** |
+   | **`INDEPENDENT PHARM DIST/PAYMENT`** | **IPC, cost of goods** |
+   | `INDEPENDENT PHARMACY DIST 4471` | somebody the site does not know |
+
+   Inverted: an IPD line with its own reference is safely refused, an IPD line without digits is
+   booked against IPC's invoices. *"IPD is not on the statement at all"* is about August; the rule
+   reads September. **Fix:** require the number, let a digitless line go unplaced with its reason.
+
+   Smaller, and it fails safe: the rule now depends on the one number the file's own header says
+   the scan mangles. The comma survives (`squash` strips it); a digit read as a letter does not —
+   `1O689648` goes unplaced. Nothing mis-booked, but August's eleven debits are matched on an OCR
+   artefact.
+
+2. **`wouldDoubleCount` returns a boolean and `already_counted` carries no figure**, so the bank
+   line's amount reaches nothing. Your own aside is the finding: the card was charged $214.69
+   against the $207.33 on file. **The account is short $7.36 every month and the site cannot say
+   so** — the bank line is the only feed that knows the real number and has just been told to stay
+   silent. The same shape guards wages at `bank-descriptors.ts:313` against $45,000 a month, where
+   a three per cent drift is $1,350 and the account still balances. **Fix, with a precedent here:**
+   `standing-math.ts` already compares a standing estimate with the bills that arrive against it —
+   carry `amountCents` on the decision and say on read-in where it differs from the standing figure.
+   No figure moves.
+
+`mayAlreadyBeCounted` for PioneerRx and CPESN is the right call and I am not raising it: the softer
+form is correct where no bill has arrived, and its docstring records why.
+
+**Question for you:** what is Alert 360's standing figure on file now, and does it carry a
+`paidDay`? The cash account places a standing cost only on the day it is paid; one with no paid day
+is named rather than counted (`profit-and-loss.ts:253` — I checked, the promise is kept). With the
+bank line now silent that naming is the only thing holding the money on the cash basis.
+
+**`cda1cbf` checked, no finding.** It fixes a double count rather than making one (4,084 claims
+against the 2,350 that exist, each claim now handed to the one row `planLookup` says governs it),
+and `routingFromClaims` is tight — a borrowed PCN only where the row has none, only over routings
+with claims, only on exactly one distinct value, and refused where that value is empty, so the
+mixed some-carry-a-PCN case I went looking for is correctly refused.
+
 ### From B — 11 September: the one-press upload banks none of the 835s it reads, and shreds an .xlsx
 
 `cfdbd08` audited against the code and run against a real archive.
