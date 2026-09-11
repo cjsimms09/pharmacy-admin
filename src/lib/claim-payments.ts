@@ -488,26 +488,87 @@ export async function sweepRemittances(user: { name: string }): Promise<{
     // Not created yet. Said plainly by the caller rather than treated as an error here.
     return out;
   }
-  const wanted = entries.filter((e) => /\.(835|txt|rmt|edi|dat)$/i.test(e) || /^\d{8}/.test(e));
-  out.files = wanted.length;
-
-  for (const file of wanted) {
+  /*
+   * Everything in the folder is looked at, and the bytes decide — not the name.
+   *
+   * This used to want one of five extensions or a name beginning with eight digits. That is a guess
+   * about what a portal calls its downloads, and the owner is pointing his browser's download folder
+   * straight at this directory: whatever ProviderPay names them, they land here. A file refused for
+   * its name is a remittance nobody ever finds out was ignored.
+   *
+   * A zip is opened rather than refused, because portals send them and one level costs nothing.
+   */
+  const { readZip } = await import("./zip-read");
+  const candidates: { name: string; onDisk: string; text: string }[] = [];
+  for (const entry of entries) {
+    if (entry === FILED || entry.startsWith(".")) continue;
+    const full = path.join(dir, entry);
     try {
-      const text = await fs.readFile(path.join(dir, file), "utf8");
-      if (!/\bCLP\b/.test(text)) continue; // Not a remittance; left where it is.
-      const r = await importRemittance(text, file, user);
+      if ((await fs.stat(full)).isDirectory()) continue;
+      const buf = await fs.readFile(full);
+      if (/\.zip$/i.test(entry) || buf.subarray(0, 2).toString("latin1") === "PK") {
+        for (const e of readZip(buf)) {
+          if (e.data.length === 0) continue;
+          candidates.push({ name: `${entry} → ${e.name.split("/").pop() ?? e.name}`, onDisk: entry, text: e.data.toString("utf8") });
+        }
+      } else {
+        candidates.push({ name: entry, onDisk: entry, text: buf.toString("utf8") });
+      }
+    } catch (e) {
+      out.problems.push(`${entry}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  out.files = candidates.length;
+
+  const done = new Set<string>();
+  for (const c of candidates) {
+    try {
+      /*
+       * An 835 is known by its own segments, the same test an emailed one gets. A file without them
+       * is named rather than passed over in silence: this folder is where he puts things, so
+       * anything he puts here that nothing happens to is worth a sentence.
+       */
+      if (!/\bCLP\b/.test(c.text)) {
+        out.problems.push(`${c.name}: not a remittance — it carries no claim segments, so nothing was read from it.`);
+        continue;
+      }
+      const r = await importRemittance(c.text, c.name, user);
       out.read++;
       out.payments += r.payments;
       out.amountCents += r.amountCents;
       out.matched += r.matched;
       out.unmatched += r.unmatched;
       out.problems.push(...r.problems);
+      done.add(c.onDisk);
     } catch (e) {
-      out.problems.push(`${file}: ${e instanceof Error ? e.message : String(e)}`);
+      out.problems.push(`${c.name}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  /*
+   * Read files are moved aside rather than left where they are.
+   *
+   * The import refuses a remittance it has already taken, so leaving them would be safe — and would
+   * also mean every sweep re-reads every 835 this pharmacy has ever downloaded. Moving them keeps
+   * the folder as what it looks like: the things not yet dealt with. They are kept rather than
+   * deleted, because an 835 is the evidence behind a payment and is not ours to throw away.
+   */
+  if (done.size > 0) {
+    const filed = path.join(dir, FILED);
+    await fs.mkdir(filed, { recursive: true });
+    for (const name of done) {
+      try {
+        await fs.rename(path.join(dir, name), path.join(filed, name));
+      } catch (e) {
+        out.problems.push(`${name} was read but could not be moved aside: ${e instanceof Error ? e.message : String(e)}`);
+      }
     }
   }
   return out;
 }
+
+/** Where a remittance goes once it has been read. Kept, never deleted: it is the evidence. */
+const FILED = "filed";
 
 /**
  * What the Medicare Transaction Facilitator has actually paid, and when.
