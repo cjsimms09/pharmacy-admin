@@ -37,7 +37,7 @@ import {
  */
 
 /** Everything a month's report needs, or the reason there is not one. */
-export async function arReportFor(month: string, today = todayIso()): Promise<{ report: ArReport } | { report: null; why: string }> {
+export async function arReportFor(month: string, today = todayIso()): Promise<{ report: ArReport | null; why: string }> {
   const ok = monthIsReportable(month, today);
   if (!ok.ok) return { report: null, why: ok.why };
 
@@ -61,7 +61,7 @@ export async function arReportFor(month: string, today = todayIso()): Promise<{ 
   const summary = owedByPayer(receivables, received, window.asAt);
   const report = arReport(month, window, summary);
   report.ageing = ageOutstanding(receivables, report.lines, window.asAt);
-  return { report };
+  return { report, why: "" };
 }
 
 /** The months there can be a report for, newest first. */

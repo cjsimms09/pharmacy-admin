@@ -28,6 +28,7 @@
  */
 
 import { db, schema } from "@/db";
+import { isOutOfBooks } from "./books-start";
 import { and, eq, gte, inArray } from "drizzle-orm";
 import { newId } from "./crypto";
 import { todayIso } from "./dates";
@@ -135,7 +136,28 @@ export async function backfillClaimsFromPioneer(fills: BackfilledFill[], from: s
    * One per day it runs. The claims table cascades on this row, so if a day's backfill ever has to
    * be undone it is one delete rather than a hunt through the claims.
    */
-  const stamp = `PioneerRx backfill ${todayIso()}`;
+  /*
+   * A pull of a month that ends before the books begin is a test, and gets an import row of its own.
+   *
+   * The owner pulls an old month so that month's remittances have claims to match against, and then
+   * none of it may be counted: "these are test only and should not show up on any AR reports or
+   * anything." `loadFills` drops every claim belonging to an import flagged this way, so the whole
+   * pull disappears from the receivables list, the month's account and the payer judgements at once,
+   * while `findClaim` still finds them and the matching still works.
+   *
+   * A separate row matters. The daily backfill reuses one import per day, so a test pull sharing it
+   * would drag that day's real September claims out of the books alongside the test ones.
+   *
+   * Judged on the newest fill in the pull rather than the range asked for: a range that happens to
+   * run up to today but returned nothing after August is still a test, and a range straddling the
+   * boundary is not one — it holds real claims, and dropping them would lose real revenue.
+   */
+  const newestFill = wanted.reduce((m, f) => (f.filledOn && f.filledOn > m ? f.filledOn : m), "");
+  const isTestPull = newestFill !== "" && isOutOfBooks(newestFill);
+
+  const stamp = isTestPull
+    ? `PioneerRx test pull ${from} to ${newestFill}`
+    : `PioneerRx backfill ${todayIso()}`;
   const existing = await db.query.claimImports.findFirst({ where: eq(schema.claimImports.fileName, stamp) });
   const importId = existing?.id ?? newId();
   if (!existing) {
@@ -143,6 +165,7 @@ export async function backfillClaimsFromPioneer(fills: BackfilledFill[], from: s
       id: importId,
       fileName: stamp,
       createdBy: user,
+      outOfBooks: isTestPull,
     });
   }
 

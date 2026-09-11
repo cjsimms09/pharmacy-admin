@@ -2119,6 +2119,19 @@ export const claimImports = sqliteTable("claim_imports", {
   unmappedColumns: text("unmapped_columns").notNull().default("[]"),
   periodFrom: text("period_from"),
   periodTo: text("period_to"),
+  /**
+   * Claims loaded as a test: kept, matchable, and counted nowhere.
+   *
+   * The owner pulls an old month of claims so that month's remittances have something to match
+   * against, and those months are not his books: "this site is starting clean as of 09/01/.."
+   *
+   * Flagged on the import, not on each claim, because it is a fact about where the rows came from.
+   * A date rule on the claim would be wrong the way the fill-date rule was wrong for payments — a
+   * fill dispensed on 31 August and collected on 2 September is real September revenue, and a rule
+   * keyed on when it was filled would discard it. Provenance has no such edge: an import pulled to
+   * test matching is a test, whatever dates its rows carry.
+   */
+  outOfBooks: integer("out_of_books", { mode: "boolean" }).notNull().default(false),
   /*
    * The report's own bottom line for this file — the only figures here nobody computed.
    *
