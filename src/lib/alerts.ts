@@ -509,6 +509,53 @@ export async function alerts(): Promise<Alert[]> {
     void e;
   }
 
+  /*
+   * The short list of things only he can fetch, and whether last month has them.
+   *
+   * The owner asked for "a checklist of all the things I need to provider monthly", and then, of
+   * the alert: "you need to make sure this alert doesnt pop early, the alert needs to be clear and
+   * the alert needs to be smart enough to know whats been done and what hasnt".
+   *
+   * All three shape this:
+   *
+   *   not early   Nothing appears until the 5th. On the 1st the bank statement does not exist yet
+   *               and neither does anything else worth asking for, so an alert then is a nag about
+   *               something nobody could have done — which is how an alert stops being read.
+   *   clear       It names how many are outstanding and what they are, not "some items pending".
+   *   knows       Every item is judged on the money it brings in rather than on a file existing:
+   *               receipts keyed the way the importer dedupes, bank lines for the month, the till's
+   *               own total. Uploading something twice cannot make it read as done twice, and
+   *               renaming a file cannot make it read as missing.
+   *
+   * One row for all five, because he has said plainly that one alert per thing is how a morning
+   * list becomes something to scroll past.
+   */
+  try {
+    const { monthlyChecklist, monthJustFinished } = await import("./monthly-checklist");
+    const day = Number(today.slice(8, 10));
+    /* The statements are not out on the 1st. Asking before they exist teaches him to ignore it. */
+    if (day >= 5) {
+      const list = await monthlyChecklist(monthJustFinished(today));
+      if (list.outstanding > 0) {
+        const names = list.items.filter((i) => !i.done).map((i) => i.name);
+        out.push({
+          key: `monthly-checklist-${list.month}`,
+          /* A fortnight in, the month cannot be closed and it is no longer a reminder. */
+          level: day >= 15 ? "now" : "soon",
+          title: `${list.label}: ${list.outstanding} thing${list.outstanding === 1 ? "" : "s"} still to upload`,
+          why:
+            `${names.join(", ")}. ` +
+            `These are the only files the site cannot fetch for itself — everything else arrives by email or by its own feed. ` +
+            `Until they are in, ${list.label}'s cash account is not the bank's.`,
+          href: "/money",
+          action: "See the list",
+        });
+      }
+    }
+  } catch (e) {
+    /* A checklist is never worth taking the dashboard down for. */
+    void e;
+  }
   // Worst first, and within a level the oldest problem first — which is the order somebody would
   // work them in anyway.
   const rank: Record<AlertLevel, number> = { now: 0, soon: 1 };

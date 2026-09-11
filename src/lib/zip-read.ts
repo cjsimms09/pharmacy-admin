@@ -116,3 +116,34 @@ export function readZipBounded(
   }
   return out;
 }
+
+/**
+ * The content type an unpacked entry should be judged as, from its name.
+ *
+ * A zip carries no MIME type for what is inside it, and the sweep's acceptance test wants one. The
+ * name is the only evidence there is, and it is the same evidence the sender's own mail client
+ * would have used had the file been attached directly.
+ */
+export function guessType(name: string): string {
+  const ext = (name.match(/\.([A-Za-z0-9]{1,5})$/)?.[1] ?? "").toLowerCase();
+  switch (ext) {
+    case "csv":
+      return "text/csv";
+    case "tsv":
+      return "text/tab-separated-values";
+    case "txt":
+    case "dat":
+      return "text/plain";
+    case "pdf":
+      return "application/pdf";
+    case "xlsx":
+      return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    case "xls":
+      return "application/vnd.ms-excel";
+    case "xml":
+      return "application/xml";
+    default:
+      /* Unknown is not "text": the acceptance test reads the bytes for those, which is the honest path. */
+      return "application/octet-stream";
+  }
+}

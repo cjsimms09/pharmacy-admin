@@ -440,6 +440,38 @@ async function pullClaims(): Promise<string> {
     onFile.map((c) => ({ rxNumber: c.rxNumber, fillNumber: c.fillNumber ?? 0, filledOn: c.dateFilled, insuranceCents: c.remitCents ?? 0, patientCents: c.copayCents ?? 0 })),
   );
 
+  /*
+   * And write in the fills the report never delivered.
+   *
+   * The owner, asked whether to re-send those days' reports or take them from the pharmacy system:
+   * "Pull from pioneer". Only fills PioneerRx has and the claims table does not, keyed on Rx and
+   * refill, so nothing is written twice when the report catches up. See claims-backfill.ts.
+   */
+  const { backfillClaimsFromPioneer } = await import("../src/lib/claims-backfill");
+  const filledIn = await backfillClaimsFromPioneer(
+    built.fills
+      .filter((f) => !new Set(onFile.map((c) => `${c.rxNumber}|${c.fillNumber ?? 0}`)).has(`${f.rxNumber}|${f.fillNumber}`))
+      .map((f) => ({
+        rxNumber: f.rxNumber,
+        fillNumber: f.fillNumber,
+        filledOn: f.filledOn,
+        soldOn: f.soldOn,
+        ndc11: f.ndc11,
+        itemName: f.itemName,
+        bin: f.primary?.bin ?? null,
+        pcn: f.primary?.pcn ?? null,
+        groupNumber: f.primary?.groupNumber ?? null,
+        networkId: f.primary?.networkId ?? null,
+        quantityThousandths: f.quantityThousandths,
+        daysSupply: f.daysSupply,
+        insuranceCents: f.insuranceCents,
+        patientCents: f.patientCents,
+        acquisitionCents: f.acquisitionCents,
+        dispensingFeeCents: f.dispensingFeeCents,
+      })),
+    "2026-09-01",
+  );
+
   const { setSetting } = await import("../src/lib/settings");
   await setSetting(
     "pioneer_claims_reconcile",
@@ -466,6 +498,7 @@ async function pullClaims(): Promise<string> {
     `${built.fills.length.toLocaleString("en-US")} fills (${built.payerCounts.twoPayers} with two payers` +
     `${built.payerCounts.more ? `, ${built.payerCounts.more} with more` : ""}); ` +
     `${recon.says}` +
+    `${filledIn.written || filledIn.heldReversed.length ? ` ${filledIn.says}.` : ""}` +
     `${built.disagree.length ? ` ${built.disagree.length} fills where the payers and the patient do not add to the fill's price.` : ""}`
   );
 }

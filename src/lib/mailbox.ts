@@ -4,6 +4,7 @@ import path from "node:path";
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { readPostageEmail } from "./postage-email";
+import { readZip, guessType } from "./zip-read";
 import { bookPostage } from "./expenses";
 import { eq, like } from "drizzle-orm";
 import { db, schema } from "@/db";
@@ -400,7 +401,33 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
             continue;
           }
 
-          const verdicts = (parsed.attachments ?? []).map((a) => ({ a, v: acceptableAttachment({ filename: a.filename, contentType: a.contentType, content: a.content as Buffer }) }));
+          /*
+           * A zip is a container, not a document, so it is opened before anything judges it.
+           *
+           * McKesson's weekly Accounts Payable report arrives as a zip of two CSVs, and `.zip` is
+           * not a type this reads — so the whole report was refused as "not a type this reads"
+           * and $253,245.45 of payment detail never got in. Expanding here rather than adding zip
+           * to the accepted list means every entry is still judged on its own merits: a zip full
+           * of something unreadable is still refused, and the reason names the file inside it
+           * rather than the envelope.
+           *
+           * One level only. A zip inside a zip is not a thing any of these feeds sends, and
+           * unpacking arbitrarily deep is how a mail sweep becomes a denial of service.
+           */
+          const expanded = (parsed.attachments ?? []).flatMap((a) => {
+            if (!/.zip$/i.test(a.filename ?? "") && a.contentType !== "application/zip") return [a];
+            try {
+              const entries = readZip(a.content as Buffer);
+              /* A directory entry has no bytes. Only real files are attachments. */
+              return entries
+                .filter((e) => e.data.length > 0 && !e.name.endsWith("/"))
+                .map((e) => ({ ...a, filename: e.name.split("/").pop() ?? e.name, contentType: guessType(e.name), content: e.data }));
+            } catch {
+              /* An unreadable zip stays as it was, so the line says a zip arrived and could not be opened. */
+              return [a];
+            }
+          });
+          const verdicts = expanded.map((a) => ({ a, v: acceptableAttachment({ filename: a.filename, contentType: a.contentType, content: a.content as Buffer }) }));
           const attachments = verdicts.filter((x) => x.v.ok).map((x) => x.a);
           if (attachments.length === 0) {
             /*
@@ -974,6 +1001,30 @@ async function importRecognised(
       );
       routeResult = r.message;
       imported = r.stored;
+    } else if (cls.kind === "mck_returns") {
+      /* Money coming back, settled like an invoice and stored beside them, negative. */
+      const { readReturnsDetail, fileReturnCredits } = await import("./ap-transactions");
+      const read = readReturnsDetail(buf.toString("utf8"));
+      const r = await fileReturnCredits(read.credits, "Mckesson", filed?.documentId ?? null);
+      routeResult = r.says;
+      imported = r.written + r.updated > 0;
+    } else if (cls.kind === "report_summary") {
+      /* Recognised on purpose and read on purpose: the detail beside it carries the same money. */
+      routeResult = "A totals sheet. The detail it summarises is read separately, so nothing was taken from this.";
+    } else if (cls.kind === "ap_transactions") {
+      /*
+       * McKesson's weekly Accounts Payable report: when the money leaves, and with what.
+       *
+       * Filed, never booked. Every row is an invoice already on the books, or already counted
+       * from PioneerRx's receiving record where no invoice arrived — so treating this as a cost
+       * would count a month's buying twice. What it adds is the ACH each invoice cleared under,
+       * which is the only thing that can put a bank debit against the invoices inside it.
+       */
+      const { readApTransactions, fileApTransactions } = await import("./ap-transactions");
+      const read = readApTransactions(buf.toString("utf8"));
+      const r = await fileApTransactions(read, "Mckesson", filed?.documentId ?? null);
+      routeResult = r.says;
+      imported = r.written + r.updated > 0;
     } else if (cls.kind === "purchase_drilldown") {
       /*
        * Where the compliance ratio stands today.

@@ -1,7 +1,6 @@
-import { eq } from "drizzle-orm";
 import { addCashReceipt } from "./expenses";
 import "server-only";
-import { inArray } from "drizzle-orm";
+import { inArray, eq, and, like } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "./crypto";
 import { audit } from "./audit";
@@ -152,4 +151,27 @@ export async function bankedPayments(limit = 200) {
     limit,
   });
   return rows.filter((r) => r.sourceKey !== null);
+}
+
+/**
+ * Whether last month's ProviderPay payment report has been uploaded yet.
+ *
+ * The owner: "a reminder on the site that pops on the 1st of the new month to tell me to upload
+ * provider pay payments report and wells fargo report would be nice."
+ *
+ * A reminder that only appears on the 1st is a reminder that is missed on the 2nd, so this answers
+ * the question the alert actually needs: has the month's money arrived or not. The alert stands
+ * from the 1st until the report is in, and goes when it is — which is the same thing a person
+ * would do, and needs nobody to remember anything.
+ *
+ * "Arrived" is judged by the receipts the report banks rather than by a document being filed. A PDF
+ * sitting in the vault under the right name is not the month's money; a receipt keyed
+ * `payer-payment|…` is, and it is the same key the import dedupes on, so the two can never disagree.
+ */
+export async function payerPaymentsFor(month: string): Promise<{ payments: number; cents: number }> {
+  const rows = await db.query.cashReceipts.findMany({
+    where: and(eq(schema.cashReceipts.month, month), like(schema.cashReceipts.sourceKey, "payer-payment|%")),
+    columns: { amountCents: true },
+  });
+  return { payments: rows.length, cents: rows.reduce((n, r) => n + r.amountCents, 0) };
 }
