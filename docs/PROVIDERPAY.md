@@ -9,6 +9,13 @@ time? what will i need to do the first time to make sure going forward all I hav
 button?"* The answer is that Claude does not remember between sessions — so the first time is
 written down here, and every time after is reading this.
 
+## Nothing you selected last time is still selected
+
+**Both the NCPDP and the Tax ID reset when a new browser session starts.** Neither is a stored
+account preference, whatever the page looks like. Every run begins by choosing them again, and both
+failures are silent: the Remittances search renders nothing at all, and the Account Summary field
+turns red rather than saying what is wrong.
+
 ## The one thing that wastes an hour if you skip it
 
 **The NCPDP must be selected on the Data Management page, not just on the Dashboard.**
@@ -96,7 +103,13 @@ the **deposit** date, whatever the field is called. A payment recorded on 04/30 
 
 It is not a separate bank login. It lives inside ProviderPay:
 
-**Account summary → the Tax ID is already filled → the one account row → View history.**
+**Account summary → Look up → click the pharmacy row → Done → the account row → View history.**
+
+The Tax ID box looks like a text field and is **read-only**. Typing into it does nothing at all — no
+error, no character appears — because it is filled by the picker behind **Look up**. In that dialog
+the pharmacy is a `<button>`, not a table row, so a click aimed at where the text appears can miss it
+entirely; clicking it adds a chip and a tick, and only then does **Done** fill the field. A dialog
+dismissed without that chip leaves the field empty and outlined in red.
 
 That opens *Transaction History* for the Wells Fargo account. The date control here is a **single
 range box, and it is read-only** — unlike every other date field in this portal, typing into it does
