@@ -599,7 +599,14 @@ export async function sweepRemittances(user: { id?: string; name: string }): Pro
       continue;
     }
     for (const entry of entries) {
-      if (entry === FILED || entry.startsWith(".")) continue;
+      /*
+       * The folder explains itself to whoever opens it, and that note is not a report.
+       *
+       * The first sweep of the synced folder read the README, could make nothing of it, filed it as
+       * a document and moved it into `filed` — so the instructions vanished from the folder they
+       * were written for. Skipped by name, like the dotfiles above.
+       */
+      if (entry === FILED || entry.startsWith(".") || /^read ?me/i.test(entry)) continue;
       const full = path.join(dir, entry);
       try {
         if ((await fs.stat(full)).isDirectory()) continue;
@@ -721,35 +728,53 @@ export async function sweepRemittances(user: { id?: string; name: string }): Pro
   }
 
   /*
-   * Read files are moved aside rather than left where they are.
+   * A file that has been read is deleted, not kept.
    *
-   * The import refuses a remittance it has already taken, so leaving them would be safe — and would
-   * also mean every sweep re-reads every 835 this pharmacy has ever downloaded. Moving them keeps
-   * the folder as what it looks like: the things not yet dealt with. They are kept rather than
-   * deleted, because an 835 is the evidence behind a payment and is not ours to throw away.
+   * The owner, 11 September 2026: "can we have it delete remits from onedrive folder once it gathers
+   * them? we need to keep computer storage as clean as possible."
    *
-   * Filed beneath the folder it arrived in, so a synced folder stays tidy on both machines at once.
+   * This used to move them into a `filed` folder, on the reasoning that an 835 is the evidence
+   * behind a payment and is not ours to throw away. That reasoning was wrong twice over:
+   *
+   *   — The evidence is not lost. ProviderPay holds every remittance and will hand it back; the
+   *     download is a copy, not the original. What the site needs from it — the prescription, the
+   *     NDC, the amounts, the payer and the trace number — is in the database before this runs.
+   *   — An 835 names patients. Keeping one is keeping a copy of PHI, in a folder that syncs to a
+   *     second machine and to cloud storage. Every copy is a place it can leak from, and a copy kept
+   *     for no reason is the easiest kind to forget about. "At least to retain them" cuts this way
+   *     too: the fewer copies, the better.
+   *
+   * Only files that were actually read reach here. A remittance that failed to parse, or one refused
+   * as unreadable X12, is left exactly where it is — deleting a file nobody has successfully read
+   * would destroy the only copy of something still needing attention.
+   *
+   * A delete that fails is reported rather than swallowed. The import refuses a remittance it has
+   * already taken, so a file left behind is untidy and not dangerous; silence about it is worse,
+   * because a folder that never empties is how somebody concludes the sweep has stopped working.
    */
   for (const [dir, names] of done) {
-    const filed = path.join(dir, FILED);
-    try {
-      await fs.mkdir(filed, { recursive: true });
-    } catch (e) {
-      out.problems.push(`${dir} could not be tidied: ${e instanceof Error ? e.message : String(e)}`);
-      continue;
-    }
     for (const name of names) {
       try {
-        await fs.rename(path.join(dir, name), path.join(filed, name));
+        await fs.unlink(path.join(dir, name));
       } catch (e) {
-        out.problems.push(`${name} was read but could not be moved aside: ${e instanceof Error ? e.message : String(e)}`);
+        out.problems.push(
+          `${name} was read but could not be removed from ${dir}: ${e instanceof Error ? e.message : String(e)}. ` +
+            `Nothing was lost — it has been read — but it will sit in the folder until it is deleted by hand.`,
+        );
       }
     }
   }
   return out;
 }
 
-/** Where a remittance goes once it has been read. Kept, never deleted: it is the evidence. */
+/**
+ * The folder read files used to be moved into. Nothing is put here any more — they are deleted.
+ *
+ * Still skipped when reading, because folders left over from before the change are full of 835s
+ * that have already been imported. Sweeping them again would do no harm — the import refuses a
+ * remittance it has already taken — but it would re-read every remittance this pharmacy has ever
+ * downloaded on every pass, and quietly undo the point of deleting them.
+ */
 const FILED = "filed";
 
 /**
