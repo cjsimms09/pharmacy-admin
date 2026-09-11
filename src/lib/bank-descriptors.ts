@@ -209,7 +209,23 @@ const RULES: Rule[] = [
     why: "Postage bought by card. The confirmation email already books it, so the bank line is the same money.",
   },
   { kind: "software", counterparty: "PioneerRx", test: /PIONEERRX/, side: "out", lands: "operating", category: "Software and systems", feed: "the PioneerRx invoices", why: "The pharmacy system's own charge." },
-  { kind: "psao_fee", counterparty: "CPESN", test: /CPESN/, side: "out", lands: "operating", category: "Professional fees", feed: "the PSAO standing cost", why: "The PSAO's monthly fee." },
+  {
+    /*
+     * Not the PSAO fee, which is a separate standing cost of its own.
+     *
+     * The owner: "cpesn is a pharmacy network we are a part of". Two different things leave the
+     * bank for two different arrangements, and calling this one the PSAO fee would have hidden the
+     * PSAO fee entirely — its $619.25 would have looked like it had been paid when it had not.
+     */
+    kind: "network_fee",
+    counterparty: "CPESN",
+    test: /CPESN/,
+    side: "out",
+    lands: "operating",
+    category: "Professional fees",
+    feed: null,
+    why: "Membership of the CPESN pharmacy network. A separate arrangement from the PSAO, and a separate cost.",
+  },
   { kind: "security", counterparty: "Alert 360", test: /ALERT360/, side: "out", lands: "operating", category: "Software and systems", feed: "the Alert 360 standing cost", why: "The alarm monitoring contract." },
   { kind: "software", counterparty: "Square", test: /SQUAREUP/, side: "out", lands: "operating", category: "Software and systems", feed: null, why: "A Square charge." },
   { kind: "software", counterparty: "Jotform", test: /JOTFORM/, side: "out", lands: "operating", category: "Software and systems", feed: null, why: "A Jotform subscription." },
@@ -228,8 +244,16 @@ const RULES: Rule[] = [
   {
     kind: "internal_transfer",
     counterparty: "another account of the pharmacy",
-    /* "Ref AMEILHA To X6728 PSA", "Ref AMIDQSP To *6728 Medications" — a transfer between own accounts. */
-    test: /^REF[A-Z0-9]{6,8}TO/,
+    /*
+     * "Ref AMEILHA To X6728 PSA" — a transfer between the pharmacy's own accounts.
+     *
+     * Not every line of this shape is one. "Ref AMIDQSP To *6728 Medications" looks identical and is
+     * a different thing entirely: drugs sold on to the practice at cost, which has a cost side
+     * already in the books and a money side in none of them. So medications are excluded here and
+     * matched on their own terms below; without the exclusion this rule would swallow them and call
+     * $15,912.81 a month of real trade "neither a cost nor revenue".
+     */
+    test: /^REF[A-Z0-9]{6,8}TO(?!.*MEDICATION)/,
     side: "out",
     lands: "transfer",
     category: null,
@@ -271,35 +295,82 @@ const RULES: Rule[] = [
     mayAlreadyBeCounted: "third-party revenue, where the voucher remittance for the same money has been read",
     why: "Copay-card money. The remittance is already read, so the deposit is the same money arriving.",
   },
+  /*
+   * The PSAO, which is where nearly all of this pharmacy's prescription money arrives.
+   *
+   * The owner: "acess help i believe is our remits from our psao, provider pay is our PSAO". So
+   * ProviderPay is the organisation and Access Health is the money coming through it — two names
+   * for one relationship, and between them the largest deposits on the statement by a wide margin.
+   *
+   * ── Why these cannot be matched by amount, ever ──
+   *
+   * A PSAO remittance is consolidated: one deposit settles hundreds of claims from many plans at
+   * once, exactly as a McKesson ACH settles dozens of invoices. $40,084.14 will never equal a
+   * claim, a day's claims, or any figure the site can derive — so no amount of matching logic will
+   * place it. The remittance detail behind it is the only thing that can, and for a PSAO that
+   * detail is the 835.
+   *
+   * That is the same 835 the owner cannot get forwarded and has to download one at a time. It is
+   * worth saying plainly what it buys: it is not a nicety, it is the only route by which the
+   * biggest number on the bank statement becomes attributable to the claims that earned it.
+   */
   {
-    kind: "payer_remittance",
-    counterparty: "Access Health",
+    kind: "psao_remittance",
+    counterparty: "the PSAO (Access Health)",
     test: /ACCESSHEAL/,
     side: "in",
     lands: "revenue",
     category: "third_party",
-    feed: null,
-    why: "The largest deposits on the statement. Nothing in the site explains them yet — the 835s would.",
+    feed: "the PSAO's 835 remittances",
+    why:
+      "Remits from the PSAO — the largest deposits here. One covers many claims across many plans, so it will never equal any single figure the site holds; " +
+      "the 835 behind it is what says which claims it paid.",
   },
   {
-    kind: "payer_remittance",
-    counterparty: "ProviderPay",
+    kind: "psao_remittance",
+    counterparty: "the PSAO (ProviderPay)",
     test: /PROVIDERPAY/,
     side: "in",
     lands: "revenue",
     category: "third_party",
-    feed: null,
-    why: "A payer remittance by EDI. The 835 for it would say which claims.",
+    feed: "the PSAO's 835 remittances",
+    why: "The PSAO paying. Consolidated across many claims, so only its 835 can break it down.",
   },
   {
-    kind: "payer_recoupment",
-    counterparty: "ProviderPay",
+    kind: "psao_recoupment",
+    counterparty: "the PSAO (ProviderPay)",
     test: /PROVIDERPAY/,
     side: "out",
     lands: "revenue",
     category: "third_party",
+    feed: "the PSAO's 835 remittances",
+    why:
+      "The PSAO taking money back — a reversal, a clawback or a fee withheld. It reduces revenue rather than adding a cost, " +
+      "so it lands on the revenue side negative and never inflates what the pharmacy appears to spend.",
+  },
+  {
+    /*
+     * Drugs bought by the pharmacy and passed to the practice next door at cost.
+     *
+     * The owner: "the transfer is drugs we sell to the doctor office at cost". It matters more than
+     * its size suggests, because at the moment only one half of it reaches the books. The drugs are
+     * bought on a wholesaler invoice, so their cost is in the cash cost of goods like any other
+     * purchase — but they are never dispensed on a claim and never rung through the till, so the
+     * money coming back for them is counted nowhere at all.
+     *
+     * Sold at cost, the two halves should cancel exactly. Counting one and not the other makes the
+     * pharmacy look as though it spent the money and got nothing, every month.
+     */
+    kind: "practice_medications",
+    counterparty: "the doctor's office",
+    test: /MEDICATION/,
+    side: "out",
+    lands: "cost_of_goods",
+    category: null,
     feed: null,
-    why: "A payer taking money back. It reduces revenue rather than adding a cost, which is why it lands on the revenue side negative.",
+    why:
+      "Drugs sold to the practice at cost. Their purchase is already in cost of goods; what is missing is the money back for them, " +
+      "which is counted nowhere. Sold at cost the two cancel, so counting one half alone understates the month by the whole amount.",
   },
   {
     kind: "transfer_in",

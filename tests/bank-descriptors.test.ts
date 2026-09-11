@@ -86,15 +86,15 @@ describe("what each line on the bank statement is", () => {
   });
 
   test("the money coming in is told apart by who sent it", () => {
-    assert.equal(readBankDescriptor("ACCESS HEALTH/ACCESS HEA L722734 West Wichita Family Ph", 4_008_414).counterparty, "Access Health");
-    assert.equal(readBankDescriptor("ProviderPay/EDI PYM NTS 489121084100001 West Wichita Family Ph", 464_254).counterparty, "ProviderPay");
+    assert.match(readBankDescriptor("ACCESS HEALTH/ACCESS HEA L722734 West Wichita Family Ph", 4_008_414).counterparty, /PSAO/);
+    assert.match(readBankDescriptor("ProviderPay/EDI PYM NTS 489121084100001 West Wichita Family Ph", 464_254).counterparty, /PSAO/);
     assert.equal(readBankDescriptor("MTF PM NGS/MTF PMT West Wichita Fam", 9_689).kind, "facilitator");
     assert.equal(readBankDescriptor("Prescription/TRA N S FER ST.J2HsP3LOMlL8", 337_322).kind, "transfer_in");
   });
 
   test("the same payer taking money back is not a cost", () => {
     const m = readBankDescriptor("PROVIDERPAY/AUTO SHA ACH ACHO72O4662 WEST WICHITA FAMILY PH", -63_558);
-    assert.equal(m.kind, "payer_recoupment");
+    assert.equal(m.kind, "psao_recoupment");
     assert.equal(m.lands, "revenue");
   });
 
@@ -154,5 +154,46 @@ describe("placing a wholesaler ACH against the invoices inside it", () => {
   test("without the wholesaler's ledger it is honestly unplaceable, not guessed", () => {
     const p = placeLine(line(-1_396_634), { ...ctx, settled: undefined });
     assert.notEqual(p.kind, "settles_ach");
+  });
+});
+
+/**
+ * What the owner told us about the three lines nothing could name.
+ *
+ * "acess help i believe is our remits from our psao, provider pay is our PSAO" and "the transfer is
+ * drugs we sell to the doctor office at cost".
+ */
+describe("the PSAO, and the drugs sold to the practice", () => {
+  test("both PSAO names are one relationship, and the money is prescription revenue", () => {
+    const access = readBankDescriptor("ACCESS HEALTH/ACCESS HEA L722734 West Wichita Family Ph", 4_008_414);
+    const pp = readBankDescriptor("ProviderPay/EDI PYM NTS 489121084100001 West Wichita Family Ph", 464_254);
+    assert.equal(access.kind, "psao_remittance");
+    assert.equal(pp.kind, "psao_remittance");
+    assert.equal(access.category, "third_party");
+    assert.equal(pp.category, "third_party");
+  });
+
+  test("a PSAO remittance points at the 835, because nothing else can break it down", () => {
+    const m = readBankDescriptor("ACCESS HEALTH/ACCESS HEA L722734 West Wichita Family Ph", 4_008_414);
+    assert.equal(m.matchTo?.feed, "the PSAO's 835 remittances");
+    /* $40,084.14 equals no claim and no day's claims. Matching by amount is not merely hard, it is impossible. */
+    assert.match(m.says, /one covers many claims/i);
+  });
+
+  test("the PSAO taking money back reduces revenue rather than adding a cost", () => {
+    const m = readBankDescriptor("PROVIDERPAY/AUTO SHA ACH ACHO72O4662 WEST WICHITA FAMILY PH", -63_558);
+    assert.equal(m.kind, "psao_recoupment");
+    assert.equal(m.lands, "revenue");
+  });
+
+  test("drugs sold to the practice are not mistaken for a transfer between our own accounts", () => {
+    /* The two lines are the same shape. Only the word "Medications" separates them. */
+    const meds = readBankDescriptor("Ref AMIDQSP To *6728 Medications Aug 202", -1_591_281);
+    const own = readBankDescriptor("Ref AMEILHA To X6728 PSA", -4_500_000);
+    assert.equal(meds.kind, "practice_medications");
+    assert.equal(own.kind, "internal_transfer");
+    /* Their cost is real and already in the books, so this is never "neither a cost nor revenue". */
+    assert.equal(meds.lands, "cost_of_goods");
+    assert.equal(own.lands, "transfer");
   });
 });
