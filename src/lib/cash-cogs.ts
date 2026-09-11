@@ -183,7 +183,7 @@ export function countedTwiceInCash(input: {
   const key = (n: string | null | undefined) => (n ?? "").trim().toUpperCase();
 
   const buckets = new Map<string, { supplier: string; cents: number; where: Set<string> }>();
-  const note = (n: string, supplier: string | null, cents: number, where: string) => {
+  const note = (n: string | null | undefined, supplier: string | null, cents: number, where: string) => {
     const k = key(n);
     if (!k) return;
     const at = buckets.get(k) ?? { supplier: supplier ?? "?", cents, where: new Set<string>() };

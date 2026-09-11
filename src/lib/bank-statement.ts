@@ -19,6 +19,8 @@
  * banks nothing twice. Pure; the store is in the page action.
  */
 
+import { readBankDescriptor } from "./bank-descriptors";
+
 export type BankLine = {
   /** YYYY-MM-DD. */
   on: string;
@@ -122,6 +124,19 @@ export type Placement =
   | { kind: "deposit"; receiptKind: ReceiptKind; payer: string | null; why: string }
   | { kind: "pays_bill"; expenseId: string; vendorName: string; why: string }
   | { kind: "pays_invoice"; invoiceId: string; supplier: string; why: string }
+  /**
+   * Understood, and deliberately not booked, because the books already have this money.
+   *
+   * The owner: "make sure we are not duplicating!!!!! cant stress this enough". Three of this
+   * pharmacy's regular lines are money the site learns about twice — postage from Endicia's own
+   * email, McKesson's ACH from their accounts-payable report, the facilitator from its own
+   * remittance. Each is recognised here and left alone, which is a different answer from
+   * "unplaced" and has to look different: one is a job for a person, the other is finished.
+   */
+  | { kind: "already_counted"; what: string; where: string; why: string }
+  /** A transfer between the pharmacy's own accounts: neither a cost nor revenue, on either basis. */
+  | { kind: "own_transfer"; why: string }
+  | { kind: "settles_ach"; supplier: string; reference: string; invoices: string[]; why: string }
   | { kind: "unplaced"; why: string };
 
 export type MatchContext = {
@@ -131,6 +146,13 @@ export type MatchContext = {
   vendors: { id: string; name: string }[];
   unpaidBills: { id: string; vendorId: string | null; vendorName: string | null; amountCents: number; invoiceDate: string }[];
   unpaidInvoices: { id: string; supplierId: string | null; supplier: string | null; totalCents: number | null; invoiceDate: string | null }[];
+  /**
+   * What each wholesaler's own ledger says cleared, and under which reference.
+   *
+   * The one thing that lets a single bank debit be tied to the invoices inside it. McKesson's
+   * ACH07172717 is twenty-seven invoices; no amount of matching by value will ever find them.
+   */
+  settled?: { supplier: string; invoiceNumber: string; checkNumber: string | null; netCents: number }[];
 };
 
 const RETAIL = /\b(square|clover|toast|stripe|merchant|card\s*(services|settlement|deposit)|visa|mastercard|amex|american express|discover|bankcard|worldpay|heartland|elavon|fiserv|cash deposit|counter deposit|mobile deposit|atm deposit)\b/i;
@@ -152,6 +174,53 @@ function mentions(description: string, name: string): boolean {
 /** Where each line goes, or why it does not. */
 export function placeLine(line: BankLine, ctx: MatchContext): Placement {
   const d = line.description;
+
+  /*
+   * What this pharmacy's own counterparties look like, before anything generic is tried.
+   *
+   * The rules below this are sound and answer almost none of these lines: the money does not
+   * arrive or leave one invoice at a time. See bank-descriptors.ts for what each one is.
+   */
+  const meaning = readBankDescriptor(d, line.amountCents);
+
+
+  /*
+   * A wholesaler's ACH, tied to its invoices by their own reference rather than by its amount.
+   *
+   * This is the line the whole bank reconciliation turns on and the one the generic rule could
+   * never place: it looks for a single open invoice of exactly $121,429.15, and there is no such
+   * invoice and never will be.
+   */
+  if (meaning.matchTo?.reference && ctx.settled) {
+    const ref = meaning.matchTo.reference;
+    const covered = ctx.settled.filter((x) => x.checkNumber === ref);
+    if (covered.length > 0) {
+      const cents = covered.reduce((n, x) => n + x.netCents, 0);
+      const agrees = cents === -line.amountCents;
+      return {
+        kind: "settles_ach",
+        supplier: meaning.counterparty,
+        reference: ref,
+        invoices: covered.map((x) => x.invoiceNumber),
+        why: agrees
+          ? `${ref} covers ${covered.length} ${meaning.counterparty} invoices and comes to exactly this debit. The money is already the cash cost of goods, from their own report, so nothing is booked from this line.`
+          : `${ref} covers ${covered.length} ${meaning.counterparty} invoices coming to ${(cents / 100).toFixed(2)}, and the bank took ${((-line.amountCents) / 100).toFixed(2)} — worth a look.`,
+      };
+    }
+  }
+
+  /*
+   * Then money the books already hold, recognised and left exactly alone.
+   *
+   * After the ACH rule, not before it. A McKesson debit is both things at once: its money is
+   * already the cash cost of goods, AND it is the only line that can say which invoices were paid.
+   * Answering "already counted" first threw the second half away and left the largest debit on the
+   * statement unreconciled — which is the thing this was built to fix.
+   */
+  if (meaning.alreadyCounted) {
+    return { kind: "already_counted", what: meaning.counterparty, where: meaning.alreadyCounted, why: meaning.says };
+  }
+  if (meaning.lands === "transfer") return { kind: "own_transfer", why: meaning.says };
   if (line.amountCents > 0) {
     if (FACILITATOR.test(d)) return { kind: "deposit", receiptKind: "facilitator", payer: "Medicare Transaction Facilitator", why: "names the facilitator" };
     const payer = ctx.payers.find((p) => mentions(d, p));
