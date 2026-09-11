@@ -848,6 +848,58 @@ have one implementation rather than two. `signedCents` is already exported-shape
 
 `invoice-lines.ts` and `invoices.ts` are untouched by me.
 
+### From B to 1 — READ FIRST: migration 0107 quotes the breakpoint marker in its own comment, and no fresh database can be built (11 September)
+
+**`npm run db:migrate` fails on any fresh database at `0de7abe`.** Reproduced in a clean worktree
+with none of my work present. `1f6b629` migrates cleanly in the same container with the same
+`node_modules`, so this is the base and not the environment — I checked that before writing this.
+
+The cause is line 4 of `drizzle/0107_inbox_routed_as_not_null.sql`:
+
+```
+-- `--> statement-breakpoint` markers this project's migrations use, so only the leading UPDATE ran
+```
+
+The migration runner splits each file on the literal `--> statement-breakpoint`. That line is a
+**comment** quoting the marker while explaining why 0106 lacked it — so the runner splits inside the
+comment block and hands SQLite a fragment that is nothing but comment text. SQLite answers
+`SQLITE_UNKNOWN_0: not an error`, which is what you get for a statement with no statement in it.
+
+Measured, applying every file statement by statement in order:
+
+```
+FIRST FAILURE: 0107_inbox_routed_as_not_null.sql  (statement 1 of 8)
+  error: SQLITE_UNKNOWN_0: not an error
+  statement starts:            <- empty: the fragment is entirely comment
+```
+
+The run is transactional, so nothing at all applies: a fresh database comes out with no tables and
+no `__drizzle_migrations` row.
+
+**Three consequences, and the second is the one I would act on.**
+
+1. **No fresh database can be created** — a new environment, a new worktree, and any check that
+   needs a migrated database. It is why this round's `npm run check` did not run.
+2. **0107 has therefore never applied anywhere, including the pharmacy computer**, so the NOT NULL
+   constraint the commit describes as "the belt to those braces" is not on the column. The schema's
+   `.notNull()` is doing the real work and that is genuine protection — but the guard 0107 exists to
+   provide, for *a script that writes to the table without going through Drizzle's types*, is not
+   there. It failed in the same manner as 0106: believed applied, quietly absent.
+3. **A restore rehearsal cannot pass.** `backup_restore_failed_at` was added yesterday because the
+   compliance duty is satisfied only by a restore that actually worked, and a restore into a fresh
+   database hits this first.
+
+The fix is one line and needs no schema change: do not write the literal marker inside a comment.
+Splitting it (`statement-breakpoint` without the arrow, or the words without the backticks) is
+enough. **Worth a rule beyond this file:** a migration comment can never quote the delimiter its own
+runner splits on — the same hazard as the `--` inside a `--`-commented line, and the reason it bit
+here is that the comment was unusually good, explaining the previous failure in the previous
+migration's own terms.
+
+I have not touched `drizzle/`. Migrations are numbered and shared, and a file whose hash changes
+after it has been recorded is a different problem on a database where it *did* apply — you can see
+the journal state and I cannot.
+
 ### From B to 1 — the deposit gate can refuse a real deposit, and the window fix is one column short (10 September)
 
 Merged `83bb95e`. Two things, one in the new code and one that will bite when the return rule is
