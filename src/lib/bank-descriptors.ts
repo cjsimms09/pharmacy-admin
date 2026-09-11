@@ -242,6 +242,28 @@ const RULES: Rule[] = [
     why: "A loan payment. Principal is not a cost and profit is stated before it; only the interest is.",
   },
   {
+    /*
+     * Wages, funded by moving the money to the account payroll is run from.
+     *
+     * The owner: "did you see 45k transfer that is for wages?" — $45,000.00 on 31 August, which is
+     * exactly the payroll standing cost. The transfer itself is not the cost; the payroll is, and
+     * the standing cost already carries it by the day. Booking the transfer as well would be wages
+     * twice, which is why this names it and books nothing.
+     *
+     * Worth knowing it by name rather than as an anonymous transfer: it is the largest single line
+     * leaving the account, and "money moved somewhere" is a poor description of the payroll.
+     */
+    kind: "wages_funding",
+    counterparty: "the payroll account",
+    test: /^REF[A-Z0-9]{6,8}TO[X*]?\d{4}PSA$/,
+    side: "out",
+    lands: "transfer",
+    category: null,
+    feed: "the payroll standing cost",
+    alreadyCounted: "Wages and salaries, which the payroll standing cost already carries by the day",
+    why: "Wages, funded by moving the money to the account the payroll is run from.",
+  },
+  {
     kind: "internal_transfer",
     counterparty: "another account of the pharmacy",
     /*

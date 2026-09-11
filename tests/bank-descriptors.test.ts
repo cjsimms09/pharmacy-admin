@@ -60,7 +60,8 @@ describe("what each line on the bank statement is", () => {
 
   test("a transfer to the pharmacy's own account is neither a cost nor revenue", () => {
     const m = readBankDescriptor("Ref AMEILHA To X6728 PSA", -4_500_000);
-    assert.equal(m.kind, "internal_transfer");
+    /* Named as wages now the owner has confirmed it; still a transfer, and still books nothing. */
+    assert.equal(m.kind, "wages_funding");
     assert.equal(m.lands, "transfer");
     /* $45,000.00 is exactly the monthly payroll. Counting it here AND as payroll would be it twice. */
     assert.equal(wouldDoubleCount("Ref AMEILHA To X6728 PSA", -4_500_000), true);
@@ -191,7 +192,7 @@ describe("the PSAO, and the drugs sold to the practice", () => {
     const meds = readBankDescriptor("Ref AMIDQSP To *6728 Medications Aug 202", -1_591_281);
     const own = readBankDescriptor("Ref AMEILHA To X6728 PSA", -4_500_000);
     assert.equal(meds.kind, "practice_medications");
-    assert.equal(own.kind, "internal_transfer");
+    assert.equal(own.kind, "wages_funding");
     /* Their cost is real and already in the books, so this is never "neither a cost nor revenue". */
     assert.equal(meds.lands, "cost_of_goods");
     assert.equal(own.lands, "transfer");
@@ -258,5 +259,30 @@ describe("naming a cheque by what it is for", () => {
   test("a line that is not a cheque is left to the ordinary rules", () => {
     const p = placeLine({ on: "2026-09-18", description: "MCKESSON DRUG/AUTO ACH ACH07227740", amountCents: -262_544, key: "x" }, ctx);
     assert.notEqual(p.kind, "confirms_standing");
+  });
+});
+
+/**
+ * The largest single line leaving the account each month.
+ *
+ * The owner: "did you see 45k transfer that is for wages?" It is exactly the payroll standing cost,
+ * and it is a transfer rather than a payment — the money moves to the account payroll is run from.
+ */
+describe("wages, funded by transfer", () => {
+  test("it is named as wages rather than as an anonymous transfer", () => {
+    const m = readBankDescriptor("Ref AMEILHA To X6728 PSA", -4_500_000);
+    assert.equal(m.kind, "wages_funding");
+    assert.equal(m.counterparty, "the payroll account");
+  });
+
+  test("it books nothing, because the payroll standing cost already carries it", () => {
+    assert.equal(wouldDoubleCount("Ref AMEILHA To X6728 PSA", -4_500_000), true);
+    assert.match(readBankDescriptor("Ref AMEILHA To X6728 PSA", -4_500_000).alreadyCounted ?? "", /Wages and salaries/);
+  });
+
+  test("a transfer that is not the payroll one stays an ordinary transfer", () => {
+    assert.equal(readBankDescriptor("Ref AMZZZZZZ To X6728 SAVINGS", -100_000).kind, "internal_transfer");
+    /* And the medications one is still its own thing. */
+    assert.equal(readBankDescriptor("Ref AMIDQSP To *6728 Medications Aug 202", -1_591_281).kind, "practice_medications");
   });
 });
