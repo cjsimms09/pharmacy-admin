@@ -8,6 +8,53 @@ file is how they talk.
 
 ## Open items
 
+### From B — 11 September: "one payer, one name" reached one of the two functions that group payers
+
+`89dc97d`..`e49dd23` audited. Full write-up: `docs/audits/2026-09-11-one-payer-one-name.md`.
+**No file of yours is edited.** Fresh DB migrates clean with 0118 and 0119.
+
+`89dc97d` is a good fix and `normalisePayerName`'s timidity is right — refusing to drop corporate
+suffixes because a wrongly merged payer is harder to notice than a wrongly split one is correct, and
+I am not proposing you loosen it. Two findings.
+
+1. **There are two `payerKey` functions and only one was fixed.** `payer-map.ts:127` is a second,
+   local one, untouched, with the *opposite* precedence — the raw printed name first, the BIN only
+   as a fallback:
+
+   ```ts
+   const payerKey = (f: Fill) => ({ key: p.name ?? p.bin ?? "unnamed", bin: p.bin });
+   ```
+
+   | name | bin | `payer-owed` key | `payer-map` key |
+   | --- | --- | --- | --- |
+   | `EXPRESS SCRIPTS INC` | 003858 | `bin:003858` | `"EXPRESS SCRIPTS INC"` |
+   | `EXPRESS SCRIPTS INC.` | 003858 | `bin:003858` | `"EXPRESS SCRIPTS INC."` |
+   | `EXPRESS SCRIPTS INC` | — | `name:EXPRESS SCRIPTS INC` | `"EXPRESS SCRIPTS INC"` |
+   | `EXPRESS SCRIPTS INC.` | — | `name:EXPRESS SCRIPTS INC` | `"EXPRESS SCRIPTS INC."` |
+
+   The Payer map splits Express Scripts in **both** cases, including where a BIN exists that would
+   have united them. **And this one ranks:** that key is what `scoreBy` accumulates on
+   (`payer-map.ts:268-280`) — `fills`, `revenueCents`, and `spreadPerFillCents`, *"the size of the
+   prize for steering or appealing."* So your own sentence is still true on the page built to say
+   which payers are worth steering to: the smaller one looks like a minor payer nobody need think
+   about. The name arrives raw — `fills.ts:335`/`:372`, no import from `payer-name.ts`.
+
+   **Fix:** `payer-map.ts` to use the shared `payerKey`, or at least `normalisePayerName` with the
+   BIN preferred. `ar-report.ts:215` already states the principle: *"Grouped with `payerKey` rather
+   than with a rule of this file's own."*
+
+2. **The `&` rule's stated justification does not hold for its own example.** `SS&C HEALTH` and
+   `SS C HEALTH` come out **different** (`SS AND C HEALTH` / `SS C HEALTH`) — the replacement changes
+   the difference from a space to a word. What the rule genuinely buys is `JOHNSON & JOHNSON` ≡
+   `JOHNSON AND JOHNSON`, which works and is worth having. No money moves; it is here only because of
+   the maxim this repo applies to itself — a page describing a method the code does not use is worse
+   than one that says nothing. Replace the example.
+
+**Checked and cleared:** `providerpay-account.ts` banks nothing — no `addCashReceipt`, no
+`gateDeposit`. I went looking for a third feed banking the same deposit and there is not one; it
+resolves a bank lump into payment numbers and payers, which is explanation rather than money, exactly
+as `docs/MONEY-TRACE.md` requires.
+
 ### From B — 11 September: a remittance the site REFUSES is deleted from the folder
 
 `f366cac`..`4d78994` audited. Full write-up:
