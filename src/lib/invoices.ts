@@ -824,6 +824,58 @@ export async function fileInvoice(
     }
   }
 
+  /*
+   * One wholesaler, one name — and the address it wrote from, remembered.
+   *
+   * The supplier stored here came from whichever source won: the register, the sender, or the words
+   * on the page. Those disagree about capitalisation and about how much of a name to use, so the
+   * same wholesaler arrived under three spellings — "MCKESSON" fourteen times, "Mckesson" seven,
+   * and IPC as "IPC", "Independent Pharmacy Cooperative" and "Independent Pharmacy Cooperative
+   * (IPC)". Nothing groups them, so every per-supplier figure was split across the spellings and the
+   * money owed to IPC was three separate answers.
+   *
+   * `supplierRecordFor` is the register's own matcher, aliases and all — the same one the rest of the
+   * site uses. Where it places the name, the register's spelling is what gets stored. Where it does
+   * not, the name is left exactly as read, because inventing a canonical form for a wholesaler
+   * nobody has set up would be worse than an odd-looking row.
+   */
+  const registry = await allSuppliers(true);
+  const placed = supplierRecordFor(registry, supplier);
+  if (placed) supplier = placed.name;
+
+  /*
+   * And the address it came from is learned, which is what he asked for months ago:
+   *
+   * > "why do I have to put in the email that invoices come from for each supplier? Once we get an
+   * > invoice from a supplier and I tell the system it's an invoice from that supplier it should
+   * > automatically save that email as where invoices come from."
+   *
+   * `learnSender` was written for exactly this, with tests, and was called from nowhere — so five of
+   * his twenty-two suppliers have an address on file and the rest are recognised by luck. It refuses
+   * a bare domain, an address another supplier already claims, and one already covered, so this is
+   * only ever the narrow case of a known supplier writing from a new mailbox.
+   */
+  if (placed) {
+    const { learnSender } = await import("./learn-sender");
+    const learned = learnSender(
+      { id: placed.id, name: placed.name, senderEmails: placed.senderEmails },
+      meta.from,
+      registry.filter((x) => x.id !== placed.id).map((x) => ({ id: x.id, name: x.name, senderEmails: x.senderEmails })),
+    );
+    if (learned.learn) {
+      const { rememberSenderEmails } = await import("./suppliers-registry");
+      await rememberSenderEmails(placed.id, learned.senderEmails);
+      await audit({
+        action: "supplier.sender_learned",
+        userId: ctx.userId,
+        userName: ctx.userName,
+        entity: "supplier",
+        entityId: placed.id,
+        details: `${placed.name} now also recognised from ${learned.address} — ${learned.why}`,
+      });
+    }
+  }
+
   const filing = FILING[schedule];
   const file = new File([new Uint8Array(buf)], meta.fileName, { type: meta.mimeType || "application/pdf" });
   const stored = await storeFile(file, { allowReportTypes: true, folder: filing.folder });
