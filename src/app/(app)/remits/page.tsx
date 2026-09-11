@@ -42,9 +42,30 @@ export const dynamic = "force-dynamic";
  */
 const PORTAL = "https://providerpay.ah.mckesson.com/providerpay/remittances";
 
-/** The folder his browser downloads into, which is the same one the reader watches. */
+/**
+ * The folder to point his browser at, which is the one the reader actually watches.
+ *
+ * The synced folder where there is one, because he is usually not at the machine the site runs
+ * on — "I just realized I am on a different computer than where the repo is stored" — and a page
+ * that names a folder on a machine he is not sitting at is a page that sends him to an empty
+ * window. Both machines share a OneDrive, so a download on his lands within reach of the reader
+ * here without an upload.
+ *
+ * Falls back to the folder beside the database, which is right when he is at this machine and is
+ * what this always used to say.
+ */
 function downloadFolder(): string {
   const path = require("node:path") as typeof import("node:path");
+  const fs = require("node:fs") as typeof import("node:fs");
+  const oneDrive = process.env.OneDrive ?? process.env.ONEDRIVE;
+  if (oneDrive) {
+    const synced = path.join(oneDrive, "ProviderPay");
+    try {
+      if (fs.statSync(synced).isDirectory()) return synced;
+    } catch {
+      // Not created yet. The folder beside the database is still true, so say that instead.
+    }
+  }
   const base = path.dirname(path.resolve(process.env.DATABASE_PATH ?? "./data/pharmacy-admin.db"));
   return path.join(base, "remittances");
 }
