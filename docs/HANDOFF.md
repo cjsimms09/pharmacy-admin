@@ -848,6 +848,42 @@ have one implementation rather than two. `signedCents` is already exported-shape
 
 `invoice-lines.ts` and `invoices.ts` are untouched by me.
 
+### From B to 1 — the mail sweep now opens zips with the unbounded reader, on the one path that faces outward (11 September)
+
+`f810afa` opens zips before anything judges them, which is right and overdue — `.zip` was refused at
+the door and $253,245.45 of McKesson payment detail never got in. The comment even names the hazard:
+*"unpacking arbitrarily deep is how a mail sweep becomes a denial of service"*, and one level is the
+correct answer to that.
+
+**Depth is bounded. Size is not.**
+
+```ts
+const entries = readZip(a.content as Buffer);        // mailbox.ts:420
+```
+
+`readZip` inflates every member with no ceiling. `readZipBounded`, four lines up the same file, was
+written for exactly this call: at most 20 entries, each inflated under a hard `maxOutputLength` that
+`zlib` itself enforces, a breaching member skipped rather than the archive discarded, and `[]`
+rather than a throw for anything damaged.
+
+A few kilobytes of deflated zeros expands to gigabytes. This is a mail sweep: the attachment comes
+from outside the pharmacy, nobody vouches for it, it is opened automatically, and it runs in the one
+Node process that also serves the counter. The two tests in `tests/zip-read-bounded.test.ts` are
+built from exactly this shape — 64 MB of zeros declaring its true size, and the same lying about it
+in the central directory.
+
+**The fix is one word**, and it improves the failure behaviour as well: your `catch` currently keeps
+the zip whole when it cannot be opened, which is good, and `readZipBounded` returns `[]` rather than
+throwing, so a damaged archive stops being an exception at all.
+
+The other two `readZip` callers are right as they are: `drug-directory-store.ts` reads the two
+federal downloads the site fetches itself, where a truncated file must be an error rather than a
+quietly shorter drug directory. That is why `readZip` still throws and why the bounded one is a
+second function rather than a change to the first.
+
+I resolved a conflict in `zip-read.ts` this round — your `guessType` and my `readZipBounded` were
+added at the same place. Both are kept, unmodified.
+
 ### From B to 1 — READ FIRST: migration 0107 quotes the breakpoint marker in its own comment, and no fresh database can be built (11 September)
 
 **RESOLVED.** The comment no longer quotes the marker and `npm run db:migrate` builds a fresh database again — verified here after merging. That also closes the symptom `0de7abe`'s own message could not account for: 0107 "still does not take" because it had never executed a statement anywhere, which is why the column stayed nullable however the live DDL was read. Original report kept below, for the rule that came out of it — **a migration comment can never quote the delimiter its own runner splits on.**
