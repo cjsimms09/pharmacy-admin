@@ -652,6 +652,23 @@ async function pullInvoices(): Promise<string> {
       totalCents: goodsCents + inv.shippingCents,
       lines: inv.lines.length,
       itemsText: inv.lines.map((l) => [l.ndc11 ?? '', l.description ?? '', l.quantity, (l.extendedCents / 100).toFixed(2)].join(' ')).join('\n'),
+      /*
+       * The same lines again, as figures rather than as a sentence.
+       *
+       * The line above is what a person reads. This is what the price check reads: it needs the
+       * unit cost, which the sentence never carried, and it needs the description separable from
+       * the numbers around it, which a space-joined line cannot give back.
+       */
+      itemsJson: JSON.stringify(
+        inv.lines.map((l) => ({
+          ndc11: l.ndc11,
+          description: l.description,
+          quantity: l.quantity,
+          unitCostCents: l.unitCostCents,
+          extendedCents: l.extendedCents,
+          packSize: l.packSize,
+        })),
+      ),
       readAt: new Date().toISOString(),
     };
     if (held) await db.update(schema.pioneerPurchases).set(values).where(eq(schema.pioneerPurchases.id, held.id));

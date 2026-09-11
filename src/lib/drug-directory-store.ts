@@ -449,3 +449,29 @@ export async function packageSizes(): Promise<Map<string, string>> {
   heldPacks = { at: Date.now(), sizes };
   return sizes;
 }
+
+let heldKnown: { at: number; set: Set<string> } | null = null;
+
+export function forgetKnownNdcs(): void {
+  heldKnown = null;
+}
+
+/**
+ * Whether an eleven-digit code is a drug the FDA lists.
+ *
+ * The invoice reader needs a neutral party for one job it cannot do from the page alone: McKesson
+ * prints front-end items with a UPC, a UPC is a prefix digit plus the ten-digit NDC, and the
+ * ten-digit form can be padded back to eleven in three places. Only one of the three is a drug.
+ * See `ndcFromUpc` in invoice-lines.ts, which does the padding and asks this which one landed.
+ *
+ * Handed in as a function so that file keeps knowing nothing about the database — it reads paper,
+ * and every test of it runs without one.
+ */
+export async function knownNdcs(): Promise<(ndc11: string) => boolean> {
+  if (!heldKnown || Date.now() - heldKnown.at >= MAX_AGE_MS) {
+    const rows = await db.query.drugDirectory.findMany({ columns: { ndc11: true } });
+    heldKnown = { at: Date.now(), set: new Set(rows.map((r) => r.ndc11)) };
+  }
+  const set = heldKnown.set;
+  return (ndc11: string) => set.has(ndc11);
+}

@@ -975,6 +975,14 @@ export const pioneerPurchases = sqliteTable(
     lines: integer("lines"),
     itemsText: text("items_text").notNull().default(""),
     /**
+     * The same lines as figures: ndc11, description, quantity, unitCostCents, extendedCents, packSize.
+     *
+     * `itemsText` is the delivery as a person reads it. This is the delivery as the price check
+     * reads it, and the two are written from the same rows in the same pass. Empty on every row
+     * pulled before this existed; the check falls back to reading the text for those.
+     */
+    itemsJson: text("items_json").notNull().default(""),
+    /**
      * True where he has said this one delivery is closed on its receipt.
      *
      * "parmed needs to use receipt as invoice this time but not going forward". Per delivery, so it

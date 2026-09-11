@@ -42,6 +42,7 @@ import {
   settleDeliveriesOnReceipt,
 } from "@/lib/invoices";
 import { stillToChase, fromBeforeWeWatched } from "@/lib/invoices-owed";
+import { checkInvoicePrices } from "@/lib/invoice-price-check";
 import { invoiceCompliance, RETENTION_YEARS } from "@/lib/invoice-compliance";
 import { setSetting } from "@/lib/settings";
 import { getSettings } from "@/lib/settings";
@@ -208,6 +209,13 @@ export default async function InvoicesPage({
    * is on their own card on the Suppliers page — which is where somebody goes to change their mind
    * about a supplier, not a list of things to chase.
    */
+  /*
+   * What the invoice billed against what the delivery recorded, drug by drug.
+   *
+   * The same two sources as the list above and the opposite question of them. That one finds a
+   * document that never came; this one finds a document that came and does not agree.
+   */
+  const prices = await checkInvoicePrices();
   const owedRows = owed.filter((l) => l.waiting > 0);
   const settledSuppliers = owed.filter((l) => l.receiptIsTheInvoice);
   const unreceipted = await awaitingReceipt();
@@ -1109,6 +1117,103 @@ export default async function InvoicesPage({
               <span className="tabular-nums">{money(backlog.cents)}</span>, are left off this list. Loading them was
               how the money from before September got counted, and it is counted &mdash; they are not something anyone
               needs to chase.
+            </p>
+          )}
+        </Card>
+      )}
+
+      {/*
+        The other half of the same check, which never had a screen.
+
+        The card above asks whether every delivery has an invoice. This one asks whether the invoice
+        agrees with the delivery — the owner's own words, "IS IT MAKING SURE WE GOT ALL THE ONES TO
+        EXPECT AND MATCHING PRICE? ITS A GOOD CHECK FOR THE SYSTEM".
+
+        The comparison did exist. The nightly pull ran it, on the totals only, and wrote the answer
+        into a setting that nothing on the site ever read. It could have said twenty invoices
+        differed every night for a month and nobody would have seen it. That is the whole reason
+        this card is here: a check nobody can see is not a check.
+      */}
+      {prices.checked > 0 && (
+        <Card
+          tone={prices.disagreements.length > 0 ? "warn" : "ok"}
+          title="What you were billed, against what came in"
+          className="mt-4 mb-6"
+          subtitle="Two systems filled in separately — the wholesaler's invoice, and whoever booked the delivery in at the counter. Where they agree the price is checked. Where only one of them holds a figure, nobody has checked it."
+        >
+          <p className="text-sm">
+            {prices.disagreements.length === 0 ? (
+              <>
+                All {prices.checked} invoices with a delivery to check against agree — the total, and every one of the{" "}
+                {prices.linesCompared} drugs on them.
+              </>
+            ) : (
+              <>
+                {prices.agreeing} of {prices.checked} invoices agree throughout, across {prices.linesCompared} drugs.{" "}
+                <b>
+                  {prices.disagreements.length} thing{prices.disagreements.length === 1 ? "" : "s"}
+                </b>{" "}
+                {prices.disagreements.length === 1 ? "does" : "do"} not
+                {prices.overbilledCents > 0 ? (
+                  <>
+                    , and <b className="tabular-nums">{money(prices.overbilledCents)}</b> of it is money you were billed
+                    above what arrived
+                  </>
+                ) : (
+                  <>, none of it money &mdash; the totals all match; it is which drug the money is against</>
+                )}
+                .
+              </>
+            )}
+          </p>
+          {prices.disagreements.length > 0 && (
+            <ul className="rows mt-2">
+              {prices.disagreements.slice(0, 12).map((d, i) => (
+                <li key={`${d.invoiceNumber}-${d.ndc11 ?? "total"}-${i}`} className="py-1.5">
+                  <div className="flex flex-wrap items-baseline gap-2">
+                    <span className="badge">
+                      {d.kind === "total"
+                        ? "the total"
+                        : d.kind === "price"
+                          ? "the price"
+                          : d.kind === "quantity"
+                            ? "the count"
+                            : d.kind === "misread"
+                              ? "which drug"
+                              : d.kind === "billed-not-received"
+                                ? "billed, not booked in"
+                                : "booked in, not billed"}
+                    </span>
+                    <span className="text-xs text-ink-3">
+                      {d.supplier} {d.invoiceNumber}
+                      {d.invoiceDate ? ` · ${fmt(d.invoiceDate)}` : ""}
+                    </span>
+                    {d.differenceCents !== 0 && (
+                      <span className="tabular-nums text-sm font-medium">{money(Math.abs(d.differenceCents))}</span>
+                    )}
+                  </div>
+                  <p className="mt-0.5 text-sm">{d.say}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+          {prices.disagreements.length > 12 && (
+            <p className="mt-2 text-xs text-ink-3">
+              The first 12 of {prices.disagreements.length} are shown.
+            </p>
+          )}
+          {prices.unchecked.length > 0 && (
+            /*
+              What the check does not cover, said plainly.
+
+              An invoice with no delivery under its number has no second copy of its prices, so
+              nothing here has looked at it. Leaving that out would make the card claim a coverage
+              it does not have, which is worse than a smaller number honestly stated.
+            */
+            <p className="mt-2 text-xs text-ink-3">
+              {prices.unchecked.length} invoice{prices.unchecked.length === 1 ? " is" : "s are"} not checked at all:
+              no PioneerRx delivery carries {prices.unchecked.length === 1 ? "its" : "their"} number, so there is no
+              second copy of {prices.unchecked.length === 1 ? "its" : "their"} prices to compare against.
             </p>
           )}
         </Card>

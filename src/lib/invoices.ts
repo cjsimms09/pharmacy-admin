@@ -1810,6 +1810,40 @@ export async function invoiceIssues(): Promise<InvoiceIssue[]> {
     });
   }
 
+  /*
+   * Where the invoice and the delivery disagree about the same purchase.
+   *
+   * One row however many disagreements there are, because the owner asked for exactly that: "Does
+   * each specific thing need its own alert or can the alert be me general and click for specific."
+   * Four lines on one McKesson invoice would otherwise be four rows on his morning list, all
+   * leading to the same screen.
+   *
+   * Money makes it blocking and everything else is a warning, because being billed above what
+   * arrived is a payment to stop, and the wrong drug against the right money is a correction to
+   * make when there is time.
+   */
+  const prices = await (await import("./invoice-price-check")).checkInvoicePrices();
+  if (prices.disagreements.length > 0) {
+    const n = prices.disagreements.length;
+    const overbilled = prices.overbilledCents > 0;
+    const over = `$${(prices.overbilledCents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    out.push({
+      key: "prices-disagree",
+      severity: overbilled ? "blocking" : "warn",
+      title: overbilled
+        ? `${over} billed above what was booked in`
+        : `${n} purchase${n === 1 ? "" : "s"} where the invoice and the delivery disagree`,
+      detail:
+        `PioneerRx records every delivery as it is booked in, and the wholesaler sends its own invoice. ` +
+        `${prices.agreeing} of ${prices.checked} invoices agree throughout, across ${prices.linesCompared} drugs. ` +
+        (overbilled
+          ? `The rest do not, and ${over} of the difference is money billed for goods that were not booked in.`
+          : `The totals all agree; what differs is which drug the money is against, which every margin below it is computed from.`),
+      href: "/inventory/invoices",
+      action: "See what differs",
+    });
+  }
+
   const rank = { blocking: 0, warn: 1 };
   return out.sort((a, b) => rank[a.severity] - rank[b.severity]);
 }
@@ -2367,7 +2401,12 @@ export async function storeInvoiceLines(
   if (!meta.text || meta.text.length < 200) return { stored: 0, unread: 0, reconciles: null, readCents: 0 };
   // Item lines add up to the goods, not to the amount due: shipping and tax are on the invoice and
   // are not items. Where the invoice prints both, the goods figure is what proves the reading.
-  const parsed = parseInvoiceLines(meta.text, readGoodsSubtotalCents(meta.text) ?? meta.printedTotalCents);
+  /*
+   * The FDA directory goes in with the page, for the one question the page cannot answer: whether
+   * a front-end item's eleven digits are the drug or the UPC that stands for it. See ndcFromUpc.
+   */
+  const { knownNdcs } = await import("./drug-directory-store");
+  const parsed = parseInvoiceLines(meta.text, readGoodsSubtotalCents(meta.text) ?? meta.printedTotalCents, await knownNdcs());
   if (parsed.lines.length === 0) return { stored: 0, unread: parsed.unreadable.length, reconciles: parsed.reconciles, readCents: 0 };
   if (parsed.reconciles === false) return { stored: 0, unread: parsed.lines.length + parsed.unreadable.length, reconciles: false, readCents: parsed.totalCents };
 

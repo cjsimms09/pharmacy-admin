@@ -277,6 +277,50 @@ export function ndc11(raw: string): string | null {
 }
 
 /**
+ * Says whether an eleven-digit code is a drug the FDA lists. Supplied by the caller, because this
+ * file reads paper and knows nothing about what is in the database.
+ */
+export type KnownNdc = (ndc11: string) => boolean;
+
+/**
+ * A drug UPC off a front-end line, to the NDC it stands for.
+ *
+ * McKesson prints over-the-counter items with a UPC rather than an NDC, split 6-5 — "305361-32710"
+ * for Rugby acetaminophen. This file used to take the view that "both are the same eleven digits
+ * once the hyphens come out", and that is not true of any of them:
+ *
+ *   305361-32710  is  3 + 0536132710, and the drug is 00536-1327-10.
+ *   041167-05877  is  0 + 4116705877, and the drug is 41167-0587-7.
+ *
+ * A drug UPC is a one-digit prefix followed by the NDC in its ten-digit form. So the prefix comes
+ * off — and then the ten digits have to be padded back to eleven, which is the old ambiguity: the
+ * ten-digit form is 4-4-2, 5-3-2 or 5-4-1 and the digits themselves cannot say which. Padding at
+ * the front every time, which is what taking the last eleven digits amounted to, is right for the
+ * first and wrong for the other two.
+ *
+ * So all three are tried and the FDA directory settles it. Only a single real answer is taken: two
+ * would be a guess, and none means the code is not a drug at all — a pen needle, a Dexcom sensor,
+ * an Omnipod — which is most of them and entirely correct.
+ *
+ * Six of these were on one McKesson invoice, and every one of the eight this resolves is confirmed
+ * by the drug it lands on: "ACETAM TAB 325MG RUG 1000@" to Rugby acetaminophen in a bottle of a
+ * thousand, "THROAT SPR SUG FR CHRY MMP6OZ@" to a 177 mL cherry throat spray. Before this they were
+ * eleven digits that are not a drug, carrying $1,040.83 of purchases against nothing.
+ */
+export function ndcFromUpc(raw: string, known?: KnownNdc): string | null {
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length !== 11) return ndc11(raw);
+  /* With nobody to ask, the old reading stands rather than a guess replacing it. */
+  if (!known) return digits;
+  /* A code that is already a drug is one: a genuine 5-4-2 NDC printed without its hyphens. */
+  if (known(digits)) return digits;
+  const ten = digits.slice(1);
+  const candidates = [...new Set(["0" + ten, ten.slice(0, 5) + "0" + ten.slice(5), ten.slice(0, 9) + "0" + ten.slice(9)])];
+  const real = candidates.filter(known);
+  return real.length === 1 ? real[0] : digits;
+}
+
+/**
  * Splits a run of digits into an order quantity and a ship quantity, using the arithmetic to
  * decide.
  *
@@ -329,7 +373,7 @@ export function lineAddsUp(quantity: number, unitCents: number, extendedCents: n
  * `printedTotalCents` is the figure read off the front of the invoice, passed in by the caller
  * that already read it. Given one, the result says whether the lines add up to it.
  */
-export function parseInvoiceLines(text: string, printedTotalCents: number | null = null): LineParse {
+export function parseInvoiceLines(text: string, printedTotalCents: number | null = null, known?: KnownNdc): LineParse {
   const out: InvoiceLineRead[] = [];
   const unreadable: string[] = [];
   let format: LineParse["format"] = null;
@@ -420,7 +464,13 @@ export function parseInvoiceLines(text: string, printedTotalCents: number | null
       const quantity = Number(qtyText);
       const unitCostCents = money(unit);
       const extendedCents = money(ext);
-      const key = ndc11(ndc);
+      /*
+       * A 5-4-2 code is an NDC and is read as one. A 6-5 code is a UPC and is not: the prefix digit
+       * comes off and what is left is padded where the FDA directory says a drug actually is. See
+       * ndcFromUpc — the old reading put $1,040.83 of front-end purchases against eleven digits
+       * that are not any drug.
+       */
+      const key = /^\d{6}-\d{5}$/.test(ndc) ? ndcFromUpc(ndc, known) : ndc11(ndc);
       // The line's own arithmetic. A description containing something that looks like money would
       // otherwise shift every field after it, and the wrong cost would look perfectly plausible.
       if (!key || !lineAddsUp(quantity, unitCostCents, extendedCents)) {
