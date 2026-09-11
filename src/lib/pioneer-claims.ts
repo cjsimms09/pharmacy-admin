@@ -237,3 +237,147 @@ export function fillsFromClaimRows(rows: PioneerClaimRow[]): FillsReport {
 
   return { fills, disagree, problems, payerCounts };
 }
+
+/**
+ * What PioneerRx holds for the month against what the site holds, over the window both can see.
+ *
+ * The comparison this replaces summed every site claim from the first of the month with no upper
+ * bound, and set it against a PioneerRx copy that stops a day short — the copy is a day old and
+ * always will be. So the site came out "over" by about a day's billing every single morning. On
+ * 11 September it read "$31,888.56 over", and the site's 10 September billing was $37,517.10: the
+ * whole of the overage was the copy not having caught up yet, and none of it was real.
+ *
+ * That mattered for more than tidiness. Like for like through the 9th, the site was *short* — it
+ * was missing fills PioneerRx had, which is money the pharmacy earned and the account did not
+ * know about. The false overage sat on top of the true shortfall and pointed the opposite way.
+ *
+ * So the window is closed at the newest fill date PioneerRx actually returned, and both sides are
+ * measured inside it. What the site holds beyond that date is reported as its own figure, because
+ * it is a real and different fact — the copy is behind — and folding it into a discrepancy is what
+ * made the discrepancy meaningless.
+ *
+ * Three answers come out, and they are three different things:
+ *
+ *   missingFromSite — PioneerRx has the fill and the site does not. Money the pharmacy earned that
+ *                     the account is missing. This is the one worth acting on.
+ *   onlyOnSite      — the site has it and PioneerRx, within the window, does not. A claim the
+ *                     pharmacy system has since reversed or replaced. Overstates the month.
+ *   aheadOfTheCopy  — the site has it and it is dated after the copy's horizon. Not a discrepancy
+ *                     at all; the ordinary state of a day-old copy, and it must never be counted
+ *                     as either of the two above.
+ */
+export type ClaimSide = { rxNumber: string; fillNumber: number; filledOn: string | null; insuranceCents: number; patientCents: number };
+
+export type ClaimsReconciliation = {
+  /** The newest fill date PioneerRx returned. Everything is measured at or before it. */
+  coverTo: string | null;
+  pioneer: { fills: number; remitCents: number; patientCents: number };
+  site: { fills: number; remitCents: number; patientCents: number };
+  /** PioneerRx less the site, inside the window. Positive means the site is short. */
+  gapCents: number;
+  missingFromSite: { day: string; fills: number; cents: number }[];
+  missingTotal: { fills: number; cents: number };
+  onlyOnSite: { fills: number; cents: number };
+  aheadOfTheCopy: { fills: number; cents: number };
+  says: string;
+};
+
+export function reconcileClaims(pioneer: ClaimSide[], site: ClaimSide[]): ClaimsReconciliation {
+  const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const key = (c: ClaimSide) => `${c.rxNumber}|${c.fillNumber}`;
+
+  /*
+   * The copy's own horizon, taken from what it returned rather than from a stamp elsewhere.
+   *
+   * Whatever the copy claims to be current to, the newest fill in it is what it can actually be
+   * held to. A stamp that disagreed with the data would put the window in the wrong place, and
+   * this cannot.
+   */
+  /*
+   * Both sides folded to one entry per fill before anything is counted.
+   *
+   * The two sources count different things. PioneerRx's side arrives already grouped — one entry a
+   * fill, every payer's money added into it. The site's `claims` table holds one row per *claim*,
+   * so a coordinated fill is two rows: 2,310 rows for 2,251 fills on 11 September. Comparing them
+   * directly made the site look like it held 22 fills more than PioneerRx while also missing 38 of
+   * them, which cannot both be true and told the reader nothing.
+   *
+   * The money was never wrong — adding every row gives the fill's total either way. The counts
+   * were, and a count is what somebody acts on. So this folds whatever it is handed, and is right
+   * however a caller happens to hold its claims.
+   */
+  const fold = (xs: ClaimSide[]): ClaimSide[] => {
+    const by = new Map<string, ClaimSide>();
+    for (const c of xs) {
+      const at = by.get(key(c));
+      if (!at) by.set(key(c), { ...c });
+      else {
+        at.insuranceCents += c.insuranceCents;
+        at.patientCents += c.patientCents;
+        /* The earliest date the rows agree on, so a coordinated pair cannot straddle the window. */
+        if (at.filledOn === null || (c.filledOn !== null && c.filledOn < at.filledOn)) at.filledOn = c.filledOn;
+      }
+    }
+    return [...by.values()];
+  };
+  const pioneerFills = fold(pioneer);
+  const siteFills = fold(site);
+
+  const coverTo = pioneerFills.map((f) => f.filledOn).filter((d): d is string => !!d).sort().pop() ?? null;
+  const within = (c: ClaimSide) => coverTo === null || (c.filledOn !== null && c.filledOn <= coverTo);
+
+  const inWindow = siteFills.filter(within);
+  const beyond = siteFills.filter((c) => !within(c));
+
+  const total = (xs: ClaimSide[]) => ({
+    fills: xs.length,
+    remitCents: xs.reduce((n, c) => n + c.insuranceCents, 0),
+    patientCents: xs.reduce((n, c) => n + c.patientCents, 0),
+  });
+  const p = total(pioneerFills);
+  const s = total(inWindow);
+
+  const heldKeys = new Set(inWindow.map(key));
+  const pioneerKeys = new Set(pioneerFills.map(key));
+
+  const byDay = new Map<string, { fills: number; cents: number }>();
+  let missingFills = 0;
+  let missingCents = 0;
+  for (const f of pioneerFills) {
+    if (heldKeys.has(key(f))) continue;
+    missingFills++;
+    missingCents += f.insuranceCents;
+    const day = f.filledOn ?? "no fill date";
+    const at = byDay.get(day) ?? { fills: 0, cents: 0 };
+    byDay.set(day, { fills: at.fills + 1, cents: at.cents + f.insuranceCents });
+  }
+  const only = inWindow.filter((c) => !pioneerKeys.has(key(c)));
+
+  const gapCents = p.remitCents - s.remitCents;
+  const missingFromSite = [...byDay].sort((a, b) => b[1].fills - a[1].fills).map(([day, x]) => ({ day, ...x }));
+
+  const says =
+    `PioneerRx holds ${p.fills.toLocaleString("en-US")} fills through ${coverTo ?? "an unknown date"} worth ${money(p.remitCents)} from payers; ` +
+    `the site holds ${s.fills.toLocaleString("en-US")} of them worth ${money(s.remitCents)}` +
+    `${gapCents === 0 ? ", which agrees" : `, ${money(Math.abs(gapCents))} ${gapCents > 0 ? "short" : "more than PioneerRx has for the same days"}`}.` +
+    (missingFills > 0
+      ? ` ${missingFills} fill${missingFills === 1 ? "" : "s"} worth ${money(missingCents)} ${missingFills === 1 ? "is" : "are"} in PioneerRx and not here` +
+        `${missingFromSite.length ? `, worst on ${missingFromSite.slice(0, 3).map((d) => `${d.day} (${d.fills})`).join(", ")}` : ""}.`
+      : " Every fill PioneerRx has is here.") +
+    (only.length > 0 ? ` ${only.length} fill${only.length === 1 ? "" : "s"} here ${only.length === 1 ? "is" : "are"} not in PioneerRx for those days — reversed or replaced since.` : "") +
+    (beyond.length > 0
+      ? ` A further ${beyond.length.toLocaleString("en-US")} fills worth ${money(beyond.reduce((n, c) => n + c.insuranceCents, 0))} are dated after ${coverTo}, which the day-old copy has not reached — not a discrepancy.`
+      : "");
+
+  return {
+    coverTo,
+    pioneer: p,
+    site: s,
+    gapCents,
+    missingFromSite,
+    missingTotal: { fills: missingFills, cents: missingCents },
+    onlyOnSite: { fills: only.length, cents: only.reduce((n, c) => n + c.insuranceCents, 0) },
+    aheadOfTheCopy: { fills: beyond.length, cents: beyond.reduce((n, c) => n + c.insuranceCents, 0) },
+    says,
+  };
+}

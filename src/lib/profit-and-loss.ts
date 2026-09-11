@@ -1177,7 +1177,15 @@ export async function driverCostFor(month: string, basis: "accrual" | "cash" = "
   const paidBy = driverPaidBy(s.driver_paid_by);
   if (paidBy !== "pharmacy") return 0;
   const invoices = await db.query.driverInvoices.findMany({ columns: { month: true, status: true, totalCents: true, sentAt: true } });
-  return driverCostOf(invoices, month, basis, paidBy);
+  /*
+   * And what the days already entered come to, for a month with no invoice yet.
+   *
+   * `monthState` is what the invoice is built from, so the accrued figure and the invoiced one
+   * are the same arithmetic and cannot drift apart.
+   */
+  const { monthState } = await import("./deliveries");
+  const accrued = basis === "accrual" ? (await monthState(month)).totalCents : 0;
+  return driverCostOf(invoices, month, basis, paidBy, accrued);
 }
 
 /**

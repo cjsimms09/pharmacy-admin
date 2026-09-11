@@ -325,3 +325,63 @@ export async function updateCashReceipt(sourceKey: string, change: { amountCents
     .where(eq(schema.cashReceipts.id, held.id));
   return true;
 }
+
+/**
+ * Books a postage purchase read out of a confirmation email.
+ *
+ * The owner: "will get email on mail postage charges" — and they do, with nothing attached, so the
+ * mail sweep dropped them. See `postage-email.ts` for the reading; this is the booking.
+ *
+ * Entered against the vendor's own category where the vendor is on file, and against Postage and
+ * shipping otherwise, so a new postage account books correctly before anybody has set it up.
+ *
+ * Both bases get it on the day the card was charged. On the cash basis that is plainly right — the
+ * money left. On the accrual basis it is a simplification worth stating: buying postage tops up a
+ * prepaid balance, and strictly the expense falls when the postage is used. Nothing records postage
+ * used, so the purchase stands as the expense, which recognises the cost sooner rather than later.
+ * The note on every one says so, so an accountant sees the choice rather than inferring it.
+ *
+ * Keyed on the vendor's own order number, so a message re-read, or arriving twice, books once.
+ */
+export async function bookPostage(
+  p: import("./postage-email").PostagePurchase,
+  sourceMessageId: string | null,
+): Promise<{ id: string | null; duplicate: boolean; says: string }> {
+  const { postageKey } = await import("./postage-email");
+  const key = postageKey(p);
+
+  const already = await db.query.expenses.findFirst({ where: eq(schema.expenses.invoiceNumber, key) });
+  if (already) {
+    return { id: already.id, duplicate: true, says: `${p.says} — already on the books, nothing added.` };
+  }
+
+  const vendor = await db.query.vendors.findFirst({ where: eq(schema.vendors.name, p.vendor) });
+  const category =
+    (vendor?.categoryId ? await db.query.expenseCategories.findFirst({ where: eq(schema.expenseCategories.id, vendor.categoryId) }) : null) ??
+    (await db.query.expenseCategories.findFirst({ where: eq(schema.expenseCategories.name, "Postage and shipping") }));
+  if (!category) return { id: null, duplicate: false, says: `${p.says} — no Postage and shipping category exists, so it could not be booked.` };
+
+  const id = newId();
+  await db.insert(schema.expenses).values({
+    id,
+    categoryId: category.id,
+    vendorId: vendor?.id ?? null,
+    invoiceNumber: key,
+    invoiceDate: p.purchasedOn,
+    /* The card was charged on the day of the confirmation, so the cash account places it there too. */
+    paidOn: p.purchasedOn,
+    amountCents: p.amountCents,
+    description: p.says,
+    notes:
+      `Read from ${p.vendor}'s purchase confirmation, which carries no attachment. ` +
+      (p.surchargeCents ? `Includes a ${(p.surchargeCents / 100).toFixed(2)} card surcharge. ` : "") +
+      `Postage bought is a prepaid balance; nothing here records postage used, so the purchase is ` +
+      `booked as the expense on the day the card was charged.` +
+      (sourceMessageId ? ` Message ${sourceMessageId}.` : ""),
+    source: "email",
+    /* The vendor stating their own charge, not a reading of a scan, so it stands as confirmed. */
+    status: "confirmed",
+    createdBy: "the mail sweep",
+  });
+  return { id, duplicate: false, says: `${p.says} — booked to ${category.name}.` };
+}

@@ -621,3 +621,40 @@ export function parseInvoiceLines(text: string, printedTotalCents: number | null
     reconciles: printedTotalCents === null || out.length === 0 ? null : totalCents === printedTotalCents,
   };
 }
+
+/**
+ * Which drawer an invoice belongs in, from the DEA schedules of what actually arrived.
+ *
+ * The owner: "We need to find way to do this without using api, if we need to use more info from
+ * pioneer and just use invoice for image than do that but we still need to separate c2, c3-5, non
+ * controlled invoices."
+ *
+ * PioneerRx records the DEA schedule of every item the pharmacy books in, against the wholesaler's
+ * own invoice number. That is the receiving pharmacy's determination of what it received, and it
+ * is a better source than reading a class letter off a wholesaler's layout: it is the same answer
+ * every time, it costs nothing, it works with no API key, and it does not decline when a page is a
+ * scan or a supplier prints no class at all.
+ *
+ * The rule is the one 21 CFR 1304.04(h)(1) forces. Any Schedule II line makes the whole invoice a
+ * Schedule II record, because that is the drawer the document has to be filed in — a folder is not
+ * a separation if a CII invoice is sitting in the ordinary one. Below that, any controlled line
+ * makes it a III-V record. Only a delivery with nothing controlled on it is an ordinary business
+ * record.
+ *
+ * Nothing is guessed. An empty list is "unknown", not "none": a delivery whose schedules were never
+ * recorded has not been shown to be free of controls, and filing it as though it had is the one
+ * mistake that breaks the rule.
+ */
+export function scheduleFromDea(codes: (string | null | undefined)[]): "schedule_2" | "schedule_3_5" | "none" | "unknown" {
+  const seen = codes.map((c) => String(c ?? "").trim()).filter((c) => c !== "");
+  if (seen.length === 0) return "unknown";
+  if (seen.some((c) => c === "2" || c === "2N" || c.toUpperCase() === "CII")) return "schedule_2";
+  if (seen.some((c) => ["3", "3N", "4", "5"].includes(c) || ["CIII", "CIV", "CV"].includes(c.toUpperCase()))) return "schedule_3_5";
+  /*
+   * Everything that is left has to be a code meaning "not controlled" before this may say so.
+   *
+   * PioneerRx writes 0 for an ordinary item. A code this does not recognise is not evidence of
+   * anything, and treating it as a nought would file an unknown schedule as an ordinary record.
+   */
+  return seen.every((c) => c === "0" || c === "00") ? "none" : "unknown";
+}
