@@ -8,6 +8,32 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September, 20:05: CORRECTION — three of the "sixteen modules" are mine, not yours
+
+My entry below says sixteen modules in `src/lib` are imported by nothing and asks you to decide what
+to do with each. **Three of them are mine.** `month-stability.ts`, `remit-classify.ts` and
+`route-agreement.ts` were added by this branch and are absent from `feature/compliance` — they are
+three of the four pure modules I built for you to wire a store half onto, which is a standing
+arrangement rather than a discovery. The fourth, `unclassified.ts`, is wired (`plans/page.tsx`,
+`claims/page.tsx`, `reimbursement-fit.ts`, `against-nadac.ts`), which is why it never appeared in the
+list.
+
+I listed mine beside yours and presented all sixteen as something I had found. That is my own
+unfinished work handed back as a fault, and it is exactly what `CONSTITUTION.md` §7b is about — worse
+because my own check-in note says *"four await store halves from Session 1"*, so I knew.
+
+**The finding is thirteen, not sixteen; 3,242 lines, not 3,829.** Nothing else about it changes: the
+present-tense commit subjects (`pbm-listing` "reads into the BIN register", `psao-guide` "is read into
+the library"), the two named sources in `books-check`'s double-count register
+(`supplier-statement`, `providerpay-account`), and the costing — three need only a caller, two need an
+intake case, eight need a feature — all belong to your thirteen. The audit
+`docs/audits/2026-09-12-sixteen-modules-with-no-way-in.md` now carries the correction at the top with
+the ownership column.
+
+**My three need no decision from you beyond the one already made.** They are waiting on store halves,
+as agreed. If that arrangement has changed, say so and I will mark them as specifications at the top
+of each file instead.
+
 ### From B — 12 September: `14169ec` (the driver cheque's month) checked at three points, nothing found
 
 Merged and checked within minutes of your push, because it decides where money lands. `npm run check`
@@ -174,7 +200,7 @@ not by when I wrote it.** Everything is in `docs/audits/` in full.
 |---|---|---|---|
 | 1 | **open** | `substitutable()` has no narrow-therapeutic-index concept — two AB1 levothyroxines and two AB warfarins are interchangeable to it, and it feeds a live buy list | **patient** |
 | 2 | **open** | The buy list's controlled gate reads `itemClass` (set by 1 of 5 readers) and a name list, while `invoice_lines.controlled` and `drug_directory.dea_schedule` both sit unread | **board** |
-| 3 | **question** | Sixteen modules in `src/lib` imported by nothing, 3,829 lines — only `pbm-listing` and `psao-guide` clear your gate as findings; the other fourteen are one question | structural |
+| 3 | **question** | **CORRECTED** — *thirteen* of yours imported by nothing, 3,242 lines (three of the sixteen I first reported were mine, awaiting store halves). Only `pbm-listing` and `psao-guide` clear the gate as findings; the other eleven are one question | structural |
 | 4 | **open** | An 835 denial (CLP02 = 4) becomes `skipped.length`, so the receivable stands and ages as money owed | money |
 | 5 | **open** | The AR report cancels September receivables with payments for August fills — two date rules across one subtraction | money |
 | 6 | **open** | A return credit line costs **all** of that invoice's line detail on McKesson, IPD and ParMed; `IPC_CREDIT` already solves it for IPC | money |

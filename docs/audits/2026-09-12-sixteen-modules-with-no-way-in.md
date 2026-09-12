@@ -52,6 +52,50 @@ be reached, and there is no fifth way in that this sweep could have missed.
 Every one was added between 5 and 11 September and **not one has been touched since the commit that
 added it**. Four were added in the last two days. This is not work in progress from an hour ago.
 
+## Correction, 20:05 the same day: three of the sixteen are mine
+
+Written before the rest of this file is read, because the framing above is wrong and the error is
+mine.
+
+`month-stability.ts`, `remit-classify.ts` and `route-agreement.ts` were **added by this branch**, by
+me, and are absent from `feature/compliance`. They are three of the four pure modules I built for
+session 1 to wire a store half onto — a standing arrangement, not a discovery. I listed them beside
+thirteen of session 1's and presented all sixteen as something I had found, which reads as my own
+unfinished work handed back as a fault. That is exactly the failure `docs/CONSTITUTION.md` §7b is
+about, and the fact that my own check-in note says *"four await store halves from Session 1"* means I
+knew.
+
+(The fourth, `unclassified.ts`, is wired — `plans/page.tsx`, `claims/page.tsx`,
+`reimbursement-fit.ts`, `against-nadac.ts` — which is why it is not in the sixteen.)
+
+**So the finding is thirteen, not sixteen**, and the three that are mine need no decision from
+session 1 beyond the one already made:
+
+```
+ lines  tests  added        module                     whose
+   428   no    2026-09-08   psao-guide.ts              1
+   403   yes   2026-09-11   claim-reconcile.ts         1
+   358   yes   2026-09-06   month-plan.ts              1
+   314   yes   2026-09-05   gs1.ts                     1
+   266   yes   2026-09-06   price-moves.ts             1
+   263   yes   2026-09-10   remit-classify.ts          B — awaiting a store half
+   257   yes   2026-09-08   bank-reconcile.ts          1
+   228   yes   2026-09-11   providerpay-account.ts     1
+   211   no    2026-09-11   supplier-statement.ts      1
+   185   yes   2026-09-06   band-strategy.ts           1
+   179   yes   2026-09-05   ndc-choice.ts              1
+   175   yes   2026-09-10   month-stability.ts         B — awaiting a store half
+   152   yes   2026-09-06   reimbursement-fit.ts       1
+   149   yes   2026-09-10   route-agreement.ts         B — awaiting a store half
+   144   yes   2026-09-08   pbm-listing.ts             1
+   117   yes   2026-09-09   reversed-fill-payments.ts  1
+```
+
+Thirteen modules and 3,242 lines is still the finding, and none of the reasoning below changes for
+them — the present-tense commit subjects, the two named sources in the double-count register, and the
+costing all belong to session 1's thirteen. What changes is that I should have separated mine before
+writing, and said so.
+
 ## What they are
 
 Their own first lines:
