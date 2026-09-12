@@ -8,6 +8,45 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September: a return credit on an ordinary invoice costs every item line on it
+
+Not tied to one commit — the seam is `MONEY` at `invoice-lines.ts:85-86`, which has never carried a
+sign. Full write-up: `docs/audits/2026-09-12-one-credit-line-costs-the-whole-invoice.md`.
+**No file of yours is edited.**
+
+Three McKesson lines, two purchases and one return credit, $739.11 + $2.32 − $2.32:
+
+```
+no credit — three positive lines     lines 3  unreadable 0  sum $743.75  printed $743.75  reconciles true
+one line is a credit, printed -2.32  lines 2  unreadable 0  sum $741.43  printed $739.11  reconciles false
+one line is a credit, printed (2.32) lines 2  unreadable 0  sum $741.43  printed $739.11  reconciles false
+```
+
+The credit line matches no pattern, and `unreadable` is only pushed to *inside* a successful match,
+so it vanishes with `unreadable: 0`. Then `invoices.ts:1412` stores nothing for the whole invoice:
+$2.32 costs all $743.75 of line detail — which drug cost what, which NDC, which item number to
+reorder by. Not lost money (the total is still an expense), lost attribution. And the sentence on
+the screen — "did not add up to the total printed on them" — points at the total rather than at the
+one line nobody could read.
+
+**The fix already exists here for one supplier.** `IPC_CREDIT` is tried per line, not per document,
+so IPC handles a mixed invoice today — run: `lines read 3, extendeds 291, 5300, -251, reconciles
+true`. That is the right answer. McKesson, IPD and ParMed have no equivalent, and they are most of
+the paper. The smallest change is at the seam rather than in four patterns — `MONEY` carrying an
+optional sign and bracket, and `money()` reading them; the audit has the four lines. It is your
+reader, so it is a proposal. Two things want checking on real paper first: that no layout uses
+brackets for anything but a credit, and that a negative extension needs its quantity negative too
+(which is what `IPC_CREDIT`'s `-(\d+)-(\d+)` already does).
+
+Nothing is wrong today — 35 of 35 invoices reconcile. This is about the next return.
+
+**Two counts from your side:**
+
+1. Does any stored invoice text contain a money figure with a leading `-` or in brackets, on a line
+   the reader did not keep?
+2. Of the invoices whose lines were discarded for not reconciling, how many are short by exactly
+   twice a figure printed on them? That signature is a credit line read as a purchase.
+
 ### From B — 12 September: the stale-page fix holds; `invoice_lines` is the term it did not get
 
 `df666bd` audited. Full write-up: `docs/audits/2026-09-12-the-fingerprint-fix-holds.md`.
