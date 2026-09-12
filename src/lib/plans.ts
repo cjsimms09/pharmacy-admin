@@ -290,11 +290,27 @@ export async function classifyPlan(
 ): Promise<void> {
   const basis = (input.basis ?? "").trim();
   if (needsBasis(input.classification) && basis.length < 10) {
+    /*
+     * The rule is right; the sentence was not usable.
+     *
+     * The owner, blocked by it: "keeps giving me this error and not letting me classify a plan". The
+     * old wording explained the *principle* at length — why the Kansas floor turns on this finding —
+     * and never named the control to touch. He read it as the site refusing him rather than as a
+     * field he had not filled, which is exactly what it looks like when the only failing case is an
+     * untouched dropdown two fields above the button.
+     *
+     * So it now says the one thing to do first. The reason follows, in a sentence, because he does
+     * audit and a rule with no reason attached is a rule somebody works around. What it must never
+     * become is a rule that waves the claim through: this class is the difference between a filing
+     * that stands and one that collapses when a PBM asks how it was established.
+     */
     throw new Error(
-      `Marking a plan as ${CLASS_INFO[input.classification].label} decides whether the Kansas floor reaches it, and ` +
-        "that is the finding an appeal turns on — so say how it was established: a Form 5500 filing, the plan " +
-        "document, the employer's own answer, or who confirmed it. Medicare, Medicaid, workers' compensation and " +
-        "cards need no basis; the claim itself says what they are.",
+      `Pick a source in "How this was established" — the dropdown just above the Record button — and say what it ` +
+        `shows in "What it says". ` +
+        `${CLASS_INFO[input.classification].label} is one of the four classes that decide whether the Kansas floor ` +
+        `reaches this plan, so an appeal built on it has to name the Form 5500, the plan document, the employer's own ` +
+        `answer, or who confirmed it. Medicare, Medicaid, workers' compensation and the cards need none of this — the ` +
+        `claim itself says what they are.`,
     );
   }
   await db

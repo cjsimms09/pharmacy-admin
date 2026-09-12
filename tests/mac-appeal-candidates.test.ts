@@ -158,10 +158,10 @@ describe("the window", () => {
 
 describe("the worklist", () => {
   const mixed: Candidate[] = [
-    claim({ claimId: "a", pbmName: "CVS Caremark", dateFilled: "2026-09-01", paidCents: 5_000, acquisitionCents: 6_000 }),
+    claim({ claimId: "a", pbmName: "CVS Caremark", dateFilled: "2026-09-01", paidCents: 5_000, acquisitionCents: 12_000 }),
     claim({ claimId: "b", pbmName: "CVS Caremark", dateFilled: "2026-09-09", paidCents: 1_000, acquisitionCents: 9_000 }),
     claim({ claimId: "c", pbmName: "Express Scripts", paidCents: 7_663, acquisitionCents: 16_816 }),
-    claim({ claimId: "d", pbmName: "Blue Eagle Health", paidCents: 100, acquisitionCents: 5_000 }),
+    claim({ claimId: "d", pbmName: "Blue Eagle Health", paidCents: 100, acquisitionCents: 9_000 }),
     claim({ claimId: "e", pbmName: "CVS Caremark", classification: "B" }),
   ];
   const allTerms: PayerTerms[] = [
@@ -194,7 +194,9 @@ describe("the worklist", () => {
     const w = worklist(mixed, allTerms, new Set(), TODAY);
     const psao = w.setAside.find((s) => s.verdict === "psao_files");
     assert.equal(psao?.claims, 1);
-    assert.equal(psao?.cents, 4_900);
+    // $89.00: the Blue Eagle fixture's shortfall was raised to clear the $30 filing floor, so that
+    // this suite goes on testing batching rather than testing the floor by accident.
+    assert.equal(psao?.cents, 8_900);
     assert.ok(w.setAside.some((s) => s.verdict === "not_generic"));
   });
 
@@ -339,7 +341,7 @@ describe("a MAC below the national average, or the national average itself", () 
      * then cost plus a dispensing fee — but never silently, because ten verification codes spent on
      * these is ten spent on declines.
      */
-    const j = judge(claim({ paidCents: 6_000, acquisitionCents: 9_000, nadacPerUnitCents: 100 }), terms(), new Set(), TODAY);
+    const j = judge(claim({ paidCents: 6_000, acquisitionCents: 12_000, nadacPerUnitCents: 100 }), terms(), new Set(), TODAY);
     assert.equal(j.verdict, "appeal");
     assert.equal(j.aboveNadac, true);
     assert.match(j.says, /buying gap rather than a MAC underpayment/);
@@ -357,5 +359,74 @@ describe("a MAC below the national average, or the national average itself", () 
   test("a claim with no quantity cannot be compared, and is not refused for it", () => {
     const j = judge(claim({ quantityThousandths: null }), terms(), new Set(), TODAY);
     assert.equal(j.verdict, "appeal");
+  });
+});
+
+/**
+ * A floor under what is worth filing.
+ *
+ * The owner, on seeing what a full Caremark run came to: "thats not worth it, rather chase other
+ * things wrong with site.. lets set a limit for mac claims (have to lose more than $30)".
+ *
+ * The arithmetic he was reacting to: of 117 below-NADAC Caremark claims worth $645.74, only 38 could
+ * be proved with an invoice, and those came to $95.85 with the largest at $6.78. Every Caremark
+ * submission costs a verification code typed by hand, so that is 38 interruptions for two and a half
+ * dollars each. He had already declined a $49.71 batch on the same grounds.
+ *
+ * It is a judgement about his time, not about entitlement — so the money stays counted, and these
+ * tests hold that as firmly as they hold the threshold.
+ */
+describe("too small to be worth filing", () => {
+  test("under $30 is not put on the worklist", () => {
+    const j = judge(claim({ paidCents: 1_000, acquisitionCents: 3_999 }), terms(), new Set(), TODAY);
+    assert.equal(j.verdict, "too_small");
+    assert.match(j.says, /not more than the \$30\.00 this pharmacy files above/);
+  });
+
+  test("$30 exactly is still too small; a penny more is not", () => {
+    /*
+     * "more than $30": thirty dollars exactly does not clear it, thirty dollars and a cent does.
+     * Paid has to be above nought or the earlier `paid_nothing` gate answers first — a deductible
+     * claim is not an underpayment however far below cost it looks.
+     */
+    assert.equal(judge(claim({ paidCents: 100, acquisitionCents: 3_100 }), terms(), new Set(), TODAY).verdict, "too_small");
+    assert.equal(judge(claim({ paidCents: 100, acquisitionCents: 3_101 }), terms(), new Set(), TODAY).verdict, "appeal");
+  });
+
+  test("the money is still counted, because it is still owed", () => {
+    /*
+     * The part that must not drift. A $4 underpayment is as wrong as a $40 one and the pharmacy is
+     * as entitled to it; what the threshold decides is only whether it goes on a list headed "do
+     * this today". A verdict that zeroed the shortfall would quietly write the money off.
+     */
+    const j = judge(claim({ paidCents: 1_000, acquisitionCents: 3_999 }), terms(), new Set(), TODAY);
+    assert.equal(j.shortfallCents, 2_999);
+    assert.match(j.says, /Still owed and still counted/);
+  });
+
+  test("it is asked after the gates that say the claim is not appealable at all", () => {
+    // A brand short by $5 is not_generic, not too_small: "we do not appeal brands" is the truer
+    // reason, and a screen explaining the wrong one sends somebody to look at the wrong thing.
+    assert.equal(
+      judge(claim({ classification: "B", paidCents: 1_000, acquisitionCents: 1_500 }), terms(), new Set(), TODAY).verdict,
+      "not_generic",
+    );
+    assert.equal(
+      judge(claim({ basisOfReimbursement: "03", paidCents: 1_000, acquisitionCents: 1_500 }), terms(), new Set(), TODAY).verdict,
+      "not_mac_priced",
+    );
+  });
+
+  test("and before the payer and window gates, which cost nothing to skip", () => {
+    // A $2 shortfall on a payer with no agreement read is too_small either way; naming the money
+    // is the more useful answer than naming a missing contract.
+    const j = judge(claim({ paidCents: 1_000, acquisitionCents: 1_200 }), terms({ whoFiles: null }), new Set(), TODAY);
+    assert.equal(j.verdict, "too_small");
+  });
+
+  test("a big shortfall still files exactly as before", () => {
+    const j = judge(claim({ paidCents: 7_663, acquisitionCents: 16_816 }), terms(), new Set(), TODAY);
+    assert.equal(j.verdict, "appeal");
+    assert.equal(j.shortfallCents, 9_153);
   });
 });

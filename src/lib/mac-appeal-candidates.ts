@@ -96,6 +96,19 @@ export type Candidate = {
 const MAC_BASES = new Set(["06", "07"]);
 
 /**
+ * The least a claim has to be short before it is worth filing.
+ *
+ * The owner set it: "lets set a limit for mac claims (have to lose more than $30)". Thirty dollars,
+ * because every Caremark submission needs a verification code typed by hand and a batch of small
+ * ones costs more time than it recovers — 38 provable claims came to $95.85 on the day he decided.
+ *
+ * Not a statement about entitlement. A $4 underpayment is as wrong as a $40 one and the money is
+ * still counted in `setAside`. One constant, so raising it is one edit; if filing ever stops costing
+ * a code each, the right value is zero and the gate should be removed rather than tuned.
+ */
+const MIN_WORTH_FILING_CENTS = 3000;
+
+/**
  * What the plan said it priced off, for the sentence that explains a refusal.
  *
  * Only the codes actually seen on this pharmacy's claims are named. An unrecognised code is quoted
@@ -159,6 +172,8 @@ export type Verdict =
   | "no_invoice"
   /** Paid nothing at all — a deductible claim, not an underpayment. */
   | "paid_nothing"
+  /** Short, but by less than this pharmacy files above. Still owed; just not a job. */
+  | "too_small"
   /** The agreement routes this payer's appeals through the PSAO. */
   | "psao_files"
   /** The agreement gives no MAC appeal process. */
@@ -297,6 +312,39 @@ export function judge(c: Candidate, terms: PayerTerms | null, alreadyFiled: Set<
   const shortfallCents = c.acquisitionCents - c.paidCents;
   if (shortfallCents <= 0) {
     return { ...base, verdict: "paid_enough", says: `Paid ${money(c.paidCents)} against a cost of ${money(c.acquisitionCents)}. Nothing to appeal.` };
+  }
+
+  /*
+   * Too small to be worth filing.
+   *
+   * The owner, 12 September, after seeing what a full Caremark run actually came to: "thats not
+   * worth it, rather chase other things wrong with site.. lets set a limit for mac claims (have to
+   * lose more than $30)".
+   *
+   * The arithmetic behind it: of 117 below-NADAC Caremark claims worth $645.74, only 38 could be
+   * proved with an invoice at all, and those came to $95.85 — the largest $6.78. Every Caremark
+   * submission needs him at the keyboard to type a verification code, so that batch was 38 codes
+   * for two and a half dollars each. He had already declined a $49.71 batch on the same grounds.
+   *
+   * This is a judgement about the worth of his time, not about the claim: a $4 underpayment is just
+   * as wrong as a $40 one and the pharmacy is just as entitled to it. So the money is still counted
+   * and still said — `setAside` carries the total — and nothing here decides that it is not owed.
+   * What it decides is that it does not go on a worklist headed "do this today".
+   *
+   * Raise or lower it in one place. If filing ever stops costing a verification code each, the
+   * right threshold is zero and this gate should go.
+   */
+  /* "more than $30", his words — so thirty dollars exactly does not clear it. */
+  if (shortfallCents <= MIN_WORTH_FILING_CENTS) {
+    return {
+      ...base,
+      shortfallCents,
+      verdict: "too_small",
+      says:
+        `${money(shortfallCents)} below cost, which is not more than the ${money(MIN_WORTH_FILING_CENTS)} this pharmacy files above. ` +
+        `Still owed and still counted — every Caremark appeal costs a verification code typed by hand, and a batch of these ` +
+        `costs more in time than it recovers.`,
+    };
   }
 
   /*
