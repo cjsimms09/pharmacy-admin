@@ -8,6 +8,69 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September: the AR report cancels September receivables with payments for August fills
+
+The queue from yesterday's pushes, audited while the base was quiet at `1a8554f`. Full write-up:
+`docs/audits/2026-09-12-ar-report-two-date-rules.md`. **No file of yours is edited.**
+
+`books-start.ts` settles the boundary and argues correctly for the received-date rule: *"A September
+remittance settling an August fill is real money in these books, and a fill-date rule would throw it
+out — quietly losing revenue in the name of tidiness."* The AR report then applies **both** rules, one
+to each side of a subtraction:
+
+```ts
+receivablesAsAt: r.dateFilled >= SITE_STARTS_ON      // ar-report.ts:150  the fill-date rule
+receivedAsAt:    !isOutOfBooks(p.receivedOn)         // ar-report.ts:163  the received-date rule
+```
+
+`owedByPayer` does `outstanding = max(0, billed − got)`, so a September payment settling an August
+fill lands in `got` for a payer whose August fill was never in `billed`. Run — one August fill, one
+September fill, both paid in September, which is the ordinary two-to-four-week lag:
+
+```
+  billed      $500.00    <- September fill only
+  received    $600.00    <- includes $400.00 settling the AUGUST fill
+  outstanding $  0.00      state: overpaid        (truth: $300.00 owed)
+```
+
+**The common case has no signal at all.** Give the payer real September volume:
+
+```
+  billed      $3500.00
+  received    $ 600.00
+  outstanding $2900.00     state: owes            (truth: $3,300.00 owed)
+```
+
+Understated by exactly the August payment, `state` reads the ordinary "owes", and `Math.max(0, …)`
+means the error can only hide, never show as a negative.
+
+The loader's guard does not catch it, and its comment says why it thought it would: *"A payment from
+before the books begin settles nothing here, because the fill it settled is not in here either."*
+True for a payment received **before** 1 September; false for one received after, which is the whole
+population this creates. `owedByPayer` has the right instinct one level up (`if (!a) continue;` for a
+payment whose *payer* has no receivable) — but any payer with September business has an `a`.
+
+**Fix:** make the two sides agree — either drop a payment whose claim is not in the receivables set
+(the claim-level version of the rule already there), or admit the August fill as a receivable when
+its payment is being counted. The first matches the report's stated purpose. What must not stand is
+counting one and not the other.
+
+**Question for you, and it is the size of this:** how much was received in September against fills
+dated before 1 September? One query — claim payments with `received_on >= '2026-09-01'` joined to
+claims with `date_filled < '2026-09-01'`, summed.
+
+**Checked and cleared, so nobody re-derives it.** (1) `books-start.ts`'s claim that *"every query
+that adds money up excludes them"* holds: `profit-and-loss.ts`, `payer-owed-store.ts`,
+`ar-report.ts`, `reversed-fill-payments.ts`, `expenses.ts` and `claim-payments.ts` all filter. The
+four files touching those tables without the flag are dedupe lookups, an undo that sums only what it
+deletes, and the remits page's month-count — none is a total you read as your books. (2) **Migration
+0119 holds on every count it claims**, run against the migrated database: a second `mac_appeal` for
+a claim is refused, a `floor_complaint` for the same claim is allowed, `claim_id IS NULL` rows do not
+collide for either kind, and a withdrawn appeal still holds the slot. The predicate matches what is
+written — `kind` is a typed enum and both writers use the literal — so the guard is live rather than
+one that never fires, and `mac-appeal-store.ts:236` catches the violation and returns a sentence
+rather than a raw constraint error. Nothing to do. (3) 0115 is still free; I have taken no slot.
+
 ### From B — 12 September: splitting a bundled 835 is right, and the deposit gate refuses every set after the first
 
 `4615a7c`..`1a8554f` audited. Full write-up:
