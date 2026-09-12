@@ -790,7 +790,12 @@ export async function importDropped(
   return { recognised: true, ...r };
 }
 
-async function importRecognised(
+/*
+ * Exported for `inbox-resort.ts`, which re-decides the backlog and has to take this path rather
+ * than a copy of it. See the note there: a re-sort that re-decided only invoices left four
+ * McKesson reports stuck for ever, one of them a format the sweep had already been taught.
+ */
+export async function importRecognised(
   buf: Buffer,
   fileName: string,
   from: string,

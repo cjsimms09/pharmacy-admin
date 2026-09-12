@@ -105,3 +105,108 @@ describe("ParMed's item lines", () => {
     assert.equal(r.lines.length, 1);
   });
 });
+
+/**
+ * The two columns the pattern had no room for.
+ *
+ * The owner, on the morning two ParMed invoices came in with a total and no lines: "fix so these
+ * issues dont keep happening with parmed".
+ *
+ * The reader matched the run of class letters and then expected digits. That reads the rows above
+ * and nothing with anything in the columns between, and ParMed's header names two that break it:
+ * DESCRIPTION, which it prints on front-end and device lines and omits on drugs, and NOTE, which
+ * carries codes like "NR". Real rows from 11 September 2026:
+ *
+ *   102399715075537009710HHCLC100TACCU-CHEK SOFTCLIX LC 10011CT 11.87 11.87
+ *   101327892600169750111RXMD1NR33ea 74.51 223.53
+ *
+ * Three of six lines matched on the first invoice and none on the second. Because what matched came
+ * to $657.98 against a printed $722.34, the reading did not reconcile and every line was thrown
+ * away — which on the screen is an invoice with a total and no items, indistinguishable from an
+ * unreadable scan. Neither was a scan. Both were completely legible.
+ *
+ * So the fix is to read the row from its two fixed ends and not interpret the middle at all, which
+ * is what this file's own docstring said the reader did.
+ */
+describe("ParMed rows that carry a description or a note code", () => {
+  /* Invoice 7491384103, every line, as the text extractor produced it. */
+  const REAL = page(
+    "102399715075537009710HHCLC100TACCU-CHEK SOFTCLIX LC 10011CT 11.87 11.87",
+    "117700          01/31/2028",
+    "21531511449502010102RXSY122ea 291.00 582.00",
+    "VT6348          04/30/2029",
+    "31402035060505082901GENSN1611ea 4.37 4.37",
+    "405523204365702731103HHCKT1TACCU-CHEK GUIDE ME KIT11ea 10.49 10.49",
+    "SAB10523A       01/31/2029",
+    "71571845700781324664GENSY1033CT 23.87 71.61",
+    "1305439112365702712102HHCSI1TACCU-CHEK GUIDE SI 10011ea 42.00 42.00",
+  );
+
+  test("REGRESSION: a line with a product name on it is read", () => {
+    const r = parseInvoiceLines(page("102399715075537009710HHCLC100TACCU-CHEK SOFTCLIX LC 10011CT 11.87 11.87"), 1_187);
+    assert.equal(r.lines.length, 1);
+    assert.equal(r.lines[0].extendedCents, 1_187);
+    assert.equal(r.lines[0].unitCostCents, 1_187);
+    assert.equal(r.lines[0].quantity, 1);
+    assert.equal(r.lines[0].unitOfMeasure, "CT");
+  });
+
+  test("REGRESSION: a line with a note code between the size and the unit is read", () => {
+    // Invoice 7491383165, its only line — a Schedule II item, and the whole invoice was lost.
+    const r = parseInvoiceLines(page("101327892600169750111RXMD1NR33ea 74.51 223.53"), 22_353);
+    assert.equal(r.lines.length, 1);
+    assert.equal(r.lines[0].extendedCents, 22_353);
+    assert.equal(r.lines[0].quantity, 3);
+    assert.equal(r.lines[0].ndc11, "00169750111");
+  });
+
+  test("the whole invoice reads, and reconciles against its printed goods subtotal", () => {
+    const r = parseInvoiceLines(REAL, 72_234);
+    assert.equal(r.lines.length, 6);
+    assert.equal(r.totalCents, 72_234);
+    assert.equal(r.reconciles, true);
+    assert.deepEqual(r.unreadable, []);
+  });
+
+  test("the NDC still comes from the front of the row, not from the description", () => {
+    const r = parseInvoiceLines(REAL, 72_234);
+    /*
+     * The last eleven digits of the leading run, exactly as before the description was allowed for.
+     * The description sits after that run and contributes no digits to it — which is the property
+     * worth pinning, because a pattern that walked the middle could have taken "100" off
+     * "ACCU-CHEK SOFTCLIX LC 100" and shifted the NDC by three places.
+     */
+    assert.deepEqual(r.lines.map((l) => l.ndc11), [
+      "75537009710",
+      "49502010102",
+      "60505082901",
+      "65702731103",
+      "00781324664",
+      "65702712102",
+    ]);
+  });
+
+  test("the description is not claimed, because it cannot be separated from the size", () => {
+    /*
+     * "ACCU-CHEK SOFTCLIX LC 10011CT" splits as "LC 100" and 11, or "LC 1001" and 1, and the row
+     * cannot say which — the same ambiguity that stops the quantity being read off the page. A
+     * description ending in half a pack size would match nothing in the catalogue.
+     */
+    for (const l of parseInvoiceLines(REAL, 72_234).lines) assert.equal(l.description, null);
+  });
+
+  test("the lot and expiry rows between the items are still not items", () => {
+    const r = parseInvoiceLines(REAL, 72_234);
+    assert.equal(r.lines.length, 6);
+    // Six items on a page holding nine candidate rows: three are lot numbers with dates.
+    assert.deepEqual(r.unreadable, []);
+  });
+
+  test("and it does not reach across an IPC row, which prints its money differently", () => {
+    // PARMED is tried before the IPC patterns, so a loosened middle must not steal their lines.
+    const ipc = "5269337Betamethasone Dip Oint 0.05% Vio 1572578009301$49.10$61.37-1-1$2.51($2.51)";
+    const r = parseInvoiceLines(page(ipc), -251);
+    for (const l of r.lines) assert.ok(l.extendedCents < 0, "an IPC credit line must stay negative");
+    assert.notEqual(r.format, "parmed");
+  });
+});

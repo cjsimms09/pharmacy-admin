@@ -39,6 +39,8 @@ type Row = {
   invoiceNumber: string | null;
   invoiceDate: string | null;
   totalCents: number | null;
+  /** What the item lines should add up to: the goods subtotal where the page prints one, else the total. */
+  targetCents: number | null;
   storedLines: number;
   storedCents: number;
   freshLines: number;
@@ -69,7 +71,7 @@ async function main() {
   const { readFile } = await import("../src/lib/files");
   const { pdfText } = await import("../src/lib/pdf-text");
   const { parseInvoiceLines } = await import("../src/lib/invoice-lines");
-  const { supplierNamedOn } = await import("../src/lib/invoices");
+  const { supplierNamedOn, readGoodsSubtotalCents } = await import("../src/lib/invoices");
   /* The same neutral party the reader itself uses, so the proof reads what the reader would read. */
   const { knownNdcs } = await import("../src/lib/drug-directory-store");
   const known = await knownNdcs();
@@ -122,13 +124,36 @@ async function main() {
       why = (why ? why + " " : "") + "Re-read from the extract stored at import rather than from the file itself.";
     }
 
-    const fresh = text ? parseInvoiceLines(text, inv.totalCents, known) : null;
+    /*
+     * The same reconcile target the importer uses, and not the invoice total.
+     *
+     * This passed `inv.totalCents`, the figure on the header. The importer passes
+     * `readGoodsSubtotalCents(text) ?? printedTotalCents` — the goods subtotal where the page prints
+     * one — because an invoice total includes freight and the item lines do not. So this prover,
+     * whose whole purpose is to run the reading "exactly as the importer would", was checking every
+     * invoice against a different number, and reported three as disagreeing that the importer
+     * reconciles: IPC 11490216 and 11495629 by exactly $10.00 of shipping each, and the credit memo
+     * CM107761 by exactly the $15.00 its own docstring already explains.
+     *
+     * One rule, one place. A prover that disagrees with the thing it proves sends somebody to look
+     * at an invoice that was read correctly.
+     */
+    const target = text ? readGoodsSubtotalCents(text) ?? inv.totalCents : inv.totalCents;
+    const fresh = text ? parseInvoiceLines(text, target, known) : null;
     rows.push({
       invoiceId: inv.id,
       supplier: inv.supplier,
       invoiceNumber: inv.invoiceNumber,
       invoiceDate: inv.invoiceDate,
       totalCents: inv.totalCents,
+      /*
+       * What the item lines are supposed to add up to, which is not always the invoice total.
+       *
+       * The goods subtotal where the page prints one, the total where it does not. Kept on the row
+       * so the check below compares like with like: the lines are goods, and a total carrying $10.00
+       * of freight is not a figure any set of item lines can equal.
+       */
+      targetCents: target,
       storedLines: stored.length,
       storedCents,
       freshLines: fresh?.lines.length ?? 0,
@@ -169,12 +194,23 @@ async function main() {
       lines.push(
         `${r.supplier ?? "A supplier"} ${r.invoiceNumber ?? "(no number)"}, ${money(r.totalCents ?? 0)}: no item lines held. A fresh read finds ${r.freshLines} summing ${money(r.freshCents)}.`,
       );
-    } else if (r.totalCents !== null && r.storedCents === r.totalCents) {
+    } else if (r.targetCents !== null && r.storedCents === r.targetCents) {
       reconciled++;
     } else {
       disagreed++;
+      /*
+       * Says which figure it was checked against, and names the freight where that is the gap.
+       *
+       * Reported against the header total, this row read "1 lines held summing $1,520.89 against a
+       * printed $1,530.89" on three invoices that were read perfectly — the difference being $10.00
+       * of shipping each time — and sent somebody to look at them. A disagreement has to be worth
+       * the walk.
+       */
+      const freight = r.totalCents !== null && r.targetCents !== null ? r.totalCents - r.targetCents : 0;
       lines.push(
-        `${r.supplier ?? "A supplier"} ${r.invoiceNumber ?? "(no number)"}: ${r.storedLines} lines held summing ${money(r.storedCents)} against a printed ${r.totalCents === null ? "total nobody found" : money(r.totalCents)}.`,
+        `${r.supplier ?? "A supplier"} ${r.invoiceNumber ?? "(no number)"}: ${r.storedLines} lines held summing ${money(r.storedCents)} ` +
+          `against ${r.targetCents === null ? "a total nobody found" : `goods of ${money(r.targetCents)}`}` +
+          `${freight !== 0 ? ` (the invoice totals ${money(r.totalCents!)}, the difference being ${money(freight)} of freight)` : ""}.`,
       );
     }
 
