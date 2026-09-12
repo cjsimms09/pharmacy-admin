@@ -1,0 +1,70 @@
+import Link from "next/link";
+import { requireUser } from "@/lib/auth";
+import { getSettings } from "@/lib/settings";
+import { FORMS } from "@/lib/manual";
+import { PageHeader, Card, Figure } from "@/components/ui";
+import { Hub } from "@/components/hub";
+
+export const dynamic = "force-dynamic";
+export const metadata = { title: "Records" };
+
+/**
+ * What the pharmacy can produce on request.
+ *
+ * The Board's question is never "do you have a system"; it is "show me the technician list for
+ * March". This page is the index to that: the forms, the agreements, the attestations, what
+ * arrived by email, and who did what. Everything an inspector asks for is one click from here,
+ * which is the only property that matters at the counter with somebody waiting.
+ */
+export default async function RecordsPage() {
+  await requireUser();
+  const s = await getSettings();
+  const pharmacy = s.pharmacy_name || "This pharmacy";
+
+  return (
+    <>
+      <PageHeader
+        title="Records"
+        subtitle={`Everything ${pharmacy === "This pharmacy" ? "this pharmacy" : pharmacy} keeps and can produce on request. Records held here are electronic on purpose — the Board's test is that they can be separated out quickly and easily during an inspection, and they can. No rule sets a number of hours.`}
+        actions={<Link href="/inspection" className="btn btn-primary">Inspection pack</Link>}
+      />
+
+      <div className="mb-6 grid gap-3 sm:grid-cols-3">
+        <Figure value={FORMS.length} label="Forms produced here" sub="Each one described in the manual's appendix" tone="ok" href="/forms" />
+        <Figure value="5 yrs" label="Retention" sub="Prescription and controlled substance records" tone="ok" />
+        {/*
+          This read "48 hrs", which no rule requires, and it was the most prominent statement of that
+          invented deadline anywhere in the site: a large number in a figure row, on the page about
+          records. The subtitle four lines above it was corrected in the same pass and this was
+          missed — a number rendered as a figure does not read like prose, and searching prose does
+          not find it.
+        */}
+        <Figure value="On request" label="Retrieval" sub="Separated out quickly and easily during an inspection. No rule sets a number of hours." tone="ok" />
+      </div>
+
+      <h2 className="mb-3">In this section</h2>
+      <Hub
+        href="/records"
+        items={[
+          { href: "/forms", label: "Forms", blurb: "Every form this pharmacy uses, and what each records" },
+          { href: "/documents", label: "Pharmacy documents", blurb: "Protocols, policies and everything else on file" },
+          { href: "/agreements", label: "Agreements", blurb: "Business associates and everyone else with access" },
+          { href: "/compliance/attestations", label: "Attestations", blurb: "Every standing duty confirmed, in the wording used" },
+          { href: "/inventory/invoices", label: "Supplier invoices", blurb: "What the wholesalers bill, filed by schedule, the C2s kept apart" },
+          { href: "/deliveries", label: "Driver invoices", blurb: "What the pharmacy raises for deliveries, one a month" },
+          { href: "/inbox", label: "Inbox", blurb: "Reports that arrived by email and what was made of them" },
+          { href: "/audit", label: "Activity log", blurb: "Who did what in this system, and when" },
+        ]}
+      />
+
+      <Card title="The one that cannot be electronic" tone="warn" className="mt-6">
+        <p className="text-sm text-ink-2">
+          Controlled substance inventories. K.A.R. 68-20-16 requires legible hard copy and 21 CFR 1304.11(a) requires
+          written, typewritten or printed form at the registered location — so the C-250 is printed, signed by everyone
+          who counted, filed on the premises, and scanned back in.{" "}
+          <Link href="/inventory" className="underline">Inventories</Link>.
+        </p>
+      </Card>
+    </>
+  );
+}

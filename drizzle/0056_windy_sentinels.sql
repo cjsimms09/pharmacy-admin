@@ -1,0 +1,1 @@
+ALTER TABLE `claims` ADD `expected_facilitator_cents` integer;

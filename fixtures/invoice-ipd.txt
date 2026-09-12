@@ -1,0 +1,145 @@
+# The text layer of an IPD (Independent Pharmacy Distributor) invoice PDF, as pdfText returns it.
+#
+# Identifiers changed: invoice number, account, DEA and state licence numbers, lot numbers,
+# addresses, telephone numbers. NDCs, quantities and prices are as printed — they identify
+# products, not people.
+#
+# Read it and the problem is plain: the columns do not survive extraction. Every NDC on a page
+# comes out as one unbroken run of digits, every quantity in another run, every price in a third.
+# Which figure belongs to which product was in the geometry of the page, not in the text, so no
+# regular expression can recover it. parseInvoiceLines() reads zero lines from this file, which is
+# correct — it refuses rather than guesses. The site now sends this layout to the model as a
+# document instead, and still requires every line to multiply out and the lines to add to the
+# printed total before any of it is stored.
+
+Independent Pharmacy Distributor, LLC
+Invoice
+ 9000001
+Attention:  
+Form #: 26X275
+Ship Date: 08/31/2026
+WES
+Purchase Order
+Customer ID
+External Lot External Lot External Lot External Lot 
+ 538.70  34.00  34.00 
+%%%% 574.70 
+ProductFed Pr 10:30amSales Order64850051301701650200307016500153064850051501Ship CII Subtotal:QuantityPrice 3 1 1 3 0  0  0  0 EACHEACHEACHEACHMG CAMG CA: (555) 000-0002CCMG ODEXAMPLE AVE CENTRA#: RI0000000#: AB1234567: www.ipdpharma.com10010030CT. C-2 , KS  00000, KS  00000COB/OExtension17.320305LOTAA0001LOTAA0002LOTAA0003LOTAA0004Product Name10th/25th, LLC046 3  1  1  3  102.00 538.70 574.70 102.00Salesperson
+ 0 0 0 0AMPHECOTEMPLADZENYS XR 9.4MG ODAMPHE
+02/28/202902/29/202810/31/202703/31/2029
+C-2 (P)C-2 (P)(B)DEState Lic#: 523Email: Customerservice@ipdpharma.comState CS Lic#: NC-DHHS-0000000
+AllocatedAllocatedAllocatedAllocatedNumberNumberNumberNumberNumberNumberNumberNumber
+000 EXAMPLE ST: USAState Lic#: 2-000000STE 5000 EXAMPLE ST, NC  00000USAGLN: 0000000000000
+Ship Phone:  (555) 000-0000
+Ship Fax:      (555) 000-0001
+67058
+Order Date: 08/31/2026
+LOTAA0001LOTAA0002LOTAA0003LOTAA0004
+Done
+Done
+DiscountUOM
+Ship 
+r
+NDC
+CII
+Page 1 of 3
+WES
+Sold 
+Continued on next page..
+5995
+Internal Lot Expiry DateQuantity 
+76174
+Internal Lot Expiry DateQuantity 
+76125
+Internal Lot Expiry DateQuantity 
+67090
+Internal Lot Expiry DateQuantity 
+$1,317.40 
+Independent Pharmacy Distributor, LLC
+Invoice
+ 9000001
+Attention:  
+Form #: 26X275
+Ship Date: 08/31/2026
+WES
+Purchase Order
+Customer ID
+External Lot External Lot External Lot External Lot External Lot External Lot 
+ 7.99  12.80  23.99  17.55 
+%%%%%%% 15.99  3.99  4.99 
+ProductFed Pr 10:30amSales Order72888001890317220723155049001704360153015199108180170436001306707000Ship QuantityPrice 1 1 2 3 2 2 2 0  0  0  0  0  0  0 EACHEACHEACHEACHEACHEACHEACHMGC: (555) 000-0002MG3X28EXAMPLE AVE CENTRA100CT#: RI0000000#: AB123456790: www.ipdpharma.com, KS  00000, KS  00000COB/OExtensionLOTAA0005LOTAA0006LOTAA0007LOTAA00081925.220MEQ Product Name10th/25th, LLC046 1  1  2  3  2  2  47.98 38.40 31.98 35.10 15.98 3.99 4.99Salesperson
+ 0 0 0 0 0 0 0SILDENAFISILDENAFIDESMOPRESSINPOPROPRANOLODESVENLAISIBLOOM (DESOGESTREL-EE 
+04/30/202910/31/202802/29/202802/28/202910/31/202810/31/2027
+(P)100CT.DEState Lic#: 523Email: Customerservice@ipdpharma.comState CS Lic#: NC-DHHS-0000000.15-30MG) 
+AllocatedAllocatedAllocatedAllocatedAllocatedAllocatedNumberNumberNumberNumberNumberNumberNumberNumberNumberNumberNumberNumber
+000 EXAMPLE ST: USAState Lic#: 2-000000STE 5000 EXAMPLE ST, NC  00000USAGLN: 0000000000000
+Ship Phone:  (555) 000-0000
+Ship Fax:      (555) 000-0001
+60
+Order Date: 08/31/2026
+A61071HE1E255559260159A2603126PK2541001925
+Placeholder for Report header that cannot be surpressed
+DiscountUOM
+Ship 
+r
+Continued on next page..
+NDC
+Non-CII
+Page 2 of 3
+WES
+Sold 
+5995
+Internal Lot Expiry DateQuantity 
+9
+Internal Lot Expiry DateQuantity 
+75580
+Internal Lot Expiry DateQuantity 
+91065
+Internal Lot Expiry DateQuantity 
+71282
+Internal Lot Expiry DateQuantity 
+91064
+Internal Lot Expiry DateQuantity 
+27631
+Independent Pharmacy Distributor, LLC
+Invoice
+ 9000001
+Attention:  
+Form #: 26X275
+Ship Date: 08/31/2026
+WES
+Purchase Order
+Customer ID
+Subtotal
+External Lot External Lot 
+ 6.95 
+%
+ProductFed Pr 10:30amSales Order33342008841Ship Non-CII Subtotal:QuantityPrice 2 0 EACHMG: (555) 000-0002$EXAMPLE AVE CENTRA#: RI0000000#: AB1234567: www.ipdpharma.com, KS  00000, KS  00000COB/OExtension5LOTAA0009LOTAA001010Product Name10th/25th, LLC046 2  2  13.90Salesperson
+ 0RIZ
+12/31/202710/31/2028
+3X6 (P)DEState Lic#: 523Email: Customerservice@ipdpharma.comState CS Lic#: NC-DHHS-0000000
+AllocatedAllocatedNumberNumberNumberNumber
+000 EXAMPLE ST: USAState Lic#: 2-000000STE 5000 EXAMPLE ST, NC  00000USAGLN: 0000000000000
+Freight
+Ship Phone:  (555) 000-0000
+Ship Fax:      (555) 000-0001
+Order Date: 08/31/2026
+LOTAA0009LOTAA0010
+Placeholder for Report header that cannot be surpressed
+DiscountUOM
+Ship 
+r
+NDC
+Page 3 of 3
+WES
+Sold 
+5995
+ 0.00 
+Internal Lot Expiry DateQuantity 
+90784
+Internal Lot Expiry DateQuantity 
+$192.32 
+Thank you for your order.
+ 1,509.72 
+US
+ 1,509.72 

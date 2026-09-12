@@ -1,0 +1,15 @@
+-- What PioneerRx recorded on each line of a delivery, kept as figures rather than as a sentence.
+--
+-- The nightly pull already wrote `items_text`, which is the lines flattened for a person to read:
+-- "70756009411 Propranolol 10 Mg Tablet 1 3.99". That is enough to show somebody and not enough to
+-- check against, because the unit cost is not in it and the description has spaces in it, so the
+-- only way to get the numbers back out is to guess which tokens are which.
+--
+-- The owner asked for the check this is for: "IS IT MAKING SURE WE GOT ALL THE ONES TO EXPECT AND
+-- MATCHING PRICE? ITS A GOOD CHECK FOR THE SYSTEM". Comparing what a wholesaler billed against what
+-- was actually booked in needs the NDC, the quantity, the unit cost and the extended amount as
+-- numbers on both sides. One side had them and threw them away.
+--
+-- `items_text` stays as it is. It is what the delivery looks like on screen, and nothing reads it
+-- for arithmetic any more.
+ALTER TABLE pioneer_purchases ADD COLUMN items_json text NOT NULL DEFAULT '';

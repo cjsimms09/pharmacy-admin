@@ -1,0 +1,378 @@
+import "server-only";
+import path from "node:path";
+import { db, schema } from "@/db";
+import { getSettings } from "./settings";
+import { filesDir } from "./files";
+import { todayIso, daysBetween } from "./dates";
+
+/**
+ * Whether this pharmacy's invoice records actually meet the rules, checked rather than asserted.
+ *
+ * The question asked was "make sure invoice storage is compliant", and the honest way to answer
+ * that is not a paragraph claiming it is. It is a list of what each rule requires, what this
+ * system does about it, and — where the requirement depends on how the pharmacy has things set
+ * up rather than on the code — whether it is actually satisfied right now.
+ *
+ * Two of these can fail on a correctly written system: the records have to be at the registered
+ * location, and they have to survive. A cloud-only store would breach the first; a backup on the
+ * same disk as the records fails the second. Both are settings, so both are checked.
+ */
+
+export type Requirement = {
+  key: string;
+  /** The rule, cited exactly. */
+  citation: string;
+  /** What it requires, in plain words. */
+  requires: string;
+  /** What this system does about it. */
+  how: string;
+  /** ok: satisfied. attention: depends on something the pharmacy has not done. */
+  state: "ok" | "attention";
+  /** What to do, when it is not satisfied. */
+  fix?: string;
+  href?: string;
+  /**
+   * The thing that actually clears this line, offered where it is raised.
+   *
+   * A panel that names a shortfall and links to a page is a panel that has done half the job. Every
+   * one of these links landed on a screen with the control somewhere on it — the receipt setting at
+   * the top of a long invoice page, the sending address behind an Edit on a supplier card — and the
+   * reading, fairly, was "no way to fix these". The finding and the fix belong in the same place.
+   */
+  settle?:
+    | { kind: "receipt_kept_in"; current: string }
+    | { kind: "supplier_address"; suppliers: { id: string; name: string }[] };
+};
+
+/** Kansas requires pharmacy records for five years; the DEA requires two. The longer one governs. */
+export const RETENTION_YEARS = 5;
+
+export async function invoiceCompliance(): Promise<Requirement[]> {
+  const [s, rows] = await Promise.all([getSettings(), db.query.supplierInvoices.findMany()]);
+  const out: Requirement[] = [];
+
+  const unconfirmed = rows.filter((r) => r.needsReview && !r.reviewedAt).length;
+  const undated = rows.filter((r) => !r.invoiceDate).length;
+
+  // ── Separation of Schedule II ─────────────────────────────────────
+  out.push({
+    key: "separation-2",
+    citation: "21 CFR 1304.04(h)(1)",
+    requires:
+      "Records of Schedule II controlled substances must be maintained separately from all other records of the registrant.",
+    how:
+      "Every invoice carrying a Schedule II line is filed under a document category no other document uses, written to " +
+      "its own directory on disk, and listed on a screen that contains nothing else. An invoice the reader was not " +
+      "certain about is held with the Schedule II records rather than with the others, because the only unsafe " +
+      "direction is the other one.",
+    state: unconfirmed > 0 ? "attention" : "ok",
+    fix:
+      unconfirmed > 0
+        ? `${unconfirmed} invoice${unconfirmed === 1 ? " is" : "s are"} held with the Schedule II records awaiting confirmation. That is the cautious side, but they should be resolved so the Schedule II list contains only Schedule II records.`
+        : undefined,
+    href: "/inventory/invoices?unconfirmed=1",
+  });
+
+  out.push({
+    key: "separation-3-5",
+    citation: "21 CFR 1304.04(h)(2)",
+    requires:
+      "Records of Schedules III, IV and V must be maintained either separately from all other records, or in a form " +
+      "where the required information is readily retrievable from the pharmacy's ordinary business records.",
+    how:
+      "They are maintained separately, which satisfies the stricter of the two routes the rule allows — and they are " +
+      "also readily retrievable, by supplier, month, date, amount, drug name and invoice number.",
+    state: "ok",
+  });
+
+  // ── Readily retrievable ───────────────────────────────────────────
+  out.push({
+    key: "retrievable",
+    citation: "21 CFR 1300.01(b), definition of “readily retrievable”",
+    requires:
+      "Records must be kept in such a manner that they can be separated out from all other records in a reasonable " +
+      "time.",
+    how:
+      "Any schedule, for any date or range of dates, is one filter and returns nothing else. Invoices with no date " +
+      "read from them are the exception, because a record outside every date range cannot be produced by one.",
+    state: undated > 0 ? "attention" : "ok",
+    fix:
+      undated > 0
+        ? `${undated} invoice${undated === 1 ? " has" : "s have"} no date, so ${undated === 1 ? "it does" : "they do"} not come back in a date range. Put the date from the invoice on each.`
+        : undefined,
+    href: "/inventory/invoices?undated=1",
+  });
+
+  // ── Where the records live ────────────────────────────────────────
+  /*
+   * The location requirement is the one an electronic system is most likely to breach by accident,
+   * because storing things "in the cloud" is the default instinct and it is the wrong one here.
+   */
+  const localStore = path.resolve(filesDir());
+  out.push({
+    key: "location",
+    citation: "21 CFR 1304.04(a)",
+    requires:
+      "Records must be maintained at the registered location. Financial and shipping records such as invoices may be " +
+      "kept at a central location only if the registrant has notified the Administration in advance.",
+    how:
+      `Invoices are stored on this computer, at the registered location — ${localStore}. Nothing is held only ` +
+      "elsewhere, so no central-recordkeeping notification is required. Backups are copies, not the record.",
+    state: "ok",
+  });
+
+  // ── Retention ─────────────────────────────────────────────────────
+  const oldest = rows.map((r) => r.invoiceDate).filter(Boolean).sort()[0] ?? null;
+  out.push({
+    key: "retention",
+    citation: "21 CFR 1304.04(a); Kansas pharmacy record retention",
+    requires:
+      "Federal law requires these records to be kept for at least two years. Kansas requires pharmacy records to be " +
+      "kept for five, and the longer period governs.",
+    how:
+      `Nothing here is ever deleted. There is no route in this system that removes a filed invoice, and the oldest ` +
+      `held is ${oldest ?? "the first one received"}. Retiring a supplier keeps every invoice filed against them.`,
+    state: "ok",
+  });
+
+  // ── Availability for inspection ───────────────────────────────────
+  out.push({
+    key: "inspection",
+    citation: "21 CFR 1304.04(a); K.A.R. 68-7-11",
+    requires: "Records must be available for inspection and copying by authorised officials.",
+    how:
+      "Any invoice opens as the original PDF the supplier sent, and any selection can be emailed on as attachments. " +
+      "Every send is recorded — who, what, when, and whether Schedule II records were in it — because forwarding one " +
+      "of those is a disclosure.",
+    state: "ok",
+  });
+
+  // ── Survival ──────────────────────────────────────────────────────
+  /*
+   * Not a DEA requirement in these words, but the one that decides whether any of the others mean
+   * anything. Records that exist only on a disk that fails are records the pharmacy cannot produce,
+   * and "the computer died" is not a defence anybody has ever succeeded with.
+   */
+  const backupDir = (s.backup_destination ?? "").trim();
+  const secondary = [(s.backup_destination_2 ?? "").trim(), (s.backup_destination_3 ?? "").trim()]
+    .filter(Boolean)
+    .join(" and ");
+  const sameDisk =
+    !backupDir || path.resolve(backupDir).startsWith(path.resolve(path.dirname(localStore)));
+  const ranAt = s.backup_last_run ? Date.parse(s.backup_last_run) : NaN;
+  const backupStale = !Number.isFinite(ranAt) || (Date.now() - ranAt) / 3_600_000 > 50;
+
+  out.push({
+    key: "survival",
+    citation: "Not a citation — the condition every other line depends on",
+    requires:
+      "A record the pharmacy cannot produce is a record it does not have, whatever the reason. Two copies, in places " +
+      "that do not fail together.",
+    how: backupDir
+      ? `Every invoice is included in the verified daily backup to ${backupDir}${secondary ? `, and copied to ${secondary}` : ""}.`
+      : "Backups are not configured, so these records exist in one place only.",
+    state: !backupDir || sameDisk || !secondary || backupStale ? "attention" : "ok",
+    fix:
+      !backupDir
+        ? "No backup destination is set. Everything here exists on one disk."
+        : sameDisk
+          ? "Backups are written to the application's own data folder, on the same disk as the records they protect. A failed drive takes both."
+          : !secondary
+            ? "There is one copy of each backup. That covers this computer dying; it does not cover the backup drive dying, or a fire."
+            : backupStale
+              ? "No backup has completed in the last two days."
+              : undefined,
+    href: "/settings/backups",
+  });
+
+  /*
+   * ── Whether the paper can go ──────────────────────────────────────
+   *
+   * The question actually asked, and it has two different answers depending on how the invoice
+   * arrived — which is why it is worth separating rather than answering in general.
+   *
+   * An invoice emailed by the wholesaler is the original. No paper ever existed, the PDF is the
+   * record, and there is nothing to keep or destroy. That is the whole of this pharmacy's McKesson,
+   * IPC and IPD feed.
+   *
+   * An invoice that came on paper and was scanned is different. The system now holds a copy, and
+   * the DEA has never issued a rule saying the paper original may be destroyed once it has been
+   * imaged. Plenty of pharmacies do it; that is not the same as being authorised to. So this says
+   * how many are in each class and does not pretend the second question is settled.
+   */
+  const emailed = rows.filter((r) => /@/.test(r.receivedFrom ?? "")).length;
+  const uploaded = rows.length - emailed;
+  /*
+   * Counted over the rows the link actually shows.
+   *
+   * This counted every invoice with no receipt recorded — 23 — and offered a link to a list built
+   * by `awaitingReceipt`, which keeps only the controlled ones — 5. So eighteen invoices held this
+   * requirement at "attention" for ever and could not be reached from the button offered to settle
+   * it. The narrowing is right: 21 CFR 1304.22(c) asks for a receipt record for controlled
+   * substances, and a bill for bottles and vitamins needs none. It was only ever the count that
+   * disagreed with it.
+   */
+  const unreceipted = rows.filter((r) => !r.receivedOn && r.schedule !== "none").length;
+
+  out.push({
+    key: "originals",
+    citation: "21 CFR 1304.04(a); 21 CFR 1300.01(b)",
+    requires:
+      "The record has to be kept, be at the registered location, and be producible. Where the record itself is " +
+      "electronic, that is the whole of it. Where it began as paper, nothing in the regulations says the paper may be " +
+      "destroyed once it has been scanned.",
+    how:
+      `${emailed} of these invoices were emailed by the wholesaler, so the PDF held here is the original record and ` +
+      `there is no paper to keep. ${uploaded} ${uploaded === 1 ? "was" : "were"} added by hand — if any of those ` +
+      "began life on paper, this system holds an image of it and not the thing itself.",
+    state: uploaded > 0 ? "attention" : "ok",
+    fix:
+      uploaded > 0
+        ? "Keep the paper for anything that arrived on paper until you have asked. The DEA field office and the " +
+          "Kansas Board will both answer it, and the answer is worth having in writing before anything is thrown away."
+        : undefined,
+    href: "/inventory/invoices",
+  });
+
+  /*
+   * ── The record of receipt ─────────────────────────────────────────
+   *
+   * The half that decides whether the paper can actually go. An emailed invoice proves what the
+   * wholesaler shipped; it does not prove what arrived. That is what the initials and the date on
+   * a paper packing slip are, and once somebody has written on it, that paper is the record of
+   * receipt rather than a duplicate — so it has to be kept.
+   *
+   * Recorded here instead, the electronic record carries the same facts and the paper is redundant.
+   */
+  /*
+   * Where the receipt record actually lives.
+   *
+   * This pharmacy checks its totes in against the wholesaler's own ordering system, which is where
+   * receipt is recorded and has been all along. Asking for it a second time here was duplicate work
+   * with a regulation attached, and the panel sat permanently red about a record that exists. So
+   * the pharmacy names the system once and this line reports the truth: the record is kept, and
+   * where. What it does not do is pretend the location is unimportant — 1304.04(a) wants records
+   * produced at the registered location on request, so the fix names that as the thing to be able
+   * to do, rather than another form to fill in here.
+   */
+  const receiptElsewhere = (s.receipt_record_kept_in ?? "").trim();
+  out.push({
+    key: "receipt",
+    citation: "21 CFR 1304.22(c)",
+    requires:
+      "The record for controlled substances received must show the date received and the quantity, and for Schedule " +
+      "II, the number of commercial containers received.",
+    how: receiptElsewhere
+      ? `Receipt is confirmed in ${receiptElsewhere} as each order is checked in, which is where this pharmacy's ` +
+        "record of what arrived and when is held. The invoice held here is the record of what was shipped; the two " +
+        "together are the account of the order. Receipt can also be recorded against an invoice here where it is " +
+        "useful, but nothing is asked for."
+      : `The invoice records what was shipped. Whether it arrived, on what date and whether it matched is recorded ` +
+        `against the invoice here: ${rows.length - unreceipted} of ${rows.length} confirmed received, with the name of ` +
+        "whoever checked it in and a note where anything was short or damaged.",
+    state: receiptElsewhere ? "ok" : unreceipted > 0 ? "attention" : "ok",
+    fix: receiptElsewhere
+      ? `Be able to produce ${receiptElsewhere}'s receipt history at the pharmacy during an inspection — printed or on ` +
+        "screen. That is what 1304.04(a) asks of a record kept electronically, wherever it is kept."
+      : unreceipted > 0
+        ? `${unreceipted} invoice${unreceipted === 1 ? " has" : "s have"} no record that the goods arrived. Until that is here, the initialled packing slip in the tote is the pharmacy's receipt record and must be kept — which is the whole reason to record it. If you confirm receipt in the wholesaler's own system instead, say so on the Invoices page and this stops asking.`
+        : undefined,
+    href: "/inventory/invoices?unreceipted=1",
+    settle: { kind: "receipt_kept_in", current: receiptElsewhere },
+  });
+
+  /*
+   * ── The one this system does not hold ─────────────────────────────
+   *
+   * A compliance panel that lists what it does well and stays silent about what it does not is
+   * worse than no panel, because it is read as complete. Paper DEA Form 222s are the gap: they are
+   * not invoices, they do not arrive by email, nothing here touches them, and they have a
+   * retention rule of their own that no amount of good invoice filing satisfies.
+   */
+  out.push({
+    key: "order-forms",
+    citation: "21 CFR 1305.17(a), (c)",
+    requires:
+      "Copy 3 of every executed paper DEA Form 222 must be retained by the purchaser, with the number of packages " +
+      "received and the date recorded on it, for at least two years. Electronic CSOS orders are retained electronically.",
+    how:
+      "Not held here, and not something invoice filing can satisfy. An order form is a different record from the " +
+      "invoice for the same goods, and this system holds the invoice.",
+    state: "attention",
+    fix:
+      "Keep paper 222s exactly as you do now. If you order Schedule II through CSOS instead, those records live in the " +
+      "CSOS system and this line does not apply to them.",
+    href: "/inventory/power-of-attorney",
+  });
+
+  // ── The feed itself ───────────────────────────────────────────────
+  const suppliers = await db.query.suppliers.findMany();
+  const active = suppliers.filter((x) => x.active);
+
+  /*
+   * ── Who is actually worth asking for an address ──
+   *
+   * This asked for one from every active supplier without an address, and said their invoices "will
+   * not be recognised". Both halves were wrong, and the owner had to be the one to say so:
+   * "Cardinal, Rrc and top rx arent going to get invoices, theyre set to use pioneer as invoice",
+   * and "anda we will get when they send us first invoice and we should capture it automatically".
+   *
+   * A settled supplier is one whose PioneerRx receipt *is* the invoice — his decision, on the
+   * supplier card. No document is coming from them, so an address would do nothing and asking for
+   * it is asking him to go and get something that does not exist. The deliveries check on the same
+   * page has excluded these all along and says so in a line; this one had never been told.
+   *
+   * And for the rest, "will not be recognised" is not true. `looksLikeInvoiceFromUnknownSender` in
+   * mailbox.ts catches an invoice from an address nobody has registered — on the document's own
+   * words, two or more lines each carrying an NDC and a price — and raises it in the Inbox with the
+   * supplier its page names. Naming them there writes the address onto the register and the next
+   * one files itself. So a first invoice from ANDA is captured; what it needs is one press, not an
+   * address typed in ahead of time on the strength of a guess about who they email from.
+   *
+   * Which leaves this line saying something true and much smaller: an address saves that one press.
+   */
+  const settled = active.filter((x) => x.invoiceFromPioneer);
+  const missing = active.filter((x) => !x.senderEmails.trim() && !x.invoiceFromPioneer);
+  out.push({
+    key: "capture",
+    citation: "Not a citation — the condition that makes the archive complete",
+    requires:
+      "Every invoice the pharmacy receives has to reach the archive. A record that never arrived cannot be produced " +
+      "either, and nothing about a well-kept archive reveals that it is missing one.",
+    how:
+      active.length > 0
+        ? `${active.length - settled.length} supplier${active.length - settled.length === 1 ? " is" : "s are"} recognised by the address they send from, ` +
+          `and silence from one that used to write is reported. An invoice from an address nobody has registered is still ` +
+          `recognised from its own page and raised in the Inbox for you to name the sender.` +
+          /*
+           * Named while there are few, counted once there are many. Ten names is a wall of text on
+           * a phone, and the fact worth carrying is that they are excluded on purpose and where to
+           * change it — not which ten.
+           */
+          (settled.length === 0
+            ? ""
+            : settled.length <= 3
+              ? ` ${settled.map((x) => x.name).join(", ")} ${settled.length === 1 ? "is" : "are"} not counted: you have said their PioneerRx receipt is the invoice.`
+              : ` ${settled.length} more are not counted: you have said their PioneerRx receipt is the invoice. Change that on their card under Suppliers.`)
+        : "No supplier is recorded, so nothing arriving by email will be filed as an invoice.",
+    /*
+     * Not "attention". Nothing is being missed — the first invoice from an unregistered sender is
+     * caught either way, and this only saves a press on it. A page that shouts about everything is
+     * a page he stops reading.
+     */
+    state: active.length === 0 ? "attention" : "ok",
+    fix:
+      active.length === 0
+        ? "Add the wholesalers and the addresses they send invoices from, or nothing will be filed automatically."
+        : missing.length
+          ? `${missing.map((x) => x.name).join(", ")} ${missing.length === 1 ? "has" : "have"} no sending address yet, so the first invoice from ${missing.length === 1 ? "them" : "each"} arrives in the Inbox to be named rather than filing itself. Naming it there records the address, and the ones after it file themselves.`
+          : undefined,
+    href: "/suppliers",
+    settle: missing.length ? { kind: "supplier_address", suppliers: missing.map((x) => ({ id: x.id, name: x.name })) } : undefined,
+  });
+
+  void todayIso;
+  void daysBetween;
+  void schema;
+  return out;
+}

@@ -1,0 +1,14 @@
+-- Suppliers whose PioneerRx receipt is the invoice.
+--
+-- The owner: "I should have an option on a supplier to use pioneers receipts as invoice for that
+-- supplier (ie Xymogen supplier)... there are a couple suppliers where I'd rather just use the
+-- pioneers invoice as the invoice."
+--
+-- The money already worked either way: the cash account takes every PioneerRx purchase no invoice
+-- covers, so nothing was uncounted. What did not work was the chasing. A wholesaler that never
+-- emails an invoice produced a permanent line on the list of invoices to go and find, and a list
+-- that always has something on it that nobody intends to act on is a list nobody reads.
+--
+-- So this is not about the arithmetic. It is about which suppliers he has decided he is not waiting
+-- on, and it belongs to him rather than to a rule.
+ALTER TABLE suppliers ADD COLUMN invoice_from_pioneer integer DEFAULT 0 NOT NULL;

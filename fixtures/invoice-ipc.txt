@@ -1,0 +1,130 @@
+# The text layer of an IPC (Independent Pharmacy Cooperative) invoice PDF, as pdfText returns it.
+#
+# Identifiers changed: invoice number, account and licence numbers, addresses, telephone numbers.
+# NDCs, quantities and prices are as printed — they identify products, not people.
+#
+# This layout does survive extraction: one line per item, item number, description with the pack
+# size run onto its end, an eleven-digit NDC, WAC, AWP, an optional note code, the order and ship
+# quantities run together with no separator, unit price and extended amount. The run-together
+# quantities are the only real trap — "11" is one ordered and one shipped, or eleven ordered and
+# one — and splitQuantities() settles it by arithmetic: shipped times unit price is the extended
+# amount, and only one split satisfies that. All 21 lines here read, and they add to the printed
+# total exactly.
+
+Invoice Num:9000002
+Invoice Date:9/3/2026
+INVOICE
+9000003
+Order Num:
+Independent Pharmacy Cooperative
+Pick Num:WK000000000
+Phone: 1-800-755-1531
+Page:1 of 2
+Fax: 1-855-424-6900
+Customer DEA:AB1234567
+www.ipcrx.com
+Bill To:
+Ship To:
+EXAMPLE PHARMACY
+EXAMPLE PHARMACY
+000 EXAMPLE ST
+000 EXAMPLE ST
+SUITE 5
+SUITE 5
+Anytown, KS  00000
+Anytown, KS  00000
+Cust#Cust POCommentsTerms
+*** Please note NR code for Not Returnable items ***
+106896484389ACH - Withdrawal date 09/10/26
+     ItemNote Order Ship      Unit     Extended
+     Description
+     Nbr       NDCWACAWPCdQtyQty     Price     Amount
+5128541Amoxicillin/Clav Pot Tabs 500/125mg Auro 65862050220$8.80$75.6911$2.91$2.91
+20
+5244058Azithromycin Susp 200mg/5ml Epic 30ml42806015134$15.00$34.8811$2.64$2.64
+5173208Benazepril Hcl Tabs 20mg Solc 10043547033710$12.00$105.0011$3.96$3.96
+5270061Clobetasol Propionate Crea 0.05% Enc 21922001606$15.00$384.6911$3.13$3.13
+45gm
+5306139Clobetasol Propionate Soln 0.05% Enc 50ml21922006127$20.00$206.3511$3.15$3.15
+w
+5309497Estradiol Vaginal 10mcg Inserts Auro 1859651043918$349.17$436.4611$53.00$53.00
+5226501Fenofibrate Tabs 145mg Auro 9065862076990$20.00$515.5811$4.60$4.60
+5308259Fluoxetine Tabs 60mg Sci 3050228063830$9.75$313.2511$2.34$2.34
+5247762Fluticasone/Salmeterol 250/50mcg Pras 6066993058597$116.44$444.3611$39.90$39.90
+5302997Fluvoxamine Maleate Tabs 100mg Bion 10069452045520$32.58$264.1411$11.10$11.10
+5292925Leflunomide Tabs 10mg Zyd 3070710115703$32.80$492.1611$3.15$3.15
+5307632Liothyronine Sodium Tabs 5mcg Bioc 10070377011412$40.00$79.2111$8.26$8.26
+5308564Norelgest/Est TDS 150/35mcg Zyd 370710119003$122.15$152.6911$63.38$63.38
+5149950Ondansetron ODT 8mg Auro 3065862039110$25.35$1,113.9511$2.86$2.86
+5328992Sacubitril/Valsartan Tabs 49mg/51mg Novu 82293002820$246.00$1,640.8211$23.79$23.79
+180
+5230073Timolol Maleate Oph Sol 0.25% San 5ml61314022605$5.17$15.0022$1.83$3.66
+5286372Tolterodine Tart Er Caps 2mg ANI 3043975032203$10.00$24.0022$3.53$7.06
+5227103Triamcinolone Ace Oint 0.025% Cos 15gm00713022915$3.07$6.1211$2.06$2.06
+5294806Triamterene/Hctz Caps 37.5/25mg San 00781207410$203.96$360.6811$40.95$40.95
+1000
+5281274Trospium Chloride Tabs 20mg Glen 6068462046160$47.61$170.2611$5.92$5.92
+5282579Zolmitriptan Tabs 2.5mg Glen 668462049776$25.18$332.6711$2.41$2.41
+Shipped FromPlease Remit To
+IPC
+1550 Columbus Street
+Sun Prairie, WI 53590
+1550 Columbus Street
+USA
+Sun Prairie, WI  53590
+Thank you for your order
+t = Taxed Itemn = Net Priced Genericw = Web Special*** Please note NR code for Not Returnable items ***
+Note Codes:
+A finance charge of 0.75% twice a month will be charged on all past due invoices. $25 returned check/ACH Fee.  Each member has the sole responsibility to convey IPC discounts to third 
+party payers if required by law.  Representation By Purchaser:  I have all State & Federal licenses required to purchase buy & receive prescription drugs.
+Notice: Independent Pharmacy Cooperative is a NAPB (formerly VAWD) accredited wholesaler. We are fully compliant with both Federal and State laws as it pertains to your pedigree tracking requirements. Visit our 
+website at www.ipcrx.com for further information. If you require an IPC login, please email memberservices@ipcrx.com or call 1-800-755-1531.
+Invoice Num:9000002
+Invoice Date:9/3/2026
+INVOICE
+9000003
+Order Num:
+Independent Pharmacy Cooperative
+Pick Num:WK000000000
+Phone: 1-800-755-1531
+Page:2 of 2
+Fax: 1-855-424-6900
+Customer DEA:AB1234567
+www.ipcrx.com
+Bill To:
+Ship To:
+EXAMPLE PHARMACY
+EXAMPLE PHARMACY
+000 EXAMPLE ST
+000 EXAMPLE ST
+SUITE 5
+SUITE 5
+Anytown, KS  00000
+Anytown, KS  00000
+Cust#Cust POCommentsTerms
+*** Please note NR code for Not Returnable items ***
+106896484389ACH - Withdrawal date 09/10/26
+     ItemNote Order Ship      Unit     Extended
+     Description
+     Nbr       NDCWACAWPCdQtyQty     Price     Amount
+Sub Total$290.23
+Shipped FromPlease Remit To
+Discounts$0.00
+IPC
+1550 Columbus Street
+Credit Card Surcharge$0.00
+*Do Not Send Payment*  ACH - 
+Sun Prairie, WI 53590
+1550 Columbus Street
+Withdrawal date 09/10/26
+Shipping/Handling$0.00
+USA
+Sun Prairie, WI  53590
+Tax$0.00
+Total Due$290.23
+t = Taxed Itemn = Net Priced Genericw = Web Special*** Please note NR code for Not Returnable items ***
+Note Codes:
+A finance charge of 0.75% twice a month will be charged on all past due invoices. $25 returned check/ACH Fee.  Each member has the sole responsibility to convey IPC discounts to third 
+party payers if required by law.  Representation By Purchaser:  I have all State & Federal licenses required to purchase buy & receive prescription drugs.
+Notice: Independent Pharmacy Cooperative is a NAPB (formerly VAWD) accredited wholesaler. We are fully compliant with both Federal and State laws as it pertains to your pedigree tracking requirements. Visit our 
+website at www.ipcrx.com for further information. If you require an IPC login, please email memberservices@ipcrx.com or call 1-800-755-1531.

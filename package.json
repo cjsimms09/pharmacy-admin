@@ -1,0 +1,56 @@
+{
+  "name": "pharmacy-admin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Private pharmacy operations desk (compliance, purchasing, reconciliation)",
+  "scripts": {
+    "dev": "npm run db:migrate && next dev",
+    "build": "next build",
+    "start": "npm run db:migrate && next start",
+    "typecheck": "tsc --noEmit",
+    "lint": "next lint",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "setup": "npm install && npm run db:migrate && tsx scripts/create-user.ts",
+    "user:create": "tsx scripts/create-user.ts",
+    "launch": "node scripts/launch.mjs",
+    "deploy": "node scripts/deploy.mjs",
+    "test": "tsx --tsconfig tsconfig.test.json --test tests/*.test.ts",
+    "check": "npm run typecheck && npm run test && npm run build",
+    "claude": "node scripts/claude-here.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.123.0",
+    "@libsql/client": "^0.18.0",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/nodemailer": "^8.0.1",
+    "bcryptjs": "^3.0.3",
+    "drizzle-orm": "^0.45.2",
+    "imapflow": "^1.7.8",
+    "mailparser": "^3.9.20",
+    "mssql": "^12.7.1",
+    "next": "^15.5.25",
+    "nodemailer": "^9.1.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "ssh2-sftp-client": "^12.1.1",
+    "tailwindcss": "^4.3.3",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/mailparser": "^3.4.6",
+    "@types/mssql": "^12.3.0",
+    "@types/node": "^22.19.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@types/ssh2-sftp-client": "^9.0.6",
+    "dotenv": "^17.4.2",
+    "drizzle-kit": "^0.31.10",
+    "server-only": "^0.0.1",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=20.9"
+  }
+}

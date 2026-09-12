@@ -1,0 +1,1 @@
+ALTER TABLE `trainings` ADD `manual_revision` text;

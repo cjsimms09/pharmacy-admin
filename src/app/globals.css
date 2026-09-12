@@ -1,0 +1,272 @@
+@import "tailwindcss";
+
+@theme {
+  /*
+    Paper, ink, and one working colour.
+
+    The ground is warm paper rather than grey, the surfaces are white, the ink is near-black with
+    the warmth of the paper in it, and the accent is the pharmacy's green. Nothing else on the page
+    is coloured unless it is a state — good, watch, wrong — and a state colour is never used for
+    decoration, so that when a figure is red it is red for a reason.
+  */
+  --color-ground: #f6f4ef;
+  --color-surface: #ffffff;
+  --color-line: #e7e3da;
+  --color-line-strong: #cfc9bd;
+  --color-ink: #1f1d1a;
+  --color-ink-2: #5b5750;
+  --color-ink-3: #8a857c;
+  --color-accent: #0f6e63;
+  --color-accent-strong: #0b5a51;
+  --color-accent-soft: #e6f2ef;
+  --color-accent-line: #9dd3c9;
+  --color-warn: #a35a00;
+  --color-warn-soft: #fbf1e2;
+  --color-crit: #b3261e;
+  --color-crit-soft: #fbe9e7;
+
+  --font-sans: "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", "Consolas", ui-monospace, monospace;
+
+  /*
+    The type scale, read from a desk chair rather than leaned into.
+
+    Fifteen-pixel body, fourteen for tables, twelve for captions; a title that is a title. The
+    previous scale was one step tighter and the owner's verdict was that the site was unreadable.
+    Fewer rows fit on a screen, and a screen full of rows was never the point.
+  */
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.125rem;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.375rem;
+  --text-base: 0.9375rem;
+  --text-base--line-height: 1.5rem;
+  --text-lg: 1.0625rem;
+  --text-lg--line-height: 1.625rem;
+  --text-xl: 1.25rem;
+  --text-xl--line-height: 1.75rem;
+  --text-2xl: 1.5rem;
+  --text-2xl--line-height: 2rem;
+  --text-3xl: 1.875rem;
+  --text-3xl--line-height: 2.25rem;
+  --text-4xl: 2.25rem;
+  --text-4xl--line-height: 2.5rem;
+
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+
+  /* Two levels of lift and no more: resting on the page, and floating above it. */
+  --shadow-rest: 0 1px 2px rgba(31, 29, 26, 0.05), 0 4px 14px -8px rgba(31, 29, 26, 0.12);
+  --shadow-lift: 0 12px 32px -12px rgba(31, 29, 26, 0.28), 0 2px 6px -2px rgba(31, 29, 26, 0.08);
+}
+
+html { color-scheme: light; }
+body { @apply bg-ground text-ink antialiased; font-size: 0.9375rem; line-height: 1.5rem; font-feature-settings: "cv11", "ss01", "tnum" 0; }
+
+/*
+  Four steps of hierarchy and nothing styled ad hoc.
+
+  A page has one h1, a section has an h2, a thing inside a section has an h3, and everything else
+  is body or a caption. The title is large and heavy: it is the first thing the eye lands on, and
+  it says where you are in two words.
+*/
+@layer base {
+  h1 { @apply text-3xl font-bold tracking-tight text-ink; }
+  h2 { @apply text-lg font-semibold text-ink; }
+  h3 { @apply text-base font-semibold text-ink; }
+  code, pre, kbd { @apply font-mono text-[0.85em]; }
+  ::selection { background: var(--color-accent-soft); }
+
+  /*
+    A closed <details> hides its own content here, not in the browser.
+
+    It is supposed to hide everything but the summary, and in Chrome it does. Where the content is
+    absolutely positioned — every popover in this site is — WebKit lets it paint anyway, so the
+    "more" menu and the Send-to-Claude panel stood open on every screen for anybody not on Chrome.
+    Fixing the two of them by name left the next one to be written broken in the same way, so it is
+    said once, in the base layer, for every <details> there is or will be.
+
+    Specificity: this is (0,1,2) — `details` and `:not(summary)` are elements, `[open]` an
+    attribute — so a component rule that opens a panel with `[open]` (0,2,1) still wins, and one
+    that only styles the closed panel does not fight it.
+  */
+  details:not([open]) > *:not(summary) { display: none; }
+}
+
+@layer components {
+  /* ── controls: one height, pill-shaped, three weights ──────── */
+  .btn {
+    @apply inline-flex h-9 items-center justify-center gap-1.5 whitespace-nowrap rounded-full border border-line bg-surface px-4 text-sm font-medium text-ink transition-colors hover:border-line-strong hover:bg-ground focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-primary { @apply border-accent bg-accent text-white hover:border-accent-strong hover:bg-accent-strong; }
+  .btn-danger { @apply border-line text-crit hover:border-crit hover:bg-crit-soft; }
+  .btn-sm { @apply h-8 px-3 text-xs; }
+
+  /* ── surfaces: white on paper, no rule around them ──────────── */
+  .card { @apply rounded-xl bg-surface p-5; box-shadow: var(--shadow-rest); }
+  .section { @apply rounded-xl bg-surface; box-shadow: var(--shadow-rest); }
+  .section-head { @apply flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-3; }
+  .section-title { @apply text-base font-semibold text-ink; }
+  .section-body { @apply px-5 py-4; }
+  /* A card's header: title on the left, actions on the right, a hairline under it. */
+  .card-head { @apply -mx-5 -mt-5 mb-4 flex min-h-12 flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-3; }
+  .card-head h2 { @apply text-base font-semibold; }
+  .card-sub { @apply -mt-2 mb-4 text-sm leading-relaxed text-ink-2; }
+
+  /*
+    A figure the page is answering with.
+
+    Label above, figure below, note under: the order a person reads a scoreboard in. The figure is
+    large and ink, not coloured; colour is kept for the state, so the one red figure on a page of
+    black ones is the one to look at.
+  */
+  .kpi { @apply relative rounded-xl bg-surface px-5 py-4; box-shadow: var(--shadow-rest); }
+  .kpi-label { @apply text-xs font-medium text-ink-3; }
+  .kpi-value { @apply mt-1.5 text-3xl font-bold leading-none tracking-tight tabular-nums text-ink; }
+  .kpi-sub { @apply mt-2 text-xs leading-snug text-ink-2; }
+  .kpi-warn::before, .kpi-crit::before, .kpi-ok::before { content: ""; @apply absolute inset-y-4 left-0 w-1 rounded-r; }
+  .kpi-warn::before { background: var(--color-warn); }
+  .kpi-crit::before { background: var(--color-crit); }
+  .kpi-ok::before { background: var(--color-accent); }
+  .kpi-crit .kpi-value { @apply text-crit; }
+  /*
+    Amber marks the tile, not the number.
+
+    A warn tile means the reading is qualified — the account has lines not yet in, a feed is stale —
+    and painting the figure itself amber made a perfectly good profit of $2,180.29 read as a bad
+    number. Three different meanings were arriving in one colour: money at risk, a decision waiting,
+    and a caveat on the arithmetic.
+
+    The bar down the left carries the state, the sub-line says what the caveat is, and the number stays
+    legible. Crit still colours the value, because there it is the number that is bad.
+  */
+  a.kpi { @apply transition-shadow; }
+  a.kpi:hover { box-shadow: var(--shadow-lift); }
+
+  /* ── form ───────────────────────────────────────────────────── */
+  .field { @apply block w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-3 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent; }
+  input[type="text"], input[type="date"], input[type="email"], input[type="number"], input[type="search"],
+  input[type="password"], input[type="url"], input[type="tel"], input[type="time"], input:not([type]), select, textarea {
+    @apply h-9 rounded-md border border-line bg-surface px-3 text-sm text-ink placeholder:text-ink-3;
+  }
+  textarea { @apply h-auto py-2; }
+  input[type="file"] { @apply text-sm; }
+  input:focus, select:focus, textarea:focus { @apply border-accent outline-none ring-1 ring-accent; }
+  .label { @apply mb-1 block text-xs font-medium text-ink-2; }
+  .hint { @apply mt-1 text-xs text-ink-3; }
+
+  /* ── status ─────────────────────────────────────────────────── */
+  .badge { @apply inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-px text-xs font-medium; }
+  .badge-ok { @apply bg-accent-soft text-accent; }
+  .badge-warn { @apply bg-warn-soft text-warn; }
+  .badge-crit { @apply bg-crit-soft text-crit; }
+  .badge-muted { @apply bg-ground text-ink-2 ring-1 ring-inset ring-line; }
+
+  /* ── tables ─────────────────────────────────────────────────── */
+  .table { @apply w-full border-collapse text-sm; }
+  .table th {
+    @apply sticky top-0 z-10 border-b border-line-strong bg-surface px-3 py-2.5 text-left text-xs font-semibold text-ink-2;
+  }
+  .table td { @apply border-b border-line px-3 py-2.5 align-middle; }
+  .table tbody tr:last-child td { @apply border-b-0; }
+  .table tbody tr { @apply transition-colors; }
+  .table tbody tr:hover { background-color: var(--color-accent-soft); }
+  .table .num { @apply text-right tabular-nums; }
+  .table tfoot td { @apply border-t border-line-strong font-semibold; }
+
+  /* ── rows: a list where each item is one thing needing attention ── */
+  .rows { @apply divide-y divide-line; }
+  .row { @apply -mx-5 flex flex-wrap items-start justify-between gap-3 px-5 py-3 transition-colors hover:bg-accent-soft/60; }
+  .row-title { @apply text-sm font-medium text-ink; }
+  .row-why { @apply mt-0.5 text-xs leading-relaxed text-ink-2; }
+
+  /* ── the head of the site: one bar, six words ───────────────── */
+  .site-head { @apply sticky top-0 z-30 border-b border-line bg-surface/95 backdrop-blur; }
+  .site-row { @apply mx-auto flex max-w-[1280px] items-center gap-6 px-6; }
+  .nav-group { @apply relative flex h-14 items-center whitespace-nowrap px-1 text-sm font-medium text-ink-2 transition-colors hover:text-ink; }
+  .nav-group.on { @apply text-ink; }
+  .nav-group.on::after { content: ""; @apply absolute inset-x-1 bottom-0 h-0.5 rounded-t; background: var(--color-accent); }
+  .nav-sub { @apply border-t border-line bg-ground/70; }
+  .nav-item { @apply inline-flex h-8 items-center whitespace-nowrap rounded-full px-3 text-xs font-medium text-ink-2 transition-colors hover:bg-surface hover:text-ink; }
+  .nav-item.on { @apply bg-ink text-white hover:bg-ink hover:text-white; }
+  .nav-more { @apply relative; }
+  .nav-more summary { @apply inline-flex h-8 cursor-pointer list-none items-center whitespace-nowrap rounded-full px-3 text-xs font-medium text-ink-2 transition-colors hover:bg-surface hover:text-ink; }
+  .nav-more[open] summary { @apply bg-surface text-ink; }
+  /*
+    The panel is hidden by this rule, not by the browser.
+
+    A closed <details> is supposed to hide everything but its summary, and in Chrome it does. But
+    the panel is absolutely positioned, and in WebKit an absolutely positioned child of a closed
+    <details> escapes that hiding and paints anyway — so the menu stood open on every screen, on
+    exactly the browsers where nobody had looked. Relying on a UA behaviour that two engines
+    disagree about is the bug; saying it in the stylesheet is the fix, and it costs one line.
+  */
+  .nav-more > div { @apply absolute right-0 top-9 z-40 hidden min-w-[14rem] rounded-xl border border-line bg-surface p-2; box-shadow: var(--shadow-lift); }
+  .nav-more[open] > div { @apply block; }
+  /* Older WebKit draws its own triangle regardless of list-style. */
+  .nav-more summary::-webkit-details-marker { display: none; }
+  .nav-more > div a { @apply block rounded-md px-3 py-1.5 text-sm text-ink-2 hover:bg-ground hover:text-ink; }
+  .nav-more > div a.on { @apply font-semibold text-ink; }
+
+  /* ── the page ───────────────────────────────────────────────── */
+  .page { @apply mx-auto w-full max-w-[1280px] px-6 py-8; }
+  .crumb { @apply flex min-w-0 items-center gap-1.5 text-sm; }
+  .crumb a { @apply text-ink-2 hover:text-ink; }
+  .crumb-sep { @apply text-ink-3; }
+  .crumb-here { @apply truncate font-medium text-ink; }
+  .topbar { @apply mb-4 flex items-center justify-between gap-4 text-xs text-ink-2; }
+}
+
+@page {
+  size: Letter;
+  margin: 0.5in 0.55in;
+}
+
+@media print {
+  .no-print { display: none !important; }
+
+  /* The head of the site and the page's own frame are not part of any document. */
+  .site-head, .topbar { display: none !important; }
+  .page { padding: 0 !important; max-width: none !important; }
+
+  /*
+    Board forms are signed and filed, so they have to paginate like a form rather than like a web
+    page: a labelled block never splits across a page, a heading never sits alone at the foot of
+    one, and a table that runs over repeats its header so the second page reads on its own.
+  */
+  .print-block,
+  .print-block * {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* On paper a sticky header pins itself and the bands only print with background graphics on. */
+  .table th { position: static !important; background: transparent !important; backdrop-filter: none !important; }
+
+  table { break-inside: auto; page-break-inside: auto; }
+  thead { display: table-header-group; }
+  tfoot { display: table-footer-group; }
+  tr, td, th { break-inside: avoid; page-break-inside: avoid; }
+
+  h1, h2, h3, .print-heading {
+    break-after: avoid;
+    page-break-after: avoid;
+    break-inside: avoid;
+  }
+
+  /* The signature block is the point of the form; it must never be orphaned onto its own page. */
+  .print-signature {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    break-before: avoid;
+    page-break-before: avoid;
+  }
+
+  .print-prose { orphans: 3; widows: 3; }
+  .print-page-break { break-before: page; page-break-before: always; }
+
+  /* Backgrounds and rules are part of the Board's layout, not decoration. */
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { background: white; font-size: 11pt; }
+}

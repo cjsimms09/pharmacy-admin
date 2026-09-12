@@ -1,0 +1,334 @@
+import { z } from "zod";
+
+/**
+ * The terms a supplier trades on that no feed carries: the rebate schedule and the return policy.
+ *
+ * Pure. No database, no server-only import, so the shapes and the arithmetic can be tested by
+ * hand — and they need to be, because a rebate tier typed in wrong is a purchasing recommendation
+ * built on a number nobody checked.
+ *
+ * ── Rebates ──
+ *
+ * The common shape, and McKesson's, is a ladder: the pharmacy's generic compliance ratio for the
+ * period (eligible generic purchases over total purchases, both at that supplier) lands in a tier,
+ * and every eligible purchase in the period earns that tier's percentage. The tiers are not
+ * cumulative — a ratio of 16% at a 15% threshold earns the 15% tier's rate on everything, not the
+ * lower tier's rate on the first part. A flat programme is the same shape with one tier at zero.
+ *
+ * Which purchases are "eligible" is the supplier's decision and is read off the catalogue (the
+ * rebate column marks the OneStop items), so it is recorded here as a rule rather than a list.
+ *
+ * ── Returns ──
+ *
+ * A return window is stated as months before expiry (the earliest a supplier will take it back)
+ * and months after (the latest), and the credit as a percentage that steps down with the months
+ * left on the product. Non-returnable categories are words because they are words on the policy:
+ * "refrigerated", "controlled Schedule II", "short-dated at purchase", "partial bottle".
+ */
+
+export const TERMS_VERSION = 1;
+
+const percent = z.number().min(0).max(100);
+
+export const RebateTier = z.object({
+  /** The ratio at or above which this tier applies, in percent. 0 for the base tier. */
+  thresholdPercent: percent,
+  /** What every eligible purchase in the period earns at this tier, in percent. */
+  rebatePercent: percent,
+});
+
+export const RebateTerms = z.object({
+  /** "tiered_ratio": the ratio ladder above. "flat_percent": one rate on every eligible purchase. */
+  kind: z.enum(["tiered_ratio", "flat_percent"]),
+  /** How often the ratio is measured and the rebate settled. */
+  period: z.enum(["month", "quarter", "year"]),
+  /**
+   * What counts. "catalog_rebate_flag": the items the catalogue marks rebated (McKesson OneStop).
+   * "all_generics": every generic. "all_purchases": everything on the invoice.
+   */
+  /*
+   * What the ladder pays on.
+   *
+   * "brand_purchases" is a fourth because McKesson pays a separate factor on brand, off the same
+   * compliance bands but a different column: nil at the bottom, one percent at the top. Folded in
+   * with generics it would either inflate a generic's discount or vanish; kept apart it can price
+   * the brand line it actually applies to.
+   */
+  eligibility: z.enum(["catalog_rebate_flag", "all_generics", "all_purchases", "brand_purchases"]),
+  /*
+   * Which measured figure drives this ladder.
+   *
+   * Two of McKesson's three programmes run off the scrubbed generic compliance rate and the third
+   * off the generic purchase ratio, and the statement prints both. Without this the site cannot
+   * pair a ladder with the figure that selects a band on it, so it cannot say which band the
+   * pharmacy is in — which is the only thing anybody actually wants to know from a ladder.
+   * Null for a programme typed in by hand whose driver was never stated.
+   */
+  ratioMeasure: z.enum(["generic_compliance", "generic_purchase_ratio"]).nullable().default(null),
+  /** The supplier's own definition of the ratio, in its words, where it has one. */
+  ratioDefinition: z.string().nullable(),
+  /** Ascending by threshold. At least one tier. */
+  tiers: z.array(RebateTier).min(1),
+  /** How and when it is paid: "credit memo the month after quarter end". */
+  paidAs: z.string().nullable(),
+  /** Anything else that changes the money: minimum commitments, exclusions, promotional windows. */
+  notes: z.string().nullable(),
+});
+export type RebateTermsT = z.infer<typeof RebateTerms>;
+
+export const CreditStep = z.object({
+  /** Applies when at least this many months remain to expiry at the time of return. */
+  monthsToExpiryMin: z.number().min(-60).max(120),
+  creditPercent: percent,
+});
+
+/**
+ * A credit step counted from the invoice date rather than from expiry.
+ *
+ * This is the window that actually decides most returns, and the one the pharmacy asked for:
+ * McKesson credits a saleable return in full where the authorisation is raised within thirty days
+ * of the invoice, and three quarters after that. Nothing about expiry enters into it — a bottle
+ * bought last week and not wanted is going back on the invoice's clock, and the only question is
+ * how many days are left before the credit drops.
+ *
+ * `withinDays` null means "after every window named above", which is how a policy expresses its
+ * final, lower rate.
+ */
+export const InvoiceCreditStep = z.object({
+  withinDays: z.number().min(0).max(3650).nullable(),
+  creditPercent: percent,
+});
+
+export const ReturnTerms = z.object({
+  /** The earliest a product can go back, in months before its expiry date. Null when not stated. */
+  windowMonthsBeforeExpiry: z.number().min(0).max(120).nullable(),
+  /** The latest, in months after expiry. 0 means nothing after expiry. Null when not stated. */
+  windowMonthsAfterExpiry: z.number().min(0).max(60).nullable(),
+  /** Credit as a percentage of what was paid, stepping down with the months left. Descending by months. */
+  creditSteps: z.array(CreditStep),
+  /**
+   * Credit counted from the invoice date, which is what most returns actually turn on.
+   *
+   * Ascending by days; a final step with withinDays null is the rate beyond every named window.
+   * Empty where the policy says nothing about an invoice-date deadline.
+   */
+  creditStepsFromInvoice: z.array(InvoiceCreditStep).default([]),
+  /** The last day a return can be raised at all, in days from the invoice. Null where not stated. */
+  returnableWithinDaysOfInvoice: z.number().min(0).max(3650).nullable().default(null),
+  restockingFeePercent: percent.nullable(),
+  /** Categories the supplier will not take back, in the policy's own words. */
+  nonReturnable: z.array(z.string()),
+  /** Who handles it when the supplier does not: a reverse distributor, by name. */
+  reverseDistributor: z.string().nullable(),
+  notes: z.string().nullable(),
+});
+export type ReturnTermsT = z.infer<typeof ReturnTerms>;
+
+/**
+ * Reads tier lines as somebody types them: one tier per line, threshold then rebate.
+ *
+ *   14% → 2.5%      14 -> 2.5      14, 2.5      14% = 2.5%      0: 1
+ *
+ * Anything else on a line is refused with the line quoted, because a tier silently dropped is a
+ * rebate silently understated. Returned sorted ascending, and a repeated threshold is refused.
+ */
+export function parseTierLines(text: string): { tiers: z.infer<typeof RebateTier>[]; problems: string[] } {
+  const tiers: z.infer<typeof RebateTier>[] = [];
+  const problems: string[] = [];
+  for (const raw of (text ?? "").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const m = /^([\d.]+)\s*%?\s*(?:→|->|=>|=|:|,|\s)\s*([\d.]+)\s*%?$/.exec(line);
+    if (!m) {
+      problems.push(`"${line}" is not a tier. Write it as threshold then rebate, e.g. "14% -> 2.5%".`);
+      continue;
+    }
+    const thresholdPercent = Number(m[1]);
+    const rebatePercent = Number(m[2]);
+    if (!Number.isFinite(thresholdPercent) || !Number.isFinite(rebatePercent) || thresholdPercent > 100 || rebatePercent > 100) {
+      problems.push(`"${line}" has a figure that is not a percentage.`);
+      continue;
+    }
+    tiers.push({ thresholdPercent, rebatePercent });
+  }
+  tiers.sort((a, b) => a.thresholdPercent - b.thresholdPercent);
+  for (let i = 1; i < tiers.length; i++) {
+    if (tiers[i].thresholdPercent === tiers[i - 1].thresholdPercent) problems.push(`Two tiers start at ${tiers[i].thresholdPercent}%.`);
+  }
+  return { tiers, problems };
+}
+
+/**
+ * Reads credit steps the same way: months-to-expiry then credit percent, one per line.
+ *
+ *   6 -> 100      3 -> 50      0 -> 0
+ */
+export function parseCreditLines(text: string): { steps: z.infer<typeof CreditStep>[]; problems: string[] } {
+  const steps: z.infer<typeof CreditStep>[] = [];
+  const problems: string[] = [];
+  for (const raw of (text ?? "").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const m = /^(-?[\d.]+)\s*(?:mo|months?)?\s*(?:→|->|=>|=|:|,|\s)\s*([\d.]+)\s*%?$/.exec(line);
+    if (!m) {
+      problems.push(`"${line}" is not a credit step. Write it as months-to-expiry then credit, e.g. "6 -> 100%".`);
+      continue;
+    }
+    const monthsToExpiryMin = Number(m[1]);
+    const creditPercent = Number(m[2]);
+    if (!Number.isFinite(monthsToExpiryMin) || !Number.isFinite(creditPercent) || creditPercent > 100) {
+      problems.push(`"${line}" has a figure out of range.`);
+      continue;
+    }
+    steps.push({ monthsToExpiryMin, creditPercent });
+  }
+  steps.sort((a, b) => b.monthsToExpiryMin - a.monthsToExpiryMin);
+  return { steps, problems };
+}
+
+/** One item per line or comma, trimmed, blanks dropped. */
+export function parseList(text: string): string[] {
+  return [...new Set((text ?? "").split(/[\r\n,;]+/).map((x) => x.trim()).filter(Boolean))];
+}
+
+/**
+ * The rebate earned at a given compliance ratio: the highest tier whose threshold the ratio meets.
+ *
+ * Returns the tier, so the caller can say which one, and null below the lowest threshold — which
+ * for a ladder that starts at 0% never happens, and for one that starts higher means "no rebate
+ * this period", a fact worth stating rather than rounding to the bottom tier.
+ */
+export function rebateTierFor(terms: RebateTermsT, ratioPercent: number): z.infer<typeof RebateTier> | null {
+  let best: z.infer<typeof RebateTier> | null = null;
+  for (const t of [...terms.tiers].sort((a, b) => a.thresholdPercent - b.thresholdPercent)) {
+    if (ratioPercent >= t.thresholdPercent) best = t;
+  }
+  return best;
+}
+
+/** The next tier above the ratio, and how far away it is, so a page can say "0.4% short of 3.5%". */
+export function nextTierFor(terms: RebateTermsT, ratioPercent: number): { tier: z.infer<typeof RebateTier>; shortByPercent: number } | null {
+  const above = [...terms.tiers].filter((t) => t.thresholdPercent > ratioPercent).sort((a, b) => a.thresholdPercent - b.thresholdPercent);
+  if (above.length === 0) return null;
+  return { tier: above[0], shortByPercent: Math.round((above[0].thresholdPercent - ratioPercent) * 100) / 100 };
+}
+
+/**
+ * What a return is worth, as a percentage of what was paid, given the months left to expiry.
+ *
+ * Null when the policy says it cannot go back at all at that point: outside the window, or a
+ * policy with no credit steps recorded. "Cannot say" is null; "worth nothing" is 0.
+ */
+export function returnCreditPercent(terms: ReturnTermsT, monthsToExpiry: number): number | null {
+  if (terms.windowMonthsBeforeExpiry !== null && monthsToExpiry > terms.windowMonthsBeforeExpiry) return null;
+  if (terms.windowMonthsAfterExpiry !== null && monthsToExpiry < -terms.windowMonthsAfterExpiry) return null;
+  if (terms.windowMonthsAfterExpiry === null && monthsToExpiry < 0 && terms.creditSteps.every((s) => s.monthsToExpiryMin >= 0)) return null;
+  const step = [...terms.creditSteps].sort((a, b) => b.monthsToExpiryMin - a.monthsToExpiryMin).find((s) => monthsToExpiry >= s.monthsToExpiryMin);
+  if (!step) return null;
+  const fee = terms.restockingFeePercent ?? 0;
+  return Math.max(0, Math.round((step.creditPercent - fee) * 100) / 100);
+}
+
+/**
+ * What a programme pays on, in the words a pharmacist would use.
+ *
+ * The enum name is the site's word for it; this is the pharmacy's. "catalog_rebate_flag" on a
+ * screen tells nobody that the ladder pays on the OneStop items and nothing else, and a rebate
+ * whose scope is not obvious is a rebate somebody will assume applies to everything.
+ */
+export function paysOn(terms: RebateTermsT): string {
+  return {
+    catalog_rebate_flag: "contract items only — the ones the catalogue marks rebated",
+    all_generics: "every generic, contract or not",
+    all_purchases: "everything bought from this supplier",
+    brand_purchases: "brand-name items only",
+  }[terms.eligibility];
+}
+
+/** The short form, for a badge. */
+export function paysOnShort(terms: RebateTermsT): string {
+  return {
+    catalog_rebate_flag: "Contract items only",
+    all_generics: "All generics",
+    all_purchases: "Everything",
+    brand_purchases: "Brand only",
+  }[terms.eligibility];
+}
+
+/** Which measured figure picks the band on this ladder, in words. */
+/**
+ * Why a rebate programme cannot be filed, or null where it can.
+ *
+ * One rule, and it is the one that cost the most: a ladder selected by a ratio has to say **which**
+ * ratio. All three McKesson programmes were stored with no measure, so `figuresFor` had nothing to
+ * read, no band was ever chosen, and 7,165 contract generics were priced at roughly 30% above what
+ * the pharmacy actually pays. The ladders were on file and looked right on the page.
+ *
+ * Refused when a programme is saved rather than when one is read. Stored rows that predate this are
+ * still parsed and still displayed — with the honest "nothing says which band applies" — because a
+ * validator that refuses existing data does not fix a ladder, it takes the supplier's page down.
+ *
+ * `flat_percent` needs no measure: one rate on every eligible purchase, nothing to select.
+ *
+ * Pure.
+ */
+export function whyTermsCannotBeSaved(terms: RebateTermsT): string | null {
+  if (terms.kind === "tiered_ratio" && terms.ratioMeasure === null) {
+    return (
+      "This ladder pays by a ratio, so it has to say which ratio picks the band — the scrubbed generic " +
+      "compliance rate or the generic purchase ratio. Without it no band can ever be chosen, and every " +
+      "contract line is priced at its printed cost. The supplier's agreement names it, usually beside the " +
+      "tiers themselves."
+    );
+  }
+  return null;
+}
+
+export function measuredBy(terms: RebateTermsT): string | null {
+  if (terms.ratioMeasure === "generic_compliance") return "your scrubbed generic compliance rate";
+  if (terms.ratioMeasure === "generic_purchase_ratio") return "your generic purchase ratio";
+  return null;
+}
+
+/** One sentence for a supplier card. */
+export function describeRebate(terms: RebateTermsT): string {
+  const period = { month: "monthly", quarter: "quarterly", year: "annual" }[terms.period];
+  const on = paysOn(terms);
+  if (terms.kind === "flat_percent" || terms.tiers.length === 1) {
+    return `${terms.tiers[0].rebatePercent}% on ${on}, ${period}.`;
+  }
+  const ladder = [...terms.tiers].sort((a, b) => a.thresholdPercent - b.thresholdPercent).map((t) => `${t.thresholdPercent}% → ${t.rebatePercent}%`).join(", ");
+  return `${period} ladder on ${on}: ${ladder}.`;
+}
+
+export function describeReturns(terms: ReturnTermsT): string {
+  const bits: string[] = [];
+  if (terms.windowMonthsBeforeExpiry !== null) bits.push(`from ${terms.windowMonthsBeforeExpiry} months before expiry`);
+  if (terms.windowMonthsAfterExpiry !== null) bits.push(terms.windowMonthsAfterExpiry === 0 ? "nothing after expiry" : `to ${terms.windowMonthsAfterExpiry} months after`);
+  if (terms.creditSteps.length) {
+    const steps = [...terms.creditSteps].sort((a, b) => b.monthsToExpiryMin - a.monthsToExpiryMin).map((s) => `${s.creditPercent}% at ${s.monthsToExpiryMin}+ months`).join(", ");
+    bits.push(`credit ${steps}`);
+  }
+  if (terms.restockingFeePercent) bits.push(`${terms.restockingFeePercent}% restocking fee`);
+  if (terms.nonReturnable.length) bits.push(`never: ${terms.nonReturnable.join(", ")}`);
+  return bits.length ? bits.join("; ") + "." : "Nothing recorded yet.";
+}
+
+/** Parses stored JSON back into terms, refusing anything that no longer fits the shape. */
+export function readRebateTerms(json: string): RebateTermsT | null {
+  try {
+    const r = RebateTerms.safeParse(JSON.parse(json));
+    return r.success ? r.data : null;
+  } catch {
+    return null;
+  }
+}
+
+export function readReturnTerms(json: string): ReturnTermsT | null {
+  try {
+    const r = ReturnTerms.safeParse(JSON.parse(json));
+    return r.success ? r.data : null;
+  } catch {
+    return null;
+  }
+}

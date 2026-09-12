@@ -1,0 +1,1 @@
+ALTER TABLE `credentials` ADD `no_expiry` integer DEFAULT false NOT NULL;
