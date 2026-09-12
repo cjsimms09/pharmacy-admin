@@ -56,6 +56,14 @@ export type Candidate = {
    * between a MAC appeal and a wasted one — see `MAC_BASES`. Null where the claim does not carry it.
    */
   basisOfReimbursement: string | null;
+  /**
+   * The NADAC per dispensing unit in force on the fill date, in cents. Null where NADAC has none.
+   *
+   * The independent check on the basis code. The basis code is the plan *saying* it used a MAC; this
+   * is what the money actually did. The owner asked for it in so many words: "is there a way to
+   * verify it is a mac claim and not nadac before submitting".
+   */
+  nadacPerUnitCents: number | null;
 };
 
 /**
@@ -139,6 +147,14 @@ export type Verdict =
    * The claim says which, and this is the gate that was missing. See `MAC_BASES` below.
    */
   | "not_mac_priced"
+  /**
+   * Paid at NADAC, so the plan priced it off the national average and there is no MAC to argue with.
+   *
+   * The second half of the owner's question — "is there a way to verify it is a mac claim and not
+   * nadac before submitting". A basis code of 06 or 07 is the plan saying it used a MAC; this is
+   * what the money says. Where the two disagree, the money wins.
+   */
+  | "paid_at_nadac"
   /** No invoice covers the NDC, so there is nothing to evidence the appeal with. */
   | "no_invoice"
   /** Paid nothing at all — a deductible claim, not an underpayment. */
@@ -163,6 +179,12 @@ export type Judged = {
   deadline: string | null;
   /** Days left, negative once past. Null where no window is on file. */
   daysLeft: number | null;
+  /**
+   * Appealable, but on the weaker argument: paid above NADAC and still under cost.
+   *
+   * Lets a worklist put the winnable ones first. False on everything that is not an `appeal`.
+   */
+  aboveNadac?: boolean;
   /** One sentence, in the owner's terms, for whichever screen shows it. */
   says: string;
 };
@@ -224,6 +246,38 @@ export function judge(c: Candidate, terms: PayerTerms | null, alreadyFiled: Set<
     };
   }
 
+  /*
+   * And what the money did, which is the check the basis code cannot give.
+   *
+   * A plan can return 06 or 07 and still have priced the claim off the national average: NADAC is
+   * what a great many MAC lists are built from, and where the paid amount lands on NADAC there is no
+   * MAC sitting below it to argue about. Appealing one of those asks Caremark to reprice at NADAC a
+   * claim it already paid at NADAC, which is a form filled in to ask for nothing.
+   *
+   * Three percent either way, not an exact match: NADAC is published weekly and a plan pricing off
+   * the previous week's file lands near the figure rather than on it. Tighter and this would miss
+   * them; looser and it would start catching real underpayments.
+   *
+   * Only the at-NADAC case is refused here. Paid *above* NADAC is a different thing and is allowed
+   * through with the fact recorded, because whether to file it is a judgement about the argument
+   * rather than about the claim — see the note on `aboveNadac` where the appeal is offered.
+   */
+  const perUnitPaid = (c.quantityThousandths ?? 0) > 0 ? c.paidCents / ((c.quantityThousandths ?? 0) / 1000) : null;
+  if (perUnitPaid !== null && c.nadacPerUnitCents !== null && c.nadacPerUnitCents > 0) {
+    const ratio = perUnitPaid / c.nadacPerUnitCents;
+    if (ratio > 0.97 && ratio < 1.03) {
+      return {
+        ...base,
+        verdict: "paid_at_nadac",
+        says:
+          `Paid ${money(Math.round(perUnitPaid))} per unit against a NADAC of ${money(Math.round(c.nadacPerUnitCents))} — ` +
+          `the plan priced this off the national average, not off a MAC list below it. There is nothing to reprice, ` +
+          `whatever the basis code says. If this is short it is short because the drug cost more than the national ` +
+          `average, which is a buying question.`,
+      };
+    }
+  }
+
   if (c.paidCents <= 0) {
     return {
       ...base,
@@ -244,6 +298,31 @@ export function judge(c: Candidate, terms: PayerTerms | null, alreadyFiled: Set<
   if (shortfallCents <= 0) {
     return { ...base, verdict: "paid_enough", says: `Paid ${money(c.paidCents)} against a cost of ${money(c.acquisitionCents)}. Nothing to appeal.` };
   }
+
+  /*
+   * ── How good the argument is, which is not the same as whether it may be filed ──
+   *
+   * A claim paid *below* NADAC is the strong case and needs no arguing: the MAC was set under the
+   * national average acquisition cost, a published federal figure, and the appeal is arithmetic.
+   *
+   * A claim paid *above* NADAC but still under what this pharmacy paid is a different argument
+   * altogether. It asks the PBM to pay more than the national average because this pharmacy's
+   * buying is expensive, and a PBM declines that — rightly. It is the buying gap in
+   * docs/MONEY-TRACE.md, where eleven days of it came to $2,582.56, and no MAC appeal can fix it.
+   *
+   * Filed anyway rather than refused, because the owner may still want it: the ask on the form is
+   * then "reprice above NADAC" on cost plus a dispensing fee, which is honest and sometimes paid.
+   * But never silently, because verification codes spent on these are codes spent on declines.
+   *
+   * Computed here, above the payer checks, so it reaches both ways out of this function that end in
+   * an appeal. It used to sit beside the second one, which left every payer naming no filing
+   * deadline — and several of the twenty name none — with the flag unset and the caveat missing.
+   */
+  const aboveNadac =
+    perUnitPaid !== null && c.nadacPerUnitCents !== null && c.nadacPerUnitCents > 0 && perUnitPaid / c.nadacPerUnitCents >= 1.03;
+  const weak = aboveNadac
+    ? ` Paid ${money(Math.round(perUnitPaid!))} a unit against a NADAC of ${money(Math.round(c.nadacPerUnitCents!))}, so this asks ${c.pbmName} to beat the national average on a drug bought above it — a buying gap rather than a MAC underpayment, and the weaker of the two arguments.`
+    : "";
 
   if (!terms || !terms.whoFiles) {
     return {
@@ -281,7 +360,8 @@ export function judge(c: Candidate, terms: PayerTerms | null, alreadyFiled: Set<
       ...base,
       shortfallCents,
       verdict: "appeal",
-      says: `${money(shortfallCents)} below cost. ${c.pbmName} names no filing deadline, so there is no clock — but no reason to wait either.`,
+      aboveNadac,
+      says: `${money(shortfallCents)} below cost. ${c.pbmName} names no filing deadline, so there is no clock — but no reason to wait either.${weak}`,
     };
   }
 
@@ -304,10 +384,11 @@ export function judge(c: Candidate, terms: PayerTerms | null, alreadyFiled: Set<
     deadline,
     daysLeft,
     verdict: "appeal",
+    aboveNadac,
     says:
-      daysLeft === 0
+      (daysLeft === 0
         ? `${money(shortfallCents)} below cost, and today is the last day ${c.pbmName} will take it.`
-        : `${money(shortfallCents)} below cost. ${daysLeft} day${daysLeft === 1 ? "" : "s"} left to file with ${c.pbmName}.`,
+        : `${money(shortfallCents)} below cost. ${daysLeft} day${daysLeft === 1 ? "" : "s"} left to file with ${c.pbmName}.`) + weak,
   };
 }
 

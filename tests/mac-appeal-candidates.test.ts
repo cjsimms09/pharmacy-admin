@@ -21,6 +21,8 @@ const claim = (over: Partial<Candidate> = {}): Candidate => ({
   daysSupply: 30,
   /* MAC-priced, so the default fixture reaches the gates each test is actually about. */
   basisOfReimbursement: "07",
+  /* Well below the paid figure, so the NADAC test is not what these tests are about. */
+  nadacPerUnitCents: 1_000,
   classification: "G",
   ...over,
 });
@@ -289,5 +291,71 @@ describe("a MAC appeal needs a MAC", () => {
   test("but already-filed still wins, so a rejection is never re-sent", () => {
     const c = claim({ basisOfReimbursement: "03" });
     assert.equal(judge(c, terms(), new Set([c.claimId]), TODAY).verdict, "already_filed");
+  });
+});
+
+/**
+ * Whether a MAC priced it, or the national average did.
+ *
+ * The owner, before submitting a batch: "is there a way to verify it is a mac claim and not nadac
+ * before submitting". There is, and it is independent of the basis code: the basis code is the plan
+ * *saying* it used a MAC, while the paid amount is what the money did. A great many MAC lists are
+ * built off NADAC, so a plan can return 06 and still have paid the national average — and an appeal
+ * asking it to reprice at NADAC a claim already paid at NADAC asks for nothing.
+ *
+ * Where the two disagree, the money wins.
+ */
+describe("a MAC below the national average, or the national average itself", () => {
+  // 30 units, so paid-per-unit is paidCents / 30.
+  const atNadac = (over: Partial<Candidate> = {}) => claim({ paidCents: 3_000, nadacPerUnitCents: 100, ...over });
+
+  test("paid at NADAC is not appealed, whatever the basis code says", () => {
+    for (const basis of ["06", "07"]) {
+      const j = judge(atNadac({ basisOfReimbursement: basis }), terms(), new Set(), TODAY);
+      assert.equal(j.verdict, "paid_at_nadac", `basis ${basis}`);
+      assert.match(j.says, /priced this off the national average/);
+    }
+  });
+
+  test("three percent either way counts as at NADAC, because NADAC moves weekly", () => {
+    // A plan pricing off last week's file lands near the figure rather than on it.
+    assert.equal(judge(atNadac({ paidCents: 2_940 }), terms(), new Set(), TODAY).verdict, "paid_at_nadac");
+    assert.equal(judge(atNadac({ paidCents: 3_060 }), terms(), new Set(), TODAY).verdict, "paid_at_nadac");
+    // And outside it does not.
+    assert.equal(judge(atNadac({ paidCents: 2_800 }), terms(), new Set(), TODAY).verdict, "appeal");
+  });
+
+  test("paid below NADAC is the strong case and carries no caveat", () => {
+    const j = judge(claim({ paidCents: 1_500, nadacPerUnitCents: 100 }), terms(), new Set(), TODAY);
+    assert.equal(j.verdict, "appeal");
+    assert.equal(j.aboveNadac, false);
+    assert.doesNotMatch(j.says, /buying gap/);
+  });
+
+  test("paid above NADAC is still filable, and says it is the weaker argument", () => {
+    /*
+     * This is the buying gap, not a MAC underpayment: it asks the PBM to beat the national average
+     * on a drug bought above it. Allowed through because the owner may still want it — the ask is
+     * then cost plus a dispensing fee — but never silently, because ten verification codes spent on
+     * these is ten spent on declines.
+     */
+    const j = judge(claim({ paidCents: 6_000, acquisitionCents: 9_000, nadacPerUnitCents: 100 }), terms(), new Set(), TODAY);
+    assert.equal(j.verdict, "appeal");
+    assert.equal(j.aboveNadac, true);
+    assert.match(j.says, /buying gap rather than a MAC underpayment/);
+    assert.match(j.says, /national average/);
+  });
+
+  test("no NADAC for the NDC leaves the claim judged on the basis code alone", () => {
+    // Not refused: the generic gate already required NADAC to classify it, so this is the rare NDC
+    // priced in one file and not the other, and the basis code is still evidence.
+    const j = judge(claim({ nadacPerUnitCents: null }), terms(), new Set(), TODAY);
+    assert.equal(j.verdict, "appeal");
+    assert.equal(j.aboveNadac, false);
+  });
+
+  test("a claim with no quantity cannot be compared, and is not refused for it", () => {
+    const j = judge(claim({ quantityThousandths: null }), terms(), new Set(), TODAY);
+    assert.equal(j.verdict, "appeal");
   });
 });
