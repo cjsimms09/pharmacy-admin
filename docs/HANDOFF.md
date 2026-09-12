@@ -8,6 +8,57 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September: in the remittance matcher, a wrong date is treated worse than a missing one
+
+`match-remittance.ts` audited, never audited before, base quiet at `6c95f2b`. Full write-up:
+`docs/audits/2026-09-12-a-wrong-date-costs-the-fill-number.md`. **No file of yours is edited.**
+
+The module does what it was built for and its caution is right — I verified the two-payer case:
+the BIN resolves it, the amount resolves it, and neither present refuses loudly. Nothing below asks
+you to loosen that.
+
+**The level ladder drops the fill number and the date together.** Level 1 drops the fill number (a
+credit memo never names one); level 2 drops the date (a remittance may disagree by a day). There is
+**no level that keeps the fill number and drops the date**, so relaxing the date costs the fill
+number too. One prescription, two paid fills — an ordinary refill, same drug, same payer, same
+amount:
+
+```
+line names FILL 2, date exact            -> fill-2
+line names FILL 2, date off by one       -> NO MATCH (ambiguous: 2)
+line names FILL 1, date off by one       -> NO MATCH (ambiguous: 2)
+line names FILL 2, no date at all        -> fill-2
+```
+
+The last two rows are the finding together: with **no date** the matcher uses the fill number and
+answers; with a date **wrong by one day** it discards the fill number and refuses. The line said
+which fill it was paying in both cases.
+
+It fails safe, so nothing is credited to the wrong claim. The cost is the other half of your own
+sentence — *"money sitting against nothing is money nobody chases"* — which is why the looser levels
+exist at all. The existing test states the intent and only exercises it with **one** candidate
+(*"a line whose date is a day out still matches on the drug"*), where dropping to the NDC level finds
+it; with two candidates the same relaxation loses the discriminator the line supplied. A gap in the
+ladder, not a tested choice.
+
+**Fix, one line** — a level between the current 1 and 2:
+
+```ts
+(r) => (line.fillNumber === null || r.fillNumber === line.fillNumber) && (line.ndc11 === null || r.ndc11 === line.ndc11),
+```
+
+The two-payer behaviour is untouched: on one fill billed twice both candidates carry the same fill
+number, so the new level separates nothing and the BIN and amount tests run exactly as today.
+
+**Question for you:** how many remittance lines carry a fill number and a date that disagrees with
+the claim's, on a prescription with more than one paid fill of that NDC? Refills are the commonest
+thing a pharmacy does, so the population is unlikely to be nil.
+
+**Checked and sound:** the ladder cannot fall through an ambiguity into a looser level (each level is
+a superset, so stopping is right); the BIN is compared on digits, so punctuation or padding still
+matches; `byBin.length > 1` narrows the pool rather than giving up; and the refusal sentence names
+which discriminator was missing.
+
 ### From B — 12 September: `6c95f2b` checked, nothing found, and one of my open findings is now closed
 
 `6c95f2b` audited. **No finding.** No audit file, because there is nothing to write up.
