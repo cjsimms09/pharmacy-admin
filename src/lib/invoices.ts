@@ -2562,11 +2562,18 @@ export async function storeInvoiceLines(
   // Item lines add up to the goods, not to the amount due: shipping and tax are on the invoice and
   // are not items. Where the invoice prints both, the goods figure is what proves the reading.
   /*
-   * The FDA directory goes in with the page, for the one question the page cannot answer: whether
-   * a front-end item's eleven digits are the drug or the UPC that stands for it. See ndcFromUpc.
+   * The FDA directory goes in with the page, for the two questions the page cannot answer: whether
+   * a front-end item's eleven digits are the drug or the UPC that stands for it (see ndcFromUpc),
+   * and how many digits a supplier's NDC column actually printed, where the layout runs it into
+   * the item number and the report has clipped it short (see ndcFromRun).
    */
-  const { knownNdcs } = await import("./drug-directory-store");
-  const parsed = parseInvoiceLines(meta.text, readGoodsSubtotalCents(meta.text) ?? meta.printedTotalCents, await knownNdcs());
+  const { knownNdcs, ndcPackages } = await import("./drug-directory-store");
+  const parsed = parseInvoiceLines(
+    meta.text,
+    readGoodsSubtotalCents(meta.text) ?? meta.printedTotalCents,
+    await knownNdcs(),
+    await ndcPackages(),
+  );
   if (parsed.lines.length === 0) return { stored: 0, unread: parsed.unreadable.length, reconciles: parsed.reconciles, readCents: 0 };
   if (parsed.reconciles === false) return { stored: 0, unread: parsed.lines.length + parsed.unreadable.length, reconciles: false, readCents: parsed.totalCents };
 

@@ -40,9 +40,21 @@ export type MoneyPosition = {
     cashFills: number;
     cashRevenueCents: number;
     cashMarginCents: number;
-    /** Promised at adjudication by a plan and not yet paid. Real, sourced, and chaseable. */
+    /** Promised at adjudication by a plan and not yet paid. Real, sourced, and owed. */
     promisedCents: number;
     promisedFills: number;
+    /**
+     * How much of that promise is late, and how much is simply not due yet.
+     *
+     * "Chaseable" was the wrong word above and it is gone: a fill that adjudicated yesterday is
+     * owed and cannot be chased. The owner, 12 September: "can we give these time before
+     * alerting.." The split is `promise-due.ts` — the same function and the same grace period the
+     * claims page uses, so the home page and that page cannot disagree about which dollar is a job.
+     *
+     * `promisedCents` is unchanged and is still the whole promise. These two add up to it.
+     */
+    promisedDueCents: number;
+    promisedNotDueCents: number;
     /**
      * The report's own bottom line for the last file loaded, which nothing here computed.
      *
@@ -268,6 +280,16 @@ async function loadMoneyPosition(today: Date): Promise<MoneyPosition> {
         }
       : null;
 
+  /*
+   * The promise, split into what is late and what the payer still has time on.
+   *
+   * One function, shared with `claims.ts`, because two copies of "when is this late" would drift
+   * and the home page and the claims page would then put different dollars on the morning's list.
+   */
+  const { splitPromised } = await import("./promise-due");
+  const { facilitatorGrace } = await import("./promise-due-store");
+  const promisedSplit = splitPromised(promised, await facilitatorGrace("mtf"), today.toISOString().slice(0, 10));
+
   const dispensing: MoneyPosition["dispensing"] = {
     month,
     fills: mine.length,
@@ -278,6 +300,8 @@ async function loadMoneyPosition(today: Date): Promise<MoneyPosition> {
     cashMarginCents: cash.reduce((n, f) => n + (f.marginCents ?? 0), 0),
     promisedCents: promised.reduce((n, f) => n + (f.facilitatorOutstandingCents ?? 0), 0),
     promisedFills: promised.length,
+    promisedDueCents: promisedSplit.dueCents,
+    promisedNotDueCents: promisedSplit.notDueCents,
     reported,
   };
 

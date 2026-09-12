@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { parseInvoiceLines, splitQuantities, ndc11, scheduleFromDea } from "../src/lib/invoice-lines";
+import { parseInvoiceLines, splitQuantities, ndc11, scheduleFromDea, ndcFromRun, sameDrugCode } from "../src/lib/invoice-lines";
 import { readFileSync } from "node:fs";
 
 /**
@@ -194,6 +194,134 @@ describe("a front-end UPC is not an NDC", () => {
     const line = "094030-00211137-9593973485930            1EA EMBRACE PEN NEEDLE 31G 5MM 100        8.50 R        8.50         8.50";
     const got = parseInvoiceLines(line, null, () => false).lines.map((l) => l.ndc11);
     assert.deepEqual(got, ["09403000211"]);
+  });
+});
+
+/**
+ * How many digits the NDC column printed, on a layout that runs it into the item number.
+ *
+ * IPD's invoice 1008931 prints, on its Non-CII half:
+ *
+ *   91654707560094 1 0EACH 3.99  0 % 3.99
+ *
+ * The item number is 91654 and the NDC column holds **nine** digits — 70756-0094, the propranolol,
+ * with no package code. The report clipped it, the same way it printed "PROPRANOLO" for propranolol
+ * and "BUME" for bumetanide on the lines either side. Taking the last eleven digits took two off
+ * the end of the item number and produced 54707560094: not a drug, not any code, $3.99 of purchases
+ * against nothing, and the item number stored as "916" rather than the 91654 you would reorder by.
+ *
+ * PioneerRx booked the same line in as 70756-0094-11 off the bottle, which is how the difference
+ * was found at all.
+ */
+describe("the NDC column's own length, on IPD and ParMed runs", () => {
+  /* The FDA lists two packages of 70756-094: the hundred-count and the thousand-count. */
+  const propranolol = ["70756009411", "70756009412"];
+  const known = (n: string) => propranolol.includes(n) || n === "70756008151";
+  const packagesOf = (nine: string) => (nine === "707560094" ? propranolol : nine === "707560081" ? ["70756008151"] : []);
+
+  test("eleven digits that are a drug are the answer, and the item number is what is left", () => {
+    /* The bumetanide on the same invoice: 90977 then all eleven digits of 70756-0081-51. */
+    const r = ndcFromRun("9097770756008151", known, packagesOf);
+    assert.deepEqual(r, { code: "70756008151", printed: 11 });
+  });
+
+  test("a nine-digit column is read as nine rather than stealing two digits of the item number", () => {
+    const r = ndcFromRun("91654707560094", known, packagesOf);
+    assert.equal(r.printed, 9);
+    assert.equal(r.code, "707560094", "the product IPD printed, not 54707560094 which is nobody's code");
+  });
+
+  test("the pack code is never invented, because every cost per tablet divides by it", () => {
+    /* 70756-094 comes in 100s and in 1000s. The invoice does not say which, so neither does this. */
+    assert.equal(ndcFromRun("91654707560094", known, packagesOf).code.length, 9);
+  });
+
+  test("one package listed under the product settles the line to all eleven digits", () => {
+    /* Same shape, but the FDA lists only the one pack, so nothing is left open. */
+    const r = ndcFromRun("91654707560081", known, packagesOf);
+    assert.deepEqual(r, { code: "70756008151", printed: 9 });
+  });
+
+  test("a package code the directory has not caught up with is still the maker's own code", () => {
+    /* Eleven digits whose labeller and product the FDA lists are trusted as printed. */
+    const r = ndcFromRun("1234570756009499", known, (nine) => (nine === "707560094" ? propranolol : []));
+    assert.deepEqual(r, { code: "70756009499", printed: 11 });
+  });
+
+  test("with no directory to ask, the last eleven digits stand, exactly as before", () => {
+    assert.deepEqual(ndcFromRun("91654707560094"), { code: "54707560094", printed: 11 });
+  });
+
+  test("a device line with no NDC to find keeps the digits it had", () => {
+    /* ParMed's Accu-Chek Softclix, off invoice 7491384103. There is no NDC for it anywhere. */
+    const r = ndcFromRun("102399715075537009710", () => false, () => []);
+    assert.deepEqual(r, { code: "75537009710", printed: 11 });
+  });
+
+  test("read off the whole IPD line, the item number and the NDC both come out right", () => {
+    const line = ["Non-CII", "91654707560094 1 0EACH 3.99  0 % 3.99", "PROPRANOLO", "Non-CII Subtotal:$3.99 "].join("\n");
+    const p = parseInvoiceLines(line, 399, known, packagesOf);
+    assert.equal(p.lines.length, 1);
+    assert.equal(p.lines[0].ndc11, "707560094");
+    assert.equal(p.lines[0].itemNumber, "91654", "IPD's own catalogue number, which was coming out as 916");
+    assert.equal(p.lines[0].extendedCents, 399);
+  });
+});
+
+/**
+ * Two codes for one item, which is not two items.
+ *
+ * The invoice and the delivery are filled in by different people from different documents, and that
+ * independence is the whole value of comparing them — worthless if a difference in how a code was
+ * *written* reads as a difference in what was *bought*. Every pair below is off the pharmacy's own
+ * invoices of 8-9 September, where ten such lines were being reported as "the invoice and the
+ * delivery disagree" and not one of them was a wrong drug against the money.
+ */
+describe("the same item, written two ways", () => {
+  test("the same ten digits padded in different places", () => {
+    /* Aspercreme, McKesson 7656840418: UPC 041167-05877 carries 4116705877. The FDA lists it as
+       41167-0587-07; the counter booked 41167-0058-77. One tube of cream, $5.84, both sides. */
+    assert.ok(sameDrugCode("41167058707", "41167005877"));
+    /* Ricola, the same invoice: 036602-07917 against 36602-0079-17. */
+    assert.ok(sameDrugCode("03660207917", "36602007917"));
+  });
+
+  test("a UPC with its prefix still on, against the NDC it stands for", () => {
+    /* Florastor and the Pulmoneb nebuliser, McKesson 7657098065. The FDA lists neither, so
+       ndcFromUpc keeps the digits it was handed — prefix and all. */
+    assert.ok(sameDrugCode("70414200024", "04142000024"));
+    assert.ok(sameDrugCode("88530400178", "85304000178"));
+  });
+
+  test("a product whose package code the invoice did not print", () => {
+    /* IPD 1008931's propranolol: nine digits billed, eleven booked in. */
+    assert.ok(sameDrugCode("707560094", "70756009411"));
+    assert.ok(sameDrugCode("70756009411", "707560094"));
+  });
+
+  test("two packs of one drug are not the same item, because a cost per tablet divides by the pack", () => {
+    /* The hundred-count and the thousand-count of the same propranolol. */
+    assert.equal(sameDrugCode("70756009411", "70756009412"), false);
+  });
+
+  test("a retail barcode against an NDC is not the same code, and no arithmetic joins them", () => {
+    /* McKesson bills AZO Standard as 787651-30152; the counter booked 00998-0015-30. Benadryl as
+       312547-17031 against 50580-0226-24. Integra as 850976-00608 against 52747-0710-30. */
+    assert.equal(sameDrugCode("78765130152", "00998001530"), false);
+    assert.equal(sameDrugCode("31254717031", "50580022624"), false);
+    assert.equal(sameDrugCode("85097600608", "52747071030"), false);
+  });
+
+  test("one digit apart is one digit apart", () => {
+    /* Cepacol: the invoice's 363824-71016 carries 6382471016 and the counter's 63824-0715-16
+       reduces to 6382471516. The labeller happens to match; the item does not. */
+    assert.equal(sameDrugCode("36382471016", "63824071516"), false);
+  });
+
+  test("a missing code is never the same as anything", () => {
+    assert.equal(sameDrugCode(null, "70756009411"), false);
+    assert.equal(sameDrugCode("70756009411", ""), false);
+    assert.equal(sameDrugCode(null, null), false);
   });
 });
 

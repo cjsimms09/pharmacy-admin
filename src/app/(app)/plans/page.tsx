@@ -166,6 +166,47 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
                       </div>
                     </div>
 
+                    {/*
+                      What this plan actually paid for, above the controls that classify it.
+
+                      The owner: "when trying to classify plans, it would be nice to see current
+                      claims we have for that plan it might help me classify them (ie copay cards)".
+
+                      He is describing the evidence, and two facts carry nearly all of it. A
+                      manufacturer copay card pays for one brand drug over and over — 019158/CNRX is
+                      Wegovy — where a benefit plan pays for the whole shop. And a card is meant to
+                      sit *on top of* a plan, so it should arrive as a second payer on the fill;
+                      DST/CNRX being the only payer on 26 of its 28 fills is the exact fact that
+                      made him correct this work once already: "Technically cnrx is a payor!! They
+                      will reimburse us for that remit amount."
+
+                      So: the drugs, and whether it ever pays alone. Both read off claims already on
+                      file, so the evidence is on the row rather than a screen away.
+                    */}
+                    {r.claims > 0 && (
+                      <div className="mt-3 rounded-md border border-line bg-surface-2 px-3 py-2 text-xs text-ink-2">
+                        <span className="font-medium text-ink-1">What it pays for:</span>{" "}
+                        {r.topDrugs.length > 0
+                          ? r.topDrugs.map((d) => `${d.name}${d.claims > 1 ? ` (${d.claims})` : ""}`).join(", ")
+                          : "no drug names on its claims"}
+                        {r.topDrugs.length === 4 && r.claims > r.topDrugs.reduce((n, d) => n + d.claims, 0) && ", and others"}
+                        <span className="mx-1.5 text-ink-3">·</span>
+                        {r.sharedFills === 0
+                          ? `the only payer on ${r.soleFills === 1 ? "its one fill" : `all ${r.soleFills} fills`}`
+                          : r.soleFills === 0
+                            ? `always alongside another payer, on ${r.sharedFills === 1 ? "its one fill" : `all ${r.sharedFills} fills`}`
+                            : `the only payer on ${r.soleFills} of ${r.soleFills + r.sharedFills} fills, sharing the rest`}
+                        {/*
+                          Suggested only where it is the whole story. One brand drug and never a
+                          second payer is a card acting as the payer of record — a thing to look at,
+                          not a classification, so this points and does not decide.
+                        */}
+                        {r.topDrugs.length === 1 && r.sharedFills === 0 && r.claims > 2 && (
+                          <span className="ml-1 text-ink-3">— one drug, always alone: worth checking whether this is a manufacturer card.</span>
+                        )}
+                      </div>
+                    )}
+
                     <div className="mt-4 grid gap-3 sm:grid-cols-2">
                       <Field label="Classification">
                         <select name="classification" defaultValue={r.classification} className="w-full">

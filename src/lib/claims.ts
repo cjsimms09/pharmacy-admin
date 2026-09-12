@@ -1,8 +1,11 @@
 import "server-only";
-import { sql, eq, inArray } from "drizzle-orm";
+import { sql, eq, and, gte, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "./crypto";
-import { parseCents, parseQuantityThousandths, isPricingUnit, receivedCents } from "./money";
+import { parseCents, parseQuantityThousandths, isPricingUnit, receivedCents, formatCents } from "./money";
+import { todayIso } from "./dates";
+import { isOutOfBooks } from "./books-start";
+import { audit } from "./audit";
 import { readSheetAsObjects, excelSerialToIso } from "./xlsx";
 import { parseCsv, buildPbmResolver } from "./reference";
 import { SB20_MIN_DISPENSING_FEE_CENTS } from "./reimbursement-rules";
@@ -644,7 +647,95 @@ export function claimCancelledBy(rev: Pairable, live: Pairable[]): { hit: Pairab
   };
 }
 
-export async function repairReversals(): Promise<{ paired: number; strays: number; stillStranded: { rxNumber: string; dateFilled: string; amountCents: number; why: string }[] }> {
+/**
+ * A live claim the pharmacy's own dispensing record says was never dispensed.
+ *
+ * ── The fault ──
+ *
+ * A daily report can list one transaction twice. The transaction key ends in an occurrence number
+ * to allow that, because it is sometimes real — the same drug at the same price to two patients on
+ * one day is two fills, not a duplicate. But when a listing is repeated and only one reversal
+ * arrives, the reversal cancels occurrence #1 and occurrence #2 stands as live revenue for ever:
+ *
+ *   337352|0|P|2026-09-10|610279|45802006535|900|1000|45000#1  paid      the fill that happened
+ *   337352|0|P|2026-09-10|610279|67877031815|900|1000|45000#2  paid      never dispensed
+ *   337352|0|P|2026-09-10|610279|67877031815|900|1000|45000#1  reversed  cancelled
+ *
+ * `repairReversals` cannot see this: there is no stranded reversal to pair, and `claimCancelledBy`
+ * would refuse anyway — two live claims a reversal could equally cancel is not an answer.
+ *
+ * ── Why PioneerRx settles it ──
+ *
+ * It is the pharmacy's own record of what left the shelf, and `IsLastValidClaimForPayMethod` is its
+ * answer to "which claim stands for this payer on this fill". Five September fills had a live row
+ * whose NDC that answer contradicts — $276.99 of revenue against $48.32 of cost, so $228.67 of
+ * profit on drugs that were never dispensed.
+ *
+ * The one thing that could have made this test wrong is a fill genuinely dispensed as two different
+ * NDCs, where PioneerRx would name only the last. So it was measured rather than assumed: across
+ * 2,546 valid claim rows over 2,484 September fills, **no fill carries more than one NDC**. One
+ * fill, one drug.
+ *
+ * ── What stops it deleting real revenue ──
+ *
+ * Three guards, and all three must hold:
+ *
+ *   PioneerRx must have an opinion. A fill it has never booked settles nothing — that is the third
+ *   state, and reversing on it would turn "we have not been told" into "it did not happen".
+ *
+ *   It must name a different NDC, affirmatively. Not merely fail to mention this one.
+ *
+ *   The fill must keep a paid row that PioneerRx *does* confirm. Never the last live row on a fill:
+ *   if the site and PioneerRx disagree about every row, that is a question for a person, not a
+ *   licence to take the whole fill off the books.
+ *
+ * Pure, so the rule can be read and tested without a database behind it. `settleStaleFills` does
+ * the loading.
+ */
+export type FillRow = { id: string; rxNumber: string; fillNumber: number | null; bin: string | null; ndc11: string | null; status: string; remitCents: number | null; copayCents: number | null };
+
+export function staleAgainstDispensing(
+  held: FillRow[],
+  /** Every NDC PioneerRx holds a standing claim for, keyed `rx|fill`. Absent means it has no opinion. */
+  dispensed: Map<string, Set<string>>,
+): { keep: FillRow[]; stale: { row: FillRow; why: string }[] } {
+  const stale: { row: FillRow; why: string }[] = [];
+  const keep: FillRow[] = [];
+  const byFill = new Map<string, FillRow[]>();
+  for (const r of held) {
+    const k = `${r.rxNumber}|${r.fillNumber ?? 0}`;
+    (byFill.get(k) ?? byFill.set(k, []).get(k)!).push(r);
+  }
+
+  for (const [k, rows] of byFill) {
+    const truth = dispensed.get(k);
+    const live = rows.filter((r) => r.status === "paid");
+    if (!truth || truth.size === 0 || live.length === 0) {
+      keep.push(...live);
+      continue;
+    }
+    const confirmed = live.filter((r) => r.ndc11 !== null && truth.has(r.ndc11));
+    const contradicted = live.filter((r) => r.ndc11 !== null && !truth.has(r.ndc11));
+    // Nothing on the fill agrees with the dispensing record: a person's question, not this one's.
+    if (confirmed.length === 0) {
+      keep.push(...live);
+      continue;
+    }
+    keep.push(...confirmed);
+    for (const r of contradicted) {
+      stale.push({
+        row: r,
+        why:
+          `PioneerRx holds no standing claim for NDC ${r.ndc11} on prescription ${r.rxNumber} fill ${r.fillNumber ?? 0} — ` +
+          `it has ${[...truth].join(", ")}, which ${truth.size === 1 ? "is" : "are"} also on file here and paid. ` +
+          `The daily report listed this transaction twice and only one reversal arrived, so this copy was never cancelled.`,
+      });
+    }
+  }
+  return { keep, stale };
+}
+
+export async function repairReversals(): Promise<{ paired: number; strays: number; beforeTheBooks: number; stillStranded: { rxNumber: string; dateFilled: string; amountCents: number; why: string }[] }> {
   const rows = await db.query.claims.findMany({
     where: eq(schema.claims.source, "transaction_report"),
     columns: {
@@ -669,7 +760,7 @@ export async function repairReversals(): Promise<{ paired: number; strays: numbe
    * false alarm that teaches somebody to stop reading the list.
    */
   const strays = rows.filter((c) => isStrandedReversal(c) && !rows.some((o) => o.id !== c.id && o.reversalKey === c.transactionKey));
-  if (strays.length === 0) return { paired: 0, strays: 0, stillStranded: [] };
+  if (strays.length === 0) return { paired: 0, strays: 0, beforeTheBooks: 0, stillStranded: [] };
 
   const live = new Map<string, typeof rows>();
   for (const c of rows) {
@@ -681,6 +772,8 @@ export async function repairReversals(): Promise<{ paired: number; strays: numbe
   const used = new Set<string>();
   const stillStranded: { rxNumber: string; dateFilled: string; amountCents: number; why: string }[] = [];
   let paired = 0;
+  /* Reversals of dispensings from before the books begin: counted, never reported as a job. */
+  let beforeTheBooks = 0;
   for (const rev of strays) {
     const found = claimCancelledBy(rev, (live.get(key(rev)) ?? []).filter((c) => !used.has(c.id)));
     /*
@@ -691,6 +784,24 @@ export async function repairReversals(): Promise<{ paired: number; strays: numbe
      * from one that had nothing to do, and the pharmacist is left pressing a button and hoping.
      */
     if (found.hit === null) {
+      /*
+       * A reversal of a dispensing from before the books begin is not a job.
+       *
+       * The owner, 12 September: "we are starting evrything clean as of 09/01, so if it is a
+       * reversal of a claim from before 09/01 we can forget about". He is right, and the reason is
+       * that there is nothing for it to cancel: the run it reverses was dispensed before this site
+       * was given a report, so no revenue was ever counted for it and pairing would move no figure.
+       * All twelve on file today are dated between 19 and 28 August.
+       *
+       * Still stored and still counted — counted apart. It is a real thing that happened and the
+       * row is the record of it; what it is not is something anybody can act on. Reporting it
+       * beside reversals that do need pairing is how a list that matters stops being read, and the
+       * paragraph above this loop already learned that lesson once.
+       */
+      if (isOutOfBooks(rev.dateFilled)) {
+        beforeTheBooks++;
+        continue;
+      }
       stillStranded.push({ rxNumber: rev.rxNumber, dateFilled: rev.dateFilled, amountCents: rev.remitCents ?? 0, why: found.why });
       continue;
     }
@@ -702,7 +813,7 @@ export async function repairReversals(): Promise<{ paired: number; strays: numbe
       .where(eq(schema.claims.id, hit.id));
     paired++;
   }
-  return { paired, strays: strays.length, stillStranded: stillStranded.slice(0, 20) };
+  return { paired, strays: strays.length, beforeTheBooks, stillStranded: stillStranded.slice(0, 20) };
 }
 
 /**
@@ -728,6 +839,8 @@ export async function recheckHeldClaims(): Promise<{
   reversalsHeld: number;
   /** The ones that still could not be paired, and why — so a repair that did nothing says so. */
   stillStranded: { rxNumber: string; dateFilled: string; amountCents: number; why: string }[];
+  /** Reversals of dispensings from before the books begin. Counted, never a job. */
+  reversalsBeforeTheBooks: number;
   paymentsMatched: number;
   before: { differenceCents: number; fillsOff: number };
   after: { differenceCents: number; fillsOff: number };
@@ -797,6 +910,7 @@ export async function recheckHeldClaims(): Promise<{
     reversalsPaired: reversals.paired,
     reversalsHeld: reversals.strays,
     stillStranded: reversals.stillStranded,
+    reversalsBeforeTheBooks: reversals.beforeTheBooks,
     paymentsMatched: matched,
     before: { differenceCents: before.differenceCents, fillsOff: before.fillsOff },
     after: { differenceCents: after.differenceCents, fillsOff: after.fillsOff },
@@ -1123,6 +1237,30 @@ async function loadClaimFlags(scope: ClaimScope) {
       return s + Math.max(0, SB20_MIN_DISPENSING_FEE_CENTS - got);
     }, 0);
 
+  /*
+   * Promised money, split into what is late and what is simply not due yet.
+   *
+   * The owner, on "$96.89 promised by a plan and not yet paid — 1 fill": "can we give these time
+   * before alerting.." The fill behind it had been dispensed the previous afternoon. A plan has a
+   * remittance cycle and nothing is late inside it; see `promise-due.ts` for what the period is
+   * keyed on and why. The total is unchanged — only `promised.due` earns an alert.
+   *
+   * Computed here rather than on the page, because `money-position.ts` shows the same figure on the
+   * home page and two copies of one rule drift.
+   *
+   * Today's date is read here, and the whole-history reading is held (see `held.ts`), so on a quiet
+   * night this can be served a day behind. Against a period of weeks that is not a figure anybody
+   * can watch move; it is written down because a date deciding a period is the fault shape this
+   * codebase keeps having.
+   */
+  const { splitPromised } = await import("./promise-due");
+  const { facilitatorGrace } = await import("./promise-due-store");
+  const promised = splitPromised(
+    fills.filter((f) => (f.facilitatorOutstandingCents ?? 0) > 0),
+    await facilitatorGrace("mtf"),
+    new Date().toISOString().slice(0, 10),
+  );
+
   return {
     total: rows.length,
     /** Claims on somebody else's plan. Every classification and floor figure is drawn from these. */
@@ -1203,10 +1341,18 @@ async function loadClaimFlags(scope: ClaimScope) {
      * Until it lands the fill sits in the red for the whole amount, and somebody looking at the
      * loss list has no way to tell a rate worth arguing about from a bill nobody has paid yet.
      */
-    awaitingFacilitator: fills
-      .filter((f) => (f.facilitatorOutstandingCents ?? 0) > 0)
-      .sort((a, b) => (b.facilitatorOutstandingCents ?? 0) - (a.facilitatorOutstandingCents ?? 0)),
+    awaitingFacilitator: promised.all,
     awaitingFacilitatorCents: fills.reduce((n, f) => n + (f.facilitatorOutstandingCents ?? 0), 0),
+    /*
+     * The same money, sorted by whether it is a job this morning.
+     *
+     * `awaitingFacilitator` above is still every promised, unpaid fill and its total is still the
+     * whole receivable: nothing has stopped being owed. `promised.due` is the part that has been
+     * waiting longer than the facilitator's own measured cycle, `promised.notDue` the part that has
+     * not, and `promised.says` is the sentence that tells him which is which and why. Only `due`
+     * belongs on a to-do list; both belong on the screen.
+     */
+    promised,
     /*
      * ── Do the books balance? ─────────────────────────────────────────────────────
      *
@@ -1574,4 +1720,97 @@ export async function latestClaimImport(): Promise<string | null> {
     limit: 1,
   });
   return rows[0]?.createdAt ?? null;
+}
+
+/**
+ * Marks live claims reversed where PioneerRx's own dispensing record contradicts their NDC.
+ *
+ * The deciding is `staleAgainstDispensing` above and is pure; this is the loading, and the writing.
+ * Safe to run at any time and does nothing twice: a row it reverses stops being live, so the next
+ * run does not see it.
+ *
+ * Reads PioneerRx, so it belongs to the morning pull rather than to a page — a page cannot reach
+ * the pharmacy system. Reports what it did in words, because this takes revenue off the books and
+ * a figure that moves without a sentence beside it is how somebody stops trusting the account.
+ */
+export async function settleStaleFills(
+  from = "2026-09-01",
+  user = "the PioneerRx pull",
+): Promise<{ reversed: number; revenueCents: number; costCents: number; rows: { rxNumber: string; fillNumber: number | null; ndc11: string | null; revenueCents: number; why: string }[]; says: string }> {
+  const { query } = await import("./pioneer-sql");
+  /*
+   * No patient column is named and none could be: `pioneer-sql.ts` refuses a query that names one
+   * and refuses `select *`. This asks only what was dispensed against which prescription.
+   */
+  const pr = await query(
+    `select c.RxNumber as rx, rx.RefillNumber as fill, i.NDC as ndc
+       from ThirdParty.ClaimRemittancePricingByRxTransactionID p
+       join Prescription.Claim c on c.ClaimID = p.ClaimID
+       join Prescription.RxTransaction rx on rx.RxTransactionID = p.RxTransactionID
+       join Item.Item i on i.ItemID = rx.DispensedItemID
+      where rx.DateFilled >= @from
+        and isnull(p.IsDuplicateClaim, 0) = 0
+        and p.TransactionResponseStatus = 'P'
+        and p.IsLastValidClaimForPayMethod = 1`,
+    { from },
+    50_000,
+  );
+  const dispensed = new Map<string, Set<string>>();
+  for (const r of pr.rows) {
+    const rx = String(r.rx ?? "").trim();
+    const digits = String(r.ndc ?? "").replace(/\D/g, "");
+    if (!rx || digits.length !== 11) continue;
+    const k = `${rx}|${Number(r.fill ?? 0)}`;
+    const set = dispensed.get(k) ?? new Set<string>();
+    set.add(digits);
+    dispensed.set(k, set);
+  }
+
+  const testImports = new Set(
+    (await db.query.claimImports.findMany({ where: eq(schema.claimImports.outOfBooks, true), columns: { id: true } })).map((i) => i.id),
+  );
+  const held = (
+    await db.query.claims.findMany({
+      where: and(gte(schema.claims.dateFilled, from), eq(schema.claims.source, "transaction_report")),
+      columns: { id: true, rxNumber: true, fillNumber: true, bin: true, ndc11: true, status: true, remitCents: true, copayCents: true, importId: true, acquisitionCents: true },
+    })
+  ).filter((c) => !testImports.has(c.importId));
+
+  const costOf = new Map(held.map((c) => [c.id, c.acquisitionCents ?? 0]));
+  const { stale } = staleAgainstDispensing(held, dispensed);
+
+  let revenueCents = 0;
+  let costCents = 0;
+  const rows: { rxNumber: string; fillNumber: number | null; ndc11: string | null; revenueCents: number; why: string }[] = [];
+  for (const s of stale) {
+    const money = (s.row.remitCents ?? 0) + (s.row.copayCents ?? 0);
+    revenueCents += money;
+    costCents += costOf.get(s.row.id) ?? 0;
+    rows.push({ rxNumber: s.row.rxNumber, fillNumber: s.row.fillNumber, ndc11: s.row.ndc11, revenueCents: money, why: s.why });
+    await db
+      .update(schema.claims)
+      /* The reason goes on the audit event, not the row: claims carry no notes column, and an
+       * audit line is where somebody looks to ask why a figure moved. */
+      .set({ status: "reversed", reversedOn: todayIso() })
+      .where(eq(schema.claims.id, s.row.id));
+    await audit({
+      action: "claim.reversed.not_dispensed",
+      userId: "system",
+      userName: user,
+      entity: "claim",
+      entityId: s.row.id,
+      details: `${s.row.rxNumber}/${s.row.fillNumber ?? 0} NDC ${s.row.ndc11}: ${formatCents(money)} taken off the books. ${s.why}`,
+    });
+  }
+
+  return {
+    reversed: rows.length,
+    revenueCents,
+    costCents,
+    rows,
+    says: rows.length
+      ? `${rows.length} claim${rows.length === 1 ? "" : "s"} taken off the books: the daily report listed the transaction twice and PioneerRx never dispensed that drug on ` +
+        `${rows.length === 1 ? "that prescription" : "those prescriptions"}. ${formatCents(revenueCents)} of revenue and ${formatCents(costCents)} of cost, so profit falls by ${formatCents(revenueCents - costCents)}.`
+      : "every live claim agrees with what PioneerRx says was dispensed",
+  };
 }

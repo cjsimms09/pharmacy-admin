@@ -61,6 +61,17 @@ export default async function ClaimsPage({
    */
   const promisedLosses = flags.awaitingFacilitator.filter((f) => (f.marginCents ?? 0) < 0);
   const promisedLossCents = promisedLosses.reduce((n, f) => n + (f.facilitatorOutstandingCents ?? 0), 0);
+  /*
+   * Which promised fills are not late yet, and the morning each starts being chased.
+   *
+   * Membership of this map is the classification from `splitPromised` — the page does not decide it
+   * — and the date is that same rule's arithmetic, the fill date plus the one grace period, so the
+   * badge on a row cannot say something different from the sentence above it.
+   */
+  const { addDays } = await import("@/lib/promise-due");
+  const promisedNotDueFrom = new Map(
+    flags.promised.notDue.map((f) => [f.key, addDays(f.dateFilled, flags.promised.grace.days)] as const),
+  );
 
   /* From the fills already grouped, rather than reading every claim and grouping them a second time. */
   const byPayer = await claimsByPayer({ fills: flags.fills, networks: flags.networks });
@@ -249,6 +260,28 @@ export default async function ClaimsPage({
         ? `${r.reversalsPaired} reversal${r.reversalsPaired === 1 ? "" : "s"} finally matched the claim${r.reversalsPaired === 1 ? "" : "s"} they cancel, which had been standing as live revenue`
         : null,
       r.paymentsMatched ? `${r.paymentsMatched} payment${r.paymentsMatched === 1 ? "" : "s"} attached to the fill it belongs to` : null,
+      /*
+       * And the ones it could not pair, which used to be dropped from this sentence entirely.
+       *
+       * `stillStranded` was returned by `recheckHeldClaims` and rendered nowhere — five September
+       * reversals worth $1,277.03 reaching no screen at all. The refusal itself is right: a reversal
+       * whose figures do not exactly cancel a live claim might belong to either run, and cancelling
+       * the wrong one deletes revenue that was really earned. But a refusal nobody is told about is
+       * the same as no check, which is the fault this codebase keeps finding in itself.
+       *
+       * Pre-September ones are not named, by his decision — "we are starting evrything clean as of
+       * 09/01, so if it is a reversal of a claim from before 09/01 we can forget about" — but they
+       * are counted in a clause of their own so the total still adds up.
+       */
+      r.stillStranded.length
+        ? `${r.stillStranded.length} reversal${r.stillStranded.length === 1 ? "" : "s"} could not be matched to the claim they cancel, so up to ` +
+          `${(r.stillStranded.reduce((n, x) => n + Math.abs(x.amountCents), 0) / 100).toFixed(2)} may still be standing as revenue: ` +
+          r.stillStranded.map((x) => `${x.rxNumber} on ${x.dateFilled}`).join(", ") +
+          `. Each needs a person to say which run of the prescription it reverses`
+        : null,
+      r.reversalsBeforeTheBooks
+        ? `${r.reversalsBeforeTheBooks} reversal${r.reversalsBeforeTheBooks === 1 ? "" : "s"} of dispensings from before 1 September were left alone, because nothing was ever counted for them`
+        : null,
     ].filter(Boolean);
 
     const balance =
@@ -302,15 +335,25 @@ export default async function ClaimsPage({
       */}
       <Todo
         items={[
-          flags.awaitingFacilitator.length > 0
+          /*
+           * Only the part that is actually late.
+           *
+           * The owner: "can we give these time before alerting.." This line used to fire on a fill
+           * dispensed the previous afternoon — $96.89 on one fill, the morning after it adjudicated
+           * — which is not a plan that has not paid, it is a plan that has not been asked yet. The
+           * grace period is the facilitator's own measured cycle; `promise-due.ts` says what it is
+           * keyed on. The money inside it has gone nowhere: it is still on the tile below, still in
+           * the loss list, and named in this sentence either way.
+           */
+          flags.promised.due.length > 0
             ? {
                 key: "promised",
                 tone: "warn" as const,
-                amount: formatCents(flags.awaitingFacilitatorCents),
-                title: `promised by a plan and not yet paid — ${flags.awaitingFacilitator.length} fills`,
+                amount: formatCents(flags.promised.dueCents),
+                title: `promised by a plan and later than that plan pays — ${flags.promised.due.length} fill${flags.promised.due.length === 1 ? "" : "s"}`,
                 href: "/remits/mtf",
                 action: "Facilitator feed",
-                why: `The plan named the payment when it adjudicated the claim; the money comes weeks later. Every one of these shows as a loss below until it lands, and none of them is a rate to argue about. Biggest is Rx ${flags.awaitingFacilitator[0].rxNumber}${flags.awaitingFacilitator[0].fillNumber !== null ? `-${flags.awaitingFacilitator[0].fillNumber}` : ""}${flags.awaitingFacilitator[0].itemName ? ` (${flags.awaitingFacilitator[0].itemName})` : ""} at ${formatCents(flags.awaitingFacilitator[0].facilitatorOutstandingCents ?? 0)}.`,
+                why: `The plan named the payment when it adjudicated the claim; the money comes weeks later. ${flags.promised.says} Biggest is Rx ${flags.promised.due[0].rxNumber}${flags.promised.due[0].fillNumber !== null ? `-${flags.promised.due[0].fillNumber}` : ""}${flags.promised.due[0].itemName ? ` (${flags.promised.due[0].itemName})` : ""} at ${formatCents(flags.promised.due[0].facilitatorOutstandingCents ?? 0)}, filled ${flags.promised.due[0].dateFilled}.`,
               }
             : null,
           /*
@@ -570,13 +613,26 @@ export default async function ClaimsPage({
               tone={flags.unreconciledCents ? "warn" : "ok"}
               sub={flags.unreconciled.length ? `${flags.unreconciled.length} fills the report values higher than we can` : "The report and this site agree"}
             />
+            {/*
+              The whole receivable, and separately whether any of it is a job.
+
+              The figure is every promised, unpaid dollar and it stays that way — a plan still owes
+              this whether or not its cycle has run. What changed is the tone and the line under it:
+              money inside the facilitator's own cycle is not a warning, so the tile reads calm and
+              says when the first of it starts being chased.
+            */}
             <Figure
               label="Promised, not yet paid"
               value={formatCents(flags.awaitingFacilitatorCents)}
-              tone={flags.awaitingFacilitatorCents ? "warn" : "ok"}
+              tone={flags.promised.dueCents ? "warn" : "ok"}
               sub={
                 flags.awaitingFacilitator.length
-                  ? `${flags.awaitingFacilitator.length} fills awaiting the facilitator`
+                  ? `${flags.awaitingFacilitator.length} fill${flags.awaitingFacilitator.length === 1 ? "" : "s"} awaiting the facilitator` +
+                    (flags.promised.dueCents
+                      ? ` · ${formatCents(flags.promised.dueCents)} of it past ${flags.promised.grace.days} days`
+                      : flags.promised.nextLateFrom
+                        ? ` · none of it late yet, the first from ${flags.promised.nextLateFrom}`
+                        : "")
                   : flags.underFee.length
                     ? `${formatCents(flags.underFeeShortfallCents)} under $10.50 on ${flags.underFee.length} in-scope claims`
                     : "Nothing outstanding"
@@ -932,7 +988,16 @@ export default async function ClaimsPage({
               </b>{" "}
               They are marked <span className="badge badge-warn">MTF promised</span> below, with what each becomes once
               it is paid. Nothing about them is a rate to argue over, and nothing needs doing to them: the payment posts
-              itself against the fill when it arrives.
+              itself against the fill when it arrives.{" "}
+              {/*
+                Why a promise is or is not on the morning's list, on the line with the promises.
+
+                The owner asked for the alert to wait — "can we give these time before alerting.." —
+                and a figure that quietly stopped appearing would be worse than the noise it
+                replaced. So the rule says itself here: the period, where the period came from, and
+                the day the first quiet one starts being chased.
+              */}
+              {flags.promised.says}
             </p>
           )}
           {flags.lossFills.length === 0 ? (
@@ -980,12 +1045,22 @@ export default async function ClaimsPage({
                           The plan's own promise, from the report's column rather than from a gap.
                           A fill that is merely unpaid must not read like a rate worth arguing over.
                         */}
+                        {/*
+                          And which of the two it is, on the row. A promise inside the facilitator's
+                          own cycle and one that has outrun it are different facts about the same
+                          dollar, and a single warn badge said only the second.
+                        */}
                         {(f.facilitatorOutstandingCents ?? 0) > 0 && (
                           <span
-                            className="badge badge-warn ml-1"
-                            title="The plan named this facilitator payment when it adjudicated the claim. It has not arrived yet, and it posts itself against this fill when it does."
+                            className={`badge ml-1 ${promisedNotDueFrom.has(f.key) ? "badge-muted" : "badge-warn"}`}
+                            title={
+                              promisedNotDueFrom.has(f.key)
+                                ? `The plan named this facilitator payment when it adjudicated the claim on ${f.dateFilled}. It is not late: ${flags.promised.grace.why}. Chased from ${promisedNotDueFrom.get(f.key) ?? "—"}. It posts itself against this fill when it arrives.`
+                                : "The plan named this facilitator payment when it adjudicated the claim. It has not arrived yet, and it posts itself against this fill when it does."
+                            }
                           >
                             MTF promised {formatCents(f.facilitatorOutstandingCents ?? 0)}
+                            {promisedNotDueFrom.has(f.key) && <> · not due yet</>}
                           </span>
                         )}
                         {/*

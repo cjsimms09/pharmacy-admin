@@ -36,6 +36,33 @@ const MOST_HELD = 48;
 
 let fpCache: { at: number; fp: string } | null = null;
 
+/**
+ * Forgets the cached fingerprint, so the next reading is taken against the tables as they are now.
+ *
+ * ── Why this had to exist ──
+ *
+ * The owner, classifying plans: "im also hitting record on some of them and nothing is happening,
+ * they arent going away". They were being recorded. Every press landed — the audit log and
+ * `decided_on` both showed his determinations — and the page he was sent back to showed each plan
+ * exactly as it had been, so he pressed again.
+ *
+ * The two-second cache below is why. A server action writes, redirects, and the page re-renders well
+ * inside two seconds; `fingerprint()` then returns the fingerprint taken *before* the write,
+ * `held()` finds a value whose fingerprint matches and is younger than ten minutes, and serves it.
+ * The work was done and the screen said otherwise — the fault this project has spent days on, this
+ * time in the caching layer rather than in any one page, and therefore on every action at once.
+ *
+ * So every write clears it. Called from `audit()`, which every action that changes anything already
+ * goes through — that is the whole reason it hangs off audit rather than being called by hand at
+ * each site, where the next action somebody writes would forget it.
+ *
+ * The two seconds are still worth keeping: they exist so one page load asking for six readings takes
+ * one fingerprint rather than six, and nothing is written in the middle of a single render.
+ */
+export function forgetFingerprint(): void {
+  fpCache = null;
+}
+
 /** What the readings depend on, in one cheap statement. Cached for two seconds so one page load asks once. */
 export async function fingerprint(): Promise<string> {
   if (fpCache && Date.now() - fpCache.at < 2_000) return fpCache.fp;

@@ -176,6 +176,26 @@ export type PlanRow = {
   receivedCents: number;
   underFeeClaims: number;
   planTypes: string[];
+  /**
+   * What this plan actually pays for, so the classification can be read off its own claims.
+   *
+   * The owner: *"when trying to classify plans, it would be nice to see current claims we have for
+   * that plan it might help me classify them (ie copay cards)"*. He is describing the real tell. A
+   * manufacturer copay card shows one brand drug over and over — BIN 019158 / CNRX is Wegovy — while
+   * a benefit plan shows the whole shop. Naming the drugs turns a BIN into something recognisable.
+   */
+  topDrugs: { name: string; claims: number }[];
+  /**
+   * Fills where this plan was the only payer, against fills where it shared one.
+   *
+   * The decisive fact for a card, and the one the owner's own correction turned on: DST/CNRX is on
+   * 26 of its 28 claims the *only* payer on the fill, which is what a card is not supposed to look
+   * like. A card sits on top of a plan and pays down what the patient was left owing, so it should
+   * arrive as a second payer; where it is the sole payer it is acting as the payer of record and
+   * belongs in what payers owe. A secondary that never appears alone is the opposite reading.
+   */
+  soleFills: number;
+  sharedFills: number;
 };
 
 /** The register, with each plan's claim volume so the unresolved ones can be worked by size. */
@@ -189,19 +209,53 @@ async function loadPlanRegister(): Promise<PlanRow[]> {
     db.query.planGroups.findMany(),
     db.query.claims.findMany({
       where: eq(schema.claims.status, "paid"),
-      columns: { bin: true, pcn: true, groupNumber: true, remitCents: true, copayCents: true, planType: true },
+      columns: {
+        bin: true, pcn: true, groupNumber: true, remitCents: true, copayCents: true, planType: true,
+        itemName: true, rxNumber: true, fillNumber: true,
+      },
     }),
   ]);
-  type Stat = { claims: number; receivedCents: number; underFeeClaims: number; planTypes: Set<string> };
+
+  /*
+   * How many payers each fill had, so a plan can be asked whether it ever pays alone.
+   *
+   * Counted once over every paid claim rather than per plan: a fill billed to two payers is two
+   * claim rows with the same prescription and fill number, so the number of rows sharing that key
+   * *is* the number of payers. Built before the loop because each plan needs to look its own fills
+   * up in it.
+   */
+  const payersOnFill = new Map<string, number>();
+  for (const c of claims) {
+    const k = `${c.rxNumber}|${c.fillNumber ?? 0}`;
+    payersOnFill.set(k, (payersOnFill.get(k) ?? 0) + 1);
+  }
+
+  type Stat = {
+    claims: number; receivedCents: number; underFeeClaims: number; planTypes: Set<string>;
+    drugs: Map<string, number>; sole: number; shared: number;
+  };
   const stats = new Map<string, Stat>();
   const add = (k: string, c: (typeof claims)[number]) => {
     let e = stats.get(k);
-    if (!e) { e = { claims: 0, receivedCents: 0, underFeeClaims: 0, planTypes: new Set() }; stats.set(k, e); }
+    if (!e) {
+      e = { claims: 0, receivedCents: 0, underFeeClaims: 0, planTypes: new Set(), drugs: new Map(), sole: 0, shared: 0 };
+      stats.set(k, e);
+    }
     e.claims++;
     const got = receivedCents(c.remitCents, c.copayCents);
     e.receivedCents += got ?? 0;
     if (got !== null && got < 1050) e.underFeeClaims++;
     if (c.planType) e.planTypes.add(c.planType);
+    /*
+     * The drug as the claim named it, not tidied. Two spellings of one product count apart, which
+     * is honest: this is here to be recognised by eye, and "Wegovy Pref Pen" and "WEGOVY 1 MG/0.5
+     * ML PEN" both read as Wegovy to a pharmacist while a normaliser guessing they are the same
+     * would eventually merge two products that are not.
+     */
+    const name = (c.itemName ?? "").trim();
+    if (name) e.drugs.set(name, (e.drugs.get(name) ?? 0) + 1);
+    if ((payersOnFill.get(`${c.rxNumber}|${c.fillNumber ?? 0}`) ?? 1) > 1) e.shared++;
+    else e.sole++;
   };
   for (const c of claims) {
     add(planKey(c.bin, c.pcn, c.groupNumber), c);
@@ -228,6 +282,15 @@ async function loadPlanRegister(): Promise<PlanRow[]> {
         receivedCents: s?.receivedCents ?? 0,
         underFeeClaims: s?.underFeeClaims ?? 0,
         planTypes: s ? [...s.planTypes].sort() : [],
+        /* Four is enough to recognise a plan by and short enough to read on a phone. */
+        topDrugs: s
+          ? [...s.drugs.entries()]
+              .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+              .slice(0, 4)
+              .map(([name, n]) => ({ name, claims: n }))
+          : [],
+        soleFills: s?.sole ?? 0,
+        sharedFills: s?.shared ?? 0,
       };
     })
     .sort((a, b) => b.claims - a.claims);
@@ -290,11 +353,27 @@ export async function classifyPlan(
 ): Promise<void> {
   const basis = (input.basis ?? "").trim();
   if (needsBasis(input.classification) && basis.length < 10) {
+    /*
+     * The rule is right; the sentence was not usable.
+     *
+     * The owner, blocked by it: "keeps giving me this error and not letting me classify a plan". The
+     * old wording explained the *principle* at length — why the Kansas floor turns on this finding —
+     * and never named the control to touch. He read it as the site refusing him rather than as a
+     * field he had not filled, which is exactly what it looks like when the only failing case is an
+     * untouched dropdown two fields above the button.
+     *
+     * So it now says the one thing to do first. The reason follows, in a sentence, because he does
+     * audit and a rule with no reason attached is a rule somebody works around. What it must never
+     * become is a rule that waves the claim through: this class is the difference between a filing
+     * that stands and one that collapses when a PBM asks how it was established.
+     */
     throw new Error(
-      `Marking a plan as ${CLASS_INFO[input.classification].label} decides whether the Kansas floor reaches it, and ` +
-        "that is the finding an appeal turns on — so say how it was established: a Form 5500 filing, the plan " +
-        "document, the employer's own answer, or who confirmed it. Medicare, Medicaid, workers' compensation and " +
-        "cards need no basis; the claim itself says what they are.",
+      `Pick a source in "How this was established" — the dropdown just above the Record button — and say what it ` +
+        `shows in "What it says". ` +
+        `${CLASS_INFO[input.classification].label} is one of the four classes that decide whether the Kansas floor ` +
+        `reaches this plan, so an appeal built on it has to name the Form 5500, the plan document, the employer's own ` +
+        `answer, or who confirmed it. Medicare, Medicaid, workers' compensation and the cards need none of this — the ` +
+        `claim itself says what they are.`,
     );
   }
   await db

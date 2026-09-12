@@ -130,6 +130,23 @@ Keep these in view; do not rediscover them.
   which padding is a real drug and takes only an unambiguous answer. A device — a pen needle, a Dexcom
   sensor — resolves to none and keeps its digits, which is correct. Do not "simplify" this back to taking
   the last eleven digits.
+- **A wholesaler's NDC column is not always eleven digits either.** IPD clipped one to nine on
+  invoice 1008931 — 70756-0094 for a propranolol, no pack code, the same clipping that printed
+  "PROPRANOLO" and "BUME" on the lines around it — and `run.slice(-11)` took two digits off the item
+  number beside it and produced 54707560094, which is nobody's code. `ndcFromRun` now asks the
+  directory how long the column was. Where the pack code is genuinely not printed and the FDA lists
+  more than one pack, the line keeps nine digits rather than eleven with a pack size invented in
+  them; a pack size is what every cost per unit divides by.
+- **Two codes for one item is not two items.** The invoice and the delivery are filled in by
+  different people from different documents, and the comparison on Supplier invoices is only worth
+  something if a difference in how a code was *written* does not read as a difference in what was
+  *bought*. `sameDrugCode` holds the three writings that turn up: the same ten digits padded in a
+  different place (41167-0587-07 against 41167-0058-77, one tube of Aspercreme), a UPC with its
+  prefix still on (704142-00024 against 04142-0000-24), and a product whose pack code the invoice
+  did not print. It deliberately does **not** treat two packs of one drug as the same item. Ten rows
+  sat on that screen under "the invoice and the delivery disagree" and every one was one of these or
+  a front-end barcode for an item with no NDC at all; a difference in codes is a finding only where
+  both codes are drugs the FDA lists and they still differ.
 - **A copay-card processor is a payer.** The owner, correcting the plan-classification work:
   "Technically cnrx is a payor!! They will reimburse us for that remit amount." He is right and the
   distinction has to be kept in two halves. DST Pharmacy Solutions (SS&C Health), BIN 019158/CNRX,
@@ -179,6 +196,19 @@ So, before shipping a screen:
 
 - Deploy: `git push origin feature/compliance`, write `data/.update-requested`, kill the PID on port
   3000, poll `.next/BUILD_ID` until it changes and HTTP is 200/307. `npm run deploy` is blocked.
+- **A deploy takes the site down for a minute or two, and he is usually in it.** On 12 September this
+  check deployed twice inside an hour and he wrote "site isnt coming up". Nothing was wrong with the
+  site — it was rebuilding, twice, with no warning and no holding page, while his own connections
+  were live in `netstat`.
+
+  So before killing the process, look: `netstat -ano | grep :3000` shows a foreign address that is
+  not `127.0.0.1` when somebody is using it from another machine. If anybody is on it, say so and
+  ask, or wait — do not take it down silently. And deploy **once** at the end of the check rather
+  than after each fix; the work is committed either way, and every extra restart is another minute
+  he is locked out.
+
+  Tell him the address afterwards — `http://10.133.63.10:3000` — because "it's deployed" is not the
+  same news as "it's back".
 - Scripts: `node node_modules/tsx/dist/cli.mjs --tsconfig tsconfig.script.json scripts/<f>.ts`,
   starting `import "dotenv/config";`. Throwaway probes go in `scripts/support/` and are deleted after.
 - Migrations are additive and numbered, `drizzle/00NN_*.sql` plus a `_journal.json` entry whose
