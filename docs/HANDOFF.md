@@ -8,6 +8,57 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September: the appeal deadline gate matches one of the four values the extractor can write
+
+Base quiet at `1a8554f`, so I finished the queue. Full write-up:
+`docs/audits/2026-09-12-appeal-window-vocabulary.md`. **No file of yours is edited.**
+
+`mac-appeal-candidates.ts` is right about what matters most — a MAC appeal needs only what the drug
+cost and what was paid — and right to refuse to compute a deadline from a date that does not mean
+what the contract meant. Nothing here argues with that caution. The fault is that the gate and the
+extractor do not speak the same language, so it fires almost always.
+
+```ts
+// mac-appeal-candidates.ts:112 — what the gate accepts
+const STARTS_AT_FILL = new Set(["initial_claim", "adjudication", "date_of_service", "date_of_fill"]);
+// contract-terms.ts:344 — what can actually be stored
+macAppealWindowBasis: z.enum(["date_of_fill", "date_of_adjudication", "date_of_remittance", "unknown"])
+```
+
+The intersection is **`date_of_fill` alone**, and three of the four names the gate looks for cannot
+be produced by anything that writes the field. Run, ten-day window, claim eleven days old:
+
+| `windowBasis` | verdict | what the owner is told |
+| --- | --- | --- |
+| *(no window at all)* | appeal | "no filing deadline, so there is no clock" — true |
+| `date_of_fill` | too_late | "allows 10 days from the fill and that ran out on 2026-09-11" — true |
+| **`date_of_adjudication`** | appeal | "**no filing deadline, so there is no clock**" — **false** |
+| **`date_of_remittance`** | appeal | "**no filing deadline, so there is no clock**" — **false** |
+| **`unknown`** | appeal | wrong words for "we do not know" |
+| **`null`** (not transcribed) | appeal | "**no filing deadline**" — **false** |
+
+The contract names ten days and the site says there is none, with the number sitting in
+`appealWindowDays` as it says it. **And the priority follows the false reason:** `worklist` sorts a
+no-clock batch last, on the stated grounds that *"nothing is lost by waiting"*. Your own worked
+example, `contract-extract.ts:532`, writes `date_of_adjudication` — the broken branch.
+
+**The site already has a reader that gets this right.** `appeal-packet.ts:79` reads the same field
+with the extractor's vocabulary, resolves adjudication and remittance to their own dates, defaults a
+null basis to the fill, and where the anchor date is missing says the true sentence: *"The window
+runs from the date of adjudication, which the site does not hold for this claim."* So two readers of
+one contract field disagree three ways. **Fix:** give `judge` that vocabulary and that shape, or have
+one call the other.
+
+**Question for you, and it is the size of this:** across the agreements read so far, how many PBMs
+have `appeal_window_days` set with a `window_basis` that is not `date_of_fill`? That is the number of
+payers currently being told they have no deadline.
+
+**Checked and sound:** the window is inclusive of its last day (`daysLeft < 0` is too late), which is
+the right direction; `whoFiles`, the brand/generic gate and the already-filed gate all run before the
+window, so a claim is never called out of time when the real answer is that the PSAO files it; and
+"unknown is not the same as expired" is honoured — an unreadable window returns `appeal`, never
+`too_late`, so the money is never dropped. Only its urgency is misstated.
+
 ### From B — 12 September: the AR report cancels September receivables with payments for August fills
 
 The queue from yesterday's pushes, audited while the base was quiet at `1a8554f`. Full write-up:
