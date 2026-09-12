@@ -14,6 +14,8 @@ import { looksLikePayerPayments } from "./payer-payments";
 import { pdfText } from "./pdf-text";
 import { looksLikeRebateReport } from "./rebate-report";
 import { isDrillDownText } from "./drill-down-read";
+import { looksLikeX12Remittance } from "./business-docs";
+import { readZipBounded } from "./zip-read";
 import { ALLOWED_MIME } from "./files";
 
 /**
@@ -115,8 +117,7 @@ export function classify(fileName: string, buf: Buffer): Classification {
    * reader it goes to checks the file against its own totals before anything is stored.
    */
   if (buf.subarray(0, 4).toString("latin1") === "ISA*") {
-    const head = buf.subarray(0, 2048).toString("latin1");
-    if (/(^|[~\r\n])ST\*835\*/.test(head)) return { kind: "remittance_835", why: "An X12 envelope declaring an 835 remittance advice.", headers: [] };
+    if (isX12Remittance(buf)) return { kind: "remittance_835", why: "An X12 envelope declaring an 835 remittance advice.", headers: [] };
     return { kind: "unrecognised", why: "An X12 envelope that is not an 835 remittance. Filed as a document.", headers: [] };
   }
   /*
@@ -407,9 +408,61 @@ const TEXT_MIME = new Set(["text/plain", "text/csv", "text/tab-separated-values"
  * happened. So a file with no extension is accepted when its type is text or its first lines are
  * the catalogue's own title; everything else still needs a known extension and a known type.
  */
+/**
+ * Whether these bytes are an 835 remittance, strictly.
+ *
+ * The envelope and the transaction set together, and nothing else. `looksLikeX12Remittance` in
+ * `business-docs.ts` is deliberately looser — it also answers true for a `.835` file name or a bare
+ * `BPR` segment — which is right at the Add tool's door, where a person confirms what a document is,
+ * and wrong anywhere a document gets *named* without being asked about.
+ *
+ * The difference is not academic. An **820 payment order** carries a `BPR` and declares `ST*820`:
+ * the loose test calls it a remittance and this one does not. So does a 999 acknowledgement that
+ * somebody saved as `REMIT.835`. Filing either as a remittance would put money against claims it
+ * never paid.
+ *
+ * Exported so `classify()` and the recogniser ask the same question rather than two that agree
+ * most of the time — the fault this repository has already paid for twice in supplier matching.
+ */
+export function isX12Remittance(buf: Buffer): boolean {
+  if (buf.subarray(0, 4).toString("latin1") !== "ISA*") return false;
+  return /(^|[~\r\n])ST\*835\*/.test(buf.subarray(0, 2048).toString("latin1"));
+}
+
+/**
+ * An 835, loose or in an archive.
+ *
+ * A clearinghouse that sends a day's remittances at once sends a zip, and a payer's portal offers
+ * one for download the same way, so "recognise an ISA envelope with ST*835 (and a zip holding one)"
+ * is one question with two shapes. The archive is walked with the bounded reader rather than the
+ * plain one: this is an attachment from outside, and a zip is a format in which something small
+ * describes something enormous.
+ */
+function remittanceInside(content: Buffer, name: string): boolean {
+  if (looksLikeX12Remittance(content, name)) return true;
+  if (content.length < 4 || content.readUInt32LE(0) !== 0x04034b50) return false;
+  return readZipBounded(content).some((e) => looksLikeX12Remittance(e.data, e.name));
+}
+
 export function acceptableAttachment(att: { filename?: string | null; contentType?: string | null; content?: Buffer | Uint8Array | null }): { ok: true } | { ok: false; why: string } {
   const name = att.filename ?? "";
   const type = att.contentType ?? "";
+  /*
+   * A remittance advice is let in on its envelope, before any rule about names.
+   *
+   * BACKLOG item 27: the owner is having 835s emailed here. A payer names the file what it likes —
+   * `.835`, `.edi`, `.dat`, or nothing at all — and sends it as whatever its mail system decides,
+   * so both of the rules below refuse it: `.835` is not in `REPORT_EXT`, and an extensionless one
+   * is only let through for the PioneerRx catalogue. The line would read "not a type this reads"
+   * and the money in the file would never arrive, which is the same outcome as it never having
+   * been sent.
+   *
+   * The envelope is not a heuristic. An ISA header with an ST*835 inside it is a remittance and is
+   * not anything else, so it is asked first, and it needs no name — including the no-name case,
+   * which every branch below refuses and which is what a forwarded attachment sometimes looks like.
+   */
+  const content = att.content ? Buffer.from(att.content) : null;
+  if (content && remittanceInside(content, name)) return { ok: true };
   if (!name) return { ok: false, why: "an attachment with no name" };
   const hasExt = /\.[A-Za-z0-9]{1,5}$/.test(name);
   if (hasExt) {

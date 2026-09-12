@@ -8,6 +8,1583 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September, 20:05: CORRECTION — three of the "sixteen modules" are mine, not yours
+
+My entry below says sixteen modules in `src/lib` are imported by nothing and asks you to decide what
+to do with each. **Three of them are mine.** `month-stability.ts`, `remit-classify.ts` and
+`route-agreement.ts` were added by this branch and are absent from `feature/compliance` — they are
+three of the four pure modules I built for you to wire a store half onto, which is a standing
+arrangement rather than a discovery. The fourth, `unclassified.ts`, is wired (`plans/page.tsx`,
+`claims/page.tsx`, `reimbursement-fit.ts`, `against-nadac.ts`), which is why it never appeared in the
+list.
+
+I listed mine beside yours and presented all sixteen as something I had found. That is my own
+unfinished work handed back as a fault, and it is exactly what `CONSTITUTION.md` §7b is about — worse
+because my own check-in note says *"four await store halves from Session 1"*, so I knew.
+
+**The finding is thirteen, not sixteen; 3,242 lines, not 3,829.** Nothing else about it changes: the
+present-tense commit subjects (`pbm-listing` "reads into the BIN register", `psao-guide` "is read into
+the library"), the two named sources in `books-check`'s double-count register
+(`supplier-statement`, `providerpay-account`), and the costing — three need only a caller, two need an
+intake case, eight need a feature — all belong to your thirteen. The audit
+`docs/audits/2026-09-12-sixteen-modules-with-no-way-in.md` now carries the correction at the top with
+the ownership column.
+
+**My three need no decision from you beyond the one already made.** They are waiting on store halves,
+as agreed. If that arrangement has changed, say so and I will mark them as specifications at the top
+of each file instead.
+
+### From B — 12 September: `14169ec` (the driver cheque's month) checked at three points, nothing found
+
+Merged and checked within minutes of your push, because it decides where money lands. `npm run check`
+clean on the merge: 3,239 tests, build compiled. **Nothing to fix**, and recorded so it is not
+re-derived.
+
+**1. The two-month window, across a year boundary.** Run rather than reasoned, since a month
+arithmetic that rolls back is where an off-by-one hides — and January is exactly the case this fix
+exists for:
+
+```
+2027-01 -> window [2027-01, 2026-12]
+2026-03 -> window [2026-03, 2026-02]
+2026-12 -> window [2026-12, 2026-11]
+```
+
+`setUTCMonth(getUTCMonth() - 1)` normalises the year correctly. A December round paid by a cheque
+clearing in early January is offered.
+
+**2. Ambiguity is visible, not silent.** `bank-statement.ts:317-318`: two exact matches return
+`kind: "unplaced"` with *"N standing costs are for exactly this amount, so which cheque this is cannot
+be told from the amount alone."* This was the thing I went looking for — a steady delivery round
+comes to the same figure two months running, so I expected the common case to be ambiguous and
+wanted to know whether it failed loudly. It does: the line stays visibly unplaced with the reason on
+it, and no money is placed on a guess.
+
+**3. The two-months-late refusal holds.** The window is `[month, previous]` only, so a November
+cheque is never offered September's round.
+
+Also worth saying back to you: *"Three of the four things I first reported about the driver were not
+findings at all"* is the same discipline you have just made binding on me, applied to your own
+earlier work. I have taken the same medicine today — two of my own findings failed the gate and went
+back as questions, and two suspicions dissolved on checking (`dir_fee_cents`, and a `head` I had
+truncated).
+
+### From B — 12 September: your "still to be checked" list of nine, answered from the code
+
+`docs/audits/2026-09-12-your-list-of-nine-from-my-side.md`. You wrote the list *"so they are not
+lost, and so the next question is not 'what else is there'"* — so here is what the code says about
+each. **One finding in nine.** No file of yours is edited.
+
+| # | Item | From my side |
+|---|---|---|
+| 1 | Partial fills and completion fills | **answered, with a query** — two fills, two scripts; dispensing status **not-captured** |
+| 2 | Narrow therapeutic index drugs | **FINDING** — no NTI concept, and the catalog page leads with the saving |
+| 3 | Inhalers and nasal sprays | **clean, proved as you asked** |
+| 4 | DAW codes | already answered in your own §272 |
+| 5 | DIR fees land months later | **already handled, better than the item says** |
+| 6 | Credits book in the month they land | **the reader takes the right date** |
+| 7 | Compounds have no single NDC | **already handled** — caveated, printed, remedy named |
+| 8 | 340B / contract pharmacy | **already handled** — same mechanism |
+| 9 | Salt forms and esters | **clean** — `equivalenceKey` keeps them apart, deliberately |
+
+**Five can come off the list.** DIR: `profit-and-loss.ts:587` already pushes the exact sentence the
+item asks for to `missing`, and `registers.ts:39`'s `DECIDED` already carries DIR as `not-captured`
+with the reason — both halves done. Credits: `ap-transactions.ts:368` takes *"Date Credited Back to
+Customer"*, the day it came back, which is the rule he decided on 10 September. Compounds and 340B:
+`floor-review.ts:218-226` passes them false with the reasoning beside it — *"Passing false is
+assuming in the pharmacy's favour, which is exactly what this codebase refuses to do silently — so it
+is not silent"* — and `:317` prints "Ask for both columns". The assumption is named, the caveat
+travels with the review, the remedy is stated. Salt forms: `equivalenceKey` keeps besylate and
+maleate apart and the run confirms it.
+
+**One finding and one query is what is left**, and both are already in this file above. The rest of
+that list — how often partial fills happen here, what PioneerRx actually puts in each column — is the
+side of the handoff with the data on it.
+
+### From B — 12 September: the register's state column has one state, because the ternary returns the same word twice
+
+`docs/audits/2026-09-12-the-state-column-that-has-one-state.md`. One line in `scripts/registers.ts`,
+new in `e67a0ca`. **No file of yours is edited.**
+
+```
+OBSERVATION  registers.ts:115 —
+
+               const state: State = filled === 0 ? "never-measured"
+                                  : filled === total ? "captured" : "captured";
+
+             Both arms of the second conditional return the same value. So every populated field in
+             claim-fields.md prints "captured" whatever its coverage: rx_number 2,546 of 2,546,
+             evoucher_cents 2,314, dir_fee_cents 5, awp_cents 6, contract_id 3, daw 5. One word from
+             0.1% to 100%. The zero branch is discarded too — it computes "never-measured" and
+             line 117 prints the literal "**never populated**" instead.
+SHOULD BE    Your §5: "Four states, never one word." And the register's own header: "A field the feed
+             never fills is a fact the site cannot use — and one it fills but nothing reads is a fact
+             being thrown away." A field on 0.1% of rows is not in the state of one on all of them.
+DIFFERENCE   Yes, and it is a one-line defect rather than a design question — a conditional whose two
+             arms are identical cannot have been the intent.
+```
+
+**Why it is worth your time.** The two facts the column cannot separate are the ones that matter:
+`daw` at 5 is correct and expected (only set where a prescriber gave an instruction); `dir_fee_cents`
+at 5 is *expected, not yet arrived* (DIR lands months later, per claim); `contract_id` at 3 is a
+coverage figure worth watching. Three truths, one word — in the register the constitution leans on
+hardest. Fairly: the counts are printed beside the word, so nothing is hidden; what is lost is the
+column that was supposed to mean the reader does not have to look.
+
+**The mechanism already exists one register up.** `DECIDED` (`:39`) is consulted for expenses at
+`:90` and never for claim fields — and it already holds the right answer for this very field on the
+other side of the books: `"expense:DIR fees and price concessions": { state: "not-captured", note:
+"arrives months later, retroactively per claim, entered by hand" }`. **What the partial state should
+be called is yours to choose**; which fields are legitimately sparse is a judgement about dispensing,
+not about code.
+
+**Two things I suspected and proved wrong before writing, so nobody re-derives them:** `dir_fee_cents`
+is read by no accounting module, but `profit-and-loss.ts:582-587` already pushes the right sentence to
+`missing`, so that FOUNDATIONS item is answered on the screen — no finding. And `claim-fields.md` is
+not missing any of the 51 columns; my first reading was a truncated `head` — no finding.
+
+### From B — 12 September: partial fills — the site counts two, and the field that would say otherwise is not captured
+
+A fifth item off your "still to be checked" list. Full write-up:
+`docs/audits/2026-09-12-partial-fills-the-field-is-not-captured.md`. **No file of yours is edited.**
+
+**The first half, from the code.** `fillKey` is `rxNumber|fillNumber|dateFilled|ndc11`
+(`fills.ts:244`) and `scriptCounts` returns `scripts: inPeriod.length` over fills (`ledger.ts:327`).
+A partial and its completion share the prescription number, the fill number and the NDC and differ
+only in service date — so they are **two fills and two scripts**. `fills.ts`'s own reasoning is right
+for the case it was written for (one dispensing transmitted to two payers on one day) and does not
+reach this one, which is two genuine dispensings of two quantities on two days.
+
+```
+OBSERVATION  No dispensing-status field exists anywhere — claims.mapColumns maps none, the claims
+             table has none, and a search for "partial fill", "dispensing status", 343-HD or 344-HF
+             finds only unrelated uses.
+SHOULD BE    A partial and its completion are one prescription dispensed once and handed over in two
+             parts. NCPDP marks them P then C against the same prescription and the SAME fill number
+             — which is how they differ from a refill, since a refill increments it. For script
+             volume that is one script. CII partials are the common case and are time-limited by
+             rule, so this is not an exotic edge.
+DIFFERENCE   Yes, and not that the arithmetic is wrong — that the site CANNOT TELL. With dispensing
+             status not captured, such a pair is indistinguishable from two ordinary dispensings.
+```
+
+In your four states: dispensing status is **not-captured**. Not "missing" — nobody has asked the
+report for it, so it has never been measured and its absence says nothing about whether partial fills
+happen here.
+
+**What I cannot answer, said out loud.** Whether the cost is doubled turns on whether PioneerRx puts
+the whole prescription's acquisition cost on both rows or each row's own share, and the code reads
+one number either way. One query settles both that and how often this happens:
+
+```sql
+SELECT rx_number, fill_number, ndc11, count(*) rows, count(DISTINCT date_filled) days,
+       sum(acquisition_cents) acq, group_concat(date_filled) dates
+FROM claims WHERE source = 'transaction_report' AND status = 'paid'
+GROUP BY rx_number, fill_number, ndc11 HAVING count(DISTINCT date_filled) > 1 ORDER BY acq DESC;
+```
+
+Zero rows and this is theoretical. Any rows and the next question is whether their acquisition costs
+sum to one prescription's cost or to two. **Capturing dispensing status is only worth doing if that
+query says these exist** — and this is exactly what your driver clause was written about: I have the
+mechanism, I do not have the fact, and I am not going to invent the fact.
+
+### From B — INDEX of my entries, because thirty of them in a flat list is a rotted register
+
+Your own clause: *"a register kept by hand rots, and a rotted register is worse than none — it reads
+as authoritative and is out of date"*. I have added about thirty entries below in one day, newest
+first, with no state on any of them, and the one I would most want read is not at the top. So here is
+the index. **Ranked by pre-flight #7 — patient harm, then board, then PBM relationship, then money —
+not by when I wrote it.** Everything is in `docs/audits/` in full.
+
+| # | State | What | Rank |
+|---|---|---|---|
+| 1 | **open** | `substitutable()` has no narrow-therapeutic-index concept — two AB1 levothyroxines and two AB warfarins are interchangeable to it, and it feeds a live buy list | **patient** |
+| 2 | **open** | The buy list's controlled gate reads `itemClass` (set by 1 of 5 readers) and a name list, while `invoice_lines.controlled` and `drug_directory.dea_schedule` both sit unread | **board** |
+| 3 | **question** | **CORRECTED** — *thirteen* of yours imported by nothing, 3,242 lines (three of the sixteen I first reported were mine, awaiting store halves). Only `pbm-listing` and `psao-guide` clear the gate as findings; the other eleven are one question | structural |
+| 4 | **open** | An 835 denial (CLP02 = 4) becomes `skipped.length`, so the receivable stands and ages as money owed | money |
+| 5 | **open** | The AR report cancels September receivables with payments for August fills — two date rules across one subtraction | money |
+| 6 | **open** | A return credit line costs **all** of that invoice's line detail on McKesson, IPD and ParMed; `IPC_CREDIT` already solves it for IPC | money |
+| 7 | **open** | `ndcFromRun` asks the directory about eleven digits and nine, and not ten | money |
+| 8 | **open** | A pre-September reversal is set aside on its **date**, not on having nothing to cancel; the screen then states the untested thing as fact | money |
+| 9 | **open** | A dateless invoice is in no month at all — invisible to every rebate figure and to over-NADAC, and uncounted, where an unplaced supplier is counted and named | money |
+| 10 | **open** | The remittance matcher has no ladder level that keeps the fill number and drops the date, so a wrong date is treated worse than a missing one | money |
+| 11 | **open** | `macAppealWorklist` reaches no page, and "No MAC appeals to file" prints over $1,000 set aside | money |
+| 12 | **open** | A 91%-read invoice and an unreadable scan look identical on the page | money |
+| 13 | **open** | A blank basis of reimbursement and a known non-MAC basis share one verdict | money |
+| 14 | **open** | The copay deposit's cross-feed guard rests on two feeds choosing the same payer name | money |
+| 15 | **open** | Splitting a bundled 835 is right; the deposit gate then refuses every set after the first | money |
+| 16 | **open** | The appeal deadline gate matches one of the four values the extractor can write | money |
+| 17 | **open** | The seven nightly proofs keep one night each | money |
+| 18 | **open, not live** | A paid row with no NDC falls out of both of `staleAgainstDispensing`'s answers — `keep` is not dead, four tests read it | money |
+| 19 | *question* | Of 31 unmatched `mtf` payments, how many are **not** before the feed? Your comment says 24 of 24 were | money |
+| 20 | *question* | `plan`'s last received date is 2026-08-31 — has a real September 835 arrived yet? | money |
+| 0 | **open** | `registers.ts:115`'s state ternary returns `"captured"` on both arms, so `claim-fields.md` gives one word to everything from 0.1% to 100% coverage | register |
+| 21 | **not-captured** | Partial fills: `fillKey` includes the service date, so a partial and its completion are two fills and two scripts — and dispensing status is not captured, so the site cannot tell such a pair from any other | money |
+| — | **RESOLVED** | The appeal scripts' own pack divisor — closed by your `pack-size.ts`, verified by running it | — |
+| — | **RESOLVED** | CI never ran `db:migrate`, so 4 tests failed on every runner since `df666bd` — fixed in `8d7c9db` | — |
+| — | **clean** | Rebates are counted once; the 835 reader at four points; the 459 plan adoptions; `books-check` fully wired; devices and salt forms in `substitutable`; the floor's scope gates against *Rutledge*; the fingerprint fix | — |
+
+Two of those twenty are **questions rather than findings** because I could not write the SHOULD BE
+line from domain knowledge, and #3 is a question for fourteen of its sixteen for the same reason.
+That is the gate working, and I would rather hand you two honest questions than two more findings you
+have to audit.
+
+Entries from 11 September and earlier are below this block, unindexed — say the word and I will index
+those too rather than guess at which still matter.
+
+### From B — 12 September: four of FOUNDATIONS.md's unchecked items, answered by running `substitutable()`
+
+`docs/audits/2026-09-12-substitutable-and-the-narrow-therapeutic-index.md`. **One finding, and it is
+the first thing I have reported that ranks above money on pre-flight #7.** No file of yours is edited.
+
+**Three closed clean.** You asked for one of them by name — *"this may already be right; it needs
+proving rather than assuming"* — so it is proved:
+
+```
+Two metered-dose inhalers, neither rated     ->  substitutable = false
+An inhaler rated AB against one unrated      ->  substitutable = false
+AB1 vs AB2 / AB1 vs bare AB / two B-rated    ->  substitutable = false
+amlodipine besylate vs maleate               ->  keys differ, substitutable = false
+```
+
+Devices with no TE code are refused (`isARated` fails on the null before the group comparison).
+Salt forms are already kept apart by `equivalenceKey`, deliberately, as its docstring says. AB
+subgroups hold. **Inhalers/nasal sprays and salt forms can come off the unchecked list.**
+
+**The finding.**
+
+```
+OBSERVATION  substitutable() returns TRUE for two AB1 levothyroxine sodium 100 ug tablets from
+             different manufacturers, and TRUE for two AB warfarin sodium 5 mg tablets. No
+             narrow-therapeutic-index concept exists anywhere in src/ or scripts/, and no
+             continuity-of-manufacturer guard either.
+SHOULD BE    For NTI drugs — warfarin, levothyroxine, phenytoin, lithium, digoxin, carbamazepine,
+             theophylline — the gap between therapeutic and toxic is small enough that modest
+             bioavailability differences matter clinically, and practice is to keep a stable patient
+             on one manufacturer. An AB rating states equivalence for approval; it does not answer
+             whether switching a stable patient is advisable.
+DIFFERENCE   Yes — and you raised this yourself in FOUNDATIONS.md ("a recommendation to change NDC on
+             a stable patient is a clinical suggestion the site is not qualified to make"). Nothing
+             in the code acts on it.
+```
+
+**How far it reaches — traced to the screen, because "live" is a claim I should not make loosely.**
+`/purchasing/catalog` → `searchDrugs` → `drugFile()` (`drug-catalog.ts:36`, calling `withEquivalents`
+at `:166`) → `substitutable()`. The page does not merely compute it, it **leads** with it: a headline
+figure captioned *"a cheaper equivalent exists"* carrying a count and the money
+(`switchableSavingsCents`, "$X on the fills already on file"), toned `warn` above zero, with a filter
+for those rows (`catalog/page.tsx:249-257`, `:368`). So a levothyroxine or warfarin whose cheaper
+equivalent is another manufacturer's AB1 product appears in that count and in that saving, with
+nothing on the row saying it is different. That is stronger than what I first wrote and it is the
+accurate version. What it produces is a **buying** recommendation,
+not "switch this patient" — but what is bought is what the next refill is dispensed from, so the
+consequence is one step removed rather than absent. That distance is why this is flag-and-name rather
+than refuse-outright.
+
+**I am not choosing the list.** Which molecules count as NTI is a clinical judgement — the FDA has
+never published one definitive list and boards differ. The code can carry the shape (a flag, and a
+sentence that a stable patient should not be switched on price alone); the list is the
+pharmacist-in-charge's and belongs in a decided register, not hardcoded by me.
+
+**One question for him, not for you:** should the buy list flag NTI drugs, rank them lower, or leave
+them out of the equivalents comparison entirely? Three defensible answers and it is his call.
+
+The other five unchecked items — partial and completion fills, DIR fees landing retroactively,
+credits reducing cost in the month they land, compounds, 340B — need the database and are yours.
+
+### From B — 12 September: the money-channels register — one area clean, two questions, no finding
+
+`docs/audits/2026-09-12-the-money-channels-register-two-questions.md`. This is the §3 proactive scan
+against your new `docs/registers/money-channels.md`. **No finding**, and I am reporting it anyway
+because §3 asks for one concrete observation *or* one area confirmed clean.
+
+**Confirmed clean.** The register shows `mtf` 31 payments, $6,774.31, **31 unmatched** — which is the
+first thing that looks like a hole. It is not one. `facilitatorMoney` already splits unmatched
+payments into `beforeTheFeed` and the rest, and the comment at `claim-payments.ts:990` records why,
+with his own words about not alerting on claims before 09/01. `claim_id IS NULL` is the right measure
+for the register and is not the site's measure of a problem. Recorded so nobody re-derives it.
+
+**Question one — the register says 31, your own comment says 24.** That comment says every one of the
+24 was for a prescription dispensed before the feed begins. There are now 31, and I cannot see which
+the seven new ones are, so the three-line test cannot be completed and this is a question:
+
+```sql
+SELECT count(*), sum(amount_cents) FROM claim_payments
+WHERE source = 'mtf' AND claim_id IS NULL
+  AND date_filled >= (SELECT min(period_from) FROM claim_imports WHERE period_from IS NOT NULL);
+```
+
+Zero means nothing is here. Above zero is facilitator money for a fill the site holds that did not
+match — and the likeliest cause is already an open finding of mine: `match-remittance.ts`'s ladder
+has no level that keeps the fill number and drops the date, so a service date off by one day discards
+the fill number and refuses.
+
+**Question two — `plan`'s last received date is 2026-08-31, the day before the books begin.** I
+cannot write the SHOULD BE for this one and I am not going to invent it: whether a PBM remittance for
+an early-September fill should have arrived by now depends on each payer's cycle and on whether the
+real 835 feed is pointed at the site yet — and his own words about the April and June pulls were "I
+want to make sure these are only tests". So: **has a real plan 835 for a September fill arrived yet,
+and if one has, is it in?** Worth asking because `third_party` cash receipts stand at $1,131,521.97
+across 104 receipts, so deposits are being recorded — money is arriving and being banked, and whether
+the remittance that explains each deposit is also arriving is the part I cannot see.
+
+### From B — 12 September: RESOLVED — the appeal scripts' own pack divisor, closed by your `pack-size.ts`
+
+`docs/audits/2026-09-12-pack-size-closes-the-appeal-divisor.md`. Checked by running it, not by
+reading it.
+
+My open finding was that the three MAC appeal scripts each derived a pack size themselves off the
+outer count of `package_description`. `73ddade` replaces all three with `packForClaim`, and
+`mac-appeal-evidence.ts:44` now takes a `PackSize` carrying its unit with its number, so the divisor
+and the unit cannot separate. Run on your own three cases:
+
+```
+Wegovy 4 pens of 0.5 mL      pack = 2 ML     claim agrees exactly   old outer count: 4
+Estradiol cream 42.5 g tube  pack = 42.5 GM  claim agrees exactly   old outer count: 1
+Bottle of 100 tablets        pack = 100 EA   claim agrees exactly   old outer count: 100
+```
+
+All three right, the ordinary case unchanged, and with the dosage form blank it **refuses** rather
+than guessing. That is the right failure and worth recording, because a divisor that guesses is how
+the original fault happened. `drug-directory.ts:416`'s `packageUnits` is not a fourth fault — it
+delegates to `fdaPackageUnits` and answers a different question correctly. **Closed.**
+
+**One boundary, so nobody assumes it reached further than it did.** This does not touch the
+over-NADAC divisor: `over-nadac-store.ts:40-42` builds pack quantities from the **catalogue's**
+`packSize` via `packQtyOf`, and `over-nadac.ts:139` divides by that. So my separate finding about
+`ndcFromRun`'s one-pack branch inventing an eleven-digit package code is unaffected — the invented
+code keys a catalogue pack quantity, and a wrong code still picks a wrong divisor there. Whether
+over-NADAC should also take its divisor from `pack-size.ts` is a design question and yours, not a
+finding: the catalogue's pack size is what the pharmacy is actually billed for, which is a defensible
+reason to prefer it.
+
+### From B — 12 September: today's findings re-run through your gate, and two of them fail it
+
+`docs/audits/2026-09-12-todays-findings-through-the-gate.md`. I merged `551ee68` and read the new
+`CLAUDE.md` gate; everything I reported earlier today was written before it existed, so I have put
+all of it through the three-line test as §3 requires. **No file of yours is edited** — and I have not
+touched `docs/OPEN-ITEMS.md` or `docs/registers/`, because you changed the first in this push and the
+second is generated.
+
+**Eight clear the gate** and are restated with OBSERVATION / SHOULD BE / DIFFERENCE: the CI migrate
+step (fixed in `8d7c9db`), the ten-digit NDC column, the reversal set aside on its date, "No MAC
+appeals to file" over $1,000 set aside, the return credit costing a whole invoice, the dateless
+invoice in no month, the buy list's controlled gate, and the 835 denial that leaves a receivable
+standing.
+
+**Two do not, and I am not going to pretend they do.**
+
+- *Sixteen modules imported by nothing*: the observation is measured and solid, but the SHOULD BE
+  splits. Two of them clear it on how he runs the business — he uploaded the PBM listing and the
+  networks guide on 8 September and a document handed to the site should change what the site knows.
+  For the other fourteen I cannot write a middle line from domain knowledge; "written code should be
+  reachable" is a software norm, not a fact about pharmacy or accounting. So it is one question:
+  **which of the fourteen were meant to be live and are waiting on a page, and which are
+  specifications written ahead of the work?**
+- *The fingerprint watching `invoice_lines` by count*: the only argument for changing it is
+  `held.ts`'s own — "a coincidence of two writes rather than a promise" — which is an argument from
+  the code, not the business. Not a finding. A note, and it should be read as one.
+
+**Confirmed clean, so §3's "one area confirmed clean" is not an empty claim:** rebates are counted
+once (traced through `cashReceipts`, the buying modules and the tile); the 835 reader at four points;
+the 459 plan adoptions against `planScopeOf`; and `books-check.ts` is fully wired — I suspected
+`countedTwice` had no caller, checked, and it does via `countedTwiceOver:367`. Reported as nothing.
+
+**Pre-flight, and what I did not check:** #1 (physical act) and #9 (when does he need to know) on all
+of them — I cannot see the pharmacy's day, so the ranking of when these matter is yours. #10
+(registers) — untouched, and nothing I found changes what `scripts/registers.ts` measures.
+
+### From B — 12 September: sixteen modules in `src/lib` are imported by nothing. Read this one first.
+
+Full write-up: `docs/audits/2026-09-12-sixteen-modules-with-no-way-in.md`. **No file of yours is
+edited.** This is the largest thing I have found on this repository, and it needs a decision from
+your side rather than a patch from mine.
+
+I checked all 294 modules in `src/lib` against every import in `src/` and `scripts/`. Sixteen have
+none, and there is no dynamic escape hatch — a grep for a template-literal or variable module path
+across all of `src/` returns nothing, so every import here is a literal string. Fifteen have zero
+mentions outside their own file; `ndc-choice.ts` has one, a sentence in a comment.
+
+```
+ lines  tests  added        module
+   428   no    2026-09-08   psao-guide.ts
+   403   yes   2026-09-11   claim-reconcile.ts
+   358   yes   2026-09-06   month-plan.ts
+   314   yes   2026-09-05   gs1.ts
+   266   yes   2026-09-06   price-moves.ts
+   263   yes   2026-09-10   remit-classify.ts
+   257   yes   2026-09-08   bank-reconcile.ts
+   228   yes   2026-09-11   providerpay-account.ts
+   211   no    2026-09-11   supplier-statement.ts
+   185   yes   2026-09-06   band-strategy.ts
+   179   yes   2026-09-05   ndc-choice.ts
+   175   yes   2026-09-10   month-stability.ts
+   152   yes   2026-09-06   reimbursement-fit.ts
+   149   yes   2026-09-10   route-agreement.ts
+   144   yes   2026-09-08   pbm-listing.ts
+   117   yes   2026-09-09   reversed-fill-payments.ts
+```
+
+3,829 lines, fourteen with test files that pass — which is why nothing anywhere reports it. Every one
+was added between 5 and 11 September and **not one has been touched since the commit that added it**.
+Four are from the last two days.
+
+They are not helpers. `claim-reconcile` is *"whether a claim is settled, and where every dollar of it
+went"*. `providerpay-account` is *"the only thing that ties a payment to the bank"*. `bank-reconcile`
+is *"what a deposit is made of"*. `supplier-statement` says *"the statement is the missing key"* for
+why a bank line never matches an invoice — and `schema.ts:3480` documents a table by naming that very
+file, so there is a schema, a reader, and no path from a document to either.
+
+Three things that make it worth your time rather than a tidy-up:
+
+1. **The commit subjects are present-tense.** `98c69d9` "The PSAO's contracted PBM listing **reads
+   into** the BIN register" — `loadPbmListing` is called by nothing. `1813274` "The PSAO's networks
+   guide **is read into** the library" — `loadPsaoGuide` is called by nothing. Both are documents the
+   owner uploaded on 8 September; the second one he sent with "here we go!!".
+2. **Two of them are named sources in your own double-count register.** `countedTwice` lists *"the
+   wholesaler's own ledger, what cleared and under which ACH"* and *"the ProviderPay payment report,
+   itemised by payer and payment number"* as one of the two records that know a figure. Both readers
+   are unreachable.
+3. **Nothing is wrong on any screen because of this.** Unreachable code computes no wrong number.
+   What it means is the site does not know what a deposit is made of and cannot trace a payment to
+   the bank — and says nothing about either.
+
+**What I am asking for is a decision per module, not a patch:** wire it, mark it a specification at
+the top of the file, or delete it. What it must not stay is the fourth thing — present-tense commit
+subjects, passing tests, and no way in. Say which each should be and I will do the mechanical part on
+this branch; choosing is the side of the handoff with the data on it.
+
+**So the decision is a costed one**, I measured what each would take (addendum in the audit):
+
+- **Three need only a caller.** `pbm-listing` already writes `payerBins` (`:119`, `:136`);
+  `psao-guide` already writes `contractDocs` and `contractText` (`:401-420`); and
+  `reversed-fill-payments` is a finished store — `paymentsOnReversedFills()` and
+  `reversedFillMoney()` take no arguments, and the second returns
+  `{ fills, heldCents, over30, over30Cents }`, which is the shape of a KPI tile. That last one is
+  the cheapest thing on the list and answers the question the owner asked on 9 September.
+- **Two need an intake case.** `supplier-statement` and `providerpay-account` each carry their own
+  recogniser — `looksLikeStatement` (`:206`), `looksLikeAccountHistory` (`:105`) — so they were built
+  to be dispatched to and the router never got the case. The intake has a `kind` for the McKesson AP
+  report, added in the same commit as `supplier-statement`, and none for either of these.
+- **Eleven need a feature** (a store and a page): `claim-reconcile`, `month-plan`, `gs1`,
+  `price-moves`, `remit-classify`, `bank-reconcile`, `band-strategy`, `ndc-choice`,
+  `month-stability`, `reimbursement-fit`, `route-agreement`. For these, "mark it a specification" may
+  well be the right answer for now.
+
+### From B — 12 September: the 835 says "denied" and the receivables go on saying "owed"
+
+Full write-up: `docs/audits/2026-09-12-the-835-says-denied-and-the-site-says-owed.md`.
+**No file of yours is edited.**
+
+**The reader itself is sound and I checked it at four points, so nobody checks them again:**
+`parse835Sets` is wired (`claim-payments.ts:402` calls it, not `parse835`); the arithmetic gate
+really gates (`:500` returns before storing and says so in words); the null-balance case cannot sneak
+past it, because `payableOnly` drops every null and zero amount; and `p.paidCents!` at `:526` is safe
+for that same reason.
+
+**The finding.** Run on a remittance paying one claim $100.00 and denying another (CLP02 = 4):
+
+```
+payments parsed : 336548 status=1 paid=10000  |  336549 status=4 paid=0
+balance         : {"paidCents":10000,"claimsCents":10000,"adjustmentsCents":0,"differenceCents":0}
+problems        : (none)
+skipped         : [{"reference":"336549","why":"denied — nothing was paid"}]
+what the store keeps of that:  skipped: 1
+```
+
+The file balances, correctly — a denied claim contributes nothing to either side. The denial *is*
+read and *is* named. Then `importOneRemittance` returns `skipped: skipped.length` (`:483`) and the
+references and reasons go nowhere. `statusCode` has exactly one use in the repository and it is that
+discarded sentence.
+
+Receivables are built from adjudication, not from the remittance — `payer-owed-store.ts:85-100`
+pushes `shares[i]?.receivableCents ?? p.remitCents` per payer per fill. So a claim the plan
+adjudicated as payable and later denied stays in the receivables at its adjudicated amount and ages
+into the 30/60/90 buckets as *"the payer owes this"*, when the payer has said in writing that it does
+not. Same for CLP02 = 22 sent with no amount: a reversal recorded nowhere.
+
+**The fix is the one you just made, one module over.** `693114d` found `stillStranded` "computed,
+passed up … and rendered on no screen anywhere" and put it on the page with the money, the
+prescription and the date. `skipped` already carries `{ reference, why }` for every one — returning
+the array rather than its length is the same fix in the same shape. Whether a denial should also mark
+the claim is a bigger question and yours; putting it on a screen needs none of that argument.
+
+**Two counts from your side:**
+
+1. Across the 835s on file, how many claim payments carry CLP02 = 4 or 22 with no amount?
+2. Of those, how many name a prescription still in the receivables at its adjudicated figure? That is
+   money the site says it is owed and the payer has said it is not.
+
+### From B — 12 September: the buy list's controlled gate asks a name list, with two better answers already stored
+
+`minimum-store.ts:30-46` read against the readers and the directory. Full write-up:
+`docs/audits/2026-09-12-the-buy-list-asks-the-weakest-of-three-sources.md`. **No file of yours is
+edited.** This one I would put above the others in this batch.
+
+`controlledNdcs` selects `{ ndc11, itemClass }` and falls back to `scheduleFromNames`. Two problems
+with that pair, both run rather than read:
+
+**`itemClass` fires for one supplier.** It is set by exactly one of five readers — McKesson at
+`invoice-lines.ts:641`. IPD `:600`, IPC `:695`, IPC credit `:737` and ParMed `:766` all set it
+`null`, and even McKesson's prints only on prescription lines. So for everything else the gate is a
+name match alone.
+
+**The supplier's own statement is on the row and is not selected.** Run on IPD's own layout:
+
+```
+IPD  ndc=70165002030  itemClass=null  controlled=true      <- oxycodone
+IPD  ndc=54707560094  itemClass=null  controlled=false
+```
+
+`invoice_lines.controlled` is a stored column, written from IPD's "CII Subtotal:" / "Non-CII
+Subtotal:" headings (`invoice-lines.ts:547`) and inserted with every line. `controlledNdcs` does not
+read it.
+
+**And the FDA's answer is in `drug_directory.dea_schedule`, per NDC.** `scheduleFromInvoiceLines`
+trusts it completely — *"a drug it lists with no schedule is uncontrolled"* (`invoices.ts:138`). The
+compliance path asks the FDA per NDC; the ordering path, for the same NDCs, asks a name.
+
+**Why the name list is the wrong tool here, in its own words:** *"Missing a Schedule III to V is a
+much smaller thing … So that list aims to be good rather than perfect."* Right for filing invoices.
+Reused as the buy list's gate it means a Schedule III to V generic can reach the page whose docstring
+says *"the cost of a wrong inclusion is a controlled substance ordered by a page that must not"*.
+Fairly: the C-II list is exhaustive by design and a III to V needs no 222 or CSOS, so this is not a
+CII in the cart — it is a controlled substance on a page whose premise is that it carries none.
+
+The fix is two columns, both already populated, and it keeps your rule exactly (either source
+suffices to exclude, nothing is required to include) — the audit has the five lines.
+
+**Two counts, the second being the one that says whether anything is wrong today:**
+
+1. How many stored invoice lines have `controlled = 1` and `item_class` null?
+2. Of the NDCs currently on the buy list or in `candidates`, how many have a non-blank `dea_schedule`
+   in `drug_directory`? Anything above zero is a controlled substance on the page right now.
+
+### From B — 12 September: rebates are not double counted; a dateless invoice is money no rebate figure can see
+
+The rebate path read end to end. Full write-up:
+`docs/audits/2026-09-12-a-dateless-invoice-is-money-nobody-counts.md`. **No file of yours is edited.**
+
+**Cleared, and recorded so it is not re-derived.** The obvious double count — the rebate reducing the
+cost of goods *and* arriving as income — is not there. Income lands once as a `cashReceipts` row
+whose key `addCashReceipt` refuses to take twice, with the corrected-statement case handled by
+`updateCashReceipt` changing the amount rather than adding a row. The rebate-reduced unit cost
+appears only in buying questions — `over-nadac`, `minimum-store:86`, `month-plan:165`,
+`drug-profit:424` — and in `drug-profit` it sits on both sides of a subtraction, so it cancels out of
+the answer. `rebates.estimatedCents` is one standalone tile on Today, summed into no cash or profit
+total, and it is this month's accrual against a cheque that settles a past month.
+
+**The finding.** `earningSoFar` selects the month by `invoiceDate >= '${m}-01' and <= '${m}-31'`
+(`rebate-rates.ts:316`), and `invoice_lines.invoice_date` is nullable. A null is neither, so a
+dateless invoice's lines are in **no month at all** — not this one, not any. `over-nadac.ts:100`
+filters them out the same way, and unlike the missing pack size and the missing NADAC it pushes
+nothing to `excluded`.
+
+What makes it worth a line is the contrast in the same function. A line whose *supplier* cannot be
+placed is counted, its money summed, its names collected — *"it is counted and named below rather
+than dropped"* — and `suppliers/page.tsx:283` renders it with the remedy: *"Nothing below counts
+them — not the purchases, not the ratio, not the rebate."* A dateless line gets none of that. And
+the codebase already names the other half of the same fact: *"A dateless invoice is in the archive
+and outside every date range, which is the one form of retrieval an inspector actually uses"*
+(`setInvoiceDate`, `invoices.ts:2127`). The compliance cost is said; the money cost is not.
+
+**One query settles whether it bites:**
+
+```sql
+select count(*), sum(extended_cents) from invoice_lines where invoice_date is null;
+select count(*) from supplier_invoices where invoice_date is null;
+```
+
+Anything but zero is purchases outside every rebate figure and every purchasing comparison with no
+screen saying so. If it is zero, the guard is still worth having — `setInvoiceDate` exists because an
+invoice arriving without a readable date is ordinary.
+
+### From B — 12 September: a return credit on an ordinary invoice costs every item line on it
+
+Not tied to one commit — the seam is `MONEY` at `invoice-lines.ts:85-86`, which has never carried a
+sign. Full write-up: `docs/audits/2026-09-12-one-credit-line-costs-the-whole-invoice.md`.
+**No file of yours is edited.**
+
+Three McKesson lines, two purchases and one return credit, $739.11 + $2.32 − $2.32:
+
+```
+no credit — three positive lines     lines 3  unreadable 0  sum $743.75  printed $743.75  reconciles true
+one line is a credit, printed -2.32  lines 2  unreadable 0  sum $741.43  printed $739.11  reconciles false
+one line is a credit, printed (2.32) lines 2  unreadable 0  sum $741.43  printed $739.11  reconciles false
+```
+
+The credit line matches no pattern, and `unreadable` is only pushed to *inside* a successful match,
+so it vanishes with `unreadable: 0`. Then `invoices.ts:1412` stores nothing for the whole invoice:
+$2.32 costs all $743.75 of line detail — which drug cost what, which NDC, which item number to
+reorder by. Not lost money (the total is still an expense), lost attribution. And the sentence on
+the screen — "did not add up to the total printed on them" — points at the total rather than at the
+one line nobody could read.
+
+**The fix already exists here for one supplier.** `IPC_CREDIT` is tried per line, not per document,
+so IPC handles a mixed invoice today — run: `lines read 3, extendeds 291, 5300, -251, reconciles
+true`. That is the right answer. McKesson, IPD and ParMed have no equivalent, and they are most of
+the paper. The smallest change is at the seam rather than in four patterns — `MONEY` carrying an
+optional sign and bracket, and `money()` reading them; the audit has the four lines. It is your
+reader, so it is a proposal. Two things want checking on real paper first: that no layout uses
+brackets for anything but a credit, and that a negative extension needs its quantity negative too
+(which is what `IPC_CREDIT`'s `-(\d+)-(\d+)` already does).
+
+Nothing is wrong today — 35 of 35 invoices reconcile. This is about the next return.
+
+**Two counts from your side:**
+
+1. Does any stored invoice text contain a money figure with a leading `-` or in brackets, on a line
+   the reader did not keep?
+2. Of the invoices whose lines were discarded for not reconciling, how many are short by exactly
+   twice a figure printed on them? That signature is a credit line read as a purchase.
+
+### From B — 12 September: the stale-page fix holds; `invoice_lines` is the term it did not get
+
+`df666bd` audited. Full write-up: `docs/audits/2026-09-12-the-fingerprint-fix-holds.md`.
+**Nothing to fix, and no file of yours is edited.**
+
+Hanging `forgetFingerprint()` off `audit()` is the right place and the argument for it is the right
+argument. I checked the claim it rests on rather than taking it: `recheckEverything` →
+`repairReversals`, `settleStaleFills`, `backfillInvoiceLines`, and all four job modules
+(`claims-import-job`, `drug-directory-job`, `nadac-job`, `manual-job`) every one write an audit row.
+No write path was found that changes stored figures without one.
+
+**One note, by the file's own standard.** The fingerprint watches `invoice_lines` by **count**, and
+`backfillInvoiceLines` replaces lines in place — `86256fb` is exactly such a change ("the only stored
+figure that changed is the propranolol line's NDC and item number", same row count, different drug
+against $3.99). It is covered today by the audit row the backfill's action writes, but that is the
+arrangement the same docstring declines to rely on for `ndc_pack_fixes`: *"the audit event would
+catch it, but that is a coincidence of two writes rather than a promise, and this is a promise."*
+A `max(created_at)` on `invoice_lines`, or the count of whatever row records a backfill, would make
+it a promise too.
+
+**Second note.** `fpCache` is module-level, so the fix is per process. `scripts/launch.mjs:597`
+starts one `next start` with no cluster flag, so it works as deployed — checked, not assumed. Worth
+one line in `held.ts` stating the property, for the day it runs behind more than one worker.
+
+### From B — 12 September: the $30 floor is well judged, and the worklist it was added to reaches no page
+
+`2d2123f` audited. Full write-up:
+`docs/audits/2026-09-12-a-floor-on-a-worklist-with-no-screen.md`. **No file of yours is edited.**
+
+The floor itself I have no argument with, and I ran it: a verdict rather than a filter, one constant
+with a note to remove the gate rather than tune it, "more than $30" taken literally so exactly thirty
+is set aside, the shortfall still carried in `setAside`, and asked after the gates that say a claim is
+not appealable at all. All of that holds.
+
+**`macAppealWorklist` has one consumer in the repository and it is not a page:**
+
+```
+scripts/caremark-appeal-plan.ts:61   await import("../src/lib/mac-appeal-store")
+tests/mac-appeal-candidates.test.ts:3
+```
+
+`src/app/(app)/claims/appeals/page.tsx:35` is built entirely on `appealQueue` from `appeals.ts` —
+every figure, card and empty state. And `mac-appeal-candidates.ts`'s own opening says of that queue:
+*"it returns nothing at all when no rate row covers the claim. On this pharmacy's data that is 1,960
+claims and an empty queue."* So the strict queue that comes back empty is the one on his screen, and
+the module built because it comes back empty is the one with no screen. That is the shape you fixed
+for `stillStranded` eight commits earlier the same day.
+
+**And one layer down, the same fault in the sentence.** Forty claims from one payer, each $25 short:
+
+```
+batches=0  totalClaims=0  totalCents=$0.00
+setAside:  too_small 40 claims $1000.00
+says:      "No MAC appeals to file."
+```
+
+`setAside` carries the $1,000 correctly, into a field rendered nowhere; `says` is the alert, and it
+says none exist. A clause fixes it: "nothing worth filing today — $1,000.00 across 40 claims is below
+the $30 floor".
+
+**The two costings in the module disagree.** The floor is priced per claim ("38 codes for two and a
+half dollars each"), and `scripts/caremark-appeal-plan.ts` backs that — one Rx number, one
+255-character comment, one reason per form. `worklist`'s docstring prices it per batch: *"one visit
+to one portal settles all of that payer's claims"*. The script is the better evidence, so the
+docstring is probably the wrong half — but it is the sentence `Batch` is built on.
+
+Small: `too_small` is asked before `too_late` (342 against 424), so the set-aside total includes
+claims whose window has already closed. It is not "what we would recover if the floor came down".
+
+**Two questions for your side:**
+
+1. Is the MAC worklist meant to reach a page? If not, `mac-appeal-candidates.ts` should say at the
+   top that it is a specification — today it reads as live.
+2. On the Caremark portal, does one submission carry one claim or many? That decides which costing is
+   true, and therefore whether $30 is per claim or per visit.
+
+### From B — 12 September: pre-September reversals are forgotten on the date, not on having nothing to cancel
+
+`693114d` audited. Full write-up: `docs/audits/2026-09-12-forgotten-on-the-date-alone.md`.
+**No file of yours is edited.** Putting `stillStranded` on the screen was the right fix and the
+refusal to pair inexact figures is right; three things about the other half.
+
+**One — the test and the reason are different tests.** The code is
+`if (isOutOfBooks(rev.dateFilled)) { beforeTheBooks++; continue; }`. The reason beside it is "there
+is nothing for it to cancel". The first is about the date, the second about whether a live claim
+exists, and `claimCancelledBy` already tells them apart in its `why`. Run against a migrated
+database with one August and one September fill, each with a live paid row and a reversal whose copay
+moved to a card:
+
+```
+strays 2   paired 0   beforeTheBooks 1  <- counted, never named
+stillStranded: [ 337203 2026-09-09 -60594
+                 "1 live claim is held for that fill but none has figures this exactly cancels" ]
+the August reversal's own why: 1 live claim is held for that fill but none has figures this exactly cancels
+```
+
+The August one says a live claim **is** held for its fill, and is set aside anyway — after which the
+page tells him "left alone, **because nothing was ever counted for them**". Also: the check sits
+*inside* `found.hit === null`, so a pre-books reversal that pairs exactly is still paired and still
+written. The rule is applied only to the ones that need a person. One line keeps his decision and
+makes the sentence true: `isOutOfBooks(...) && found.why.startsWith("no live claim is held")`.
+
+**Two — `isOutOfBooks` takes a received date, and this passes it a fill date.** Its parameter is
+`receivedOn`, and its own docstring says a fill-date rule "would throw it out — quietly losing
+revenue in the name of tidiness". An August fill paid by a September remittance is money in these
+books (`claim-payments.ts:105` counts it on `receivedOn`), and its reversal is now forgotten on the
+fill date. `claims-backfill.ts:156` and `mac-appeal-store.ts:245` pass fill dates too; both are
+defensible alone, which is what makes the drift invisible. A `receivedOn` type, or a second
+`fillIsOutOfBooks`, would make each call say which question it is asking.
+
+**Three — `stillStranded.slice(0, 20)` under a sentence that reads as a total.** `strays` and
+`beforeTheBooks` are full counts, `stillStranded` is a page. Today 28 = 0 + 23 + 5 and it adds up;
+with thirty needing a person the screen says "20 reversals … so up to $X" where X is the sum of
+twenty of thirty, and nothing says so. Either return the count separately or say "showing 20 of 30".
+
+Small: the comment at `claims.ts:794` says "All twelve on file today"; the commit message says
+twenty-three, and 28 − 23 = 5 is the figure the rest of it uses.
+
+**One count only your side can take:** of the 23 stranded reversals dated before 1 September, how
+many have a live paid claim on file for their own prescription, fill, BIN and NDC?
+`claimCancelledBy(rev, live).why` answers it — anything not beginning "no live claim is held" is a
+reversal with something to cancel that is being forgotten on its date.
+
+### From B — 12 September: the clipped NDC column can print ten, and `ndcFromRun` only asks about nine
+
+`86256fb` audited. Full write-up: `docs/audits/2026-09-12-the-column-that-printed-ten.md`.
+**No file of yours is edited.** Two things, neither wrong on today's data, both about the next
+clipped line.
+
+**One. Ten is not asked about.** `ndcFromRun` asks the directory whether the column printed eleven
+or nine. A column that printed **ten** — the 4-4-2, 5-3-2 and 5-4-1 forms, and what a clip of one
+character leaves — falls through to the `run.slice(-11)` the commit was written to stop trusting.
+Run against the function as it stands:
+
+```
+run=916540093015301 (item 91654 + the 4-4-2 form of 00093-0153-01)
+  code=40093015301   printed=11   itemNumber=9165   isADrug=false
+```
+
+The propranolol bug, one digit over: nobody's code, purchases against nothing, item number short of
+its last digit. And where the stolen digit happens to complete a code the FDA *does* list, guard 1
+(`known(last11)`) accepts it and the money attaches silently to a drug that was not bought.
+
+**The reader is already in the file.** `ndcFromUpc` pads ten back to eleven three ways and accepts
+only when exactly one is a listed drug. Three lines, after the nine-digit branches:
+
+```ts
+const ten = run.slice(-10);
+const padded = [...new Set(["0" + ten, ten.slice(0, 5) + "0" + ten.slice(5), ten.slice(0, 9) + "0" + ten.slice(9)])].filter(known);
+if (padded.length === 1) return { code: padded[0], printed: 10 };
+```
+
+Checked against a stand-in directory: the two ten-digit cases come right (`00093015301` item `91654`,
+`41167058707` item `91654`) and **all three of your existing cases are unchanged**, the propranolol
+included. `sameDrugCode` has the matching hole — an eleven-digit code against its own ten-digit form
+reads as a disagreement, though `ten()` inside it already knows the three paddings.
+
+**Two. Guard 3 reads one listed pack as certainty, and guard 2 says the directory lags.** Both cannot
+hold. The nine-digit code your two-pack branch keeps is inert — `over-nadac.ts:108` drops any line
+whose NDC has no pack size. The eleven-digit code the one-pack branch invents is fully live:
+`gross = packCostCents * 10_000 / packQty` at `over-nadac.ts:139`. A hundred-count bought for $10
+attached to the thirty-count divides by 30, shows >200% over NADAC, and over-NADAC rows are where
+the NADAC complaints come from. The safer outcome is reserved for the case where the directory knows
+*more*.
+
+**Two counts only your side can take:**
+
+1. Does any stored line have `ndcFromRun` returning `printed: 11` for a `code` that `knownNdcs()`
+   does not recognise? Those are the ten-digit columns.
+2. How many stored invoice lines carry an eleven-digit `ndc11` whose product has exactly one package
+   listed, on an IPD or ParMed invoice? Each is a pack size the document did not print, now dividing
+   a cost per unit.
+
+### From B — 12 September: CI has been red since `df666bd`, and the cause is one missing line
+
+**Fixed on my branch (PR #25) in `.github/workflows/check.yml` — one step, no source file touched.**
+Flagging it because it is your commit's test and your workflow file, and because it changes what a
+green tick on this repository means.
+
+`df666bd` added `tests/held-stale.test.ts`. Its four tests call `fingerprint()`, which reads the
+`claims` table. `.github/workflows/check.yml` ran `npm ci`, `typecheck`, `test`, `build` — and never
+`npm run db:migrate`. So on a runner, where `./data` is empty, all four fail with:
+
+```
+SQLITE_ERROR: no such table: claims
+    at async fingerprint (src/lib/held.ts:70:13)
+# tests 3205 / # pass 3201 / # fail 4
+```
+
+On a developer machine they pass, because a migrated `data/pharmacy-admin.db` is already sitting
+there from `npm run dev`. That is why `npm run check` was green for both of us while CI was red.
+
+**What was red:** runs 1490 (push) and 1491 (pull_request), both on `521dd79`, both failed — that is
+`feature/compliance` itself, before my branch merged it. `6c95f2b`, `6a04682` and `25f5b00` were the
+last green ones. Every commit from `df666bd` onward is red, yours and mine alike.
+
+**The fix** is `- run: npm run db:migrate` before `- run: npm run test`. No env: `scripts/migrate.ts`
+and `src/db/index.ts` both default to `./data/pharmacy-admin.db`, and `migrate.ts` mkdirs it. Verified
+the way CI does it — deleted `data/pharmacy-admin.db*`, migrated, ran `npm run check`: 3205/3205, build
+clean. Without the migrate step, on the same tree: 3201/3205.
+
+CLAUDE.md already says *"Tests that touch the database need a migrated one: `npm run db:migrate`
+first."* The workflow was the half that did not say it.
+
+**Nothing for you to answer** — take it or drop it when you merge. But if you drop it, `npm run test`
+on a clean checkout stays broken, and the red tick stops being information.
+
+### From B — 12 September: a paid row with no NDC falls out of both of `staleAgainstDispensing`'s answers
+
+`c041d1a`..`521dd79` (nine commits) audited. Full write-up:
+`docs/audits/2026-09-12-a-row-in-neither-answer.md`. **No file of yours is edited.** I took the two
+that move money — `52e4d67` (revenue **off** the books) and `41eb512` (when promised money is late) —
+rather than skimming nine.
+
+**`52e4d67` is careful work and its three guards are really in the code**, and the one assumption
+that could have made the whole test wrong was **measured, not assumed** (2,546 claim rows over 2,484
+fills, no fill carrying two NDCs). That is the right discipline and I am not arguing with any of it.
+
+**The gap is in the accounting of rows.** `confirmed` and `contradicted` both require
+`r.ndc11 !== null`, and only `confirmed` is pushed to `keep` — so a live **paid** row carrying no NDC
+is in neither list:
+
+```
+input live rows : confirmed, contradicted, no-ndc
+keep            : confirmed
+stale           : contradicted
+in NEITHER list : no-ndc
+```
+
+**Not live, and that first:** the only caller takes `stale` alone (`claims.ts:1780`), so such a row
+is simply not reversed — the correct outcome, and no revenue is wrongly removed today. What makes it
+worth a line is that `keep` is **not dead**: four assertions in `tests/stale-fills.test.ts` read it as
+the set that survives. So the natural next use — writing back the surviving set, or counting it for
+the register — would drop a paid row nobody decided about. In a module built because *"occurrence #2
+stands as live revenue for ever"* when nothing looked at it, a row falling out of both answers is the
+same shape as the bug being fixed.
+
+**Fix, one line:** `keep.push(...confirmed, ...live.filter((r) => r.ndc11 === null));` — a null NDC
+means *cannot be judged*, and this module's own principle is that "we have not been told" must never
+become an action.
+
+**Checked and sound, so it is not re-derived.** `41eb512` does **not** change what is owed, which is
+the thing worth checking about it: `money-position.ts:301-304` still sums the full
+`facilitatorOutstandingCents` into `promisedCents` and reports `promisedDueCents` /
+`promisedNotDueCents` **alongside** it, never instead of it. The four states are kept genuinely apart
+— "nobody promised" and "promised and paid" are both "nothing outstanding" and would have been
+`DAILY-CHECK.md`'s "a null that means two things", caught before it landed. And keying the grace on
+the facilitator rather than the adjudicating PBM is right: the BIN is Caremark or OptumRx and none of
+them pays the MTF promise.
+
+### From B — 12 September: in the remittance matcher, a wrong date is treated worse than a missing one
+
+`match-remittance.ts` audited, never audited before, base quiet at `6c95f2b`. Full write-up:
+`docs/audits/2026-09-12-a-wrong-date-costs-the-fill-number.md`. **No file of yours is edited.**
+
+The module does what it was built for and its caution is right — I verified the two-payer case:
+the BIN resolves it, the amount resolves it, and neither present refuses loudly. Nothing below asks
+you to loosen that.
+
+**The level ladder drops the fill number and the date together.** Level 1 drops the fill number (a
+credit memo never names one); level 2 drops the date (a remittance may disagree by a day). There is
+**no level that keeps the fill number and drops the date**, so relaxing the date costs the fill
+number too. One prescription, two paid fills — an ordinary refill, same drug, same payer, same
+amount:
+
+```
+line names FILL 2, date exact            -> fill-2
+line names FILL 2, date off by one       -> NO MATCH (ambiguous: 2)
+line names FILL 1, date off by one       -> NO MATCH (ambiguous: 2)
+line names FILL 2, no date at all        -> fill-2
+```
+
+The last two rows are the finding together: with **no date** the matcher uses the fill number and
+answers; with a date **wrong by one day** it discards the fill number and refuses. The line said
+which fill it was paying in both cases.
+
+It fails safe, so nothing is credited to the wrong claim. The cost is the other half of your own
+sentence — *"money sitting against nothing is money nobody chases"* — which is why the looser levels
+exist at all. The existing test states the intent and only exercises it with **one** candidate
+(*"a line whose date is a day out still matches on the drug"*), where dropping to the NDC level finds
+it; with two candidates the same relaxation loses the discriminator the line supplied. A gap in the
+ladder, not a tested choice.
+
+**Fix, one line** — a level between the current 1 and 2:
+
+```ts
+(r) => (line.fillNumber === null || r.fillNumber === line.fillNumber) && (line.ndc11 === null || r.ndc11 === line.ndc11),
+```
+
+The two-payer behaviour is untouched: on one fill billed twice both candidates carry the same fill
+number, so the new level separates nothing and the BIN and amount tests run exactly as today.
+
+**Question for you:** how many remittance lines carry a fill number and a date that disagrees with
+the claim's, on a prescription with more than one paid fill of that NDC? Refills are the commonest
+thing a pharmacy does, so the population is unlikely to be nil.
+
+**Checked and sound:** the ladder cannot fall through an ambiguity into a looser level (each level is
+a superset, so stopping is right); the BIN is compared on digits, so punctuation or padding still
+matches; `byBin.length > 1` narrows the pool rather than giving up; and the refusal sentence names
+which discriminator was missing.
+
+### From B — 12 September: `6c95f2b` checked, nothing found, and one of my open findings is now closed
+
+`6c95f2b` audited. **No finding.** No audit file, because there is nothing to write up.
+
+I went at it from the compliance side, since the file is named `invoice-compliance.ts` and the commit
+sets **Cardinal Health** — a full-line wholesaler that ships controlled substances — as settled. The
+worry was whether the address being relaxed is the supplier name-and-address a controlled-substance
+receipt record needs under 21 CFR 1304.22. **It is not.** The requirement is keyed `capture` and its
+own citation says so: *"Not a citation — the condition that makes the archive complete."* The address
+in question is the supplier's **sending email address**, used to auto-recognise an incoming invoice,
+not a business address on a DEA record. The commit's *"no arithmetic anywhere is affected"* holds,
+and moving the state from "attention" to "ok" is a judgment about noise, not a compliance signal
+being softened.
+
+**Then I checked the thing the whole "ok" rests on**, because the argument is that nothing is missed
+since `looksLikeInvoiceFromUnknownSender` catches a first invoice from an unregistered address. When
+I reported that predicate on 8 September it was a seam with **no caller** — I wrote then that it
+*"files nothing and changes no existing routing"* and asked for the mailbox half to be built. It has
+been: `mailbox.ts:655` calls it, computes the printed supplier from the document's own words via
+`classifyInvoiceText`, stores the attachment against the inbox item, and files nothing as an invoice
+on the strength of the predicate alone — *"an unknown sender is exactly when a person should
+decide."* That is the seam I asked for, built the way I asked for it.
+
+**So mark resolved: "an invoice from a sender we do not know" (8 September).** The "ok" state is
+earned rather than asserted.
+
+### From B — 12 September: a 91%-read invoice and an unreadable scan look identical on the page
+
+`6a04682` audited. Full write-up: `docs/audits/2026-09-12-a-near-miss-looks-like-a-scan.md`.
+**No file of yours is edited.** Four fixes, all sound; the schedule chain is right in every step and
+I verified its premise rather than taking it (below). One finding, and it is the general case of the
+bug you just fixed.
+
+Your own account: *"Three of six lines matched… the reading did not reconcile and every line was
+discarded — which on the screen is an invoice with a total and no items, indistinguishable from an
+unreadable scan. Neither was a scan."* The pattern is fixed. The **policy** is unchanged
+(`invoices.ts:1412` and `:2571`, `if (reconciles === false) return { stored: 0, … }`).
+
+**Refusing to store a partial read is the right call** — lines summing to less than the invoice make
+purchases-by-item wrong in a way that looks right, which is this repo's own "a total is a floor
+unless every part was measured". Nothing here argues for storing them. What is wrong is that **the
+near-miss is computed at the discard and thrown away with the lines**: both return sites already
+carry `readCents` ($657.98) and `unread`, and the printed total is in hand, and none of it is written
+to the invoice. The backfill counts them only in aggregate (`:1507`), under a comment that states
+exactly the distinction the invoice row cannot make — *"it is a layout this reader does not fully
+know, not a scan."* One number for the whole run does not say **which** invoice, or by how much.
+
+**So the next supplier whose layout shifts by a column produces the same silent total loss**, found
+again only because somebody looked. **Fix, and the data is already in the function:** record lines
+read, cents read and printed total on the invoice at the discard, so it can say *"6 lines read coming
+to $657.98 against a printed $722.34; none stored because they do not add up."* That is the
+difference between a reader fault somebody can fix and a scan nobody can.
+
+**Checked and sound — the schedule chain, verified at every step**, because it decides a DEA
+recordkeeping question. The premise holds: `drug-directory.ts:157` sets `deaSchedule` straight from
+the FDA product file's `DEASCHEDULE` (column 18), so a blank in a row the FDA lists is the FDA's own
+"not scheduled", not missing data. `scheduleFromInvoiceLines` refuses unless every line has an NDC
+and every NDC is in the directory. `scheduleFromDea` is strictest-wins and returns `none` only where
+**every** code is explicitly `0`/`00` — an unrecognised code is `unknown`, never `none`. Spelling the
+blanks as `"0"` rather than dropping them is right for the reason given. Every step errs toward the
+drawer, which is the direction 21 CFR 1304.04(h)(1) requires. Nothing to do.
+
+**Unchanged and not re-reported:** `money()`/`MONEY` (`invoice-lines.ts:85-86`) still have no sign or
+bracket handling, so a credit line printed `-11.87` or `(11.87)` is not matched as a row at all.
+
+### From B — 12 September: a blank basis of reimbursement and a known non-MAC basis share one verdict
+
+`0f9397a` and `25f5b00` audited. Full write-up:
+`docs/audits/2026-09-12-not-mac-priced-and-the-blank-basis.md`. **No file of yours is edited.**
+
+`0f9397a` is a good fix from the best possible source — Caremark's own rejection — and the NCPDP
+mapping is right: **06** and **07** are the two MAC bases in 522-FM; 03, 08, 09 and 13 all name a
+different benchmark. `25f5b00`'s NADAC check is a good second gate for the same reason. Asking both
+before the money questions is deliberate and correct.
+
+**But three parts of this repository contradict the commit's premise.** It says
+*"`claims.basis_of_reimbursement` has been storing it since the feed was written."*
+`report-check.ts:69` lists that field as **critical and absent** — *"Which pricing leg the PBM used
+is unknown, so an appeal cannot be aimed"* — and `:174` puts it among the fields *"the report cannot
+carry"*. `data-audit.md` §3 says the same: *"no report carries the basis of reimbursement (NCPDP
+522-FM)."*
+
+The gate refuses on a null basis, so **if the field is blank on most claims, a gate built to stop one
+bad appeal stops every appeal and the queue quietly goes to zero.** The commit's own cost argument
+assumes blanks are rare. Rx 333968 carried 03, so the field is populated *sometimes* — partial
+coverage is the likeliest and least visible case.
+
+**The query, and only you can run it:** of claims filled since 1 September, how many carry a non-null
+`basis_of_reimbursement`, and what is the distribution? That says whether this gate protects the
+pharmacy or silences it — and whether `report-check.ts:69` and `data-audit.md` §3 are now stale,
+which matters because `report-check` is what tells the owner his feed is incomplete.
+
+**The finding holds whatever the coverage is.** The refusal *sentence* distinguishes the two cases
+honestly; the *verdict* does not — both are `not_mac_priced`, and `worklist` groups the set-aside by
+verdict keeping the first claim's sentence. So one row reads `not_mac_priced — N claims, $X` with
+whichever wording came first standing for all of them, and **the population that matters has no count
+of its own**: "priced off AWP" is money that was never there, while "the claim does not say" is money
+waiting on a report writer. **Fix:** a separate `basis_unknown` verdict beside it — same refusal,
+same safe default, one line — which also sizes what fixing the PioneerRx report is worth.
+
+### From B — 12 September (daily audit): the nightly proofs keep one night each
+
+Base quiet at `1a8554f`, no new commits since the last audit, so this is the organisation step —
+never run before. Full write-up: `docs/audits/2026-09-12-settings-keys-as-a-time-series.md`.
+**No file of yours is edited.**
+
+`data-audit.md` §3 item 7 said *"Ten settings keys carry data, not configuration… Each is a row in a
+table somebody will one day want the history of."* Measured today: **174** distinct keys, **67**
+matching a run-state pattern, **25** of them `pioneer_*` added since that item was written.
+
+**The exact part, and the part that costs what the daily routine exists for.** Seven keys hold a
+scheduled run's outcome and every one is written with `setSetting`, which replaces the single row:
+
+```
+catalogue_proof   claims_proof   data_health_last   drug_directory_proof
+invoice_proof     nadac_proof    rate_backtest
+```
+
+There is no proof-history table in `schema.ts`. **So the site proves its own data every night and
+keeps exactly one night of it** — it can say whether the data is sound tonight and never whether it
+is getting better or worse. A trend needs two points. The same shape is on every new feed:
+`pioneer_pull_*_on`/`_result`, `pioneer_claims_reconcile`, `sftp_last_pull`/`_result`,
+`ar_report_last_month`/`_result`. `pioneer_claims_reconcile` is the one figure whose *movement* says
+whether that feed is improving, and only its latest value survives.
+
+**Fix, and it is one small table rather than migrating 67 keys:** `run_results` —
+`(job, ran_on, ok, summary_json)` — written where the key is written today, with the settings key
+left alone as "latest" so nothing that reads it changes. Every proof then has a history from the day
+it lands and Data health can show a line rather than a number. Keys that really are configuration
+(`pharmacy_*`, `mail_*`, `ai_*`, credentials) are untouched.
+
+This is §3 item 7 compounding rather than being paid down, and the same fault as its item 1
+(catalogue price history thrown away every Monday) and item 3 (rebate settlement stored three ways)
+in a different container. The audit predicted it; what is new is the measurement that it is growing.
+
+### From B — 12 September: the copay deposit's cross-feed guard rests on the two feeds choosing the same payer name
+
+Base quiet a fourth round, so I audited `copay-remit-store.ts`, never audited before. Full write-up:
+`docs/audits/2026-09-12-copay-deposit-two-roads.md`. **No file of yours is edited.**
+
+**The accrual side is right and I am not raising it** — `revenueCents: claim ? 0 : n.paidCents` is
+exactly the distinction that stops a voucher settling a claim from booking the dispensing twice, and
+passing `bin: COPAY_BIN` into `recordClaimPayment` rather than letting a second matcher choose is the
+same good instinct. The finding is on the cash side.
+
+The comment at `copay-remit-store.ts:293` claims cross-feed protection from the `sourceKey` it sits
+on: *"a voucher payment the payer payment report already banked is the same money arriving by a
+second road."* That cannot come from this line — the report's key is `payer-payment|${paymentNumber}`
+and this one is `copay|…`, so the prefixes can never match. The protection is really the gate's other
+two rules. Run, same $177.25 by both roads on the same day:
+
+```
+report says payer 'RedSail Technologies', payment 900123456   refused (amount + payer clash)
+report says payer 'ProviderPay', payment 900123456            BANKED AGAIN
+report carries the SAME reference (6+ digits)                 refused (reference rule)
+report says payer 'RedSail', but $1 more                      BANKED AGAIN
+```
+
+So it is caught when the feeds **share a reference of at least six digits**, or when the **payer
+names share their first eight alphanumeric characters** and the amounts match to the cent. It is not
+caught when the report names the payer differently — and the copay reader hard-codes
+`COPAY_PAYER = "RedSail Technologies (RAS copay voucher)"`, `head()` = `redsailt`, against a report
+saying "ProviderPay" → `provider`. $177.25 banks twice.
+
+**Question for you, and it decides whether this is live:** on a real ProviderPay payment report, what
+payer name carries the RAS copay voucher money, and does that money appear on the report at all? If
+the report names RedSail and the amounts agree to the cent, the guard holds today and this is latent.
+
+**Fix:** give the copay receipt an identity the other feed can match — the payment number where the
+statement carries one, or a `sourceKey` whose payer segment is normalised the way `payer-name.ts` now
+normalises payer names elsewhere. Failing that, make the comment say what the protection actually
+rests on, because the next person to change either feed's payer string will not know they are holding
+a dedupe together.
+
+**One property worth knowing:** the reference rule needs **six** digits (`deposit-gate.ts:104`). A
+check number printed `CHK80421` has five, falls through the rule entirely, and is left to the
+amount-and-payer clash alone. It caught my own first fixture out, which is how I noticed.
+
+### From B — 12 September: the floor's scope gates all agree, and the reason they exclude self-funded plans is worth checking against *Rutledge*
+
+Base quiet a third round, so I audited something never audited. Full write-up:
+`docs/audits/2026-09-12-erisa-scope-premise.md`. **No file of yours is edited. No defect found.**
+
+**1. `4615a7c`'s safety property holds, on one more gate than it claims.** It says
+`commercial_unknown_funding` is absent from `planScopeOf`, `SCOPE_OF` and `needsBasis`. There is a
+fourth — `CLASS_INFO[cls].inScope`, read by `against-nadac.ts:155` and `claims.ts:1082` — and it is
+`false` there too. Run across every class, exactly three can reach a floor filing
+(`commercial_fully_insured`, `governmental`, `church_plan`) and **all three require a basis**, so no
+plan reaches a Kansas filing without a person recording how it was established. The four gates never
+disagree for any class, which given this repository's history is worth stating rather than assuming.
+`governmental` and `church_plan` in scope is right for a stronger reason than preemption analysis:
+29 U.S.C. § 1003(b)(1) and (b)(2) exclude them from ERISA outright.
+
+**2. A question that may be worth money, and is not a defect.** `reimbursement-rules.ts` states the
+premise twice — line 9, *"commercial plans not preempted by ERISA"*; line 144, *"Self-funded ERISA
+plan — preempted, the state floor does not reach it."* That is a **federal preemption** claim, and it
+is the point *Rutledge v. PCMA*, 592 U.S. 80 (2020) decided **unanimously the other way**: Arkansas
+Act 900 required PBMs to reimburse pharmacies at or above acquisition cost, and the Court held it not
+preempted **including as applied to PBMs administering self-funded ERISA plans**, because rate
+regulation is traditional state authority and cost effects alone do not "relate to" a plan.
+
+An acquisition-cost floor with an appeal route is the same species of law as Act 900.
+
+**What I am not saying:** that the mapping is wrong. A state may write a narrower law than the
+Constitution permits. **If SB 20's own scope provision limits it to plans not subject to ERISA, the
+exclusion is right as a matter of Kansas law** and the only fault is that a state limit is given a
+federal reason. I do not have the statute here and will not assert what it says. Note also *PCMA v.
+Mulready*, 78 F.4th 1183 (10th Cir. 2023) — Kansas's own circuit — which found several Oklahoma PBM
+provisions preempted, distinguishing them from Act 900 as network and plan-design mandates rather
+than rate regulation. A pure floor sits on the *Rutledge* side of that line, but the line exists.
+
+**The ask, and only you can do it:** read SB 20's scope provision against
+`reimbursement-rules.ts:144`. Does the statute exclude self-funded plans **by its own terms**, or is
+that a preemption assumption? Most large employers self-fund, so if a large share of commercial
+claims is held out of every floor test on a premise the Supreme Court rejected, that is money never
+pursued. **The direction of the error is the safe one** — the site never claims a floor it should not,
+so nothing filed today is wrong and nothing should change on my say-so. What is wanted is the statute
+read against the premise.
+
+### From B — 12 September: the appeal deadline gate matches one of the four values the extractor can write
+
+Base quiet at `1a8554f`, so I finished the queue. Full write-up:
+`docs/audits/2026-09-12-appeal-window-vocabulary.md`. **No file of yours is edited.**
+
+`mac-appeal-candidates.ts` is right about what matters most — a MAC appeal needs only what the drug
+cost and what was paid — and right to refuse to compute a deadline from a date that does not mean
+what the contract meant. Nothing here argues with that caution. The fault is that the gate and the
+extractor do not speak the same language, so it fires almost always.
+
+```ts
+// mac-appeal-candidates.ts:112 — what the gate accepts
+const STARTS_AT_FILL = new Set(["initial_claim", "adjudication", "date_of_service", "date_of_fill"]);
+// contract-terms.ts:344 — what can actually be stored
+macAppealWindowBasis: z.enum(["date_of_fill", "date_of_adjudication", "date_of_remittance", "unknown"])
+```
+
+The intersection is **`date_of_fill` alone**, and three of the four names the gate looks for cannot
+be produced by anything that writes the field. Run, ten-day window, claim eleven days old:
+
+| `windowBasis` | verdict | what the owner is told |
+| --- | --- | --- |
+| *(no window at all)* | appeal | "no filing deadline, so there is no clock" — true |
+| `date_of_fill` | too_late | "allows 10 days from the fill and that ran out on 2026-09-11" — true |
+| **`date_of_adjudication`** | appeal | "**no filing deadline, so there is no clock**" — **false** |
+| **`date_of_remittance`** | appeal | "**no filing deadline, so there is no clock**" — **false** |
+| **`unknown`** | appeal | wrong words for "we do not know" |
+| **`null`** (not transcribed) | appeal | "**no filing deadline**" — **false** |
+
+The contract names ten days and the site says there is none, with the number sitting in
+`appealWindowDays` as it says it. **And the priority follows the false reason:** `worklist` sorts a
+no-clock batch last, on the stated grounds that *"nothing is lost by waiting"*. Your own worked
+example, `contract-extract.ts:532`, writes `date_of_adjudication` — the broken branch.
+
+**The site already has a reader that gets this right.** `appeal-packet.ts:79` reads the same field
+with the extractor's vocabulary, resolves adjudication and remittance to their own dates, defaults a
+null basis to the fill, and where the anchor date is missing says the true sentence: *"The window
+runs from the date of adjudication, which the site does not hold for this claim."* So two readers of
+one contract field disagree three ways. **Fix:** give `judge` that vocabulary and that shape, or have
+one call the other.
+
+**Question for you, and it is the size of this:** across the agreements read so far, how many PBMs
+have `appeal_window_days` set with a `window_basis` that is not `date_of_fill`? That is the number of
+payers currently being told they have no deadline.
+
+**Checked and sound:** the window is inclusive of its last day (`daysLeft < 0` is too late), which is
+the right direction; `whoFiles`, the brand/generic gate and the already-filed gate all run before the
+window, so a claim is never called out of time when the real answer is that the PSAO files it; and
+"unknown is not the same as expired" is honoured — an unreadable window returns `appeal`, never
+`too_late`, so the money is never dropped. Only its urgency is misstated.
+
+### From B — 12 September: the AR report cancels September receivables with payments for August fills
+
+The queue from yesterday's pushes, audited while the base was quiet at `1a8554f`. Full write-up:
+`docs/audits/2026-09-12-ar-report-two-date-rules.md`. **No file of yours is edited.**
+
+`books-start.ts` settles the boundary and argues correctly for the received-date rule: *"A September
+remittance settling an August fill is real money in these books, and a fill-date rule would throw it
+out — quietly losing revenue in the name of tidiness."* The AR report then applies **both** rules, one
+to each side of a subtraction:
+
+```ts
+receivablesAsAt: r.dateFilled >= SITE_STARTS_ON      // ar-report.ts:150  the fill-date rule
+receivedAsAt:    !isOutOfBooks(p.receivedOn)         // ar-report.ts:163  the received-date rule
+```
+
+`owedByPayer` does `outstanding = max(0, billed − got)`, so a September payment settling an August
+fill lands in `got` for a payer whose August fill was never in `billed`. Run — one August fill, one
+September fill, both paid in September, which is the ordinary two-to-four-week lag:
+
+```
+  billed      $500.00    <- September fill only
+  received    $600.00    <- includes $400.00 settling the AUGUST fill
+  outstanding $  0.00      state: overpaid        (truth: $300.00 owed)
+```
+
+**The common case has no signal at all.** Give the payer real September volume:
+
+```
+  billed      $3500.00
+  received    $ 600.00
+  outstanding $2900.00     state: owes            (truth: $3,300.00 owed)
+```
+
+Understated by exactly the August payment, `state` reads the ordinary "owes", and `Math.max(0, …)`
+means the error can only hide, never show as a negative.
+
+The loader's guard does not catch it, and its comment says why it thought it would: *"A payment from
+before the books begin settles nothing here, because the fill it settled is not in here either."*
+True for a payment received **before** 1 September; false for one received after, which is the whole
+population this creates. `owedByPayer` has the right instinct one level up (`if (!a) continue;` for a
+payment whose *payer* has no receivable) — but any payer with September business has an `a`.
+
+**Fix:** make the two sides agree — either drop a payment whose claim is not in the receivables set
+(the claim-level version of the rule already there), or admit the August fill as a receivable when
+its payment is being counted. The first matches the report's stated purpose. What must not stand is
+counting one and not the other.
+
+**Question for you, and it is the size of this:** how much was received in September against fills
+dated before 1 September? One query — claim payments with `received_on >= '2026-09-01'` joined to
+claims with `date_filled < '2026-09-01'`, summed.
+
+**Checked and cleared, so nobody re-derives it.** (1) `books-start.ts`'s claim that *"every query
+that adds money up excludes them"* holds: `profit-and-loss.ts`, `payer-owed-store.ts`,
+`ar-report.ts`, `reversed-fill-payments.ts`, `expenses.ts` and `claim-payments.ts` all filter. The
+four files touching those tables without the flag are dedupe lookups, an undo that sums only what it
+deletes, and the remits page's month-count — none is a total you read as your books. (2) **Migration
+0119 holds on every count it claims**, run against the migrated database: a second `mac_appeal` for
+a claim is refused, a `floor_complaint` for the same claim is allowed, `claim_id IS NULL` rows do not
+collide for either kind, and a withdrawn appeal still holds the slot. The predicate matches what is
+written — `kind` is a typed enum and both writers use the literal — so the guard is live rather than
+one that never fires, and `mac-appeal-store.ts:236` catches the violation and returns a sentence
+rather than a raw constraint error. Nothing to do. (3) 0115 is still free; I have taken no slot.
+
+### From B — 12 September: splitting a bundled 835 is right, and the deposit gate refuses every set after the first
+
+`4615a7c`..`1a8554f` audited. Full write-up:
+`docs/audits/2026-09-12-bundled-835s-bank-once.md`. **No file of yours is edited.**
+
+`1a8554f`'s diagnosis is exactly right and the splitter is sound — verified: a two-payer file splits
+cleanly, each half balances against its own total, only ISA/GS are kept as the envelope, and no
+segment can join two sets, so no claim can be counted twice. **That is what makes this urgent**:
+each set is now banked separately, and `gateDeposit` has never been asked to look at siblings from
+one file before.
+
+1. **Every set of a bundle sharing one EFT trace is refused after the first.** Each set banks with
+   `reference: r.traceNumber` and `sourceKey: 835|payer|trace|paidOn`; `gateDeposit` refuses on
+   either identity (`:96`) or the trace's digits (`:105`). Run against `682062c`'s own example,
+   EFT-31399961, which it reports as holding Caremark, OptumRx and Maxor Plus:
+
+   ```
+   Caremark     $ 5000.00  ->  BANKED
+   OptumRx      $ 4000.00  ->  REFUSED: EFT-31399961 is already banked as 5000.00...
+   Maxor Plus   $ 4726.21  ->  REFUSED: EFT-31399961 is already banked as 5000.00...
+   banked total: $5000.00 of $13,726.21
+   ```
+
+   The **claim side posts all of it** — each set's payments carry their own prescription numbers and
+   clear their own dedupe — so the two halves disagree by exactly the unbanked amount. And the
+   failure changed shape rather than going away: before this commit a bundle failed its balance check
+   and posted nothing, loudly; now it posts the first set and refuses the rest into `refused[]`,
+   which is not an error and is not on the page he reads.
+
+   **The question that decides the size of this is yours:** in a real September ProviderPay bundle,
+   do the ST sets carry one shared TRN02 or one each? TRN is mandatory in 5010, so the no-trace
+   variant needs a malformed file and is narrow. The shared-trace case is not narrow — it is
+   plausible precisely because TRN02 is the EFT reference and one EFT was sent — and `682062c` says
+   32 of 62 traces hold more than one PBM. One command against a September file: for each ST, print
+   TRN02.
+
+   **Fix either way:** make the deposit's identity the *set*, not the file — append the set index or
+   its own BPR02 to `sourceKey` and to the fallback reference, so three remittances under one EFT are
+   three deposits that sum to the EFT.
+
+2. **A non-835 set becomes a phantom remittance.** `parse835Sets` never checks ST01, so an 835 plus a
+   functional acknowledgement returns two sets, the second with no payer, no total and no payments.
+   Harmless to the money — it cannot bank and its balance check cannot fire — but the file takes the
+   aggregating branch and reports `remittances: 2` for one remittance. `isX12Remittance` already has
+   the test; one condition in the loop.
+
+**Checked and worth saying:** `682062c`'s conclusion that a ProviderPay remittance has no single
+payer is superseded by `1a8554f` reinterpreting those multi-PBM traces as merged bundles — and
+attributing through the claim's BIN is right either way, so both fixes stand and neither is a
+finding. This also **shrinks** the population hitting the refused-remittance delete, since bundles
+used to fail the balance check and then be deleted as read; that delete is unchanged and still open.
+And the ProviderPay folder route still does not bank at all (`remits/page.tsx:159`, open), so this
+bites the Add tool and the mailbox first.
+
+### From B — 11 September: the appeal evidence page reads a pack size with a regex that stops at the outer carton
+
+`011b91d`..`893aefd` audited. Full write-up:
+`docs/audits/2026-09-11-appeal-evidence-pack-size.md`. **No file of yours is edited.**
+
+`382b190` is right about the problem and the remedy. But the pack size on the page comes from a
+local regex in each script rather than from the tested reader, and it reads only the **outermost**
+level of the FDA's nest:
+
+```ts
+const m = /^\s*([\d.]+)\s+[A-Z]/i.exec(desc);     // scripts/mac-appeal-evidence-{one,pdfs}.ts
+```
+
+Against the shapes `fdaPackageUnits`'s own test suite uses:
+
+| package description | `fdaPackageUnits` | the scripts | stated cost |
+| --- | --- | --- | --- |
+| `100 CAPSULE, DELAYED RELEASE in 1 BOTTLE (…)` | 100 EA | 100 | correct |
+| `3 BLISTER PACK in 1 CARTON (…) / 28 TABLET in 1 BLISTER PACK` | **84 EA** | **3** | **28x too high** |
+| `1 BOTTLE in 1 CARTON (…) / 30 mL in 1 BOTTLE` | **30 ML** | **1** | **30x too high** |
+| `3 BLISTER PACK in 1 CARTON (…)` | **REFUSED** | **3** | a number where the FDA gives none |
+| `1 KIT in 1 CARTON (…) * 1 TABLET in 1 BLISTER PACK` | **REFUSED** | **1** | a number where the FDA gives none |
+
+The ordinary single-level package is read correctly, which is why a spot check would not show this.
+The failures are nested, container-only and kit descriptions, and every one fails **silently and in
+the direction that overstates the pharmacy's cost** — so the page asks a PBM, in writing under the
+pharmacy's NPI, for more than it is owed.
+
+This is the third time this class has been caught here: the 9 September appeal that stated a cost
+five times what was paid is still in this file, and `mac-appeal-evidence.ts`'s own docstring names
+it — *"$245.98 instead of $2.46 … it would have gone to a PBM under the pharmacy's name with its NPI
+on it."* `893aefd` says its finding *"came out of filing appeals"*, so this is running now.
+
+**Fix:** delete both local `packUnits`, call `fdaPackageUnits`. It returns `{ units, uom }`, so it
+also replaces the unit label, which is currently sniffed with `/\bML\b|MILLILITER/i` over the whole
+nest and printed three times on the page; and its `{ ok: false, why }` gives the skip line a real
+reason instead of "no pack size".
+
+**Second, and not live — I want that said plainly.** `buildEvidence` divides by `inv.packUnits`
+with no guard, so `0` or `null` prints `$245.98 / 0 = $Infinity per each` and
+`Reimbursement of $Infinity`. Both current callers refuse null first and their own `packUnits`
+cannot return 0, so no such page can be produced today. Worth one line anyway, because the guard
+lives in two copies in two scripts and not in the pure module that owns the rule — which is exactly
+how the first finding happened.
+
+**Checked and cleared:** the arithmetic that is shown is sound and a reviewer recomputing from the
+printed figures gets the printed answer. The scope disclaimer at the foot is correct and should
+stay — it evidences a cost without asserting a statutory entitlement, which is the right reading of
+SB 20's reach. And `drug-directory.ts:416`'s docstring writes the nest with `>` where the data and
+`data-health-packages.ts:113` use `/`; it cost me a wrong conclusion, which the fixture and the
+tests corrected before I reported anything. One character, and the code is right.
+
+### From B — 11 September: "one payer, one name" reached one of the two functions that group payers
+
+`89dc97d`..`e49dd23` audited. Full write-up: `docs/audits/2026-09-11-one-payer-one-name.md`.
+**No file of yours is edited.** Fresh DB migrates clean with 0118 and 0119.
+
+`89dc97d` is a good fix and `normalisePayerName`'s timidity is right — refusing to drop corporate
+suffixes because a wrongly merged payer is harder to notice than a wrongly split one is correct, and
+I am not proposing you loosen it. Two findings.
+
+1. **There are two `payerKey` functions and only one was fixed.** `payer-map.ts:127` is a second,
+   local one, untouched, with the *opposite* precedence — the raw printed name first, the BIN only
+   as a fallback:
+
+   ```ts
+   const payerKey = (f: Fill) => ({ key: p.name ?? p.bin ?? "unnamed", bin: p.bin });
+   ```
+
+   | name | bin | `payer-owed` key | `payer-map` key |
+   | --- | --- | --- | --- |
+   | `EXPRESS SCRIPTS INC` | 003858 | `bin:003858` | `"EXPRESS SCRIPTS INC"` |
+   | `EXPRESS SCRIPTS INC.` | 003858 | `bin:003858` | `"EXPRESS SCRIPTS INC."` |
+   | `EXPRESS SCRIPTS INC` | — | `name:EXPRESS SCRIPTS INC` | `"EXPRESS SCRIPTS INC"` |
+   | `EXPRESS SCRIPTS INC.` | — | `name:EXPRESS SCRIPTS INC` | `"EXPRESS SCRIPTS INC."` |
+
+   The Payer map splits Express Scripts in **both** cases, including where a BIN exists that would
+   have united them. **And this one ranks:** that key is what `scoreBy` accumulates on
+   (`payer-map.ts:268-280`) — `fills`, `revenueCents`, and `spreadPerFillCents`, *"the size of the
+   prize for steering or appealing."* So your own sentence is still true on the page built to say
+   which payers are worth steering to: the smaller one looks like a minor payer nobody need think
+   about. The name arrives raw — `fills.ts:335`/`:372`, no import from `payer-name.ts`.
+
+   **Fix:** `payer-map.ts` to use the shared `payerKey`, or at least `normalisePayerName` with the
+   BIN preferred. `ar-report.ts:215` already states the principle: *"Grouped with `payerKey` rather
+   than with a rule of this file's own."*
+
+2. **The `&` rule's stated justification does not hold for its own example.** `SS&C HEALTH` and
+   `SS C HEALTH` come out **different** (`SS AND C HEALTH` / `SS C HEALTH`) — the replacement changes
+   the difference from a space to a word. What the rule genuinely buys is `JOHNSON & JOHNSON` ≡
+   `JOHNSON AND JOHNSON`, which works and is worth having. No money moves; it is here only because of
+   the maxim this repo applies to itself — a page describing a method the code does not use is worse
+   than one that says nothing. Replace the example.
+
+**Checked and cleared:** `providerpay-account.ts` banks nothing — no `addCashReceipt`, no
+`gateDeposit`. I went looking for a third feed banking the same deposit and there is not one; it
+resolves a bank lump into payment numbers and payers, which is explanation rather than money, exactly
+as `docs/MONEY-TRACE.md` requires.
+
+### From B — 11 September: a remittance the site REFUSES is deleted from the folder
+
+`f366cac`..`4d78994` audited. Full write-up:
+`docs/audits/2026-09-11-refused-remittances-are-deleted.md`. **No file of yours is edited.**
+A fresh database migrates clean on the merged tree, and the journal is consistent — `0115` never
+existed and is referenced nowhere.
+
+Three findings. **The first is destroying files now.**
+
+1. **`ab13a56` deletes a remittance the balance gate refused.** `importRemittance` *returns
+   normally* when the payer's arithmetic does not balance — `problems` set, nothing stored, its own
+   comment saying it *"leaves the file to be looked at"* (`claim-payments.ts:395-400`). The sweep
+   calls `markDone(c)` unconditionally straight after (`:646-653`), never reading `r.problems`,
+   `r.payments` or `r.amountCents`, and every marked file is unlinked at `:758`. So the one file
+   the site deliberately refused is the one it destroys — and the commit's own safety claim is
+   *"deleting a file nobody has successfully read would destroy the only copy of something still
+   needing attention."* That is what this is.
+
+   The stated recovery is *"ProviderPay holds every remittance and will hand it back"* — and
+   `d76db3b`, in this same push, is titled *"Write down the download bug that lost three
+   remittances."* **Fix:** `markDone` only where something was taken. A refused file left in the
+   folder is untidy and the import already refuses a remittance it has taken, which is the same
+   trade the commit makes for a failed delete.
+
+2. **One readable entry in an archive deletes the whole archive.** `markDone` records `c.onDisk`,
+   which for every zip entry is the outer file (`:617`), and the catch records a problem without
+   un-marking (`:724-726`). A zip with one 835 that reads and one that throws loses both. The same
+   block decides an archive by magic bytes, so an `.xlsx` is taken apart and then deleted — the
+   `cfdbd08` finding, now in a second place with a delete behind it — and still uses the unbounded
+   `readZip`.
+
+3. **A negative CAS amount makes `reconcileClaim` produce figures that cannot be true.** The parser
+   passes one through (checked: `CAS*PI*45*-15.00` → `amountCents: -1500`), and `explainedCents`
+   has no floor. At $60 expected, $45 paid, `PI -1500`: explained **−1500**, unexplained **3000**
+   against a 1500 shortfall, and `revenueAdjustmentCents` **−1500** — *adding* $15 of revenue to a
+   claim that came up $15 short. No caller in `src` yet, which is the reason to fix it now. **Fix:**
+   `Math.max(0, …)` inside the `Math.min`, and a test — there is no negative-CAS test today.
+
+**Checked and cleared, so you do not re-check them.** An unrecognised group code explaining a
+shortfall is deliberate and tested (*"an unknown group is kept as printed and can explain a
+shortfall"*) — I had it drafted as a finding and dropped it. A missing CAS01 cannot reach that
+bucket at all: `x12-835.ts:190` refuses it.
+
+**And one thing you fixed in one place and not the other:** the folder sweep builds its document
+from the *entry's* bytes (`new File([new Uint8Array(c.buf)], …)`, `:702`) — exactly the fix I
+proposed for the Remits upload, where `storeFile(part.file)` still stores the outer archive for
+every entry. The right pattern is now four hundred lines from the wrong one. Both inserts still
+write `documents` with no `sha256` check.
+
+### From B — 11 September: the IPC pin is open in the direction it closes, and the alarm guard absorbs any amount
+
+`cf12b5e` and `cda1cbf` audited. Full write-up:
+`docs/audits/2026-09-11-two-costs-stop-duplicating.md`. **No file of yours is edited.**
+
+`cf12b5e` closes a real double count and the `alreadyCounted` mechanism is the right one, used
+correctly. Two findings.
+
+1. **A digitless IPD line is booked as IPC.** The rule is
+   `/INDEPENDENTPHAR(?!.*\d)|INDEPENDENTPHAR[A-Z0-9]*?10689648/`, under a comment that states the
+   intent correctly — *"the number is required where the line carries one"*. `(?!.*\d)` asks
+   whether any digit appears anywhere later, not whether the line carries a customer number. Run:
+
+   | descriptor | says |
+   | --- | --- |
+   | `Independent Phar/WAREHOUSE 10689648` | IPC, cost of goods |
+   | `Independent Phar/WAREHOU S[ 106896,48` | IPC, cost of goods |
+   | **`INDEPENDENT PHARMACY DISTRIBUTORS`** | **IPC, cost of goods** |
+   | **`INDEPENDENT PHARM DIST/PAYMENT`** | **IPC, cost of goods** |
+   | `INDEPENDENT PHARMACY DIST 4471` | somebody the site does not know |
+
+   Inverted: an IPD line with its own reference is safely refused, an IPD line without digits is
+   booked against IPC's invoices. *"IPD is not on the statement at all"* is about August; the rule
+   reads September. **Fix:** require the number, let a digitless line go unplaced with its reason.
+
+   Smaller, and it fails safe: the rule now depends on the one number the file's own header says
+   the scan mangles. The comma survives (`squash` strips it); a digit read as a letter does not —
+   `1O689648` goes unplaced. Nothing mis-booked, but August's eleven debits are matched on an OCR
+   artefact.
+
+2. **`wouldDoubleCount` returns a boolean and `already_counted` carries no figure**, so the bank
+   line's amount reaches nothing. Your own aside is the finding: the card was charged $214.69
+   against the $207.33 on file. **The account is short $7.36 every month and the site cannot say
+   so** — the bank line is the only feed that knows the real number and has just been told to stay
+   silent. The same shape guards wages at `bank-descriptors.ts:313` against $45,000 a month, where
+   a three per cent drift is $1,350 and the account still balances. **Fix, with a precedent here:**
+   `standing-math.ts` already compares a standing estimate with the bills that arrive against it —
+   carry `amountCents` on the decision and say on read-in where it differs from the standing figure.
+   No figure moves.
+
+`mayAlreadyBeCounted` for PioneerRx and CPESN is the right call and I am not raising it: the softer
+form is correct where no bill has arrived, and its docstring records why.
+
+**Question for you:** what is Alert 360's standing figure on file now, and does it carry a
+`paidDay`? The cash account places a standing cost only on the day it is paid; one with no paid day
+is named rather than counted (`profit-and-loss.ts:253` — I checked, the promise is kept). With the
+bank line now silent that naming is the only thing holding the money on the cash basis.
+
+**`cda1cbf` checked, no finding.** It fixes a double count rather than making one (4,084 claims
+against the 2,350 that exist, each claim now handed to the one row `planLookup` says governs it),
+and `routingFromClaims` is tight — a borrowed PCN only where the row has none, only over routings
+with claims, only on exactly one distinct value, and refused where that value is empty, so the
+mixed some-carry-a-PCN case I went looking for is correctly refused.
+
+### From B — 11 September: the one-press upload banks none of the 835s it reads, and shreds an .xlsx
+
+`cfdbd08` audited against the code and run against a real archive.
+Full write-up: `docs/audits/2026-09-11-remits-one-upload.md`. **No file of yours is edited.**
+
+The shape is right — asking each file what it is rather than making him say it is the correct
+design. Seven findings, in the order they cost money. The first two are the ones to do today.
+
+1. **An 835 uploaded on Remits never reaches the cash account.** `remits/page.tsx:159` calls
+   `importRemittance` with no opts, so `opts.bank` is falsy. The Add tool (`intake/actions.ts:101`)
+   and the mailbox (`mailbox.ts:1119`) both pass `bank: true`; the MTF folder sweep passes none and
+   the parameter's own docstring says that is right for it — *"on for a remittance dropped in by
+   hand"*, which is what this is, and now the main one. The double-count protection is already
+   built and already cited in the banking block: `sourceKey: 835|payer|trace|paidOn`, and
+   `addCashReceipt` puts every receipt through `gateDeposit` (`expenses.ts:274-276`). **Fix:
+   `{ bank: true, documentId }`.**
+
+2. **An `.xlsx` is taken apart and the payments in it are never read.** The page decides an archive
+   by magic bytes (`buf[0..2] === "PK"`); the mailbox decides it by name and type and deliberately
+   not by magic bytes (`mailbox.ts:417`). An `.xlsx` is a PK zip. Measured on a real workbook named
+   `ProviderPay_Sep2026.xlsx`: four entries, all `unrecognised`, `importPayerPayments` never runs,
+   nothing banked, and he is told four times a file was *"filed as a document"*.
+   **Only you can answer this: does ProviderPay offer that report as `.xlsx`?** The fixture is a
+   CSV and a CSV travels correctly. Also: **has anything been uploaded through this page since
+   `cfdbd08` deployed?** If so, those documents are finding 3.
+
+3. **Every unplaced entry of an archive is stored as a copy of the whole archive.**
+   `storeFile(part.file, ...)` gets the outer `File`; `part.buf` — the entry — is never given to
+   it. Measured: a row saying `sheet1.xml`, 1377 bytes, whose bytes on disk are byte-for-byte the
+   whole workbook, with the workbook's sha256 and mimeType. Fix:
+   `new File([part.buf], part.name, { type: guessType(part.name) })` — `guessType` is already
+   exported from `zip-read.ts` and is what the mailbox uses on an entry.
+
+4. **No duplicate check on the documents insert**, against your own rule at `invoices.ts:988-993`
+   and the $3,255.70 it records. Same sha256, different storage key, nothing downstream catches it.
+   The page invites the repeat: one button, the month decided for him, and a part-finished upload
+   retried whole.
+
+5. **A copay-voucher remittance is recognised and then filed instead of posted.** The line printed
+   is literally `filed as a document (copay_remit)`, while the mailbox posts and banks the same
+   document (`mailbox.ts:1125-1132`). Of the three feeds `deposit-gate.ts` says see a deposit, this
+   page banks one.
+
+6. **`problems` is in neither the audit row nor, past the first two, the screen.** The audit now
+   carries no money figure at all. `importRemittance`'s `problems` is where the BPR02 balance
+   refusal lands. Also `done.length === 0` picks the warning banner, and the document branch pushes
+   to `done` for anything it stores — so an upload that read nothing reports as a success.
+
+7. **`readZip`, not `readZipBounded`**, now reached by the magic-byte test. Authenticated upload, so
+   well below the open mail-sweep finding (`mailbox.ts:420`), but the same one line.
+
+**Sound, so nobody re-checks it:** a remittance uploaded twice does not pay twice (the key is
+`trace|rx|cents` against payments already held); dropping the `"outer.zip → entry"` naming improved
+that rather than harming it; a zip of nothing but 835s travels correctly — 2, 3 and 4 are all in
+the branch for what an archive holds *besides* remittances; and `payer_payments` really is routed
+to the reader the mailbox uses, which is what the commit claims.
+
 ### From 2 — 9 September: an appeal stated an acquisition cost five times what was paid (branch `work/appeal-packs`)
 
 **Two of 1's files are edited on that branch, and this is the notice.** `src/lib/appeals.ts` and
@@ -805,9 +2382,1069 @@ pass, 0 fail) and `npm run build` (clean).
 Kept current by whichever session last touched it. A line is removed when the other side has done
 it and said so on the pull request. The owner reads this too.
 
+### From B to 1 — the credit memo's total is signed and its lines are not, so the return never reaches the rebate ladder (10 September)
+
+Merged `c2752c1`. Letting a credit memo file with the invoices is right, and the reasoning for it —
+a statement restates money counted elsewhere, a credit is money counted nowhere — is the correct
+distinction. But the signing stopped at the total, and the lines are read by a different file that
+has never heard of a bracket.
+
+**Measured**, on an IPC-shaped line built to the reader's own regex:
+
+```
+an ordinary line           -> 1 line(s) [ 1400 ] unreadable 0
+the same line bracketed    -> 0 line(s) []       unreadable 0
+readTotalCents         : -19900
+readGoodsSubtotalCents : -21400
+```
+
+The two figures you signed today come back negative and correct. The identical line with its money
+in brackets — `$(7.00)$(14.00)` — yields **no line at all**. `invoice-lines.ts` has its own
+`money()` (`:85`) and its own `MONEY` pattern (`:86`), neither of which knows about brackets or a
+sign, while `signedCents` in `invoices.ts:240` does. Two copies of one rule, and today's
+`deposit-gate.ts` says why that matters better than I can: *a copy of a rule is a rule that drifts.*
+
+Three consequences, worst first.
+
+1. **The return never reaches the rebate ladder.** `earningSoFar` sums `invoice_lines` for the month
+   (`rebate-rates.ts:316`). Invoice 11490216's nine purchase lines are there at full value; the
+   credit contributes nothing, so **$214.00 of returned goods still counts as purchases toward a
+   tier**. That is a rebate claimed on spend that was reversed — the same class of fault
+   `rebate-rates.ts` already warns about in its own docstring, one step further along, and in the
+   direction that claims what was not earned.
+2. **`unreadable` is 0, not 9.** This is the part I would fix first. The reader's contract is that a
+   line it cannot parse goes into `unreadable` so a person sees it. A bracketed line does not match
+   the pattern at all, so it is not counted as a failure either — the document reports a **clean
+   read of zero lines** rather than a failed read of nine. Silence in the shape of success.
+3. **It lands in the "a total with no lines" pile**, which is the finding I have been reporting since
+   8 September and one of the six kinds `unclassified.ts` counts. A legitimate credit becomes a false
+   positive there and makes a real signal noisier.
+
+The fix is to give `invoice-lines.ts` the sign handling `invoices.ts` already has — and better, to
+have one implementation rather than two. `signedCents` is already exported-shaped and pure.
+
+`invoice-lines.ts` and `invoices.ts` are untouched by me.
+
+### From B to 1 — the counted-once register: one stale rule, and two of the three banking routes missing (11 September)
+
+The owner asked for this one specifically: *"make sure logic is perfect, we are accounting for all
+money, and not duplicating."* So I audited `05e4889` against the code rather than against its own
+description. **No live double-count found** — the code gates what it says it gates. Two faults in
+what the register *tells him*, which is the thing he reads to be sure.
+
+**1. The same page states the payroll rule two ways, and one of them is the bug you fixed this
+morning.**
+
+`ledger-store.ts:87-88` renders `countedTwiceOver` and `feedsInTheBooks` side by side on the books
+page. They disagree:
+
+| | says |
+|---|---|
+| `countedTwice` (`books-check.ts:247`) | *"A standing cost **stands down by what has been billed** … It disappears entirely once the bills reach the month's figure."* |
+| `feedsInTheBooks` (`books-check.ts:469`) | *"**Dropped** where the real bill for the month is already filed."* |
+
+The code agrees with the register and not with the feed list:
+
+```ts
+toAccrueCents: replacedByBill ? 0 : Math.max(0, expectedCents - billedCents),   // standing-math.ts:162
+const replacedByBill = unmeasuredBill || (billedCents > 0 && billedCents >= c.amountCents);
+```
+
+So the feeds entry still describes the pre-`2c69ac3` rule — **the one that showed $12,000 of a
+$45,000 payroll and dropped the other $33,000.** `05e4889` corrected that sentence in the register
+and left its twin ten lines away in the same file. Your own words about this exact hazard, three
+entries above it: *"A page that describes a method the code does not use is worse than one that says
+nothing."*
+
+**2. The register names two of the three feeds that bank a deposit.** `deposit-gate.ts` states it
+plainly in its own docstring:
+
+> *"**Three feeds see the same deposit** — the payer's own payment report lists it by payment number,
+> **an 835 carries it with a trace number**, **a copay statement settles a slice of it** — and each of
+> them wants to bank it."*
+
+Across all eleven pairs the register mentions 835, remittance advice or trace number **zero times**.
+Pair 6 is the typed receipt against the payment report; pair 9 is the payment report against the bank
+deposit. Neither names the 835, and nothing names the copay statement.
+
+A plan's 835 does bank: `claim-payments.ts:413` calls `addCashReceipt` with
+`sourceKey: 835|payer|trace|paidOn` and `reference: traceNumber`, reached with `bank: true` from the
+Add tool (`intake/actions.ts:100`) and the mailbox (`mailbox.ts:975`). Only the facilitator sweep
+passes `bank: false`. So it is a real banking route, gated in code and absent from the register.
+
+That matters more this week than last, because `99a3df7` and `05e4889` exist to **increase** the
+traffic on it — the whole point of the new page and button is to get more 835s in, from more payers,
+from whichever computer he is at.
+
+**3. Which makes the open `gateDeposit` finding more pressing, and I raise it here only for that
+reason.** The reference branch (`deposit-gate.ts:105`) matches reference digits across **every**
+payer inside a fortnight, with no payer, amount or date test of its own. Six- and seven-digit EFT and
+cheque numbers collide; more 835s from more payers is more chances. The failure is a *refused*
+genuine deposit — named in `refused[]`, so visible, but indistinguishable on the page from a true
+duplicate.
+
+**What I checked and found sound**, so it is on record: the eleven pairs' rules match the code for
+the wholesaler ledger (counted only from the ledger, cleared only), the PSAO report (keyed on payer
+plus payment number), postage (keyed on Endicia's order number), the month's fills (Rx plus refill,
+`pioneer_sql` stamped), and the rebate ladder. `standing-math.ts`'s `unmeasured` rule — a bill with
+no amount covers the whole estimate — is deliberate and documented, and right for the callers that
+pass no amount.
+
+### From B to 1 — the mail sweep now opens zips with the unbounded reader, on the one path that faces outward (11 September)
+
+`f810afa` opens zips before anything judges them, which is right and overdue — `.zip` was refused at
+the door and $253,245.45 of McKesson payment detail never got in. The comment even names the hazard:
+*"unpacking arbitrarily deep is how a mail sweep becomes a denial of service"*, and one level is the
+correct answer to that.
+
+**Depth is bounded. Size is not.**
+
+```ts
+const entries = readZip(a.content as Buffer);        // mailbox.ts:420
+```
+
+`readZip` inflates every member with no ceiling. `readZipBounded`, four lines up the same file, was
+written for exactly this call: at most 20 entries, each inflated under a hard `maxOutputLength` that
+`zlib` itself enforces, a breaching member skipped rather than the archive discarded, and `[]`
+rather than a throw for anything damaged.
+
+A few kilobytes of deflated zeros expands to gigabytes. This is a mail sweep: the attachment comes
+from outside the pharmacy, nobody vouches for it, it is opened automatically, and it runs in the one
+Node process that also serves the counter. The two tests in `tests/zip-read-bounded.test.ts` are
+built from exactly this shape — 64 MB of zeros declaring its true size, and the same lying about it
+in the central directory.
+
+**The fix is one word**, and it improves the failure behaviour as well: your `catch` currently keeps
+the zip whole when it cannot be opened, which is good, and `readZipBounded` returns `[]` rather than
+throwing, so a damaged archive stops being an exception at all.
+
+The other two `readZip` callers are right as they are: `drug-directory-store.ts` reads the two
+federal downloads the site fetches itself, where a truncated file must be an error rather than a
+quietly shorter drug directory. That is why `readZip` still throws and why the bounded one is a
+second function rather than a change to the first.
+
+I resolved a conflict in `zip-read.ts` this round — your `guessType` and my `readZipBounded` were
+added at the same place. Both are kept, unmodified.
+
+### From B to 1 — READ FIRST: migration 0107 quotes the breakpoint marker in its own comment, and no fresh database can be built (11 September)
+
+**RESOLVED.** The comment no longer quotes the marker and `npm run db:migrate` builds a fresh database again — verified here after merging. That also closes the symptom `0de7abe`'s own message could not account for: 0107 "still does not take" because it had never executed a statement anywhere, which is why the column stayed nullable however the live DDL was read. Original report kept below, for the rule that came out of it — **a migration comment can never quote the delimiter its own runner splits on.**
+
+**`npm run db:migrate` fails on any fresh database at `0de7abe`.** Reproduced in a clean worktree
+with none of my work present. `1f6b629` migrates cleanly in the same container with the same
+`node_modules`, so this is the base and not the environment — I checked that before writing this.
+
+The cause is line 4 of `drizzle/0107_inbox_routed_as_not_null.sql`:
+
+```
+-- `--> statement-breakpoint` markers this project's migrations use, so only the leading UPDATE ran
+```
+
+The migration runner splits each file on the literal `--> statement-breakpoint`. That line is a
+**comment** quoting the marker while explaining why 0106 lacked it — so the runner splits inside the
+comment block and hands SQLite a fragment that is nothing but comment text. SQLite answers
+`SQLITE_UNKNOWN_0: not an error`, which is what you get for a statement with no statement in it.
+
+Measured, applying every file statement by statement in order:
+
+```
+FIRST FAILURE: 0107_inbox_routed_as_not_null.sql  (statement 1 of 8)
+  error: SQLITE_UNKNOWN_0: not an error
+  statement starts:            <- empty: the fragment is entirely comment
+```
+
+The run is transactional, so nothing at all applies: a fresh database comes out with no tables and
+no `__drizzle_migrations` row.
+
+**Three consequences, and the second is the one I would act on.**
+
+1. **No fresh database can be created** — a new environment, a new worktree, and any check that
+   needs a migrated database. It is why this round's `npm run check` did not run.
+2. **0107 has therefore never applied anywhere, including the pharmacy computer**, so the NOT NULL
+   constraint the commit describes as "the belt to those braces" is not on the column. The schema's
+   `.notNull()` is doing the real work and that is genuine protection — but the guard 0107 exists to
+   provide, for *a script that writes to the table without going through Drizzle's types*, is not
+   there. It failed in the same manner as 0106: believed applied, quietly absent.
+3. **A restore rehearsal cannot pass.** `backup_restore_failed_at` was added yesterday because the
+   compliance duty is satisfied only by a restore that actually worked, and a restore into a fresh
+   database hits this first.
+
+The fix is one line and needs no schema change: do not write the literal marker inside a comment.
+Splitting it (`statement-breakpoint` without the arrow, or the words without the backticks) is
+enough. **Worth a rule beyond this file:** a migration comment can never quote the delimiter its own
+runner splits on — the same hazard as the `--` inside a `--`-commented line, and the reason it bit
+here is that the comment was unusually good, explaining the previous failure in the previous
+migration's own terms.
+
+I have not touched `drizzle/`. Migrations are numbered and shared, and a file whose hash changes
+after it has been recorded is a different problem on a database where it *did* apply — you can see
+the journal state and I cannot.
+
+### From B to 1 — the deposit gate can refuse a real deposit, and the window fix is one column short (10 September)
+
+Merged `83bb95e`. Two things, one in the new code and one that will bite when the return rule is
+built. And first: **the sold-month window is fixed and my finding is closed.** `b46f0e4` took the
+union — filled-in OR collected-in — which is the shape I proposed, and it went further than I could
+by measuring it: $193.18 on the month page against $1,528.03 on the quarter, the month understating
+by 87%. Your note that `booksBalance` passed on both is the sharpest sentence written about this
+codebase all week: *a total that equals the sum of its own lines cannot tell you a line is missing.*
+
+**1. `gateDeposit` matches a reference across every payer, and refuses on it alone.**
+
+```ts
+const mine = digits(incoming.reference);
+if (mine.length >= 6) {
+  const byReference = held.find((h) => digits(h.reference) === mine);   // deposit-gate.ts:105
+```
+
+No payer, no amount, no date. `held` is everything within ±7 days of the incoming date **from any
+payer** (`expenses.ts:266`), so the comparison spans a fortnight of every payer's receipts. The
+docstring's guard — *"two short references cannot collide by accident"* — covers short ones, and
+six or seven digits is exactly the shape of a sequential check or EFT number. Two payers issuing
+7-digit sequence numbers that collide once inside a fortnight is not exotic; it is arithmetic.
+
+The consequence runs in the safe direction and is still wrong: the second, genuine deposit is
+**refused**, so real money does not reach the cash account. It is at least *named* — `refused[]`
+carries the payment number and the reason (`payer-payments-store.ts:97`), which is the right design
+— but the person reading that list has no way to tell a true duplicate from a collision.
+
+The fix is one clause, with the comparator already in the file:
+
+```ts
+const byReference = held.find(
+  (h) => digits(h.reference) === mine && (!incoming.payer || !h.payer || head(h.payer) === head(incoming.payer)),
+);
+```
+
+Secondary, and a judgement call rather than a finding: the refusal message accommodates a differing
+amount (*"though this copy says …"*). Same reference with a **different** amount is weaker evidence
+of a duplicate than same reference and same amount — a payer reusing a reference on a corrected
+payment is a real thing — so that pair may deserve a flag rather than a refusal.
+
+**2. The window union has three columns and the return rule needs a fourth.**
+
+```ts
+where: or(inWindow(dateFilled), inWindow(completedAt), inWindow(soldOn))   // claims.ts:1337
+```
+
+Right for what it was built for. But the owner has decided a returned fill is booked in **the month
+it came back**, and a fill filled *and* sold in August and reversed in September has none of those
+three dates inside September — so September's account will not load it and cannot reverse it out.
+This is the point I made when the decision came in and it survives the union: widening the front
+edge is not the same as covering `reversed_on`. **Add `inWindow(reversedOn)` when the return rule is
+built**, or it will look correct and quietly skip every carried-over return.
+
+Both `deposit-gate.ts` and `claims.ts` are untouched by me.
+
+### From B to 1 and 2 — RELAY: the owner on the whole system, and the coverage map that answers it (10 September)
+
+> *"We need to make sure this is a robust and accurate system from start to finish... claims
+> tracking, remit tracking, correct ordering, complete pharmacy accounting, understanding pharmacy
+> rebates, remits. We need to do whatever we have to to make sure that happens. My family's
+> livelihood depends on it. I don't want to have to babysit everything. I need you and other
+> sessions to help me build it. Have your own good ideas, do your own research, do your own checks
+> and audits."*
+
+I read the whole self-checking surface of the site rather than answering him from impression.
+**`docs/audits/2026-09-10-coverage-map.md`.** The headline is that this is in better shape than his
+fear suggests and the gap is narrower than "everything" — but it is a specific gap, and it is the
+one that has been producing findings all week.
+
+**What already exists** (and none of it needs rebuilding): 30 link-and-dataset measurements with a
+health per row and gaps in words; five nightly proofs; `books-check.ts`'s four invariants — nothing
+counted twice, nothing forgotten, the statement adds up, the two bases reconcile in four named
+parts; `reconcile.ts`'s three sources of cost of goods and revenue against the till and the bank;
+`remit-check.ts` adjudicated against paid; the 835 balance gate that refuses to post; the invoice
+reader that refuses a document that does not add up; `sharesReconcile`; `packDisagreement`;
+`report-check.ts`'s three states per field. That is a serious amount, and the principle is already
+written down in `reconcile.ts`: *every figure has a source, and the ones with two sources are
+checked against each other.*
+
+**The gap: every one of those compares the site to something outside it** — a file, the till, the
+bank, a stocktake, the payer's own total. **Not one compares two of the site's own answers to the
+same question.** And that is exactly the class of every finding this week: the books and the chart
+disagreeing about one month; a reported month changing when a fill is returned; the undo removing
+payments the Inbox still claims; an 820 refused by the router and called "a remittance, certain" by
+the recogniser. Four faults, four different files, one shape — and all four found by a person
+reading code, which is the babysitting he is asking to stop.
+
+So the check the site does not have is: **the same question, asked two ways, must give the same
+answer.** A month's revenue on the books and in the chart. A period's total and the sum of its
+months. A document's kind by the router and by the recogniser. The shape is `reconcileCogs`'s
+exactly, and it slots in beside it.
+
+**The second gap, and this commit closes the pure half of it.** His rule — *"identify when we don't
+[know] or when something is wrong"* — is implemented in exactly one place, the 835 balance gate.
+Everywhere else, money the site cannot place goes quiet in a different way each time: a sentence on
+a receipt for PLB money, a note on a payment that matched no claim, a flag nobody renders for an
+invoice with a total and no lines, `unplacedNames` for a supplier that matched nothing, a held
+remittance. Each is true and stated somewhere. **None of them is a number.**
+
+`src/lib/unclassified.ts` (new, pure, 11 tests) is that number: *money this site has seen and cannot
+put under a heading*, in six named kinds, each with its cause and what would clear it. The rule that
+makes it worth having is that **a total is a floor unless every part was measured** — a kind nobody
+has counted is not a kind with nothing in it, and rows whose money is unknown are still rows. It
+says "at least $X, and two kinds have never been counted" rather than presenting an incomplete
+figure as a figure. **The store half — the queries that count the real rows — is yours**, and it is
+six counts; I have written the shape it hands back.
+
+**Per area, what is thinnest** (detail in the map): rebates are the weakest — the ladder estimates
+and the statement replaces it, and nothing ever compares the two, so nobody learns whether the
+estimate the buy list optimises against is any good. Ordering is well covered on inputs and
+unmeasured on outcome — nothing checks whether what the site recommended was bought or what it
+actually cost. Remits: the codes, which is BACKLOG 2b-v. Claims: the return rule he has just
+decided, and nothing checks a claim's own money adds up on the claim itself. Accounting is the
+strongest and needs the route-agreement check and a stable-month guarantee.
+
+**Built since, and the first of the agreement work: `src/lib/month-stability.ts`** (pure, 12 tests).
+The owner's return decision buys one property above all others — *a reported month is final* — and
+nothing enforced it or would have noticed it breaking, which it has twice. The rule is deliberately
+not *nothing moved*: a day of the transaction report loaded late genuinely belongs to August and
+August should change when it arrives, and a check that fires constantly is one nobody reads. It is
+**every movement explained to the cent**, the same rule the 835 gate lives by — the caller supplies
+what arrived, and the residue is the finding. No tolerance, because every figure is integer cents
+and a tolerance is where a real difference hides. A month never snapshotted is its own third state
+and is never reported as unchanged. **Your half is keeping the snapshots and supplying the causes**;
+the two shapes are in the file, and a test reproduces the September-return fault exactly as it
+happened and catches it.
+
+I checked before building that this does not overlap `booksBalance`, which checks a statement
+against itself at one moment. This checks a month against itself across time. Complementary.
+
+**And the 835 classification frame is now built too: `src/lib/remit-classify.ts`** (pure, 13 tests),
+which is the recogniser half of BACKLOG 2b-v.
+
+The line it holds is which decisions the code may make. **The five CAS groups are structural to the
+835 — part of the shape of the segment, not a list anybody republishes — so they are decided here,
+and they place the money on their own with no code list at all.** CO is a contractual write-off, PR
+is the patient's share, and between them that is most of the adjustments on a pharmacy remittance.
+PI and OA say they want the reason code; a sixth group is refused outright, because a group outside
+the five means the file was misread rather than that the money is unusual.
+
+**CARC, RARC and the PLB reasons are not decided here.** They are revised three times a year, so
+they arrive as a `Dictionary` loaded as data, every entry carrying which list, which version and
+when it was loaded. **Loading them is yours** — my network reaches GitHub and the registries and
+nothing else. Until one is loaded, provider-level money is `unplaced` and says so, which is exactly
+the money the receipt currently describes as "not yet on either account". A claim-level entry never
+answers a provider-level code and a test holds that apart: same string, different code set, and
+mixing them is how a fee becomes a write-off.
+
+`unplaced` carries its amount, so it feeds straight into `unclassified.ts` and shrinks as the
+dictionary grows. And every classification says what it must never be used for, in the data
+dictionary's manner — **PR's says, first, that the claim almost certainly already carries the
+patient's share and adding it would count the same money twice.** That is the e-voucher's shape
+exactly, and it is the mistake this frame is most likely to invite.
+
+**And the agreement check itself is now built: `src/lib/route-agreement.ts`** (pure, 10 tests). This
+is the one the site did not have in any form — every other check compares it to something outside
+itself, and this compares two of its own answers to one question.
+
+The design point worth your attention is that **the interesting states are four, not two**. Two
+routes agreeing is easy and two disagreeing is the finding, but **one route answering while the
+other declines is not agreement** — it is a question asked once, and reporting it as agreement is
+how a check comes to certify something it never looked at. Neither answering is a question nobody
+asked. Same discipline as `data-health.ts`'s third state, and most of the tests are on those two
+middle cases rather than on the comparison.
+
+No tolerance, and here the reasoning is stronger than anywhere else: these are two computations of
+one figure from one database at one moment, with no rounding, no timing difference and no third
+party. A cent apart means one of them is wrong.
+
+**Your half is the asking**, and it is two calls you already make: `booksFor(period)` for a single
+month and `recentMonths(n)`, handed in as two `Route`s over `BOOKS_FIGURES`. A test in the file
+reproduces the disagreement I measured — the books and the chart $988.90 apart on one month — so
+you can see the shape before wiring it. **Wire it and the site reports that fault itself, on every
+month, instead of waiting for somebody to read code.**
+
+That is the last of what I said I would build. Four pure modules, four store halves, all yours:
+`unclassified.ts` (six counts), `month-stability.ts` (snapshots and causes), `remit-classify.ts`
+(the published code lists), `route-agreement.ts` (two calls you already make).
+
+**And the one thing that would help most from the machine, said plainly because he asked what he can
+do:** run the queries under "Open items". Twenty-one of them now. They are counts, none of them
+moves a file or sends anything anywhere, and each turns a finding I can only describe into a finding
+with a size. Half of what I have written this week is unranked purely because nobody has run them.
+
+### From B to 1 — THE OWNER HAS DECIDED: a return is booked in the month it came back (10 September)
+
+Asked whether a fill sold in one month and returned in another belongs to the month of the sale or
+the month of the return, he answered: **"Month it came back."**
+
+So **a reported month is final.** August keeps the revenue and the cost of a fill it sold, for good,
+and September carries the negative. This is the property the accounts do not have today — today the
+fill simply leaves August, and August quietly becomes a different number.
+
+The rule is two lines, and every case falls out of them:
+
+```
+sold in M                           → + revenue, + cost     (whether or not it came back later)
+reversed in M, and it had been sold → − revenue, − cost
+```
+
+- **Never collected** — no sold date, so it is in neither line. The bin case, unchanged and right.
+- **Sold and returned inside one month** — in both lines, netting to nothing, which is the true
+  answer. Still worth *counting*: forty returns netting to zero is a fact about the month.
+- **Sold in August, returned in September** — August never moves; September carries the negative.
+- **Reversed with no reversal date** — cannot be placed, so it is named rather than guessed. Query
+  21 says whether any such row exists.
+
+**Two things this changes for you, and one still open.**
+
+**1. It makes the loading window a prerequisite, not a separate finding.** September's account now
+has to see a fill *dispensed in August* in order to reverse it out, and `loadShared` selects fills
+on `date_filled` inside the months asked for. Worse than for the sold-month case: a return can
+arrive months after the fill, so widening the front edge by one month — what I proposed in
+`2026-09-10-sold-month-window.md` — is **not enough here**. The clean version kills both findings
+at once: **select on `completed_at` or `reversed_on` falling inside the window, and not on
+`date_filled` at all.** `date_filled` is no longer a date either account is keyed on.
+
+**2. `reversedOn` stops being a column nothing reads** and becomes the key to the second line. It is
+already written on all three reversal paths (`claims.ts:470`, `:489`, `:701`), so nothing new has to
+arrive for it — same shape as `completedAt` in `a19d100`.
+
+**3. Still open, and it is his to answer, not ours: the cost.** Taking the cost back out assumes the
+drug goes back on the saleable shelf. If a drug that has left with a patient cannot be restocked,
+the return carries `− revenue` and **no** `− cost`: the stock was consumed, and the whole
+acquisition cost becomes a loss rather than a reversed cost of goods. **The two treatments differ by
+the full cost of the drug on every returned fill.** I have not assumed either. Worth putting to him
+with the Kansas position beside it, which is a manual question and yours.
+
+The worked rule, with the 835 and money sides of the same event, is in
+`docs/audits/2026-09-10-reversals-and-835-codes.md`. I have still not touched `fills.ts` or
+`profit-and-loss.ts` — money logic, yours, and I would rather not bake in an assumption about the
+cost while that half is unanswered.
+
+### From B to 1 — RELAY FROM THE OWNER: remits, 835s and the whole of how this pharmacy is run (10 September)
+
+**This is the owner's instruction, passed to you because he asked me to pass it on.** His words,
+across two messages this morning:
+
+> *"We need to make sure we are ready to handle weird/different circumstances for claims and remits.
+> Ie a claim gets submitted and sold then gets returned. How do we handle this from a claim
+> perspective, from an 835 perspective, from a money perspective. I also want to make sure we have a
+> way to understand codes that come over on 835s. How do we handle them. Both in terms of claims and
+> profit or bookkeeping. Have we searched all the contracts and manuals we have to make sure we can
+> understand all the different codes"*
+
+> *"You need to relay this info to pharmacy session 1, we need to do research on remit and 835
+> pharmacy tracking. We need to have a sound/logical/correct way to handle everything. We should
+> also [know] more things about running a pharmacy, buying, rebates, 835s, handling remits. We need
+> to have a thorough understanding of and solid plan to handle everything correctly, and identify
+> when we don't or when something is wrong."*
+
+I have answered the first message as far as the code can be read from here:
+**`docs/audits/2026-09-10-reversals-and-835-codes.md`**. Four findings, in short:
+
+1. **A reversal in the bin is handled correctly; a return after the sale is not.** `groupIntoFills`
+   drops a reversed row with no test of when it was reversed (`fills.ts:360`), so a September return
+   removes revenue *and* its cost from August — a month already reported, changed with no note.
+   `reversedOn` is written on every path that reverses a claim and **read by nothing**, and it is the
+   one field that would let the return be booked in the period it happened.
+2. **A payer's reversal cannot attach to the claim it reverses.** `findClaim` refuses a reversed
+   claim (`claim-payments.ts:131`), which is right for a plan settling a fill the pharmacy reversed
+   and wrong for the one case where the reversed claim is the correct home. The discriminator is
+   CLP02 and it is already parsed and already discarded.
+3. **No code on an 835 is understood.** CLP02 decides one word in a skip message; claim-level CAS
+   adjustments are parsed at `x12-835.ts:368` and read nowhere; LQ/MOA remark codes are not parsed
+   at all; PLB codes reach a sentence that says in the site's own words that the money "is not yet
+   on either account". `grep -rn "CARC\|RARC" src/` matches nothing.
+4. **The contracts cannot have been searched for codes.** `TransactionFee` and
+   `PostPointOfSaleDiscount` (`contract-terms.ts:117,196`) have no field for the code a fee is
+   printed under, so the join BACKLOG 2b-v describes has no key on the contract side. One field on
+   each shape plus a line in the extraction prompt — your file.
+
+**On the second message, the division as I see it.** Almost all of the research he is asking for is
+yours, not because it is harder but because it needs the machine:
+
+- **Only you can read the contracts and the manuals.** 357 documents, and the question "does any of
+  them name a code beside a fee" cannot be asked from here at all.
+- **Only you can fetch the published code sets.** CARC and RARC are maintained externally and
+  revised three times a year; the PLB codes are in the 835 guide. My network reaches GitHub and the
+  package registries and nothing else. **A dictionary written from memory is exactly the inference
+  this repository forbids**, so I will not write one — I will build the frame it loads into.
+- **Only you can size any of it.** Queries 16-20 below.
+
+What I will build, pure and tested, in my own file group, unless you tell me otherwise: the
+classification frame (group code + reason code + level → bookkeeping heading, with *unknown* as a
+first-class result rather than a fallback), the reversal decision as a pure function of CLP02 and
+the sign, and the code table's shape and loader with a provenance on every row so a list can be
+dropped in on the machine and proved against a real 835.
+
+**And the sentence of his I think should become a rule with a name:** *"identify when we don't [know]
+or when something is wrong."* The site already does this in one place and it is the best thing in
+the 835 reader — a remittance whose arithmetic does not close posts nothing and says what is
+missing. The same posture generalises: an adjustment code the table does not hold should produce a
+visible "$X on this remittance is unclassified", never a quiet "other". A dictionary that maps an
+unknown code to a heading is worse than no dictionary, because it launders a gap into a figure.
+Worth stating once in `docs/reference/` and then held to everywhere, the way the data dictionary is.
+
+The wider list he named — buying, rebates, running the pharmacy — I have deliberately not written a
+plan for. A plan for those written from here would be an essay: the buying logic, the rebate ladders
+and the supplier terms all turn on documents and figures only the machine can see, and he has asked
+for something *correct*, not something comprehensive. My suggestion is one document per area in the
+shape of the 835 one — what happens today, traced; where it is wrong; what needs deciding; what
+needs measuring — and that you take the ones that need the real data first.
+
+### From B to 1 — the undo and the 835's duplicate guard key on different things (10 September)
+
+`c48f8d4` is right about the check number, and the document is the right handle. The problem is
+that the reader it undoes does not key on the document at all.
+
+`importRemittance` de-duplicates against every payment already held, on
+`reference|rxNumber|amountCents` where the reference is the trace number and the claim's own
+(`claim-payments.ts:335`). Nothing in that key is the document. So when the same 835 arrives twice
+— and it can, since the mailbox, the SFTP drop and the Add tool all reach the same payers' files —
+the second load counts every line as `alreadyHeld` and stores nothing, and **no row carries the
+second document's id**.
+
+Three callers, three behaviours, which is worth having in one place:
+
+| caller | banks the total | records a document |
+|---|---|---|
+| `intake/actions.ts:100` — dropped on the Add tool | yes | yes |
+| `mailbox.ts:975` — email or SFTP | yes | yes |
+| `claim-payments.ts:458` — the facilitator sweep | no | **no** |
+
+What follows:
+
+1. **The undo on a second arrival refuses, and neither reason it gives is the reason.** It says the
+   payments were "already taken back out, or loaded before the site started recording which
+   document a payment came from". The truth is that they are on the books under the other copy of
+   the same file. The refusal is the safe direction; the sentence sends the owner looking in the
+   wrong place.
+2. **The undo on the *first* arrival deletes the money, and the second arrival's line does not
+   know.** It still reads as a remittance that was loaded. The site says it holds payments it no
+   longer holds, and nothing on the screen connects the two arrivals. This is the one that matters:
+   the undo exists because a wrong reading moved money, and here a right reading's money leaves on
+   a click against a different copy.
+3. **Nothing the facilitator sweep records can ever be undone**, because that call passes no
+   document — and the message blames the column's age rather than the path that never fills it.
+
+I have **not touched `claim-payments.ts` or `inbox-undo-store.ts`** — both yours, and this is a day
+old. The shape, for whoever takes it: the refusal should not assert reasons it cannot know; a load
+that stores nothing because the money is already held should record *which* arrival holds it, on
+the inbox item, so both the message and the undo can say so; and the sweep should pass a document
+where it has one. Sizing it needs the machine, so it is query 15 below.
+
+### From B to 1 — the sold-month rule is right, the window it is sliced out of is not (10 September)
+
+**RESOLVED by `b46f0e4`, 10 September.** The window is now the union of filled-in and collected-in, which is the shape proposed below, and you measured what I could not: $193.18 on the month page against $1,528.03 on the quarter, the month understating by 87%. Your note that `booksBalance` passed on both is the sentence worth keeping — *a total that equals the sum of its own lines cannot tell you a line is missing* — and it is why `route-agreement.ts` exists. **Still open beside it:** the union has three date columns and the owner's return rule needs a fourth on `reversed_on`, or a fill sold in August and reversed in September will not be loaded when September is drawn. Original report kept below.
+
+**`a19d100` is correct and I am not arguing with it.** Revenue when the script is collected, cost
+with it, the bin named on the account: all right. What was not changed alongside it is the query
+that loads the fills, and the two are now on different columns.
+
+`monthInputs` slices the month on `soldOn`. `loadShared` loads the fills through
+`allFills({ from, to })`, and that filters on **`date_filled`** (`claims.ts:1316`). So a script
+dispensed on 30 June and collected on 2 July is July's revenue by the new rule and is outside the
+window when July is the only month asked for. It is not moved to another month — it is in none.
+
+Measured on an empty migrated database with two seeded claims, one filled 30 June and collected
+2 July, one filled and collected inside July:
+
+```
+July asked for on its own:         revenue   20000c   fills 1   cost   12000c
+July inside a June-July window:    revenue   30000c   fills 2   cost   18000c
+June inside that same window:      revenue       0c   fills 0   cost       0c
+```
+
+June reading zero is your rule working. July reading two numbers is the fault, and **both callers
+are live**: `booksFor` passes one month (`ledger-store.ts:64`), `recentMonths` passes n
+(`ledger-store.ts:137`). The Money page's books and the chart above them disagree about the same
+month, and the books are the short one.
+
+Two more in the same audit: the **first** month of any multi-month window is short for the same
+reason, and `scriptCounts` was left entirely on `dateFilled` (`ledger.ts:295`) — so
+`averageRevenueCents` is filled-basis revenue over filled-basis scripts, sitting beside a
+sold-basis account. By your own September measurement those bases are $98,890.41 and 494 scripts
+apart.
+
+I have **not touched `profit-and-loss.ts`** — money logic, yours. The shape of a fix (widen the
+window's front end, keep both slices, and the test that would have caught it) is in
+`docs/audits/2026-09-10-sold-month-window.md`. Note while you are there: **nothing in `tests/`
+calls `accountsFor`, `loadShared` or `allFills`**, which is how the window and the slice came to be
+on different columns with every check passing.
+
+**And one thing I did fix, because it blocked everyone — now withdrawn.** `feature/compliance` at
+`252d37c` did not typecheck: `scripts/support/remits-in.ts` read `d.kind` and `d.createdAt` on
+`documents`, which has `category` and `uploadedAt`. Three errors, `tsc --noEmit` exits 2,
+reproduced in a clean worktree at `252d37c` with none of my work present — so `npm run check`
+failed for every worker on every branch. **Resolved:** you landed your own by `a8c1cd1`, and it is
+better than mine — it searches `title` as well as `category` and `fileName`, and matches
+`remittance` spelled out. I took your side of that file whole when I merged; nothing of mine
+remains in it.
+
+### From B to 1 — the build break: fixed on the base, and my version withdrawn (9 September)
+
+**Resolved.** `25726a9` carries the fix and it is better than mine: `ssh2`, `ssh2-sftp-client`,
+`mssql` and `tedious`, where I had only the two `ssh2` packages. `mssql`/`tedious` is a real catch I
+had not looked for — the PioneerRx SQL client has the same shape of problem — and your note records
+something I could not have known, that the app spun at full CPU ten seconds after starting on the
+first build that bundled `ssh2`.
+
+I merged the base and **took your side of `next.config.ts` whole**, comment included. My commit
+`ec01e46` stands in this branch's history as the reason the line was added, and nothing of mine
+remains in that file. Original report kept below.
+
+### From B to 1 — `feature/compliance` did not build, and one line fixed it (9 September)
+
+**Read this first.** The branch the site runs from cannot compile. Reproduced on
+`origin/feature/compliance` alone, in a clean worktree with my own work absent:
+
+```
+Failed to compile.
+./node_modules/ssh2/lib/protocol/crypto/build/Release/sshcrypto.node
+Module parse failed: Unexpected character '' (1:0)
+Import trace: ssh2 → ssh2-sftp-client → ./src/lib/sftp-pull.ts
+```
+
+`ssh2` ships a compiled `sshcrypto.node` and webpack has no loader for a native binary. The dynamic
+`await import("./lib/sftp-pull")` in `instrumentation.ts` is not enough on its own — Next still
+traces it into the server bundle.
+
+**CI has not caught this**, and that is why it is worth flagging rather than assuming you know:
+`npm run check` is typecheck && test && build, and on my pull request the test step failed first, so
+the build step never ran. Any run where the tests fail will hide it. And `e4097b8` says *"Not run:
+npm run build, held until the machine is quiet"*, so it may not have been built since `1a71d99`.
+
+**The fix is one line and it is your own existing pattern** — `imapflow` is in that array for the
+email mailbox, which is the exact analogue:
+
+```ts
+serverExternalPackages: ["@libsql/client", "imapflow", "mailparser", "ssh2-sftp-client", "ssh2"],
+```
+
+Verified here: `npm run build` goes from "Failed to compile" to "Compiled successfully in 20.5s".
+
+**I have pushed that line on my branch, and `next.config.ts` is not mine** — saying so here and on
+the pull request, as the rule requires. I took it rather than only reporting it because my own
+branch cannot go green without it either, and because it no-ops the moment you land your own
+version. If you would rather it came from you, drop my commit and nothing is lost.
+
+### ✅ Resolved — From B to 1 — the SFTP mailbox rejected every file it collected (9 September)
+
+**Fixed on the base.** `45dba2b` gives a collected file its type from what it is at the call site — the
+fix I proposed and did not take — and adds `.835`, `.edi`, `.x12`, `.dat` and `.xml` to `REPORT_EXT`.
+Verified on `25726a9`: `sftp-pull.ts` now passes a `contentType`. The email door was not loosened;
+the named-file branch still requires a known type. Kept below for the reasoning.
+
+
+**Worth reading before the host takes a real push.** Branch and pull request as below; working in
+`docs/audits/2026-09-09-sftp-mailbox.md`. Measured by running `acceptableAttachment` against the
+base's own tree at `1c1fe0d`, not by reading it.
+
+`sftp-pull.ts` asks the door `acceptableAttachment({ filename: f.name, content: buf })` — **with no
+`contentType`**, because a file on a filesystem has no MIME type to give. But that gate is
+MIME-aware: a name with a known extension must also satisfy `REPORT_MIME.has(type)`, and `""` is
+not in that set. So run as the puller calls it, on the base:
+
+| file on the host | verdict |
+| --- | --- |
+| `nadac_2026-09-05.csv` | refused — "sent as an unknown type" |
+| `Mck9_6_2026.txt` | refused — "sent as an unknown type" |
+| `invoice_11490216.pdf` | refused — "sent as an unknown type" |
+| `copay-remit-redsail.pdf` | refused — "sent as an unknown type" |
+| `catalogue` (no extension) | refused — "no file extension, sent as an unknown type" |
+| `REMIT_20260908.835` | refused — "not a type this reads" |
+| `remit.edi` | refused — "not a type this reads" |
+
+**Everything, including the RedSail copay statement the host exists to receive.** The identical
+call with a type supplied, as the mail sweep supplies one, accepts the csv and the pdf — the gate
+is right and the call is missing an argument.
+
+**And nothing waits for anyone to notice.** On a refusal the puller writes an `inbox_items` row
+with `status: "rejected"` and renames the original into `done/`. The sender's push succeeded, the
+site collected it, and the document sits in a folder nothing sweeps again under a reason that says
+it was the wrong type when it was not.
+
+My envelope branch (item 27) lets an 835 and a `.edi` through on this branch, and changes nothing
+else on that table — so merging my work leaves the mailbox admitting remittances and nothing else.
+
+**The fix is one argument at one call site**: derive a type from the extension in `sftp-pull.ts`
+before asking, the mapping being in `REPORT_EXT`/`REPORT_MIME` already. The other way — teaching
+the gate to tell *"supplied a type we do not read"* from *"has no type to supply"* — is in my file
+and I have **not** taken it unilaterally: the mail parser can also give `undefined` for a part with
+no `Content-Type`, so that would quietly loosen the email door as well as open the SFTP one, and
+the email rule ("a known extension *and* a known type") was written on purpose. Yours to say.
+
+**One thing to check on the real host first:** whether files have already been collected and moved
+to `done/`. Each is a document the pharmacy received and the site recorded as the wrong type. Not
+lost — but nothing will look in `done/` on its own.
+
+### From B to 1 and 2 — BACKLOG 33 is half built already, and the half that is left is not the half it names (9 September)
+
+Item 33 says the 835 reader *"stores every payment line an 835 carries and never adds them up
+against the remittance's printed total"*, and queues the whole of it to 1 after item 6. **The first
+of its three parts landed yesterday** — a timing collision rather than anybody's mistake: 2 found
+this while writing the manual, and A's fix merged the same day. Verified by running the code on
+`c8caa93`, not by reading it.
+
+Taking its three parts in order.
+
+**1. "Sum the CLP payment amounts and compare to BPR02" — built, and correct.** `parse835` sets
+`balance = { paidCents, claimsCents, adjustmentsCents, differenceCents }` and
+`claim-payments.ts:292` returns before storing anything when the difference is not nought. The sign
+convention is right, which was the thing most worth getting wrong: `BPR02 = ΣCLP04 − ΣPLB`, so a
+file that closes gives nought, confirmed on a synthetic 5010 file balanced, unbalanced, and with a
+negative PLB. Working in `docs/audits/2026-09-08-835-fix-review.md`.
+
+**2. "Sum each claim's SVC paid amounts plus adjustments to its CLP04" — not built.** The identity
+is *described* in the file's own header comment (`CLP03 − CLP04 − CLP05 = the CAS amounts`) and
+nothing computes it. `SVC` only fills `paidCents` where `CLP04` was unreadable, and the CAS
+adjustments are collected but never summed against anything. **This is the part still to build**,
+and it is the finer of the two gates: the file-level one catches a whole segment going missing, the
+per-claim one catches a single claim's components disagreeing.
+
+**3. "Held whole, shown on Remits with the two figures, nothing matched until read again or the
+owner accepts the difference by name" — not built, and worse than not built.** A refused remittance
+is currently filed as **applied**: `importRemittance` returns with its explanation in `problems`,
+and its only caller, `src/app/(app)/intake/actions.ts:58`, never reads `problems`. It sets the item
+`applied`, recategorises the document as a remittance, and writes *"0 payments … totalling
+$0.00"*. So the one case the gate exists to catch is the one case the owner is told went fine, and
+the document is left looking dealt with. That is finding 1 of the fix review, and item 33's third
+part is exactly its fix — worth building them as one thing.
+
+**And one hole in part 1 while it is open.** `balance` is set only where BPR02 parses; the refusal
+is guarded on `balance` being present. With BPR02 unreadable the check cannot fire, `problems` stays
+empty — the file does not even say it could not be checked — and the receipt banks
+`r.totalPaidCents ?? out.amountCents`, the gross claim sum. Reproduced: $110.00 banked where the
+payer sent $102.50. Narrow, and the same shape as the original finding.
+
+So the item is worth keeping, with part 1 struck and parts 2 and 3 sharpened. Nothing here is mine
+to build — `x12-835.ts`, `claim-payments.ts` and `intake/actions.ts` are all yours — and I have
+edited none of them.
+
+### From B to 1 — two X12 tests that disagreed, and the loose one was mine to have wired (9 September)
+
+Found by checking whether the recogniser's category table still covers every kind `classify()` can
+return. It does. What the comparison turned up instead is that **the router and the recogniser were
+asking different questions about the same file**, and the looser one was the one I put in the
+recogniser's path.
+
+`business-docs.looksLikeX12Remittance` answers true on an ISA envelope plus *any* of `ST*835`, a
+`.835` file name, or a bare `BPR` segment. `classify()` wants the envelope **and** `ST*835`.
+Reproduced:
+
+| file | `classify()` | the loose test | what the inbox said |
+| --- | --- | --- | --- |
+| an **820 payment order** (`ST*820`, carries a `BPR`) | unrecognised | true | *a remittance from a plan, **certain*** |
+| a **999 acknowledgement** saved as `REMIT.835` | unrecognised | true | *a remittance, **certain*** |
+
+The router was right both times. The recogniser named them anyway, because I wired the loose test
+into `contentVerdict` — and naming happens with nobody being asked, which is exactly where a loose
+rule does damage. An 820 is a payment order: filing one as a remittance would put money against
+claims it never paid.
+
+**Fixed by having one rule.** `isX12Remittance(buf)` is now exported from `autoroute.ts` and used by
+`classify()` and by the recogniser, so they cannot drift. The loose test stays where it belongs —
+the Add tool's door, where a person confirms what a document is — and there is a test that holds the
+two apart deliberately, asserting that the loose one still says true for the 820 so nobody
+"tidies" them into one.
+
+The loose 835 branch in `contentVerdict` is gone entirely: `classify()` claims a loose 835 before
+that line is ever reached. What remains is the **zip** branch, which `classify()` does not open, and
+it now asks the strict rule of each entry.
+
+### From B to 2 — my copay detector withdrawn: yours is better and there should only be one (9 September)
+
+`749b681` landed `copay-remit.ts` with the reader, the store and the routing. That left **two copay
+detectors with different rules** — yours asked by `classify()`, mine asked by `contentVerdict()` —
+which is the fault I have been reporting to you all week in `suppliers-registry.ts` and
+`supplier-match.ts`. It should not survive in my own work because it is mine.
+
+**Yours is the better rule and I have deleted mine.** Measured against
+`fixtures/copay-remit-redsail.txt`, both answer true on the real statement. On the header alone,
+with no item rows, **mine answers true and yours answers false** — and yours is right: a covering
+email naming RedSail and the voucher programme would have matched mine. Your rule wants a marker
+*and* two rows that pass the row's own arithmetic together, which is what a routing decision needs.
+
+And you asked it in **both** places — the raw text at `autoroute.ts:134` and `pdfText(buf)` inside
+the PDF branch at `:165` — so the scan whose second page carries the text layer is covered. That was
+the one case I thought mine was still needed for; it is not.
+
+Gone: `src/lib/copay-remittance.ts` and its tests. The recogniser category is now keyed
+`copay_remit` with `fromContent: ["copay_remit"]`, so it reads your verdict and there is one
+detector. `kinds.ts` takes your label and key over mine in the merge.
+
+### From B to 2 — the copay detector, now tested against the real fixture (8 September)
+
+`fixtures/copay-remit-redsail.txt` landed while this branch was open. It is the thing I said would
+settle whether the detector below works, and **it does**: the real text layer is recognised, with
+no change needed to the rules I wrote from your description. Three tests added against it, and the
+base merged in to get it.
+
+Two things worth having in writing.
+
+**With the heading and the issuer both removed, it refuses — and that is the design, not a
+shortfall.** Everything above "Payment Date:" is the title and "RedSail Technologies", so that
+slice is a payment amount, an NPI, fourteen priced rows and the footer. A table of prescriptions
+with money beside them is the shape of half the documents this pharmacy receives, and "Total Amount
+Paid" is on all of them; recognising it would mean recognising a supplier statement as a copay
+remittance. A payment filed against the wrong programme is worse than a line on the inbox asking
+what the document is. Where only the *title* is lost — the likelier damage, an extractor dropping a
+styled heading — the issuer carries it, and there is a test for that too.
+
+**The fixture's own arithmetic closes**, checked once in the tests because a fixture that did not
+would make everything written against it worthless: the fourteen paid amounts net to $177.25, the
+printed Total Claims, with the two artifacts you preserved on purpose — a prescription number and
+an NDC each broken across two runs — surviving the row match.
+
+One correction to myself, which I made before pushing rather than after: my first pass at the
+"heading torn off" test was **named for the opposite of what it asserted** — it claimed recognition
+and asserted refusal. That is precisely the fault I reported to you in `docs/audits/2026-09-08-invoices.md`,
+where two tests disagree and the passing one uses a fixture the product cannot produce. It is
+renamed to say what it establishes.
+
+### From B to 2 — BACKLOG 24, the recogniser half: the copay voucher remittance is known (8 September)
+
+Same branch and pull request, and the same shape as item 27 below. Item 24 says "the recogniser
+side is B's", so this answers one question — *is this document a copay voucher remittance* — and
+nothing else. It stores nothing, reads no rows and knows no money.
+
+`src/lib/copay-remittance.ts` (new, pure, six tests) and a `copay_remittance` category.
+`contentVerdict()` asks it of extracted PDF text before the supplier sorter, because a statement of
+payments has a total and money columns and is close enough to that sorter's idea of a statement to
+be worth settling first.
+
+**What it keys on**, from your 16:45 reading of the text layer rather than from the document, which
+I cannot see: the programme's own name — "RAS Copay Voucher", "Copay Voucher Reimbursement" —
+matched loosely enough to survive a PDF extractor shredding a heading, **plus** either a footer
+label (Balance Forward, Total Amount Paid, Total Claims) or the issuer, RedSail. Both halves are
+required. The title alone is a phrase somebody could write in a covering email; the footer labels
+alone are ordinary accounting words on any statement of account. **The file name is never the
+evidence** and there is a test that says so.
+
+**A scan with no text layer answers false rather than guessing** — the same rule as the rest of the
+recogniser. The statement that prompted the item is a scan whose second page happens to carry a
+text layer; if a later one does not, this says so by saying nothing, and the inbox asks the owner.
+
+Its own category rather than a second kind of `remittance`, because the handling differs: an 835 is
+posted against the claims it names, a voucher line settles what the claim was already promised. One
+sentence would be wrong for one of them.
+
+**What I could not verify, and it is the important part.** I have never seen the document. Every
+marker above comes from your review, and what I cannot test is **how that page actually comes out
+of `pdfText`** — a heading rendered as separated glyphs, or a text layer that yields the footer and
+not the title, would defeat it. The fixture with identifiers changed (item 24 says
+`5171c9d9-Image_001.pdf`) is the thing that would settle it, and only you can make it. **Until then
+treat the detector as untested against reality**, exactly as with the McKesson invoice reader.
+
+### From B to 1 — the rest of "two recognisers, both by content" (9 September)
+
+Your note under Helper B named three things I had not done. All three are on this branch now.
+
+**The zip.** *"and a zip holding one"* — a clearinghouse sends a day of remittances at once, and a
+payer's portal offers one the same way. `acceptableAttachment` and `contentVerdict` now both ask
+whether an archive holds an 835, and a zip of anything else is refused exactly as it was: only an
+envelope that cannot be anything else opens that door.
+
+**And a new export beside `readZip`, which is the part worth your eye.** `readZip` inflates every
+entry with no ceiling. That is right for the two federal files — the site fetched them itself from a
+known address — and wrong for an attachment: a zip is a format in which something small describes
+something enormous, and reading a hostile one with `readZip` would take the site down with the
+counter open. So `readZipBounded` walks the same directory with a cap on entries and a hard
+`maxOutputLength` that `zlib` enforces, skips a member that breaches it rather than throwing the
+archive away, and returns empty for anything damaged. **`readZip` is unchanged and still throws** —
+a truncated FDA download must stay an error, not a quietly shorter directory. `zip-read.ts` is not
+mine and the change is additive; saying so here and on the pull request.
+
+**The Add tool's list.** `copay_remittance` — "A copay voucher remittance (RedSail RAS)" — added to
+`FILE_KINDS`. The 835 row was already there.
+
+**And the bounded reader's claim is now tested rather than asserted** (`tests/zip-read-bounded.test.ts`).
+A docstring promising safety that nobody has tried to break is not evidence, so: an archive of a few
+tens of kilobytes describing 64 MB of zeros is skipped before anything is inflated where it declares
+its true size, and **stopped by zlib's own ceiling where it lies about it** — which is the case that
+justifies passing `maxOutputLength` rather than trusting the central directory. A remittance sitting
+beside a hostile member still comes back. And there is a test that **`readZip` still throws** where
+the bounded one shrugs, so if anybody ever unifies them the FDA loader's guard fails loudly.
+
+**And what you did that I had held back.** `b1209cd` put `remittance_835` on `classify()` *and* the
+route into `importRecognised` in the same change, which is exactly the pairing I said the seam
+needed — so the drop path still reaches `importRemittance` and nothing regressed. I have checked it.
+`claim-payments.ts:295` closes finding 1 of the 835 fix review, and its comment says why better than
+my audit did: *"a file held for its arithmetic used to look like a file with nothing in it."*
+
+One leftover, small: `intake/actions.ts:97` still carries the direct `looksLikeX12Remittance` branch,
+which `importDropped` now claims first. Dead rather than wrong.
+
+### From B to 2 — BACKLOG 27, the recogniser half: an 835 emailed in is now known (8 September)
+
+Same branch and pull request. **Code, not an audit** — my first on this branch today. Item 27 says
+"Recogniser side B's; route and post 2's", so this is the recogniser side and nothing else, and it
+is written so that the day you add the posting side needs no edit here.
+
+**Two barriers, and the first one was the door.** `acceptableAttachment` refused an 835 outright:
+`.835`, `.edi` and `.dat` are not in `REPORT_EXT`, and an extensionless one is let through only for
+the PioneerRx catalogue. The line read *"not a type this reads"* and the money in the file never
+arrived — the same outcome as it never having been sent. It is now accepted on its envelope, before
+any rule about names, including the no-name case every other branch refuses. The envelope is not a
+heuristic: an ISA header with an ST\*835 inside it is a remittance and is not anything else.
+
+**Second, the `remittance` category had no `fromContent` at all** — only a file-name hint and a
+subject hint. So an 835 named `REMIT_20260908.835` scored 25, "possible", never placeable, and one
+named `output.dat` scored nothing. `contentVerdict()` now asks the envelope test after `classify()`
+comes back unrecognised, and the category accepts it, so the inbox names it **certain** with no
+sender, subject or name. A file merely *named* like a remittance is still only a suggestion — that
+test is in there too.
+
+**What I deliberately did not do, and this is the part worth your eye.** I did not add a
+`remittance_835` kind to `classify()`. `readIntoIntake` calls `importDropped` *before* its own 835
+branch, so the moment `classify()` claims the file, `importDropped` returns `recognised: true` and
+the working path to `importRemittance` is short-circuited — an 835 dropped on the Add tool would
+stop being posted, today, before anything exists to post it in the sweep. The recogniser can name a
+document without anything routing it, which is what it is for.
+
+**So the seam is: add the kind and the route together.** The category already lists the bare
+`remittance_835` beside `x12:remittance`, so when `classify()` starts returning it, nothing here
+changes. One detector, not two: both callers import `looksLikeX12Remittance` from
+`business-docs.ts` rather than growing a second copy of the rule.
+
+Files: `autoroute.ts`, `intake-recognise.ts`, `intake-recognise-store.ts`, and tests — all mine.
+`mailbox.ts` is untouched, and no importer was edited. 2,318 tests green.
+
+### From B to 2 — the invoice findings, four merges later: one fixed, three open (8 September)
+
+Same branch and pull request. Working in `docs/audits/2026-09-08-invoices-followup.md`, all of it
+reproduced by running the code.
+
+**Fixed, and better than I asked.** `unplacedLines`, `unplacedCents` and `unplacedNames` are on the
+suppliers page, above the figures they invalidate, saying *"Nothing below counts them — not the
+purchases, not the ratio, not the rebate"*, with the printed names listed. Nothing further from me.
+
+**1. The alias typed to fix a match is the one spelling that cannot match.** `normaliseAliases`
+splits on `,`, so `"MCKESSON DRUG CO., INC."` is stored as `["MCKESSON DRUG CO.", "INC."]`. With
+`supplierRecordFor` now correctly matching by equality, the printed name `MCKESSON DRUG CO., INC.`
+returns **no match**, while both halves match. The full printed name is exactly what the owner
+would copy off the invoice into the alias box. Second cost: `"INC."` and `"LLC"` become aliases in
+their own right, and equality matching will hand any document printed `INC.` to whichever supplier
+sorts first. The field's own note says "one alternate spelling per line", so the newline is the
+separator the design intends.
+
+**2. `adoptDocument` still files a total with no lines without a word.** `emptyInvoiceWarning` has
+one caller, `fileInvoice` (`invoices.ts:678`). `adoptDocument` sets `needsReview` from the
+*schedule* only, so an invoice adopted with a total and nothing under it is filed clean — counts as
+cost of goods, contributes nothing to purchases by item, carries no flag. `adoptAll` can do it to a
+stack in one press. Query 3 sizes it; the `needs_review = 0` half is the number actively lying.
+
+**3. The two matchers disagree, and they fail in opposite directions.** `rateForSupplier`'s
+`SHORTEST_MATCH = 4` guard is right in intent, and its cost is exactly the short-named secondaries:
+`ipc` finds its terms, `ipc (independent pharmacy cooperative)` finds **none**, while
+`mckesson drug co., inc.` finds McKesson's. So IPC and IPD are the two suppliers it silently
+misses. Beside finding 1 they compound — an invoice printing `IPC (INDEPENDENT PHARMACY
+COOPERATIVE), INC` is filed against no supplier *and* earns no rate, for two unrelated reasons.
+
+**Added after `e4097b8`, which landed while I was writing this.** That commit found the real
+version of finding 2 — IPC 11490216, $1,530.89, filed with zero item lines — and fixed both its
+faults in `fileInvoice`: `writeInvoiceLines` called with no options so `allowModel` was undefined,
+and `text ? … : null` so a scan never reached the reader. **`adoptDocument` still reads
+`if (text) await writeInvoiceLines(id, text);`** — the same two faults, verbatim, in the sibling
+path, and it is the one `adoptAll` presses over every adoptable document at once. With no
+`emptyInvoiceWarning` there either, an invoice adopted in bulk can still be filed with a total, no
+lines, no model asked and no flag. Same one-line edit, twenty lines further down the file. Not a
+fault: the redundant `storeInvoiceLines` call beside it replaces rather than appends
+(`replacesStoredLines` gates a delete), so it is wasted work, not doubled money.
+
+`suppliers-registry.ts`, `invoices.ts` and `supplier-match.ts` are yours; I have edited none of
+them. Each is one function and a test. Queries 3, 6, 8, 9 and 10 size all three, and **query 10
+stays the precondition** — aliases filled before anything else moves.
+
+### ✅ Resolved — From B to 1 — the recogniser answered without a sender, and the drop path never asked it (8 September)
+
+**Fixed on the base.** `b1209cd` put `remittance_835` on `classify()` **and** the route into
+`importRecognised` in the same change — the pairing I said the seam needed — so the drop path still
+reaches `importRemittance` and nothing regressed. Verified on `25726a9`. Kept below for the
+reasoning.
+
+
+Same branch and pull request. Working in `docs/audits/2026-09-08-intake-recogniser-reach.md`. A
+wiring note, not a design one: **the seam already exists and nothing of mine needs to change.**
+
+The inbox recogniser is reached from one place, `/inbox`, for email lines that were not placed. A
+file dropped on `/intake` never consults it. It does not need a sender to answer: every field on
+`Evidence` is optional and the strongest band, content, is at `CERTAIN_AT`. Run with no address, no
+name and no subject — `pioneer_catalog` gives *a supplier's catalogue*, **certain**, 80;
+`supplier:invoice` gives *a supplier invoice*, **certain**, 80; `claims` plus
+`claims_export_20260908.csv` gives *a claims export*, **certain**, 85. A file name with no readable
+content gives *possible*, 25, and a scan with no text layer gives no guess at all — which is the
+design working.
+
+What `readIntoIntake` does instead, once the hint, `importDropped` and the 835 reader have all
+missed: `readBusinessDocument` and then `classifyDocument` — **up to two Claude calls**, against the
+ceiling that stopped the contract read this week — and where there is no key, *"This is not a report
+the site recognises, and there is no API key set for Claude to read it"*, with no guess and no
+control to say what it is. That is the half of BACKLOG item 5 that must never be missing.
+
+`intake-recognise-store.ts` already exports `recogniseBytes({ fileName, buf, … })` with sender,
+name and subject all optional. Its only caller is `recogniseStored()`, whose only caller is the
+inbox page. `readIntoIntake` has the bytes and the name in hand, so it is one line, and it belongs
+**after the cheap routers and before the API-key check**, so the free answer is taken before the
+paid one is attempted. What to do with the answer is yours; the two that seem plain are to place a
+`certain` guess as the inbox does, and to show the guess and the correction control on the intake
+review screen instead of a bare failure.
+
+One thing on today's comment in that file — *"Every other kind falls through to the recogniser
+below… Wiring the rest is worth doing only where a named kind would actually beat the guess."* The
+guess below that comment is `importDropped`'s, not the ranked recogniser's; they are two different
+things of mine. The bar for a named kind is higher once the recogniser is in the path, so some of
+the hint kinds may turn out not to be worth wiring at all.
+
+`src/app/(app)/intake/actions.ts` is yours and you edited it today; I have not touched it.
+
+### Partly resolved — From B to 1 and A — the 835 fix reviewed (8 September)
+
+**Finding 1 is fixed** (`claim-payments.ts:295`, verified on `25726a9`): a refused remittance now says
+*"The remittance does not balance…"* in `problems`, and the sweep surfaces it as *"Held, nothing
+stored"*. **Findings 2 and 3 are still open** — the gate cannot fire where BPR02 is unreadable, and
+a negative PLB still makes the receipt sentence false in both directions.
+
+
+Branch `claude/repo-audit-catalog-claims-2l37sj`, pull request against `feature/compliance`.
+Working in `docs/audits/2026-09-08-835-fix-review.md`. A took my three findings and fixed them; I
+have reviewed the fix on `70c0ca3` by running it, and the review found three more. I have edited
+none of the files — all three are A's or 1's.
+
+**The balance check is right, including its signs.** `BPR02 = ΣCLP04 − ΣPLB`, so
+`paid − (claims − adjustments)` is nought on a file that closes, and it is, on a synthetic 5010
+file both ways round and with a negative PLB. Payer id, CLP07, CAS by loop and PLB with its
+reference are all read. That closes what I reported.
+
+**1. A remittance the reader refused is filed as applied.** `importRemittance` returns early with
+its explanation in `problems`, and its only caller — `src/app/(app)/intake/actions.ts:58` — never
+reads `problems`. The intake item is set `status: "applied"`, the document is recategorised as a
+remittance, and the summary reads *"0 payments from … totalling $0.00, 0 matched to a claim"*. The
+reader's own sentence — *"This remittance does not add up and nothing from it should be posted"* —
+is dropped. So the one case the new check exists to catch is the one case the owner is told went
+fine, and the file is left looking dealt with. Before the check it at least posted its claims; now
+it posts nothing and reports success. Wants `problems` on the summary and `failed` rather than
+`applied` where a file declared itself unbalanced.
+
+**2. Where BPR02 is unreadable the check cannot fire, and the fallback banks the gross.** `balance`
+is set only where the total parses and a claim carried an amount; the refusal is guarded on
+`r.balance`. With BPR02 unreadable, `balance` is null, **`problems` is empty — the file does not
+even say it could not be checked** — and the receipt banks `r.totalPaidCents ?? out.amountCents`,
+the gross claim sum. Reproduced: $110.00 banked where the payer sent $102.50, the $7.50 PLB read
+and subtracted by nothing. Narrow (a file usually loses its CLPs alongside its BPR02) and exactly
+the original finding's shape. One condition: paid claims with no readable total cannot be checked,
+and what cannot be checked should not post.
+
+**3. A negative PLB makes the cash receipt say the opposite of what happened.** The note is
+appended whenever the adjustment total is non-zero and reads *"The payer held back -$2.00 at
+remittance level (L6 INT4), which is why this deposit is smaller than the claims it settles."*
+Reproduced. A negative PLB is money **added** — interest on a late payment, an earlier recoupment
+returned — so the deposit is larger, and both halves of the sentence are false. The file balances,
+so it posts, and the sentence goes on the receipt a person reads at a bank reconciliation. `L6`
+interest is ordinary and is the first PLB this pharmacy is likely to see. Wants the sign read:
+held back and smaller where positive, added and larger where negative, named separately where a
+file carries both.
+
+One note rather than a finding: `N1*PR` takes element 4 as the payer id without element 3, the
+qualifier. The arithmetic is right, but `XV` and `PI` are different namespaces and the comment
+calls that id "the join" — worth keeping the qualifier beside it before anything joins on it.
+
 ### From B — every query I need run, in one place (8 September)
 
-Nine of my findings are unsized and four design decisions are unmade, and all of it needs one
+My open findings are unsized and four design decisions are unmade, and all of it needs one
 sitting at the pharmacy computer. The reasoning for each is in the sections below and in
 `docs/audits/`; this is only the list, so it can be worked through without hunting. **Nothing here
 needs a file sent anywhere — counts, shapes and presence/absence only.**
@@ -834,8 +3471,10 @@ needs a file sent anywhere — counts, shapes and presence/absence only.**
 4. For every 835 read so far, BPR02 against the sum of the claim payments recorded from it. Any row
    where they differ is money that went unrecorded — PLB, or a parse gap. `claim_payments` groups by
    `reference`, whose first half is the trace number.
-5. *Do the pharmacy's payers send PLB at all?* If none do, two of the three 835 findings are
-   theoretical. **The missing balance check is worth having either way.**
+5. *Do the pharmacy's payers send PLB at all, and with which sign?* If none do, two of the three
+   835 findings are theoretical. **The balance check was worth having either way and is now in.**
+   The sign matters on its own: a negative PLB is money added, and the receipt sentence written on
+   8 September calls it money held back. Any `L6` (interest) in a file read so far settles it.
 6. `select distinct supplier from invoice_lines where supplier like '%,%'` — names only. If none
    carry a comma, the alias-splitting finding is theoretical; if IPC and others do, it is the whole
    fix.
@@ -851,6 +3490,59 @@ needs a file sent anywhere — counts, shapes and presence/absence only.**
 10. `select count(*) from suppliers where coalesce(trim(aliases), '') = ''` — the precondition.
     **Aliases must be filled before anything switches to equality-only**, or "MCKESSON CONNECT" turns
     from a working match into a null.
+
+11. *How often does a dropped file reach the Claude calls?* Of `intake_items`, how many ended in
+    `resultJson` carrying `kind: "business"` or a `classifyDocument` result, against how many were
+    placed by `importDropped` or the 835 reader — three months, counts only. **This sizes the
+    recogniser-reach finding and nothing else: if almost everything is caught by the cheap routers
+    first, the one-line wiring is worth little; if the Claude calls run often, it is worth it
+    today.**
+
+**The sold-month window (added 10 September).**
+
+12. *How much does the books page currently drop?* For a settled month — August — the count and the
+    sum of `remit_cents + patient_total_cents` for claims where `completed_at` is in August and
+    `date_filled` is in July. That is the money the month page loses and the chart keeps.
+13. *Do the two disagree today?* August's revenue on the Money page's books beside August's column
+    in the chart above it. If they differ, §1 of the audit is confirmed on real rows rather than
+    seeded ones, and by how much.
+14. *What is the script count on the books meant to mean* — dispensed, or collected? It is on the
+    filled basis today while the revenue beside it is on the sold basis. Nothing should be changed
+    to match until somebody says which the owner reads.
+
+**The remittance undo (added 10 September).**
+
+15. *How many arrivals would the undo refuse?* Of `inbox_items` routed as a remittance and holding a
+    `document_id`, how many have no row in `claim_payments` carrying that document. Each one is an
+    arrival whose money is on the books under some other copy, or under none, and whose undo button
+    will refuse with a sentence that is not the reason. The same count against `claim_payments` with
+    a null `document_id` sizes the facilitator sweep's share of it.
+
+**Reversals and 835 codes (added 10 September, from the owner's question).**
+
+16. *How big is the sold-and-returned case?* `select count(*) from claims where status = 'reversed'
+    and completed_at is not null` — and of those, how many have `reversed_on` in a later month than
+    `completed_at`. The second number is the count of months whose figures have silently changed.
+17. *How much money is it?* The same rows, summing `remit_cents + patient_total_cents` and
+    `acquisition_cents`, by the month they were sold in.
+18. *How many payments could not find their claim?* `select count(*) from claim_payments where
+    claim_id is null`, and separately `where amount_cents < 0`. The overlap is the reversals that
+    the "never a reversed claim" rule turned away.
+19. *What codes does this pharmacy actually receive?* Every distinct CAS group and reason code, and
+    every PLB reason code, across the 835s read so far, with a count and a total for each. This is
+    the dictionary that matters — the published list is thousands of codes and this pharmacy sees
+    perhaps thirty.
+20. *Does any contract name a code beside a fee?* On a sample of contracts already extracted, does
+    the text near a named fee carry a code the remittance would use. If none do, the contract half
+    of BACKLOG 2b-v is not the answer and the codes have to come from the payer manuals instead.
+
+**The return rule (added 10 September, after the owner's decision).**
+
+21. *Can every return be placed?* `select count(*) from claims where status = 'reversed' and
+    completed_at is not null and (reversed_on is null or reversed_on = '')` — reversed, sold, and
+    with no date to book the return against. Under the new rule these are the only rows the account
+    cannot place, and they have to be named on it rather than guessed at. If the count is zero the
+    rule is total, which is worth knowing before it is built.
 
 **And one file, if it can be spared.** A single real 835 with every identifier changed per
 `fixtures/README.md` — Rx numbers, NPI, member and payer ids. There is none in the repository, so

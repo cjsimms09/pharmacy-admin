@@ -2,10 +2,11 @@ import "server-only";
 import { desc, eq, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "./crypto";
-import { classify } from "./autoroute";
+import { classify, isX12Remittance } from "./autoroute";
 import { pdfText } from "./pdf-text";
 import { triageByText } from "./contract-triage";
 import { classifySupplierDocument } from "./invoices";
+import { readZipBounded } from "./zip-read";
 import { readFile } from "./files";
 import { CATEGORIES, recognise, ruleFromCorrection, categoryFor, type Evidence, type Recognition, type SenderHistory, type SenderRule } from "./intake-recognise";
 
@@ -101,6 +102,21 @@ export async function historyFor(fromAddress: string): Promise<SenderHistory[]> 
 export function contentVerdict(fileName: string, buf: Buffer, subject = ""): { verdict: string; why: string; headers?: string[] } | null {
   const cls = classify(fileName, buf);
   if (cls.kind !== "unrecognised") return { verdict: cls.kind, why: cls.why, headers: cls.headers };
+  /*
+   * A remittance inside an archive, which `classify()` does not open.
+   *
+   * A loose 835 never reaches here — `classify()` claims it above — so this is the zip a
+   * clearinghouse sends when it has a day of them at once. `isX12Remittance` is the router's own
+   * rule rather than the looser `looksLikeX12Remittance`, because a document named here is named
+   * without anybody being asked: an 820 payment order carries a BPR and is not a remittance, and
+   * the loose test says it is.
+   *
+   * Bounded, because this is a file from outside: see `readZipBounded`.
+   */
+  if (buf.length > 4 && buf.readUInt32LE(0) === 0x04034b50) {
+    const held = readZipBounded(buf).find((e) => isX12Remittance(e.data));
+    if (held) return { verdict: "x12:remittance", why: `A zip holding a remittance: ${held.name} is an X12 envelope carrying an 835.` };
+  }
   let text = "";
   if (/^%PDF/.test(buf.subarray(0, 8).toString("latin1"))) {
     try {
