@@ -8,6 +8,48 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September: the register's state column has one state, because the ternary returns the same word twice
+
+`docs/audits/2026-09-12-the-state-column-that-has-one-state.md`. One line in `scripts/registers.ts`,
+new in `e67a0ca`. **No file of yours is edited.**
+
+```
+OBSERVATION  registers.ts:115 —
+
+               const state: State = filled === 0 ? "never-measured"
+                                  : filled === total ? "captured" : "captured";
+
+             Both arms of the second conditional return the same value. So every populated field in
+             claim-fields.md prints "captured" whatever its coverage: rx_number 2,546 of 2,546,
+             evoucher_cents 2,314, dir_fee_cents 5, awp_cents 6, contract_id 3, daw 5. One word from
+             0.1% to 100%. The zero branch is discarded too — it computes "never-measured" and
+             line 117 prints the literal "**never populated**" instead.
+SHOULD BE    Your §5: "Four states, never one word." And the register's own header: "A field the feed
+             never fills is a fact the site cannot use — and one it fills but nothing reads is a fact
+             being thrown away." A field on 0.1% of rows is not in the state of one on all of them.
+DIFFERENCE   Yes, and it is a one-line defect rather than a design question — a conditional whose two
+             arms are identical cannot have been the intent.
+```
+
+**Why it is worth your time.** The two facts the column cannot separate are the ones that matter:
+`daw` at 5 is correct and expected (only set where a prescriber gave an instruction); `dir_fee_cents`
+at 5 is *expected, not yet arrived* (DIR lands months later, per claim); `contract_id` at 3 is a
+coverage figure worth watching. Three truths, one word — in the register the constitution leans on
+hardest. Fairly: the counts are printed beside the word, so nothing is hidden; what is lost is the
+column that was supposed to mean the reader does not have to look.
+
+**The mechanism already exists one register up.** `DECIDED` (`:39`) is consulted for expenses at
+`:90` and never for claim fields — and it already holds the right answer for this very field on the
+other side of the books: `"expense:DIR fees and price concessions": { state: "not-captured", note:
+"arrives months later, retroactively per claim, entered by hand" }`. **What the partial state should
+be called is yours to choose**; which fields are legitimately sparse is a judgement about dispensing,
+not about code.
+
+**Two things I suspected and proved wrong before writing, so nobody re-derives them:** `dir_fee_cents`
+is read by no accounting module, but `profit-and-loss.ts:582-587` already pushes the right sentence to
+`missing`, so that FOUNDATIONS item is answered on the screen — no finding. And `claim-fields.md` is
+not missing any of the 51 columns; my first reading was a truncated `head` — no finding.
+
 ### From B — 12 September: partial fills — the site counts two, and the field that would say otherwise is not captured
 
 A fifth item off your "still to be checked" list. Full write-up:
@@ -83,6 +125,7 @@ not by when I wrote it.** Everything is in `docs/audits/` in full.
 | 18 | **open, not live** | A paid row with no NDC falls out of both of `staleAgainstDispensing`'s answers — `keep` is not dead, four tests read it | money |
 | 19 | *question* | Of 31 unmatched `mtf` payments, how many are **not** before the feed? Your comment says 24 of 24 were | money |
 | 20 | *question* | `plan`'s last received date is 2026-08-31 — has a real September 835 arrived yet? | money |
+| 0 | **open** | `registers.ts:115`'s state ternary returns `"captured"` on both arms, so `claim-fields.md` gives one word to everything from 0.1% to 100% coverage | register |
 | 21 | **not-captured** | Partial fills: `fillKey` includes the service date, so a partial and its completion are two fills and two scripts — and dispensing status is not captured, so the site cannot tell such a pair from any other | money |
 | — | **RESOLVED** | The appeal scripts' own pack divisor — closed by your `pack-size.ts`, verified by running it | — |
 | — | **RESOLVED** | CI never ran `db:migrate`, so 4 tests failed on every runner since `df666bd` — fixed in `8d7c9db` | — |
