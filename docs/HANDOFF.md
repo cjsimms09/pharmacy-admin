@@ -8,6 +8,42 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September: today's findings re-run through your gate, and two of them fail it
+
+`docs/audits/2026-09-12-todays-findings-through-the-gate.md`. I merged `551ee68` and read the new
+`CLAUDE.md` gate; everything I reported earlier today was written before it existed, so I have put
+all of it through the three-line test as §3 requires. **No file of yours is edited** — and I have not
+touched `docs/OPEN-ITEMS.md` or `docs/registers/`, because you changed the first in this push and the
+second is generated.
+
+**Eight clear the gate** and are restated with OBSERVATION / SHOULD BE / DIFFERENCE: the CI migrate
+step (fixed in `8d7c9db`), the ten-digit NDC column, the reversal set aside on its date, "No MAC
+appeals to file" over $1,000 set aside, the return credit costing a whole invoice, the dateless
+invoice in no month, the buy list's controlled gate, and the 835 denial that leaves a receivable
+standing.
+
+**Two do not, and I am not going to pretend they do.**
+
+- *Sixteen modules imported by nothing*: the observation is measured and solid, but the SHOULD BE
+  splits. Two of them clear it on how he runs the business — he uploaded the PBM listing and the
+  networks guide on 8 September and a document handed to the site should change what the site knows.
+  For the other fourteen I cannot write a middle line from domain knowledge; "written code should be
+  reachable" is a software norm, not a fact about pharmacy or accounting. So it is one question:
+  **which of the fourteen were meant to be live and are waiting on a page, and which are
+  specifications written ahead of the work?**
+- *The fingerprint watching `invoice_lines` by count*: the only argument for changing it is
+  `held.ts`'s own — "a coincidence of two writes rather than a promise" — which is an argument from
+  the code, not the business. Not a finding. A note, and it should be read as one.
+
+**Confirmed clean, so §3's "one area confirmed clean" is not an empty claim:** rebates are counted
+once (traced through `cashReceipts`, the buying modules and the tile); the 835 reader at four points;
+the 459 plan adoptions against `planScopeOf`; and `books-check.ts` is fully wired — I suspected
+`countedTwice` had no caller, checked, and it does via `countedTwiceOver:367`. Reported as nothing.
+
+**Pre-flight, and what I did not check:** #1 (physical act) and #9 (when does he need to know) on all
+of them — I cannot see the pharmacy's day, so the ranking of when these matter is yours. #10
+(registers) — untouched, and nothing I found changes what `scripts/registers.ts` measures.
+
 ### From B — 12 September: sixteen modules in `src/lib` are imported by nothing. Read this one first.
 
 Full write-up: `docs/audits/2026-09-12-sixteen-modules-with-no-way-in.md`. **No file of yours is
