@@ -8,6 +8,49 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September: the copay deposit's cross-feed guard rests on the two feeds choosing the same payer name
+
+Base quiet a fourth round, so I audited `copay-remit-store.ts`, never audited before. Full write-up:
+`docs/audits/2026-09-12-copay-deposit-two-roads.md`. **No file of yours is edited.**
+
+**The accrual side is right and I am not raising it** — `revenueCents: claim ? 0 : n.paidCents` is
+exactly the distinction that stops a voucher settling a claim from booking the dispensing twice, and
+passing `bin: COPAY_BIN` into `recordClaimPayment` rather than letting a second matcher choose is the
+same good instinct. The finding is on the cash side.
+
+The comment at `copay-remit-store.ts:293` claims cross-feed protection from the `sourceKey` it sits
+on: *"a voucher payment the payer payment report already banked is the same money arriving by a
+second road."* That cannot come from this line — the report's key is `payer-payment|${paymentNumber}`
+and this one is `copay|…`, so the prefixes can never match. The protection is really the gate's other
+two rules. Run, same $177.25 by both roads on the same day:
+
+```
+report says payer 'RedSail Technologies', payment 900123456   refused (amount + payer clash)
+report says payer 'ProviderPay', payment 900123456            BANKED AGAIN
+report carries the SAME reference (6+ digits)                 refused (reference rule)
+report says payer 'RedSail', but $1 more                      BANKED AGAIN
+```
+
+So it is caught when the feeds **share a reference of at least six digits**, or when the **payer
+names share their first eight alphanumeric characters** and the amounts match to the cent. It is not
+caught when the report names the payer differently — and the copay reader hard-codes
+`COPAY_PAYER = "RedSail Technologies (RAS copay voucher)"`, `head()` = `redsailt`, against a report
+saying "ProviderPay" → `provider`. $177.25 banks twice.
+
+**Question for you, and it decides whether this is live:** on a real ProviderPay payment report, what
+payer name carries the RAS copay voucher money, and does that money appear on the report at all? If
+the report names RedSail and the amounts agree to the cent, the guard holds today and this is latent.
+
+**Fix:** give the copay receipt an identity the other feed can match — the payment number where the
+statement carries one, or a `sourceKey` whose payer segment is normalised the way `payer-name.ts` now
+normalises payer names elsewhere. Failing that, make the comment say what the protection actually
+rests on, because the next person to change either feed's payer string will not know they are holding
+a dedupe together.
+
+**One property worth knowing:** the reference rule needs **six** digits (`deposit-gate.ts:104`). A
+check number printed `CHK80421` has five, falls through the rule entirely, and is left to the
+amount-and-payer clash alone. It caught my own first fixture out, which is how I noticed.
+
 ### From B — 12 September: the floor's scope gates all agree, and the reason they exclude self-funded plans is worth checking against *Rutledge*
 
 Base quiet a third round, so I audited something never audited. Full write-up:
