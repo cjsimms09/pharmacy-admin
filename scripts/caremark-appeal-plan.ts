@@ -30,13 +30,6 @@ const FEE_CENTS = 1050;
  */
 const TODAY = new Date().toISOString().slice(0, 10);
 
-function packUnits(desc: string | null): number | null {
-  if (!desc) return null;
-  const m = /^\s*([\d.]+)\s+[A-Z]/i.exec(desc);
-  const n = m ? Number(m[1]) : NaN;
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-
 const money = (c: number) => "$" + (c / 100).toFixed(2);
 const us = (iso: string) => iso.slice(5, 7) + "/" + iso.slice(8, 10) + "/" + iso.slice(0, 4);
 const shortUs = (iso: string) => iso.slice(5, 7) + "/" + iso.slice(8, 10) + "/" + iso.slice(2, 4);
@@ -58,6 +51,7 @@ async function main() {
    * paid above the national average asks Caremark to beat it on a drug bought above it, which is a
    * buying gap and comes back declined. `judge` flags those `aboveNadac` and they are left out here.
    */
+  const { packForClaim } = await import("../src/lib/pack-size");
   const { macAppealWorklist } = await import("../src/lib/mac-appeal-store");
   const worklist = await macAppealWorklist();
   const batch = worklist.batches.find((b) => /caremark/i.test(b.pbmName));
@@ -74,6 +68,7 @@ async function main() {
     SELECT c.id, c.rx_number, c.date_filled, c.ndc11, c.item_name, c.bin, c.pcn,
            c.quantity_thousandths, c.remit_cents, c.copay_cents, c.acquisition_cents,
            (SELECT dd.package_description FROM drug_directory dd WHERE dd.ndc11 = c.ndc11 LIMIT 1) AS pkg,
+           (SELECT dd.form FROM drug_directory dd WHERE dd.ndc11 = c.ndc11 LIMIT 1) AS form,
            (SELECT np.unit_micros FROM nadac_prices np
              WHERE np.ndc11 = c.ndc11 AND np.effective_on <= c.date_filled
              ORDER BY np.effective_on DESC LIMIT 1) AS nadac_micros,
@@ -108,8 +103,21 @@ async function main() {
     })).rows[0] as any;
     if (!inv) continue;
 
-    const units = packUnits(x.pkg);
-    if (units === null) continue;
+    /*
+     * How many dispensing units are in the package, from the one function that knows.
+     *
+     * This read `/^\s*([\d.]+)\s+[A-Z]/` off the package description, which takes the outermost
+     * count — a number of cartons or syringes about as often as a number of anything dispensed. On
+     * Wegovy that is 4 against a true 2 mL; on the estradiol cream it is 1 against 42.5 g. Both
+     * then failed the 2% agreement check below, so the drugs with the worst reading were the drugs
+     * that never got appealed — the fault hid itself.
+     *
+     * `packForClaim` also refuses where the claim's quantity cannot be shown to be in the pack's
+     * unit at all, and a refusal here is exactly right: nothing unproven should reach a PBM form.
+     */
+    const read = packForClaim({ packageDescription: x.pkg, form: x.form }, Number(x.quantity_thousandths));
+    if (!read.ok) continue;
+    const units = read.pack.units;
 
     /* The two sources must agree, or the figure going to a PBM is not trustworthy. */
     const invPerUnit = Number(inv.unit_cost_cents) / units;
@@ -136,7 +144,9 @@ async function main() {
     const comments =
       `Generic. NADAC on ${shortUs(x.date_filled)} was $${(nadacPerUnit / 100).toFixed(5)}/unit, ${money(nadacTotal)} for ${qty}. ` +
       `Paid ${money(received)} ($${(received / 100 / qty).toFixed(4)}/unit). ` +
-      `Acquisition ${money(Number(inv.unit_cost_cents))} per ${units}ct, ${inv.supplier} inv ${inv.invoice_number} dtd ${shortUs(inv.invoice_date)}. ` +
+      // "ct" only where the pack is counted. A 2 mL Wegovy carton is not "2ct" and a PBM reviewer
+      // reading that would be right to reject it.
+      `Acquisition ${money(Number(inv.unit_cost_cents))} per ${units}${read.pack.unit === "EA" ? "ct" : " " + read.pack.unit}, ${inv.supplier} inv ${inv.invoice_number} dtd ${shortUs(inv.invoice_date)}. ` +
       `${money(Math.abs(nadacTotal - received))} ${received < nadacTotal ? "below" : "above"} NADAC, ${money(cost - received)} below cost. ${reason} requested.`;
 
     plan.push({

@@ -13,13 +13,6 @@ import { join } from "node:path";
 
 const FEE_CENTS = 1050;
 
-function packUnits(desc: string | null): number | null {
-  if (!desc) return null;
-  const m = /^\s*([\d.]+)\s+[A-Z]/i.exec(desc);
-  const n = m ? Number(m[1]) : NaN;
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-
 async function main() {
   const outDir = process.argv[2];
   if (!outDir) throw new Error("give an output directory");
@@ -27,6 +20,7 @@ async function main() {
 
   const { db } = await import("../src/db");
   const { buildEvidence } = await import("../src/lib/mac-appeal-evidence");
+  const { packForClaim } = await import("../src/lib/pack-size");
   const { textPdf } = await import("../src/lib/pdf");
   const { getSettings } = await import("../src/lib/settings");
   const s = await getSettings();
@@ -34,7 +28,8 @@ async function main() {
   const appeals = await db.$client.execute(
     `SELECT a.id, a.rx_number, a.date_filled, a.ndc11, a.pbm_name, a.packet_json,
             c.item_name, c.quantity_thousandths, c.remit_cents, c.copay_cents,
-            (SELECT dd.package_description FROM drug_directory dd WHERE dd.ndc11 = a.ndc11 LIMIT 1) AS pkg
+            (SELECT dd.package_description FROM drug_directory dd WHERE dd.ndc11 = a.ndc11 LIMIT 1) AS pkg,
+            (SELECT dd.form FROM drug_directory dd WHERE dd.ndc11 = a.ndc11 LIMIT 1) AS form
        FROM appeals a JOIN claims c ON c.id = a.claim_id
       WHERE a.kind = 'mac_appeal' ORDER BY a.rx_number`,
   );
@@ -50,13 +45,19 @@ async function main() {
     if (!inv.rows.length) { console.log(`  ${a.rx_number}: no invoice line, skipped`); continue; }
     const il = inv.rows[0] as any;
 
-    const units = packUnits(a.pkg);
-    if (units === null) { console.log(`  ${a.rx_number}: no pack size, skipped`); continue; }
+    /*
+     * The pack and its unit together, from the one function that knows. See `pack-size.ts`.
+     *
+     * This read the outermost count off the description and labelled it from whether the same text
+     * contained "ML" anywhere — so a carton of 25 vials of 10 mL was printed as "25 Milliliter" and
+     * the division beside it was shown to a PBM as proof. Skipped rather than guessed now, with the
+     * reason printed, because a divisor nobody can stand behind must not reach this document.
+     */
+    const read = packForClaim({ packageDescription: a.pkg, form: a.form }, Number(a.quantity_thousandths));
+    if (!read.ok) { console.log(`  ${a.rx_number}: no pack size, skipped — ${read.why}`); continue; }
 
     const qty = Number(a.quantity_thousandths) / 1000;
     const ref = (() => { try { return JSON.parse(a.packet_json)?.confirmation ?? null; } catch { return null; } })();
-    /* Millilitres for a solution, each for a tablet. Taken from the FDA description's own noun. */
-    const unitLabel = /\bML\b|MILLILITER/i.test(String(a.pkg)) ? "Milliliter" : "Each";
 
     const built = buildEvidence({
       pharmacy: {
@@ -75,7 +76,6 @@ async function main() {
         ndc11: a.ndc11,
         drugName: a.item_name,
         quantity: qty,
-        unitLabel,
         planPaidCents: Number(a.remit_cents),
         copayCents: Number(a.copay_cents ?? 0),
       },
@@ -85,9 +85,8 @@ async function main() {
         date: il.invoice_date,
         description: il.description,
         packPriceCents: Number(il.unit_cost_cents),
-        packUnits: units,
-        packSource: "FDA NDC directory",
       },
+      pack: read.pack,
       dispensingFeeCents: FEE_CENTS,
     });
 
