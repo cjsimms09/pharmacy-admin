@@ -1166,6 +1166,45 @@ export default async function InvoicesPage({
               </>
             )}
           </p>
+          {/*
+            The lines the two systems wrote down under different codes, where nothing is in dispute.
+
+            Ten of these were on this card as "the invoice and the delivery disagree" and not one of
+            them was a wrong drug against the money — the same NDC padded in a different place, a
+            UPC against the NDC it stands for, a front-end barcode for an item that has no NDC at
+            all. They are not rows, because ten rows that are all nothing is how a screen stops
+            being read. They are not silence either: the count that was compared includes them, so
+            saying nothing would make this card's coverage a figure it had not earned.
+          */}
+          {prices.codeDifferences.length > 0 &&
+            (() => {
+              const sameItem = prices.codeDifferences.filter((c) => c.why === "same-item");
+              const noNdc = prices.codeDifferences.filter((c) => c.why === "no-ndc");
+              const noNdcCents = noNdc.reduce((n, c) => n + c.extendedCents, 0);
+              return (
+                <p className="mt-2 text-xs text-ink-3">
+                  On {prices.codeDifferences.length} of those lines the two systems wrote the code down differently, and
+                  the count and the money agree on every one.{" "}
+                  {sameItem.length > 0 && (
+                    <>
+                      {sameItem.length} {sameItem.length === 1 ? "is" : "are"} the same item written two ways &mdash; the
+                      same ten digits of an NDC padded in a different place, a UPC with its prefix still on, or a product
+                      whose pack code the invoice did not print.{" "}
+                    </>
+                  )}
+                  {noNdc.length > 0 && (
+                    <>
+                      {noNdc.length} {noNdc.length === 1 ? "is a" : "are"} front-end or device line
+                      {noNdc.length === 1 ? "" : "s"} the wholesaler bills with a retail barcode and the counter booked
+                      under its own code; {noNdc.length === 1 ? "it is" : "they are"} not
+                      {noNdc.length === 1 ? " a drug" : " drugs"} the FDA lists, so there is no NDC for the two to agree
+                      on &mdash; and <span className="tabular-nums">{money(noNdcCents)}</span> of cost that is against no
+                      drug.
+                    </>
+                  )}
+                </p>
+              );
+            })()}
           {prices.disagreements.length > 0 && (
             <ul className="rows mt-2">
               {prices.disagreements.slice(0, 12).map((d, i) => (

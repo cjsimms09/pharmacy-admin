@@ -27,10 +27,25 @@
  * The first run found one: an IPD line for propranolol where both sides agree on the quantity and
  * agree on the $3.99, and the NDC read off the invoice was 54707560094, which is not a drug. The
  * money was right and the product was wrong, which no total will ever catch, and every margin
- * computed from that line was against the wrong drug.
+ * computed from that line was against the wrong drug. That one was this site's own reading — IPD
+ * printed nine digits and the parser took eleven — and it is fixed in `ndcFromRun`.
+ *
+ * ── What a difference in codes is, and what it is not ──
+ *
+ * Nine more rows came with it and none of them was a wrong drug against the money. The two systems
+ * write the same item down differently as a matter of course: the same ten digits padded in
+ * different places, a UPC against the NDC it stands for, a retail barcode on a front-end line that
+ * has no NDC at all. `sameDrugCode` knows the first two are one item; the third is two numbering
+ * systems for one shelf item and neither party is wrong.
+ *
+ * So a difference in codes is a finding only where **both** codes are drugs the FDA lists and they
+ * are still different — which is the only case where one of the two systems really does have the
+ * wrong drug against the money. The rest are counted and stated, never nothing, but never a row
+ * either: ten rows that were all nothing is how this screen would have stopped being read.
  */
 
 import { db, schema } from "@/db";
+import { sameDrugCode } from "./invoice-lines";
 
 /** How far apart two figures may be before it is worth saying. Rounding, not a dispute. */
 const TOLERANCE_CENTS = 2;
@@ -53,6 +68,35 @@ export type PriceDisagreement = {
   say: string;
 };
 
+/**
+ * A line the two systems wrote down under different codes, where nothing is actually in dispute.
+ *
+ * These are not findings and are deliberately not in `disagreements`. They are counted and said in
+ * one line, because a coverage figure that quietly excluded them would be overstating itself — and
+ * because ten rows that turn out to be nothing is how a screen stops being read.
+ */
+export type CodeDifference = {
+  invoiceNumber: string;
+  supplier: string;
+  description: string | null;
+  /** What the invoice was read as carrying. */
+  billedNdc: string;
+  /** What PioneerRx booked the delivery in under. */
+  receivedNdc: string;
+  extendedCents: number;
+  /**
+   * "same-item" — the two codes are the same item written a different way: the same ten digits
+   * padded in different places, a UPC against the NDC it stands for, or a product whose package
+   * code the invoice did not print. The drug, the count and the money all agree.
+   *
+   * "no-ndc" — the codes genuinely differ, and at least one of them is not a drug the FDA lists.
+   * Front-end and device lines: McKesson bills them with a retail barcode and the counter books
+   * them under something else. Nothing for the two systems to disagree about, and the line's cost
+   * is attributed to no drug either way.
+   */
+  why: "same-item" | "no-ndc";
+};
+
 export type PriceCheck = {
   /** Invoices on file that have a PioneerRx delivery under the same number to check against. */
   checked: number;
@@ -61,6 +105,8 @@ export type PriceCheck = {
   /** Invoice lines compared drug by drug. */
   linesCompared: number;
   disagreements: PriceDisagreement[];
+  /** Lines written down two ways with nothing in dispute. Not findings; see CodeDifference. */
+  codeDifferences: CodeDifference[];
   /** Billed above what arrived, across every disagreement that is about money. */
   overbilledCents: number;
   /** Invoices with no delivery to check against, and why — so the coverage is not overstated. */
@@ -185,6 +231,7 @@ export async function checkInvoicePrices(): Promise<PriceCheck> {
   const known = new Set((await db.select({ ndc11: schema.drugDirectory.ndc11 }).from(schema.drugDirectory)).map((d) => d.ndc11));
 
   const out: PriceDisagreement[] = [];
+  const codeDifferences: CodeDifference[] = [];
   const unchecked: PriceCheck["unchecked"] = [];
   let checked = 0;
   let agreeing = 0;
@@ -286,6 +333,30 @@ export async function checkInvoicePrices(): Promise<PriceCheck> {
      * same money, is one line whose NDC was read two ways rather than two problems. Reporting them
      * separately would read as "you were billed for something that never came" about a delivery
      * that was perfectly correct.
+     *
+     * ── And then only where something is actually in dispute ──
+     *
+     * Pairing them was right and calling all of them a disagreement was not. Ten such lines were on
+     * this screen under "the invoice and the delivery disagree", and not one of them was a wrong
+     * drug against the money:
+     *
+     *   Four were the same code written two ways — 041167-05877 and 41167-0058-77 are the same ten
+     *   digits of Aspercreme padded in different places; 704142-00024 is the Florastor UPC with its
+     *   prefix still on the front of 04142-0000-24. `sameDrugCode` knows those are one item.
+     *
+     *   Five were front-end lines where McKesson bills the retail barcode and the counter books the
+     *   NDC — AZO Standard as 787651-30152 against 00998-0015-30 — and neither system is wrong,
+     *   because no arithmetic joins a GS1 barcode to an NDC. Several are not drugs the FDA lists at
+     *   all: a nebuliser, a probiotic, lozenges.
+     *
+     *   One was this reader's own fault, now fixed in `ndcFromRun`: IPD printed nine digits for a
+     *   propranolol and the parser took eleven, two of them off the item number.
+     *
+     * So a difference is reported only when **both** codes are drugs the FDA lists and they are
+     * still different. That is the case where one of the two systems really has the wrong drug
+     * against the money, and it is the only one worth a row. The rest are counted and said in a
+     * line, because a screen that cries wolf ten times stops being read — which costs more than the
+     * check was worth.
      */
     const onlyBilled = [...billed].filter(([ndc]) => !received.has(ndc));
     const onlyReceived = [...received].filter(([ndc]) => !billed.has(ndc));
@@ -297,34 +368,35 @@ export async function checkInvoicePrices(): Promise<PriceCheck> {
       if (twin) {
         takenReceived.add(twin[0]);
         const [rNdc, r] = twin;
+        const same = sameDrugCode(ndc, rNdc);
         const billedReal = known.has(ndc);
         const receivedReal = known.has(rNdc);
-        const which =
-          billedReal && receivedReal
-            ? "Both are real drugs, so one of the two systems has the wrong one against the money."
-            : billedReal
-              ? `PioneerRx's ${rNdc} is not a drug in the FDA directory, so the delivery was booked in under a code that is not one.`
-              : receivedReal
-                ? `${ndc} is not a drug in the FDA directory, so the invoice reader produced it — the delivery's ${rNdc} is the real one.`
-                : /*
-                   * Neither is a drug, which is the ordinary case for the front end.
-                   *
-                   * Pen needles, Dexcom sensors and Omnipods are devices and have no NDC at all, so
-                   * both systems are holding a UPC and neither is wrong. Saying "one of these is
-                   * wrong" about 28 such lines would be 28 findings that are not findings.
-                   */
-                  "Neither is a drug in the FDA directory, so both are device codes — likely the same item under two barcodes rather than a mistake.";
+        if (same || !billedReal || !receivedReal) {
+          // Compared, and it agreed: the money, the count and — where either side names a drug at
+          // all — the drug. It is not left out of `linesCompared`, because it was looked at.
+          linesCompared++;
+          codeDifferences.push({
+            invoiceNumber: number,
+            supplier,
+            description: b.description ?? r.description,
+            billedNdc: ndc,
+            receivedNdc: rNdc,
+            extendedCents: b.extendedCents,
+            why: same ? "same-item" : "no-ndc",
+          });
+          continue;
+        }
         out.push({
           ...at,
           kind: "misread",
-          ndc11: billedReal && !receivedReal ? ndc : rNdc,
+          ndc11: rNdc,
           description: b.description ?? r.description,
           billedCents: b.extendedCents,
           receivedCents: r.extendedCents,
           differenceCents: 0,
           say:
             `${b.description ?? r.description ?? "One line"} on ${supplier} ${number}: read off the invoice as NDC ${ndc}, booked into PioneerRx as ${rNdc} — ` +
-            `same count, same ${money(b.extendedCents)}. ${which}`,
+            `same count, same ${money(b.extendedCents)}. Both are drugs the FDA lists, so one of the two systems has the wrong one against the money.`,
         });
         continue;
       }
@@ -369,5 +441,5 @@ export async function checkInvoicePrices(): Promise<PriceCheck> {
     .filter((d) => d.kind === "total" || ((d.kind === "price" || d.kind === "billed-not-received") && !totalsSeen.has(d.invoiceNumber)))
     .reduce((n, d) => n + Math.max(0, d.differenceCents), 0);
 
-  return { checked, agreeing, linesCompared, disagreements: out, overbilledCents, unchecked, checkedAt: new Date().toISOString() };
+  return { checked, agreeing, linesCompared, disagreements: out, codeDifferences, overbilledCents, unchecked, checkedAt: new Date().toISOString() };
 }

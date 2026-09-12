@@ -196,8 +196,10 @@ const IPC_CREDIT = new RegExp(
  *
  * That is item 76133, NDC 70165-0020-30, two shipped of nought back-ordered, EACH, $574.70 each,
  * no discount, $1,149.40. The per cent sign floats: it prints on some lines and not others, so it
- * is optional rather than a field. The item number's length is not fixed, so the NDC is taken as
- * the last eleven digits of the run rather than the item as the first five.
+ * is optional rather than a field. The item number's length is not fixed, so the NDC is read from
+ * the end of the run rather than the item from its front — and how many digits it took is asked
+ * about rather than assumed, because on one line of this very invoice the NDC column printed nine.
+ * See `ndcFromRun`.
  */
 const IPD = new RegExp(
   String.raw`^(\d{12,})` + // item number and NDC, run together
@@ -246,9 +248,10 @@ const IPD_NAMED = new RegExp(
  * separators on the whole row are the two spaces before the money. So the row cannot be split by
  * position and is read from its two fixed ends instead.
  *
- * The NDC is the last eleven digits of the leading run, the same reasoning as IPD above: the item
- * number's length is not fixed and the NDC's is. Here that gives 72888-0149-38, which is the
- * labeller's real code — taking the first eleven would have given a number belonging to nobody.
+ * The NDC is read from the end of the leading run, the same reasoning as IPD above: the item
+ * number's length is not fixed. Here that gives 72888-0149-38, which is the labeller's real code —
+ * taking the first eleven would have given a number belonging to nobody. Nor is the NDC's own
+ * length fixed on these layouts, so `ndcFromRun` asks the FDA directory how many digits it took.
  *
  * The quantity is not read from the page at all. SIZE, ORDER and QTY run together into one digit
  * run ("3011" is a pack of 30, one ordered, one shipped) with nothing to say where each ends, and
@@ -335,6 +338,117 @@ export type KnownNdc = (ndc11: string) => boolean;
  * thousand, "THROAT SPR SUG FR CHRY MMP6OZ@" to a 177 mL cherry throat spray. Before this they were
  * eleven digits that are not a drug, carrying $1,040.83 of purchases against nothing.
  */
+/**
+ * Every package the FDA lists under one labeller-and-product code. Supplied by the caller, for the
+ * same reason `KnownNdc` is: this file reads paper.
+ */
+export type PackagesOf = (productNdc9: string) => string[];
+
+/**
+ * The NDC off a run of digits that also carries the supplier's own item number, with no separator.
+ *
+ * IPD and ParMed print the item number and the NDC as one unbroken run, and this file has always
+ * taken the NDC as the last eleven digits because "the item number's length is not fixed, so the
+ * NDC is taken as the last eleven digits of the run rather than the item as the first five". That
+ * is the right way round, and it was still wrong, because it assumed the other half: that eleven
+ * digits were always printed.
+ *
+ * IPD's invoice 1008931 prints
+ *
+ *   91654707560094 1 0EACH 3.99  0 % 3.99
+ *
+ * and the NDC column on that line holds **nine** digits — 70756-0094, the propranolol, with no
+ * package code. The report clipped it, the same way it printed "PROPRANOLO" for propranolol and
+ * "BUME" for bumetanide on the lines around it. Taking eleven digits took two off the end of the
+ * item number instead, and produced 54707560094: not a drug, not any code, and $3.99 of purchases
+ * against nothing. The item number came out as "916" rather than IPD's own 91654, so the one field
+ * that could have been used to reorder the drug was wrong too.
+ *
+ * So the length of the NDC column is no longer assumed. It is asked about, exactly as `ndcFromUpc`
+ * asks which padding is real:
+ *
+ *   - eleven digits that are a drug the FDA lists is the answer, and the common case;
+ *   - so is eleven digits whose labeller and product the FDA lists, because a package code the
+ *     directory has not caught up with is still that manufacturer's code and not a misread;
+ *   - otherwise, where the last nine digits are a product the FDA does list, the column was short.
+ *     One package listed under that product settles it. Several, and the package code is a fact the
+ *     document does not carry — so the nine digits are kept as nine, which no reader can mistake
+ *     for a dispensing NDC, rather than eleven digits with a pack size invented in them. A pack
+ *     size is what every cost-per-unit divides by.
+ *
+ * `printed` is how many digits the column took, so the caller can take the item number off the
+ * front of what is left instead of guessing at that too.
+ */
+export function ndcFromRun(run: string, known?: KnownNdc, packagesOf?: PackagesOf): { code: string; printed: number } {
+  const last11 = run.slice(-11);
+  /* With nobody to ask, the old reading stands rather than a guess replacing it. */
+  if (!known || !packagesOf || run.length < 12) return { code: last11, printed: 11 };
+  if (known(last11)) return { code: last11, printed: 11 };
+  if (packagesOf(last11.slice(0, 9)).length > 0) return { code: last11, printed: 11 };
+  const nine = run.slice(-9);
+  const packages = packagesOf(nine);
+  if (packages.length === 1) return { code: packages[0], printed: 9 };
+  if (packages.length > 1) return { code: nine, printed: 9 };
+  return { code: last11, printed: 11 };
+}
+
+/**
+ * Whether two codes name the same item, where one of them was written a different way.
+ *
+ * The pharmacy holds two independent codes for every delivery — the wholesaler's invoice and
+ * whoever booked it in at the counter — and comparing them is the only check on what the money was
+ * spent on. It is worth nothing if a difference in how a code was *written* reads as a difference
+ * in what was *bought*.
+ *
+ * Three writings of one code turn up on real documents:
+ *
+ *   **The same ten digits padded in different places.** The ten-digit NDC is 4-4-2, 5-3-2 or 5-4-1
+ *   and the digits cannot say which, so padding it back to eleven has three answers. McKesson's
+ *   Aspercreme UPC 041167-05877 carries 4116705877; the FDA lists it as 41167-0587-07 and this
+ *   site's reader resolves it there, while PioneerRx booked 41167-0058-77. Both are the same ten
+ *   digits and the same tube of cream.
+ *
+ *   **A UPC against the NDC it stands for.** A drug UPC is a prefix digit and then the ten-digit
+ *   NDC. Where the FDA lists no drug for any of the three paddings — a supplement, a nebuliser —
+ *   `ndcFromUpc` keeps the digits it was given, which is correct and leaves the invoice holding a
+ *   prefix the delivery does not: 704142-00024 for the Florastor the counter booked as
+ *   04142-0000-24, 885304-00178 for the Pulmoneb it booked as 85304-0001-78.
+ *
+ *   **A product with its package code missing.** IPD printed nine digits for the propranolol on
+ *   1008931; the counter booked all eleven. See `ndcFromRun`.
+ *
+ * Nothing is loosened beyond that. Two packages of one drug are **not** the same item — the
+ * hundred-count and the thousand-count of the same tablet are the thing a cost per tablet is
+ * divided by — so a nine-digit product matches an eleven-digit code only when the document itself
+ * printed nine. On the front-end lines this leaves alone, the digits genuinely differ: McKesson
+ * bills AZO Standard as 787651-30152, its retail barcode, and the counter booked 00998-0015-30,
+ * its NDC, and no arithmetic gets from one to the other.
+ */
+export function sameDrugCode(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  // A product code against a package of it, and only in that direction: the short one is the one
+  // the document printed short.
+  if (a.length === 9 && b.length === 11) return b.startsWith(a);
+  if (b.length === 9 && a.length === 11) return a.startsWith(b);
+  if (a.length !== 11 || b.length !== 11) return false;
+  /** The ten-digit forms an eleven-digit NDC can have come from: 4-4-2, 5-3-2, 5-4-1. */
+  const ten = (c: string): Set<string> => {
+    const out = new Set<string>();
+    if (c[0] === "0") out.add(c.slice(1));
+    if (c[5] === "0") out.add(c.slice(0, 5) + c.slice(6));
+    if (c[9] === "0") out.add(c.slice(0, 9) + c.slice(10));
+    return out;
+  };
+  /** A drug UPC with its prefix digit still on the front, as `ndcFromUpc` leaves one it cannot place. */
+  const withoutUpcPrefix = (c: string) => c.slice(1);
+  const A = ten(a);
+  const B = ten(b);
+  for (const x of A) if (B.has(x) || x === withoutUpcPrefix(b)) return true;
+  for (const x of B) if (x === withoutUpcPrefix(a)) return true;
+  return false;
+}
+
 export function ndcFromUpc(raw: string, known?: KnownNdc): string | null {
   const digits = raw.replace(/\D/g, "");
   if (digits.length !== 11) return ndc11(raw);
@@ -401,7 +515,12 @@ export function lineAddsUp(quantity: number, unitCents: number, extendedCents: n
  * `printedTotalCents` is the figure read off the front of the invoice, passed in by the caller
  * that already read it. Given one, the result says whether the lines add up to it.
  */
-export function parseInvoiceLines(text: string, printedTotalCents: number | null = null, known?: KnownNdc): LineParse {
+export function parseInvoiceLines(
+  text: string,
+  printedTotalCents: number | null = null,
+  known?: KnownNdc,
+  packagesOf?: PackagesOf,
+): LineParse {
   const out: InvoiceLineRead[] = [];
   const unreadable: string[] = [];
   let format: LineParse["format"] = null;
@@ -450,7 +569,10 @@ export function parseInvoiceLines(text: string, printedTotalCents: number | null
       // Where IPD printed no extension, the line's own arithmetic supplies it and the section
       // subtotal is what proves it. See IPD_NAMED.
       const extendedCents = ext ? money(ext) : quantity * unitCostCents;
-      const key = ndc11(run.slice(-11));
+      // How many digits of the run the NDC column actually took, asked rather than assumed: on one
+      // line of IPD 1008931 it printed nine and taking eleven ate two digits of the item number.
+      const read = ndcFromRun(run, known, packagesOf);
+      const key = read.printed === 11 ? ndc11(read.code) : read.code;
       // The line's own arithmetic, as everywhere else here: a description that ran into the digits
       // would otherwise shift every field along it and the wrong cost would look entirely ordinary.
       if (!key || !lineAddsUp(quantity, unitCostCents, extendedCents)) {
@@ -469,7 +591,7 @@ export function parseInvoiceLines(text: string, printedTotalCents: number | null
       const line0: InvoiceLineRead = {
         ndc11: key,
         description: next ? next.replace(/\s{2,}/g, " ").slice(0, 120) : null,
-        itemNumber: run.slice(0, -11) || null,
+        itemNumber: run.slice(0, run.length - read.printed) || null,
         quantity,
         unitOfMeasure: uom,
         unitCostCents,
@@ -528,7 +650,9 @@ export function parseInvoiceLines(text: string, printedTotalCents: number | null
       const [, run, , uom, unit, ext] = par;
       const unitCostCents = money(unit);
       const extendedCents = money(ext);
-      const key = ndc11(run.slice(-11));
+      // The same run-of-digits problem as IPD above, so the same rule reads it. See ndcFromRun.
+      const read = ndcFromRun(run, known, packagesOf);
+      const key = read.printed === 11 ? ndc11(read.code) : read.code;
       /*
        * Only where the money divides exactly. The page gives no honest way to tell the shipped
        * quantity from the pack size beside it, so the arithmetic is the only source — and where

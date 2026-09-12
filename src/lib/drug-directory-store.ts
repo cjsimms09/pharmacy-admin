@@ -451,9 +451,11 @@ export async function packageSizes(): Promise<Map<string, string>> {
 }
 
 let heldKnown: { at: number; set: Set<string> } | null = null;
+let heldPackagesBy9: { at: number; by9: Map<string, string[]> } | null = null;
 
 export function forgetKnownNdcs(): void {
   heldKnown = null;
+  heldPackagesBy9 = null;
 }
 
 /**
@@ -474,4 +476,33 @@ export async function knownNdcs(): Promise<(ndc11: string) => boolean> {
   }
   const set = heldKnown.set;
   return (ndc11: string) => set.has(ndc11);
+}
+
+/**
+ * Every package the FDA lists under one labeller-and-product code.
+ *
+ * The second question the invoice reader cannot answer from the page. A wholesaler's own report
+ * sometimes clips the NDC column and prints the nine digits of the product without its package
+ * code — IPD did it to a propranolol line, and reading eleven digits where nine were printed took
+ * two off the item number beside it and produced a code belonging to nobody. Knowing what packages
+ * exist under a product is what lets the reader tell the two apart: one package listed settles the
+ * line, several means the document genuinely does not say which pack, and none means those nine
+ * digits were never a product code at all.
+ *
+ * Handed in as a function for the same reason as `knownNdcs`: `invoice-lines.ts` reads paper.
+ */
+export async function ndcPackages(): Promise<(productNdc9: string) => string[]> {
+  if (!heldPackagesBy9 || Date.now() - heldPackagesBy9.at >= MAX_AGE_MS) {
+    const rows = await db.query.drugDirectory.findMany({ columns: { ndc11: true } });
+    const by9 = new Map<string, string[]>();
+    for (const r of rows) {
+      const key = r.ndc11.slice(0, 9);
+      const at = by9.get(key);
+      if (at) at.push(r.ndc11);
+      else by9.set(key, [r.ndc11]);
+    }
+    heldPackagesBy9 = { at: Date.now(), by9 };
+  }
+  const by9 = heldPackagesBy9.by9;
+  return (productNdc9: string) => by9.get(productNdc9) ?? [];
 }
