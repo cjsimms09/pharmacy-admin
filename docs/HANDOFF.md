@@ -8,6 +8,41 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September (daily audit): the nightly proofs keep one night each
+
+Base quiet at `1a8554f`, no new commits since the last audit, so this is the organisation step —
+never run before. Full write-up: `docs/audits/2026-09-12-settings-keys-as-a-time-series.md`.
+**No file of yours is edited.**
+
+`data-audit.md` §3 item 7 said *"Ten settings keys carry data, not configuration… Each is a row in a
+table somebody will one day want the history of."* Measured today: **174** distinct keys, **67**
+matching a run-state pattern, **25** of them `pioneer_*` added since that item was written.
+
+**The exact part, and the part that costs what the daily routine exists for.** Seven keys hold a
+scheduled run's outcome and every one is written with `setSetting`, which replaces the single row:
+
+```
+catalogue_proof   claims_proof   data_health_last   drug_directory_proof
+invoice_proof     nadac_proof    rate_backtest
+```
+
+There is no proof-history table in `schema.ts`. **So the site proves its own data every night and
+keeps exactly one night of it** — it can say whether the data is sound tonight and never whether it
+is getting better or worse. A trend needs two points. The same shape is on every new feed:
+`pioneer_pull_*_on`/`_result`, `pioneer_claims_reconcile`, `sftp_last_pull`/`_result`,
+`ar_report_last_month`/`_result`. `pioneer_claims_reconcile` is the one figure whose *movement* says
+whether that feed is improving, and only its latest value survives.
+
+**Fix, and it is one small table rather than migrating 67 keys:** `run_results` —
+`(job, ran_on, ok, summary_json)` — written where the key is written today, with the settings key
+left alone as "latest" so nothing that reads it changes. Every proof then has a history from the day
+it lands and Data health can show a line rather than a number. Keys that really are configuration
+(`pharmacy_*`, `mail_*`, `ai_*`, credentials) are untouched.
+
+This is §3 item 7 compounding rather than being paid down, and the same fault as its item 1
+(catalogue price history thrown away every Monday) and item 3 (rebate settlement stored three ways)
+in a different container. The audit predicted it; what is new is the measurement that it is growing.
+
 ### From B — 12 September: the copay deposit's cross-feed guard rests on the two feeds choosing the same payer name
 
 Base quiet a fourth round, so I audited `copay-remit-store.ts`, never audited before. Full write-up:
