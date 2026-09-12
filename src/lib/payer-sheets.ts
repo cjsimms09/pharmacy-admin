@@ -62,14 +62,27 @@ export const LOB_CLASS: Record<LineOfBusiness, PlanClass | null> = {
   discount_card: "discount_card",
   copay_card: "copay_card",
   /*
-   * Commercial is not an answer, and this null is the most important value in the file.
+   * Commercial is half an answer, and the half it gives is worth keeping.
    *
-   * A commercial payer sheet establishes the payer and the line of business and stops exactly where
-   * the Kansas question begins. Mapping it to `commercial_fully_insured` would be a one-click ERISA
-   * determination made from a document that does not address ERISA — the precise failure `plans.ts`
-   * refuses, and the one that collapses a filing when somebody asks how it was established.
+   * This was null, on reasoning that is still right about what it was defending against: a
+   * commercial payer sheet establishes the payer and the line of business and stops exactly where
+   * the Kansas question begins, so mapping it to `commercial_fully_insured` would be a one-click
+   * ERISA determination made from a document that does not address ERISA — the precise failure
+   * `plans.ts` refuses, and the one that collapses a filing when somebody asks how it was
+   * established.
+   *
+   * What the null also did, unintentionally, was discard the half the sheet does establish. A payer
+   * sheet is the strongest source this file has, and these are the payer's own words: the sheets for
+   * Liviniti, SmithRx, RxSense and others state their commercial BIN and PCN outright. Throwing that
+   * away left those plans indistinguishable from plans nobody had ever looked at, which is part of
+   * how 396 plans came to sit at "not yet determined".
+   *
+   * `commercial_unknown_funding` holds the stated half without asserting the unstated one. It
+   * appears in no floor whitelist — not `planScopeOf`, not `SCOPE_OF` in floor-review.ts, not
+   * `needsBasis` — so adopting it cannot carry a claim into a Kansas filing. The funding question is
+   * untouched and still needs a Form 5500 or the plan document, exactly as this comment demanded.
    */
-  commercial: null,
+  commercial: "commercial_unknown_funding",
   /*
    * A federal employee plan, which looks like the easiest call here and is the hardest.
    *

@@ -74,6 +74,28 @@ export const CLASS_INFO: Record<PlanClass, { label: string; inScope: boolean; wh
       "arrives as a second claim on a fill that already has a payer. Nothing owes a floor, and it is not a payer to " +
       "be ranked — it covers whatever is put to it, which flatters the brand plan underneath it.",
   },
+  /*
+   * Commercial, funding not established — and therefore out of scope, which is the safe direction.
+   *
+   * "Out of scope" here means "not yet shown to be in scope", not "shown to be out of it". Some of
+   * these plans are fully insured and the floor does reach them; the register simply cannot say
+   * which yet. Defaulting the other way would put self-funded ERISA plans into a Kansas filing,
+   * and over-including one is what gets a whole schedule dismissed.
+   *
+   * What it does buy is everything that does not depend on funding: the plan is known to be
+   * commercial rather than Part D, so MAC appeals can route it, the payer can be ranked, and the
+   * 396 plans that were sitting at "not yet determined" stop reading as unexamined.
+   */
+  commercial_unknown_funding: {
+    label: "Commercial — funding not established",
+    inScope: false,
+    why:
+      "Known to be a commercial plan rather than Medicare, Medicaid or a card, which is what the BIN and PCN can " +
+      "establish. Whether the employer bought insurance from a state-regulated carrier or funds the plan itself " +
+      "under ERISA is a separate question, and only a Form 5500 or the plan document settles it. Until one does, " +
+      "this plan is left out of any Kansas floor filing — not because it is known to be preempted, but because it " +
+      "is not yet known not to be.",
+  },
   unknown: { label: "Not yet determined", inScope: false, why: "Nobody has established how this plan is funded. Investigate before treating it either way." },
 };
 

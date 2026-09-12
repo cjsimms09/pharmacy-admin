@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { parse835, payableOnly, x12Cents, x12Date, ndcFromServiceId, splitReference } from "../src/lib/x12-835";
+import { parse835, parse835Sets, payableOnly, x12Cents, x12Date, ndcFromServiceId, splitReference } from "../src/lib/x12-835";
 
 /**
  * Reading a remittance, which is where money the pharmacy has already banked is described.
@@ -203,5 +203,85 @@ describe("provider-level money and the file's own arithmetic", () => {
   test("a remittance with nothing to check does not claim to balance", () => {
     const ack = "ISA*00*          *00*          *ZZ*A              *ZZ*B              *260906*0230*^*00501*000000001*0*P*:~ST*999*0001~SE*2*0001~";
     assert.equal(parse835(ack).balance, null);
+  });
+});
+
+/**
+ * One file, several remittances.
+ *
+ * The owner, looking at the files ProviderPay hands over: "each 835 has the payor on it doesn't
+ * it.. at the top". It does — and a file can have more than one top. An X12 file is an envelope
+ * around one or more ST/SE transaction sets, and each 835 set is a complete remittance with its own
+ * payer at N1*PR, its own trace at TRN and its own total at BPR02.
+ *
+ * Read as a single remittance, a bundle of three comes out as one remittance from whichever payer
+ * was last, with all three payers' claims merged into it — and then fails its own balance check,
+ * because one payer's total is being set against everybody's claims. The practical result was the
+ * worst of both: not a wrong figure but no figure, because a remittance that does not balance posts
+ * nothing.
+ */
+describe("a file that holds more than one remittance", () => {
+  const ISA =
+    "ISA*00*          *00*          *ZZ*PROVIDERPAY    *ZZ*PHARM          *260911*0300*^*00501*000000001*0*P*:~" +
+    "GS*HP*PP*PHARM*20260911*0300*1*X*005010X221A1~";
+  const set = (n: string, payer: string, trace: string, total: string, claim: string) =>
+    `ST*835*000${n}~BPR*I*${total}*C*ACH*CCP*01*9*DA*1*2**01*9*DA*3*20260910~TRN*1*${trace}*4~` +
+    `N1*PR*${payer}*XV*ID${n}~N1*PE*WEST WICHITA FAMILY PHARMACY*XX*1~${claim}SE*9*000${n}~`;
+  const bundle =
+    ISA +
+    set("1", "CVS CAREMARK", "EFT-111", "150.00", "CLP*332359-1*1*200.00*150.00*10.00*MC*C1*01~") +
+    set("2", "OPTUMRX", "EFT-222", "75.50", "CLP*332360-0*1*100.00*75.50*5.00*MC*C2*01~") +
+    set("3", "PRIME THERAPEUTICS", "EFT-333", "40.25", "CLP*332361-2*1*60.00*40.25*0.00*MC*C3*01~") +
+    "GE*3*1~IEA*1*000000001~";
+
+  test("each remittance keeps its own payer, trace and total", () => {
+    const sets = parse835Sets(bundle);
+    assert.equal(sets.length, 3);
+    assert.deepEqual(
+      sets.map((r) => [r.payer, r.traceNumber, r.totalPaidCents]),
+      [
+        ["CVS CAREMARK", "EFT-111", 15_000],
+        ["OPTUMRX", "EFT-222", 7_550],
+        ["PRIME THERAPEUTICS", "EFT-333", 4_025],
+      ],
+    );
+  });
+
+  test("and each balances against its own claims, so all three are postable", () => {
+    // The whole point. Merged, the file reports a $225.50 discrepancy and posts nothing.
+    for (const r of parse835Sets(bundle)) {
+      assert.equal(r.balance?.differenceCents, 0);
+      assert.deepEqual(r.problems, []);
+      assert.equal(r.payments.length, 1);
+    }
+  });
+
+  test("the payer id is kept too, because a name is four companies' typing", () => {
+    assert.deepEqual(parse835Sets(bundle).map((r) => r.payerId), ["ID1", "ID2", "ID3"]);
+  });
+
+  test("REGRESSION: read as one remittance it names the last payer and refuses to post", () => {
+    // Asserted rather than described, so the reason `parse835Sets` exists stays visible.
+    const merged = parse835(bundle);
+    assert.equal(merged.payer, "PRIME THERAPEUTICS");
+    assert.equal(merged.payments.length, 3);
+    assert.equal(merged.balance?.differenceCents, -22_550);
+    assert.match(merged.problems[0], /does not add up and nothing from it should be posted/);
+  });
+
+  test("an ordinary single-remittance file is still exactly one, and unchanged", () => {
+    const single = ISA + set("1", "HUMANA", "912585211", "150.00", "CLP*332359-1*1*200.00*150.00*10.00*MC*C1*01~") + "GE*1*1~IEA*1*000000001~";
+    const sets = parse835Sets(single);
+    assert.equal(sets.length, 1);
+    assert.equal(sets[0].payer, "HUMANA");
+    assert.equal(sets[0].balance?.differenceCents, 0);
+    // And the same file through the single-remittance reader agrees with it, which is what makes
+    // routing everything through the splitter safe.
+    assert.deepEqual(parse835(single).payments, sets[0].payments);
+  });
+
+  test("a file with no transaction set at all still says what is wrong with it", () => {
+    assert.match(parse835Sets("").at(0)!.problems[0], /empty/);
+    assert.match(parse835Sets("nonsense").at(0)!.problems[0], /No segments|not be an 835/);
   });
 });

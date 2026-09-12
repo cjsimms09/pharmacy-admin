@@ -43,21 +43,70 @@ describe("what the BIN listing settles", () => {
   });
 });
 
-describe("THE REFUSAL THAT MATTERS: commercial is not an answer", () => {
-  test("a commercial line of business proposes nothing, and says why at length", () => {
-    // "Commercial" does not say whether the employer bought insurance from a state-regulated
-    // carrier or funds the plan itself under ERISA. That is the entire question the register
-    // exists to answer: one is in reach of the Kansas floor and the other is preempted.
+/*
+ * ── What replaced "commercial is not an answer" ──
+ *
+ * That rule refused a commercial listing outright, and it was half right. It was right that such a
+ * listing cannot say whether the employer bought insurance or funds its own plan under ERISA, which
+ * is the question a Kansas filing turns on. It was wrong to discard the half the listing does
+ * establish — that this is a commercial plan and not Part D — and the cost was 396 plans and
+ * $138,178.78 of September sitting at "not yet determined", indistinguishable from plans nobody had
+ * ever looked at.
+ *
+ * The owner, 11 September: "Only problem will be ERISA vs commercial which we should just treat all
+ * as commercial until proven otherwise."
+ *
+ * So the refusal became a narrower finding: `commercial_unknown_funding`, which asserts the benefit
+ * type and expressly not the funding. The safety property did not weaken, it moved — from "this is
+ * never classified" to "this is classified, and no classification of it can reach a floor filing".
+ * That is what these tests hold, and the last two are the ones that matter.
+ */
+describe("commercial is half an answer, and only the stated half is taken", () => {
+  test("a commercial line of business is proposed as commercial, funding left open", () => {
     const r = proposePlanClass(evidence({ linesOfBusiness: "Commercial" }));
-    assert.equal(r.classification, null);
-    assert.match((r as { why: string }).why, /bought insurance or funds the plan/);
-    assert.match((r as { why: string }).why, /Form 5500|plan document/);
+    assert.ok(isProposal(r));
+    assert.equal(r.classification, "commercial_unknown_funding");
+    // The sentence still has to name the unanswered question and what would settle it: the owner
+    // reads it to decide whether chasing a Form 5500 for this plan is worth an afternoon.
+    assert.match(r.from, /bought insurance or funds its own plan/);
+    assert.match(r.from, /Form 5500|plan document/);
   });
 
-  test("nor does an employer group or group health line", () => {
+  test("it is offered as indicated, never as stated", async () => {
+    // A listing names the lines of business a BIN carries; the PCN selects one out of them. That is
+    // enough to rule out Part D and not enough to be called a document about this employer.
+    //
+    // Asserted against `findPlanClass`, because `proposePlanClass` returns only the class and the
+    // sentence — the confidence is what the register stores beside them, and it is the field that
+    // stops a listing being recorded as though a payer had stated it.
+    const { findPlanClass: find } = await import("../src/lib/plan-evidence");
+    const r = find(evidence({ linesOfBusiness: "Commercial" }));
+    assert.ok(r.classification === "commercial_unknown_funding");
+    assert.equal((r as { confidence: string }).confidence, "indicated");
+  });
+
+  test("an employer group or group health line reads the same way", () => {
     for (const lob of ["Group Health", "Employer Group"]) {
-      assert.equal(proposePlanClass(evidence({ linesOfBusiness: lob })).classification, null, lob);
+      assert.equal(proposePlanClass(evidence({ linesOfBusiness: lob })).classification, "commercial_unknown_funding", lob);
     }
+  });
+
+  /*
+   * The property that actually protects a filing, asserted against the whitelist rather than
+   * restated here.
+   *
+   * `planScopeOf` is a switch with a default, so a class absent from it yields "unknown" — but
+   * "absent by accident" and "absent on purpose" look identical until something asserts it. If
+   * somebody later adds this class to it, reasoning that the register is full of them and they
+   * ought to count, this fails and says why.
+   */
+  test("a commercial finding can never carry a claim into a Kansas floor filing", async () => {
+    const { planScopeOf, CLASS_INFO, needsBasis: nb } = await import("../src/lib/plans");
+    assert.equal(planScopeOf("commercial_unknown_funding"), "unknown");
+    assert.equal(CLASS_INFO.commercial_unknown_funding.inScope, false);
+    // And it needs no basis, for the same reason a card needs none: the finding claims no more
+    // than the listing says. If it ever starts needing one, it has stopped being a default.
+    assert.equal(nb("commercial_unknown_funding"), false);
   });
 
   test("no class that needs a document can ever be proposed", () => {

@@ -2406,6 +2406,26 @@ export const PLAN_CLASSES = [
    * to it — and the brand plan it is subsidising, which may be paying badly, is flattered by it.
    */
   "copay_card",
+  /*
+   * Commercial, and nobody has established who carries the risk.
+   *
+   * The owner, 11 September: "Only problem will be ERISA vs commercial which we should just treat
+   * all as commercial until proven otherwise."
+   *
+   * He is right, and the register was conflating two questions in one column. What kind of benefit
+   * this is — Medicare, Medicaid, workers' compensation, a card, commercial — is answerable from the
+   * BIN and the PCN for nearly every plan billed. Who *funds* a commercial plan is a separate
+   * question that only a Form 5500 or the plan document settles. Holding the first answer hostage to
+   * the second left 396 plans and $138,178.78 of September at "unknown" while the pharmacy knew
+   * perfectly well that BIN 610011 / PCN IRX is OptumRx commercial.
+   *
+   * So this class says what is known and no more: a commercial plan, funding undetermined. It is
+   * deliberately absent from `planScopeOf` in plans.ts and from `SCOPE_OF` in floor-review.ts, both
+   * of which are whitelists — so a plan sitting here can never be carried into a Kansas floor
+   * filing by default. Proving it fully insured or self-funded moves it to one of those classes,
+   * with a basis, exactly as before.
+   */
+  "commercial_unknown_funding",
   "unknown",                  // not yet determined. Never files.
 ] as const;
 export type PlanClass = (typeof PLAN_CLASSES)[number];

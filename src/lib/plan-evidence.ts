@@ -359,6 +359,34 @@ const COMMERCIAL = /\bcommercial\b|\bgroup\s*health\b|\bemployer\b/i;
 const MEDICARE_PCN = /medd|partd|\bpdp\b|\bmapd\b/i;
 const MEDICAID_PCN = /medicaid|kscaid|\bmcd\b|\bmcaid\b/i;
 
+/**
+ * A CMS contract number in the group field, which is Medicare identifying itself.
+ *
+ * CMS issues every Part D sponsor a contract number, and the letter says which programme: S for a
+ * standalone prescription drug plan, H for a Medicare Advantage plan, R for a regional PPO, E for
+ * an employer or union group waiver plan. The format is that letter and four digits, and nothing
+ * else in a group field looks like it.
+ *
+ * This is `stated` rather than `indicated`, unlike the PCN tests above. A PCN is a routing code a
+ * payer chose and "MEDD" is this reader's inference from it; a contract number is an identifier the
+ * federal government assigned to a Medicare contract, and a claim carrying one is a claim on that
+ * contract. It is the strongest Medicare evidence available without a document.
+ *
+ * Checked against the group number only. The same pattern would fire on plenty of ordinary
+ * commercial group codes if it were let loose on a payer name or a plan name — "S1234" is also how
+ * a self-insured employer numbers a division — so it is deliberately confined to the one field
+ * where CMS contract numbers are actually written.
+ */
+const CMS_CONTRACT = /^[SHRE]\d{4}$/i;
+
+/** Which Medicare programme a contract letter names, for the sentence that cites it. */
+const CMS_PROGRAMME: Record<string, string> = {
+  S: "a standalone Part D prescription drug plan",
+  H: "a Medicare Advantage plan",
+  R: "a regional Medicare Advantage PPO",
+  E: "an employer or union group waiver plan under Part D",
+};
+
 type Kind = "medicare" | "medicaid" | "workers" | "discount" | "commercial";
 
 const KIND_CLASS: Record<Kind, PlanClass> = {
@@ -366,7 +394,14 @@ const KIND_CLASS: Record<Kind, PlanClass> = {
   medicaid: "medicaid",
   workers: "workers_comp",
   discount: "discount_card",
-  commercial: "unknown",
+  /*
+   * Commercial names the benefit type and leaves the funding open, which is what this class is for.
+   *
+   * It used to map to "unknown", which threw away a real finding to avoid asserting a false one.
+   * The new class keeps the finding without the assertion: out of every floor whitelist, so it
+   * cannot be filed on, but no longer indistinguishable from a plan nobody has looked at.
+   */
+  commercial: "commercial_unknown_funding",
 };
 
 const KIND_WORD: Record<Kind, string> = {
@@ -499,6 +534,27 @@ export function findPlanClass(e: PlanEvidence): PlanFinding | NoFinding {
   }
 
   // ── The claim's own routing ──
+  /*
+   * A CMS contract number in the group field, tested before the PCN because it outranks it.
+   *
+   * It is the federal government's own identifier for the contract being billed, so it settles the
+   * programme outright where a PCN only points at it. Kept above the PCN tests so a Part D claim
+   * routed on a PCN this reader does not recognise is still classified.
+   */
+  const contract = norm(e.groupNumber);
+  if (CMS_CONTRACT.test(contract)) {
+    const letter = contract.slice(0, 1);
+    return {
+      classification: "medicare",
+      source: "pcn",
+      confidence: "stated",
+      from:
+        `The group number on the claim is "${contract}", which is a CMS contract number — the letter ${letter} names ` +
+        `${CMS_PROGRAMME[letter]}. CMS assigns these to Medicare contracts, so a claim billed under one is a claim on ` +
+        `that contract.`,
+      detail: letter === "S" ? "Medicare Part D" : "Medicare Advantage",
+    };
+  }
   if (has(e.pcn, MPPP_PCN)) {
     return {
       classification: "medicare",
@@ -522,8 +578,26 @@ export function findPlanClass(e: PlanEvidence): PlanFinding | NoFinding {
   // ── The BIN listing, which is a published document rather than a name somebody typed ──
   const listing = namedKinds(lob);
   const listed = only(listing);
-  if (listed && listed !== "commercial") {
-    return { classification: KIND_CLASS[listed], source: "bin_listing", confidence: "indicated", from: `The BIN listing records this BIN's line of business as "${lob}".`, detail: null };
+  /*
+   * A listing naming exactly one line of business, commercial included.
+   *
+   * The exclusion of commercial that used to sit here was not about the listing being weaker for
+   * commercial than for anything else — it was about there being no class that could hold the
+   * answer without also asserting the funding. There is now, so the one-line-of-business case is
+   * uniform again and the `commercial` arm of KIND_CLASS is live rather than unreachable.
+   */
+  if (listed) {
+    return {
+      classification: KIND_CLASS[listed],
+      source: "bin_listing",
+      confidence: "indicated",
+      from:
+        `The BIN listing records this BIN's line of business as "${lob}".` +
+        (listed === "commercial"
+          ? " That establishes the benefit type and not the funding: whether this employer bought insurance or funds its own plan needs a Form 5500 or the plan document."
+          : ""),
+      detail: listed === "commercial" ? "Commercial, funding not established" : null,
+    };
   }
 
   // ── The payer's own name, for the classes that cannot be anything else ──
@@ -560,20 +634,34 @@ export function findPlanClass(e: PlanEvidence): PlanFinding | NoFinding {
   }
 
   /*
-   * "Commercial" is where an answer would do harm, so it is refused loudly rather than skipped.
+   * "Commercial" — which is an answer, just not the whole answer.
    *
-   * A listing saying commercial does not say whether the employer bought insurance from a
-   * state-regulated carrier or funded the plan itself under ERISA — and that distinction is the
-   * whole reason the register exists. Both answers are commercial and only one is in reach.
+   * This used to be refused outright, on the grounds that a listing saying commercial does not say
+   * whether the employer bought insurance from a state-regulated carrier or funds its own plan
+   * under ERISA. That reasoning is still correct and it still governs what may be *filed*. What was
+   * wrong was throwing away the part the listing does establish.
+   *
+   * The owner: "Only problem will be ERISA vs commercial which we should just treat all as
+   * commercial until proven otherwise." So the finding is `commercial_unknown_funding`, which
+   * asserts the benefit type and expressly not the funding — and which `planScopeOf` and
+   * `SCOPE_OF` both leave out, so it cannot reach a Kansas floor filing by default.
+   *
+   * `indicated`, never `stated`: the listing names a line of business for the BIN, and the PCN is
+   * what selects a network out of it. That is strong enough to say this is not Part D and not
+   * Medicaid, which is what the appeal routing needs. It is not a document about this employer.
    */
   if (listing.has("commercial") || named.has("commercial")) {
     return {
-      classification: null,
-      why:
+      classification: "commercial_unknown_funding",
+      source: listing.has("commercial") ? "bin_listing" : "payer_name",
+      confidence: "indicated",
+      from:
         (split.length ? `${split[0]} ` : "") +
-        `The listing says "${(lob ?? allNames).replace(/\s+/g, " ").slice(0, 120)}", which does not say whether the employer bought insurance ` +
-        `or funds the plan itself. That is the difference between the Kansas floor applying and ERISA preempting it, so ` +
-        `it needs a Form 5500 or the plan document rather than a guess.`,
+        `The listing says "${(lob ?? allNames).replace(/\s+/g, " ").slice(0, 120)}", which establishes this as a commercial plan ` +
+        `rather than Medicare, Medicaid or a card. It does not say whether the employer bought insurance or funds the plan ` +
+        `itself, and that is the difference between the Kansas floor applying and ERISA preempting it — so the funding is ` +
+        `left open and a Form 5500 or the plan document is what settles it.`,
+      detail: "Commercial, funding not established",
     };
   }
 
@@ -609,4 +697,16 @@ export function findPlanClass(e: PlanEvidence): PlanFinding | NoFinding {
  * of exceptions that is not revisited when the thing it excepts from grows is how a guard starts
  * blocking the work it was built to protect.
  */
-export const PROPOSABLE: PlanClass[] = ["medicare", "medicaid", "workers_comp", "discount_card", "copay_card"];
+/*
+ * ── Why commercial_unknown_funding belongs here and the four floor classes still do not ──
+ *
+ * The guard's purpose is that nothing which decides the Kansas question may be proposed. This class
+ * is the one commercial answer that decides none of it: it names the benefit type and expressly
+ * leaves the funding open, and it appears in no floor whitelist — not `planScopeOf`, not `SCOPE_OF`
+ * in floor-review.ts, not `needsBasis`. Adopting it therefore cannot put a claim into a filing,
+ * which is exactly what separates it from `commercial_fully_insured`.
+ *
+ * It needs no basis for the same reason a card needs none: the BIN listing is the evidence, and the
+ * finding claims no more than the listing says.
+ */
+export const PROPOSABLE: PlanClass[] = ["medicare", "medicaid", "workers_comp", "discount_card", "copay_card", "commercial_unknown_funding"];
