@@ -8,6 +8,47 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September: the floor's scope gates all agree, and the reason they exclude self-funded plans is worth checking against *Rutledge*
+
+Base quiet a third round, so I audited something never audited. Full write-up:
+`docs/audits/2026-09-12-erisa-scope-premise.md`. **No file of yours is edited. No defect found.**
+
+**1. `4615a7c`'s safety property holds, on one more gate than it claims.** It says
+`commercial_unknown_funding` is absent from `planScopeOf`, `SCOPE_OF` and `needsBasis`. There is a
+fourth — `CLASS_INFO[cls].inScope`, read by `against-nadac.ts:155` and `claims.ts:1082` — and it is
+`false` there too. Run across every class, exactly three can reach a floor filing
+(`commercial_fully_insured`, `governmental`, `church_plan`) and **all three require a basis**, so no
+plan reaches a Kansas filing without a person recording how it was established. The four gates never
+disagree for any class, which given this repository's history is worth stating rather than assuming.
+`governmental` and `church_plan` in scope is right for a stronger reason than preemption analysis:
+29 U.S.C. § 1003(b)(1) and (b)(2) exclude them from ERISA outright.
+
+**2. A question that may be worth money, and is not a defect.** `reimbursement-rules.ts` states the
+premise twice — line 9, *"commercial plans not preempted by ERISA"*; line 144, *"Self-funded ERISA
+plan — preempted, the state floor does not reach it."* That is a **federal preemption** claim, and it
+is the point *Rutledge v. PCMA*, 592 U.S. 80 (2020) decided **unanimously the other way**: Arkansas
+Act 900 required PBMs to reimburse pharmacies at or above acquisition cost, and the Court held it not
+preempted **including as applied to PBMs administering self-funded ERISA plans**, because rate
+regulation is traditional state authority and cost effects alone do not "relate to" a plan.
+
+An acquisition-cost floor with an appeal route is the same species of law as Act 900.
+
+**What I am not saying:** that the mapping is wrong. A state may write a narrower law than the
+Constitution permits. **If SB 20's own scope provision limits it to plans not subject to ERISA, the
+exclusion is right as a matter of Kansas law** and the only fault is that a state limit is given a
+federal reason. I do not have the statute here and will not assert what it says. Note also *PCMA v.
+Mulready*, 78 F.4th 1183 (10th Cir. 2023) — Kansas's own circuit — which found several Oklahoma PBM
+provisions preempted, distinguishing them from Act 900 as network and plan-design mandates rather
+than rate regulation. A pure floor sits on the *Rutledge* side of that line, but the line exists.
+
+**The ask, and only you can do it:** read SB 20's scope provision against
+`reimbursement-rules.ts:144`. Does the statute exclude self-funded plans **by its own terms**, or is
+that a preemption assumption? Most large employers self-fund, so if a large share of commercial
+claims is held out of every floor test on a premise the Supreme Court rejected, that is money never
+pursued. **The direction of the error is the safe one** — the site never claims a floor it should not,
+so nothing filed today is wrong and nothing should change on my say-so. What is wanted is the statute
+read against the premise.
+
 ### From B — 12 September: the appeal deadline gate matches one of the four values the extractor can write
 
 Base quiet at `1a8554f`, so I finished the queue. Full write-up:
