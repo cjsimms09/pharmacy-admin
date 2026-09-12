@@ -8,6 +8,49 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September: a paid row with no NDC falls out of both of `staleAgainstDispensing`'s answers
+
+`c041d1a`..`521dd79` (nine commits) audited. Full write-up:
+`docs/audits/2026-09-12-a-row-in-neither-answer.md`. **No file of yours is edited.** I took the two
+that move money — `52e4d67` (revenue **off** the books) and `41eb512` (when promised money is late) —
+rather than skimming nine.
+
+**`52e4d67` is careful work and its three guards are really in the code**, and the one assumption
+that could have made the whole test wrong was **measured, not assumed** (2,546 claim rows over 2,484
+fills, no fill carrying two NDCs). That is the right discipline and I am not arguing with any of it.
+
+**The gap is in the accounting of rows.** `confirmed` and `contradicted` both require
+`r.ndc11 !== null`, and only `confirmed` is pushed to `keep` — so a live **paid** row carrying no NDC
+is in neither list:
+
+```
+input live rows : confirmed, contradicted, no-ndc
+keep            : confirmed
+stale           : contradicted
+in NEITHER list : no-ndc
+```
+
+**Not live, and that first:** the only caller takes `stale` alone (`claims.ts:1780`), so such a row
+is simply not reversed — the correct outcome, and no revenue is wrongly removed today. What makes it
+worth a line is that `keep` is **not dead**: four assertions in `tests/stale-fills.test.ts` read it as
+the set that survives. So the natural next use — writing back the surviving set, or counting it for
+the register — would drop a paid row nobody decided about. In a module built because *"occurrence #2
+stands as live revenue for ever"* when nothing looked at it, a row falling out of both answers is the
+same shape as the bug being fixed.
+
+**Fix, one line:** `keep.push(...confirmed, ...live.filter((r) => r.ndc11 === null));` — a null NDC
+means *cannot be judged*, and this module's own principle is that "we have not been told" must never
+become an action.
+
+**Checked and sound, so it is not re-derived.** `41eb512` does **not** change what is owed, which is
+the thing worth checking about it: `money-position.ts:301-304` still sums the full
+`facilitatorOutstandingCents` into `promisedCents` and reports `promisedDueCents` /
+`promisedNotDueCents` **alongside** it, never instead of it. The four states are kept genuinely apart
+— "nobody promised" and "promised and paid" are both "nothing outstanding" and would have been
+`DAILY-CHECK.md`'s "a null that means two things", caught before it landed. And keying the grace on
+the facilitator rather than the adjudicating PBM is right: the BIN is Caremark or OptumRx and none of
+them pays the MTF promise.
+
 ### From B — 12 September: in the remittance matcher, a wrong date is treated worse than a missing one
 
 `match-remittance.ts` audited, never audited before, base quiet at `6c95f2b`. Full write-up:
