@@ -76,6 +76,18 @@ does not tell a pharmacist to switch a patient. But what is bought is what the n
 dispensed from, so the clinical consequence is one step removed rather than absent. That is the
 honest distance, and it is why this is a flag-and-name problem rather than a refuse-outright one.
 
+**Traced to the screen, after writing the above, because "live" is a claim I should not make
+loosely.** The chain is `/purchasing/catalog` → `searchDrugs` → `drugFile()` (`drug-catalog.ts:36`,
+calling `withEquivalents` at `:166`) → `substitutable()`. The page does not merely compute it — it
+**leads** with it: a headline figure captioned *"a cheaper equivalent exists"*, carrying a count and
+the money (`switchableSavingsCents`, *"$X on the fills already on file"*), toned `warn` when above
+zero, with a filter to show only those rows (`catalog/page.tsx:249-257`, `:368`).
+
+So a levothyroxine or a warfarin whose cheaper equivalent is another manufacturer's AB1 product
+appears in that count, and in that saving, with nothing on the row saying this one is different from
+an ordinary generic. That is a stronger statement than the one I made above and it is the accurate
+one.
+
 **Pre-flight #7, worst case ranked:** patient harm > board > PBM relationship > money. This is the
 only thing I have reported today that reaches the first rank; everything else has been money. It
 should be read in that order.

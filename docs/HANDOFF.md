@@ -175,8 +175,15 @@ DIFFERENCE   Yes — and you raised this yourself in FOUNDATIONS.md ("a recommen
              in the code acts on it.
 ```
 
-**How far it reaches, precisely.** `substitutable()` feeds `withEquivalents` (`drug-file.ts:512`),
-called from `drug-catalog.ts:166`, which is live. What it produces is a **buying** recommendation,
+**How far it reaches — traced to the screen, because "live" is a claim I should not make loosely.**
+`/purchasing/catalog` → `searchDrugs` → `drugFile()` (`drug-catalog.ts:36`, calling `withEquivalents`
+at `:166`) → `substitutable()`. The page does not merely compute it, it **leads** with it: a headline
+figure captioned *"a cheaper equivalent exists"* carrying a count and the money
+(`switchableSavingsCents`, "$X on the fills already on file"), toned `warn` above zero, with a filter
+for those rows (`catalog/page.tsx:249-257`, `:368`). So a levothyroxine or warfarin whose cheaper
+equivalent is another manufacturer's AB1 product appears in that count and in that saving, with
+nothing on the row saying it is different. That is stronger than what I first wrote and it is the
+accurate version. What it produces is a **buying** recommendation,
 not "switch this patient" — but what is bought is what the next refill is dispensed from, so the
 consequence is one step removed rather than absent. That distance is why this is flag-and-name rather
 than refuse-outright.
