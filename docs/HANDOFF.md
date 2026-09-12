@@ -8,6 +8,66 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September: sixteen modules in `src/lib` are imported by nothing. Read this one first.
+
+Full write-up: `docs/audits/2026-09-12-sixteen-modules-with-no-way-in.md`. **No file of yours is
+edited.** This is the largest thing I have found on this repository, and it needs a decision from
+your side rather than a patch from mine.
+
+I checked all 294 modules in `src/lib` against every import in `src/` and `scripts/`. Sixteen have
+none, and there is no dynamic escape hatch — a grep for a template-literal or variable module path
+across all of `src/` returns nothing, so every import here is a literal string. Fifteen have zero
+mentions outside their own file; `ndc-choice.ts` has one, a sentence in a comment.
+
+```
+ lines  tests  added        module
+   428   no    2026-09-08   psao-guide.ts
+   403   yes   2026-09-11   claim-reconcile.ts
+   358   yes   2026-09-06   month-plan.ts
+   314   yes   2026-09-05   gs1.ts
+   266   yes   2026-09-06   price-moves.ts
+   263   yes   2026-09-10   remit-classify.ts
+   257   yes   2026-09-08   bank-reconcile.ts
+   228   yes   2026-09-11   providerpay-account.ts
+   211   no    2026-09-11   supplier-statement.ts
+   185   yes   2026-09-06   band-strategy.ts
+   179   yes   2026-09-05   ndc-choice.ts
+   175   yes   2026-09-10   month-stability.ts
+   152   yes   2026-09-06   reimbursement-fit.ts
+   149   yes   2026-09-10   route-agreement.ts
+   144   yes   2026-09-08   pbm-listing.ts
+   117   yes   2026-09-09   reversed-fill-payments.ts
+```
+
+3,829 lines, fourteen with test files that pass — which is why nothing anywhere reports it. Every one
+was added between 5 and 11 September and **not one has been touched since the commit that added it**.
+Four are from the last two days.
+
+They are not helpers. `claim-reconcile` is *"whether a claim is settled, and where every dollar of it
+went"*. `providerpay-account` is *"the only thing that ties a payment to the bank"*. `bank-reconcile`
+is *"what a deposit is made of"*. `supplier-statement` says *"the statement is the missing key"* for
+why a bank line never matches an invoice — and `schema.ts:3480` documents a table by naming that very
+file, so there is a schema, a reader, and no path from a document to either.
+
+Three things that make it worth your time rather than a tidy-up:
+
+1. **The commit subjects are present-tense.** `98c69d9` "The PSAO's contracted PBM listing **reads
+   into** the BIN register" — `loadPbmListing` is called by nothing. `1813274` "The PSAO's networks
+   guide **is read into** the library" — `loadPsaoGuide` is called by nothing. Both are documents the
+   owner uploaded on 8 September; the second one he sent with "here we go!!".
+2. **Two of them are named sources in your own double-count register.** `countedTwice` lists *"the
+   wholesaler's own ledger, what cleared and under which ACH"* and *"the ProviderPay payment report,
+   itemised by payer and payment number"* as one of the two records that know a figure. Both readers
+   are unreachable.
+3. **Nothing is wrong on any screen because of this.** Unreachable code computes no wrong number.
+   What it means is the site does not know what a deposit is made of and cannot trace a payment to
+   the bank — and says nothing about either.
+
+**What I am asking for is a decision per module, not a patch:** wire it, mark it a specification at
+the top of the file, or delete it. What it must not stay is the fourth thing — present-tense commit
+subjects, passing tests, and no way in. Say which each should be and I will do the mechanical part on
+this branch; choosing is the side of the handoff with the data on it.
+
 ### From B — 12 September: the 835 says "denied" and the receivables go on saying "owed"
 
 Full write-up: `docs/audits/2026-09-12-the-835-says-denied-and-the-site-says-owed.md`.
