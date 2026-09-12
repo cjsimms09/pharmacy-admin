@@ -12,13 +12,6 @@ import { join } from "node:path";
 
 const FEE_CENTS = 1050;
 
-function packUnits(desc: string | null): number | null {
-  if (!desc) return null;
-  const m = /^\s*([\d.]+)\s+[A-Z]/i.exec(desc);
-  const n = m ? Number(m[1]) : NaN;
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-
 async function main() {
   const [rx, dos, pbm, outDir] = process.argv.slice(2);
   if (!rx || !dos || !pbm || !outDir) throw new Error("give rx, dateFilled, pbm, outDir");
@@ -26,12 +19,14 @@ async function main() {
 
   const { db } = await import("../src/db");
   const { buildEvidence } = await import("../src/lib/mac-appeal-evidence");
+  const { packForClaim } = await import("../src/lib/pack-size");
   const { textPdf } = await import("../src/lib/pdf");
   const { getSettings } = await import("../src/lib/settings");
   const s = await getSettings();
 
   const c = (await db.$client.execute({
-    sql: `SELECT c.*, (SELECT dd.package_description FROM drug_directory dd WHERE dd.ndc11 = c.ndc11 LIMIT 1) AS pkg
+    sql: `SELECT c.*, (SELECT dd.package_description FROM drug_directory dd WHERE dd.ndc11 = c.ndc11 LIMIT 1) AS pkg,
+                 (SELECT dd.form FROM drug_directory dd WHERE dd.ndc11 = c.ndc11 LIMIT 1) AS form
             FROM claims c WHERE c.rx_number = ? AND c.date_filled = ? LIMIT 1`,
     args: [rx, dos],
   })).rows[0] as any;
@@ -46,8 +41,15 @@ async function main() {
   })).rows[0] as any;
   if (!il) throw new Error("no invoice line for that NDC");
 
-  const units = packUnits(c.pkg);
-  if (units === null) throw new Error("no pack size in the FDA directory for " + c.ndc11);
+  /*
+   * The pack, and whether this claim's quantity is in its unit, from the one function that knows.
+   *
+   * Refusing stops the page being built at all, which is the right outcome: this document goes to a
+   * PBM under the pharmacy's NPI with a division printed on it as proof, and a divisor nobody can
+   * stand behind is worse than no document. The reason is printed so it can be fixed or accepted.
+   */
+  const read = packForClaim({ packageDescription: c.pkg, form: c.form }, Number(c.quantity_thousandths));
+  if (!read.ok) throw new Error(`cannot state a pack size for ${c.ndc11}: ${read.why}`);
 
   const built = buildEvidence({
     pharmacy: {
@@ -66,7 +68,6 @@ async function main() {
       ndc11: c.ndc11,
       drugName: c.item_name,
       quantity: Number(c.quantity_thousandths) / 1000,
-      unitLabel: /\bML\b|MILLILITER/i.test(String(c.pkg)) ? "Milliliter" : "Each",
       planPaidCents: Number(c.remit_cents),
       copayCents: Number(c.copay_cents ?? 0),
     },
@@ -76,9 +77,8 @@ async function main() {
       date: il.invoice_date,
       description: il.description,
       packPriceCents: Number(il.unit_cost_cents),
-      packUnits: units,
-      packSource: "FDA NDC directory",
     },
+    pack: read.pack,
     dispensingFeeCents: FEE_CENTS,
   });
 

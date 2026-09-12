@@ -26,8 +26,22 @@
  * attempt at this produced, and it would have gone to a PBM under the pharmacy's name with its NPI
  * on it. So the pack size is named, its source is named, and the division is written out.
  *
+ * ── The unit and the divisor are now one input, because they used to be two ──
+ *
+ * This took `packUnits` and `unitLabel` as unrelated fields. The caller filled the first from a
+ * regex over the FDA's package description and the second from whether that same text contained the
+ * letters "ML" anywhere — so "25 VIAL in 1 CARTON / 10 mL in 1 VIAL" handed this a divisor of 25
+ * (vials) and a label of "Milliliter", and the page printed the division as a proof. Nothing here
+ * could catch it: the two fields were never compared, and both looked filled in.
+ *
+ * So the pack arrives as one `PackSize` from `pack-size.ts`, which carries its unit with its number
+ * and refuses where it cannot tell. The label on this page is read off that unit rather than passed
+ * in beside it, and the two can no longer disagree.
+ *
  * Pure: it returns lines, and the caller renders them.
  */
+
+import type { PackSize } from "./pack-size";
 
 export type EvidenceInput = {
   pharmacy: { name: string; ncpdp: string; npi: string; address: string; phone: string; email: string };
@@ -39,10 +53,8 @@ export type EvidenceInput = {
     dateFilled: string;
     ndc11: string;
     drugName: string | null;
-    /** Units dispensed, in units — 30 tablets, 100 mL. */
+    /** Units dispensed, in the pack's own unit — 30 tablets, 100 mL. */
     quantity: number;
-    /** "Each", "Milliliter", as the PBM's own form labels it. */
-    unitLabel: string;
     /** What the plan paid. */
     planPaidCents: number;
     /** What the patient paid at the counter. */
@@ -56,10 +68,12 @@ export type EvidenceInput = {
     description: string;
     /** Price of one package, as invoiced. */
     packPriceCents: number;
-    /** Units in that package, and where that number came from. */
-    packUnits: number;
-    packSource: string;
   };
+  /**
+   * What one package holds, from `pack-size.ts` — the number, its unit and where it came from,
+   * settled together so this page cannot divide by one unit and label the answer another.
+   */
+  pack: PackSize;
   /** The dispensing fee the appeal asks for on top of cost, in cents. */
   dispensingFeeCents: number;
 };
@@ -70,10 +84,15 @@ const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 /** Per-unit figures need more than two places: a tablet can cost a third of a cent. */
 const unitMoney = (cents: number) => `$${(cents / 100).toFixed(4)}`;
 
-export function buildEvidence(input: EvidenceInput): { lines: Line[]; fileName: string; shortfallCents: number } {
-  const { pharmacy: p, claim: c, invoice: inv } = input;
+/** What a PBM's own form calls each of the three pricing units. */
+const UNIT_LABEL: Record<PackSize["unit"], string> = { EA: "each", ML: "millilitre", GM: "gram" };
 
-  const costPerUnitCents = inv.packPriceCents / inv.packUnits;
+export function buildEvidence(input: EvidenceInput): { lines: Line[]; fileName: string; shortfallCents: number } {
+  const { pharmacy: p, claim: c, invoice: inv, pack } = input;
+
+  /* One unit, read off the pack that supplied the divisor. See the header. */
+  const unitLabel = UNIT_LABEL[pack.unit];
+  const costPerUnitCents = inv.packPriceCents / pack.units;
   const totalCostCents = Math.round(costPerUnitCents * c.quantity);
   const receivedCents = c.planPaidCents + c.copayCents;
   const shortfallCents = totalCostCents - receivedCents;
@@ -92,7 +111,7 @@ export function buildEvidence(input: EvidenceInput): { lines: Line[]; fileName: 
     line("The claim", { bold: true, gapBefore: 14 }),
     line(`Prescription ${c.rxNumber}, dispensed ${c.dateFilled}`),
     line(`${c.drugName ?? "(unnamed)"}   NDC ${c.ndc11}`),
-    line(`Quantity dispensed: ${c.quantity} ${c.unitLabel.toLowerCase()}`),
+    line(`Quantity dispensed: ${c.quantity} ${unitLabel}`),
 
     /*
      * The X the cover sheet asks for, on the line being appealed.
@@ -104,10 +123,10 @@ export function buildEvidence(input: EvidenceInput): { lines: Line[]; fileName: 
     line(`[X]  ${inv.description}`, { bold: true }),
     line(`     ${inv.supplier} invoice ${inv.number}, dated ${inv.date}`),
     line(`     Invoiced at ${money(inv.packPriceCents)} per package`),
-    line(`     Package contains ${inv.packUnits} ${c.unitLabel.toLowerCase()} (${inv.packSource})`),
+    line(`     Package contains ${pack.units} ${unitLabel} (${pack.source})`),
 
     line("Acquisition cost per unit", { bold: true, gapBefore: 14 }),
-    line(`${money(inv.packPriceCents)} / ${inv.packUnits} = ${unitMoney(costPerUnitCents)} per ${c.unitLabel.toLowerCase()}`),
+    line(`${money(inv.packPriceCents)} / ${pack.units} = ${unitMoney(costPerUnitCents)} per ${unitLabel}`),
     line(`${unitMoney(costPerUnitCents)} x ${c.quantity} dispensed = ${money(totalCostCents)} acquisition cost for this claim`),
 
     line("What was received", { bold: true, gapBefore: 14 }),
@@ -125,7 +144,7 @@ export function buildEvidence(input: EvidenceInput): { lines: Line[]; fileName: 
     line("What is asked", { bold: true, gapBefore: 14 }),
     line(
       `Reimbursement of ${money(askCents)} — acquisition cost of ${money(totalCostCents)} plus a ${money(input.dispensingFeeCents)} dispensing fee — ` +
-        `or ${unitMoney(askCents / c.quantity)} per ${c.unitLabel.toLowerCase()}.`,
+        `or ${unitMoney(askCents / c.quantity)} per ${unitLabel}.`,
     ),
 
     /*

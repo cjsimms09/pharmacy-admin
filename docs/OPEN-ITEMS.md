@@ -22,13 +22,14 @@ so the answer can be checked rather than taken on trust.
 | **Login almost never works** | — | When it fails, is it the pharmacy computer or a different one? The server records success every time (77 successes, 4 failures, 78 sessions, ten successes in 73 seconds on 9 September), so his browser is not landing. A separate cause was found and fixed on 12 September — every action's result was being served from a stale cache — but that does not explain a login that never lands, so this stays open. |
 | **The brand book loses money** | **−$2,019.24 of September gross profit** | Generics return 43.0% on 1,765 scripts. Brands return **−1.6%** on 182 scripts carrying 73% of the revenue. Two items did most of it: Rexulti 1.0mg, 3 scripts, −$1,328.39 (−44.4%); Zepbound 12.5mg, 3 scripts, −$1,053.81 (−50.5%). GLP-1s are not losses but not a business either — Wegovy 1.9%, Ozempic 0.6%, Mounjaro 3.5%. **No MAC appeal reaches a brand**, so this is a contract question or a do-not-dispense question, and both are his. It is also the answer to "i just feel like our accural is too low for the month": it is low, and this is why. |
 | **rx 336826, cephalexin, $23.36** | $23.36 | The fifth stale claim. The settler deliberately left it: it is the only live row on its fill, so nothing confirms the fill happened at all, and reversing it would take a whole fill off the books on no evidence. Needs him to say whether that prescription was dispensed. |
+| **8 claims where PioneerRx's cost disagrees with an invoice dated the same day** | **$419.53 overstated, all of it inside accrual COGS** | Where the pharmacy holds an invoice for the same NDC on the same day, should the site prefer the invoice over PioneerRx's `acquisition_cents` and show the difference — or leave PioneerRx's figure alone and only flag it? Nothing has been overwritten either way. **The measurement says PioneerRx is normally right**, which is what makes these eight worth asking about: across 758 solid-dose September claims with a pack size the catalogue corroborates, the median claim-to-invoice ratio is exactly 1.0000 and 487 are within 5% of it. So this is not two different cost bases — it is a few drug records whose cost was never updated when the price changed. Worst three: rx 337350 mirabegron ER 50mg, claim $297.98 against ParMed 7491190346 of the same day at $175.67 (1.70x, $122.31); rx 337512 ivermectin 3mg (1.63x, $186.57); rx 337115 doxepin 3mg (6.48x, $83.57) — and that last one carries two paid rows under two different NDCs, so it may be one of the stale rebills rather than a cost fault. Measured 12 September. |
 | **19 plans still unclassified** | the residual after 459 were adopted and 15 he decided himself | Almost all of it is the one question no document on file answers: is this employer insured, or does it fund its own plan. Needs a Form 5500 or the plan document, one plan at a time. Each row now shows what the plan pays for and whether it ever pays alone, which is what settles a card. |
 
 ## Being corrected in another session
 
 | What | Money | What was asked |
 |---|---|---|
-| **One authoritative pack size per NDC** | has produced two phantom findings near $34,000 and disqualified real appeals | "How many dispensing units are in this package" is re-derived in at least four places, each with its own regex, and none of them checks that the claim's quantity and the pack's count measure the same thing. Wegovy: the claim counts 2 **mL**, the pack counts 4 **syringes**. Estradiol cream: 42.5 **g** against 1 **tube** — a 28x artefact that disqualified an appealable claim. Asked for: one pure function giving the pack size *and its unit*, which **refuses** where it cannot tell. Then reconcile the 43 solid-dose claims whose acquisition cost disagrees with the invoice ($339.59, $313.16 of it inside accrual COGS; mirabegron rx 337350 overstated by $122.31 against a same-day ParMed invoice). |
+| ~~**One authoritative pack size per NDC**~~ | — | **Done, 12 September** — `src/lib/pack-size.ts`. See the done list below. |
 
 ## Decisions he made today, so nobody reopens them
 
@@ -58,6 +59,22 @@ so the answer can be checked rather than taken on trust.
 
 ## Done today, 12 September
 
+- **One pack size per NDC, and it refuses rather than guess.** `src/lib/pack-size.ts`. "How many
+  dispensing units are in this package" was re-derived in four places and three of them used the
+  same regex over `package_description` — `/^\s*([\d.]+)\s+[A-Z]/`, which takes the **outermost**
+  count. On this pharmacy's own claims that number differs from the truth on **404 of 3,212 fills**,
+  by factors from 0.01x to 1000x. Wegovy read 4 syringes against a true 2 mL; the estradiol cream
+  read 1 tube against 42.5 g. The fix is that the **dosage form** decides the unit, not the
+  innermost level of the text: a lidocaine patch's `30 POUCH / .7 g in 1 POUCH` is 30 patches, and a
+  cream's `1 TUBE / 42.5 g in 1 TUBE` is 42.5 grams, and those are the same shape of sentence.
+  82 claims that used to get a number now get a refusal with its reason — metered inhalers, whose
+  claim quantity is a net fill weight the FDA states nowhere (albuterol bills 8.5 g against a
+  described 200 actuations, a factor of 23.5), and oral-contraceptive kits (the claim says 84 and
+  the only number in the text is 3, a factor of 28). `claims.quantity_unit` is null on all 3,370
+  rows, so the claim's own unit can never be read and the check is arithmetic instead: 3,040 of
+  3,212 confirm, 7 are caught counting containers rather than millilitres, 83 are unproven partials
+  that are refused to any figure going to a payer. The appeal evidence page can no longer divide by
+  one unit and label the answer another — the pack and its unit are one input now.
 - **459 plans classified in 61 presses: 1,588 claims, $206,059.80.** The register went from 481
   unclassified to 19, counting the 15 he decided himself.
 - A press showed him the page from *before* the press. `held()` keys its cached readings on a
