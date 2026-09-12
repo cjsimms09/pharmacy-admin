@@ -8,6 +8,50 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September: the 835 says "denied" and the receivables go on saying "owed"
+
+Full write-up: `docs/audits/2026-09-12-the-835-says-denied-and-the-site-says-owed.md`.
+**No file of yours is edited.**
+
+**The reader itself is sound and I checked it at four points, so nobody checks them again:**
+`parse835Sets` is wired (`claim-payments.ts:402` calls it, not `parse835`); the arithmetic gate
+really gates (`:500` returns before storing and says so in words); the null-balance case cannot sneak
+past it, because `payableOnly` drops every null and zero amount; and `p.paidCents!` at `:526` is safe
+for that same reason.
+
+**The finding.** Run on a remittance paying one claim $100.00 and denying another (CLP02 = 4):
+
+```
+payments parsed : 336548 status=1 paid=10000  |  336549 status=4 paid=0
+balance         : {"paidCents":10000,"claimsCents":10000,"adjustmentsCents":0,"differenceCents":0}
+problems        : (none)
+skipped         : [{"reference":"336549","why":"denied — nothing was paid"}]
+what the store keeps of that:  skipped: 1
+```
+
+The file balances, correctly — a denied claim contributes nothing to either side. The denial *is*
+read and *is* named. Then `importOneRemittance` returns `skipped: skipped.length` (`:483`) and the
+references and reasons go nowhere. `statusCode` has exactly one use in the repository and it is that
+discarded sentence.
+
+Receivables are built from adjudication, not from the remittance — `payer-owed-store.ts:85-100`
+pushes `shares[i]?.receivableCents ?? p.remitCents` per payer per fill. So a claim the plan
+adjudicated as payable and later denied stays in the receivables at its adjudicated amount and ages
+into the 30/60/90 buckets as *"the payer owes this"*, when the payer has said in writing that it does
+not. Same for CLP02 = 22 sent with no amount: a reversal recorded nowhere.
+
+**The fix is the one you just made, one module over.** `693114d` found `stillStranded` "computed,
+passed up … and rendered on no screen anywhere" and put it on the page with the money, the
+prescription and the date. `skipped` already carries `{ reference, why }` for every one — returning
+the array rather than its length is the same fix in the same shape. Whether a denial should also mark
+the claim is a bigger question and yours; putting it on a screen needs none of that argument.
+
+**Two counts from your side:**
+
+1. Across the 835s on file, how many claim payments carry CLP02 = 4 or 22 with no amount?
+2. Of those, how many name a prescription still in the receivables at its adjudicated figure? That is
+   money the site says it is owed and the payer has said it is not.
+
 ### From B — 12 September: the buy list's controlled gate asks a name list, with two better answers already stored
 
 `minimum-store.ts:30-46` read against the readers and the directory. Full write-up:
