@@ -390,6 +390,9 @@ export const SETTING_KEYS = [
   "pioneer_pull_on_hand_result",
   "pioneer_pull_claims_on",
   "pioneer_pull_claims_result",
+  // What the register sweep made of the plans those claims arrived on. Runs with the claims feed,
+  // because a new BIN, PCN and group triple is the only thing that creates a plan to classify.
+  "pioneer_pull_classify_result",
   "pioneer_pull_invoices_on",
   "pioneer_pull_invoices_result",
   // PioneerRx’s own September invoices set against the ones read from the suppliers’ PDFs.

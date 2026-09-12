@@ -81,6 +81,25 @@ async function main() {
         await setSetting("pioneer_pull_claims_on", today);
         await setSetting("pioneer_pull_claims_result", `${new Date().toISOString()}: ${r}`);
         console.log(`claims: ${r} (${Date.now() - started}ms)`);
+        /*
+         * And classify what just arrived, because a new plan is only new once.
+         *
+         * The owner: "It should be setup to constantly be classifying correctly anyways."
+         *
+         * The register only ever grew when somebody opened /plans and pressed Sweep, and the
+         * proposals only when somebody pressed "Look again" on /payers/plans. Both are the right
+         * buttons to have and neither is a schedule, so a plan first billed on a Tuesday sat
+         * outside the register until a person happened to look — and a plan the register does not
+         * hold cannot be offered a class, cannot be judged, and cannot be routed for an appeal.
+         *
+         * Here rather than on a schedule of its own, because claims are what create plans: the
+         * moment a new BIN, PCN and group triple arrives is the moment there is something to
+         * classify. `scripts/refresh-plan-proposals.ts` has said "so a feed can run it after the
+         * nightly PioneerRx pull" since it was written; this is that feed.
+         */
+        const c = await classifyWhatArrived();
+        await setSetting("pioneer_pull_classify_result", `${new Date().toISOString()}: ${c}`);
+        console.log(`  plans: ${c}`);
       } else if (feed === "invoices") {
         const r = await pullInvoices();
         await setSetting("pioneer_pull_invoices_on", today);
@@ -259,6 +278,42 @@ async function pullCatalogue(): Promise<string> {
  * by a week is worse than no AWP at all — the backtest divides by it. They keep coming from the
  * dispensed export, which prints the figure as it stood at adjudication.
  */
+/**
+ * Sweeps newly-billed plans into the register and recomputes what can be offered for each.
+ *
+ * Two steps, both additive and neither of which decides anything:
+ *
+ *   `syncPlanGroups` adds a register row per BIN, PCN and group triple appearing in the claims and
+ *   deliberately classifies none of them. A plan it adds is "not yet determined" until somebody
+ *   confirms a class, so this cannot move a figure.
+ *
+ *   `refreshProposals` recomputes the offer beside each unclassified plan from the evidence as it
+ *   now stands — the payer sheets, the BIN listing, PioneerRx's plan file, the PCN, the CMS
+ *   contract number on the claim. A proposal prices nothing and files nothing; it sits next to the
+ *   plan with the sentence it came from until a person adopts it.
+ *
+ * Which is why this is safe to run unattended, and why it has to be: the evidence moves every time
+ * the plan-types feed runs or a payer sheet is added, and a stored proposal is only as fresh as the
+ * last time somebody asked.
+ *
+ * Failure here must not fail the claims pull. The claims are in by this point and they are the
+ * valuable part; a register sweep that falls over is worth saying out loud and worth nothing else.
+ */
+async function classifyWhatArrived(): Promise<string> {
+  try {
+    const { syncPlanGroups } = await import("../src/lib/plans");
+    const { refreshProposals } = await import("../src/lib/plan-proposals-store");
+    const swept = await syncPlanGroups();
+    const proposed = await refreshProposals();
+    return (
+      `${swept.added} new plan${swept.added === 1 ? "" : "s"} on the register (${swept.total} billed); ` +
+      `${proposed.proposed} have an offer, ${proposed.unproposable} say why not`
+    );
+  } catch (e) {
+    return `the register could not be swept: ${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
 async function pullClaims(): Promise<string> {
   const { query } = await import("../src/lib/pioneer-sql");
   /*

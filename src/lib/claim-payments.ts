@@ -330,7 +330,7 @@ export async function backfillPatientTotals(): Promise<{ read: number; filled: n
 }
 
 /**
- * Loads an 835 remittance and records what it paid against the fills it names.
+ * Loads every remittance in an 835 file and records what each paid against the fills it names.
  *
  * The whole point of the Medicare Transaction Facilitator CLI: it downloads these files on a
  * schedule, and until they are read the money in them reaches the bank and nothing here knows.
@@ -338,6 +338,18 @@ export async function backfillPatientTotals(): Promise<{ read: number; filled: n
  * Loading the same file twice is safe. A payment is identified by the remittance's trace number
  * and the claim's own reference, which is what makes a re-download of the same day harmless —
  * and re-downloading is exactly what a scheduled task does.
+ *
+ * ── One file, possibly several remittances ──
+ *
+ * A file is an envelope around one or more ST/SE transaction sets, and each 835 set is a whole
+ * remittance with its own payer, trace and total. This used to read a file as a single remittance,
+ * which made a bundle of several come out as one remittance from whichever payer was last, with
+ * every payer's claims merged into it — and then fail its own balance check, because one payer's
+ * BPR total was being set against all of them. A bundled file therefore posted nothing at all.
+ *
+ * So the file is split first and each remittance is imported on its own terms: banked against its
+ * own total, balanced against its own claims, and attributed to the payer named at its own top.
+ * The owner: "each 835 has the payor on it doesn't it.. at the top". Now every one of them is read.
  */
 export async function importRemittance(
   text: string,
@@ -384,9 +396,70 @@ export async function importRemittance(
    * moment it arrives, rather than discovered later as a hole in the cash account.
    */
   providerAdjustmentCents: number;
+  /** How many remittances the file held. One, almost always; more when a sender bundles them. */
+  remittances: number;
 }> {
-  const { parse835, payableOnly } = await import("./x12-835");
-  const r = parse835(text);
+  const { parse835Sets } = await import("./x12-835");
+  const sets = parse835Sets(text);
+
+  /*
+   * The ordinary case, kept as the straight path: one remittance in, one report out.
+   *
+   * Only a file that genuinely holds several takes the aggregating branch below, so nothing about
+   * reading a normal 835 changed and the report a caller gets back is the same object it always was.
+   */
+  if (sets.length <= 1) {
+    const one = await importOneRemittance(sets[0], fileName, user, opts);
+    return { ...one, remittances: sets.length };
+  }
+
+  /*
+   * A bundle. Each remittance is imported on its own, and the report is the file's total.
+   *
+   * `payer` is the one thing that cannot be summed. Where every remittance in the file came from
+   * the same payer it is that payer; where they did not, saying so is the honest answer and a
+   * caller printing it gets "3 payers" rather than one payer's name standing for all of them.
+   */
+  const out = {
+    payments: 0, alreadyHeld: 0, matched: 0, unmatched: 0, paidAReversedFill: 0, ambiguous: 0,
+    amountCents: 0, skipped: 0, problems: [] as string[],
+    payer: null as string | null, paidOn: null as string | null,
+    settles: true, banked: false, providerAdjustmentCents: 0, remittances: sets.length,
+  };
+  const payers = new Set<string>();
+  for (const [i, set] of sets.entries()) {
+    const r = await importOneRemittance(set, fileName, user, opts);
+    out.payments += r.payments;
+    out.alreadyHeld += r.alreadyHeld;
+    out.matched += r.matched;
+    out.unmatched += r.unmatched;
+    out.paidAReversedFill += r.paidAReversedFill;
+    out.ambiguous += r.ambiguous;
+    out.amountCents += r.amountCents;
+    out.skipped += r.skipped;
+    out.providerAdjustmentCents += r.providerAdjustmentCents;
+    out.banked = out.banked || r.banked;
+    // Not every remittance in a bundle settles the same way: a facilitator file could ride along
+    // with plans' files, and `settles` is only true of the file if it is true of all of it.
+    out.settles = out.settles && r.settles;
+    out.paidOn = out.paidOn ?? r.paidOn;
+    if (r.payer) payers.add(r.payer);
+    // Prefixed, because a problem naming neither the payer nor which of five remittances it came
+    // from is a problem nobody can act on.
+    out.problems.push(...r.problems.map((p) => `${r.payer ?? `remittance ${i + 1}`}: ${p}`));
+  }
+  out.payer = payers.size === 1 ? [...payers][0] : `${payers.size} payers`;
+  return out;
+}
+
+/** One remittance, already parsed out of its file. See `importRemittance` above. */
+async function importOneRemittance(
+  r: import("./x12-835").Remittance,
+  fileName: string,
+  user: { name: string; id?: string },
+  opts: { bank?: boolean; documentId?: string | null } = {},
+) {
+  const { payableOnly } = await import("./x12-835");
   const { keep, skipped } = payableOnly(r);
   /*
    * Whose money this is decides what it does to a fill.
@@ -680,7 +753,25 @@ export async function sweepRemittances(user: { id?: string; name: string }): Pro
         out.matched += r.matched;
         out.unmatched += r.unmatched;
         out.problems.push(...r.problems);
-        markDone(c);
+        /*
+         * Deleted only if something was actually taken from it.
+         *
+         * `markDone` used to be called here unconditionally, which quietly broke the promise the
+         * delete loop below makes — "only files that were actually read reach here". A remittance
+         * that does not balance posts nothing on purpose, and a file that parsed but posted nothing
+         * was being deleted anyway: the one copy of a remittance still needing attention, destroyed
+         * because reading it had not thrown.
+         *
+         * Payments already held count as read. A re-download of yesterday's file posts nothing
+         * because every line of it is recognised, and that file is finished with — leaving it would
+         * make the folder fill up with remittances the site already has.
+         */
+        if (r.payments > 0 || r.alreadyHeld > 0) markDone(c);
+        else
+          out.problems.push(
+            `${c.name}: nothing was posted from it, so it has been left in the folder rather than deleted. ` +
+              `It is the only copy here, and ProviderPay still holds the original.`,
+          );
         continue;
       }
 

@@ -240,11 +240,105 @@ export function splitReference(reference: string): { rxNumber: string; fillNumbe
 }
 
 /**
+ * The delimiters this file uses, read from its ISA rather than assumed.
+ *
+ * Shared by `parse835` and `parse835Sets` so the two can never disagree about where a segment
+ * ends — which would make the splitter and the parser see different files.
+ */
+function delimitersOf(body: string): { element: string; component: string; terminator: string } {
+  // ISA is fixed-width: the element separator is its fourth character, the component separator its
+  // 105th, and the segment terminator the one after that.
+  const isa = body.indexOf("ISA");
+  if (isa >= 0 && body.length > isa + 106) {
+    return { element: body[isa + 3], component: body[isa + 104], terminator: body[isa + 105] };
+  }
+  return { element: "*", component: ":", terminator: "~" };
+}
+
+/**
+ * Every remittance in a file, because one file is not always one remittance.
+ *
+ * ── Why this exists ──
+ *
+ * An X12 file is an envelope (ISA/GS) around one or more transaction sets, each bracketed by ST and
+ * SE, and each 835 transaction set is a complete remittance: its own payer at N1*PR, its own trace
+ * at TRN, its own total at BPR02. `parse835` reads a file as a single remittance, which is right
+ * for a file holding one and quietly wrong for a file holding several: the payer, the trace and the
+ * total are each single values that every ST overwrites, so a bundle of five payers' remittances
+ * comes out as one remittance from whichever payer happened to be last, with all five payers'
+ * claims merged into it.
+ *
+ * That is not hypothetical here. Of the 62 ProviderPay traces with matched claims, 32 hold claims
+ * from more than one PBM — one holds five — which is exactly the shape a merged bundle takes. The
+ * owner, looking at the files themselves: "each 835 has the payor on it doesn't it.. at the top".
+ * It does. There is more than one top.
+ *
+ * The other half of the fault is the arithmetic. `parse835` balances BPR02 against every claim it
+ * found, so on a merged bundle it checks one payer's total against five payers' claims, and the
+ * difference is reported as a file that does not add up. Read as separate remittances, each one
+ * balances against its own total and the check means what it says again.
+ *
+ * ── Why it delegates rather than reimplementing ──
+ *
+ * Each set is handed back to `parse835` with the file's own envelope in front of it, so there is one
+ * reader of an 835 and not two. A second implementation would drift from the first, and this one
+ * has the PHI rule in it — the `default: break` that refuses to keep the segment naming the patient.
+ * Splitting a file must not become a way around that.
+ */
+export function parse835Sets(text: string): Remittance[] {
+  const body = text.replace(/^﻿/, "");
+  if (!body.trim()) return [parse835(text)];
+
+  const { element, terminator } = delimitersOf(body);
+  const segments = body
+    .split(new RegExp(`[${escapeForClass(terminator)}\\r\\n]+`))
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  /*
+   * The envelope, kept so each set is parsed with the delimiters it was written with.
+   *
+   * Only ISA and GS: they carry the delimiters and the sender, and nothing else outside a
+   * transaction set means anything to this reader.
+   */
+  const tagOf = (seg: string) => (seg.split(element)[0] ?? "").trim().toUpperCase();
+  const envelope = segments.filter((s) => tagOf(s) === "ISA" || tagOf(s) === "GS");
+  const sets: string[][] = [];
+  let open: string[] | null = null;
+  for (const seg of segments) {
+    const tag = tagOf(seg);
+    if (tag === "ST") {
+      if (open) sets.push(open);
+      open = [seg];
+      continue;
+    }
+    if (open) {
+      open.push(seg);
+      if (tag === "SE") {
+        sets.push(open);
+        open = null;
+      }
+    }
+  }
+  if (open) sets.push(open);
+
+  // No transaction set at all is not something to invent an answer for: hand the whole file to the
+  // reader and let it say what is wrong with it.
+  if (sets.length === 0) return [parse835(text)];
+
+  const head = envelope.length ? envelope.join(terminator) + terminator : "";
+  return sets.map((set) => parse835(head + set.join(terminator) + terminator));
+}
+
+/**
  * Reads a remittance.
  *
  * The delimiters are taken from the ISA segment rather than assumed, because they vary by sender
  * and a file split on the wrong character reads as one enormous unusable segment. Where there is no
  * ISA — the CLI writes files that begin at ST — the common defaults are used and that is stated.
+ *
+ * Reads **one** remittance. A file may hold several, and `parse835Sets` above is what reads those;
+ * everything that imports a file goes through it, so this is reached with a single transaction set.
  */
 export function parse835(text: string): Remittance {
   const out: Remittance = {
@@ -266,17 +360,7 @@ export function parse835(text: string): Remittance {
     return out;
   }
 
-  // ISA is fixed-width: the element separator is its fourth character, the component separator its
-  // 105th, and the segment terminator the one after that.
-  let element = "*";
-  let component = ":";
-  let terminator = "~";
-  const isa = body.indexOf("ISA");
-  if (isa >= 0 && body.length > isa + 106) {
-    element = body[isa + 3];
-    component = body[isa + 104];
-    terminator = body[isa + 105];
-  }
+  const { element, component, terminator } = delimitersOf(body);
 
   const segments = body
     .split(new RegExp(`[${escapeForClass(terminator)}\\r\\n]+`))
