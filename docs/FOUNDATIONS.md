@@ -337,23 +337,70 @@ payroll $45,000.00, rent $2,625.44, accounting $1,403.40, PSAO fees $619.25, Ale
 $49,855.42 a month, which at twelve days of thirty gives the $19,942.17 the account shows, plus
 $522.00 of delivery and $200.00 of postage.
 
-**What is certainly real and entirely absent.** Each checked for a standing cost *and* a vendor, and
-neither exists in any case:
+**What is absent, and in which of three states.** I first wrote this as one list of costs
+"certainly real and entirely absent". He corrected three of the five, and every correction was right:
 
-| Missing | Why it is certain | Can the site size it? |
+> "Pioneer invoices are sent to our email, we just haven't received one yet, same with credit card
+> processing fees, 45k is fully loaded with everything"
+
+| | State | Why |
 |---|---|---|
-| Card and merchant fees | $32,715.93 of copays plus $2,844.76 front of shop — **$35,560.69 through the counter in twelve days** | the base yes, the rate is his |
-| **PioneerRx itself** | the pharmacy cannot operate without it | no — his invoice |
-| Payroll taxes | on $18,000 of pro-rated wages, unless the $45,000 is already fully loaded | not until that is answered |
-| DIR fees | a revenue offset, landing months later and retroactively per claim | not yet; needs a per-payer estimate |
-| Insurance, utilities, phone and internet, licences and DEA registrations, waste disposal, delivery fuel | every pharmacy has all of them | no |
+| **PioneerRx software** | **expected, not yet arrived** | invoiced by email; the feed will catch it |
+| **Card and merchant fees** | **expected, not yet arrived** | same; the statement comes by email |
+| **Payroll taxes and benefits** | **already counted** | the $45,000 is fully loaded — the finding was simply wrong |
+| DIR fees | genuinely not captured | a revenue offset landing months later, retroactively per claim, entered by hand |
+| Insurance, utilities, phone and internet, licences, waste disposal, delivery fuel | **not established** | may arrive by email, may be on a card, may not exist as separate bills — not yet asked |
+
+So the same three states the brief warns about — never measured, measured and none, nothing to
+measure — collapsed into one word and handed over as a finding.
+
+What the site must do and does not: **tell a cost that is missing from a cost that has not arrived
+yet.** An empty line today means one of three things and the account renders all three as nought,
+which is why "is the pharmacy making money" cannot be answered from that page.
+
+Worth knowing either way: **$35,560.69 went through the counter in twelve days** ($32,715.93 of
+copays plus $2,844.76 front of shop), so whatever the card rate is, the fee on it is real money and
+is not in the account yet.
 
 Two vendors are on file in total: Endicia and Rx Systems.
 
-**So September's −$713.03 is optimistic, and not by a little.** Card fees alone on $35,560.69 are
-several hundred dollars month to date. A cost base of five lines cannot answer "is the pharmacy
-making money", which is the question the site exists for — and it is why an 8.0% gross margin and a
-near-break-even bottom line can sit on the same page without either looking wrong.
+**September's −$713.03 is therefore incomplete rather than optimistic**, and the distinction
+matters: the costs are not missing from the business, the account cannot yet distinguish a cost that
+does not exist from one whose invoice has not arrived. Card fees and the software bill are both
+coming. DIR is real and unentered. Until each empty line says which of the three it is, the bottom
+line cannot be acted on.
 
-This is the first thing to fix on the accounting side, and most of it is one conversation rather
-than any code: what each of those costs actually is per month.
+---
+
+## The delivery driver: a "finding" that was not one, twice
+
+Worth writing down in full because the mistake is more instructive than anything it found.
+
+**What the site shows.** 9 delivery days recorded, $522.00 accrued into the accrual account,
+`driver_invoices` holding 0 rows, no standing cost, nothing on the cash side.
+
+**What I reported.** That on a cash basis the driver works for nothing. He corrected it:
+
+> "From a cash basis that's correct until we pay the driver…"
+
+Right, and obviously right. $522.00 accrued against nothing paid is what cash accounting *should*
+show before a supplier is paid. The two bases are meant to differ there and `docs/MONEY-TRACE.md`
+says so in its own words. I knew that and did not apply it to my own output.
+
+**What I then reported.** A narrower version: that 0 invoices means the payment was never triggered.
+He caught that too:
+
+> "the driver thing is correct now but I had to catch it, not you, that's the problem"
+
+And that second version is also not established. I do not know that the invoice workflow is how he
+pays his driver. He may pay cash weekly, or by standing transfer, or the table may be for something
+else entirely. **"The site has an empty table" is not the same as "something is wrong."**
+
+**What it actually is: a question, not a finding.** Does he pay the driver through this workflow? If
+yes, nothing has prompted it in nine delivery days and that is worth a nudge on a screen. If no, the
+table is unused by design and the accrual is right, and the only open question is whether the cash
+side will ever see the payment.
+
+**The discipline this earned**, now in `docs/CONSTITUTION.md` §7b: before reporting a finding, state
+what *should* be true and why — from knowledge, not from the data — and only call it a finding if the
+two differ. If I cannot say what should be true, I have a question and must present it as one.
