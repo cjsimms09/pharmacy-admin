@@ -8,6 +8,45 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September: rebates are not double counted; a dateless invoice is money no rebate figure can see
+
+The rebate path read end to end. Full write-up:
+`docs/audits/2026-09-12-a-dateless-invoice-is-money-nobody-counts.md`. **No file of yours is edited.**
+
+**Cleared, and recorded so it is not re-derived.** The obvious double count — the rebate reducing the
+cost of goods *and* arriving as income — is not there. Income lands once as a `cashReceipts` row
+whose key `addCashReceipt` refuses to take twice, with the corrected-statement case handled by
+`updateCashReceipt` changing the amount rather than adding a row. The rebate-reduced unit cost
+appears only in buying questions — `over-nadac`, `minimum-store:86`, `month-plan:165`,
+`drug-profit:424` — and in `drug-profit` it sits on both sides of a subtraction, so it cancels out of
+the answer. `rebates.estimatedCents` is one standalone tile on Today, summed into no cash or profit
+total, and it is this month's accrual against a cheque that settles a past month.
+
+**The finding.** `earningSoFar` selects the month by `invoiceDate >= '${m}-01' and <= '${m}-31'`
+(`rebate-rates.ts:316`), and `invoice_lines.invoice_date` is nullable. A null is neither, so a
+dateless invoice's lines are in **no month at all** — not this one, not any. `over-nadac.ts:100`
+filters them out the same way, and unlike the missing pack size and the missing NADAC it pushes
+nothing to `excluded`.
+
+What makes it worth a line is the contrast in the same function. A line whose *supplier* cannot be
+placed is counted, its money summed, its names collected — *"it is counted and named below rather
+than dropped"* — and `suppliers/page.tsx:283` renders it with the remedy: *"Nothing below counts
+them — not the purchases, not the ratio, not the rebate."* A dateless line gets none of that. And
+the codebase already names the other half of the same fact: *"A dateless invoice is in the archive
+and outside every date range, which is the one form of retrieval an inspector actually uses"*
+(`setInvoiceDate`, `invoices.ts:2127`). The compliance cost is said; the money cost is not.
+
+**One query settles whether it bites:**
+
+```sql
+select count(*), sum(extended_cents) from invoice_lines where invoice_date is null;
+select count(*) from supplier_invoices where invoice_date is null;
+```
+
+Anything but zero is purchases outside every rebate figure and every purchasing comparison with no
+screen saying so. If it is zero, the guard is still worth having — `setInvoiceDate` exists because an
+invoice arriving without a readable date is ordinary.
+
 ### From B — 12 September: a return credit on an ordinary invoice costs every item line on it
 
 Not tied to one commit — the seam is `MONEY` at `invoice-lines.ts:85-86`, which has never carried a
