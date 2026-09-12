@@ -266,3 +266,94 @@ In order, and none of them is optional:
 
 Then the tools he listed are worth building, and not before: buying above NADAC, supplier appeals,
 MAC appeals, NADAC complaints, return tools, and choosing the NDC furthest under NADAC.
+
+---
+
+## The claim: what it carries, and what the site never looks at
+
+Asked because he said the site "has to understand everything I do as the PIC". So: which facts about
+a claim does a pharmacist act on, and which of those does the site actually hold?
+
+### DAW is in the data, is empty here, and the site recommends substitutions anyway
+
+`claims.daw` exists, is read in exactly one file, and is **null on all 2,536 September claims**.
+PioneerRx has it — `Prescription.Claim.DawCodeID` — and it is populated. Straight from PioneerRx,
+September's paid claims:
+
+| DawCodeID | Claims |
+|---|---|
+| 0 | 2,506 |
+| 9 | 17 |
+| **1** | **11** |
+| **2** | **10** |
+| 3 | 1 |
+| 8 | 1 |
+
+If those ids carry the NCPDP meanings — and the 0–9 range says they probably do — then 1 is
+substitution not allowed by the prescriber and 2 is the patient asking for the brand. **On 21
+September claims the substitution is not the pharmacy's to make**, while `switch-ndc` recommends
+$2,628.36 a month of NDC changes without ever consulting the field that says so.
+
+Question 8 applies here rather than question 7: the worst case is not a bad recommendation, it is a
+dispensing against a prescriber's instruction. That ranks the risk far above its dollar value, and
+the counts being small is exactly why it would go unnoticed.
+
+**Not yet proved:** `DawCodeID` is an id into PioneerRx's own lookup table, and the query to read
+that lookup returned nothing. The mapping to the NCPDP codes is inference and has to be confirmed
+before anything relies on it. Question 9.
+
+### Other claim facts the site does not take
+
+All present in `Prescription.Claim` or `RxTransaction`, none pulled:
+
+- **`CompoundCode`** — 2 September claims are compounds. A compound has no single NDC, so every
+  per-NDC cost, NADAC comparison and appeal is meaningless on them, and they are currently
+  indistinguishable from ordinary fills.
+- **`PharmacyServiceTypeID`** — null on all 3,370 claims here. Retail, mail, long-term care and
+  specialty carry different contract terms; a margin figure that mixes them compares different
+  businesses.
+- **`PriorAuthorizationRequested` / `PriorAuthorizationNumber`** — a prior authorisation is unpaid
+  work the pharmacy did, and one requested and never returned may be a claim still recoverable.
+- **`PartialFillTotalDispensedQuantity`**, `AllowPartialFill` — a partial fill and its completion are
+  one prescription across two claims. Counted as two fills, the quantity and the cost are both wrong.
+- **`LevelOfService`**, **`PlaceOfService`** — both change what a plan owes.
+
+### Stored and read by nothing
+
+`enrichedFrom`, `matchMethod`, `payerAmbiguous`, `wacCents`, `nadacDispensedCents`,
+`pharmacyServiceType`, `reversedOn`. Some are provenance worth keeping. `payerAmbiguous` is a flag
+the matcher raises and nothing surfaces, and `wacCents` is a fifth benchmark stored and unused.
+
+---
+
+## The accounting: the cost base is five lines
+
+All 25 expense categories are well chosen — DIR fees, payroll taxes, insurance, interest, licences,
+returns and credits, wholesaler rebates, owner draws, loan principal. **Every one carries $0.00 for
+September.** Nothing has been entered.
+
+So the whole operating side of the account is five standing monthly costs pro-rated by days elapsed:
+payroll $45,000.00, rent $2,625.44, accounting $1,403.40, PSAO fees $619.25, Alert360 $207.33 —
+$49,855.42 a month, which at twelve days of thirty gives the $19,942.17 the account shows, plus
+$522.00 of delivery and $200.00 of postage.
+
+**What is certainly real and entirely absent.** Each checked for a standing cost *and* a vendor, and
+neither exists in any case:
+
+| Missing | Why it is certain | Can the site size it? |
+|---|---|---|
+| Card and merchant fees | $32,715.93 of copays plus $2,844.76 front of shop — **$35,560.69 through the counter in twelve days** | the base yes, the rate is his |
+| **PioneerRx itself** | the pharmacy cannot operate without it | no — his invoice |
+| Payroll taxes | on $18,000 of pro-rated wages, unless the $45,000 is already fully loaded | not until that is answered |
+| DIR fees | a revenue offset, landing months later and retroactively per claim | not yet; needs a per-payer estimate |
+| Insurance, utilities, phone and internet, licences and DEA registrations, waste disposal, delivery fuel | every pharmacy has all of them | no |
+
+Two vendors are on file in total: Endicia and Rx Systems.
+
+**So September's −$713.03 is optimistic, and not by a little.** Card fees alone on $35,560.69 are
+several hundred dollars month to date. A cost base of five lines cannot answer "is the pharmacy
+making money", which is the question the site exists for — and it is why an 8.0% gross margin and a
+near-break-even bottom line can sit on the same page without either looking wrong.
+
+This is the first thing to fix on the accounting side, and most of it is one conversation rather
+than any code: what each of those costs actually is per month.
