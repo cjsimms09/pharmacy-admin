@@ -4,6 +4,7 @@ import { db, schema } from "@/db";
 import { newId } from "./crypto";
 import { parseCents, parseQuantityThousandths, isPricingUnit, receivedCents, formatCents } from "./money";
 import { todayIso } from "./dates";
+import { isOutOfBooks } from "./books-start";
 import { audit } from "./audit";
 import { readSheetAsObjects, excelSerialToIso } from "./xlsx";
 import { parseCsv, buildPbmResolver } from "./reference";
@@ -734,7 +735,7 @@ export function staleAgainstDispensing(
   return { keep, stale };
 }
 
-export async function repairReversals(): Promise<{ paired: number; strays: number; stillStranded: { rxNumber: string; dateFilled: string; amountCents: number; why: string }[] }> {
+export async function repairReversals(): Promise<{ paired: number; strays: number; beforeTheBooks: number; stillStranded: { rxNumber: string; dateFilled: string; amountCents: number; why: string }[] }> {
   const rows = await db.query.claims.findMany({
     where: eq(schema.claims.source, "transaction_report"),
     columns: {
@@ -759,7 +760,7 @@ export async function repairReversals(): Promise<{ paired: number; strays: numbe
    * false alarm that teaches somebody to stop reading the list.
    */
   const strays = rows.filter((c) => isStrandedReversal(c) && !rows.some((o) => o.id !== c.id && o.reversalKey === c.transactionKey));
-  if (strays.length === 0) return { paired: 0, strays: 0, stillStranded: [] };
+  if (strays.length === 0) return { paired: 0, strays: 0, beforeTheBooks: 0, stillStranded: [] };
 
   const live = new Map<string, typeof rows>();
   for (const c of rows) {
@@ -771,6 +772,8 @@ export async function repairReversals(): Promise<{ paired: number; strays: numbe
   const used = new Set<string>();
   const stillStranded: { rxNumber: string; dateFilled: string; amountCents: number; why: string }[] = [];
   let paired = 0;
+  /* Reversals of dispensings from before the books begin: counted, never reported as a job. */
+  let beforeTheBooks = 0;
   for (const rev of strays) {
     const found = claimCancelledBy(rev, (live.get(key(rev)) ?? []).filter((c) => !used.has(c.id)));
     /*
@@ -781,6 +784,24 @@ export async function repairReversals(): Promise<{ paired: number; strays: numbe
      * from one that had nothing to do, and the pharmacist is left pressing a button and hoping.
      */
     if (found.hit === null) {
+      /*
+       * A reversal of a dispensing from before the books begin is not a job.
+       *
+       * The owner, 12 September: "we are starting evrything clean as of 09/01, so if it is a
+       * reversal of a claim from before 09/01 we can forget about". He is right, and the reason is
+       * that there is nothing for it to cancel: the run it reverses was dispensed before this site
+       * was given a report, so no revenue was ever counted for it and pairing would move no figure.
+       * All twelve on file today are dated between 19 and 28 August.
+       *
+       * Still stored and still counted — counted apart. It is a real thing that happened and the
+       * row is the record of it; what it is not is something anybody can act on. Reporting it
+       * beside reversals that do need pairing is how a list that matters stops being read, and the
+       * paragraph above this loop already learned that lesson once.
+       */
+      if (isOutOfBooks(rev.dateFilled)) {
+        beforeTheBooks++;
+        continue;
+      }
       stillStranded.push({ rxNumber: rev.rxNumber, dateFilled: rev.dateFilled, amountCents: rev.remitCents ?? 0, why: found.why });
       continue;
     }
@@ -792,7 +813,7 @@ export async function repairReversals(): Promise<{ paired: number; strays: numbe
       .where(eq(schema.claims.id, hit.id));
     paired++;
   }
-  return { paired, strays: strays.length, stillStranded: stillStranded.slice(0, 20) };
+  return { paired, strays: strays.length, beforeTheBooks, stillStranded: stillStranded.slice(0, 20) };
 }
 
 /**
@@ -818,6 +839,8 @@ export async function recheckHeldClaims(): Promise<{
   reversalsHeld: number;
   /** The ones that still could not be paired, and why — so a repair that did nothing says so. */
   stillStranded: { rxNumber: string; dateFilled: string; amountCents: number; why: string }[];
+  /** Reversals of dispensings from before the books begin. Counted, never a job. */
+  reversalsBeforeTheBooks: number;
   paymentsMatched: number;
   before: { differenceCents: number; fillsOff: number };
   after: { differenceCents: number; fillsOff: number };
@@ -887,6 +910,7 @@ export async function recheckHeldClaims(): Promise<{
     reversalsPaired: reversals.paired,
     reversalsHeld: reversals.strays,
     stillStranded: reversals.stillStranded,
+    reversalsBeforeTheBooks: reversals.beforeTheBooks,
     paymentsMatched: matched,
     before: { differenceCents: before.differenceCents, fillsOff: before.fillsOff },
     after: { differenceCents: after.differenceCents, fillsOff: after.fillsOff },

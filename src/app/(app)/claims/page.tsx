@@ -260,6 +260,28 @@ export default async function ClaimsPage({
         ? `${r.reversalsPaired} reversal${r.reversalsPaired === 1 ? "" : "s"} finally matched the claim${r.reversalsPaired === 1 ? "" : "s"} they cancel, which had been standing as live revenue`
         : null,
       r.paymentsMatched ? `${r.paymentsMatched} payment${r.paymentsMatched === 1 ? "" : "s"} attached to the fill it belongs to` : null,
+      /*
+       * And the ones it could not pair, which used to be dropped from this sentence entirely.
+       *
+       * `stillStranded` was returned by `recheckHeldClaims` and rendered nowhere — five September
+       * reversals worth $1,277.03 reaching no screen at all. The refusal itself is right: a reversal
+       * whose figures do not exactly cancel a live claim might belong to either run, and cancelling
+       * the wrong one deletes revenue that was really earned. But a refusal nobody is told about is
+       * the same as no check, which is the fault this codebase keeps finding in itself.
+       *
+       * Pre-September ones are not named, by his decision — "we are starting evrything clean as of
+       * 09/01, so if it is a reversal of a claim from before 09/01 we can forget about" — but they
+       * are counted in a clause of their own so the total still adds up.
+       */
+      r.stillStranded.length
+        ? `${r.stillStranded.length} reversal${r.stillStranded.length === 1 ? "" : "s"} could not be matched to the claim they cancel, so up to ` +
+          `${(r.stillStranded.reduce((n, x) => n + Math.abs(x.amountCents), 0) / 100).toFixed(2)} may still be standing as revenue: ` +
+          r.stillStranded.map((x) => `${x.rxNumber} on ${x.dateFilled}`).join(", ") +
+          `. Each needs a person to say which run of the prescription it reverses`
+        : null,
+      r.reversalsBeforeTheBooks
+        ? `${r.reversalsBeforeTheBooks} reversal${r.reversalsBeforeTheBooks === 1 ? "" : "s"} of dispensings from before 1 September were left alone, because nothing was ever counted for them`
+        : null,
     ].filter(Boolean);
 
     const balance =
