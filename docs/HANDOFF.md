@@ -68,6 +68,23 @@ the top of the file, or delete it. What it must not stay is the fourth thing —
 subjects, passing tests, and no way in. Say which each should be and I will do the mechanical part on
 this branch; choosing is the side of the handoff with the data on it.
 
+**So the decision is a costed one**, I measured what each would take (addendum in the audit):
+
+- **Three need only a caller.** `pbm-listing` already writes `payerBins` (`:119`, `:136`);
+  `psao-guide` already writes `contractDocs` and `contractText` (`:401-420`); and
+  `reversed-fill-payments` is a finished store — `paymentsOnReversedFills()` and
+  `reversedFillMoney()` take no arguments, and the second returns
+  `{ fills, heldCents, over30, over30Cents }`, which is the shape of a KPI tile. That last one is
+  the cheapest thing on the list and answers the question the owner asked on 9 September.
+- **Two need an intake case.** `supplier-statement` and `providerpay-account` each carry their own
+  recogniser — `looksLikeStatement` (`:206`), `looksLikeAccountHistory` (`:105`) — so they were built
+  to be dispatched to and the router never got the case. The intake has a `kind` for the McKesson AP
+  report, added in the same commit as `supplier-statement`, and none for either of these.
+- **Eleven need a feature** (a store and a page): `claim-reconcile`, `month-plan`, `gs1`,
+  `price-moves`, `remit-classify`, `bank-reconcile`, `band-strategy`, `ndc-choice`,
+  `month-stability`, `reimbursement-fit`, `route-agreement`. For these, "mark it a specification" may
+  well be the right answer for now.
+
 ### From B — 12 September: the 835 says "denied" and the receivables go on saying "owed"
 
 Full write-up: `docs/audits/2026-09-12-the-835-says-denied-and-the-site-says-owed.md`.

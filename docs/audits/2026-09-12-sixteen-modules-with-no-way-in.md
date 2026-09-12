@@ -118,3 +118,41 @@ What it must not stay is the fourth thing: present-tense commit subjects, passin
 in. If it would help, I will do the mechanical part of any of the three on this branch — but which of
 the three each module gets is a judgement about what the pharmacy needs, and that is the side of the
 handoff with the data on it.
+
+---
+
+## Addendum: what each would take, so the decision is a costed one
+
+Measured, not guessed: whether the module touches the database, what it writes, and whether it
+carries its own `looksLike…` recogniser (which is how the intake router dispatches a document).
+
+**Already complete — needs only a caller.** The write is written and the table exists:
+
+| module | writes to | missing |
+|---|---|---|
+| `pbm-listing` | `payerBins` (`:119`, `:136`) | one caller — an intake case or a button |
+| `psao-guide` | `contractDocs`, `contractText` (`:401-420`) | one caller |
+| `reversed-fill-payments` | reads only; `paymentsOnReversedFills()` and `reversedFillMoney()` take no arguments and return render-ready rows | one page, or one tile on Claims |
+
+`reversed-fill-payments` is the cheapest thing on this list and answers a question the owner asked on
+9 September in the module's own opening quote. Two argument-free functions, one of which already
+returns `{ fills, heldCents, over30, over30Cents }` — the exact shape of a KPI tile.
+
+**Built to be dispatched to, and the router never got the case.** Each carries its own recogniser:
+
+| module | recogniser | what the router would do with it |
+|---|---|---|
+| `supplier-statement` | `looksLikeStatement(text, fileName)` `:206` | read it, store the due dates in the table `schema.ts:3480` already documents |
+| `providerpay-account` | `looksLikeAccountHistory(text)` `:105` | read it, so a sweep line on the bank statement resolves into payers |
+
+Both are pure — text in, rows out — so neither can have been half-wired by accident. The intake path
+has a `kind` for the McKesson AP report (`ap_transactions`, added in the same commit as
+`supplier-statement`) and none for either of these.
+
+**Pure, and needing a store as well as a page:** `claim-reconcile`, `month-plan`, `gs1`,
+`price-moves`, `remit-classify`, `bank-reconcile`, `band-strategy`, `ndc-choice`, `month-stability`,
+`reimbursement-fit`, `route-agreement`. These are the expensive ones, and the ones where "mark it a
+specification" may well be the right answer for now.
+
+That is the whole shape of the decision: three that need a caller, two that need an intake case, and
+eleven that need a feature. None of it is mine to choose.
