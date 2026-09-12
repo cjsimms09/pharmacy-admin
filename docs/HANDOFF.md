@@ -8,6 +8,56 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September: the clipped NDC column can print ten, and `ndcFromRun` only asks about nine
+
+`86256fb` audited. Full write-up: `docs/audits/2026-09-12-the-column-that-printed-ten.md`.
+**No file of yours is edited.** Two things, neither wrong on today's data, both about the next
+clipped line.
+
+**One. Ten is not asked about.** `ndcFromRun` asks the directory whether the column printed eleven
+or nine. A column that printed **ten** — the 4-4-2, 5-3-2 and 5-4-1 forms, and what a clip of one
+character leaves — falls through to the `run.slice(-11)` the commit was written to stop trusting.
+Run against the function as it stands:
+
+```
+run=916540093015301 (item 91654 + the 4-4-2 form of 00093-0153-01)
+  code=40093015301   printed=11   itemNumber=9165   isADrug=false
+```
+
+The propranolol bug, one digit over: nobody's code, purchases against nothing, item number short of
+its last digit. And where the stolen digit happens to complete a code the FDA *does* list, guard 1
+(`known(last11)`) accepts it and the money attaches silently to a drug that was not bought.
+
+**The reader is already in the file.** `ndcFromUpc` pads ten back to eleven three ways and accepts
+only when exactly one is a listed drug. Three lines, after the nine-digit branches:
+
+```ts
+const ten = run.slice(-10);
+const padded = [...new Set(["0" + ten, ten.slice(0, 5) + "0" + ten.slice(5), ten.slice(0, 9) + "0" + ten.slice(9)])].filter(known);
+if (padded.length === 1) return { code: padded[0], printed: 10 };
+```
+
+Checked against a stand-in directory: the two ten-digit cases come right (`00093015301` item `91654`,
+`41167058707` item `91654`) and **all three of your existing cases are unchanged**, the propranolol
+included. `sameDrugCode` has the matching hole — an eleven-digit code against its own ten-digit form
+reads as a disagreement, though `ten()` inside it already knows the three paddings.
+
+**Two. Guard 3 reads one listed pack as certainty, and guard 2 says the directory lags.** Both cannot
+hold. The nine-digit code your two-pack branch keeps is inert — `over-nadac.ts:108` drops any line
+whose NDC has no pack size. The eleven-digit code the one-pack branch invents is fully live:
+`gross = packCostCents * 10_000 / packQty` at `over-nadac.ts:139`. A hundred-count bought for $10
+attached to the thirty-count divides by 30, shows >200% over NADAC, and over-NADAC rows are where
+the NADAC complaints come from. The safer outcome is reserved for the case where the directory knows
+*more*.
+
+**Two counts only your side can take:**
+
+1. Does any stored line have `ndcFromRun` returning `printed: 11` for a `code` that `knownNdcs()`
+   does not recognise? Those are the ten-digit columns.
+2. How many stored invoice lines carry an eleven-digit `ndc11` whose product has exactly one package
+   listed, on an IPD or ParMed invoice? Each is a pack size the document did not print, now dividing
+   a cost per unit.
+
 ### From B — 12 September: CI has been red since `df666bd`, and the cause is one missing line
 
 **Fixed on my branch (PR #25) in `.github/workflows/check.yml` — one step, no source file touched.**
