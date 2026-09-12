@@ -8,6 +8,51 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September: the buy list's controlled gate asks a name list, with two better answers already stored
+
+`minimum-store.ts:30-46` read against the readers and the directory. Full write-up:
+`docs/audits/2026-09-12-the-buy-list-asks-the-weakest-of-three-sources.md`. **No file of yours is
+edited.** This one I would put above the others in this batch.
+
+`controlledNdcs` selects `{ ndc11, itemClass }` and falls back to `scheduleFromNames`. Two problems
+with that pair, both run rather than read:
+
+**`itemClass` fires for one supplier.** It is set by exactly one of five readers — McKesson at
+`invoice-lines.ts:641`. IPD `:600`, IPC `:695`, IPC credit `:737` and ParMed `:766` all set it
+`null`, and even McKesson's prints only on prescription lines. So for everything else the gate is a
+name match alone.
+
+**The supplier's own statement is on the row and is not selected.** Run on IPD's own layout:
+
+```
+IPD  ndc=70165002030  itemClass=null  controlled=true      <- oxycodone
+IPD  ndc=54707560094  itemClass=null  controlled=false
+```
+
+`invoice_lines.controlled` is a stored column, written from IPD's "CII Subtotal:" / "Non-CII
+Subtotal:" headings (`invoice-lines.ts:547`) and inserted with every line. `controlledNdcs` does not
+read it.
+
+**And the FDA's answer is in `drug_directory.dea_schedule`, per NDC.** `scheduleFromInvoiceLines`
+trusts it completely — *"a drug it lists with no schedule is uncontrolled"* (`invoices.ts:138`). The
+compliance path asks the FDA per NDC; the ordering path, for the same NDCs, asks a name.
+
+**Why the name list is the wrong tool here, in its own words:** *"Missing a Schedule III to V is a
+much smaller thing … So that list aims to be good rather than perfect."* Right for filing invoices.
+Reused as the buy list's gate it means a Schedule III to V generic can reach the page whose docstring
+says *"the cost of a wrong inclusion is a controlled substance ordered by a page that must not"*.
+Fairly: the C-II list is exhaustive by design and a III to V needs no 222 or CSOS, so this is not a
+CII in the cart — it is a controlled substance on a page whose premise is that it carries none.
+
+The fix is two columns, both already populated, and it keeps your rule exactly (either source
+suffices to exclude, nothing is required to include) — the audit has the five lines.
+
+**Two counts, the second being the one that says whether anything is wrong today:**
+
+1. How many stored invoice lines have `controlled = 1` and `item_class` null?
+2. Of the NDCs currently on the buy list or in `candidates`, how many have a non-blank `dea_schedule`
+   in `drug_directory`? Anything above zero is a controlled substance on the page right now.
+
 ### From B — 12 September: rebates are not double counted; a dateless invoice is money no rebate figure can see
 
 The rebate path read end to end. Full write-up:
