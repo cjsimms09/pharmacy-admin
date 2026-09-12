@@ -224,10 +224,13 @@ not by when I wrote it.** Everything is in `docs/audits/` in full.
 | — | **RESOLVED** | CI never ran `db:migrate`, so 4 tests failed on every runner since `df666bd` — fixed in `8d7c9db` | — |
 | — | **clean** | Rebates are counted once; the 835 reader at four points; the 459 plan adoptions; `books-check` fully wired; devices and salt forms in `substitutable`; the floor's scope gates against *Rutledge*; the fingerprint fix | — |
 
-Two of those twenty are **questions rather than findings** because I could not write the SHOULD BE
-line from domain knowledge, and #3 is a question for fourteen of its sixteen for the same reason.
-That is the gate working, and I would rather hand you two honest questions than two more findings you
-have to audit.
+**Twenty-two rows, of which two (#19, #20) are questions rather than findings**, because I could not
+write the SHOULD BE line from domain knowledge; #3 is a question for eleven of its thirteen for the
+same reason; and #21 is a *state* — not-captured — rather than either. That is the gate working, and
+I would rather hand you honest questions than more findings you have to audit.
+
+*Counts corrected 21:10 — the line above said "twenty" while the table had grown to twenty-two, which
+is the rot this index exists to prevent. If you find the two disagreeing again, trust the table.*
 
 Entries from 11 September and earlier are below this block, unindexed — say the word and I will index
 those too rather than guess at which still matter.
