@@ -8,6 +8,58 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September: the $30 floor is well judged, and the worklist it was added to reaches no page
+
+`2d2123f` audited. Full write-up:
+`docs/audits/2026-09-12-a-floor-on-a-worklist-with-no-screen.md`. **No file of yours is edited.**
+
+The floor itself I have no argument with, and I ran it: a verdict rather than a filter, one constant
+with a note to remove the gate rather than tune it, "more than $30" taken literally so exactly thirty
+is set aside, the shortfall still carried in `setAside`, and asked after the gates that say a claim is
+not appealable at all. All of that holds.
+
+**`macAppealWorklist` has one consumer in the repository and it is not a page:**
+
+```
+scripts/caremark-appeal-plan.ts:61   await import("../src/lib/mac-appeal-store")
+tests/mac-appeal-candidates.test.ts:3
+```
+
+`src/app/(app)/claims/appeals/page.tsx:35` is built entirely on `appealQueue` from `appeals.ts` —
+every figure, card and empty state. And `mac-appeal-candidates.ts`'s own opening says of that queue:
+*"it returns nothing at all when no rate row covers the claim. On this pharmacy's data that is 1,960
+claims and an empty queue."* So the strict queue that comes back empty is the one on his screen, and
+the module built because it comes back empty is the one with no screen. That is the shape you fixed
+for `stillStranded` eight commits earlier the same day.
+
+**And one layer down, the same fault in the sentence.** Forty claims from one payer, each $25 short:
+
+```
+batches=0  totalClaims=0  totalCents=$0.00
+setAside:  too_small 40 claims $1000.00
+says:      "No MAC appeals to file."
+```
+
+`setAside` carries the $1,000 correctly, into a field rendered nowhere; `says` is the alert, and it
+says none exist. A clause fixes it: "nothing worth filing today — $1,000.00 across 40 claims is below
+the $30 floor".
+
+**The two costings in the module disagree.** The floor is priced per claim ("38 codes for two and a
+half dollars each"), and `scripts/caremark-appeal-plan.ts` backs that — one Rx number, one
+255-character comment, one reason per form. `worklist`'s docstring prices it per batch: *"one visit
+to one portal settles all of that payer's claims"*. The script is the better evidence, so the
+docstring is probably the wrong half — but it is the sentence `Batch` is built on.
+
+Small: `too_small` is asked before `too_late` (342 against 424), so the set-aside total includes
+claims whose window has already closed. It is not "what we would recover if the floor came down".
+
+**Two questions for your side:**
+
+1. Is the MAC worklist meant to reach a page? If not, `mac-appeal-candidates.ts` should say at the
+   top that it is a specification — today it reads as live.
+2. On the Caremark portal, does one submission carry one claim or many? That decides which costing is
+   true, and therefore whether $30 is per claim or per visit.
+
 ### From B — 12 September: pre-September reversals are forgotten on the date, not on having nothing to cancel
 
 `693114d` audited. Full write-up: `docs/audits/2026-09-12-forgotten-on-the-date-alone.md`.
