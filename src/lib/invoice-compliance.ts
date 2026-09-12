@@ -308,6 +308,31 @@ export async function invoiceCompliance(): Promise<Requirement[]> {
   // ── The feed itself ───────────────────────────────────────────────
   const suppliers = await db.query.suppliers.findMany();
   const active = suppliers.filter((x) => x.active);
+
+  /*
+   * ── Who is actually worth asking for an address ──
+   *
+   * This asked for one from every active supplier without an address, and said their invoices "will
+   * not be recognised". Both halves were wrong, and the owner had to be the one to say so:
+   * "Cardinal, Rrc and top rx arent going to get invoices, theyre set to use pioneer as invoice",
+   * and "anda we will get when they send us first invoice and we should capture it automatically".
+   *
+   * A settled supplier is one whose PioneerRx receipt *is* the invoice — his decision, on the
+   * supplier card. No document is coming from them, so an address would do nothing and asking for
+   * it is asking him to go and get something that does not exist. The deliveries check on the same
+   * page has excluded these all along and says so in a line; this one had never been told.
+   *
+   * And for the rest, "will not be recognised" is not true. `looksLikeInvoiceFromUnknownSender` in
+   * mailbox.ts catches an invoice from an address nobody has registered — on the document's own
+   * words, two or more lines each carrying an NDC and a price — and raises it in the Inbox with the
+   * supplier its page names. Naming them there writes the address onto the register and the next
+   * one files itself. So a first invoice from ANDA is captured; what it needs is one press, not an
+   * address typed in ahead of time on the strength of a guess about who they email from.
+   *
+   * Which leaves this line saying something true and much smaller: an address saves that one press.
+   */
+  const settled = active.filter((x) => x.invoiceFromPioneer);
+  const missing = active.filter((x) => !x.senderEmails.trim() && !x.invoiceFromPioneer);
   out.push({
     key: "capture",
     citation: "Not a citation — the condition that makes the archive complete",
@@ -316,19 +341,34 @@ export async function invoiceCompliance(): Promise<Requirement[]> {
       "either, and nothing about a well-kept archive reveals that it is missing one.",
     how:
       active.length > 0
-        ? `${active.length} supplier${active.length === 1 ? " is" : "s are"} recognised by the address they send from, and silence from one that used to write is reported.`
+        ? `${active.length - settled.length} supplier${active.length - settled.length === 1 ? " is" : "s are"} recognised by the address they send from, ` +
+          `and silence from one that used to write is reported. An invoice from an address nobody has registered is still ` +
+          `recognised from its own page and raised in the Inbox for you to name the sender.` +
+          /*
+           * Named while there are few, counted once there are many. Ten names is a wall of text on
+           * a phone, and the fact worth carrying is that they are excluded on purpose and where to
+           * change it — not which ten.
+           */
+          (settled.length === 0
+            ? ""
+            : settled.length <= 3
+              ? ` ${settled.map((x) => x.name).join(", ")} ${settled.length === 1 ? "is" : "are"} not counted: you have said their PioneerRx receipt is the invoice.`
+              : ` ${settled.length} more are not counted: you have said their PioneerRx receipt is the invoice. Change that on their card under Suppliers.`)
         : "No supplier is recorded, so nothing arriving by email will be filed as an invoice.",
-    state: active.length === 0 || active.some((x) => !x.senderEmails.trim()) ? "attention" : "ok",
+    /*
+     * Not "attention". Nothing is being missed — the first invoice from an unregistered sender is
+     * caught either way, and this only saves a press on it. A page that shouts about everything is
+     * a page he stops reading.
+     */
+    state: active.length === 0 ? "attention" : "ok",
     fix:
       active.length === 0
         ? "Add the wholesalers and the addresses they send invoices from, or nothing will be filed automatically."
-        : active.some((x) => !x.senderEmails.trim())
-          ? `${active.filter((x) => !x.senderEmails.trim()).map((x) => x.name).join(", ")} ${active.filter((x) => !x.senderEmails.trim()).length === 1 ? "has" : "have"} no sending address recorded, so their invoices will not be recognised.`
+        : missing.length
+          ? `${missing.map((x) => x.name).join(", ")} ${missing.length === 1 ? "has" : "have"} no sending address yet, so the first invoice from ${missing.length === 1 ? "them" : "each"} arrives in the Inbox to be named rather than filing itself. Naming it there records the address, and the ones after it file themselves.`
           : undefined,
     href: "/suppliers",
-    settle: active.some((x) => !x.senderEmails.trim())
-      ? { kind: "supplier_address", suppliers: active.filter((x) => !x.senderEmails.trim()).map((x) => ({ id: x.id, name: x.name })) }
-      : undefined,
+    settle: missing.length ? { kind: "supplier_address", suppliers: missing.map((x) => ({ id: x.id, name: x.name })) } : undefined,
   });
 
   void todayIso;
