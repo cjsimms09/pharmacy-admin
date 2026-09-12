@@ -8,6 +8,60 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September: splitting a bundled 835 is right, and the deposit gate refuses every set after the first
+
+`4615a7c`..`1a8554f` audited. Full write-up:
+`docs/audits/2026-09-12-bundled-835s-bank-once.md`. **No file of yours is edited.**
+
+`1a8554f`'s diagnosis is exactly right and the splitter is sound — verified: a two-payer file splits
+cleanly, each half balances against its own total, only ISA/GS are kept as the envelope, and no
+segment can join two sets, so no claim can be counted twice. **That is what makes this urgent**:
+each set is now banked separately, and `gateDeposit` has never been asked to look at siblings from
+one file before.
+
+1. **Every set of a bundle sharing one EFT trace is refused after the first.** Each set banks with
+   `reference: r.traceNumber` and `sourceKey: 835|payer|trace|paidOn`; `gateDeposit` refuses on
+   either identity (`:96`) or the trace's digits (`:105`). Run against `682062c`'s own example,
+   EFT-31399961, which it reports as holding Caremark, OptumRx and Maxor Plus:
+
+   ```
+   Caremark     $ 5000.00  ->  BANKED
+   OptumRx      $ 4000.00  ->  REFUSED: EFT-31399961 is already banked as 5000.00...
+   Maxor Plus   $ 4726.21  ->  REFUSED: EFT-31399961 is already banked as 5000.00...
+   banked total: $5000.00 of $13,726.21
+   ```
+
+   The **claim side posts all of it** — each set's payments carry their own prescription numbers and
+   clear their own dedupe — so the two halves disagree by exactly the unbanked amount. And the
+   failure changed shape rather than going away: before this commit a bundle failed its balance check
+   and posted nothing, loudly; now it posts the first set and refuses the rest into `refused[]`,
+   which is not an error and is not on the page he reads.
+
+   **The question that decides the size of this is yours:** in a real September ProviderPay bundle,
+   do the ST sets carry one shared TRN02 or one each? TRN is mandatory in 5010, so the no-trace
+   variant needs a malformed file and is narrow. The shared-trace case is not narrow — it is
+   plausible precisely because TRN02 is the EFT reference and one EFT was sent — and `682062c` says
+   32 of 62 traces hold more than one PBM. One command against a September file: for each ST, print
+   TRN02.
+
+   **Fix either way:** make the deposit's identity the *set*, not the file — append the set index or
+   its own BPR02 to `sourceKey` and to the fallback reference, so three remittances under one EFT are
+   three deposits that sum to the EFT.
+
+2. **A non-835 set becomes a phantom remittance.** `parse835Sets` never checks ST01, so an 835 plus a
+   functional acknowledgement returns two sets, the second with no payer, no total and no payments.
+   Harmless to the money — it cannot bank and its balance check cannot fire — but the file takes the
+   aggregating branch and reports `remittances: 2` for one remittance. `isX12Remittance` already has
+   the test; one condition in the loop.
+
+**Checked and worth saying:** `682062c`'s conclusion that a ProviderPay remittance has no single
+payer is superseded by `1a8554f` reinterpreting those multi-PBM traces as merged bundles — and
+attributing through the claim's BIN is right either way, so both fixes stand and neither is a
+finding. This also **shrinks** the population hitting the refused-remittance delete, since bundles
+used to fail the balance check and then be deleted as read; that delete is unchanged and still open.
+And the ProviderPay folder route still does not bank at all (`remits/page.tsx:159`, open), so this
+bites the Add tool and the mailbox first.
+
 ### From B — 11 September: the appeal evidence page reads a pack size with a regex that stops at the outer carton
 
 `011b91d`..`893aefd` audited. Full write-up:
