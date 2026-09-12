@@ -45,6 +45,31 @@ async function main() {
   const limit = Number(process.argv[2] ?? 40);
   const { db } = await import("../src/db");
 
+  /*
+   * Which claims may be appealed is decided in one place, and it is not here.
+   *
+   * This script used to pick its own: paid, Caremark, generic per NADAC, under cost. Those are four
+   * of the tests `judge` makes and it misses the two that matter most — whether a MAC priced the
+   * claim at all (basis of reimbursement 06 or 07) and whether the money landed on NADAC rather
+   * than under it. Caremark rejected Rx 333968 as a "non MAC claim" for exactly the first, and this
+   * script would have offered it again.
+   *
+   * So the worklist decides and this only builds the form. Below-NADAC claims only: an appeal on one
+   * paid above the national average asks Caremark to beat it on a drug bought above it, which is a
+   * buying gap and comes back declined. `judge` flags those `aboveNadac` and they are left out here.
+   */
+  const { macAppealWorklist } = await import("../src/lib/mac-appeal-store");
+  const worklist = await macAppealWorklist();
+  const batch = worklist.batches.find((b) => /caremark/i.test(b.pbmName));
+  const filable = (batch?.claims ?? []).filter((j) => !j.aboveNadac);
+  if (filable.length === 0) {
+    console.log("Nothing is filable with Caremark today.");
+    return;
+  }
+  const allowed = new Set(filable.map((j) => j.candidate.claimId));
+  const daysLeftOf = new Map(filable.map((j) => [j.candidate.claimId, j.daysLeft]));
+  const deadlineOf = new Map(filable.map((j) => [j.candidate.claimId, j.deadline]));
+
   const rows = (await db.$client.execute(`
     SELECT c.id, c.rx_number, c.date_filled, c.ndc11, c.item_name, c.bin, c.pcn,
            c.quantity_thousandths, c.remit_cents, c.copay_cents, c.acquisition_cents,
@@ -64,7 +89,7 @@ async function main() {
        AND c.acquisition_cents IS NOT NULL
        AND c.quantity_thousandths > 0
        AND c.id NOT IN (SELECT claim_id FROM appeals WHERE kind = 'mac_appeal' AND claim_id IS NOT NULL)
-  `)).rows as any[];
+  `)).rows.filter((r: any) => allowed.has(String(r.id))) as any[];
 
   const plan: any[] = [];
   for (const x of rows) {
@@ -93,8 +118,13 @@ async function main() {
 
     const nadacPerUnit = Number(x.nadac_micros) / 10000;
     const nadacTotal = Math.round(nadacPerUnit * qty);
-    const deadline = new Date(Date.parse(x.date_filled + "T00:00:00Z") + 10 * 86400000).toISOString().slice(0, 10);
-    const daysLeft = Math.round((Date.parse(deadline + "T00:00:00Z") - Date.parse(TODAY + "T00:00:00Z")) / 86400000);
+    /*
+     * The deadline and the days left come from the worklist, which read this payer's window off its
+     * own agreement. Recomputing them here as "fill date plus ten" hard-codes Caremark's window into
+     * a second place, and the day it changes only one of them would learn.
+     */
+    const deadline = deadlineOf.get(String(x.id)) ?? null;
+    const daysLeft = daysLeftOf.get(String(x.id)) ?? null;
 
     /*
      * Which reason to ask for. Repricing at NADAC only helps where NADAC covers the cost; where
