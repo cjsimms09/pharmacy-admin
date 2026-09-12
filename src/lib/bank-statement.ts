@@ -274,15 +274,37 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
    */
   if (/^(CHECK|CHQ|CHEQUE|DRAFT)\s*#?\s*\d+$/i.test(d.trim()) && ctx.standing?.length) {
     /*
-     * Only the figures that could be this month's.
+     * Only the figures this cheque could be paying.
      *
      * Most recurring costs are the same every month and carry no month of their own. The delivery
      * round is not: the owner pays the driver for the trips he actually drove, so his cheque is a
      * different figure every month — 54 trips at $9.00 in one, 47 in the next. A candidate carrying
-     * a month is only a candidate in that month, or September's cheque would be matched against
-     * August's round and confirm a payment that never happened.
+     * a month is therefore only a candidate for the round it belongs to, or one month's cheque would
+     * confirm another month's round and assert a payment that never happened.
+     *
+     * ── Which months, and why two ──
+     *
+     * The owner, on how the driver is paid: "at end of month print that invoice and give driver a
+     * check", and then plainly on the timing: **"It won't clear on exact day, it will clear early in
+     * the next month for same amount as delivery."**
+     *
+     * So the normal case is a cheque landing in the first days of the month *after* the trips. This
+     * filter admitted only the line's own month, which meant the normal case came back unplaced —
+     * measured: $522.00 clearing 30 September matched, the same cheque clearing 1 October did not —
+     * and left him placing it by hand every month.
+     *
+     * The line's month and the one before it, then. Not wider: two months is what his workflow can
+     * produce, and a third would start matching cheques to rounds nobody was paying that late.
+     * `chequeCandidates` offers both rounds; this decides which of them a given line may pay.
+     *
+     * Where both months came to the same figure the amount cannot say which, and the code below
+     * refuses rather than choosing — see the two-exact-matches branch.
      */
-    const candidates = ctx.standing.filter((c) => !c.month || c.month === line.on.slice(0, 7));
+    const lineMonth = line.on.slice(0, 7);
+    const before = new Date(Date.parse(`${lineMonth}-01T00:00:00Z`));
+    before.setUTCMonth(before.getUTCMonth() - 1);
+    const payable = new Set([lineMonth, before.toISOString().slice(0, 7)]);
+    const candidates = ctx.standing.filter((c) => !c.month || payable.has(c.month));
     const exact = candidates.filter((c) => c.amountCents === out);
     if (exact.length === 1) {
       return {
@@ -373,11 +395,41 @@ export async function chequeCandidates(month: string): Promise<{ name: string; a
   /*
    * The driver's round, from the days entered — the same arithmetic his invoice is built from, so
    * the figure the cheque is tested against is the figure he was actually owed.
+   *
+   * ── Two months of rounds, because of when the cheque is written ──
+   *
+   * The owner, asked how he pays the driver: "We pay driver once monthly, track with the invoice on
+   * site then at end of month print that invoice and give driver a check.. so accural should read
+   * off invoice and cash will see check. It should know which check is delivery because it will be
+   * for exact amount of delivery from previous month."
+   *
+   * So the cheque for September's trips is written at the end of September and clears on either
+   * side of the boundary. Offering only the drawn month's round meant a $522.00 cheque clearing on
+   * 30 September matched and the same cheque clearing on 1 October did not — measured, both ways —
+   * leaving him to place it by hand twelve times a year.
+   *
+   * The previous month's round is a candidate too, and each carries its own month so the placement
+   * can say *which* round it paid. That is why the month sits on the candidate rather than being
+   * inferred from the line: a cheque confirming the wrong month's round asserts a payment that
+   * never happened, and naming the month is what makes that visible to him.
+   *
+   * Only the delivery round gets this. A standing cost carries no month because it is the same
+   * every month, and widening those would match a rent cheque against any month's rent.
    */
   const { monthState } = await import("./deliveries");
-  const round = await monthState(month);
-  if (round.totalCents > 0) {
-    out.push({ name: `The delivery round for ${round.label}`, amountCents: round.totalCents, paidDay: null, month });
+  const previous = new Date(Date.parse(`${month}-01T00:00:00Z`));
+  previous.setUTCMonth(previous.getUTCMonth() - 1);
+
+  for (const m of [month, previous.toISOString().slice(0, 7)]) {
+    const round = await monthState(m);
+    if (round.totalCents <= 0) continue;
+    /*
+     * Two consecutive months coming to the same figure would make a cheque ambiguous. Deliberately
+     * not resolved here and not hidden: both are offered, `placeLine` finds two exact matches and
+     * says it cannot tell them apart from the amount alone — which is the honest answer, and the
+     * one he can do something about.
+     */
+    out.push({ name: `The delivery round for ${round.label}`, amountCents: round.totalCents, paidDay: null, month: m });
   }
 
   return out;

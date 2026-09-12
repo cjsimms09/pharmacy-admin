@@ -227,16 +227,35 @@ describe("naming a cheque by what it is for", () => {
     assert.match(p.why, /nothing is booked from this line/);
   });
 
-  test("the delivery round is a candidate only in its own month", () => {
-    /* The driver is paid for the trips he drove, so his cheque is a different figure every month. */
+  test("the delivery round is a candidate in its own month and the one after", () => {
+    /*
+     * The driver is paid for the trips he drove, so his cheque is a different figure every month and
+     * the exact amount is the only handle the bank gives.
+     *
+     * This test used to assert the round was a candidate *only* in its own month — written to stop
+     * one month's cheque confirming another month's round. Then the owner said how he actually pays:
+     * "at end of month print that invoice and give driver a check", and on the timing, "It won't
+     * clear on exact day, it will clear early in the next month for same amount as delivery."
+     *
+     * So the case this test enforced — September's round unmatched by an October cheque — was the
+     * *normal* case, and it sent him to place the line by hand every month. The window is now the
+     * line's month and the one before it. Two rounds late is still refused, below.
+     */
     const withRound = [...standing, { name: "The delivery round for September 2026", amountCents: 48_600, paidDay: null, month: "2026-09" }];
     const p = placeLine(cheque(48_600), { ...ctx, standing: withRound });
     assert.equal(p.kind, "confirms_standing");
     if (p.kind !== "confirms_standing") return;
     assert.match(p.name, /delivery round/);
-    /* The same cheque in October must not confirm September's round. */
-    const october = placeLine({ ...cheque(48_600), on: "2026-10-18" }, { ...ctx, standing: withRound });
-    assert.equal(october.kind, "unplaced");
+
+    /* Early in October, paying September's round: the ordinary case, and it must be placed. */
+    const october = placeLine({ ...cheque(48_600), on: "2026-10-06" }, { ...ctx, standing: withRound });
+    assert.equal(october.kind, "confirms_standing");
+    if (october.kind !== "confirms_standing") return;
+    assert.match(october.name, /September/);
+
+    /* November is two rounds late and must not confirm September. */
+    const november = placeLine({ ...cheque(48_600), on: "2026-11-04" }, { ...ctx, standing: withRound });
+    assert.equal(november.kind, "unplaced");
   });
 
   test("a figure near a standing cost is NOT taken for it", () => {
