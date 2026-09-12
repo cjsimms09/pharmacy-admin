@@ -16,6 +16,19 @@ Each was then re-checked by plain text search for the module's name anywhere out
 Fifteen have zero mentions. The sixteenth, `ndc-choice.ts`, has one — a sentence in a comment in
 `under-nadac.ts` saying what it would do.
 
+**The "no escape hatch" claim, checked four ways rather than asserted**, because the whole finding
+rests on it. Across `src/`:
+
+```
+require(                      only node:path and node:fs, both literal   (remits/page.tsx:56-57)
+next/dynamic, dynamic(        no matches
+import(<non-literal>)         no matches
+import(`…`)                   no matches
+```
+
+So every module reference in this codebase is a literal string. A module that no literal names cannot
+be reached, and there is no fifth way in that this sweep could have missed.
+
 ```
  lines  tests  added        module
    428   no    2026-09-08   psao-guide.ts
