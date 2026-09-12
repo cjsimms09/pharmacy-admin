@@ -8,6 +8,51 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September: partial fills — the site counts two, and the field that would say otherwise is not captured
+
+A fifth item off your "still to be checked" list. Full write-up:
+`docs/audits/2026-09-12-partial-fills-the-field-is-not-captured.md`. **No file of yours is edited.**
+
+**The first half, from the code.** `fillKey` is `rxNumber|fillNumber|dateFilled|ndc11`
+(`fills.ts:244`) and `scriptCounts` returns `scripts: inPeriod.length` over fills (`ledger.ts:327`).
+A partial and its completion share the prescription number, the fill number and the NDC and differ
+only in service date — so they are **two fills and two scripts**. `fills.ts`'s own reasoning is right
+for the case it was written for (one dispensing transmitted to two payers on one day) and does not
+reach this one, which is two genuine dispensings of two quantities on two days.
+
+```
+OBSERVATION  No dispensing-status field exists anywhere — claims.mapColumns maps none, the claims
+             table has none, and a search for "partial fill", "dispensing status", 343-HD or 344-HF
+             finds only unrelated uses.
+SHOULD BE    A partial and its completion are one prescription dispensed once and handed over in two
+             parts. NCPDP marks them P then C against the same prescription and the SAME fill number
+             — which is how they differ from a refill, since a refill increments it. For script
+             volume that is one script. CII partials are the common case and are time-limited by
+             rule, so this is not an exotic edge.
+DIFFERENCE   Yes, and not that the arithmetic is wrong — that the site CANNOT TELL. With dispensing
+             status not captured, such a pair is indistinguishable from two ordinary dispensings.
+```
+
+In your four states: dispensing status is **not-captured**. Not "missing" — nobody has asked the
+report for it, so it has never been measured and its absence says nothing about whether partial fills
+happen here.
+
+**What I cannot answer, said out loud.** Whether the cost is doubled turns on whether PioneerRx puts
+the whole prescription's acquisition cost on both rows or each row's own share, and the code reads
+one number either way. One query settles both that and how often this happens:
+
+```sql
+SELECT rx_number, fill_number, ndc11, count(*) rows, count(DISTINCT date_filled) days,
+       sum(acquisition_cents) acq, group_concat(date_filled) dates
+FROM claims WHERE source = 'transaction_report' AND status = 'paid'
+GROUP BY rx_number, fill_number, ndc11 HAVING count(DISTINCT date_filled) > 1 ORDER BY acq DESC;
+```
+
+Zero rows and this is theoretical. Any rows and the next question is whether their acquisition costs
+sum to one prescription's cost or to two. **Capturing dispensing status is only worth doing if that
+query says these exist** — and this is exactly what your driver clause was written about: I have the
+mechanism, I do not have the fact, and I am not going to invent the fact.
+
 ### From B — INDEX of my entries, because thirty of them in a flat list is a rotted register
 
 Your own clause: *"a register kept by hand rots, and a rotted register is worse than none — it reads
@@ -38,6 +83,7 @@ not by when I wrote it.** Everything is in `docs/audits/` in full.
 | 18 | **open, not live** | A paid row with no NDC falls out of both of `staleAgainstDispensing`'s answers — `keep` is not dead, four tests read it | money |
 | 19 | *question* | Of 31 unmatched `mtf` payments, how many are **not** before the feed? Your comment says 24 of 24 were | money |
 | 20 | *question* | `plan`'s last received date is 2026-08-31 — has a real September 835 arrived yet? | money |
+| 21 | **not-captured** | Partial fills: `fillKey` includes the service date, so a partial and its completion are two fills and two scripts — and dispensing status is not captured, so the site cannot tell such a pair from any other | money |
 | — | **RESOLVED** | The appeal scripts' own pack divisor — closed by your `pack-size.ts`, verified by running it | — |
 | — | **RESOLVED** | CI never ran `db:migrate`, so 4 tests failed on every runner since `df666bd` — fixed in `8d7c9db` | — |
 | — | **clean** | Rebates are counted once; the 835 reader at four points; the 459 plan adoptions; `books-check` fully wired; devices and salt forms in `substitutable`; the floor's scope gates against *Rutledge*; the fingerprint fix | — |
