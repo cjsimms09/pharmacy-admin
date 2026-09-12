@@ -19,25 +19,65 @@ so the answer can be checked rather than taken on trust.
 
 | What | Money | The question |
 |---|---|---|
-| **Login almost never works** | — | When it fails, is it the pharmacy computer or a different one? The server records success every time (77 successes, 4 failures, 78 sessions, ten successes in 73 seconds on 9 September), so his browser is not landing. That answer decides whether it is the cookie being dropped for that host or the redirect. |
-| **5 stale paid claim rows** | **$276.99 revenue, $228.67 of September profit** | PioneerRx's last-valid claim names a different NDC than the site holds, on 5 fills — the site kept the pre-rebill row as paid. Is a single fill here ever dispensed as two different NDCs? If never, these 5 are stale and should be reversed, and September's accrual net moves from −$520.55 to −$749.22. Measured 12 September. |
-| **Caremark MAC appeals** | **$645.74** across 117 claims | Needs him to sign in and enter the verification code per submission. 117 below-NADAC claims; 17 lapse the day they are counted. He chose the below-NADAC filter over a top-N cut on 12 September. |
+| **Login almost never works** | — | When it fails, is it the pharmacy computer or a different one? The server records success every time (77 successes, 4 failures, 78 sessions, ten successes in 73 seconds on 9 September), so his browser is not landing. A separate cause was found and fixed on 12 September — every action's result was being served from a stale cache — but that does not explain a login that never lands, so this stays open. |
+| **The brand book loses money** | **−$2,019.24 of September gross profit** | Generics return 43.0% on 1,765 scripts. Brands return **−1.6%** on 182 scripts carrying 73% of the revenue. Two items did most of it: Rexulti 1.0mg, 3 scripts, −$1,328.39 (−44.4%); Zepbound 12.5mg, 3 scripts, −$1,053.81 (−50.5%). GLP-1s are not losses but not a business either — Wegovy 1.9%, Ozempic 0.6%, Mounjaro 3.5%. **No MAC appeal reaches a brand**, so this is a contract question or a do-not-dispense question, and both are his. It is also the answer to "i just feel like our accural is too low for the month": it is low, and this is why. |
+| **rx 336826, cephalexin, $23.36** | $23.36 | The fifth stale claim. The settler deliberately left it: it is the only live row on its fill, so nothing confirms the fill happened at all, and reversing it would take a whole fill off the books on no evidence. Needs him to say whether that prescription was dispensed. |
+| **19 plans still unclassified** | the residual after 459 were adopted and 15 he decided himself | Almost all of it is the one question no document on file answers: is this employer insured, or does it fund its own plan. Needs a Form 5500 or the plan document, one plan at a time. Each row now shows what the plan pays for and whether it ever pays alone, which is what settles a card. |
 
 ## Being corrected in another session
 
 | What | Money | What was asked |
 |---|---|---|
-| **10 purchases where the invoice and the delivery disagree** | totals agree; the money is against the wrong drug | Find why the invoice reader and PioneerRx's receiving record name different NDCs for the same line, and fix the cause. Most are front-end items where neither code is a drug in the FDA directory. Every margin below it is computed from which drug the money is against. |
+| **One authoritative pack size per NDC** | has produced two phantom findings near $34,000 and disqualified real appeals | "How many dispensing units are in this package" is re-derived in at least four places, each with its own regex, and none of them checks that the claim's quantity and the pack's count measure the same thing. Wegovy: the claim counts 2 **mL**, the pack counts 4 **syringes**. Estradiol cream: 42.5 **g** against 1 **tube** — a 28x artefact that disqualified an appealable claim. Asked for: one pure function giving the pack size *and its unit*, which **refuses** where it cannot tell. Then reconcile the 43 solid-dose claims whose acquisition cost disagrees with the invoice ($339.59, $313.16 of it inside accrual COGS; mirabegron rx 337350 overstated by $122.31 against a same-day ParMed invoice). |
+
+## Decisions he made today, so nobody reopens them
+
+- **A MAC appeal needs a shortfall over $30.** His words: "thats not worth it, rather chase other
+  things wrong with site.. lets set a limit for mac claims (have to lose more than $30)". Of 117
+  below-NADAC Caremark claims worth $645.74, only 38 could be proved with an invoice and those came
+  to $95.85, the largest $6.78 — 38 verification codes typed by hand for two and a half dollars
+  each. Money under the floor is still counted and still owed; it just does not reach a worklist.
+  `MIN_WORTH_FILING_CENTS` in `mac-appeal-candidates.ts`.
+- **A reversal of a dispensing from before 1 September is forgotten.** "we are starting evrything
+  clean as of 09/01, so if it is a reversal of a claim from before 09/01 we can forget about". 23 of
+  the 28 on file. Still stored, counted apart: nothing was ever counted for them to cancel.
+- **Cardinal Health, RrcPharmaSolution and TopRx use the PioneerRx receipt as the invoice.** No
+  document is coming, so the site no longer asks for a sending address.
+- **Revenue stays recognised at pickup, not at fill.** Asked and answered on 12 September: the stock
+  is still his until the patient takes it, the cost is held out with the revenue, and an unclaimed
+  script gets reversed. $92,154.24 sits in the bin and the account says so.
 
 ## Mine, not yet started
 
 | What | Money | Note |
 |---|---|---|
-| **Payer payment cycles are on file as prose, not as days** | — | `payment_routing` holds a cycle for 20 of its 29 payers, and every one is the sentence the contract printed: "Within fourteen (14) days of receipt of an electronically submitted Clean Claim". Nothing reads a number out of it, so `promise-due.ts` cannot prefer a payer's own terms and falls back to measurement, or to a default where there is nothing to measure. Not a small job: one row can carry two cycles for two lines of business, and Caremark's states a sixty-day *reconciliation* cycle that says nothing about when a point-of-sale claim is paid. Parse it wrong and the site invents a deadline. |
-| **41 plans still unclassified** | the residual after 459 were adopted on 12 September | Almost all of it is the one question no document on file answers: is this employer insured, or does it fund its own plan. Needs a Form 5500 or the plan document, one plan at a time. |
+| **Invoice coverage is 51%** | blocks **$317.69** of provable appeals, and every per-drug cost | Invoices on file come to $118,449.24 against $230,143.13 of PioneerRx purchases. 66 of the 117 below-NADAC Caremark claims cannot be proved because no invoice covers the NDC. Not a reader problem — the documents are not arriving. Worth more than any appeal on that list. |
+| **5 September reversals cannot be matched to what they cancel** | **$1,277.03** may still be standing as revenue | 336765 on 09-04 at $461.89 and 337203 on 09-09 at $605.94 among them. `claimCancelledBy` is right to refuse: the Wegovy reversal carries an $833.52 copay the live row does not, so it could belong to either run. Each now appears on the recheck with its money. What is missing is a way for him to say which run a reversal cancels. |
+| **Payer payment cycles are prose, not days** | — | `payment_routing` holds a cycle for 20 of its 29 payers, every one the sentence the contract printed. Nothing reads a number out of it, so `promise-due.ts` falls back to measurement. One row can carry two cycles for two lines of business, and Caremark's states a sixty-day *reconciliation* cycle that says nothing about when a point-of-sale claim is paid. Parse it wrong and the site invents a deadline. |
 | **ANDA has no sending address** | — | Self-resolving: their first invoice is captured from its own page and raised in the Inbox to be named. No action unless it does not arrive. |
 
 ## Done today, 12 September
+
+- **459 plans classified in 61 presses: 1,588 claims, $206,059.80.** The register went from 481
+  unclassified to 19, counting the 15 he decided himself.
+- A press showed him the page from *before* the press. `held()` keys its cached readings on a
+  fingerprint of the tables, but `fingerprint()` cached itself for two seconds — and an action
+  writes, redirects and re-renders inside two seconds. Every action on the site had it; `audit()`
+  now forgets the fingerprint.
+- 4 claims for drugs PioneerRx says were never dispensed, taken off the books: accrual net
+  −$520.55 → −$713.03, both bases still balancing to $0.00.
+- MAC appeals: a claim no MAC priced is no longer appealed (basis 06/07 only, 1,038 set aside), one
+  paid *at* NADAC is refused, one paid *above* it is flagged as the weaker argument, and a
+  shortfall of $30 or less does not reach the worklist.
+- The plan classification error named the principle and never the control. It now says the action
+  first.
+- Each plan row shows what it pays for and whether it ever pays alone — the two facts that separate
+  a manufacturer card from a benefit plan.
+- 10 invoice-vs-delivery disagreements → 0; invoices agreeing 19 of 22 → 22 of 22; lines compared
+  215 → 225. A real reader bug behind one: IPD printed a 9-digit NDC column and the reader invented
+  the missing two digits.
+- "Promised by a plan and not yet paid" no longer alerts inside a 25-day grace period measured from
+  the pharmacy's own facilitator payments. $96.89 → $0.00 alerted; nothing stopped being owed.
 
 - ParMed's reader could not cross the DESCRIPTION or NOTE columns — two invoices read as having no
   lines, $945.87 reaching no drug. Fixed; 35 of 35 invoices now reconcile, 0 hold no lines.
