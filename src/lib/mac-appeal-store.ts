@@ -57,6 +57,7 @@ async function loadCandidates(from: string): Promise<Candidate[]> {
       acquisitionCents: schema.claims.acquisitionCents,
       quantityThousandths: schema.claims.quantityThousandths,
       daysSupply: schema.claims.daysSupply,
+      basisOfReimbursement: schema.claims.basisOfReimbursement,
       importId: schema.claims.importId,
     })
     .from(schema.claims)
@@ -108,6 +109,7 @@ async function loadCandidates(from: string): Promise<Candidate[]> {
       acquisitionCents: r.acquisitionCents,
       quantityThousandths: r.quantityThousandths,
       daysSupply: r.daysSupply,
+      basisOfReimbursement: r.basisOfReimbursement,
       classification: classOf.get(r.ndc11!)?.cls ?? null,
     }));
 }

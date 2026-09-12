@@ -49,7 +49,72 @@ export type Candidate = {
   daysSupply: number | null;
   /** From NADAC: "G" generic, "B" brand, null where the NDC is not priced there. */
   classification: string | null;
+  /**
+   * NCPDP Basis of Reimbursement Determination (field 522-FM), as the plan returned it.
+   *
+   * How the plan says it priced this claim, in its own adjudication response. It is the difference
+   * between a MAC appeal and a wasted one — see `MAC_BASES`. Null where the claim does not carry it.
+   */
+  basisOfReimbursement: string | null;
 };
+
+/**
+ * The bases that mean a MAC list set the price, and therefore that there is a MAC to appeal.
+ *
+ * ── Why this gate exists ──
+ *
+ * Caremark rejected the first appeal this pharmacy filed as a "non MAC claim", and it was right to.
+ * Rx 333968, amphetamine ER 12.5mg ODT, came back with basis **03** — ingredient cost reduced to
+ * AWP less a percentage. No MAC list priced it, so there was no MAC to appeal and nothing the form
+ * could have said would have changed that.
+ *
+ * Every gate before this one asked whether the claim *lost money* and whether the pharmacy *may*
+ * file. None of them asked the prior question: did a MAC price this claim at all. The plan answers
+ * that on the claim itself, in field 522-FM, and the site has been storing it all along without
+ * reading it.
+ *
+ * ── Why only 06 and 07 ──
+ *
+ * These two are the MAC bases in the NCPDP list: 06 is MAC pricing with the ingredient cost paid as
+ * the MAC, 07 is ingredient cost reduced to the MAC. Everything else names a different benchmark —
+ * 03 is AWP less a discount, 13 is WAC, 09 is acquisition cost, 08 is contract pricing — and an
+ * appeal against a MAC list that did not price the claim is refused on sight.
+ *
+ * Codes not on this list are treated as not-MAC rather than unknown, deliberately. The cost of
+ * skipping a real MAC claim is one appeal not filed, worth a few dollars; the cost of filing
+ * against a non-MAC claim is a rejection on the pharmacy's record with a PBM it has to keep filing
+ * with, and enough of those is how a pharmacy's appeals stop being read.
+ */
+const MAC_BASES = new Set(["06", "07"]);
+
+/**
+ * What the plan said it priced off, for the sentence that explains a refusal.
+ *
+ * Only the codes actually seen on this pharmacy's claims are named. An unrecognised code is quoted
+ * back rather than guessed at: inventing a meaning for it would be the same fault as the appeal
+ * this gate prevents.
+ */
+const BASIS_MEANS: Record<string, string> = {
+  "00": "no basis specified",
+  "01": "the ingredient cost paid as submitted",
+  "02": "ingredient cost reduced to AWP",
+  "03": "ingredient cost reduced to AWP less a percentage",
+  "04": "usual and customary, paid as submitted",
+  "05": "the lower of ingredient cost plus fees and usual and customary",
+  "08": "contract pricing",
+  "09": "acquisition cost pricing",
+  "13": "wholesale acquisition cost (WAC)",
+  "14": "another payer's patient-responsibility amount",
+  "15": "the patient pay amount",
+  "16": "a coupon payment",
+};
+
+/** The code as the NCPDP list writes it: two digits, so "6" and "06" are one basis. */
+function basisCode(raw: string | null | undefined): string | null {
+  const t = (raw ?? "").trim();
+  if (t === "") return null;
+  return /^\d$/.test(t) ? `0${t}` : t;
+}
 
 /** The rules for one PBM, as transcribed from its agreement. */
 export type PayerTerms = {
@@ -68,6 +133,12 @@ export type Verdict =
   | "paid_enough"
   /** A brand, or an NDC NADAC does not classify. MAC does not price it. */
   | "not_generic"
+  /**
+   * The plan priced this claim off something other than a MAC list, so there is no MAC to appeal.
+   *
+   * The claim says which, and this is the gate that was missing. See `MAC_BASES` below.
+   */
+  | "not_mac_priced"
   /** No invoice covers the NDC, so there is nothing to evidence the appeal with. */
   | "no_invoice"
   /** Paid nothing at all — a deductible claim, not an underpayment. */
@@ -133,6 +204,23 @@ export function judge(c: Candidate, terms: PayerTerms | null, alreadyFiled: Set<
         c.classification === null
           ? "NADAC does not price this NDC, so there is no way to tell whether a MAC list covers it."
           : "A brand. MAC lists price generics, so a brand paid below cost is a contract or buying question, not a MAC appeal.",
+    };
+  }
+
+  /*
+   * Did a MAC list price this claim at all. The plan says so on the claim, and it is the first
+   * question a PBM asks of an appeal — Caremark's answer on the one filed without this gate was
+   * "non MAC claim".
+   */
+  const basis = basisCode(c.basisOfReimbursement);
+  if (basis === null || !MAC_BASES.has(basis)) {
+    return {
+      ...base,
+      verdict: "not_mac_priced",
+      says:
+        basis === null
+          ? "The claim does not say how the plan priced it, and an appeal needs a MAC to appeal against. Without basis of reimbursement 06 or 07 there is no way to tell a MAC underpayment from a drug bought badly."
+          : `The plan priced this off ${BASIS_MEANS[basis] ?? `basis of reimbursement ${basis}`}, not off a MAC list (which would be 06 or 07). There is no MAC to appeal, and a PBM refuses these as a non-MAC claim.`,
     };
   }
 
