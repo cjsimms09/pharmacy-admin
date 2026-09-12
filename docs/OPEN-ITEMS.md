@@ -28,12 +28,12 @@ so the answer can be checked rather than taken on trust.
 | What | Money | What was asked |
 |---|---|---|
 | **10 purchases where the invoice and the delivery disagree** | totals agree; the money is against the wrong drug | Find why the invoice reader and PioneerRx's receiving record name different NDCs for the same line, and fix the cause. Most are front-end items where neither code is a drug in the FDA directory. Every margin below it is computed from which drug the money is against. |
-| **"Promised by a plan and not yet paid" alerts too early** | $96.89, 1 fill | The owner: *"can we give these time before alerting.."* — a plan has a remittance cycle and a fill adjudicated yesterday is not late. Give it a grace period before it is called unpaid, keyed on something real rather than a number somebody picked. |
 
 ## Mine, not yet started
 
 | What | Money | Note |
 |---|---|---|
+| **Payer payment cycles are on file as prose, not as days** | — | `payment_routing` holds a cycle for 20 of its 29 payers, and every one is the sentence the contract printed: "Within fourteen (14) days of receipt of an electronically submitted Clean Claim". Nothing reads a number out of it, so `promise-due.ts` cannot prefer a payer's own terms and falls back to measurement, or to a default where there is nothing to measure. Not a small job: one row can carry two cycles for two lines of business, and Caremark's states a sixty-day *reconciliation* cycle that says nothing about when a point-of-sale claim is paid. Parse it wrong and the site invents a deadline. |
 | **41 plans still unclassified** | the residual after 459 were adopted on 12 September | Almost all of it is the one question no document on file answers: is this employer insured, or does it fund its own plan. Needs a Form 5500 or the plan document, one plan at a time. |
 | **ANDA has no sending address** | — | Self-resolving: their first invoice is captured from its own page and raised in the Inbox to be named. No action unless it does not arrive. |
 
@@ -56,3 +56,10 @@ so the answer can be checked rather than taken on trust.
 - **459 plans classified in 61 presses: 1,588 claims, $206,059.80.** The register went from 481
   unclassified to 41.
 - A deploy takes the site down and he is usually in it. Rule written into `DAILY-CHECK.md`.
+- **"Promised by a plan and not yet paid" no longer alerts on a fill dispensed yesterday.** *"can we
+  give these time before alerting.."* The grace period is 25 days, which is the 90th percentile of
+  the 31 facilitator payments this pharmacy has actually received — its own measurement, not a
+  number anybody picked. The alert went from $96.89 on 1 fill to nothing; the $96.89 is still on the
+  tile as money owed, marked "not due yet", and chased from 6 October. Across all of September it is
+  $4,056.21 on 14 fills outstanding and none of it late. `promise-due.ts`, shared by the claims page
+  and the home page so the two cannot disagree about which dollar is a job.

@@ -410,8 +410,18 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                     money.dispensing.cashFills > 0
                       ? `${formatCents(money.dispensing.cashMarginCents)} of it from cash`
                       : null,
+                    /*
+                      Promised and unpaid, and whether any of it is late.
+
+                      The whole promise, as before — none of it has stopped being owed. What it now
+                      says is which part the payer still has time on, because "promised and unpaid"
+                      on money that adjudicated yesterday reads as a plan not paying.
+                    */
                     money.dispensing.promisedCents > 0
-                      ? `${formatCents(money.dispensing.promisedCents)} promised and unpaid`
+                      ? `${formatCents(money.dispensing.promisedCents)} promised and unpaid` +
+                        (money.dispensing.promisedNotDueCents > 0
+                          ? `, ${formatCents(money.dispensing.promisedNotDueCents)} of it not due yet`
+                          : "")
                       : null,
                   ]
                     .filter(Boolean)
