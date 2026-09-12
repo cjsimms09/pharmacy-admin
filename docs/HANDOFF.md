@@ -8,6 +8,45 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September: a 91%-read invoice and an unreadable scan look identical on the page
+
+`6a04682` audited. Full write-up: `docs/audits/2026-09-12-a-near-miss-looks-like-a-scan.md`.
+**No file of yours is edited.** Four fixes, all sound; the schedule chain is right in every step and
+I verified its premise rather than taking it (below). One finding, and it is the general case of the
+bug you just fixed.
+
+Your own account: *"Three of six lines matched… the reading did not reconcile and every line was
+discarded — which on the screen is an invoice with a total and no items, indistinguishable from an
+unreadable scan. Neither was a scan."* The pattern is fixed. The **policy** is unchanged
+(`invoices.ts:1412` and `:2571`, `if (reconciles === false) return { stored: 0, … }`).
+
+**Refusing to store a partial read is the right call** — lines summing to less than the invoice make
+purchases-by-item wrong in a way that looks right, which is this repo's own "a total is a floor
+unless every part was measured". Nothing here argues for storing them. What is wrong is that **the
+near-miss is computed at the discard and thrown away with the lines**: both return sites already
+carry `readCents` ($657.98) and `unread`, and the printed total is in hand, and none of it is written
+to the invoice. The backfill counts them only in aggregate (`:1507`), under a comment that states
+exactly the distinction the invoice row cannot make — *"it is a layout this reader does not fully
+know, not a scan."* One number for the whole run does not say **which** invoice, or by how much.
+
+**So the next supplier whose layout shifts by a column produces the same silent total loss**, found
+again only because somebody looked. **Fix, and the data is already in the function:** record lines
+read, cents read and printed total on the invoice at the discard, so it can say *"6 lines read coming
+to $657.98 against a printed $722.34; none stored because they do not add up."* That is the
+difference between a reader fault somebody can fix and a scan nobody can.
+
+**Checked and sound — the schedule chain, verified at every step**, because it decides a DEA
+recordkeeping question. The premise holds: `drug-directory.ts:157` sets `deaSchedule` straight from
+the FDA product file's `DEASCHEDULE` (column 18), so a blank in a row the FDA lists is the FDA's own
+"not scheduled", not missing data. `scheduleFromInvoiceLines` refuses unless every line has an NDC
+and every NDC is in the directory. `scheduleFromDea` is strictest-wins and returns `none` only where
+**every** code is explicitly `0`/`00` — an unrecognised code is `unknown`, never `none`. Spelling the
+blanks as `"0"` rather than dropping them is right for the reason given. Every step errs toward the
+drawer, which is the direction 21 CFR 1304.04(h)(1) requires. Nothing to do.
+
+**Unchanged and not re-reported:** `money()`/`MONEY` (`invoice-lines.ts:85-86`) still have no sign or
+bracket handling, so a credit line printed `-11.87` or `(11.87)` is not matched as a row at all.
+
 ### From B — 12 September: a blank basis of reimbursement and a known non-MAC basis share one verdict
 
 `0f9397a` and `25f5b00` audited. Full write-up:
