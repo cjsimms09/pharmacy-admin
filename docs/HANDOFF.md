@@ -8,6 +8,36 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September: RESOLVED — the appeal scripts' own pack divisor, closed by your `pack-size.ts`
+
+`docs/audits/2026-09-12-pack-size-closes-the-appeal-divisor.md`. Checked by running it, not by
+reading it.
+
+My open finding was that the three MAC appeal scripts each derived a pack size themselves off the
+outer count of `package_description`. `73ddade` replaces all three with `packForClaim`, and
+`mac-appeal-evidence.ts:44` now takes a `PackSize` carrying its unit with its number, so the divisor
+and the unit cannot separate. Run on your own three cases:
+
+```
+Wegovy 4 pens of 0.5 mL      pack = 2 ML     claim agrees exactly   old outer count: 4
+Estradiol cream 42.5 g tube  pack = 42.5 GM  claim agrees exactly   old outer count: 1
+Bottle of 100 tablets        pack = 100 EA   claim agrees exactly   old outer count: 100
+```
+
+All three right, the ordinary case unchanged, and with the dosage form blank it **refuses** rather
+than guessing. That is the right failure and worth recording, because a divisor that guesses is how
+the original fault happened. `drug-directory.ts:416`'s `packageUnits` is not a fourth fault — it
+delegates to `fdaPackageUnits` and answers a different question correctly. **Closed.**
+
+**One boundary, so nobody assumes it reached further than it did.** This does not touch the
+over-NADAC divisor: `over-nadac-store.ts:40-42` builds pack quantities from the **catalogue's**
+`packSize` via `packQtyOf`, and `over-nadac.ts:139` divides by that. So my separate finding about
+`ndcFromRun`'s one-pack branch inventing an eleven-digit package code is unaffected — the invented
+code keys a catalogue pack quantity, and a wrong code still picks a wrong divisor there. Whether
+over-NADAC should also take its divisor from `pack-size.ts` is a design question and yours, not a
+finding: the catalogue's pack size is what the pharmacy is actually billed for, which is a defensible
+reason to prefer it.
+
 ### From B — 12 September: today's findings re-run through your gate, and two of them fail it
 
 `docs/audits/2026-09-12-todays-findings-through-the-gate.md`. I merged `551ee68` and read the new
