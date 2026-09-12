@@ -256,11 +256,39 @@ const IPD_NAMED = new RegExp(
  * the figure this whole reader exists to produce. So it is taken from the arithmetic, where there
  * is only one answer: extended divided by unit. A line where that does not divide exactly is left
  * unread rather than guessed at.
+ *
+ * ── Why the middle is not parsed at all ──
+ *
+ * It used to be, as `[A-Z]{3,}` then `(\d+)`: type/form/class, then the size run. That reads the
+ * line above and nothing with anything in the columns between. Two invoices arrived on 11 September
+ * that had, and both were thrown away whole:
+ *
+ *   102399715075537009710HHCLC100TACCU-CHEK SOFTCLIX LC 10011CT 11.87 11.87
+ *   101327892600169750111RXMD1NR33ea 74.51 223.53
+ *
+ * The first prints a DESCRIPTION — a column the header names and the pattern had no room for — so
+ * letters and spaces appear where the size digits were expected. The second carries the note code
+ * "NR" between the size and the unit. Three of six lines matched on the first invoice and none on
+ * the second; because what matched summed to $657.98 against a printed $722.34, the reading did not
+ * reconcile and every line was discarded. On the screen that is an invoice with a total and no
+ * items, which reads as an unreadable scan. Neither was a scan. Both were fully legible.
+ *
+ * The paragraph above already said what to do — "the row cannot be split by position and is read
+ * from its two fixed ends instead" — and the pattern was not doing it. So now it is: the leading
+ * digit run and the trailing UOM-and-two-amounts are matched, and everything between them is
+ * skipped without being interpreted. Nothing downstream wanted those columns; the NDC comes from
+ * the front and the quantity from the arithmetic.
+ *
+ * The middle excludes "$" so this cannot reach across an IPC row, which prints its money with a
+ * dollar sign and no space. The tail already separated them — IPC has no whitespace before its
+ * amounts and closes a credit in brackets — but PARMED is tried first, and a pattern that is only
+ * safe because of the order it happens to sit in is one edit away from not being safe.
  */
 const PARMED = new RegExp(
   String.raw`^(\d{13,})` + // line, item number and NDC, run together
-    String.raw`([A-Z]{3,})` + // type, form and class, run together
-    String.raw`(\d+)` + // size, ordered and shipped, run together
+    // Type, form, class, size, MSG, SOM, IT, NOTE, description, order and quantity. Opens with a
+    // letter, because TYPE always does and a row of nothing but digits is not an item line.
+    String.raw`([A-Z][^$\r\n]*?)` +
     String.raw`([A-Za-z]{1,4})` + // unit of measure
     String.raw`\s+(${MONEY})` + // unit price
     String.raw`\s+(${MONEY})\s*$`, // extended amount
@@ -497,7 +525,7 @@ export function parseInvoiceLines(text: string, printedTotalCents: number | null
 
     const par = PARMED.exec(line);
     if (par) {
-      const [, run, , , uom, unit, ext] = par;
+      const [, run, , uom, unit, ext] = par;
       const unitCostCents = money(unit);
       const extendedCents = money(ext);
       const key = ndc11(run.slice(-11));
@@ -514,7 +542,19 @@ export function parseInvoiceLines(text: string, printedTotalCents: number | null
       format = format ?? "parmed";
       out.push({
         ndc11: key,
-        // The product name is not on the row. The line above it carries the lot and expiry only.
+        /*
+         * Sometimes it is on the row and it still cannot be had.
+         *
+         * This said "the product name is not on the row", which was true of every invoice read at
+         * the time and is not true in general: ParMed prints one for its front-end and device lines
+         * ("ACCU-CHEK SOFTCLIX LC 100"), and drugs go without. Where it is printed it runs straight
+         * into the size, order and quantity digits, so "ACCU-CHEK SOFTCLIX LC 10011CT" splits as
+         * either "LC 100" and 11, or "LC 1001" and 1 — the same ambiguity that stops the quantity
+         * being read off the page, and it cannot be settled from the row.
+         *
+         * Null rather than a guess, and null rather than the digits left on: a description ending
+         * in a stray pack size would be compared against the catalogue and match nothing.
+         */
         description: null,
         /*
          * The row opens with the line number and the item number run together and nothing marks

@@ -26,6 +26,7 @@ import { readFile } from "./files";
 import { pdfText } from "./pdf-text";
 import { allSuppliers, supplierForSender } from "./suppliers-registry";
 import { looksLikeInvoice, fileInvoice, filingFor } from "./invoices";
+import { classify } from "./autoroute";
 
 export type ResortOutcome = {
   itemId: string;
@@ -70,17 +71,63 @@ export async function resortInbox(ctx: { userId: string; userName: string }): Pr
       continue;
     }
 
-    const matched = supplierForSender(register, from);
-    if (!matched) {
-      out.push({ itemId: item.id, fileName, from, routedAs: null, detail: `no supplier in the register sends from ${from}` });
-      continue;
-    }
-
     let bytes: Buffer;
     try {
       bytes = await readFile(doc.storageKey);
     } catch {
       out.push({ itemId: item.id, fileName, from, routedAs: null, detail: "the stored file could not be read" });
+      continue;
+    }
+
+    /*
+     * The reports, before the supplier register is consulted at all.
+     *
+     * This used to begin by asking which supplier sends from this address and give up on anything it
+     * could not name. That is the right question for an invoice and the wrong one for a report: the
+     * recogniser places a report by its own columns and needs no sender, and `era@mckesson.com` is
+     * not in the supplier register because McKesson's invoices arrive from somewhere else.
+     *
+     * So four McKesson reports sat unrecognised and pressing the button could never move them —
+     * among them `returns_details_-_invoice_level.csv`, a format the sweep had already been taught,
+     * and which carried $8,526.77 of credits when the same report arrived again the next day. The
+     * backlog this exists to clear was the one thing it could not clear, and the docstring above
+     * already promised "the same calls the sweep makes — not a copy of them, which would be one
+     * more rule to drift". It had drifted.
+     *
+     * `importRecognised` is that call, given the real sender and subject so the routes that depend
+     * on them still work. Because it is the sweep's own router, a format learned tomorrow is
+     * re-decided by the next press with nothing added here.
+     *
+     * An 835 is left to the supplier path below: `claim-payments.ts` owns remittances, deletes the
+     * file after reading it, and refuses to store remittance bytes as a document. This must not
+     * become a second way in.
+     */
+    const cls = classify(fileName, bytes);
+    if (cls.kind !== "unrecognised" && cls.kind !== "remittance_835") {
+      try {
+        const { importRecognised } = await import("./mailbox");
+        const { getSettings } = await import("./settings");
+        const r = await importRecognised(
+          bytes,
+          fileName,
+          from,
+          item.subject ?? "",
+          await getSettings(),
+          { userId: ctx.userId, userName: ctx.userName },
+          { documentId: item.documentId ?? null },
+        );
+        await db.update(schema.inboxItems).set({ routedAs: r.routedAs, routeResult: r.routeResult }).where(eq(schema.inboxItems.id, item.id));
+        out.push({ itemId: item.id, fileName, from, routedAs: r.routedAs, detail: r.routeResult ?? `read as ${r.routedAs}` });
+        continue;
+      } catch (e) {
+        out.push({ itemId: item.id, fileName, from, routedAs: null, detail: `recognised as ${cls.kind} but could not be read: ${(e as Error).message}` });
+        continue;
+      }
+    }
+
+    const matched = supplierForSender(register, from);
+    if (!matched) {
+      out.push({ itemId: item.id, fileName, from, routedAs: null, detail: `no supplier in the register sends from ${from}` });
       continue;
     }
 

@@ -242,3 +242,48 @@ describe("the schedule, from what PioneerRx booked in", () => {
     assert.equal(scheduleFromDea(["2N"]), "schedule_2");
   });
 });
+
+/**
+ * The FDA's own schedule codes, which are now a source for the drawer.
+ *
+ * The owner: "parmed doesnt send controls" — said about a ParMed invoice sitting in the Schedule II
+ * drawer whose only line was NovoLog insulin. It was filed there because its schedule was
+ * "unknown", and it was unknown because the reader could not read the row and PioneerRx had never
+ * booked the delivery in.
+ *
+ * `scheduleFromInvoiceLines` in invoices.ts now settles that case from the NDCs on the invoice
+ * against `drug_directory.dea_schedule`, and hands the codes to this function rather than deciding
+ * anything itself. So what it hands over has to be understood: the FDA writes "CII" where PioneerRx
+ * writes "2", and it leaves the column blank for a drug that is not controlled.
+ */
+describe("DEA schedules as the FDA writes them", () => {
+  test("the FDA's lettered codes decide the same drawer as PioneerRx's numbers", () => {
+    assert.equal(scheduleFromDea(["CII"]), "schedule_2");
+    assert.equal(scheduleFromDea(["cii"]), "schedule_2");
+    assert.equal(scheduleFromDea(["CIII"]), "schedule_3_5");
+    assert.equal(scheduleFromDea(["CIV"]), "schedule_3_5");
+    assert.equal(scheduleFromDea(["CV"]), "schedule_3_5");
+  });
+
+  test("one Schedule II line makes the whole invoice a Schedule II record", () => {
+    // 21 CFR 1304.04(h)(1). A folder is not a separation if a CII invoice sits in the ordinary one.
+    assert.equal(scheduleFromDea(["0", "CIV", "CII", "0"]), "schedule_2");
+  });
+
+  test("a blank must be spelled out as 0, or an uncontrolled invoice reads as unknown", () => {
+    /*
+     * The trap `scheduleFromInvoiceLines` has to avoid. The directory leaves the column blank for a
+     * drug that is not controlled, and filtering those out leaves an empty list — which this reads
+     * as "unknown", which files with the Schedule IIs. An invoice of nothing but insulin would go
+     * straight back into the drawer it was just taken out of.
+     */
+    assert.equal(scheduleFromDea([]), "unknown");
+    assert.equal(scheduleFromDea([null, undefined, ""]), "unknown");
+    assert.equal(scheduleFromDea(["0", "0"]), "none");
+  });
+
+  test("and a code nobody recognises is still not evidence of nothing", () => {
+    assert.equal(scheduleFromDea(["N/A"]), "unknown");
+    assert.equal(scheduleFromDea(["0", "SOMETHING"]), "unknown");
+  });
+});

@@ -87,6 +87,81 @@ export async function scheduleFromPioneer(invoiceNumber: string | null | undefin
   };
 }
 
+/**
+ * What the invoice's own item lines say it carried, from the FDA's schedule for each NDC.
+ *
+ * The owner, on finding a ParMed invoice in the Schedule II drawer: "parmed doesnt send controls".
+ * He is right, and the invoice proves it — its one line is NDC 00169750111, NovoLog insulin, which
+ * the FDA directory carries with no DEA schedule at all.
+ *
+ * ── Why a third source, when two already exist ──
+ *
+ * The drawer is decided by PioneerRx's receiving record, and where that has nothing the invoice
+ * waits as "unknown" — which files with the Schedule IIs, deliberately, because assuming the other
+ * way is the one mistake 21 CFR 1304.04(h)(1) does not forgive. That is right when nothing is
+ * known. It was being applied when something was: the lines had been read, every NDC on them was in
+ * the directory, and not one was controlled.
+ *
+ * The two faults were one fault. The ParMed reader could not read the row, so the invoice had no
+ * lines; with no lines and no PioneerRx booking the schedule stayed unknown, and a box of insulin
+ * was filed as a Schedule II record. Fixing the reader is what makes this source possible — and a
+ * Schedule II drawer with non-controlled invoices in it is not a separation either.
+ *
+ * ── What makes it safe ──
+ *
+ * It answers only when it can see the whole invoice. Every line must carry an NDC the directory
+ * knows; one unrecognised NDC and this returns null, because an invoice is shown to be free of
+ * controls only when every line on it has been looked at. "Most of it is uncontrolled" files
+ * nothing.
+ *
+ * `scheduleFromDea` does the deciding, so the rule — any CII makes the whole invoice a CII record,
+ * any control makes it III-V — is the one already written and tested rather than a second copy.
+ */
+export async function scheduleFromInvoiceLines(invoiceId: string): Promise<{ schedule: InvoiceSchedule; basis: string } | null> {
+  const lines = await db
+    .select({ ndc11: schema.invoiceLines.ndc11 })
+    .from(schema.invoiceLines)
+    .where(eq(schema.invoiceLines.invoiceId, invoiceId));
+  if (lines.length === 0) return null;
+
+  const ndcs = lines.map((l) => l.ndc11).filter((n): n is string => !!n);
+  // A line with no NDC is a line nobody can classify, so the invoice is not settled here.
+  if (ndcs.length !== lines.length) return null;
+
+  const known = await db.query.drugDirectory.findMany({
+    where: inArray(schema.drugDirectory.ndc11, [...new Set(ndcs)]),
+    columns: { ndc11: true, deaSchedule: true },
+  });
+  const scheduleOf = new Map(known.map((d) => [d.ndc11, d.deaSchedule]));
+  if (ndcs.some((n) => !scheduleOf.has(n))) return null;
+
+  /*
+   * The directory's blank means "not a controlled substance", and this is the one place such a null
+   * is a fact rather than an absence: every NDC in the directory has been looked at by the FDA, and
+   * a drug it lists with no schedule is uncontrolled.
+   *
+   * Written as "0", which is the code `scheduleFromDea` already reads as uncontrolled — PioneerRx's
+   * convention, and the point is to hand that function something it understands rather than teach
+   * it a second vocabulary. It is deliberate that the blanks are spelled out at all: it reads an
+   * empty list as "unknown", so dropping them would turn an invoice of nothing but insulin into an
+   * empty list and put it straight back in the Schedule II drawer.
+   *
+   * The FDA's own values — CII, CIII, CIV, CV — are ones it already knows.
+   */
+  const codes = ndcs.map((n) => scheduleOf.get(n) || "0");
+  const schedule = scheduleFromDea(codes);
+  if (schedule === "unknown") return null;
+
+  const controlled = codes.filter((c) => c !== "0");
+  return {
+    schedule,
+    basis:
+      `Every one of the ${lines.length} item line${lines.length === 1 ? "" : "s"} read off this invoice names an NDC the FDA directory ` +
+      `carries, and ${controlled.length === 0 ? "none of them is a controlled substance" : `${controlled.length} of them carr${controlled.length === 1 ? "ies" : "y"} DEA schedule ${[...new Set(controlled)].join(", ")}`}. ` +
+      `That is the invoice's own contents, so the filing follows it.`,
+  };
+}
+
 export function filingFor(schedule: InvoiceSchedule) {
   return FILING[schedule];
 }
@@ -3357,11 +3432,29 @@ export async function settleSchedulesFromPioneer(user = "the PioneerRx pull"): P
     columns: { id: true, invoiceNumber: true, supplier: true, schedule: true, needsReview: true, reviewedAt: true, documentId: true, basis: true },
   });
   let settled = 0;
+  /* Counted apart: "the pharmacy booked it in" and "we read every line of it" are different grounds. */
+  let byLines = 0;
   const disagreed: { invoiceNumber: string; wasSaid: InvoiceSchedule; pioneerSays: InvoiceSchedule }[] = [];
 
   for (const inv of rows) {
-    const booked = await scheduleFromPioneer(inv.invoiceNumber);
+    /*
+     * PioneerRx first, then the invoice's own item lines.
+     *
+     * PioneerRx is the better source and stays first: it is the pharmacy's record of what it
+     * actually took in at the counter, which is the determination 21 CFR 1304.04(h)(1) cares about.
+     * But it only knows deliveries it has booked, and an invoice it has never seen used to stop
+     * here and wait as "unknown" — which files with the Schedule IIs.
+     *
+     * For invoices whose lines have been read that is throwing away an answer. ParMed 7491383165
+     * sat in the Schedule II drawer carrying one line of NovoLog insulin, and the owner had to be
+     * the one to notice: "parmed doesnt send controls". See `scheduleFromInvoiceLines`, which
+     * answers only when every line on the invoice names an NDC the FDA directory knows.
+     */
+    const fromPioneer = await scheduleFromPioneer(inv.invoiceNumber);
+    const booked = fromPioneer ?? (await scheduleFromInvoiceLines(inv.id));
     if (!booked) continue;
+    /* Which of the two answered, so the audit line and the summary name the real source. */
+    const source = fromPioneer ? "pioneer" : "invoice_lines";
 
     /* Somebody has answered for this one. Their answer stands; a disagreement is reported, never applied. */
     if (inv.reviewedAt) {
@@ -3385,7 +3478,7 @@ export async function settleSchedulesFromPioneer(user = "the PioneerRx pull"): P
       })
       .where(eq(schema.supplierInvoices.id, inv.id));
     await audit({
-      action: "invoice.schedule.from_pioneer",
+      action: source === "pioneer" ? "invoice.schedule.from_pioneer" : "invoice.schedule.from_lines",
       userId: "system",
       userName: user,
       entity: "invoice",
@@ -3393,6 +3486,7 @@ export async function settleSchedulesFromPioneer(user = "the PioneerRx pull"): P
       details: `${inv.supplier ?? "an invoice"} ${inv.invoiceNumber ?? ""}: ${inv.schedule} → ${booked.schedule}. ${booked.basis}`,
     });
     settled++;
+    if (source === "invoice_lines") byLines++;
   }
 
   return {
@@ -3400,8 +3494,13 @@ export async function settleSchedulesFromPioneer(user = "the PioneerRx pull"): P
     disagreed,
     says:
       settled === 0 && disagreed.length === 0
-        ? "no invoice was waiting on a schedule PioneerRx could settle"
-        : `${settled} invoice${settled === 1 ? "" : "s"} filed by what PioneerRx booked in` +
+        ? "no invoice was waiting on a schedule either PioneerRx or its own item lines could settle"
+        : `${settled} invoice${settled === 1 ? "" : "s"} filed` +
+          (byLines === settled
+            ? ` by the NDCs on ${settled === 1 ? "its" : "their"} own item lines`
+            : byLines > 0
+              ? ` — ${settled - byLines} by what PioneerRx booked in, ${byLines} by the NDCs on ${byLines === 1 ? "its" : "their"} own item lines`
+              : " by what PioneerRx booked in") +
           (disagreed.length
             ? `; ${disagreed.length} where a person's answer differs from PioneerRx and was left alone: ${disagreed.map((d) => `${d.invoiceNumber} (filed ${d.wasSaid}, PioneerRx says ${d.pioneerSays})`).join(", ")}`
             : ""),
