@@ -179,6 +179,19 @@ So, before shipping a screen:
 
 - Deploy: `git push origin feature/compliance`, write `data/.update-requested`, kill the PID on port
   3000, poll `.next/BUILD_ID` until it changes and HTTP is 200/307. `npm run deploy` is blocked.
+- **A deploy takes the site down for a minute or two, and he is usually in it.** On 12 September this
+  check deployed twice inside an hour and he wrote "site isnt coming up". Nothing was wrong with the
+  site — it was rebuilding, twice, with no warning and no holding page, while his own connections
+  were live in `netstat`.
+
+  So before killing the process, look: `netstat -ano | grep :3000` shows a foreign address that is
+  not `127.0.0.1` when somebody is using it from another machine. If anybody is on it, say so and
+  ask, or wait — do not take it down silently. And deploy **once** at the end of the check rather
+  than after each fix; the work is committed either way, and every extra restart is another minute
+  he is locked out.
+
+  Tell him the address afterwards — `http://10.133.63.10:3000` — because "it's deployed" is not the
+  same news as "it's back".
 - Scripts: `node node_modules/tsx/dist/cli.mjs --tsconfig tsconfig.script.json scripts/<f>.ts`,
   starting `import "dotenv/config";`. Throwaway probes go in `scripts/support/` and are deleted after.
 - Migrations are additive and numbered, `drizzle/00NN_*.sql` plus a `_journal.json` entry whose
