@@ -51,10 +51,14 @@ tedious — the last 10% is where the money hides.
 
 ## 3. Completeness is a register, not an intention
 
-The delivery driver is the case that proves it. The site has a `driver_invoices` table, a rate, a
-delivery-day count and an accrual line of $522.00 — and **zero invoices ever raised, nothing on the
-cash side, no standing cost.** On a cash basis the driver works for nothing. Nobody was careless; it
-simply was never enumerated.
+The case that proves it is the expense categories. All 25 are well chosen and every one carried
+$0.00 for September, and the account renders that as nought rather than as "not yet known" — so a
+bottom line of −$713.03 reads as a near-break-even month when the truth is that most of its costs
+have not arrived yet. Nobody was careless. The cases were simply never enumerated with a state
+against each one.
+
+*(This clause first cited the delivery driver, using a framing that was wrong — see §7b. The
+correction is itself the argument for enumerating rather than noticing.)*
 
 So for every domain I touch, the obligation is an **explicit list of every case, with each one marked
 captured or not** — not a search for cases I happen to think of. Money in, money out, document types,
