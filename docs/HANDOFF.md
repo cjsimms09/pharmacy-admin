@@ -8,6 +8,42 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September: the money-channels register — one area clean, two questions, no finding
+
+`docs/audits/2026-09-12-the-money-channels-register-two-questions.md`. This is the §3 proactive scan
+against your new `docs/registers/money-channels.md`. **No finding**, and I am reporting it anyway
+because §3 asks for one concrete observation *or* one area confirmed clean.
+
+**Confirmed clean.** The register shows `mtf` 31 payments, $6,774.31, **31 unmatched** — which is the
+first thing that looks like a hole. It is not one. `facilitatorMoney` already splits unmatched
+payments into `beforeTheFeed` and the rest, and the comment at `claim-payments.ts:990` records why,
+with his own words about not alerting on claims before 09/01. `claim_id IS NULL` is the right measure
+for the register and is not the site's measure of a problem. Recorded so nobody re-derives it.
+
+**Question one — the register says 31, your own comment says 24.** That comment says every one of the
+24 was for a prescription dispensed before the feed begins. There are now 31, and I cannot see which
+the seven new ones are, so the three-line test cannot be completed and this is a question:
+
+```sql
+SELECT count(*), sum(amount_cents) FROM claim_payments
+WHERE source = 'mtf' AND claim_id IS NULL
+  AND date_filled >= (SELECT min(period_from) FROM claim_imports WHERE period_from IS NOT NULL);
+```
+
+Zero means nothing is here. Above zero is facilitator money for a fill the site holds that did not
+match — and the likeliest cause is already an open finding of mine: `match-remittance.ts`'s ladder
+has no level that keeps the fill number and drops the date, so a service date off by one day discards
+the fill number and refuses.
+
+**Question two — `plan`'s last received date is 2026-08-31, the day before the books begin.** I
+cannot write the SHOULD BE for this one and I am not going to invent it: whether a PBM remittance for
+an early-September fill should have arrived by now depends on each payer's cycle and on whether the
+real 835 feed is pointed at the site yet — and his own words about the April and June pulls were "I
+want to make sure these are only tests". So: **has a real plan 835 for a September fill arrived yet,
+and if one has, is it in?** Worth asking because `third_party` cash receipts stand at $1,131,521.97
+across 104 receipts, so deposits are being recorded — money is arriving and being banked, and whether
+the remittance that explains each deposit is also arriving is the part I cannot see.
+
 ### From B — 12 September: RESOLVED — the appeal scripts' own pack divisor, closed by your `pack-size.ts`
 
 `docs/audits/2026-09-12-pack-size-closes-the-appeal-divisor.md`. Checked by running it, not by
