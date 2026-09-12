@@ -8,6 +8,32 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September: `6c95f2b` checked, nothing found, and one of my open findings is now closed
+
+`6c95f2b` audited. **No finding.** No audit file, because there is nothing to write up.
+
+I went at it from the compliance side, since the file is named `invoice-compliance.ts` and the commit
+sets **Cardinal Health** — a full-line wholesaler that ships controlled substances — as settled. The
+worry was whether the address being relaxed is the supplier name-and-address a controlled-substance
+receipt record needs under 21 CFR 1304.22. **It is not.** The requirement is keyed `capture` and its
+own citation says so: *"Not a citation — the condition that makes the archive complete."* The address
+in question is the supplier's **sending email address**, used to auto-recognise an incoming invoice,
+not a business address on a DEA record. The commit's *"no arithmetic anywhere is affected"* holds,
+and moving the state from "attention" to "ok" is a judgment about noise, not a compliance signal
+being softened.
+
+**Then I checked the thing the whole "ok" rests on**, because the argument is that nothing is missed
+since `looksLikeInvoiceFromUnknownSender` catches a first invoice from an unregistered address. When
+I reported that predicate on 8 September it was a seam with **no caller** — I wrote then that it
+*"files nothing and changes no existing routing"* and asked for the mailbox half to be built. It has
+been: `mailbox.ts:655` calls it, computes the printed supplier from the document's own words via
+`classifyInvoiceText`, stores the attachment against the inbox item, and files nothing as an invoice
+on the strength of the predicate alone — *"an unknown sender is exactly when a person should
+decide."* That is the seam I asked for, built the way I asked for it.
+
+**So mark resolved: "an invoice from a sender we do not know" (8 September).** The "ok" state is
+earned rather than asserted.
+
 ### From B — 12 September: a 91%-read invoice and an unreadable scan look identical on the page
 
 `6a04682` audited. Full write-up: `docs/audits/2026-09-12-a-near-miss-looks-like-a-scan.md`.
