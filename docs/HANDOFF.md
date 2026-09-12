@@ -8,6 +8,53 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September: pre-September reversals are forgotten on the date, not on having nothing to cancel
+
+`693114d` audited. Full write-up: `docs/audits/2026-09-12-forgotten-on-the-date-alone.md`.
+**No file of yours is edited.** Putting `stillStranded` on the screen was the right fix and the
+refusal to pair inexact figures is right; three things about the other half.
+
+**One — the test and the reason are different tests.** The code is
+`if (isOutOfBooks(rev.dateFilled)) { beforeTheBooks++; continue; }`. The reason beside it is "there
+is nothing for it to cancel". The first is about the date, the second about whether a live claim
+exists, and `claimCancelledBy` already tells them apart in its `why`. Run against a migrated
+database with one August and one September fill, each with a live paid row and a reversal whose copay
+moved to a card:
+
+```
+strays 2   paired 0   beforeTheBooks 1  <- counted, never named
+stillStranded: [ 337203 2026-09-09 -60594
+                 "1 live claim is held for that fill but none has figures this exactly cancels" ]
+the August reversal's own why: 1 live claim is held for that fill but none has figures this exactly cancels
+```
+
+The August one says a live claim **is** held for its fill, and is set aside anyway — after which the
+page tells him "left alone, **because nothing was ever counted for them**". Also: the check sits
+*inside* `found.hit === null`, so a pre-books reversal that pairs exactly is still paired and still
+written. The rule is applied only to the ones that need a person. One line keeps his decision and
+makes the sentence true: `isOutOfBooks(...) && found.why.startsWith("no live claim is held")`.
+
+**Two — `isOutOfBooks` takes a received date, and this passes it a fill date.** Its parameter is
+`receivedOn`, and its own docstring says a fill-date rule "would throw it out — quietly losing
+revenue in the name of tidiness". An August fill paid by a September remittance is money in these
+books (`claim-payments.ts:105` counts it on `receivedOn`), and its reversal is now forgotten on the
+fill date. `claims-backfill.ts:156` and `mac-appeal-store.ts:245` pass fill dates too; both are
+defensible alone, which is what makes the drift invisible. A `receivedOn` type, or a second
+`fillIsOutOfBooks`, would make each call say which question it is asking.
+
+**Three — `stillStranded.slice(0, 20)` under a sentence that reads as a total.** `strays` and
+`beforeTheBooks` are full counts, `stillStranded` is a page. Today 28 = 0 + 23 + 5 and it adds up;
+with thirty needing a person the screen says "20 reversals … so up to $X" where X is the sum of
+twenty of thirty, and nothing says so. Either return the count separately or say "showing 20 of 30".
+
+Small: the comment at `claims.ts:794` says "All twelve on file today"; the commit message says
+twenty-three, and 28 − 23 = 5 is the figure the rest of it uses.
+
+**One count only your side can take:** of the 23 stranded reversals dated before 1 September, how
+many have a live paid claim on file for their own prescription, fill, BIN and NDC?
+`claimCancelledBy(rev, live).why` answers it — anything not beginning "no live claim is held" is a
+reversal with something to cancel that is being forgotten on its date.
+
 ### From B — 12 September: the clipped NDC column can print ten, and `ndcFromRun` only asks about nine
 
 `86256fb` audited. Full write-up: `docs/audits/2026-09-12-the-column-that-printed-ten.md`.
