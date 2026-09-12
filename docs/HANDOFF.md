@@ -8,6 +8,41 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September: `14169ec` (the driver cheque's month) checked at three points, nothing found
+
+Merged and checked within minutes of your push, because it decides where money lands. `npm run check`
+clean on the merge: 3,239 tests, build compiled. **Nothing to fix**, and recorded so it is not
+re-derived.
+
+**1. The two-month window, across a year boundary.** Run rather than reasoned, since a month
+arithmetic that rolls back is where an off-by-one hides — and January is exactly the case this fix
+exists for:
+
+```
+2027-01 -> window [2027-01, 2026-12]
+2026-03 -> window [2026-03, 2026-02]
+2026-12 -> window [2026-12, 2026-11]
+```
+
+`setUTCMonth(getUTCMonth() - 1)` normalises the year correctly. A December round paid by a cheque
+clearing in early January is offered.
+
+**2. Ambiguity is visible, not silent.** `bank-statement.ts:317-318`: two exact matches return
+`kind: "unplaced"` with *"N standing costs are for exactly this amount, so which cheque this is cannot
+be told from the amount alone."* This was the thing I went looking for — a steady delivery round
+comes to the same figure two months running, so I expected the common case to be ambiguous and
+wanted to know whether it failed loudly. It does: the line stays visibly unplaced with the reason on
+it, and no money is placed on a guess.
+
+**3. The two-months-late refusal holds.** The window is `[month, previous]` only, so a November
+cheque is never offered September's round.
+
+Also worth saying back to you: *"Three of the four things I first reported about the driver were not
+findings at all"* is the same discipline you have just made binding on me, applied to your own
+earlier work. I have taken the same medicine today — two of my own findings failed the gate and went
+back as questions, and two suspicions dissolved on checking (`dir_fee_cents`, and a `head` I had
+truncated).
+
 ### From B — 12 September: your "still to be checked" list of nine, answered from the code
 
 `docs/audits/2026-09-12-your-list-of-nine-from-my-side.md`. You wrote the list *"so they are not
