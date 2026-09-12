@@ -57,6 +57,7 @@ async function loadCandidates(from: string): Promise<Candidate[]> {
       acquisitionCents: schema.claims.acquisitionCents,
       quantityThousandths: schema.claims.quantityThousandths,
       daysSupply: schema.claims.daysSupply,
+      basisOfReimbursement: schema.claims.basisOfReimbursement,
       importId: schema.claims.importId,
     })
     .from(schema.claims)
@@ -79,16 +80,43 @@ async function loadCandidates(from: string): Promise<Candidate[]> {
    * The row in force on the fill date, not the newest: a drug reclassified since is still whatever
    * it was on the day it was dispensed.
    */
+  /*
+   * The price comes from here too, and both are read as at the fill date.
+   *
+   * This used to keep whichever row was newest, which contradicted the paragraph above it. For the
+   * classification that is a small error — a drug is rarely reclassified. For the price it would be
+   * a real one: NADAC is republished weekly, so the newest figure is the wrong figure for a claim
+   * filled a fortnight ago, and the whole point of comparing the two is to tell a MAC sitting under
+   * the national average from a plan that simply paid the national average.
+   *
+   * So the history is kept per NDC and the row in force on the day is picked per claim.
+   */
   const ndcs = [...new Set(rows.map((r) => r.ndc11).filter((n): n is string => n !== null))];
-  const classOf = new Map<string, { on: string; cls: string }>();
+  const history = new Map<string, { on: string; cls: string | null; unitMicros: number | null }[]>();
   if (ndcs.length > 0) {
-    const prices = await db.query.nadacPrices.findMany({ columns: { ndc11: true, classification: true, effectiveOn: true } });
+    const prices = await db.query.nadacPrices.findMany({
+      columns: { ndc11: true, classification: true, effectiveOn: true, unitMicros: true },
+    });
+    const wanted = new Set(ndcs);
     for (const p of prices) {
-      if (!p.classification) continue;
-      const held = classOf.get(p.ndc11);
-      if (!held || p.effectiveOn > held.on) classOf.set(p.ndc11, { on: p.effectiveOn, cls: p.classification });
+      if (!wanted.has(p.ndc11)) continue;
+      const list = history.get(p.ndc11) ?? [];
+      list.push({ on: p.effectiveOn, cls: p.classification ?? null, unitMicros: p.unitMicros ?? null });
+      history.set(p.ndc11, list);
     }
+    for (const list of history.values()) list.sort((a, b) => (a.on < b.on ? -1 : a.on > b.on ? 1 : 0));
   }
+  /** The newest NADAC row effective on or before the fill date. */
+  const asAt = (ndc11: string | null, on: string) => {
+    const list = ndc11 ? history.get(ndc11) : undefined;
+    if (!list) return null;
+    let found: { on: string; cls: string | null; unitMicros: number | null } | null = null;
+    for (const row of list) {
+      if (row.on > on) break;
+      found = row;
+    }
+    return found;
+  };
 
   return rows
     .filter((r) => !testImports.has(r.importId))
@@ -108,7 +136,13 @@ async function loadCandidates(from: string): Promise<Candidate[]> {
       acquisitionCents: r.acquisitionCents,
       quantityThousandths: r.quantityThousandths,
       daysSupply: r.daysSupply,
-      classification: classOf.get(r.ndc11!)?.cls ?? null,
+      basisOfReimbursement: r.basisOfReimbursement,
+      classification: asAt(r.ndc11, r.dateFilled)?.cls ?? null,
+      /* Micros to cents: NADAC is published to six places because a tablet can cost a third of a cent. */
+      nadacPerUnitCents: (() => {
+        const micros = asAt(r.ndc11, r.dateFilled)?.unitMicros ?? null;
+        return micros === null ? null : micros / 10_000;
+      })(),
     }));
 }
 

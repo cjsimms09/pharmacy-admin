@@ -21,7 +21,14 @@
 import "dotenv/config";
 
 const FEE_CENTS = 1050;
-const TODAY = "2026-09-11";
+/*
+ * Today, read from the clock rather than typed in.
+ *
+ * This was the literal "2026-09-11". A hardcoded date in a script whose whole output is a countdown
+ * to a ten-day deadline goes wrong quietly the moment the day turns over: every claim reports a day
+ * more time than it has, and the ones that lapsed overnight still read as filable.
+ */
+const TODAY = new Date().toISOString().slice(0, 10);
 
 function packUnits(desc: string | null): number | null {
   if (!desc) return null;

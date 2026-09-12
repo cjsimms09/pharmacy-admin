@@ -19,6 +19,10 @@ const claim = (over: Partial<Candidate> = {}): Candidate => ({
   acquisitionCents: 16_816,
   quantityThousandths: 30_000,
   daysSupply: 30,
+  /* MAC-priced, so the default fixture reaches the gates each test is actually about. */
+  basisOfReimbursement: "07",
+  /* Well below the paid figure, so the NADAC test is not what these tests are about. */
+  nadacPerUnitCents: 1_000,
   classification: "G",
   ...over,
 });
@@ -212,5 +216,146 @@ describe("the worklist", () => {
     const w = worklist(mixed, allTerms, new Set(), TODAY);
     assert.ok(w.says.includes("3 claims"));
     assert.ok(w.says.includes("CVS Caremark"));
+  });
+});
+
+/**
+ * Whether a MAC list priced the claim at all, which is the question a PBM asks first.
+ *
+ * Caremark rejected the first appeal this pharmacy ever filed as a "non MAC claim". Rx 333968,
+ * amphetamine ER 12.5mg ODT, $192.24 below cost, came back with basis of reimbursement 03 —
+ * ingredient cost reduced to AWP less a percentage. No MAC list priced it, so there was no MAC to
+ * appeal, and nothing the form could have said would have changed the answer.
+ *
+ * Every gate written before this one asked whether the claim lost money and whether the pharmacy
+ * was allowed to file. None asked the prior question, and the plan had been answering it on every
+ * claim in NCPDP field 522-FM all along.
+ */
+describe("a MAC appeal needs a MAC", () => {
+  test("06 and 07 are the MAC bases, and they pass", () => {
+    for (const basis of ["06", "07", "6", "7"]) {
+      const j = judge(claim({ basisOfReimbursement: basis }), terms(), new Set(), TODAY);
+      assert.equal(j.verdict, "appeal", `basis ${basis} should be appealable`);
+    }
+  });
+
+  test("REGRESSION: basis 03 is AWP less a discount, and is refused", () => {
+    // The actual claim, with its actual figures.
+    const j = judge(
+      claim({ rxNumber: "333968", drugName: "AMPHETAMINE ER 12.5 MG ODT", basisOfReimbursement: "03", pbmName: "CVS Caremark", paidCents: 1_000, acquisitionCents: 20_224 }),
+      terms({ pbmName: "CVS Caremark" }),
+      new Set(),
+      TODAY,
+    );
+    assert.equal(j.verdict, "not_mac_priced");
+    assert.match(j.says, /AWP less a percentage/);
+    assert.match(j.says, /non-MAC claim/);
+  });
+
+  test("every other benchmark is refused, and named so the refusal can be checked", () => {
+    const cases: [string, RegExp][] = [
+      ["13", /wholesale acquisition cost/],
+      ["09", /acquisition cost pricing/],
+      ["08", /contract pricing/],
+      ["04", /usual and customary/],
+      ["16", /coupon/],
+    ];
+    for (const [basis, names] of cases) {
+      const j = judge(claim({ basisOfReimbursement: basis }), terms(), new Set(), TODAY);
+      assert.equal(j.verdict, "not_mac_priced", `basis ${basis}`);
+      assert.match(j.says, names, `basis ${basis} should be named in the reason`);
+    }
+  });
+
+  test("a code nobody has a meaning for is quoted back, not guessed at", () => {
+    // Inventing a meaning for an unknown code would be the same fault as the appeal this prevents.
+    const j = judge(claim({ basisOfReimbursement: "20" }), terms(), new Set(), TODAY);
+    assert.equal(j.verdict, "not_mac_priced");
+    assert.match(j.says, /basis of reimbursement 20/);
+  });
+
+  test("a claim that does not say how it was priced is not appealed", () => {
+    const j = judge(claim({ basisOfReimbursement: null }), terms(), new Set(), TODAY);
+    assert.equal(j.verdict, "not_mac_priced");
+    assert.match(j.says, /does not say how the plan priced it/);
+  });
+
+  test("the gate is asked before the money, because it settles the claim outright", () => {
+    // A non-MAC claim miles below cost is still not a MAC appeal. Were the order the other way
+    // round the worklist would show it as appealable and the shortfall would look recoverable.
+    const j = judge(claim({ basisOfReimbursement: "13", paidCents: 34, acquisitionCents: 50_000 }), terms(), new Set(), TODAY);
+    assert.equal(j.verdict, "not_mac_priced");
+    assert.equal(j.shortfallCents, 0);
+  });
+
+  test("but already-filed still wins, so a rejection is never re-sent", () => {
+    const c = claim({ basisOfReimbursement: "03" });
+    assert.equal(judge(c, terms(), new Set([c.claimId]), TODAY).verdict, "already_filed");
+  });
+});
+
+/**
+ * Whether a MAC priced it, or the national average did.
+ *
+ * The owner, before submitting a batch: "is there a way to verify it is a mac claim and not nadac
+ * before submitting". There is, and it is independent of the basis code: the basis code is the plan
+ * *saying* it used a MAC, while the paid amount is what the money did. A great many MAC lists are
+ * built off NADAC, so a plan can return 06 and still have paid the national average — and an appeal
+ * asking it to reprice at NADAC a claim already paid at NADAC asks for nothing.
+ *
+ * Where the two disagree, the money wins.
+ */
+describe("a MAC below the national average, or the national average itself", () => {
+  // 30 units, so paid-per-unit is paidCents / 30.
+  const atNadac = (over: Partial<Candidate> = {}) => claim({ paidCents: 3_000, nadacPerUnitCents: 100, ...over });
+
+  test("paid at NADAC is not appealed, whatever the basis code says", () => {
+    for (const basis of ["06", "07"]) {
+      const j = judge(atNadac({ basisOfReimbursement: basis }), terms(), new Set(), TODAY);
+      assert.equal(j.verdict, "paid_at_nadac", `basis ${basis}`);
+      assert.match(j.says, /priced this off the national average/);
+    }
+  });
+
+  test("three percent either way counts as at NADAC, because NADAC moves weekly", () => {
+    // A plan pricing off last week's file lands near the figure rather than on it.
+    assert.equal(judge(atNadac({ paidCents: 2_940 }), terms(), new Set(), TODAY).verdict, "paid_at_nadac");
+    assert.equal(judge(atNadac({ paidCents: 3_060 }), terms(), new Set(), TODAY).verdict, "paid_at_nadac");
+    // And outside it does not.
+    assert.equal(judge(atNadac({ paidCents: 2_800 }), terms(), new Set(), TODAY).verdict, "appeal");
+  });
+
+  test("paid below NADAC is the strong case and carries no caveat", () => {
+    const j = judge(claim({ paidCents: 1_500, nadacPerUnitCents: 100 }), terms(), new Set(), TODAY);
+    assert.equal(j.verdict, "appeal");
+    assert.equal(j.aboveNadac, false);
+    assert.doesNotMatch(j.says, /buying gap/);
+  });
+
+  test("paid above NADAC is still filable, and says it is the weaker argument", () => {
+    /*
+     * This is the buying gap, not a MAC underpayment: it asks the PBM to beat the national average
+     * on a drug bought above it. Allowed through because the owner may still want it — the ask is
+     * then cost plus a dispensing fee — but never silently, because ten verification codes spent on
+     * these is ten spent on declines.
+     */
+    const j = judge(claim({ paidCents: 6_000, acquisitionCents: 9_000, nadacPerUnitCents: 100 }), terms(), new Set(), TODAY);
+    assert.equal(j.verdict, "appeal");
+    assert.equal(j.aboveNadac, true);
+    assert.match(j.says, /buying gap rather than a MAC underpayment/);
+    assert.match(j.says, /national average/);
+  });
+
+  test("no NADAC for the NDC leaves the claim judged on the basis code alone", () => {
+    // Not refused: the generic gate already required NADAC to classify it, so this is the rare NDC
+    // priced in one file and not the other, and the basis code is still evidence.
+    const j = judge(claim({ nadacPerUnitCents: null }), terms(), new Set(), TODAY);
+    assert.equal(j.verdict, "appeal");
+    assert.equal(j.aboveNadac, false);
+  });
+
+  test("a claim with no quantity cannot be compared, and is not refused for it", () => {
+    const j = judge(claim({ quantityThousandths: null }), terms(), new Set(), TODAY);
+    assert.equal(j.verdict, "appeal");
   });
 });

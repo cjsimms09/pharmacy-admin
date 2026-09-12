@@ -49,7 +49,80 @@ export type Candidate = {
   daysSupply: number | null;
   /** From NADAC: "G" generic, "B" brand, null where the NDC is not priced there. */
   classification: string | null;
+  /**
+   * NCPDP Basis of Reimbursement Determination (field 522-FM), as the plan returned it.
+   *
+   * How the plan says it priced this claim, in its own adjudication response. It is the difference
+   * between a MAC appeal and a wasted one — see `MAC_BASES`. Null where the claim does not carry it.
+   */
+  basisOfReimbursement: string | null;
+  /**
+   * The NADAC per dispensing unit in force on the fill date, in cents. Null where NADAC has none.
+   *
+   * The independent check on the basis code. The basis code is the plan *saying* it used a MAC; this
+   * is what the money actually did. The owner asked for it in so many words: "is there a way to
+   * verify it is a mac claim and not nadac before submitting".
+   */
+  nadacPerUnitCents: number | null;
 };
+
+/**
+ * The bases that mean a MAC list set the price, and therefore that there is a MAC to appeal.
+ *
+ * ── Why this gate exists ──
+ *
+ * Caremark rejected the first appeal this pharmacy filed as a "non MAC claim", and it was right to.
+ * Rx 333968, amphetamine ER 12.5mg ODT, came back with basis **03** — ingredient cost reduced to
+ * AWP less a percentage. No MAC list priced it, so there was no MAC to appeal and nothing the form
+ * could have said would have changed that.
+ *
+ * Every gate before this one asked whether the claim *lost money* and whether the pharmacy *may*
+ * file. None of them asked the prior question: did a MAC price this claim at all. The plan answers
+ * that on the claim itself, in field 522-FM, and the site has been storing it all along without
+ * reading it.
+ *
+ * ── Why only 06 and 07 ──
+ *
+ * These two are the MAC bases in the NCPDP list: 06 is MAC pricing with the ingredient cost paid as
+ * the MAC, 07 is ingredient cost reduced to the MAC. Everything else names a different benchmark —
+ * 03 is AWP less a discount, 13 is WAC, 09 is acquisition cost, 08 is contract pricing — and an
+ * appeal against a MAC list that did not price the claim is refused on sight.
+ *
+ * Codes not on this list are treated as not-MAC rather than unknown, deliberately. The cost of
+ * skipping a real MAC claim is one appeal not filed, worth a few dollars; the cost of filing
+ * against a non-MAC claim is a rejection on the pharmacy's record with a PBM it has to keep filing
+ * with, and enough of those is how a pharmacy's appeals stop being read.
+ */
+const MAC_BASES = new Set(["06", "07"]);
+
+/**
+ * What the plan said it priced off, for the sentence that explains a refusal.
+ *
+ * Only the codes actually seen on this pharmacy's claims are named. An unrecognised code is quoted
+ * back rather than guessed at: inventing a meaning for it would be the same fault as the appeal
+ * this gate prevents.
+ */
+const BASIS_MEANS: Record<string, string> = {
+  "00": "no basis specified",
+  "01": "the ingredient cost paid as submitted",
+  "02": "ingredient cost reduced to AWP",
+  "03": "ingredient cost reduced to AWP less a percentage",
+  "04": "usual and customary, paid as submitted",
+  "05": "the lower of ingredient cost plus fees and usual and customary",
+  "08": "contract pricing",
+  "09": "acquisition cost pricing",
+  "13": "wholesale acquisition cost (WAC)",
+  "14": "another payer's patient-responsibility amount",
+  "15": "the patient pay amount",
+  "16": "a coupon payment",
+};
+
+/** The code as the NCPDP list writes it: two digits, so "6" and "06" are one basis. */
+function basisCode(raw: string | null | undefined): string | null {
+  const t = (raw ?? "").trim();
+  if (t === "") return null;
+  return /^\d$/.test(t) ? `0${t}` : t;
+}
 
 /** The rules for one PBM, as transcribed from its agreement. */
 export type PayerTerms = {
@@ -68,6 +141,20 @@ export type Verdict =
   | "paid_enough"
   /** A brand, or an NDC NADAC does not classify. MAC does not price it. */
   | "not_generic"
+  /**
+   * The plan priced this claim off something other than a MAC list, so there is no MAC to appeal.
+   *
+   * The claim says which, and this is the gate that was missing. See `MAC_BASES` below.
+   */
+  | "not_mac_priced"
+  /**
+   * Paid at NADAC, so the plan priced it off the national average and there is no MAC to argue with.
+   *
+   * The second half of the owner's question — "is there a way to verify it is a mac claim and not
+   * nadac before submitting". A basis code of 06 or 07 is the plan saying it used a MAC; this is
+   * what the money says. Where the two disagree, the money wins.
+   */
+  | "paid_at_nadac"
   /** No invoice covers the NDC, so there is nothing to evidence the appeal with. */
   | "no_invoice"
   /** Paid nothing at all — a deductible claim, not an underpayment. */
@@ -92,6 +179,12 @@ export type Judged = {
   deadline: string | null;
   /** Days left, negative once past. Null where no window is on file. */
   daysLeft: number | null;
+  /**
+   * Appealable, but on the weaker argument: paid above NADAC and still under cost.
+   *
+   * Lets a worklist put the winnable ones first. False on everything that is not an `appeal`.
+   */
+  aboveNadac?: boolean;
   /** One sentence, in the owner's terms, for whichever screen shows it. */
   says: string;
 };
@@ -136,6 +229,55 @@ export function judge(c: Candidate, terms: PayerTerms | null, alreadyFiled: Set<
     };
   }
 
+  /*
+   * Did a MAC list price this claim at all. The plan says so on the claim, and it is the first
+   * question a PBM asks of an appeal — Caremark's answer on the one filed without this gate was
+   * "non MAC claim".
+   */
+  const basis = basisCode(c.basisOfReimbursement);
+  if (basis === null || !MAC_BASES.has(basis)) {
+    return {
+      ...base,
+      verdict: "not_mac_priced",
+      says:
+        basis === null
+          ? "The claim does not say how the plan priced it, and an appeal needs a MAC to appeal against. Without basis of reimbursement 06 or 07 there is no way to tell a MAC underpayment from a drug bought badly."
+          : `The plan priced this off ${BASIS_MEANS[basis] ?? `basis of reimbursement ${basis}`}, not off a MAC list (which would be 06 or 07). There is no MAC to appeal, and a PBM refuses these as a non-MAC claim.`,
+    };
+  }
+
+  /*
+   * And what the money did, which is the check the basis code cannot give.
+   *
+   * A plan can return 06 or 07 and still have priced the claim off the national average: NADAC is
+   * what a great many MAC lists are built from, and where the paid amount lands on NADAC there is no
+   * MAC sitting below it to argue about. Appealing one of those asks Caremark to reprice at NADAC a
+   * claim it already paid at NADAC, which is a form filled in to ask for nothing.
+   *
+   * Three percent either way, not an exact match: NADAC is published weekly and a plan pricing off
+   * the previous week's file lands near the figure rather than on it. Tighter and this would miss
+   * them; looser and it would start catching real underpayments.
+   *
+   * Only the at-NADAC case is refused here. Paid *above* NADAC is a different thing and is allowed
+   * through with the fact recorded, because whether to file it is a judgement about the argument
+   * rather than about the claim — see the note on `aboveNadac` where the appeal is offered.
+   */
+  const perUnitPaid = (c.quantityThousandths ?? 0) > 0 ? c.paidCents / ((c.quantityThousandths ?? 0) / 1000) : null;
+  if (perUnitPaid !== null && c.nadacPerUnitCents !== null && c.nadacPerUnitCents > 0) {
+    const ratio = perUnitPaid / c.nadacPerUnitCents;
+    if (ratio > 0.97 && ratio < 1.03) {
+      return {
+        ...base,
+        verdict: "paid_at_nadac",
+        says:
+          `Paid ${money(Math.round(perUnitPaid))} per unit against a NADAC of ${money(Math.round(c.nadacPerUnitCents))} — ` +
+          `the plan priced this off the national average, not off a MAC list below it. There is nothing to reprice, ` +
+          `whatever the basis code says. If this is short it is short because the drug cost more than the national ` +
+          `average, which is a buying question.`,
+      };
+    }
+  }
+
   if (c.paidCents <= 0) {
     return {
       ...base,
@@ -156,6 +298,31 @@ export function judge(c: Candidate, terms: PayerTerms | null, alreadyFiled: Set<
   if (shortfallCents <= 0) {
     return { ...base, verdict: "paid_enough", says: `Paid ${money(c.paidCents)} against a cost of ${money(c.acquisitionCents)}. Nothing to appeal.` };
   }
+
+  /*
+   * ── How good the argument is, which is not the same as whether it may be filed ──
+   *
+   * A claim paid *below* NADAC is the strong case and needs no arguing: the MAC was set under the
+   * national average acquisition cost, a published federal figure, and the appeal is arithmetic.
+   *
+   * A claim paid *above* NADAC but still under what this pharmacy paid is a different argument
+   * altogether. It asks the PBM to pay more than the national average because this pharmacy's
+   * buying is expensive, and a PBM declines that — rightly. It is the buying gap in
+   * docs/MONEY-TRACE.md, where eleven days of it came to $2,582.56, and no MAC appeal can fix it.
+   *
+   * Filed anyway rather than refused, because the owner may still want it: the ask on the form is
+   * then "reprice above NADAC" on cost plus a dispensing fee, which is honest and sometimes paid.
+   * But never silently, because verification codes spent on these are codes spent on declines.
+   *
+   * Computed here, above the payer checks, so it reaches both ways out of this function that end in
+   * an appeal. It used to sit beside the second one, which left every payer naming no filing
+   * deadline — and several of the twenty name none — with the flag unset and the caveat missing.
+   */
+  const aboveNadac =
+    perUnitPaid !== null && c.nadacPerUnitCents !== null && c.nadacPerUnitCents > 0 && perUnitPaid / c.nadacPerUnitCents >= 1.03;
+  const weak = aboveNadac
+    ? ` Paid ${money(Math.round(perUnitPaid!))} a unit against a NADAC of ${money(Math.round(c.nadacPerUnitCents!))}, so this asks ${c.pbmName} to beat the national average on a drug bought above it — a buying gap rather than a MAC underpayment, and the weaker of the two arguments.`
+    : "";
 
   if (!terms || !terms.whoFiles) {
     return {
@@ -193,7 +360,8 @@ export function judge(c: Candidate, terms: PayerTerms | null, alreadyFiled: Set<
       ...base,
       shortfallCents,
       verdict: "appeal",
-      says: `${money(shortfallCents)} below cost. ${c.pbmName} names no filing deadline, so there is no clock — but no reason to wait either.`,
+      aboveNadac,
+      says: `${money(shortfallCents)} below cost. ${c.pbmName} names no filing deadline, so there is no clock — but no reason to wait either.${weak}`,
     };
   }
 
@@ -216,10 +384,11 @@ export function judge(c: Candidate, terms: PayerTerms | null, alreadyFiled: Set<
     deadline,
     daysLeft,
     verdict: "appeal",
+    aboveNadac,
     says:
-      daysLeft === 0
+      (daysLeft === 0
         ? `${money(shortfallCents)} below cost, and today is the last day ${c.pbmName} will take it.`
-        : `${money(shortfallCents)} below cost. ${daysLeft} day${daysLeft === 1 ? "" : "s"} left to file with ${c.pbmName}.`,
+        : `${money(shortfallCents)} below cost. ${daysLeft} day${daysLeft === 1 ? "" : "s"} left to file with ${c.pbmName}.`) + weak,
   };
 }
 
