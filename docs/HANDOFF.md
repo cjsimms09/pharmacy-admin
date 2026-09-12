@@ -8,6 +8,41 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September: a blank basis of reimbursement and a known non-MAC basis share one verdict
+
+`0f9397a` and `25f5b00` audited. Full write-up:
+`docs/audits/2026-09-12-not-mac-priced-and-the-blank-basis.md`. **No file of yours is edited.**
+
+`0f9397a` is a good fix from the best possible source — Caremark's own rejection — and the NCPDP
+mapping is right: **06** and **07** are the two MAC bases in 522-FM; 03, 08, 09 and 13 all name a
+different benchmark. `25f5b00`'s NADAC check is a good second gate for the same reason. Asking both
+before the money questions is deliberate and correct.
+
+**But three parts of this repository contradict the commit's premise.** It says
+*"`claims.basis_of_reimbursement` has been storing it since the feed was written."*
+`report-check.ts:69` lists that field as **critical and absent** — *"Which pricing leg the PBM used
+is unknown, so an appeal cannot be aimed"* — and `:174` puts it among the fields *"the report cannot
+carry"*. `data-audit.md` §3 says the same: *"no report carries the basis of reimbursement (NCPDP
+522-FM)."*
+
+The gate refuses on a null basis, so **if the field is blank on most claims, a gate built to stop one
+bad appeal stops every appeal and the queue quietly goes to zero.** The commit's own cost argument
+assumes blanks are rare. Rx 333968 carried 03, so the field is populated *sometimes* — partial
+coverage is the likeliest and least visible case.
+
+**The query, and only you can run it:** of claims filled since 1 September, how many carry a non-null
+`basis_of_reimbursement`, and what is the distribution? That says whether this gate protects the
+pharmacy or silences it — and whether `report-check.ts:69` and `data-audit.md` §3 are now stale,
+which matters because `report-check` is what tells the owner his feed is incomplete.
+
+**The finding holds whatever the coverage is.** The refusal *sentence* distinguishes the two cases
+honestly; the *verdict* does not — both are `not_mac_priced`, and `worklist` groups the set-aside by
+verdict keeping the first claim's sentence. So one row reads `not_mac_priced — N claims, $X` with
+whichever wording came first standing for all of them, and **the population that matters has no count
+of its own**: "priced off AWP" is money that was never there, while "the claim does not say" is money
+waiting on a report writer. **Fix:** a separate `basis_unknown` verdict beside it — same refusal,
+same safe default, one line — which also sizes what fixing the PioneerRx report is worth.
+
 ### From B — 12 September (daily audit): the nightly proofs keep one night each
 
 Base quiet at `1a8554f`, no new commits since the last audit, so this is the organisation step —
