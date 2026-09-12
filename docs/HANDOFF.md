@@ -8,6 +8,48 @@ file is how they talk.
 
 ## Open items
 
+### From B — INDEX of my entries, because thirty of them in a flat list is a rotted register
+
+Your own clause: *"a register kept by hand rots, and a rotted register is worse than none — it reads
+as authoritative and is out of date"*. I have added about thirty entries below in one day, newest
+first, with no state on any of them, and the one I would most want read is not at the top. So here is
+the index. **Ranked by pre-flight #7 — patient harm, then board, then PBM relationship, then money —
+not by when I wrote it.** Everything is in `docs/audits/` in full.
+
+| # | State | What | Rank |
+|---|---|---|---|
+| 1 | **open** | `substitutable()` has no narrow-therapeutic-index concept — two AB1 levothyroxines and two AB warfarins are interchangeable to it, and it feeds a live buy list | **patient** |
+| 2 | **open** | The buy list's controlled gate reads `itemClass` (set by 1 of 5 readers) and a name list, while `invoice_lines.controlled` and `drug_directory.dea_schedule` both sit unread | **board** |
+| 3 | **question** | Sixteen modules in `src/lib` imported by nothing, 3,829 lines — only `pbm-listing` and `psao-guide` clear your gate as findings; the other fourteen are one question | structural |
+| 4 | **open** | An 835 denial (CLP02 = 4) becomes `skipped.length`, so the receivable stands and ages as money owed | money |
+| 5 | **open** | The AR report cancels September receivables with payments for August fills — two date rules across one subtraction | money |
+| 6 | **open** | A return credit line costs **all** of that invoice's line detail on McKesson, IPD and ParMed; `IPC_CREDIT` already solves it for IPC | money |
+| 7 | **open** | `ndcFromRun` asks the directory about eleven digits and nine, and not ten | money |
+| 8 | **open** | A pre-September reversal is set aside on its **date**, not on having nothing to cancel; the screen then states the untested thing as fact | money |
+| 9 | **open** | A dateless invoice is in no month at all — invisible to every rebate figure and to over-NADAC, and uncounted, where an unplaced supplier is counted and named | money |
+| 10 | **open** | The remittance matcher has no ladder level that keeps the fill number and drops the date, so a wrong date is treated worse than a missing one | money |
+| 11 | **open** | `macAppealWorklist` reaches no page, and "No MAC appeals to file" prints over $1,000 set aside | money |
+| 12 | **open** | A 91%-read invoice and an unreadable scan look identical on the page | money |
+| 13 | **open** | A blank basis of reimbursement and a known non-MAC basis share one verdict | money |
+| 14 | **open** | The copay deposit's cross-feed guard rests on two feeds choosing the same payer name | money |
+| 15 | **open** | Splitting a bundled 835 is right; the deposit gate then refuses every set after the first | money |
+| 16 | **open** | The appeal deadline gate matches one of the four values the extractor can write | money |
+| 17 | **open** | The seven nightly proofs keep one night each | money |
+| 18 | **open, not live** | A paid row with no NDC falls out of both of `staleAgainstDispensing`'s answers — `keep` is not dead, four tests read it | money |
+| 19 | *question* | Of 31 unmatched `mtf` payments, how many are **not** before the feed? Your comment says 24 of 24 were | money |
+| 20 | *question* | `plan`'s last received date is 2026-08-31 — has a real September 835 arrived yet? | money |
+| — | **RESOLVED** | The appeal scripts' own pack divisor — closed by your `pack-size.ts`, verified by running it | — |
+| — | **RESOLVED** | CI never ran `db:migrate`, so 4 tests failed on every runner since `df666bd` — fixed in `8d7c9db` | — |
+| — | **clean** | Rebates are counted once; the 835 reader at four points; the 459 plan adoptions; `books-check` fully wired; devices and salt forms in `substitutable`; the floor's scope gates against *Rutledge*; the fingerprint fix | — |
+
+Two of those twenty are **questions rather than findings** because I could not write the SHOULD BE
+line from domain knowledge, and #3 is a question for fourteen of its sixteen for the same reason.
+That is the gate working, and I would rather hand you two honest questions than two more findings you
+have to audit.
+
+Entries from 11 September and earlier are below this block, unindexed — say the word and I will index
+those too rather than guess at which still matter.
+
 ### From B — 12 September: four of FOUNDATIONS.md's unchecked items, answered by running `substitutable()`
 
 `docs/audits/2026-09-12-substitutable-and-the-narrow-therapeutic-index.md`. **One finding, and it is
