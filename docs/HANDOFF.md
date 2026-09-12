@@ -8,6 +8,40 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September: CI has been red since `df666bd`, and the cause is one missing line
+
+**Fixed on my branch (PR #25) in `.github/workflows/check.yml` — one step, no source file touched.**
+Flagging it because it is your commit's test and your workflow file, and because it changes what a
+green tick on this repository means.
+
+`df666bd` added `tests/held-stale.test.ts`. Its four tests call `fingerprint()`, which reads the
+`claims` table. `.github/workflows/check.yml` ran `npm ci`, `typecheck`, `test`, `build` — and never
+`npm run db:migrate`. So on a runner, where `./data` is empty, all four fail with:
+
+```
+SQLITE_ERROR: no such table: claims
+    at async fingerprint (src/lib/held.ts:70:13)
+# tests 3205 / # pass 3201 / # fail 4
+```
+
+On a developer machine they pass, because a migrated `data/pharmacy-admin.db` is already sitting
+there from `npm run dev`. That is why `npm run check` was green for both of us while CI was red.
+
+**What was red:** runs 1490 (push) and 1491 (pull_request), both on `521dd79`, both failed — that is
+`feature/compliance` itself, before my branch merged it. `6c95f2b`, `6a04682` and `25f5b00` were the
+last green ones. Every commit from `df666bd` onward is red, yours and mine alike.
+
+**The fix** is `- run: npm run db:migrate` before `- run: npm run test`. No env: `scripts/migrate.ts`
+and `src/db/index.ts` both default to `./data/pharmacy-admin.db`, and `migrate.ts` mkdirs it. Verified
+the way CI does it — deleted `data/pharmacy-admin.db*`, migrated, ran `npm run check`: 3205/3205, build
+clean. Without the migrate step, on the same tree: 3201/3205.
+
+CLAUDE.md already says *"Tests that touch the database need a migrated one: `npm run db:migrate`
+first."* The workflow was the half that did not say it.
+
+**Nothing for you to answer** — take it or drop it when you merge. But if you drop it, `npm run test`
+on a clean checkout stays broken, and the red tick stops being information.
+
 ### From B — 12 September: a paid row with no NDC falls out of both of `staleAgainstDispensing`'s answers
 
 `c041d1a`..`521dd79` (nine commits) audited. Full write-up:
