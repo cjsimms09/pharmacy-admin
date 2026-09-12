@@ -8,6 +8,59 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September: four of FOUNDATIONS.md's unchecked items, answered by running `substitutable()`
+
+`docs/audits/2026-09-12-substitutable-and-the-narrow-therapeutic-index.md`. **One finding, and it is
+the first thing I have reported that ranks above money on pre-flight #7.** No file of yours is edited.
+
+**Three closed clean.** You asked for one of them by name — *"this may already be right; it needs
+proving rather than assuming"* — so it is proved:
+
+```
+Two metered-dose inhalers, neither rated     ->  substitutable = false
+An inhaler rated AB against one unrated      ->  substitutable = false
+AB1 vs AB2 / AB1 vs bare AB / two B-rated    ->  substitutable = false
+amlodipine besylate vs maleate               ->  keys differ, substitutable = false
+```
+
+Devices with no TE code are refused (`isARated` fails on the null before the group comparison).
+Salt forms are already kept apart by `equivalenceKey`, deliberately, as its docstring says. AB
+subgroups hold. **Inhalers/nasal sprays and salt forms can come off the unchecked list.**
+
+**The finding.**
+
+```
+OBSERVATION  substitutable() returns TRUE for two AB1 levothyroxine sodium 100 ug tablets from
+             different manufacturers, and TRUE for two AB warfarin sodium 5 mg tablets. No
+             narrow-therapeutic-index concept exists anywhere in src/ or scripts/, and no
+             continuity-of-manufacturer guard either.
+SHOULD BE    For NTI drugs — warfarin, levothyroxine, phenytoin, lithium, digoxin, carbamazepine,
+             theophylline — the gap between therapeutic and toxic is small enough that modest
+             bioavailability differences matter clinically, and practice is to keep a stable patient
+             on one manufacturer. An AB rating states equivalence for approval; it does not answer
+             whether switching a stable patient is advisable.
+DIFFERENCE   Yes — and you raised this yourself in FOUNDATIONS.md ("a recommendation to change NDC on
+             a stable patient is a clinical suggestion the site is not qualified to make"). Nothing
+             in the code acts on it.
+```
+
+**How far it reaches, precisely.** `substitutable()` feeds `withEquivalents` (`drug-file.ts:512`),
+called from `drug-catalog.ts:166`, which is live. What it produces is a **buying** recommendation,
+not "switch this patient" — but what is bought is what the next refill is dispensed from, so the
+consequence is one step removed rather than absent. That distance is why this is flag-and-name rather
+than refuse-outright.
+
+**I am not choosing the list.** Which molecules count as NTI is a clinical judgement — the FDA has
+never published one definitive list and boards differ. The code can carry the shape (a flag, and a
+sentence that a stable patient should not be switched on price alone); the list is the
+pharmacist-in-charge's and belongs in a decided register, not hardcoded by me.
+
+**One question for him, not for you:** should the buy list flag NTI drugs, rank them lower, or leave
+them out of the equivalents comparison entirely? Three defensible answers and it is his call.
+
+The other five unchecked items — partial and completion fills, DIR fees landing retroactively,
+credits reducing cost in the month they land, compounds, 340B — need the database and are yours.
+
 ### From B — 12 September: the money-channels register — one area clean, two questions, no finding
 
 `docs/audits/2026-09-12-the-money-channels-register-two-questions.md`. This is the §3 proactive scan
