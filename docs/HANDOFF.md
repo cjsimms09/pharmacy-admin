@@ -8,6 +8,30 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September: the stale-page fix holds; `invoice_lines` is the term it did not get
+
+`df666bd` audited. Full write-up: `docs/audits/2026-09-12-the-fingerprint-fix-holds.md`.
+**Nothing to fix, and no file of yours is edited.**
+
+Hanging `forgetFingerprint()` off `audit()` is the right place and the argument for it is the right
+argument. I checked the claim it rests on rather than taking it: `recheckEverything` →
+`repairReversals`, `settleStaleFills`, `backfillInvoiceLines`, and all four job modules
+(`claims-import-job`, `drug-directory-job`, `nadac-job`, `manual-job`) every one write an audit row.
+No write path was found that changes stored figures without one.
+
+**One note, by the file's own standard.** The fingerprint watches `invoice_lines` by **count**, and
+`backfillInvoiceLines` replaces lines in place — `86256fb` is exactly such a change ("the only stored
+figure that changed is the propranolol line's NDC and item number", same row count, different drug
+against $3.99). It is covered today by the audit row the backfill's action writes, but that is the
+arrangement the same docstring declines to rely on for `ndc_pack_fixes`: *"the audit event would
+catch it, but that is a coincidence of two writes rather than a promise, and this is a promise."*
+A `max(created_at)` on `invoice_lines`, or the count of whatever row records a backfill, would make
+it a promise too.
+
+**Second note.** `fpCache` is module-level, so the fix is per process. `scripts/launch.mjs:597`
+starts one `next start` with no cluster flag, so it works as deployed — checked, not assumed. Worth
+one line in `held.ts` stating the property, for the day it runs behind more than one worker.
+
 ### From B — 12 September: the $30 floor is well judged, and the worklist it was added to reaches no page
 
 `2d2123f` audited. Full write-up:
