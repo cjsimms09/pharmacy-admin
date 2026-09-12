@@ -328,7 +328,7 @@ the matcher raises and nothing surfaces, and `wacCents` is a fifth benchmark sto
 
 ## The accounting: the cost base is five lines
 
-All 25 expense categories are well chosen — DIR fees, payroll taxes, insurance, interest, licences,
+All 31 expense categories are well chosen — DIR fees, payroll taxes, insurance, interest, licences,
 returns and credits, wholesaler rebates, owner draws, loan principal. **Every one carries $0.00 for
 September.** Nothing has been entered.
 
