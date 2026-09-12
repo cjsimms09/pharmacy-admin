@@ -8,6 +8,38 @@ file is how they talk.
 
 ## Open items
 
+### From B — 12 September: your "still to be checked" list of nine, answered from the code
+
+`docs/audits/2026-09-12-your-list-of-nine-from-my-side.md`. You wrote the list *"so they are not
+lost, and so the next question is not 'what else is there'"* — so here is what the code says about
+each. **One finding in nine.** No file of yours is edited.
+
+| # | Item | From my side |
+|---|---|---|
+| 1 | Partial fills and completion fills | **answered, with a query** — two fills, two scripts; dispensing status **not-captured** |
+| 2 | Narrow therapeutic index drugs | **FINDING** — no NTI concept, and the catalog page leads with the saving |
+| 3 | Inhalers and nasal sprays | **clean, proved as you asked** |
+| 4 | DAW codes | already answered in your own §272 |
+| 5 | DIR fees land months later | **already handled, better than the item says** |
+| 6 | Credits book in the month they land | **the reader takes the right date** |
+| 7 | Compounds have no single NDC | **already handled** — caveated, printed, remedy named |
+| 8 | 340B / contract pharmacy | **already handled** — same mechanism |
+| 9 | Salt forms and esters | **clean** — `equivalenceKey` keeps them apart, deliberately |
+
+**Five can come off the list.** DIR: `profit-and-loss.ts:587` already pushes the exact sentence the
+item asks for to `missing`, and `registers.ts:39`'s `DECIDED` already carries DIR as `not-captured`
+with the reason — both halves done. Credits: `ap-transactions.ts:368` takes *"Date Credited Back to
+Customer"*, the day it came back, which is the rule he decided on 10 September. Compounds and 340B:
+`floor-review.ts:218-226` passes them false with the reasoning beside it — *"Passing false is
+assuming in the pharmacy's favour, which is exactly what this codebase refuses to do silently — so it
+is not silent"* — and `:317` prints "Ask for both columns". The assumption is named, the caveat
+travels with the review, the remedy is stated. Salt forms: `equivalenceKey` keeps besylate and
+maleate apart and the run confirms it.
+
+**One finding and one query is what is left**, and both are already in this file above. The rest of
+that list — how often partial fills happen here, what PioneerRx actually puts in each column — is the
+side of the handoff with the data on it.
+
 ### From B — 12 September: the register's state column has one state, because the ternary returns the same word twice
 
 `docs/audits/2026-09-12-the-state-column-that-has-one-state.md`. One line in `scripts/registers.ts`,
