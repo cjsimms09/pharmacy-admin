@@ -420,10 +420,15 @@ export function buildLedger(input: LedgerInput): LedgerRow[] {
 }
 
 /**
- * How many units a stored pack size describes: "30 EA" is thirty, "(10) 100 EA" is a hundred.
+ * How many units a stored pack size describes: "30 EA" is thirty. A bracketed pack is refused.
  *
- * The leading bracket is the order multiple — how many packs one order line buys — and is not part
- * of the pack. Reading it as the pack size would divide every price by ten.
+ * This header used to read "(10) 100 EA is a hundred", on the reading that the bracket is an order
+ * multiple rather than part of the pack — and it contradicted the body below it, which has refused
+ * bracketed packs since 9 September because the catalogue proof settled the question the other way
+ * against NADAC on 1,593 of 2,147 multi-pack rows.
+ *
+ * Left there by me when I changed the body and the tests and not the sentence above them. Two
+ * comments on one function saying opposite things, and this is the one an editor shows on hover.
  */
 export function packQtyOf(packSize: string | null): number | null {
   if (!packSize) return null;
