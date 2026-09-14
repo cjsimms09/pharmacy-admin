@@ -62,6 +62,20 @@ export type Fill = {
   nadacPerUnitCents: number | null;
   nadacOn: string | null;
   /**
+   * What the Medicare Transaction Facilitator is expected to refund on this fill, in cents.
+   *
+   * The claims feed's own `Est. MTF` column. It is populated on exactly the claims priced at a
+   * Maximum Fair Price under the Inflation Reduction Act's Medicare Drug Price Negotiation
+   * Programme — on this pharmacy's book, 14 claims, all of them basis of reimbursement **46**, and
+   * no others.
+   *
+   * On an MFP claim the plan pays the negotiated price, which is far below what the pharmacy paid
+   * its wholesaler at WAC, and CMS refunds the difference separately through the MTF. So the fill
+   * looks catastrophic and is not: basis 46 returns **−42.7%** on ingredient cost, the worst of any
+   * basis by a factor of eighteen, and every cent of it is money in transit rather than money lost.
+   */
+  expectedFacilitatorCents: number | null;
+  /**
    * Whether the Kansas floor reaches this plan.
    *
    * `true` proved in scope, `false` proved out, **`null` nobody has classified it** — and null is
@@ -74,6 +88,15 @@ export type Fill = {
 export type Remedy =
   /** Nothing is wrong with it. */
   | "not_below_cost"
+  /**
+   * Priced at a Medicare Maximum Fair Price. The gap is a refund CMS owes, not a loss.
+   *
+   * Placed before every other below-cost remedy because it explains the whole gap and none of the
+   * others apply: there is no MAC to appeal against a negotiated price, no Kansas filing against a
+   * federal programme, and buying better does not change a refund that tracks actual acquisition.
+   * Filing any of those would be work spent arguing with the wrong party about money already owed.
+   */
+  | "mfp_refund_due"
   /** Bought above the national average. The buying group can take the price up with the wholesaler. */
   | "buy_better"
   /** Bought well, and a MAC list set the price. */
@@ -226,6 +249,38 @@ export function route(f: Fill): Routed {
       ...carry,
       remedy: "not_below_cost",
       says: `Paid ${money(ingredient)} for a drug that cost ${money(f.acquisitionCents)}. Nothing to chase.`,
+    };
+  }
+
+  /*
+   * A Maximum Fair Price claim, before anything else is asked of it.
+   *
+   * The pharmacy buys a negotiated drug at WAC and the plan pays the MFP, which is far lower. CMS
+   * refunds the difference through the Medicare Transaction Facilitator, so the fill is whole and
+   * the gap is money in transit. None of the other remedies fit and each would be wasted work: no
+   * MAC prices a negotiated drug, the Kansas floor does not reach a federal programme, and a better
+   * wholesale price does not change a refund computed from what was actually paid.
+   *
+   * Identified from the feed's own `Est. MTF` column rather than from the basis code, because that
+   * is the plan stating the amount rather than this file inferring it. Basis 46 corroborates — all
+   * 14 such claims carry it and nothing else does — which is how the code was identified at all.
+   */
+  const refund = f.expectedFacilitatorCents ?? 0;
+  if (refund > 0) {
+    const left = shortfallCents - refund;
+    return {
+      ...carry,
+      shortfallCents,
+      remedy: "mfp_refund_due",
+      says:
+        `${name} cost ${money(f.acquisitionCents)} and ${f.pbmName} paid ${money(ingredient)} — a Medicare negotiated price, ` +
+        `not an underpayment. CMS owes ${money(refund)} of the ${money(shortfallCents)} gap through the Transaction Facilitator` +
+        (left > 100
+          ? `, which still leaves ${money(left)} short once it arrives.`
+          : left < -100
+            ? `, which is ${money(-left)} more than the gap.`
+            : `, which covers it.`) +
+        ` Chase the refund, not the plan.`,
     };
   }
 
@@ -418,6 +473,7 @@ export type RemedyBook = {
 
 const BUCKET_SAYS: Record<Remedy, string> = {
   not_below_cost: "made money, or broke even",
+  mfp_refund_due: "a Medicare negotiated price — CMS owes the gap through the Transaction Facilitator",
   buy_better: "bought above the national average — a price request to the buying group",
   mac_appeal: "bought well and MAC-priced — a MAC appeal",
   kansas_underpayment: "bought well and paid under NADAC on a plan the floor reaches — a Kansas filing",
@@ -442,6 +498,11 @@ export function remedyBook(fills: Fill[], minOverCents = 500): RemedyBook {
     .map(([remedy, e]) => ({ remedy, ...e, says: BUCKET_SAYS[remedy] }))
     .sort((a, b) => b.shortfallCents - a.shortfallCents);
 
+  /*
+   * `mfp_refund_due` is deliberately not actionable. Nothing is filed and nobody is chased: CMS
+   * pays it on its own schedule and the only job is matching the refund when it lands. Counting it
+   * as recoverable would put money on a worklist that no amount of work brings in any sooner.
+   */
   const actionable = routed.filter((r) => r.remedy === "buy_better" || r.remedy === "mac_appeal" || r.remedy === "kansas_underpayment");
   const total = actionable.reduce((n, r) => n + r.shortfallCents, 0);
   const blocked = routed.filter((r) => r.remedy === "kansas_plan_unclassified" || r.remedy === "basis_unknown" || r.remedy === "no_cost");

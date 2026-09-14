@@ -33,6 +33,7 @@ const fill = (over: Partial<Fill> = {}): Fill => ({
   basisOfReimbursement: "06",
   nadacPerUnitCents: 40, // 40c a capsule -> $12.00 for 30
   nadacOn: "2026-09-02",
+  expectedFacilitatorCents: null,
   inKansasScope: null,
   ...over,
 });
@@ -149,6 +150,81 @@ describe("the tree, in the order he set it out", () => {
       assert.ok(["kansas_underpayment", "kansas_plan_unclassified", "contract_problem"].includes(r.remedy), r.remedy);
       assert.equal(r.alsoUnderNadac, true);
     }
+  });
+});
+
+describe("a Medicare negotiated price is a refund in transit, not a loss", () => {
+  /*
+   * Basis 46, identified on 14 September from the claims themselves rather than from any contract —
+   * the PBM agreements do not define NCPDP 522-FM at all, because it is a standard field and not a
+   * contract term, and a search of 399 indexed documents and 3.2 million characters returns nothing.
+   *
+   * What identified it was the drugs and the feed's own `Est. MTF` column. Every basis-46 fill is a
+   * drug on the first Medicare negotiation list — Eliquis, Xarelto, Januvia, Jardiance, NovoLog —
+   * and all 14 carry an expected facilitator amount while no other claim on the book does. The
+   * pharmacy buys at WAC, the plan pays the Maximum Fair Price, and CMS refunds the difference.
+   *
+   * Left unrouted these read as the worst losses in the book: −42.7% on ingredient cost, eighteen
+   * times worse than any other basis, and $3,574.63 that is not lost at all.
+   */
+  const eliquis = (over: Partial<Fill> = {}) =>
+    fill({
+      drugName: "ELIQUIS 5 MG TABLET",
+      ndc11: "00003089421",
+      pbmName: "Humana",
+      quantityThousandths: 180_000,
+      acquisitionCents: 97_227,
+      ingredientPaidCents: 74_611,
+      dispensingFeePaidCents: 75,
+      basisOfReimbursement: "46",
+      expectedFacilitatorCents: 22_616,
+      nadacPerUnitCents: null,
+      ...over,
+    });
+
+  test("it routes to the refund and names CMS, not the plan", () => {
+    const r = route(eliquis());
+    assert.equal(r.remedy, "mfp_refund_due");
+    assert.match(r.says, /Medicare negotiated price, not an underpayment/);
+    assert.match(r.says, /Chase the refund, not the plan/);
+  });
+
+  test("it says whether the refund actually covers the gap", () => {
+    assert.match(route(eliquis()).says, /which covers it/);
+    assert.match(route(eliquis({ expectedFacilitatorCents: 10_000 })).says, /still leaves \$126\.16 short/);
+    assert.match(route(eliquis({ expectedFacilitatorCents: 30_000 })).says, /\$73\.84 more than the gap/);
+  });
+
+  test("it beats every other remedy, because none of them applies to a negotiated price", () => {
+    /*
+     * No MAC prices a negotiated drug, the Kansas floor does not reach a federal programme, and a
+     * better wholesale price does not change a refund computed from what was actually paid. Each
+     * would be a form filed with the wrong party about money already owed.
+     */
+    const boughtDear = eliquis({ nadacPerUnitCents: 100, quantityThousandths: 180_000 }); // NADAC $180 vs $972 paid
+    assert.equal(route(boughtDear).remedy, "mfp_refund_due");
+    assert.equal(route(eliquis({ basisOfReimbursement: "06", inKansasScope: true })).remedy, "mfp_refund_due");
+  });
+
+  test("it is counted, but never as something to go and do", () => {
+    /*
+     * CMS pays on its own schedule. The only job is matching the refund when it lands, so putting
+     * it on a worklist would promise money that no amount of work brings in any sooner.
+     */
+    const book = remedyBook([eliquis(), fill({ claimId: "b", acquisitionCents: 2_500, ingredientPaidCents: 1_400 })]);
+    assert.ok(book.buckets.some((b) => b.remedy === "mfp_refund_due"));
+    assert.doesNotMatch(book.says, /2 fills/);
+    assert.match(book.says, /1 fill worth/);
+  });
+
+  test("a claim with no facilitator amount is routed on its own merits, whatever its basis", () => {
+    // The feed stating an amount is the fact; the basis code only corroborates it.
+    assert.notEqual(route(eliquis({ expectedFacilitatorCents: null })).remedy, "mfp_refund_due");
+    assert.notEqual(route(eliquis({ expectedFacilitatorCents: 0 })).remedy, "mfp_refund_due");
+  });
+
+  test("a fill that made money is not dressed up as a refund", () => {
+    assert.equal(route(eliquis({ ingredientPaidCents: 120_000 })).remedy, "not_below_cost");
   });
 });
 
