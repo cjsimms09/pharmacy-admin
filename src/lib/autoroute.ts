@@ -33,7 +33,7 @@ import { ALLOWED_MIME } from "./files";
  * behaviour we already had and is never wrong, only unhelpful.
  */
 
-export type RouteKind = "claims" | "rx_transactions" | "payer_payments" | "accrual_sales" | "on_hand" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "ap_transactions" | "mck_returns" | "report_summary" | "return_policy" | "nadac" | "remittance_835" | "copay_remit" | "unrecognised";
+export type RouteKind = "claims" | "rx_transactions" | "payer_payments" | "accrual_sales" | "on_hand" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "ap_transactions" | "mck_returns" | "report_summary" | "return_policy" | "nadac" | "remittance_835" | "copay_remit" | "empty_report" | "unrecognised";
 
 export type Classification = {
   kind: RouteKind;
@@ -44,6 +44,51 @@ export type Classification = {
 };
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/**
+ * The whole file is a "nothing to report" marker, or it is not.
+ *
+ * Returns the marker as written, so the inbox can quote the report's own words back rather than
+ * paraphrasing them. Null for everything else, including an empty file.
+ *
+ * Deliberately strict in three ways. It is **anchored to the whole file**, so a report that merely
+ * contains the words somewhere is untouched. It is **bounded by size**, because no real report is
+ * this small and the bound is what stops the rule ever reaching one. And **zero bytes is not a
+ * match**: a file with no content at all is as likely to be a download that failed as a report that
+ * ran, and those are different facts — it stays unrecognised, which is the safe direction.
+ *
+ * The family of wordings is matched rather than the one string actually seen. "No Data" is what
+ * RxLocal sent on 13 September; the same report writer elsewhere says "No Records Found" and "No
+ * rows to display", and a rule that had to be extended each time a vendor phrased it differently
+ * would be a rule that fails on a Sunday nobody is watching.
+ */
+const NO_DATA = /^\(?\s*no\s+(data|records?|results?|rows?)(\s+(available|found|returned|to\s+display))?\s*\.?\s*\)?$/i;
+
+export function emptyReportMarker(buf: Buffer): string | null {
+  if (buf.length === 0 || buf.length > 512) return null;
+  const text = buf.toString("utf8").replace(/^﻿/, "").trim();
+  if (text === "") return null;
+  return NO_DATA.test(text.replace(/\s+/g, " ")) ? text : null;
+}
+
+/**
+ * Which scheduled report a file is, from its name alone — for the case where its content cannot say.
+ *
+ * Only reached for an empty report, where there is nothing inside to recognise. It exists so the
+ * inbox can say *"the daily claims report ran and had no transactions"* rather than *"a file was
+ * empty"*, which is the difference between a line he can dismiss at a glance and one he has to go
+ * and open.
+ *
+ * Naming a report by its filename is exactly what the rest of this file refuses to do, and the
+ * reason is worth stating: every other rule has the file's own contents to go on, and a name is a
+ * worse witness than contents whenever both exist. Here there are no contents. So the fall-back is
+ * an honest "a scheduled report" rather than a guess, and a name this does not know costs nothing.
+ */
+function scheduledReportNamedBy(fileName: string): string | null {
+  /* "Daily 9_13_2026 12_00_00 AM.txt" — how RxLocal names every daily transaction report. */
+  if (/^daily\s+\d{1,2}_\d{1,2}_\d{4}\b/i.test(fileName.trim())) return "The daily claims report";
+  return null;
+}
 
 /**
  * Whether a PDF is McKesson's daily Purchase Drill Down, before anything is spent reading it.
@@ -322,6 +367,39 @@ export function classify(fileName: string, buf: Buffer): Classification {
       kind: "pioneer_catalog",
       why: "Begins with PioneerRx's \"Supplier Catalog Item Search Results\" header; the supplier is named inside the file.",
       headers: ["Supplier Item Number", "Name", "NDC", "Order By Constant", "Cost Per Unit"],
+    };
+  }
+
+  /*
+   * A scheduled report that ran and correctly carried nothing.
+   *
+   * On Sunday 13 September the daily claims report arrived as twelve bytes reading "No Data" — the
+   * pharmacy was shut, so there were no transactions to report. The header reader took "No Data" as
+   * a one-column header, matched no known report, and filed it as unrecognised: the same pile as a
+   * file whose format has never been seen. That is the third state rendered as a fault, and it will
+   * recur every Sunday and every holiday.
+   *
+   * It matters more than tidiness. The first question of the daily check is whether each feed ran,
+   * and silence is the failure mode this site keeps having. An empty report sitting on the
+   * unrecognised pile looks exactly like a feed that stopped — and a feed that really stops becomes
+   * one more line on a pile that already has a line on it every Monday, which is how a real break
+   * goes unnoticed.
+   *
+   * Three states, kept apart: the report ran and had nothing (here), the report could not be read
+   * (`unrecognised`), the report never arrived (nothing in the mailbox at all, which only a
+   * freshness check can see). Placed after every positive content rule, so a real file is always
+   * claimed first.
+   */
+  const emptied = emptyReportMarker(buf);
+  if (emptied !== null) {
+    const named = scheduledReportNamedBy(fileName);
+    return {
+      kind: "empty_report",
+      why:
+        `${named ?? "A scheduled report"} arrived carrying "${emptied}" and nothing else. The report ran and there was ` +
+        `nothing in it, which on a Sunday or a holiday is what a closed day looks like. Nothing is filed from it, and ` +
+        `it is not a reader that failed.`,
+      headers: [],
     };
   }
 

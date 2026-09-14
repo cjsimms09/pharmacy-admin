@@ -52,7 +52,15 @@ export type Price = {
   supplier: string;
   /** Per unit after the rebate this line earns, micros. */
   effectiveUnitMicros: number;
-  source: "invoice" | "catalogue";
+  /**
+   * What the figure rests on: the wholesaler's invoice, a delivery PioneerRx booked in, or a price
+   * a supplier lists that nobody has paid.
+   *
+   * "receipt" carries the half of this pharmacy's buying whose invoice never reached the mailbox.
+   * It is real money and good evidence for a buying decision, which is all this file makes. It is
+   * not good enough to state an acquisition cost to a PBM, and nothing here does.
+   */
+  source: "invoice" | "catalogue" | "receipt";
   itemNumber?: string | null;
 };
 
@@ -433,7 +441,20 @@ export function drugProfitReport(input: ProfitInput): { rows: DrugProfit[]; summ
     for (const { leg } of g.legs) dispensed.set(leg.ndc11, (dispensed.get(leg.ndc11) ?? 0) + 1);
     const currentNdc = [...dispensed.entries()].sort((a, b) => b[1] - a[1])[0][0];
     const currentPrices = pricesByNdc.get(currentNdc) ?? [];
-    const currentPrice = currentPrices.find((p) => p.source === "invoice") ?? [...currentPrices].sort((a, b) => a.effectiveUnitMicros - b.effectiveUnitMicros)[0] ?? null;
+    /*
+     * What this pharmacy pays today, strongest source first: the invoice, then the delivery
+     * receipt, and only then the cheapest price anybody lists.
+     *
+     * The last of those is a guess and always was — a catalogue price is what a supplier would
+     * charge, not what was paid — and it was reached for on every NDC with no invoice, which on
+     * today's data is half the buying. Taking the receipt first replaces a guess with a figure,
+     * and the gain against it is measured from what the pharmacy actually spent.
+     */
+    const currentPrice =
+      currentPrices.find((p) => p.source === "invoice") ??
+      currentPrices.find((p) => p.source === "receipt") ??
+      [...currentPrices].sort((a, b) => a.effectiveUnitMicros - b.effectiveUnitMicros)[0] ??
+      null;
     const currentCandidate = currentPrice ? candidates.find((c) => c.ndc11 === currentNdc && c.supplier === currentPrice.supplier) ?? null : null;
     const current = { ndc11: currentNdc, name: nameOf(currentNdc, g.legs.find((x) => x.leg.ndc11 === currentNdc)?.leg.ndc11 ?? null), supplier: currentPrice?.supplier ?? null, marginCents: currentCandidate?.marginCents ?? null };
 

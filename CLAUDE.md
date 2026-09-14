@@ -47,6 +47,16 @@ import, and an explicit state for anything incomplete — *not yet arrived*, *ne
 **5. Four states, never one word.** Captured · expected-not-yet · never-measured · measured-and-none
 · not-captured. "Missing" is not a state and must never be reported as one.
 
+**6. A sentence he will act on gets read by somebody who did not write it.** Every dataset here is
+re-proved nightly against its source; no sentence on any screen or register is ever re-read by
+anybody but its author. That gap produced three faults in one day on 14 September — *"608 of 45,906
+drugs priced"* (the denominator was the supplier catalogue), *"412 are not priced at all"* (every one
+of the 412 has a cost), and a register heading an edit consumed, orphaning four tracked items. All
+three had correct arithmetic and passing tests; none could have failed one. **Ask what the number
+would make him do, not whether it is right.** Where another session exists it reads the words before
+they ship; where none does — usually — the author reads it cold, as him. That is the weaker form, and
+a figure shipped without a second reader says so in the same breath.
+
 Full reasoning and the failures that earned each clause: `docs/CONSTITUTION.md`. The questions in
 long form and what they found: `docs/FOUNDATIONS.md`. The registers, generated from the data by
 `scripts/registers.ts` so they cannot rot: `docs/registers/`. Open findings with money and owner:

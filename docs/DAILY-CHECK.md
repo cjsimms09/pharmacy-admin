@@ -67,7 +67,7 @@ Work down this list. Each line names what "wrong" looks like.
 
 ## Then fix the underlying problem, not the symptom
 
-Every fault found so far has been one of six shapes. Look for the shape, not the instance:
+Every fault found so far has been one of eight shapes. Look for the shape, not the instance:
 
 - **The same money down two roads.** Two feeds carrying one dollar. Ask which pairs can, and whether
   a rule exists for each.
@@ -81,6 +81,25 @@ Every fault found so far has been one of six shapes. Look for the shape, not the
   per-package into per-unit. A silent factor of 25 lives here.
 - **A date deciding a period.** Filled, sold, paid, deposited, invoiced, posted. Mixing two inside
   one figure is invisible and wrong.
+- **A denominator nobody stated.** A percentage or a fraction is a claim about what the question
+  is, and the bottom half is the half nobody reads. Found twice on 14 September, in opposite
+  directions, within an hour: a coverage figure read as *"608 of 45,906 drugs priced"* — 1.3%, and
+  alarming — because the denominator was every NDC in every supplier catalogue, 44,886 of which
+  this pharmacy has never bought; and a figure reported to him as "51%" without ever saying 51% of
+  what. Neither of us found our own. **So: whenever a figure is a percentage or a fraction, say what
+  the denominator is, and check it is the population the question is about.** A number that is
+  right about the wrong population is worse than no number, because it survives being checked.
+- **A count that is right and a label that is wrong.** The seventh is the *population* being wrong;
+  this is the *name* for it being a claim about the world that the number does not support. The same
+  screen, an hour later, said **"412 are not priced at all"** — arithmetically perfect, reconciling
+  four ways, fully tested, and false. All 412 have a cost: PioneerRx records it on every fill, which
+  is what the appeal engine and the below-cost router have always used. What those drugs lack is a
+  *purchase* record, so the site cannot say where to buy them better. Read as written it said 412
+  drugs were going out of the door blind.
+
+  It survives every check the other seven catch. **So: read the sentence as he would read it, not as
+  the code means it — and ask what the number would make him do.** Nothing about the arithmetic can
+  find this one; only asking what it means can.
 
 ## Decisions he has made, so nobody reopens them
 

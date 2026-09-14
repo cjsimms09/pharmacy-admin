@@ -48,11 +48,116 @@ so the answer can be checked rather than taken on trust.
   is still his until the patient takes it, the cost is held out with the revenue, and an unclaimed
   script gets reversed. $92,154.24 sits in the bin and the account says so.
 
+## Found 14 September, written to the three-line gate
+
+### The PioneerRx receipt does half the job the owner asked of it
+
+**OBSERVATION.** `pioneer_purchases.itemsJson` carries the per-drug figures of every delivery
+PioneerRx booked in — ndc11, quantity, unitCostCents, extendedCents, packSize. Exactly one module
+reads it: `invoice-price-check.ts`, which uses it to check invoices that *did* arrive. Nothing reads
+it as a cost. `product-ledger.ts`, `minimum-store.ts`, `over-nadac-store.ts`, `appeals.ts` and
+`returns-due.ts` all read `invoice_lines` and only `invoice_lines`, and `invoice_lines` is written
+only by `storeInvoiceLines` from an invoice document's own text. Invoice coverage is 51%
+($118,449.24 of $230,143.13, measured 12 September).
+
+**SHOULD BE.** The owner named two jobs for this data and the schema records both in his words:
+*"standing in for a purchase whose invoice never reached the pharmacy"*, and checking the invoices
+that did. He was explicit about the first — *"I more just wanted to use it to catch the money from
+invoices we didn't get before this was setup in September."* A delivery the pharmacy booked in, with
+the wholesaler's own per-drug figures on it, is evidence of what a drug cost whether or not the
+invoice was ever posted. That is pharmacy practice rather than an inference from this data: the
+receiving record is what a pharmacist reconciles against, and it exists precisely because the paper
+is slow.
+
+**DIFFERENCE.** The second job is built and the first is not. Roughly half the pharmacy's purchases
+by value have no per-drug cost reaching any screen that prices an order, times a return or backs an
+appeal — while the figures sit in the database, already parsed, one table away.
+
+**What this must not become.** The owner also said *"we shouldn't be taking pioneer order receipts
+as invoices, invoices are mailed to us from suppliers and that's what we have to keep"*, and the
+schema keeps them in a separate table on purpose so no query can count a delivery twice by
+forgetting a flag. So the answer is **not** to write `invoice_lines` from a receipt. It is a cost
+source that names its own authority, is visibly weaker than an invoice, and never reaches the money
+accounts unless he says so.
+
+**Money: $146,612.51, and it is not a chase.** Corrected 14 September. The first figure —
+$157,264.78 across 62 deliveries — was a raw SQL join that ignored the site's own rules, and the
+site's own answer is different in both directions. `invoicesStillOwed()` reports **0 invoices still
+to chase, $0.00**, and 50 invoices worth $146,612.51 from before the mailbox was watching, across
+four suppliers. JamsRX and Xymogen carry `invoice_from_pioneer`, so their receipts already are their
+invoices; ParMed's nine are settled; McKesson, IPC, IPD and ANDA all pre-date `filingSince`. Nothing
+is waiting on anybody, the owner has said he does not want the 1–8 September backlog chased, and
+McKesson is now sending everything — every McKesson gap is before 9 September, zero after it, 29 of
+31 deliveries invoiced since.
+
+**So the gap is real and it is not the gap it looked like.** Those 50 deliveries have no
+`invoice_lines`, therefore no per-drug cost on any screen that prices a buy or times a return. That
+is what `drug-cost-source.ts` answers and nothing reads it yet. Wiring it into the buying-side
+consumers is session 1's, by agreement on 14 September, because the consumers are its files — with
+two constraints carried from the module's docstring: `provable()` gates anything that reaches a
+payer, since a receipt is not a document the pharmacy can produce; and nothing receipt-derived may
+reach `profit-and-loss.ts`, which sources purchases from the wholesaler invoices dated in the month
+and would double-count the stock check.
+
+**The six lines with no drug code: answered, and there is nothing to build.** All six are correctly
+codeless — the field is empty rather than malformed, so `ndc11()`, `ndcFromUpc()` and the
+twelve-to-eleven reading are all inapplicable. Two McKesson front-end items, a dressing and an elbow
+support, and four Xymogen nutraceuticals; Xymogen is a supplements house and none of its catalogue is
+an NDC drug. $429.45, correctly outside every per-drug figure, and `coverage` says so in a sentence
+rather than dropping them silently as it used to.
+
+### The site had no answer to "are these two names the same wholesaler"
+
+**OBSERVATION.** The invoice proof's first real run, 14 September: 35 invoices, 35 reconcile, 0
+disagree, 0 hold no lines, 0 undated, 0 readable better now, **10 under the wrong wholesaler**, 0
+unreadable. All ten were one wholesaler written two ways — nine filed `IPC` against pages reading
+"Independent Pharmacy Cooperative", one filed `IPD` against "Independent Pharmacy Distributor".
+
+**SHOULD BE.** A check's own sentence has to be true of what it reports. "Filed under a different
+wholesaler than the page now names" was false on ten of ten.
+
+**DIFFERENCE.** Yes, and the cost is not the noise — it is that a genuine ParMed-under-Cardinal would
+have been indistinguishable from it on the screen. A row that cries wolf ten times is a row nobody
+reads on the eleventh.
+
+**Fixed 14 September.** The comparison had been written twice, in `scripts/prove-invoices.ts` and in
+`drug-cost-source.ts`, and both copies missed the same case: an acronym against its own expansion.
+`sameWholesaler` in `supplier-match.ts` is now the one answer and both call it. It works from the
+two strings rather than an alias list, because an alias list goes stale the first time a wholesaler
+is added by somebody who does not know it exists. Same shape as `sameDrugCode`: two writings of one
+thing read as two things.
+
+**Not a similarity score, deliberately.** Either these are the same company or they are not, and a
+threshold would make the answer depend on a number nobody can defend.
+
+**Pre-flight.** Physical act: boxes arriving and being booked in at the counter. Time: affects every
+period already loaded. What a pharmacist knows that the tables do not: that the receiving record is
+reconciled against, not the invoice. Whose money / already counted elsewhere: **the risk that
+matters** — `profit-and-loss.ts` sources purchases from "the wholesaler invoices dated in the
+month", so a receipt-derived cost must stay out of it or the stock-movement check double-counts.
+Worst case ranked: money, not patient harm. Could it pass for the wrong reason: yes — a receipt and
+an invoice for the same delivery must be one cost, matched on the wholesaler's own invoice number,
+which is the join `invoices-owed.ts` already uses. **Resolved since.** Both unknowns answered on 14 September. There are no older rows — every
+`pioneer_purchases` row is September 2026 and all 96 carry both columns — so no text fallback is
+carried, and a backfill of pre-September deliveries must be refused here rather than read from prose.
+548 of 554 lines have a usable NDC. **The 6 that do not were looked at on 15 September and all six
+are correctly codeless** — the field is empty rather than malformed, so `ndc11()`, `ndcFromUpc()` and
+the twelve-to-eleven reading are all inapplicable. Two McKesson front-end items, a dressing and an
+elbow support, and four Xymogen nutraceuticals; Xymogen is a supplements house and none of its
+catalogue is an NDC drug. $429.45, correctly outside every per-drug figure, and `costCoverage` says
+so in a sentence rather than dropping them silently.
+
 ## Mine, not yet started
+
+This heading was deleted by accident on 14 September. I used it as the anchor for the finding above
+and the replacement consumed it, so four tracked items spent a day sitting under "Found 14 September"
+with no owner against them — in the register whose first rule is that nothing leaves the list except
+by being done or decided. Restored 15 September. An edit that takes a heading as its landmark should
+put the landmark back.
 
 | What | Money | Note |
 |---|---|---|
-| **Invoice coverage is 51%** | blocks **$317.69** of provable appeals, and every per-drug cost | Invoices on file come to $118,449.24 against $230,143.13 of PioneerRx purchases. 66 of the 117 below-NADAC Caremark claims cannot be proved because no invoice covers the NDC. Not a reader problem — the documents are not arriving. Worth more than any appeal on that list. |
+| ~~**Invoice coverage is 51%**~~ | — | **Superseded 14 September, see the finding above.** The figure and the framing were both wrong. `invoicesStillOwed()` reports **0 invoices to chase**: the 50 uninvoiced deliveries are from before the mailbox was watching, two of those suppliers send receipts by design, and the owner has said he does not want the 1–8 September backlog chased. It was never a chase. What it is — those deliveries carrying no per-drug purchase price — is answered by `drug-cost-source.ts` and reported on Data health. |
 | **5 September reversals cannot be matched to what they cancel** | **$1,277.03** may still be standing as revenue | 336765 on 09-04 at $461.89 and 337203 on 09-09 at $605.94 among them. `claimCancelledBy` is right to refuse: the Wegovy reversal carries an $833.52 copay the live row does not, so it could belong to either run. Each now appears on the recheck with its money. What is missing is a way for him to say which run a reversal cancels. |
 | **Payer payment cycles are prose, not days** | — | `payment_routing` holds a cycle for 20 of its 29 payers, every one the sentence the contract printed. Nothing reads a number out of it, so `promise-due.ts` falls back to measurement. One row can carry two cycles for two lines of business, and Caremark's states a sixty-day *reconciliation* cycle that says nothing about when a point-of-sale claim is paid. Parse it wrong and the site invents a deadline. |
 | **ANDA has no sending address** | — | Self-resolving: their first invoice is captured from its own page and raised in the Inbox to be named. No action unless it does not arrive. |

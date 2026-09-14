@@ -76,6 +76,8 @@ const KIND_WORDS: Record<string, string> = {
   ap_transactions: "McKesson accounts payable",
   mck_returns: "McKesson returns and credits",
   report_summary: "A totals sheet",
+  /* It ran, and there was nothing in it. A closed Sunday, not a reader that failed. */
+  empty_report: "A report with nothing in it",
   unrecognised: "Not recognised",
 };
 
