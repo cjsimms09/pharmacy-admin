@@ -506,7 +506,7 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
     const { costCoverage, provableShare } = await import("./drug-cost-source");
     const { productLedger } = await import("./product-ledger");
     const ledger = await productLedger();
-    const c = costCoverage(ledger.rows.map((r) => ({ ndc11: r.ndc11, paid: r.paid })));
+    const c = costCoverage(ledger.rows.map((r) => ({ ndc11: r.ndc11, paid: r.paid, unitsDispensed: r.unitsDispensed })));
     const p = provableShare(c);
     /*
      * The gaps are what a person can act on. "Not priced at all" first, because a drug with no cost
@@ -515,7 +515,7 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
     const gaps: string[] = [];
     if (c.neverPriced > 0) {
       gaps.push(
-        `${c.neverPriced.toLocaleString()} drug${c.neverPriced === 1 ? "" : "s"} ${c.neverPriced === 1 ? "has" : "have"} no cost from any source, so ${c.neverPriced === 1 ? "it is" : "they are"} absent from every comparison rather than shown as expensive or cheap.`,
+        `${c.neverPriced.toLocaleString()} drug${c.neverPriced === 1 ? "" : "s"} this pharmacy has bought or dispensed ${c.neverPriced === 1 ? "has" : "have"} no cost from any source, so ${c.neverPriced === 1 ? "it is" : "they are"} absent from every comparison rather than shown as expensive or cheap.`,
       );
     }
     if (c.fromReceipt > 0) gaps.push(p.says);
