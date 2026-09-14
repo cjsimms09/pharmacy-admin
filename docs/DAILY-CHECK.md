@@ -67,7 +67,7 @@ Work down this list. Each line names what "wrong" looks like.
 
 ## Then fix the underlying problem, not the symptom
 
-Every fault found so far has been one of seven shapes. Look for the shape, not the instance:
+Every fault found so far has been one of eight shapes. Look for the shape, not the instance:
 
 - **The same money down two roads.** Two feeds carrying one dollar. Ask which pairs can, and whether
   a rule exists for each.
@@ -89,6 +89,17 @@ Every fault found so far has been one of seven shapes. Look for the shape, not t
   what. Neither of us found our own. **So: whenever a figure is a percentage or a fraction, say what
   the denominator is, and check it is the population the question is about.** A number that is
   right about the wrong population is worse than no number, because it survives being checked.
+- **A count that is right and a label that is wrong.** The seventh is the *population* being wrong;
+  this is the *name* for it being a claim about the world that the number does not support. The same
+  screen, an hour later, said **"412 are not priced at all"** — arithmetically perfect, reconciling
+  four ways, fully tested, and false. All 412 have a cost: PioneerRx records it on every fill, which
+  is what the appeal engine and the below-cost router have always used. What those drugs lack is a
+  *purchase* record, so the site cannot say where to buy them better. Read as written it said 412
+  drugs were going out of the door blind.
+
+  It survives every check the other seven catch. **So: read the sentence as he would read it, not as
+  the code means it — and ask what the number would make him do.** Nothing about the arithmetic can
+  find this one; only asking what it means can.
 
 ## Decisions he has made, so nobody reopens them
 
