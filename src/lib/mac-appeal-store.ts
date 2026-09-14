@@ -4,6 +4,7 @@ import { and, eq, gte, isNotNull } from "drizzle-orm";
 import { todayIso } from "./dates";
 import { isOutOfBooks } from "./books-start";
 import { worklist, type Candidate, type PayerTerms, type Worklist } from "./mac-appeal-candidates";
+import { ingredientReceivedCents } from "./claim-remedy";
 
 /**
  * The MAC appeal worklist, loaded from the database.
@@ -53,7 +54,25 @@ async function loadCandidates(from: string): Promise<Candidate[]> {
       pcn: schema.claims.pcn,
       groupNumber: schema.claims.groupNumber,
       pbmName: schema.claims.pbmName,
-      paidCents: schema.claims.remitCents,
+      /*
+       * The ingredient reimbursement, patient share included — not `remit_cents`.
+       *
+       * `remit_cents` is what the *plan* sent, and on this pharmacy's book it obeys
+       * `remit = ingredient + fee − copay` on 1,523 of 1,594 September fills: the copay is the
+       * patient's slice **of** the ingredient cost, not money on top of it. Comparing acquisition
+       * against the plan's share alone counts every copay dollar as a loss, and on September that
+       * was 342 claims and $25,810.59 of "below cost" that was nothing of the kind — a Wegovy fill
+       * costing $1,308.55 against a $1,535.01 patient copay read as $1,136.45 in the red. Those are
+       * claims an appeal would have been filed on, and a don't-dispense decision made from.
+       *
+       * It is also the figure a PBM's own form asks for, and the benchmark NADAC is on. The
+       * derivation is shared with `claim-remedy.ts`, which routes these same claims to the remedy
+       * each one needs.
+       */
+      ingredientPaidCents: schema.claims.ingredientPaidCents,
+      dispensingFeePaidCents: schema.claims.dispensingFeePaidCents,
+      remitCents: schema.claims.remitCents,
+      copayCents: schema.claims.copayCents,
       acquisitionCents: schema.claims.acquisitionCents,
       quantityThousandths: schema.claims.quantityThousandths,
       daysSupply: schema.claims.daysSupply,
@@ -120,6 +139,7 @@ async function loadCandidates(from: string): Promise<Candidate[]> {
 
   return rows
     .filter((r) => !testImports.has(r.importId))
+    .map((r) => ({ ...r, paidCents: ingredientReceivedCents(r).cents }))
     .filter((r) => r.paidCents !== null)
     .map((r) => ({
       claimId: r.claimId,
