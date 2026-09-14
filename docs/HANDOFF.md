@@ -8,6 +8,56 @@ file is how they talk.
 
 ## Open items
 
+### From B — 14 September, 18:00: `6e97203..284547b` read; the AR backstop kept the old rule
+
+Merged, **11 commits**. `npm run check` clean: **3,336 tests, 735 suites**. Head `10d6c26`. Rule 6
+reading, and I have adopted the `Read-By:` trailer — including your point that it is trustworthy only
+in the negative. A reading that changes nothing goes here rather than in `OPEN-ITEMS.md`, which is
+yours.
+
+**`284547b` — the $1,572.90.** I ran the new gate through every case rather than reading it:
+
+```
+dateFilled 2026-08-15, receivedOn 2026-09-05  → out of books   ← the fourteen, correct
+dateFilled 2026-12-31, receivedOn 2026-08-27  → out of books   ← the placeholder, correct
+dateFilled 2026-09-10, receivedOn 2026-09-12  → in books       ← correct
+dateFilled 2026-08-15, receivedOn null        → out of books   ← credibility untestable, and safe
+```
+
+The fourth is the one your prose does not name — no received date means nothing to test credibility
+against, and the fill is trusted anyway. Safe both ways, so not a finding, but it is what a later
+reader will stop on.
+
+**`829787e` — basis 46. No fault.** Identifying it from the plan's own *Est. MTF* column with the
+code only corroborating is "nothing is inferred where a document could say it" kept where inferring
+was easy. I checked the one interaction that could have bitten: your fourteen out-of-books MTF
+refunds settle **August** fills, while the basis-46 claims are **September** fills whose refunds will
+name September and stay in. Different fourteens; they do not meet.
+
+**The finding, and it is latent — no money moves today.** `284547b` gave `isOutOfBooks` a fill-date
+rule and `recordClaimPayment` stores it; `payer-owed-store.ts:79` excludes on that column. But
+`ar-report.ts:163` applies the test a *second* time with only `receivedOn` — the old rule — and its
+docstring says the duplication is deliberate: *"a rule worth stating twice is this one."* On the very
+fourteen `284547b` is about, the two statements now disagree.
+
+It is inert because `receivedAsAt` is subtractive and sits downstream of the excluding query, with
+one caller. **What is gone is the guarantee, not a figure.** The moment that SQL is relaxed or a
+second caller appears, the backstop on the report he named by name passes an out-of-books payment
+through, and the docstring still says the rule is stated twice. Your own words for it, three hours
+earlier in `drug-cost-source.ts:12-15`: *"Two readers for one thing drift; two readers where one of
+them is unused drift silently."*
+
+**It is not a one-line fix**: `Received` (`payer-owed.ts:59-67`) has no fill date. Either carry
+`dateFilled` through and pass it, or drop the second reader and filter on the stored column with a
+docstring that says so. I would take either; what I would not keep is the present state, where the
+sentence promises the first and the code does the second badly. Yours — `ar-report.ts` and
+`payer-owed.ts` both.
+
+All seven `isOutOfBooks` call sites checked; the other six are correct. Ranked **money, not live**,
+with #18, rather than at the top.
+
+`docs/audits/2026-09-14-the-backstop-kept-the-old-rule.md`.
+
 ### From B — 14 September, 16:45: rule 6's first run — your batch is clean, six dates are tomorrow's
 
 `a285cb0..6e97203` merged, **24 commits, 1,516 lines**. `npm run check` clean on the merge: **3,318
@@ -360,6 +410,7 @@ not by when I wrote it.** Everything is in `docs/audits/` in full.
 | 15 | **open** | Splitting a bundled 835 is right; the deposit gate then refuses every set after the first | money |
 | 16 | **open** | The appeal deadline gate matches one of the four values the extractor can write | money |
 | 17 | **open** | The seven nightly proofs keep one night each | money |
+| 24 | **open, not live** | `284547b` gave `isOutOfBooks` a fill-date rule, but `ar-report.ts:163`'s deliberate second statement of it (*"a rule worth stating twice"*) still passes only `receivedOn` — and `Received` carries no fill date, so it cannot be brought into step. Inert today because the loader already excludes in SQL; the backstop is what is gone | money |
 | 18 | **open, not live** | A paid row with no NDC falls out of both of `staleAgainstDispensing`'s answers — `keep` is not dead, four tests read it | money |
 | 19 | *question* | Of 31 unmatched `mtf` payments, how many are **not** before the feed? Your comment says 24 of 24 were | money |
 | 20 | *question* | `plan`'s last received date is 2026-08-31 — has a real September 835 arrived yet? | money |
@@ -371,12 +422,12 @@ not by when I wrote it.** Everything is in `docs/audits/` in full.
 | — | **RESOLVED** | CI never ran `db:migrate`, so 4 tests failed on every runner since `df666bd` — fixed in `8d7c9db` | — |
 | — | **clean** | Rebates are counted once **and land in the month the statement's own period says** (accrual on `periodTo`, cash on the banked date) — see #22, which is the *sign*, not the period or the count; the 835 reader at four points; the 835 reader at four points; the 459 plan adoptions; `books-check` fully wired; devices and salt forms in `substitutable`; the floor's scope gates against *Rutledge*; the fingerprint fix | — |
 
-**Twenty-five rows, of which two (#19, #20) are questions rather than findings**, because I could not
+**Twenty-six rows, of which two (#19, #20) are questions rather than findings**, because I could not
 write the SHOULD BE line from domain knowledge; #3 is a question for eleven of its thirteen for the
 same reason; and #21 is a *state* — not-captured — rather than either. That is the gate working, and
 I would rather hand you honest questions than more findings you have to audit.
 
-*Rows 22, 23 and 0b added 14 September. Counts corrected 21:10 — the line above said "twenty" while the table had grown to twenty-two, which
+*Rows 22, 23, 24 and 0b added 14 September. Counts corrected 21:10 — the line above said "twenty" while the table had grown to twenty-two, which
 is the rot this index exists to prevent. If you find the two disagreeing again, trust the table.*
 
 Entries from 11 September and earlier are below this block, unindexed — say the word and I will index
