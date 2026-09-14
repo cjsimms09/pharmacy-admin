@@ -247,6 +247,16 @@ export type CoverageSummary = {
   fromReceipt: number;
   notYetArrived: number;
   neverBought: number;
+  /**
+   * Delivery lines carrying no drug code at all, which no figure above can be about.
+   *
+   * They are not `neverBought` — something was bought and paid for. They are not unpriced drugs
+   * either, because nothing establishes that they are drugs. They are outside every other number
+   * here, and the only dishonest thing to do with them is leave them out silently: a delivery can
+   * be reported ninety per cent priced while the other ten per cent was never a candidate for the
+   * question. Six of them are on file as at 14 September and nobody has looked at them yet.
+   */
+  noCode: number;
   says: string;
 };
 
@@ -256,7 +266,7 @@ export type CoverageSummary = {
  * Reported in NDCs rather than dollars on purpose: this is a question about coverage, and one
  * expensive drug would otherwise hide a hundred cheap ones nobody can price.
  */
-export function coverage(costs: DrugCost[]): CoverageSummary {
+export function coverage(costs: DrugCost[], noCode = 0): CoverageSummary {
   const n = (a: CostAuthority) => costs.filter((c) => c.authority === a).length;
   const fromInvoice = n("invoice");
   const fromReceipt = n("receipt");
@@ -264,12 +274,29 @@ export function coverage(costs: DrugCost[]): CoverageSummary {
   const neverBought = n("neverBought");
   const priced = fromInvoice + fromReceipt + notYetArrived;
 
-  if (costs.length === 0) return { ndcs: 0, fromInvoice, fromReceipt, notYetArrived, neverBought, says: "No drug was asked about." };
+  if (costs.length === 0 && noCode === 0) {
+    return { ndcs: 0, fromInvoice, fromReceipt, notYetArrived, neverBought, noCode, says: "No drug was asked about." };
+  }
+  if (costs.length === 0) {
+    return {
+      ndcs: 0, fromInvoice, fromReceipt, notYetArrived, neverBought, noCode,
+      says: `No drug was asked about, and ${noCode} delivery line${noCode === 1 ? "" : "s"} carr${noCode === 1 ? "ies" : "y"} no drug code, so nothing on ${noCode === 1 ? "it" : "them"} could be.`,
+    };
+  }
 
   const bits = [`${priced} of ${costs.length} drugs have a cost the site can state`];
   if (fromInvoice) bits.push(`${fromInvoice} from a wholesaler's invoice`);
   if (notYetArrived) bits.push(`${notYetArrived} from a delivery whose invoice has not arrived yet`);
   if (fromReceipt) bits.push(`${fromReceipt} from a delivery no invoice is coming for`);
   if (neverBought) bits.push(`${neverBought} this pharmacy has never bought`);
-  return { ndcs: costs.length, fromInvoice, fromReceipt, notYetArrived, neverBought, says: `${bits.join(", ")}.` };
+  /*
+   * Said after the full stop rather than inside the list, because it is not a drug that failed to
+   * be priced — it is a line that was never a candidate for the question, and adding it to a count
+   * of drugs would make the two figures a sum nobody could take apart again.
+   */
+  const tail =
+    noCode === 0
+      ? ""
+      : ` Separately, ${noCode} delivery line${noCode === 1 ? "" : "s"} carr${noCode === 1 ? "ies" : "y"} no drug code — a device, a fee or a front-end item — and ${noCode === 1 ? "is" : "are"} outside every figure above rather than counted as unpriced.`;
+  return { ndcs: costs.length, fromInvoice, fromReceipt, notYetArrived, neverBought, noCode, says: `${bits.join(", ")}.${tail}` };
 }
