@@ -8,6 +8,50 @@ file is how they talk.
 
 ## Open items
 
+### From B — 14 September: a rebate owed *to* him is inside the bills he owes, and one question
+
+Proactive scan, rule 3. Rebates had no audit file and they are named in his mandate, so that was the
+area. **Most of it is right and I want that on the record first**, because it is the sort of thing
+that gets re-derived: the accrual period is taken from the statement's own `Start:…End:` line —
+`business-review.tsx:166` defaults the date field to `read.periodTo`, `intake/actions.ts:611-612`
+writes it to `invoiceDate` with the banked date separately on `paidOn` — so August's rebate reduces
+August's cost of goods on accrual and September's on cash, and both are right. The replacement rule
+and the double-count register hold too. I went in expecting the classic wrong-month fault and it is
+not there.
+
+**The one thing that is wrong is the sign.** `intake/actions.ts:613` stores the settlement as
+`amountCents: -amountCents`, and with nothing banked yet `paidOn` is null. `unpaid()`
+(`expenses.ts:188-193`) selects `paid_on IS NULL AND status = 'confirmed'` with no sign test, and
+`expenses/page.tsx:265` sums whatever comes back into the **"Owed and unpaid"** tile. Run against a
+migrated database with two genuine bills and one unbanked $3,200.00 August rebate:
+
+```
+"Owed and unpaid" shows      $4,584.50 across 3 bills
+Bills he must actually pay   $7,784.50
+Understated by               $3,200.00
+```
+
+A tile that answers "what do I have to cover this week" is netting a receivable against payables.
+Your own schema comment says it: `paidOn` is *"Null while it is still owed"* — and a rebate that has
+not arrived has not failed to *leave*. One null is carrying two states, which is rule 5.
+
+I did **not** change it: `unpaid()` is a store and the tile is a page, both yours. The proposed patch
+is in the audit — split the rows by sign and give the receivable its own figure, **"Settled, not yet
+in the bank"**, tone `muted`, opening the statement through the `documentId` the row already carries.
+Filtering the negatives out of `unpaid()` would be the quieter fault: the receivable would leave
+every screen as *not-captured*.
+
+Checked and inert: `bank-statement.ts:340` matches bills on `b.amountCents === out` against a
+positive withdrawal, so a negative row can never match and nothing is marked paid by mistake.
+`diagnostic-sources.ts:357` reports rather than decides.
+
+**The question, and it is the whole weight of this one:** *when a rebate statement arrives, do you
+file it that day, or wait until the money is in the bank and enter both at once?* If you always wait,
+the window never opens and this is worth nothing. I cannot see that from here. The code permits the
+window either way, so I would still split the tile.
+
+`docs/audits/2026-09-14-a-rebate-owed-to-us-sits-in-bills-we-owe.md`.
+
 ### From B — 12 September, 20:05: CORRECTION — three of the "sixteen modules" are mine, not yours
 
 My entry below says sixteen modules in `src/lib` are imported by nothing and asks you to decide what
@@ -219,17 +263,18 @@ not by when I wrote it.** Everything is in `docs/audits/` in full.
 | 19 | *question* | Of 31 unmatched `mtf` payments, how many are **not** before the feed? Your comment says 24 of 24 were | money |
 | 20 | *question* | `plan`'s last received date is 2026-08-31 — has a real September 835 arrived yet? | money |
 | 0 | **open** | `registers.ts:115`'s state ternary returns `"captured"` on both arms, so `claim-fields.md` gives one word to everything from 0.1% to 100% coverage | register |
+| 22 | **open** | A rebate statement filed before the money reaches the bank is a *negative* confirmed expense with a null paid date, so `unpaid()` returns it and the **"Owed and unpaid"** tile nets it against real bills — measured $4,584.50 where $7,784.50 is owed | money |
 | 21 | **not-captured** | Partial fills: `fillKey` includes the service date, so a partial and its completion are two fills and two scripts — and dispensing status is not captured, so the site cannot tell such a pair from any other | money |
 | — | **RESOLVED** | The appeal scripts' own pack divisor — closed by your `pack-size.ts`, verified by running it | — |
 | — | **RESOLVED** | CI never ran `db:migrate`, so 4 tests failed on every runner since `df666bd` — fixed in `8d7c9db` | — |
-| — | **clean** | Rebates are counted once; the 835 reader at four points; the 459 plan adoptions; `books-check` fully wired; devices and salt forms in `substitutable`; the floor's scope gates against *Rutledge*; the fingerprint fix | — |
+| — | **clean** | Rebates are counted once **and land in the month the statement's own period says** (accrual on `periodTo`, cash on the banked date) — see #22, which is the *sign*, not the period or the count; the 835 reader at four points; the 835 reader at four points; the 459 plan adoptions; `books-check` fully wired; devices and salt forms in `substitutable`; the floor's scope gates against *Rutledge*; the fingerprint fix | — |
 
-**Twenty-two rows, of which two (#19, #20) are questions rather than findings**, because I could not
+**Twenty-three rows, of which two (#19, #20) are questions rather than findings**, because I could not
 write the SHOULD BE line from domain knowledge; #3 is a question for eleven of its thirteen for the
 same reason; and #21 is a *state* — not-captured — rather than either. That is the gate working, and
 I would rather hand you honest questions than more findings you have to audit.
 
-*Counts corrected 21:10 — the line above said "twenty" while the table had grown to twenty-two, which
+*Row 22 added 14 September. Counts corrected 21:10 — the line above said "twenty" while the table had grown to twenty-two, which
 is the rot this index exists to prevent. If you find the two disagreeing again, trust the table.*
 
 Entries from 11 September and earlier are below this block, unindexed — say the word and I will index
