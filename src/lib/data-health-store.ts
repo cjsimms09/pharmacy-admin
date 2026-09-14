@@ -513,9 +513,14 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
      * is invisible in every comparison rather than visibly wrong in one.
      */
     const gaps: string[] = [];
-    if (c.neverPriced > 0) {
+    if (c.noPurchaseRecord > 0) {
+      /*
+       * Worded against the fault it caused. The first version said "no cost from any source", and
+       * on 15 September all 412 of them had one — PioneerRx's own acquisition figure on the fill,
+       * which the MAC appeal engine has always used. What they have no record of is the purchase.
+       */
       gaps.push(
-        `${c.neverPriced.toLocaleString()} drug${c.neverPriced === 1 ? "" : "s"} this pharmacy has bought or dispensed ${c.neverPriced === 1 ? "has" : "have"} no cost from any source, so ${c.neverPriced === 1 ? "it is" : "they are"} absent from every comparison rather than shown as expensive or cheap.`,
+        `${c.noPurchaseRecord.toLocaleString()} drug${c.noPurchaseRecord === 1 ? "" : "s"} dispensed here ${c.noPurchaseRecord === 1 ? "has" : "have"} no invoice or receipt for the stock, so the site cannot say where to buy ${c.noPurchaseRecord === 1 ? "it" : "them"} better or set a price against NADAC. Their cost on each fill is known from the claim, so no margin is in doubt — this is a gap in the buying picture, not in the books.`,
       );
     }
     if (c.fromReceipt > 0) gaps.push(p.says);
