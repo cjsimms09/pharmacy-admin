@@ -140,20 +140,91 @@ an invoice for the same delivery must be one cost, matched on the wholesaler's o
 which is the join `invoices-owed.ts` already uses. **Resolved since.** Both unknowns answered on 14 September. There are no older rows — every
 `pioneer_purchases` row is September 2026 and all 96 carry both columns — so no text fallback is
 carried, and a backfill of pre-September deliveries must be refused here rather than read from prose.
-548 of 554 lines have a usable NDC. **The 6 that do not were looked at on 15 September and all six
+548 of 554 lines have a usable NDC. **The 6 that do not were looked at on 14 September and all six
 are correctly codeless** — the field is empty rather than malformed, so `ndc11()`, `ndcFromUpc()` and
 the twelve-to-eleven reading are all inapplicable. Two McKesson front-end items, a dressing and an
 elbow support, and four Xymogen nutraceuticals; Xymogen is a supplements house and none of its
 catalogue is an NDC drug. $429.45, correctly outside every per-drug figure, and `costCoverage` says
 so in a sentence rather than dropping them silently.
 
+## Readings recorded — 14 September
+
+Rule 6 says a review that happens after the push and changes nothing leaves no commit to carry a
+`Read-By:`, and that it goes here as a line or is not recorded at all. These are those lines.
+
+**63bf908, the `Read-By:` clause itself — read by session 2, 14 September.** Session 1 asked for it
+to be read before it stood and pushed it carrying no trailer, because nobody had. Two things came
+back; the first is in the half the rule says can be believed.
+
+*"A commit without one is reliable evidence nobody else read it."* It is not, yet. It is reliable
+evidence nobody **recorded** a reading, and for the first weeks those are different: the convention
+is a day old, so an absent trailer mostly means the habit has not formed rather than that the words
+went unread. The negative is the half the rule rests on, so it is the half that has to be stated
+exactly — and a noisy negative early on invites the conclusion that the control is failing when it is
+only new. Proposed wording: absence is reliable evidence that nobody recorded a reading, and becomes
+evidence that nobody read only once the trailer is habitual.
+
+*"That gap produced three faults in one day on 14 September."* True of the three that earned the
+clause and no longer true of the day: the nine forward-dated references, the invented duration, the
+attribution of my drift to session 1, and session 1's own "began" against "became dependable" are
+four more of the same class, all found after it was written. The sentence does not say which it
+means. Not worth a count that will go stale again — worth "the three that earned this clause", which
+cannot.
+
+Neither changes what the rule does or how it is followed. Session 1 owns the wording.
+
+## Open against rule 6 itself — 14 September
+
+### It is the only control here that cannot show it ran
+
+**OBSERVATION.** Six nightly proofs each re-read a source file and print what they compared: the
+catalogue against the wholesaler's file, NADAC against the CMS files, the claims against the stored
+reports, the shelf against its own record count, the invoices against their documents. Every one can
+be asked "did you run, and on what" and answer. Rule 6 has no source to compare against — the
+instrument is a person reading — so it cannot answer either question. There is no record anywhere of
+a sentence having been read by somebody who did not write it.
+
+**SHOULD BE.** A control that cannot be shown to have run is indistinguishable from one that has
+stopped, which is the whole reason the six proofs carry their own date: a job that dies leaves a row
+that ages visibly rather than a row that looks fine. Rule 6 has the failure mode those were built to
+prevent, and it is the newest and least practised rule in the set.
+
+**DIFFERENCE.** Yes, and session 1 named it rather than papering over it — its own words, that it
+will say so to the owner rather than let it sit alongside the others as though it were the same kind
+of thing. That is right and this entry is not a complaint about it.
+
+**A partial answer, offered rather than adopted.** The rule already records the *absence*: a figure
+shipped with no second reader says so in the same breath. What nothing records is the presence. A
+`Read-By:` trailer on a commit, in the same shape as `Co-Authored-By:`, would make the question
+answerable — `git log --grep` says which work was read and by whom, and more usefully which was not.
+
+Its limits, said plainly because an attestation that oversells itself is worse than none: it records
+that the control ran, never that it ran well. It can be typed without reading, exactly as any trailer
+can. It proves nothing about a sentence's truth. What it buys is that absence stops being invisible,
+which is the same and only thing the proofs' dates buy.
+
+Session 1 owns the wording of rules 1 to 6 and this is a proposal to it, not a change to it.
+
+**Correction to the record while here.** Commit 294c729's message says *"Session 1's messages said
+the fifteenth too, and I took the date from the conversation rather than from the clock."* The first
+half is false. `git log -S"15 September"` returns five commits and all five are mine; session 1
+checked and its text says 14 September for Monday's work and 13 September for the Sunday file, both
+correct. I asserted a fault in somebody else's work while owning my own, without checking, and the
+effect of it would have been to make a drift that was mine alone look systemic. Worse than the nine
+dates, and found only because session 1 disputed it rather than accepting the company.
+
 ## Mine, not yet started
 
-This heading was deleted by accident on 14 September. I used it as the anchor for the finding above
-and the replacement consumed it, so four tracked items spent a day sitting under "Found 14 September"
-with no owner against them — in the register whose first rule is that nothing leaves the list except
-by being done or decided. Restored 15 September. An edit that takes a heading as its landmark should
+This heading was deleted by accident on 14 September and restored the same day. I used it as the
+anchor for the finding above and the replacement consumed it, so four tracked items sat under
+"Found 14 September" with no owner against them — in the register whose first rule is that nothing
+leaves the list except by being done or decided. An edit that takes a heading as its landmark should
 put the landmark back.
+
+(The first version of this paragraph said they had spent a day that way. They had not: it was the
+same session, a few hours. Nobody was harmed by the overstatement and it was still a figure about
+the world stated without being checked, in the paragraph about a register describing a world that
+had moved.)
 
 | What | Money | Note |
 |---|---|---|

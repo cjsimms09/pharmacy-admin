@@ -516,7 +516,7 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
     if (c.noPurchaseRecord > 0) {
       /*
        * Worded against the fault it caused. The first version said "no cost from any source", and
-       * on 15 September all 412 of them had one — PioneerRx's own acquisition figure on the fill,
+       * on 14 September all 412 of them had one — PioneerRx's own acquisition figure on the fill,
        * which the MAC appeal engine has always used. What they have no record of is the purchase.
        */
       gaps.push(
