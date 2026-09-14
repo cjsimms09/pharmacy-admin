@@ -6,7 +6,7 @@ import { costCoverage, provableShare, type PricedRow } from "../src/lib/drug-cos
  * How much of what the pharmacy buys it can price, and on what evidence.
  *
  * This module used to decide what a drug cost. It does not any more: session 1 wired receipts into
- * `buildLedger` on 15 September and the ledger decides it, in the one place every buying screen
+ * `buildLedger` on 14 September and the ledger decides it, in the one place every buying screen
  * already reads. Two readers for one thing drift, and two readers where one of them is unused drift
  * silently — nothing tests the spare against reality, and the first person to reach for it gets a
  * different answer from the screen beside them. Deleting the duplicate was the fix.
@@ -89,7 +89,7 @@ describe("lines with no drug code", () => {
 describe("the denominator answers the question asked", () => {
   test("a catalogue listing nobody bought is outside the question, not an unpriced drug", () => {
     /*
-     * The ledger holds a row for every NDC in every supplier catalogue — 45,906 on 15 September, of
+     * The ledger holds a row for every NDC in every supplier catalogue — 45,906 on 14 September, of
      * which 44,886 this pharmacy has never touched. Counting them would have printed "608 of 45,906
      * priced", 1.3%, when the answer to the question being asked is fifty-one per cent. Session 1
      * caught it before it reached him.
@@ -134,7 +134,7 @@ describe("no purchase record is not no margin, and the sentence must not say it 
   /*
    * The words were wrong where the count was right, which is the harder half to catch. "412 are not
    * priced at all" reads as "412 drugs go out of the door with no margin known" — and on
-   * 15 September PioneerRx knew the cost on all 412 of them, 993 fills and $16,219.38 of
+   * 14 September PioneerRx knew the cost on all 412 of them, 993 fills and $16,219.38 of
    * acquisition. The MAC appeal engine has always used that figure and the below-cost router runs
    * on it. A person acting on the old sentence would have been acting on something false for every
    * single one.

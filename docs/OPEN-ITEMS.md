@@ -140,7 +140,7 @@ an invoice for the same delivery must be one cost, matched on the wholesaler's o
 which is the join `invoices-owed.ts` already uses. **Resolved since.** Both unknowns answered on 14 September. There are no older rows — every
 `pioneer_purchases` row is September 2026 and all 96 carry both columns — so no text fallback is
 carried, and a backfill of pre-September deliveries must be refused here rather than read from prose.
-548 of 554 lines have a usable NDC. **The 6 that do not were looked at on 15 September and all six
+548 of 554 lines have a usable NDC. **The 6 that do not were looked at on 14 September and all six
 are correctly codeless** — the field is empty rather than malformed, so `ndc11()`, `ndcFromUpc()` and
 the twelve-to-eleven reading are all inapplicable. Two McKesson front-end items, a dressing and an
 elbow support, and four Xymogen nutraceuticals; Xymogen is a supplements house and none of its
@@ -149,11 +149,16 @@ so in a sentence rather than dropping them silently.
 
 ## Mine, not yet started
 
-This heading was deleted by accident on 14 September. I used it as the anchor for the finding above
-and the replacement consumed it, so four tracked items spent a day sitting under "Found 14 September"
-with no owner against them — in the register whose first rule is that nothing leaves the list except
-by being done or decided. Restored 15 September. An edit that takes a heading as its landmark should
+This heading was deleted by accident on 14 September and restored the same day. I used it as the
+anchor for the finding above and the replacement consumed it, so four tracked items sat under
+"Found 14 September" with no owner against them — in the register whose first rule is that nothing
+leaves the list except by being done or decided. An edit that takes a heading as its landmark should
 put the landmark back.
+
+(The first version of this paragraph said they had spent a day that way. They had not: it was the
+same session, a few hours. Nobody was harmed by the overstatement and it was still a figure about
+the world stated without being checked, in the paragraph about a register describing a world that
+had moved.)
 
 | What | Money | Note |
 |---|---|---|
