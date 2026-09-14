@@ -5,8 +5,9 @@ import { buildLedger, type LedgerInput } from "../src/lib/product-ledger";
 /**
  * The delivery receipt standing in for the invoice that never came.
  *
- * Invoice coverage is 51%. The mailbox only began capturing supplier invoices on 9 September, so
- * 50 deliveries worth $146,612.51 from the first eight days have no document and never will. The
+ * Invoice capture became reliable on 9 September — 0 of 13 deliveries invoiced on the 1st, 2 of 11
+ * on the 4th, then 10 of 11, 10 of 10, 9 of 10 — so the 50 deliveries before it, worth $146,612.51,
+ * have no document and never will. The
  * owner closed it: *"dont want to chase 1-8 sept invoices.. we will use pioneers but going forward
  * all mckesson invoices are sent now"*.
  *

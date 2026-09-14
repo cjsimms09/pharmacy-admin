@@ -180,9 +180,15 @@ export type LedgerInput = {
   /**
    * Deliveries PioneerRx booked in, for the NDCs no invoice line covers.
    *
-   * Invoice coverage is 51%: the mailbox only began capturing supplier invoices on 9 September, so
-   * 50 deliveries worth $146,612.51 from the first eight days of the month have no document and
-   * never will. The owner closed that: *"dont want to chase 1-8 sept invoices.. we will use pioneers
+   * Invoice capture became reliable on 9 September, so the deliveries before it have no document
+   * and never will: 50 of them, worth $146,612.51.
+   *
+   * "Became reliable", not "began" — an earlier draft of this note said the mailbox started catching
+   * invoices on the 9th and that was a claim about the world made without looking. Measured by
+   * delivery date: 0 of 13 invoiced on the 1st, 0 of 11 on the 2nd, 0 of 10 on the 3rd, **2 of 11 on
+   * the 4th**, 3 of 20 on the 8th — then 10 of 11, 10 of 10, 9 of 10. So a handful arrived from the
+   * 4th and the feed only became dependable on the 9th, which is a different sentence and the true
+   * one. The owner closed that: *"dont want to chase 1-8 sept invoices.. we will use pioneers
    * but going forward all mckesson invoices are sent now"* — and he is right that it resolves
    * itself, since every McKesson gap is before the 9th and there are none after.
    *
