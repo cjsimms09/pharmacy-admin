@@ -32,6 +32,12 @@ import "dotenv/config";
  */
 import { db, schema } from "../src/db";
 import { eq } from "drizzle-orm";
+/*
+ * The site's one answer to whether two names are the same wholesaler. This script had its own, and
+ * it was wrong on all ten lines it reported on 14 September — IPC against "Independent Pharmacy
+ * Cooperative" read as two different companies.
+ */
+import { sameWholesaler } from "../src/lib/supplier-match";
 
 type Row = {
   invoiceId: string;
@@ -49,20 +55,6 @@ type Row = {
   unreadable: boolean;
   why: string | null;
 };
-
-/**
- * Whether two supplier names are the same wholesaler.
- *
- * Loose on purpose: the page prints "PARMED PHARMACEUTICALS" and the register may hold "ParMed",
- * and a difference in punctuation or a trading suffix is not a different company. Only a genuine
- * disagreement should reach the screen, or the row cries wolf and stops being read.
- */
-const fold = (v: string) => v.toUpperCase().replace(/[^A-Z]/g, "");
-function sameSupplier(a: string, b: string): boolean {
-  const x = fold(a);
-  const y = fold(b);
-  return x === y || x.startsWith(y) || y.startsWith(x);
-}
 
 const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -219,7 +211,7 @@ async function main() {
      * sender's registered name and printing no wholesaler on the page is not a disagreement, and a
      * page naming one the register never matched is the register's gap rather than this one's.
      */
-    if (r.supplierNow && r.supplier && !sameSupplier(r.supplierNow, r.supplier)) {
+    if (r.supplierNow && r.supplier && !sameWholesaler(r.supplierNow, r.supplier)) {
       supplierDiffers++;
       lines.push(
         `${r.invoiceNumber ?? "(no number)"} is filed under ${r.supplier} and the page names ${r.supplierNow}. The supplier decides which returns policy times this stock; read it again.`,

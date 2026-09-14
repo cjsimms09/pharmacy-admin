@@ -48,7 +48,87 @@ so the answer can be checked rather than taken on trust.
   is still his until the patient takes it, the cost is held out with the revenue, and an unclaimed
   script gets reversed. $92,154.24 sits in the bin and the account says so.
 
-## Mine, not yet started
+## Found 14 September, written to the three-line gate
+
+### The PioneerRx receipt does half the job the owner asked of it
+
+**OBSERVATION.** `pioneer_purchases.itemsJson` carries the per-drug figures of every delivery
+PioneerRx booked in — ndc11, quantity, unitCostCents, extendedCents, packSize. Exactly one module
+reads it: `invoice-price-check.ts`, which uses it to check invoices that *did* arrive. Nothing reads
+it as a cost. `product-ledger.ts`, `minimum-store.ts`, `over-nadac-store.ts`, `appeals.ts` and
+`returns-due.ts` all read `invoice_lines` and only `invoice_lines`, and `invoice_lines` is written
+only by `storeInvoiceLines` from an invoice document's own text. Invoice coverage is 51%
+($118,449.24 of $230,143.13, measured 12 September).
+
+**SHOULD BE.** The owner named two jobs for this data and the schema records both in his words:
+*"standing in for a purchase whose invoice never reached the pharmacy"*, and checking the invoices
+that did. He was explicit about the first — *"I more just wanted to use it to catch the money from
+invoices we didn't get before this was setup in September."* A delivery the pharmacy booked in, with
+the wholesaler's own per-drug figures on it, is evidence of what a drug cost whether or not the
+invoice was ever posted. That is pharmacy practice rather than an inference from this data: the
+receiving record is what a pharmacist reconciles against, and it exists precisely because the paper
+is slow.
+
+**DIFFERENCE.** The second job is built and the first is not. Roughly half the pharmacy's purchases
+by value have no per-drug cost reaching any screen that prices an order, times a return or backs an
+appeal — while the figures sit in the database, already parsed, one table away.
+
+**What this must not become.** The owner also said *"we shouldn't be taking pioneer order receipts
+as invoices, invoices are mailed to us from suppliers and that's what we have to keep"*, and the
+schema keeps them in a separate table on purpose so no query can count a delivery twice by
+forgetting a flag. So the answer is **not** to write `invoice_lines` from a receipt. It is a cost
+source that names its own authority, is visibly weaker than an invoice, and never reaches the money
+accounts unless he says so.
+
+**Money: $157,264.78.** Measured by session 1 on 14 September: 96 deliveries on file, $275,908.19,
+all of September. 34 have an invoice; 62 do not, and every one of those 62 carries `itemsJson` — 554
+item lines, 548 of them (98.9%) with an eleven-digit NDC and a cost. More than half the buying by
+value, with the data to price it complete.
+
+**The ceiling was real in principle and nearly empty in fact.** Session 1 measured it on
+14 September: there are only **35 invoice documents in the whole estate**, 34 already matched to a
+delivery and 1 unmatched. So whatever the numbering or the naming does, the 62 can fall by at most
+one. These are not invoices the site failed to match — they are invoices that do not exist yet. The
+caveat is withdrawn rather than carried, because a caveat nobody can act on costs a reader more than
+it protects them.
+
+### The site had no answer to "are these two names the same wholesaler"
+
+**OBSERVATION.** The invoice proof's first real run, 14 September: 35 invoices, 35 reconcile, 0
+disagree, 0 hold no lines, 0 undated, 0 readable better now, **10 under the wrong wholesaler**, 0
+unreadable. All ten were one wholesaler written two ways — nine filed `IPC` against pages reading
+"Independent Pharmacy Cooperative", one filed `IPD` against "Independent Pharmacy Distributor".
+
+**SHOULD BE.** A check's own sentence has to be true of what it reports. "Filed under a different
+wholesaler than the page now names" was false on ten of ten.
+
+**DIFFERENCE.** Yes, and the cost is not the noise — it is that a genuine ParMed-under-Cardinal would
+have been indistinguishable from it on the screen. A row that cries wolf ten times is a row nobody
+reads on the eleventh.
+
+**Fixed 14 September.** The comparison had been written twice, in `scripts/prove-invoices.ts` and in
+`drug-cost-source.ts`, and both copies missed the same case: an acronym against its own expansion.
+`sameWholesaler` in `supplier-match.ts` is now the one answer and both call it. It works from the
+two strings rather than an alias list, because an alias list goes stale the first time a wholesaler
+is added by somebody who does not know it exists. Same shape as `sameDrugCode`: two writings of one
+thing read as two things.
+
+**Not a similarity score, deliberately.** Either these are the same company or they are not, and a
+threshold would make the answer depend on a number nobody can defend.
+
+**Pre-flight.** Physical act: boxes arriving and being booked in at the counter. Time: affects every
+period already loaded. What a pharmacist knows that the tables do not: that the receiving record is
+reconciled against, not the invoice. Whose money / already counted elsewhere: **the risk that
+matters** — `profit-and-loss.ts` sources purchases from "the wholesaler invoices dated in the
+month", so a receipt-derived cost must stay out of it or the stock-movement check double-counts.
+Worst case ranked: money, not patient harm. Could it pass for the wrong reason: yes — a receipt and
+an invoice for the same delivery must be one cost, matched on the wholesaler's own invoice number,
+which is the join `invoices-owed.ts` already uses. **Resolved since.** Both unknowns answered on 14 September. There are no older rows — every
+`pioneer_purchases` row is September 2026 and all 96 carry both columns — so no text fallback is
+carried, and a backfill of pre-September deliveries must be refused here rather than read from prose.
+548 of 554 lines have a usable NDC. **Still not checked:** the 6 that do not. If they are front-end
+items with a UPC, `ndcFromUpc` already handles that shape and they are recoverable; if they are
+devices they correctly have none. Nothing treats them as a hole until somebody looks.
 
 | What | Money | Note |
 |---|---|---|
