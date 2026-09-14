@@ -48,7 +48,52 @@ so the answer can be checked rather than taken on trust.
   is still his until the patient takes it, the cost is held out with the revenue, and an unclaimed
   script gets reversed. $92,154.24 sits in the bin and the account says so.
 
-## Mine, not yet started
+## Found 14 September, written to the three-line gate
+
+### The PioneerRx receipt does half the job the owner asked of it
+
+**OBSERVATION.** `pioneer_purchases.itemsJson` carries the per-drug figures of every delivery
+PioneerRx booked in — ndc11, quantity, unitCostCents, extendedCents, packSize. Exactly one module
+reads it: `invoice-price-check.ts`, which uses it to check invoices that *did* arrive. Nothing reads
+it as a cost. `product-ledger.ts`, `minimum-store.ts`, `over-nadac-store.ts`, `appeals.ts` and
+`returns-due.ts` all read `invoice_lines` and only `invoice_lines`, and `invoice_lines` is written
+only by `storeInvoiceLines` from an invoice document's own text. Invoice coverage is 51%
+($118,449.24 of $230,143.13, measured 12 September).
+
+**SHOULD BE.** The owner named two jobs for this data and the schema records both in his words:
+*"standing in for a purchase whose invoice never reached the pharmacy"*, and checking the invoices
+that did. He was explicit about the first — *"I more just wanted to use it to catch the money from
+invoices we didn't get before this was setup in September."* A delivery the pharmacy booked in, with
+the wholesaler's own per-drug figures on it, is evidence of what a drug cost whether or not the
+invoice was ever posted. That is pharmacy practice rather than an inference from this data: the
+receiving record is what a pharmacist reconciles against, and it exists precisely because the paper
+is slow.
+
+**DIFFERENCE.** The second job is built and the first is not. Roughly half the pharmacy's purchases
+by value have no per-drug cost reaching any screen that prices an order, times a return or backs an
+appeal — while the figures sit in the database, already parsed, one table away.
+
+**What this must not become.** The owner also said *"we shouldn't be taking pioneer order receipts
+as invoices, invoices are mailed to us from suppliers and that's what we have to keep"*, and the
+schema keeps them in a separate table on purpose so no query can count a delivery twice by
+forgetting a flag. So the answer is **not** to write `invoice_lines` from a receipt. It is a cost
+source that names its own authority, is visibly weaker than an invoice, and never reaches the money
+accounts unless he says so.
+
+**Money: not yet measured, and deliberately not guessed.** How much of the 49% gap has a purchase
+row with figures on it is the question, and this worktree's database is empty. Asked of session 1 on
+14 September.
+
+**Pre-flight.** Physical act: boxes arriving and being booked in at the counter. Time: affects every
+period already loaded. What a pharmacist knows that the tables do not: that the receiving record is
+reconciled against, not the invoice. Whose money / already counted elsewhere: **the risk that
+matters** — `profit-and-loss.ts` sources purchases from "the wholesaler invoices dated in the
+month", so a receipt-derived cost must stay out of it or the stock-movement check double-counts.
+Worst case ranked: money, not patient harm. Could it pass for the wrong reason: yes — a receipt and
+an invoice for the same delivery must be one cost, matched on the wholesaler's own invoice number,
+which is the join `invoices-owed.ts` already uses. **Not checked:** whether `itemsJson` is populated
+on the older rows (the column post-dates some of them and falls back to text), and how many
+receipt-only deliveries carry a usable NDC.
 
 | What | Money | Note |
 |---|---|---|
