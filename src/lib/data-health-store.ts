@@ -495,6 +495,34 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
   });
 
   /*
+   * ── What the site can price, and on whose paper ───────────────────
+   *
+   * Read off the ledger's own rows rather than worked out again here. The ledger is where receipts
+   * and invoices are weighed against each other, and a second opinion on the same question would
+   * drift from it the first time either changed — quietly, because only one of them is on a screen
+   * anybody looks at.
+   */
+  await timed("cost-coverage", async () => {
+    const { costCoverage, provableShare } = await import("./drug-cost-source");
+    const { productLedger } = await import("./product-ledger");
+    const ledger = await productLedger();
+    const c = costCoverage(ledger.rows.map((r) => ({ ndc11: r.ndc11, paid: r.paid })));
+    const p = provableShare(c);
+    /*
+     * The gaps are what a person can act on. "Not priced at all" first, because a drug with no cost
+     * is invisible in every comparison rather than visibly wrong in one.
+     */
+    const gaps: string[] = [];
+    if (c.neverPriced > 0) {
+      gaps.push(
+        `${c.neverPriced.toLocaleString()} drug${c.neverPriced === 1 ? "" : "s"} ${c.neverPriced === 1 ? "has" : "have"} no cost from any source, so ${c.neverPriced === 1 ? "it is" : "they are"} absent from every comparison rather than shown as expensive or cheap.`,
+      );
+    }
+    if (c.fromReceipt > 0) gaps.push(p.says);
+    return { numerator: c.priced, denominator: c.drugs, gaps, note: c.says };
+  });
+
+  /*
    * ── Every supplier invoice against the file it was read from ──────
    *
    * Read back from what the nightly script left behind. The fraction excludes scanned invoices
