@@ -15,10 +15,14 @@ import { costCoverage, provableShare, type PricedRow } from "../src/lib/drug-cos
  * much can be priced at all, and how much of that could be produced to a plan.
  */
 
-const row = (source: "invoice" | "catalogue" | "receipt" | null, ndc = "1"): PricedRow => ({
+const row = (source: "invoice" | "catalogue" | "receipt" | null, ndc = "1", unitsDispensed = 1): PricedRow => ({
   ndc11: ndc,
   paid: source === null ? null : { source },
+  unitsDispensed,
 });
+
+/** A catalogue listing nobody here has bought or dispensed: outside the question entirely. */
+const listed = (ndc: string): PricedRow => ({ ndc11: ndc, paid: { source: "catalogue" }, unitsDispensed: 0 });
 
 describe("what counts as priced", () => {
   test("an invoice and a receipt are both money that changed hands", () => {
@@ -37,7 +41,7 @@ describe("what counts as priced", () => {
     const c = costCoverage([row("catalogue", "1")]);
     assert.equal(c.priced, 0);
     assert.equal(c.neverPriced, 1);
-    assert.match(c.says, /^0 of 1 drug have a cost this site can state/);
+    assert.match(c.says, /^0 of 1 drug bought or dispensed have a cost this site can state/);
   });
 
   test("nothing on file at all is not priced", () => {
@@ -47,8 +51,8 @@ describe("what counts as priced", () => {
   });
 
   test("counted in drugs, so one expensive drug hides nothing", () => {
-    assert.match(costCoverage([row("invoice", "1")]).says, /1 of 1 drug have a cost/);
-    assert.match(costCoverage([row("invoice", "1"), row("invoice", "2")]).says, /2 of 2 drugs/);
+    assert.match(costCoverage([row("invoice", "1")]).says, /1 of 1 drug bought or dispensed have a cost/);
+    assert.match(costCoverage([row("invoice", "1"), row("invoice", "2")]).says, /2 of 2 drugs bought or dispensed/);
   });
 });
 
@@ -61,7 +65,7 @@ describe("lines with no drug code", () => {
     const c = costCoverage([row("invoice", "1")], 6);
     assert.equal(c.drugs, 1, "one drug was asked about, whatever else was on the delivery");
     assert.equal(c.noCode, 6);
-    assert.match(c.says, /^1 of 1 drug have a cost/);
+    assert.match(c.says, /^1 of 1 drug bought or dispensed have a cost/);
     assert.match(c.says, /Separately, 6 delivery lines carry no drug code/);
     assert.match(c.says, /outside every figure above rather than counted as unpriced/);
   });
@@ -77,8 +81,49 @@ describe("lines with no drug code", () => {
   test("nothing asked about still reports the codeless lines", () => {
     // Otherwise money on a delivery vanishes entirely on a day nothing was dispensed.
     const c = costCoverage([], 6);
-    assert.match(c.says, /No drug was asked about\./);
+    assert.match(c.says, /not bought or dispensed anything, so there is nothing to price/);
     assert.match(c.says, /6 delivery lines carry no drug code/);
+  });
+});
+
+describe("the denominator answers the question asked", () => {
+  test("a catalogue listing nobody bought is outside the question, not an unpriced drug", () => {
+    /*
+     * The ledger holds a row for every NDC in every supplier catalogue — 45,906 on 15 September, of
+     * which 44,886 this pharmacy has never touched. Counting them would have printed "608 of 45,906
+     * priced", 1.3%, when the answer to the question being asked is fifty-one per cent. Session 1
+     * caught it before it reached him.
+     */
+    const c = costCoverage([row("invoice", "1"), listed("2"), listed("3")]);
+    assert.equal(c.drugs, 1, "one drug bought or dispensed");
+    assert.equal(c.neverBought, 2);
+    assert.equal(c.neverPriced, 0, "a listing nobody bought did not fail to be priced");
+    assert.match(c.says, /^1 of 1 drug bought or dispensed/);
+    assert.match(c.says, /2 more listings sit in a supplier.s catalogue/);
+    assert.match(c.says, /outside the question rather than counted as unpriced/);
+  });
+
+  test("a drug dispensed with no purchase record is inside the question, and is the real gap", () => {
+    // It went out of the door and nothing says what it cost. That is worth acting on.
+    const c = costCoverage([row(null, "1", 30)]);
+    assert.equal(c.drugs, 1);
+    assert.equal(c.neverPriced, 1);
+    assert.equal(c.neverBought, 0);
+  });
+
+  test("stock bought and not yet dispensed is inside it too", () => {
+    // Stock has to be priced to be valued or sent back.
+    const c = costCoverage([row("receipt", "1", 0)]);
+    assert.equal(c.drugs, 1);
+    assert.equal(c.priced, 1);
+  });
+
+  test("one listing reads as one listing", () => {
+    assert.match(costCoverage([row("invoice", "1"), listed("2")]).says, /1 more listing sits/);
+  });
+
+  test("nothing bought or dispensed says that, rather than nought out of nought", () => {
+    assert.match(costCoverage([listed("1"), listed("2")]).says, /has not bought or dispensed anything, so there is nothing to price/);
   });
 });
 

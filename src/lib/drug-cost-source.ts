@@ -27,8 +27,10 @@
  *   invoice        the wholesaler's own document. What an appeal can produce.
  *   receipt        PioneerRx booked the delivery in and no invoice covers it. Real money, weaker
  *                  evidence — good for a buying decision, never offered to a plan.
- *   neverPriced    nothing on file says what this pharmacy paid for it. Not a failure of the
- *                  readers: an absence of the purchase.
+ *   neverPriced    the pharmacy bought or dispensed it and nothing on file says what it paid.
+ *                  The real gap, and the one worth acting on.
+ *   neverBought    in a supplier's catalogue and never bought, never dispensed. Outside the
+ *                  question entirely rather than inside it as a failure.
  *   noCode         a delivery line carrying no drug code at all. Outside every figure above rather
  *                  than inside one as a failure — all six on file are two McKesson front-end items
  *                  and four Xymogen nutraceuticals, $429.45, correctly codeless.
@@ -41,13 +43,40 @@
  *
  * "Missing" is not among them, which is the point.
  *
+ * ── The denominator, which is the whole of the difficulty ──
+ *
+ * The ledger holds a row for every NDC in every supplier catalogue: 45,906 of them on 15 September,
+ * of which 44,886 this pharmacy has never bought and never dispensed. Counting those would have put
+ * "608 of 45,906 drugs priced" on the screen — 1.3%, when the true answer to the question being
+ * asked is 423 of 835, or fifty-one per cent. Session 1 caught it before it reached him.
+ *
+ * So the denominator is drugs this pharmacy has **bought or dispensed**, and a catalogue listing
+ * nobody here has ever touched is not in it.
+ *
+ * That is deliberately not the treatment the codeless delivery lines got, and the difference is
+ * worth stating because the two look alike. Those six lines were inside the thing being measured —
+ * a delivery the pharmacy paid for — and leaving them out silently would have let a delivery read
+ * as fully priced when part of it was never asked about. A catalogue-only row is not inside
+ * anything: no delivery, no payment, no event. It is not a part that would go missing; it is
+ * outside the subject. It is said once, after the full stop, so that nobody wonders where
+ * forty-five thousand rows went — and it is not a category of the answer.
+ *
  * Pure, and reads the ledger's own rows rather than recomputing anything from them.
  */
 
-/** The part of a ledger row this needs: what was paid for it, and where that came from. */
+/** The part of a ledger row this needs: what was paid, where that came from, and whether it moved. */
 export type PricedRow = {
   ndc11: string;
   paid: { source: "invoice" | "catalogue" | "receipt" } | null;
+  /**
+   * Units dispensed in the period.
+   *
+   * With `paid`, this is what puts a row inside the question. A drug the pharmacy dispensed but has
+   * no purchase record for is a real gap — it went out of the door and nothing says what it cost.
+   * A drug it bought and has not dispensed is in too: it is stock, and stock has to be priced to be
+   * valued or returned.
+   */
+  unitsDispensed: number;
 };
 
 export type CostCoverage = {
@@ -57,6 +86,8 @@ export type CostCoverage = {
   neverPriced: number;
   /** Delivery lines carrying no drug code. Counted apart, never inside `drugs`. */
   noCode: number;
+  /** Catalogue listings never bought and never dispensed. Outside the question, never inside `drugs`. */
+  neverBought: number;
   /** Drugs with a cost from any source: the numerator of the useful fraction. */
   priced: number;
   /** One sentence, for above a table or beside a figure. */
@@ -77,25 +108,41 @@ const plural = (n: number, one: string, many: string) => `${n.toLocaleString()} 
  * an invoice or a receipt is money that changed hands.
  */
 export function costCoverage(rows: PricedRow[], noCode = 0): CostCoverage {
-  const fromInvoice = rows.filter((r) => r.paid?.source === "invoice").length;
-  const fromReceipt = rows.filter((r) => r.paid?.source === "receipt").length;
+  /*
+   * Bought or dispensed. A catalogue listing nobody here has touched is not a drug the site failed
+   * to price — it is a drug nobody bought, and putting it in the denominator answers a question
+   * nobody asked with a number that reads as a fault.
+   */
+  const paidFor = (r: PricedRow) => r.paid?.source === "invoice" || r.paid?.source === "receipt";
+  const inScope = rows.filter((r) => paidFor(r) || r.unitsDispensed > 0);
+  const neverBought = rows.length - inScope.length;
+
+  const fromInvoice = inScope.filter((r) => r.paid?.source === "invoice").length;
+  const fromReceipt = inScope.filter((r) => r.paid?.source === "receipt").length;
   const priced = fromInvoice + fromReceipt;
-  const neverPriced = rows.length - priced;
+  const neverPriced = inScope.length - priced;
 
-  const tail =
-    noCode === 0
+  const bought =
+    neverBought === 0
       ? ""
-      : ` Separately, ${plural(noCode, "delivery line carries", "delivery lines carry")} no drug code — a front-end item or a supplement — and ${noCode === 1 ? "is" : "are"} outside every figure above rather than counted as unpriced.`;
+      : ` ${neverBought.toLocaleString()} more ${neverBought === 1 ? "listing sits" : "listings sit"} in a supplier's catalogue that this pharmacy has never bought and never dispensed, and ${neverBought === 1 ? "it is" : "they are"} outside the question rather than counted as unpriced.`;
+  const tail =
+    (noCode === 0
+      ? ""
+      : ` Separately, ${plural(noCode, "delivery line carries", "delivery lines carry")} no drug code — a front-end item or a supplement — and ${noCode === 1 ? "is" : "are"} outside every figure above rather than counted as unpriced.`) + bought;
 
-  if (rows.length === 0) {
-    return { drugs: 0, fromInvoice, fromReceipt, neverPriced, noCode, priced, says: `No drug was asked about.${tail}` };
+  if (inScope.length === 0) {
+    return {
+      drugs: 0, fromInvoice, fromReceipt, neverPriced, noCode, neverBought, priced,
+      says: `This pharmacy has not bought or dispensed anything, so there is nothing to price.${tail}`,
+    };
   }
 
-  const bits = [`${priced.toLocaleString()} of ${plural(rows.length, "drug", "drugs")} have a cost this site can state`];
+  const bits = [`${priced.toLocaleString()} of ${plural(inScope.length, "drug", "drugs")} bought or dispensed have a cost this site can state`];
   if (fromInvoice) bits.push(`${fromInvoice.toLocaleString()} from a wholesaler's invoice`);
   if (fromReceipt) bits.push(`${fromReceipt.toLocaleString()} from a delivery whose invoice never came`);
   if (neverPriced) bits.push(`${plural(neverPriced, "is", "are")} not priced at all`);
-  return { drugs: rows.length, fromInvoice, fromReceipt, neverPriced, noCode, priced, says: `${bits.join(", ")}.${tail}` };
+  return { drugs: inScope.length, fromInvoice, fromReceipt, neverPriced, noCode, neverBought, priced, says: `${bits.join(", ")}.${tail}` };
 }
 
 /**
