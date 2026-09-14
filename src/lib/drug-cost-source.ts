@@ -1,5 +1,5 @@
 /**
- * How much of what the pharmacy buys it can price, and on what evidence.
+ * How much of what the pharmacy buys it has a **purchase price** for, and on what evidence.
  *
  * ── What this used to be, and why it is smaller now ──
  *
@@ -27,8 +27,10 @@
  *   invoice        the wholesaler's own document. What an appeal can produce.
  *   receipt        PioneerRx booked the delivery in and no invoice covers it. Real money, weaker
  *                  evidence — good for a buying decision, never offered to a plan.
- *   neverPriced    the pharmacy bought or dispensed it and nothing on file says what it paid.
- *                  The real gap, and the one worth acting on.
+ *   noPurchaseRecord
+ *                  the pharmacy dispensed it and no invoice or receipt says what it paid for the
+ *                  stock. **Not a drug whose margin is unknown** — see below, because the first
+ *                  wording of this said exactly that and it was false on all 412.
  *   neverBought    in a supplier's catalogue and never bought, never dispensed. Outside the
  *                  question entirely rather than inside it as a failure.
  *   noCode         a delivery line carrying no drug code at all. Outside every figure above rather
@@ -42,6 +44,32 @@
  * paragraph further down.
  *
  * "Missing" is not among them, which is the point.
+ *
+ * ── The third cost source, and why it does not belong in this fraction ──
+ *
+ * `claims.acquisition_cents` is PioneerRx's record of what a drug cost on the fill, populated on
+ * 2,571 of 2,632 paid in-books claims. The MAC appeal engine has always used it and claim-remedy's
+ * below-cost router runs on it. Measured 15 September: of the 412 drugs here with no purchase
+ * record, PioneerRx knows the cost on **all 412** — 993 fills, $16,219.38 of acquisition. Not most
+ * of them. Every one.
+ *
+ * It is not counted here, and that is deliberate rather than an oversight to correct later. The
+ * three sources answer two different questions:
+ *
+ *   an invoice or a receipt   what a **purchase** cost. What is needed to say "buy it somewhere
+ *                             else", to value stock, to time a return, to ask the buying group for
+ *                             a better price.
+ *   the claim's acquisition   what the drug cost **on that fill**. What is needed to say whether
+ *                             the dispensing made money.
+ *
+ * Widening this fraction to include the third would answer neither question. The count was right;
+ * the **words** were wrong, and badly — "412 are not priced at all" reads as "412 drugs go out of
+ * the door with no margin known", and a person acting on that sentence would be acting on a fact
+ * that is false for every one of them.
+ *
+ * What is true of those 412, and is a real limit: with no purchase price there is nothing to
+ * compare a supplier against, so they sit outside "buy this elsewhere" and outside the buying-group
+ * price list — and inside every below-cost and margin figure the site produces.
  *
  * ── The denominator, which is the whole of the difficulty ──
  *
@@ -83,7 +111,8 @@ export type CostCoverage = {
   drugs: number;
   fromInvoice: number;
   fromReceipt: number;
-  neverPriced: number;
+  /** Dispensed, with no invoice or receipt for the stock. Their per-fill cost is known elsewhere. */
+  noPurchaseRecord: number;
   /** Delivery lines carrying no drug code. Counted apart, never inside `drugs`. */
   noCode: number;
   /** Catalogue listings never bought and never dispensed. Outside the question, never inside `drugs`. */
@@ -120,7 +149,7 @@ export function costCoverage(rows: PricedRow[], noCode = 0): CostCoverage {
   const fromInvoice = inScope.filter((r) => r.paid?.source === "invoice").length;
   const fromReceipt = inScope.filter((r) => r.paid?.source === "receipt").length;
   const priced = fromInvoice + fromReceipt;
-  const neverPriced = inScope.length - priced;
+  const noPurchaseRecord = inScope.length - priced;
 
   const bought =
     neverBought === 0
@@ -133,16 +162,24 @@ export function costCoverage(rows: PricedRow[], noCode = 0): CostCoverage {
 
   if (inScope.length === 0) {
     return {
-      drugs: 0, fromInvoice, fromReceipt, neverPriced, noCode, neverBought, priced,
+      drugs: 0, fromInvoice, fromReceipt, noPurchaseRecord, noCode, neverBought, priced,
       says: `This pharmacy has not bought or dispensed anything, so there is nothing to price.${tail}`,
     };
   }
 
-  const bits = [`${priced.toLocaleString()} of ${plural(inScope.length, "drug", "drugs")} bought or dispensed have a cost this site can state`];
+  const bits = [`${priced.toLocaleString()} of ${plural(inScope.length, "drug", "drugs")} bought or dispensed have a purchase price this site can state`];
   if (fromInvoice) bits.push(`${fromInvoice.toLocaleString()} from a wholesaler's invoice`);
   if (fromReceipt) bits.push(`${fromReceipt.toLocaleString()} from a delivery whose invoice never came`);
-  if (neverPriced) bits.push(`${plural(neverPriced, "is", "are")} not priced at all`);
-  return { drugs: inScope.length, fromInvoice, fromReceipt, neverPriced, noCode, neverBought, priced, says: `${bits.join(", ")}.${tail}` };
+  /*
+   * Said as its own sentence rather than as the last item of a list, because the list is about
+   * where a price came from and this is about what follows from not having one. As a list item it
+   * read "412 are not priced at all", which is true of the purchase and false of the drug.
+   */
+  const gap =
+    noPurchaseRecord === 0
+      ? ""
+      : ` ${noPurchaseRecord.toLocaleString()} ${noPurchaseRecord === 1 ? "has" : "have"} no purchase record, so there is nothing to compare a supplier against — what ${noPurchaseRecord === 1 ? "it" : "they"} cost on each fill is known from the claim, and ${noPurchaseRecord === 1 ? "its margin is" : "their margins are"} not in doubt.`;
+  return { drugs: inScope.length, fromInvoice, fromReceipt, noPurchaseRecord, noCode, neverBought, priced, says: `${bits.join(", ")}.${gap}${tail}` };
 }
 
 /**

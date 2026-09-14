@@ -276,10 +276,10 @@ export const SPECS: LinkSpec[] = [
   {
     key: "cost-coverage",
     group: "Datasets",
-    title: "Drugs the site can price, and what the price rests on",
+    title: "Drugs with a purchase price, and what it rests on",
     of: "drugs with a cost this pharmacy actually paid, out of the drugs it has bought or dispensed — never out of the catalogue, which lists forty-five thousand products nobody here has touched",
     why:
-      "Every buying decision is a comparison, and a drug with no cost is not in the comparison at all — it does not appear as expensive or cheap, it simply does not appear. That is the quietest way for a screen to be wrong, because nothing on it looks incomplete. The figure separates the two sources on purpose: a wholesaler's invoice is a document the pharmacy can produce to a plan, and a PioneerRx delivery receipt is real money it cannot. Both are good enough to decide what to buy; only one is good enough to put in front of a payer, which is why the appeals reader takes invoice lines and nothing else. Delivery lines carrying no drug code at all — front-end items and supplements — are counted apart rather than inside the fraction, because they were never drugs that failed to be priced.",
+      "Every buying decision is a comparison, and a drug with no cost is not in the comparison at all — it does not appear as expensive or cheap, it simply does not appear. That is the quietest way for a screen to be wrong, because nothing on it looks incomplete. The figure separates the two sources on purpose: a wholesaler's invoice is a document the pharmacy can produce to a plan, and a PioneerRx delivery receipt is real money it cannot. Both are good enough to decide what to buy; only one is good enough to put in front of a payer, which is why the appeals reader takes invoice lines and nothing else. Delivery lines carrying no drug code at all — front-end items and supplements — are counted apart rather than inside the fraction, because they were never drugs that failed to be priced. A drug with no purchase price is not a drug whose margin is unknown: PioneerRx records what it cost on the fill, and the appeal engine and the below-cost router both run on that. What is lost without a purchase price is the comparison — where to buy it better, and what to ask the buying group for.",
   },
   {
     key: "invoice-proof",
