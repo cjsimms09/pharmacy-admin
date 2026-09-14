@@ -101,7 +101,18 @@ export type Flag =
   | "no_nadac"
   | "not_dispensed"
   | "short_dated_only"
+  /** A line marked rebated whose supplier has no rate on file: compared at its gross price. */
   | "rebate_unknown"
+  /**
+   * Priced off a delivery receipt, which carries no contract flag, from a supplier that pays a rate.
+   *
+   * Different from `rebate_unknown`, which is a *rate* nobody has recorded for a line that says it
+   * is rebated. This is the flag itself being absent and unobtainable: the receipt never records
+   * one, and the invoice that would have is the invoice that never came. So it is not a gap to be
+   * filled — it is permanent for the row, and the comparison is made on the assumption least likely
+   * to produce a recommendation.
+   */
+  | "rebate_unrecorded"
   | "pack_size_unknown";
 
 /**
@@ -352,10 +363,46 @@ export function buildLedger(input: LedgerInput): LedgerRow[] {
     // difference recommends it every time.
     r.best = r.buys.find((b) => !b.shortDated) ?? null;
 
-    if (comparable && r.paid && r.nadacMicros !== null) r.vsNadacMicros = r.paid.effectiveUnitMicros - r.nadacMicros;
+    /*
+     * ── What the paid price is worth comparing, when nobody recorded the rebate ──
+     *
+     * A delivery receipt has no contract flag. PioneerRx books in what arrived; whether the line
+     * earned the tier rate is on the invoice, and these are exactly the deliveries whose invoice
+     * never came. So for a receipt-priced row from a supplier that pays a rate, the rebate is not
+     * merely unrecorded — it is **unknowable**, on every such row, by construction.
+     *
+     * Left at its gross price, that row is compared against catalogue listings whose tier rate has
+     * already been taken off, and the comparison recommends moving spend off the contract on a
+     * saving that may not exist. This module's own rule, written before any of this: *"treating a
+     * rebated line as unmarked invents a saving and recommends moving spend off the contract, which
+     * can cost more in a lost tier than it saves on the invoice."*
+     *
+     * Measured the hour the receipt fallback shipped: 68 of 99 `cheaper_elsewhere` rows and
+     * **$44,373.98 of $46,777.89** were exactly this — McKesson generics compared gross against
+     * rebated competitors. Ninety-five per cent of the money on the switch list.
+     *
+     * So an unknown is tested against the assumption most hostile to making the recommendation: the
+     * line is priced as though it *did* earn the rate, which is the best case for staying put. A
+     * switch that still pays after that is real whichever way the rebate went, and is the only kind
+     * worth putting in front of him. The rest say they cannot tell, which is what `rebate_unrecorded`
+     * is for — they keep their price and their row, they just stop being advice.
+     *
+     * Not applied where the supplier has no rate on file: there is no rebate to be unsure about.
+     */
+    const rebateUnknowable =
+      r.paid !== null && r.paid.source === "receipt" && r.paid.rebated === null && rateFor(contract, r.paid.supplier) !== null;
+    if (rebateUnknowable) r.flags.push("rebate_unrecorded");
+    const paidToCompare =
+      r.paid === null
+        ? null
+        : rebateUnknowable
+          ? effectiveMicros(r.paid.unitCostMicros, true, rateFor(contract, r.paid.supplier))
+          : r.paid.effectiveUnitMicros;
 
-    if (comparable && r.paid && r.best && r.best.effectiveUnitMicros < r.paid.effectiveUnitMicros && r.unitsDispensed > 0) {
-      const perUnit = r.paid.effectiveUnitMicros - r.best.effectiveUnitMicros;
+    if (comparable && paidToCompare !== null && r.nadacMicros !== null) r.vsNadacMicros = paidToCompare - r.nadacMicros;
+
+    if (comparable && paidToCompare !== null && r.best && r.best.effectiveUnitMicros < paidToCompare && r.unitsDispensed > 0) {
+      const perUnit = paidToCompare - r.best.effectiveUnitMicros;
       r.switchSavingCents = Math.round((perUnit * r.unitsDispensed) / 10_000);
     }
 

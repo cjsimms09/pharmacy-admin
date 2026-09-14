@@ -114,6 +114,80 @@ describe("where no invoice covers it, the receipt prices the drug", () => {
   });
 });
 
+describe("a receipt-priced row does not invent a saving by forgetting the rebate", () => {
+  /*
+   * The regression the wiring itself caused, caught in review the same hour.
+   *
+   * A delivery receipt has no contract flag — PioneerRx books in what arrived, and whether the line
+   * earned the tier rate is on the invoice that never came. Left at its gross price, the row is
+   * compared against catalogue listings whose rate has already been taken off, and it recommends
+   * moving spend off the contract on a saving that may not exist.
+   *
+   * Measured on the live ledger the hour it shipped: 68 of 99 `cheaper_elsewhere` rows and
+   * $44,373.98 of $46,777.89 — 95% of the money on the switch list. Exactly the fault this module's
+   * docstring warns about: "treating a rebated line as unmarked invents a saving and recommends
+   * moving spend off the contract, which can cost more in a lost tier than it saves on the invoice."
+   */
+  const dispensed = { ndc11: "16714005203", itemName: "Clopidogrel", quantityThousandths: 1_000_000, remitCents: 50_000, copayCents: 0, status: "paid" as const };
+  const rival = (unitCostMicros: number) => ({
+    ndc11: "16714005203", supplier: "IPC", description: null, unitCostMicros,
+    packQty: 1, contractFlag: "not rebated", pricedOn: "2026-09-10", availability: null,
+  });
+  const withRate = { bySupplier: { mckesson: 0.29 }, genericRebateRate: null };
+
+  test("a switch that only pays if the rebate was NOT earned is not recommended", () => {
+    /*
+     * Receipt gross 75,780 micros a unit. At the 29% tier that is 53,804. A rival at 60,000 beats
+     * the gross and loses to the rebated price — so whether the switch pays depends entirely on the
+     * unknown, and it is not advice.
+     */
+    const rows = buildLedger(base({ receiptLines: [receipt()], catalogue: [rival(60_000)], claims: [dispensed], contract: withRate }));
+    const r = rows.find((x) => x.ndc11 === "16714005203");
+    assert.ok(r?.flags.includes("rebate_unrecorded"), "the row must say why it is quiet");
+    assert.ok(!r?.flags.includes("cheaper_elsewhere"), "no switch recommendation on an unknown");
+    assert.equal(r?.switchSavingCents, null);
+  });
+
+  test("a switch that pays EVEN IF the rebate was earned is still recommended", () => {
+    // A rival at 40,000 beats even the rebated 53,804. Real whichever way the rebate went.
+    const rows = buildLedger(base({ receiptLines: [receipt()], catalogue: [rival(40_000)], claims: [dispensed], contract: withRate }));
+    const r = rows.find((x) => x.ndc11 === "16714005203");
+    assert.ok(r?.flags.includes("rebate_unrecorded"));
+    assert.ok(r?.flags.includes("cheaper_elsewhere"), "the provable ones must survive the fix");
+    assert.ok((r?.switchSavingCents ?? 0) > 0);
+  });
+
+  test("the same caution applies to 'paying over NADAC', which would otherwise overstate it", () => {
+    /*
+     * The identical defect in the other direction: a gross price against NADAC says he is paying
+     * over the national average when the rebate may put him under it. That drives a price request
+     * to the buying group, and a complaint he cannot support is worse than one not made.
+     */
+    const nadac = [{ ndc11: "16714005203", unitMicros: 60_000, effectiveOn: "2026-09-01", description: null }];
+    const r = buildLedger(base({ receiptLines: [receipt()], nadac, claims: [dispensed], contract: withRate })).find((x) => x.ndc11 === "16714005203");
+    assert.ok(!r?.flags.includes("buying_above_nadac"), "53,804 rebated is under a NADAC of 60,000");
+  });
+
+  test("with no rate on file for the supplier there is no rebate to be unsure about", () => {
+    const r = buildLedger(base({ receiptLines: [receipt({ supplier: "JamsRX" })], claims: [dispensed], contract: withRate })).find((x) => x.ndc11 === "16714005203");
+    assert.ok(!r?.flags.includes("rebate_unrecorded"));
+  });
+
+  test("an INVOICE line is untouched by this — its flag is recorded, not unknowable", () => {
+    /*
+     * Checked on the live ledger before choosing the fix: of 99 switch rows, zero were invoice lines
+     * with no rebate flag from a rate-bearing supplier. McKesson's invoices always carry the flag.
+     * So this narrows to receipts only and costs nothing on the invoice side.
+     */
+    const r = buildLedger(base({
+      invoiceLines: [invoice({ rebated: false })], catalogue: [rival(60_000)], claims: [dispensed],
+      packFallback: [{ ndc11: "16714005203", packQty: 500 }], contract: withRate,
+    })).find((x) => x.ndc11 === "16714005203");
+    assert.ok(!r?.flags.includes("rebate_unrecorded"));
+    assert.ok(r?.flags.includes("cheaper_elsewhere"), "a recorded 'not rebated' is a fact and is compared at its gross");
+  });
+});
+
 describe("a receipt never quietly becomes evidence for a payer", () => {
   test("the source survives onto the Buy, so a caller can refuse it", () => {
     /*

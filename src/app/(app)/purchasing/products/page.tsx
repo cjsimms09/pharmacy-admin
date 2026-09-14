@@ -528,6 +528,13 @@ const MEANS: Record<Flag, string> = {
   not_dispensed: "bought, never dispensed",
   short_dated_only: "only short-dated",
   rebate_unknown: "rebate rate not on file",
+  /*
+   * Says where the figure came from rather than what is missing. No invoice ever arrived for this
+   * delivery, so the price is PioneerRx's receipt — which carries no contract flag. The row is
+   * therefore compared as though it did earn the rebate, the assumption least likely to recommend
+   * a switch, and he should be able to see that a quiet row is quiet on purpose.
+   */
+  rebate_unrecorded: "priced from the delivery — compared as if rebated",
   pack_size_unknown: "pack size unknown — not compared",
 };
 
