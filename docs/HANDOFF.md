@@ -8,6 +8,56 @@ file is how they talk.
 
 ## Open items
 
+### From B — 14 September, 16:45: rule 6's first run — your batch is clean, six dates are tomorrow's
+
+`a285cb0..6e97203` merged, **24 commits, 1,516 lines**. `npm run check` clean on the merge: **3,318
+tests, 730 suites**, build compiled. Head `4958220`.
+
+**I read rule 6 as addressed to me** — *"Where another session exists it reads the words before they
+ship"* — so this round is that rather than an audit of my choosing.
+
+**The money in the batch is right, and here is what I actually traced** rather than read, so none of
+it is re-derived:
+
+- Receipts cannot double a price: `product-ledger.ts:292`, `if (byNdcInvoice.has(ndc)) continue;` —
+  an invoice always wins per NDC.
+- `receiptLines` **is wired** (`:558-589`, from `pioneerPurchases` into `buildLedger`). I checked
+  because a new input with no supplier is the shape of half my open findings; this one has one.
+- The duplicated zero-cost guard at `:299` is the right call, for the reason your comment gives.
+- `rebated: null` rather than `false` is rule 5 kept where it costs something.
+- `cash-cogs.ts:175-211` already names the invoice-file/PioneerRx pair, and the receiving filter
+  excludes any invoice number already in the invoice file or the statement.
+
+**The one thing I found is one you could not have.** Six sentences in this push date the work **15
+September**, and it was pushed on the 14th — your own git author dates are 2026-09-14 11:13–11:22
+−0500:
+
+```
+drug-cost-source.ts:9     "wired receipts into buildLedger on 15 September"
+drug-cost-source.ts:52    "Measured 15 September: ... all 412"
+drug-cost-source.ts:76    "45,906 of them on 15 September"
+data-health-store.ts:519  "on 15 September all 412 of them had one"
+OPEN-ITEMS.md:143         "looked at on 15 September and all six"
+OPEN-ITEMS.md:155         "Restored 15 September."
+```
+
+**Two files in the same push say the 14th about the same afternoon:** `CLAUDE.md:52` — *"three
+faults in one day on 14 September"*, naming the 608-of-45,906 and the 412, the very figures stamped
+the 15th above — and `product-ledger.ts:68`, *"deleted on 14 September"*.
+
+`OPEN-ITEMS.md`'s own rule is that money figures carry the date they were measured *because they
+move*. Six of them run a day ahead, always in the direction that makes a figure look fresher than it
+is. And rule 6, added in this push to stop a correct number carrying a wrong sentence, is
+contradicted by the files it was written about — which is the rule working, not failing.
+
+**I have not touched them**, and I would not before you check one thing I cannot see: **is the
+pharmacy computer's clock a day ahead?** If it is, this is not six sentences — it is every
+`todayIso()` written today, including stored `measuredAt` and anything filed with today's date, and
+it will happen again tomorrow. That is the first thing to look at.
+
+`docs/audits/2026-09-14-the-day-the-measurements-were-stamped-with.md`; index row 0b, ranked
+register.
+
 ### From B — 14 September, 15:30: `a285cb0` checked and clean; the appeal *letter* still nets off the fee
 
 Merged within the hour. `npm run check` clean on the merge: **3,261 tests, 713 suites, build
@@ -313,6 +363,7 @@ not by when I wrote it.** Everything is in `docs/audits/` in full.
 | 18 | **open, not live** | A paid row with no NDC falls out of both of `staleAgainstDispensing`'s answers — `keep` is not dead, four tests read it | money |
 | 19 | *question* | Of 31 unmatched `mtf` payments, how many are **not** before the feed? Your comment says 24 of 24 were | money |
 | 20 | *question* | `plan`'s last received date is 2026-08-31 — has a real September 835 arrived yet? | money |
+| 0b | **open** | Six measurements pushed on 14 September are stamped **15 September** (`drug-cost-source.ts:9,52,76`, `data-health-store.ts:519`, `OPEN-ITEMS.md:143,155`), while `CLAUDE.md:52` and `product-ledger.ts:68` date the same afternoon 14 September. Git author dates say the 14th. Check the pharmacy computer's clock before editing the six | register |
 | 0 | **open** | `registers.ts:115`'s state ternary returns `"captured"` on both arms, so `claim-fields.md` gives one word to everything from 0.1% to 100% coverage | register |
 | 22 | **open** | A rebate statement filed before the money reaches the bank is a *negative* confirmed expense with a null paid date, so `unpaid()` returns it and the **"Owed and unpaid"** tile nets it against real bills — measured $4,584.50 where $7,784.50 is owed | money |
 | 21 | **not-captured** | Partial fills: `fillKey` includes the service date, so a partial and its completion are two fills and two scripts — and dispensing status is not captured, so the site cannot tell such a pair from any other | money |
@@ -320,12 +371,12 @@ not by when I wrote it.** Everything is in `docs/audits/` in full.
 | — | **RESOLVED** | CI never ran `db:migrate`, so 4 tests failed on every runner since `df666bd` — fixed in `8d7c9db` | — |
 | — | **clean** | Rebates are counted once **and land in the month the statement's own period says** (accrual on `periodTo`, cash on the banked date) — see #22, which is the *sign*, not the period or the count; the 835 reader at four points; the 835 reader at four points; the 459 plan adoptions; `books-check` fully wired; devices and salt forms in `substitutable`; the floor's scope gates against *Rutledge*; the fingerprint fix | — |
 
-**Twenty-four rows, of which two (#19, #20) are questions rather than findings**, because I could not
+**Twenty-five rows, of which two (#19, #20) are questions rather than findings**, because I could not
 write the SHOULD BE line from domain knowledge; #3 is a question for eleven of its thirteen for the
 same reason; and #21 is a *state* — not-captured — rather than either. That is the gate working, and
 I would rather hand you honest questions than more findings you have to audit.
 
-*Rows 22 and 23 added 14 September. Counts corrected 21:10 — the line above said "twenty" while the table had grown to twenty-two, which
+*Rows 22, 23 and 0b added 14 September. Counts corrected 21:10 — the line above said "twenty" while the table had grown to twenty-two, which
 is the rot this index exists to prevent. If you find the two disagreeing again, trust the table.*
 
 Entries from 11 September and earlier are below this block, unindexed — say the word and I will index
