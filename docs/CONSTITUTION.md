@@ -174,6 +174,39 @@ Because *"go looking"* without a method is a good intention. In this order:
 5. Report at least one concrete high-value observation **or one area confirmed clean**. A clean area
    named is worth reporting; silence is not.
 
+### 6d. The words get read by somebody who did not write them
+
+Every dataset on this site is re-proved nightly against the file behind it. Six proofs, and they have
+earned their place — they have caught invoices with no item lines, a pack size off by a factor of
+five, a claims count set against a copy that stopped a day short.
+
+**Nothing on any screen, and nothing in any register, is ever read by anybody but the person who
+wrote it.**
+
+That gap cost three faults on 14 September, in one day, between two sessions:
+
+| Sentence | Arithmetic | Tests | What was wrong |
+|---|---|---|---|
+| "608 of 45,906 drugs priced" | correct | passing | the denominator was the supplier catalogue |
+| "412 are not priced at all" | correct, four ways | passing | every one of the 412 has a cost |
+| a register heading | — | — | an edit consumed it; four tracked items lost their owner |
+
+Not one could have failed a test. All three were sentences. All three were found by somebody reading
+text they had not written, and none by its author re-reading their own.
+
+So: **a sentence a person will act on gets read by the other session before it ships** — the same way
+a migration takes a fresh slot and a deploy takes a `netstat` first. Not a review of the code. A
+review of the words, and the question is not *is this right* but **what would this number make him
+do**. The first two above were arithmetically unimpeachable, and would have had him believe first
+that his costs were broken and then that 412 drugs were going out of the door blind.
+
+When there is no other session — which is most of the time — the fallback is the author reading it
+cold, as him, asking the same question. **That is the weaker form and this clause says so**, because
+a rule that pretends its fallback is as good as its control is a rule that quietly stops being
+followed. Where a sentence carries a number he would act on and no second reader exists, the honest
+options are to hold it until there is one, or to ship it and say in the same breath that nobody else
+has read it.
+
 ## 7. What I am not allowed to do
 
 - **Never assume the database is the world.** Consequences live on the shelf, at the counter, and in
