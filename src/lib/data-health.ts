@@ -274,6 +274,14 @@ export const SPECS: LinkSpec[] = [
       "The catalogue is what every buying decision here is made from: which supplier is cheapest, what an add-on costs, what the shelf is worth. A price the table holds that the wholesaler's file does not state is a purchase made on a number nobody sent. Counted per NDC because a wholesaler lists the same NDC several times in one file — McKesson 539 of them — and the table keeps one. Prices carried over from an earlier file are outside the figure and named in the gaps with their age: the newest file says nothing about them, so there is nothing to agree or disagree with, and counting them against the score would make a wholesaler who trimmed their catalogue look like one whose prices are wrong.",
   },
   {
+    key: "cost-coverage",
+    group: "Datasets",
+    title: "Drugs the site can price, and what the price rests on",
+    of: "drugs with a cost this pharmacy actually paid, out of every drug it has bought or dispensed",
+    why:
+      "Every buying decision is a comparison, and a drug with no cost is not in the comparison at all — it does not appear as expensive or cheap, it simply does not appear. That is the quietest way for a screen to be wrong, because nothing on it looks incomplete. The figure separates the two sources on purpose: a wholesaler's invoice is a document the pharmacy can produce to a plan, and a PioneerRx delivery receipt is real money it cannot. Both are good enough to decide what to buy; only one is good enough to put in front of a payer, which is why the appeals reader takes invoice lines and nothing else. Delivery lines carrying no drug code at all — front-end items and supplements — are counted apart rather than inside the fraction, because they were never drugs that failed to be priced.",
+  },
+  {
     key: "invoice-proof",
     group: "Datasets",
     title: "Every supplier invoice proved against its own file",
