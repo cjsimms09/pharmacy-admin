@@ -48,3 +48,58 @@ export function rateForSupplier<T>(rates: Record<string, T>, supplier: string | 
   }
   return best;
 }
+
+/**
+ * Whether two names are the same wholesaler.
+ *
+ * Different question from `rateForSupplier` above, which matches a printed name to a key in a table
+ * the pharmacy keyed itself. This compares two names that both came off documents, and it exists
+ * because the invoice proof shipped without it and was wrong on every line it reported.
+ *
+ * On 14 September the proof reported ten invoices "filed under a different wholesaler than the page
+ * now names", and all ten were one wholesaler written two ways: nine filed IPC against pages reading
+ * "Independent Pharmacy Cooperative", and one filed IPD against "Independent Pharmacy Distributor".
+ * The check was comparing a filing shorthand with a printed legal name and calling it a different
+ * company. Worse than useless: a real ParMed-filed-under-Cardinal would have been indistinguishable
+ * from the noise.
+ *
+ * Three rules, and the third is the one that was missing:
+ *
+ *   A name nobody recorded cannot disagree with anything, so a null on either side agrees.
+ *
+ *   One name being a prefix of the other is the same company written longer — "ParMed" against
+ *   "PARMED PHARMACEUTICALS" — and the prefix must be at least `SHORTEST_MATCH` characters, for the
+ *   reason given above: short strings appear inside unrelated names often enough to be a coin toss.
+ *
+ *   An acronym against its own expansion is the same company. "IPC" is the initials of "Independent
+ *   Pharmacy Cooperative" and that is a fact about the two strings rather than an alias somebody has
+ *   to remember to add — an alias list is a list that goes stale the first time a wholesaler is
+ *   added by somebody who does not know it exists.
+ *
+ * Deliberately not a similarity score. Either these are the same company or they are not, and a
+ * threshold would make the answer depend on a number nobody can defend.
+ */
+export function sameWholesaler(a: string | null | undefined, b: string | null | undefined): boolean {
+  const x = fold(a);
+  const y = fold(b);
+  if (!x || !y) return true;
+  if (x === y) return true;
+  const short = x.length <= y.length ? x : y;
+  const long = x.length <= y.length ? y : x;
+  if (short.length >= SHORTEST_MATCH && long.startsWith(short)) return true;
+  return initialsOf(a) === y || initialsOf(b) === x;
+}
+
+const fold = (v: string | null | undefined): string => (v ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+/**
+ * The initials of a multi-word name, or "" where there are not enough words to form any.
+ *
+ * Two words at minimum, and each has to be a word rather than a stray letter, so "J M Smith" does
+ * not collapse to something that matches half the register.
+ */
+function initialsOf(v: string | null | undefined): string {
+  const words = (v ?? "").split(/[^A-Za-z0-9]+/).filter((w) => w.length >= 2);
+  if (words.length < 2) return "";
+  return words.map((w) => w[0]).join("").toUpperCase();
+}

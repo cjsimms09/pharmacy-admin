@@ -85,11 +85,36 @@ all of September. 34 have an invoice; 62 do not, and every one of those 62 carri
 item lines, 548 of them (98.9%) with an eleven-digit NDC and a cost. More than half the buying by
 value, with the data to price it complete.
 
-**A ceiling, not a figure.** Invoice-number equality was the only test applied, so a supplier named
-differently on the two sides reads as uninvoiced when it is not — the ParMed-as-Cardinal fault
-exactly. The real gap is 62 less however many that reached. `drug-cost-source.ts` now requires the
-suppliers to agree as well, and where the number matches and the names do not it shows the cost and
-names the disagreement rather than hiding either.
+**The ceiling was real in principle and nearly empty in fact.** Session 1 measured it on
+14 September: there are only **35 invoice documents in the whole estate**, 34 already matched to a
+delivery and 1 unmatched. So whatever the numbering or the naming does, the 62 can fall by at most
+one. These are not invoices the site failed to match — they are invoices that do not exist yet. The
+caveat is withdrawn rather than carried, because a caveat nobody can act on costs a reader more than
+it protects them.
+
+### The site had no answer to "are these two names the same wholesaler"
+
+**OBSERVATION.** The invoice proof's first real run, 14 September: 35 invoices, 35 reconcile, 0
+disagree, 0 hold no lines, 0 undated, 0 readable better now, **10 under the wrong wholesaler**, 0
+unreadable. All ten were one wholesaler written two ways — nine filed `IPC` against pages reading
+"Independent Pharmacy Cooperative", one filed `IPD` against "Independent Pharmacy Distributor".
+
+**SHOULD BE.** A check's own sentence has to be true of what it reports. "Filed under a different
+wholesaler than the page now names" was false on ten of ten.
+
+**DIFFERENCE.** Yes, and the cost is not the noise — it is that a genuine ParMed-under-Cardinal would
+have been indistinguishable from it on the screen. A row that cries wolf ten times is a row nobody
+reads on the eleventh.
+
+**Fixed 14 September.** The comparison had been written twice, in `scripts/prove-invoices.ts` and in
+`drug-cost-source.ts`, and both copies missed the same case: an acronym against its own expansion.
+`sameWholesaler` in `supplier-match.ts` is now the one answer and both call it. It works from the
+two strings rather than an alias list, because an alias list goes stale the first time a wholesaler
+is added by somebody who does not know it exists. Same shape as `sameDrugCode`: two writings of one
+thing read as two things.
+
+**Not a similarity score, deliberately.** Either these are the same company or they are not, and a
+threshold would make the answer depend on a number nobody can defend.
 
 **Pre-flight.** Physical act: boxes arriving and being booked in at the counter. Time: affects every
 period already loaded. What a pharmacist knows that the tables do not: that the receiving record is

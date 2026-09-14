@@ -42,6 +42,10 @@
  * wholesaler's own invoice number, which is the join `invoices-owed.ts` already uses and the only
  * field both systems copy from the same place — **and on the supplier agreeing**.
  *
+ * On today's data this path is cold: there are 35 invoices in the whole estate and 34 already match
+ * a delivery, so nothing clashes. Kept anyway — it costs nothing to be right before it matters — and
+ * its silence is not evidence it works.
+ *
  * The number alone was the first version and it is not enough in either direction. Two wholesalers
  * can issue the same number, and a delivery whose supplier is named differently on the two sides is
  * exactly the fault already found on 10 September: ParMed invoices filed under Cardinal, because
@@ -65,6 +69,8 @@
  * wholesaler invoices dated in the month, and a receipt-derived figure must stay out of it or the
  * stock-movement check counts the same delivery twice.
  */
+
+import { sameWholesaler } from "./supplier-match";
 
 export type CostAuthority = "invoice" | "receipt" | "notYetArrived" | "neverBought";
 
@@ -117,19 +123,12 @@ export type DrugCost = {
 /** Two references are the same delivery. Wholesalers pad and punctuate their own numbers unevenly. */
 const norm = (v: string | null | undefined): string => (v ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
 
-/**
- * Whether two records name the same wholesaler.
- *
- * A name nobody recorded cannot disagree with anything, so a null on either side agrees. One name
- * being a prefix of the other is the same company written longer — "ParMed" against "PARMED
- * PHARMACEUTICALS" — and only a genuine difference counts as one.
+/*
+ * Whether two records name the same wholesaler: `sameWholesaler` in supplier-match.ts, which is the
+ * site's one answer to that question. This module had its own and it was the same one the invoice
+ * proof had — both missed an acronym against its own expansion, and the proof reported ten
+ * disagreements on 14 September of which ten were IPC against "Independent Pharmacy Cooperative".
  */
-function sameSupplier(a: string | null, b: string | null): boolean {
-  const x = norm(a);
-  const y = norm(b);
-  if (!x || !y) return true;
-  return x === y || x.startsWith(y) || y.startsWith(x);
-}
 
 const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -193,7 +192,7 @@ export function costOf(
   const standing = receipts.filter((r) => {
     const against = byNumber.get(norm(r.invoiceNumber)) ?? [];
     if (against.length === 0) return true;
-    if (against.some((l) => sameSupplier(l.supplier, r.supplier))) return false;
+    if (against.some((l) => sameWholesaler(l.supplier, r.supplier))) return false;
     clash = against[0].supplier ?? null;
     return true;
   });
