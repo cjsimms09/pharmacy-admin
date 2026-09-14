@@ -140,13 +140,24 @@ an invoice for the same delivery must be one cost, matched on the wholesaler's o
 which is the join `invoices-owed.ts` already uses. **Resolved since.** Both unknowns answered on 14 September. There are no older rows — every
 `pioneer_purchases` row is September 2026 and all 96 carry both columns — so no text fallback is
 carried, and a backfill of pre-September deliveries must be refused here rather than read from prose.
-548 of 554 lines have a usable NDC. **Still not checked:** the 6 that do not. If they are front-end
-items with a UPC, `ndcFromUpc` already handles that shape and they are recoverable; if they are
-devices they correctly have none. Nothing treats them as a hole until somebody looks.
+548 of 554 lines have a usable NDC. **The 6 that do not were looked at on 15 September and all six
+are correctly codeless** — the field is empty rather than malformed, so `ndc11()`, `ndcFromUpc()` and
+the twelve-to-eleven reading are all inapplicable. Two McKesson front-end items, a dressing and an
+elbow support, and four Xymogen nutraceuticals; Xymogen is a supplements house and none of its
+catalogue is an NDC drug. $429.45, correctly outside every per-drug figure, and `costCoverage` says
+so in a sentence rather than dropping them silently.
+
+## Mine, not yet started
+
+This heading was deleted by accident on 14 September. I used it as the anchor for the finding above
+and the replacement consumed it, so four tracked items spent a day sitting under "Found 14 September"
+with no owner against them — in the register whose first rule is that nothing leaves the list except
+by being done or decided. Restored 15 September. An edit that takes a heading as its landmark should
+put the landmark back.
 
 | What | Money | Note |
 |---|---|---|
-| **Invoice coverage is 51%** | blocks **$317.69** of provable appeals, and every per-drug cost | Invoices on file come to $118,449.24 against $230,143.13 of PioneerRx purchases. 66 of the 117 below-NADAC Caremark claims cannot be proved because no invoice covers the NDC. Not a reader problem — the documents are not arriving. Worth more than any appeal on that list. |
+| ~~**Invoice coverage is 51%**~~ | — | **Superseded 14 September, see the finding above.** The figure and the framing were both wrong. `invoicesStillOwed()` reports **0 invoices to chase**: the 50 uninvoiced deliveries are from before the mailbox was watching, two of those suppliers send receipts by design, and the owner has said he does not want the 1–8 September backlog chased. It was never a chase. What it is — those deliveries carrying no per-drug purchase price — is answered by `drug-cost-source.ts` and reported on Data health. |
 | **5 September reversals cannot be matched to what they cancel** | **$1,277.03** may still be standing as revenue | 336765 on 09-04 at $461.89 and 337203 on 09-09 at $605.94 among them. `claimCancelledBy` is right to refuse: the Wegovy reversal carries an $833.52 copay the live row does not, so it could belong to either run. Each now appears on the recheck with its money. What is missing is a way for him to say which run a reversal cancels. |
 | **Payer payment cycles are prose, not days** | — | `payment_routing` holds a cycle for 20 of its 29 payers, every one the sentence the contract printed. Nothing reads a number out of it, so `promise-due.ts` falls back to measurement. One row can carry two cycles for two lines of business, and Caremark's states a sixty-day *reconciliation* cycle that says nothing about when a point-of-sale claim is paid. Parse it wrong and the site invents a deadline. |
 | **ANDA has no sending address** | — | Self-resolving: their first invoice is captured from its own page and raised in the Inbox to be named. No action unless it does not arrive. |
