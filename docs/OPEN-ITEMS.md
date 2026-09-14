@@ -80,9 +80,16 @@ forgetting a flag. So the answer is **not** to write `invoice_lines` from a rece
 source that names its own authority, is visibly weaker than an invoice, and never reaches the money
 accounts unless he says so.
 
-**Money: not yet measured, and deliberately not guessed.** How much of the 49% gap has a purchase
-row with figures on it is the question, and this worktree's database is empty. Asked of session 1 on
-14 September.
+**Money: $157,264.78.** Measured by session 1 on 14 September: 96 deliveries on file, $275,908.19,
+all of September. 34 have an invoice; 62 do not, and every one of those 62 carries `itemsJson` — 554
+item lines, 548 of them (98.9%) with an eleven-digit NDC and a cost. More than half the buying by
+value, with the data to price it complete.
+
+**A ceiling, not a figure.** Invoice-number equality was the only test applied, so a supplier named
+differently on the two sides reads as uninvoiced when it is not — the ParMed-as-Cardinal fault
+exactly. The real gap is 62 less however many that reached. `drug-cost-source.ts` now requires the
+suppliers to agree as well, and where the number matches and the names do not it shows the cost and
+names the disagreement rather than hiding either.
 
 **Pre-flight.** Physical act: boxes arriving and being booked in at the counter. Time: affects every
 period already loaded. What a pharmacist knows that the tables do not: that the receiving record is
@@ -91,9 +98,12 @@ matters** — `profit-and-loss.ts` sources purchases from "the wholesaler invoic
 month", so a receipt-derived cost must stay out of it or the stock-movement check double-counts.
 Worst case ranked: money, not patient harm. Could it pass for the wrong reason: yes — a receipt and
 an invoice for the same delivery must be one cost, matched on the wholesaler's own invoice number,
-which is the join `invoices-owed.ts` already uses. **Not checked:** whether `itemsJson` is populated
-on the older rows (the column post-dates some of them and falls back to text), and how many
-receipt-only deliveries carry a usable NDC.
+which is the join `invoices-owed.ts` already uses. **Resolved since.** Both unknowns answered on 14 September. There are no older rows — every
+`pioneer_purchases` row is September 2026 and all 96 carry both columns — so no text fallback is
+carried, and a backfill of pre-September deliveries must be refused here rather than read from prose.
+548 of 554 lines have a usable NDC. **Still not checked:** the 6 that do not. If they are front-end
+items with a UPC, `ndcFromUpc` already handles that shape and they are recoverable; if they are
+devices they correctly have none. Nothing treats them as a hole until somebody looks.
 
 | What | Money | Note |
 |---|---|---|
