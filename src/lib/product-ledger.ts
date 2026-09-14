@@ -52,8 +52,21 @@ export type Buy = {
   /** After the tier rate, where the line is marked rebated. Equal to the gross where it is not. */
   effectiveUnitMicros: number;
   rebated: boolean | null;
-  /** "invoice" is what was actually paid; "catalogue" is what the supplier lists. */
-  source: "invoice" | "catalogue";
+  /**
+   * Where the figure came from, and how much weight it carries.
+   *
+   * "invoice" is the wholesaler's own document: what was actually paid, and the only one the
+   * pharmacy can produce if a plan asks. "catalogue" is what a supplier lists — a price nobody has
+   * paid yet. "receipt" is PioneerRx's record of a delivery it booked in, standing in for the half
+   * of this pharmacy's buying whose invoice never reached the mailbox: real money, weaker evidence.
+   *
+   * The distinction is not cosmetic and must survive every hop. A receipt is good enough to decide
+   * what to buy and what to send back; it is **not** good enough to state an acquisition cost to a
+   * PBM, because the pharmacy cannot produce the document behind it. `provable()` in
+   * drug-cost-source.ts is the gate for anything that reaches a payer, and `appeals.ts` reads
+   * invoice lines directly rather than coming through here for exactly that reason.
+   */
+  source: "invoice" | "catalogue" | "receipt";
   on: string | null;
   shortDated: string | null;
 };
@@ -145,6 +158,27 @@ export type LedgerInput = {
    * rest, and only where the catalogue did not, so a supplier's own pack size always wins.
    */
   packFallback?: { ndc11: string; packQty: number }[];
+  /**
+   * Deliveries PioneerRx booked in, for the NDCs no invoice line covers.
+   *
+   * Invoice coverage is 51%: the mailbox only began capturing supplier invoices on 9 September, so
+   * 50 deliveries worth $146,612.51 from the first eight days of the month have no document and
+   * never will. The owner closed that: *"dont want to chase 1-8 sept invoices.. we will use pioneers
+   * but going forward all mckesson invoices are sent now"* — and he is right that it resolves
+   * itself, since every McKesson gap is before the 9th and there are none after.
+   *
+   * Until it does, half of what he buys has no price on the screens that decide what to buy. These
+   * lines fill that half and nothing more: an invoice always wins, and a receipt is used only where
+   * no invoice line prices the NDC at all.
+   *
+   * `unitCostCents` is per package and `quantity` is packages, the same convention an invoice line
+   * uses — checked against all 898 lines on file, where `unitCostCents × quantity` equals the
+   * extended amount on 898 of 898 and never needs the pack size as a third factor. `packQty` comes
+   * off the receipt itself, which is better than an invoice line manages: those need the catalogue
+   * to say what a package holds, and a line whose pack size nothing knows drops out of every
+   * comparison silently.
+   */
+  receiptLines?: { ndc11: string; supplier: string | null; description: string | null; unitCostCents: number; packQty: number | null; receivedOn: string | null }[];
   nadac: { ndc11: string; unitMicros: number; effectiveOn: string; description: string | null }[];
   claims: { ndc11: string | null; itemName: string | null; quantityThousandths: number | null; remitCents: number | null; copayCents: number | null; status?: string }[];
   contract: Contract;
@@ -211,6 +245,56 @@ export function buildLedger(input: LedgerInput): LedgerRow[] {
       rebated: l.rebated,
       source: "invoice",
       on: l.invoiceDate,
+      shortDated: null,
+    };
+    r.paid = buy;
+    r.buys.push(buy);
+  }
+
+  /*
+   * ── What was paid where no invoice says so ──
+   *
+   * Only for NDCs the invoice lines do not price at all. An invoice always wins, and this never
+   * overrides one: `byNdcInvoice` is consulted first and a hit here means no document covers the
+   * drug, not that a document disagrees.
+   *
+   * The receipt brings its own pack size, so unlike an invoice line it does not need the catalogue
+   * to be put per unit — which matters, because these are exactly the NDCs least likely to be in a
+   * catalogue the pharmacy holds.
+   *
+   * `rebated` is null rather than false. The receipt does not record whether the line earned the
+   * tier rate, and that is genuinely unknown rather than known to be no — the same state an
+   * invoice line with no contract flag is already in, handled the same way, and flagged the same
+   * way by `rebate_unknown` below. Guessing false here would invent a cost higher than the
+   * pharmacy paid and push drugs onto the buying-group list that do not belong there.
+   */
+  const byNdcReceipt = new Map<string, NonNullable<LedgerInput["receiptLines"]>[number]>();
+  for (const l of [...(input.receiptLines ?? [])].sort((a, b) => (a.receivedOn ?? "").localeCompare(b.receivedOn ?? ""))) {
+    byNdcReceipt.set(l.ndc11, l);
+  }
+  for (const [ndc, l] of byNdcReceipt) {
+    if (byNdcInvoice.has(ndc)) continue;
+    /*
+     * A cost of nothing is not a cost.
+     *
+     * The loader already drops these, and the guard is here as well on purpose: a zero reaching the
+     * arithmetic prices the drug at nought, which makes it look infinitely profitable and puts it
+     * top of every buy list. That is the worst shape of wrong a buying screen can be, and it must
+     * not depend on a filter in a different file staying correct.
+     */
+    if (!(l.unitCostCents > 0)) continue;
+    const r = row(ndc);
+    if (!r.name && l.description) r.name = l.description;
+    const pack = l.packQty ?? packOf.get(ndc) ?? null;
+    if (pack === null) r.flags.push("pack_size_unknown");
+    const gross = Math.round((l.unitCostCents * 10_000) / (pack ?? 1));
+    const buy: Buy = {
+      supplier: l.supplier ?? "our supplier",
+      unitCostMicros: gross,
+      effectiveUnitMicros: effectiveMicros(gross, null, rateFor(contract, l.supplier)),
+      rebated: null,
+      source: "receipt",
+      on: l.receivedOn,
       shortDated: null,
     };
     r.paid = buy;
@@ -403,8 +487,46 @@ async function loadProductLedger(): Promise<{ rows: LedgerRow[]; rate: number | 
   const anyRate = Object.values(bySupplier).sort((a, b) => b - a)[0] ?? null;
   const materialityCents = Number(s.floor_materiality_cents ?? "") || 500;
 
+  /*
+   * The deliveries whose invoice never came, read from what PioneerRx booked in at the counter.
+   *
+   * Read from `itemsJson` and never from `itemsText`, deliberately. Every row on file carries both,
+   * so a text fallback would be an untested branch kept for a case that does not exist — and a cost
+   * read out of prose is a different confidence from one read out of figures, which is the one
+   * thing this must not blur. A row whose JSON will not parse is skipped rather than guessed at.
+   */
+  const receiptLines = (
+    await db.query.pioneerPurchases.findMany({
+      columns: { supplier: true, invoiceDate: true, itemsJson: true },
+    })
+  ).flatMap((p) => {
+    let items: { ndc11?: string; description?: string; quantity?: number; unitCostCents?: number; packSize?: string | number }[];
+    try {
+      items = JSON.parse(p.itemsJson ?? "[]");
+    } catch {
+      return [];
+    }
+    if (!Array.isArray(items)) return [];
+    return items.flatMap((it) => {
+      const ndc11 = String(it.ndc11 ?? "").replace(/\D/g, "");
+      const unitCostCents = Number(it.unitCostCents ?? 0);
+      /* Eleven digits or it is not an NDC — a front-end item or a supplement, which correctly has none. */
+      if (ndc11.length !== 11 || !(unitCostCents > 0)) return [];
+      const packQty = Number(it.packSize ?? 0);
+      return [{
+        ndc11,
+        supplier: p.supplier,
+        description: it.description ?? null,
+        unitCostCents,
+        packQty: packQty > 0 ? packQty : null,
+        receivedOn: p.invoiceDate,
+      }];
+    });
+  });
+
   const rows = buildLedger({
     invoiceLines: lines,
+    receiptLines,
     packFallback: shelf,
     catalogue: catalogue.map((c) => ({
       ndc11: c.ndc11, supplier: c.supplier, description: c.description,
