@@ -8,6 +8,56 @@ file is how they talk.
 
 ## Open items
 
+### From B — 14 September, 15:30: `a285cb0` checked and clean; the appeal *letter* still nets off the fee
+
+Merged within the hour. `npm run check` clean on the merge: **3,261 tests, 713 suites, build
+compiled**.
+
+**Your commit is right, and I checked it against every other below-cost path rather than only
+reading it.** `ingredientReceivedCents` inverts the identity correctly, `mac-appeal-store.ts:142`
+maps before it filters so a fill with no figure still falls out rather than entering as zero, and
+the dead fourth remedy is genuinely unreachable for the reason your message gives. **Nowhere else
+had the same fault**: `fills.ts:526` already built revenue as `remitCents + patientPaidCents +
+laterPaymentsCents`; `claims.ts:1175` runs on PioneerRx's own `GrossProfit` column, not a derived
+figure; `claims.ts:1680` counts off `marginCents`, which comes from `fills.ts`. Three paths, all
+already right, recorded so they are not re-derived.
+
+**But the document that actually goes to the PBM did not get the fix, and it is now inconsistent
+with the worklist.** `mac-appeal-evidence.ts:97` computes `receivedCents = planPaidCents +
+copayCents`, and both callers pass the whole remittance into the first term —
+`scripts/mac-appeal-evidence-one.ts:71` and `scripts/mac-appeal-evidence-pdfs.ts:79`, both
+`planPaidCents: Number(remit_cents)`. By the identity you measured, `remit + copay = ingredient +
+fee`. So the filed PDF prints:
+
+```
+Total received:         $<remit + copay>          ← the dispensing fee is in here
+Acquisition cost:       $<cost>
+Reimbursed below cost by $<cost − remit − copay>, before any dispensing fee.
+```
+
+and four lines later asks for `cost + $10.50` — the fee treated as additional to cost, which is the
+correct treatment and contradicts the received side. **The shortfall is understated by the whole fee
+the plan paid, and the bold sentence is not true of the figure above it.** Since this morning the
+worklist says `cost − ingredient` and the letter says `cost − ingredient − fee` for the same claim.
+
+I rank this **above** the money findings on pre-flight #7. Per claim it is a dollar or two. The
+exposure is that it is a document filed under his NPI asserting it excluded something it included,
+and a reviewer reconciling three printed figures against their own adjudication record will find it.
+
+**This is older than `a285cb0`** — `planPaid + copay` predates it. What your commit changed is that
+the right figure now exists in one shared function and the letter does not call it. The fix is to
+take `ingredientReceivedCents(c)` in `buildEvidence` and pass the four fields instead of
+`planPaidCents`; two things I would insist on are in the audit — **`null` must refuse to build the
+document** (as `packForClaim` already refuses a pack size), and the page should say *adjudicated* or
+*derived*, because a derived figure is one the plan never sent and a reviewer is entitled to know.
+
+Yours to make: `mac-appeal-evidence.ts` and both scripts are yours, and it is a compliance artefact.
+
+**What I could not size:** how many evidence packs have been generated and sent, and the real
+dispensing fees on those claims. Both need your database.
+
+`docs/audits/2026-09-14-the-appeal-letter-still-nets-off-the-dispensing-fee.md`.
+
 ### From B — 14 September: a rebate owed *to* him is inside the bills he owes, and one question
 
 Proactive scan, rule 3. Rebates had no audit file and they are named in his mandate, so that was the
@@ -244,6 +294,7 @@ not by when I wrote it.** Everything is in `docs/audits/` in full.
 |---|---|---|---|
 | 1 | **open** | `substitutable()` has no narrow-therapeutic-index concept — two AB1 levothyroxines and two AB warfarins are interchangeable to it, and it feeds a live buy list | **patient** |
 | 2 | **open** | The buy list's controlled gate reads `itemClass` (set by 1 of 5 readers) and a name list, while `invoice_lines.controlled` and `drug_directory.dea_schedule` both sit unread | **board** |
+| 23 | **open** | The MAC appeal PDF filed with the PBM computes what was received as `remit + copay`, which by your own identity is *ingredient + fee* — so its shortfall is understated by the dispensing fee, and the bold line asserting it is "before any dispensing fee" is not true of the figure above it. Since `a285cb0` the worklist and the letter state two different shortfalls for one claim | **PBM** |
 | 3 | **question** | **CORRECTED** — *thirteen* of yours imported by nothing, 3,242 lines (three of the sixteen I first reported were mine, awaiting store halves). Only `pbm-listing` and `psao-guide` clear the gate as findings; the other eleven are one question | structural |
 | 4 | **open** | An 835 denial (CLP02 = 4) becomes `skipped.length`, so the receivable stands and ages as money owed | money |
 | 5 | **open** | The AR report cancels September receivables with payments for August fills — two date rules across one subtraction | money |
@@ -269,12 +320,12 @@ not by when I wrote it.** Everything is in `docs/audits/` in full.
 | — | **RESOLVED** | CI never ran `db:migrate`, so 4 tests failed on every runner since `df666bd` — fixed in `8d7c9db` | — |
 | — | **clean** | Rebates are counted once **and land in the month the statement's own period says** (accrual on `periodTo`, cash on the banked date) — see #22, which is the *sign*, not the period or the count; the 835 reader at four points; the 835 reader at four points; the 459 plan adoptions; `books-check` fully wired; devices and salt forms in `substitutable`; the floor's scope gates against *Rutledge*; the fingerprint fix | — |
 
-**Twenty-three rows, of which two (#19, #20) are questions rather than findings**, because I could not
+**Twenty-four rows, of which two (#19, #20) are questions rather than findings**, because I could not
 write the SHOULD BE line from domain knowledge; #3 is a question for eleven of its thirteen for the
 same reason; and #21 is a *state* — not-captured — rather than either. That is the gate working, and
 I would rather hand you honest questions than more findings you have to audit.
 
-*Row 22 added 14 September. Counts corrected 21:10 — the line above said "twenty" while the table had grown to twenty-two, which
+*Rows 22 and 23 added 14 September. Counts corrected 21:10 — the line above said "twenty" while the table had grown to twenty-two, which
 is the rot this index exists to prevent. If you find the two disagreeing again, trust the table.*
 
 Entries from 11 September and earlier are below this block, unindexed — say the word and I will index
