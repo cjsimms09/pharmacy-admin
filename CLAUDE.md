@@ -57,6 +57,14 @@ would make him do, not whether it is right.** Where another session exists it re
 they ship; where none does — usually — the author reads it cold, as him. That is the weaker form, and
 a figure shipped without a second reader says so in the same breath.
 
+**Record it with a `Read-By:` trailer**, same shape as `Co-Authored-By:`. It is **trustworthy only in
+the negative**: nobody forges an absence, so a commit without one is reliable evidence nobody else
+read it, while a commit with one is weak evidence that somebody did — it can be typed without
+reading and proves nothing about whether the sentence is true. So it is an instrument for finding
+unread work, never for certifying read work, and it must never be described as the second. It cannot
+cover the commonest case either — a review that happens after the push and changes nothing leaves no
+commit to carry it; that one goes in `docs/OPEN-ITEMS.md` as a line, or it is not recorded at all.
+
 Full reasoning and the failures that earned each clause: `docs/CONSTITUTION.md`. The questions in
 long form and what they found: `docs/FOUNDATIONS.md`. The registers, generated from the data by
 `scripts/registers.ts` so they cannot rot: `docs/registers/`. Open findings with money and owner:

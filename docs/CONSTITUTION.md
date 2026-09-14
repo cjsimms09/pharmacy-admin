@@ -207,6 +207,15 @@ followed. Where a sentence carries a number he would act on and no second reader
 options are to hold it until there is one, or to ship it and say in the same breath that nobody else
 has read it.
 
+**What this control cannot do, said here so nobody mistakes it for a proof.** Every other check on
+this site re-reads a file and compares, and each can show its working. This one has no source to
+compare against — the only instrument is a person reading — so it is the only rule in the set with no
+way to demonstrate that it ran. A `Read-By:` trailer narrows that and does not close it: absence is
+reliable because nobody forges an absence, presence is weak because it can be typed without reading,
+and neither says anything about whether the sentence was true. It buys exactly what a proof's date
+buys — that *not* running stops being invisible — and nothing beyond it. **It is the weakest-attested
+rule here and it should be described that way** whenever it is relied on, including to him.
+
 ## 7. What I am not allowed to do
 
 - **Never assume the database is the world.** Consequences live on the shelf, at the counter, and in
