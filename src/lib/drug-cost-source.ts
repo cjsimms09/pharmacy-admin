@@ -6,6 +6,12 @@
  * screen that prices an order, times a return or backs an appeal — while the figures sit in
  * `pioneer_purchases.itemsJson`, already parsed, one table away.
  *
+ * Measured on the real database, 14 September 2026: 96 deliveries, $275,908.19, all of September.
+ * 34 have an invoice on file. **62 do not, worth $157,264.78** — and every one of those 62 carries
+ * `itemsJson`, 554 item lines between them, 548 of which (98.9%) have an eleven-digit NDC and a
+ * cost. So this is not a handful of edge cases: it is more than half the pharmacy's buying by value,
+ * and the data to price it is complete.
+ *
  * ── Why this is not "write invoice lines from the receipt" ──
  *
  * The owner, and the schema records it: *"we shouldn't be taking pioneer order receipts as
@@ -30,12 +36,30 @@
  *
  * "Missing" is not among them, which is the point.
  *
- * ── One delivery is one cost ──
+ * ── One delivery is one cost, and the number alone does not prove it ──
  *
  * A receipt and an invoice for the same delivery are the same money. They are matched on the
  * wholesaler's own invoice number, which is the join `invoices-owed.ts` already uses and the only
- * field both systems copy from the same place. A receipt whose number matches an invoice on file is
- * never a cost of its own.
+ * field both systems copy from the same place — **and on the supplier agreeing**.
+ *
+ * The number alone was the first version and it is not enough in either direction. Two wholesalers
+ * can issue the same number, and a delivery whose supplier is named differently on the two sides is
+ * exactly the fault already found on 10 September: ParMed invoices filed under Cardinal, because
+ * ParMed is a Cardinal company and was not on the name list. So where the numbers match and the
+ * suppliers disagree, this suppresses nothing and says so — `numberClashWith` carries the other
+ * name. Hiding a cost the pharmacy has, on the strength of a number that may belong to somebody
+ * else, is the worse of the two errors: nothing here reaches the money accounts, so the risk is a
+ * drug with no price rather than a sum counted twice.
+ *
+ * ── Read from figures, never from prose ──
+ *
+ * `pioneer_purchases` carries both `itemsJson` and `itemsText`, and `invoice-price-check.ts` falls
+ * back to reading the text where the JSON is empty. This does not, and the omission is deliberate.
+ * Every row in the table is September 2026 and all 96 have both columns populated, so the fallback
+ * would be an untested branch carried for a case that does not exist. If a backfill ever loads
+ * pre-September deliveries the loader must refuse them here rather than reach for the text: a cost
+ * read out of prose is a different confidence from one read out of figures, and this module's whole
+ * job is not to blur two confidences together.
  *
  * Pure. Nothing here reaches the money accounts: `profit-and-loss.ts` sources purchases from the
  * wholesaler invoices dated in the month, and a receipt-derived figure must stay out of it or the
@@ -79,12 +103,33 @@ export type DrugCost = {
   on: string | null;
   /** The wholesaler's own number, so the figure can be traced to the page it came from. */
   reference: string | null;
+  /**
+   * The supplier on an invoice carrying this delivery's number but a different wholesaler's name.
+   *
+   * Null in the ordinary case. Set where the two systems disagree about who sent it, which is
+   * either one delivery named twice or two deliveries sharing a number, and this cannot tell which.
+   */
+  numberClashWith: string | null;
   /** One sentence naming the source and its weight, for wherever the figure is shown. */
   says: string;
 };
 
 /** Two references are the same delivery. Wholesalers pad and punctuate their own numbers unevenly. */
 const norm = (v: string | null | undefined): string => (v ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+/**
+ * Whether two records name the same wholesaler.
+ *
+ * A name nobody recorded cannot disagree with anything, so a null on either side agrees. One name
+ * being a prefix of the other is the same company written longer — "ParMed" against "PARMED
+ * PHARMACEUTICALS" — and only a genuine difference counts as one.
+ */
+function sameSupplier(a: string | null, b: string | null): boolean {
+  const x = norm(a);
+  const y = norm(b);
+  if (!x || !y) return true;
+  return x === y || x.startsWith(y) || y.startsWith(x);
+}
 
 const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -128,17 +173,30 @@ export function costOf(
       unitCostCents: bestInvoice.unitCostCents,
       on: bestInvoice.invoiceDate,
       reference: bestInvoice.invoiceNumber,
+      numberClashWith: null,
       says: `${money(bestInvoice.unitCostCents)} a unit, from ${bestInvoice.supplier ?? "the wholesaler"}'s invoice${bestInvoice.invoiceNumber ? ` ${bestInvoice.invoiceNumber}` : ""}${bestInvoice.invoiceDate ? ` of ${bestInvoice.invoiceDate}` : ""}.`,
     };
   }
 
   /*
-   * A receipt whose delivery an invoice already bills for is not a second cost. Matched on the
-   * wholesaler's own number, which both systems copy from the same place — the only field on either
-   * record that was not typed or read twice.
+   * A receipt whose delivery an invoice already bills for is not a second cost — where the two
+   * agree about who sent it. Where they do not, the receipt stands and the disagreement is named:
+   * see the note above on why hiding a real cost is the worse error here.
    */
-  const billed = new Set(invoiceLines.map((l) => norm(l.invoiceNumber)).filter(Boolean));
-  const standing = receipts.filter((r) => !billed.has(norm(r.invoiceNumber)));
+  const byNumber = new Map<string, InvoiceCost[]>();
+  for (const l of invoiceLines) {
+    const k = norm(l.invoiceNumber);
+    if (!k) continue;
+    byNumber.set(k, [...(byNumber.get(k) ?? []), l]);
+  }
+  let clash: string | null = null;
+  const standing = receipts.filter((r) => {
+    const against = byNumber.get(norm(r.invoiceNumber)) ?? [];
+    if (against.length === 0) return true;
+    if (against.some((l) => sameSupplier(l.supplier, r.supplier))) return false;
+    clash = against[0].supplier ?? null;
+    return true;
+  });
 
   const bestReceipt = newest(standing);
   if (!bestReceipt) {
@@ -149,6 +207,7 @@ export function costOf(
       unitCostCents: null,
       on: null,
       reference: null,
+      numberClashWith: null,
       says: "Nothing on file says this pharmacy has ever bought this drug. That is an absence of the event, not a gap in the records.",
     };
   }
@@ -167,9 +226,14 @@ export function costOf(
     unitCostCents: bestReceipt.unitCostCents,
     on: bestReceipt.invoiceDate,
     reference: bestReceipt.invoiceNumber,
-    says: waiting
+    numberClashWith: clash,
+    says:
+      (clash
+        ? `An invoice on file carries this delivery's number ${bestReceipt.invoiceNumber ?? ""} under ${clash} rather than ${bestReceipt.supplier ?? "this wholesaler"} — either one delivery named twice or two sharing a number, and this cannot tell which, so the cost is shown rather than hidden. `
+        : "") +
+      (waiting
       ? `${money(bestReceipt.unitCostCents)} a unit, from ${where}, as PioneerRx booked it in. The wholesaler's invoice has not arrived yet, so this is what was received rather than what was billed.`
-      : `${money(bestReceipt.unitCostCents)} a unit, from ${where}, as PioneerRx booked it in. No invoice is coming for this one, so the receipt is the record — good enough to price an order, and not a document to produce to a plan.`,
+      : `${money(bestReceipt.unitCostCents)} a unit, from ${where}, as PioneerRx booked it in. No invoice is coming for this one, so the receipt is the record — good enough to price an order, and not a document to produce to a plan.`),
   };
 }
 

@@ -62,11 +62,21 @@ describe("one delivery is one cost", () => {
   });
 
   test("the same number punctuated differently is the same delivery", () => {
-    const invoices = [inv({ ndc11: "5", invoiceNumber: "inv 123-4" })];
-    const receipts = [rec({ ndc11: "5", invoiceNumber: "INV1234" })];
-    // The invoice covers this NDC anyway, so prove it through a second NDC on the same delivery.
-    const c = costOf("6", invoices, [...receipts, rec({ ndc11: "6", invoiceNumber: "INV1234" })]);
+    // Wholesalers pad and punctuate their own numbers unevenly between the two systems.
+    const invoices = [inv({ ndc11: "5", supplier: "ParMed", invoiceNumber: "inv 123-4" })];
+    const receipts = [rec({ ndc11: "6", supplier: "ParMed", invoiceNumber: "INV1234" })];
+    const c = costOf("6", invoices, receipts);
     assert.equal(c.authority, "neverBought", "the delivery is billed, so its receipt is not a cost of its own");
+  });
+
+  test("a longer form of the same company name still agrees", () => {
+    const c = costOf("6", [inv({ ndc11: "5", supplier: "ParMed", invoiceNumber: "X1" })], [rec({ ndc11: "6", supplier: "PARMED PHARMACEUTICALS", invoiceNumber: "X1" })]);
+    assert.equal(c.authority, "neverBought");
+  });
+
+  test("a name nobody recorded cannot disagree with one that was", () => {
+    const c = costOf("6", [inv({ ndc11: "5", supplier: null, invoiceNumber: "X1" })], [rec({ ndc11: "6", supplier: "ParMed", invoiceNumber: "X1" })]);
+    assert.equal(c.authority, "neverBought", "a null supplier agrees rather than clashing");
   });
 
   test("a receipt for a delivery no invoice covers does answer", () => {
@@ -75,6 +85,42 @@ describe("one delivery is one cost", () => {
     const d = costOf("77777777777", [inv({ invoiceNumber: "OTHER" })], [rec({ ndc11: "77777777777" })]);
     assert.equal(d.authority, "notYetArrived");
     assert.equal(d.unitCostCents, 900);
+  });
+});
+
+describe("the number matches and the wholesalers do not", () => {
+  /*
+   * Session 1's caveat on the 14 September measurement: invoice-number equality was the only test
+   * applied, so any supplier named differently on the two sides reads as uninvoiced when it is not
+   * — which is exactly the ParMed-as-Cardinal fault found on 10 September. The same weakness would
+   * be inherited here, in the opposite direction: a receipt suppressed by an invoice that may
+   * belong to somebody else entirely.
+   */
+  test("the receipt is not suppressed, and the disagreement is named", () => {
+    const c = costOf("00093721410", [inv({ ndc11: "OTHER", supplier: "Cardinal Health", invoiceNumber: "2057167199" })], [rec({ supplier: "ParMed", invoiceNumber: "2057167199" })]);
+    assert.equal(c.numberClashWith, "Cardinal Health");
+    assert.equal(c.unitCostCents, 900, "the cost is shown rather than hidden");
+    assert.match(c.says, /either one delivery named twice or two sharing a number/);
+    assert.match(c.says, /cannot tell which/);
+  });
+
+  test("hiding the cost is the worse error, and the comment says why", () => {
+    // Nothing here reaches the money accounts, so the risk is a drug with no price rather than a
+    // sum counted twice. The opposite choice would silently lose a cost the pharmacy has.
+    const hidden = costOf("00093721410", [inv({ ndc11: "OTHER", supplier: "Cardinal Health", invoiceNumber: "2057167199" })], [rec({ supplier: "ParMed", invoiceNumber: "2057167199" })]);
+    assert.notEqual(hidden.authority, "neverBought");
+  });
+
+  test("no clash means no sentence about one", () => {
+    const c = costOf("00093721410", [], [rec()]);
+    assert.equal(c.numberClashWith, null);
+    assert.doesNotMatch(c.says, /named twice/);
+  });
+
+  test("an invoice answering directly never carries a clash", () => {
+    const c = costOf("00093721410", [inv()], [rec({ supplier: "Somebody Else", invoiceNumber: "9890971" })]);
+    assert.equal(c.authority, "invoice");
+    assert.equal(c.numberClashWith, null);
   });
 });
 
