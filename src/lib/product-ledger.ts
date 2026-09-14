@@ -62,9 +62,17 @@ export type Buy = {
    *
    * The distinction is not cosmetic and must survive every hop. A receipt is good enough to decide
    * what to buy and what to send back; it is **not** good enough to state an acquisition cost to a
-   * PBM, because the pharmacy cannot produce the document behind it. `provable()` in
-   * drug-cost-source.ts is the gate for anything that reaches a payer, and `appeals.ts` reads
-   * invoice lines directly rather than coming through here for exactly that reason.
+   * PBM, because the pharmacy cannot produce the document behind it.
+   *
+   * What actually enforces that is worth naming precisely, because the obvious answer is wrong.
+   * There was a `provable()` in drug-cost-source.ts written as the gate, and it was deleted on 14
+   * September because nothing ever called it — an uncalled gate is not protection, it is the
+   * appearance of protection, and it reads as a reason to stop checking.
+   *
+   * The protection is structural and tested: `appeals.ts` reads invoice lines directly and takes
+   * only `packQtyOf` from this file, and `tests/ledger-receipt-cost.test.ts` asserts that import
+   * list is exactly `["packQtyOf"]`. Widening it fails the suite. This field is what any *future*
+   * caller must read to make the same decision for itself.
    */
   source: "invoice" | "catalogue" | "receipt";
   on: string | null;
