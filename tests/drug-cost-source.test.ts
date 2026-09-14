@@ -192,4 +192,32 @@ describe("how much can be priced, and on what", () => {
   test("asking about nothing says so", () => {
     assert.match(coverage([]).says, /No drug was asked about/);
   });
+
+  test("a line with no drug code is counted, not silently absent", () => {
+    /*
+     * Six of these are on file as at 14 September and nobody has looked at them. They are not
+     * neverBought — something was bought and paid for — and they are not unpriced drugs, because
+     * nothing establishes they are drugs. Leaving them out silently would let a delivery read as
+     * ninety per cent priced while the rest was never a candidate for the question.
+     */
+    const s = coverage([costOf("1", [inv({ ndc11: "1" })], [])], 6);
+    assert.equal(s.noCode, 6);
+    assert.match(s.says, /Separately, 6 delivery lines carry no drug code/);
+    assert.match(s.says, /a front-end item or a supplement/, "named for what the six actually were: two McKesson front-end items and four Xymogen nutraceuticals");
+    assert.match(s.says, /outside every figure above rather than counted as unpriced/);
+  });
+
+  test("the count of drugs never absorbs them", () => {
+    const s = coverage([costOf("1", [inv({ ndc11: "1" })], [])], 6);
+    assert.equal(s.ndcs, 1, "one drug was asked about, whatever else was on the delivery");
+    assert.match(s.says, /^1 of 1 drugs/);
+  });
+
+  test("one line reads as one line", () => {
+    assert.match(coverage([costOf("1", [inv({ ndc11: "1" })], [])], 1).says, /1 delivery line carries no drug code/);
+  });
+
+  test("no drugs and no codes at all still says both", () => {
+    assert.match(coverage([], 3).says, /3 delivery lines carry no drug code, so nothing on them could be/);
+  });
 });

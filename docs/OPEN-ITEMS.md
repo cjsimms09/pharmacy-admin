@@ -80,17 +80,31 @@ forgetting a flag. So the answer is **not** to write `invoice_lines` from a rece
 source that names its own authority, is visibly weaker than an invoice, and never reaches the money
 accounts unless he says so.
 
-**Money: $157,264.78.** Measured by session 1 on 14 September: 96 deliveries on file, $275,908.19,
-all of September. 34 have an invoice; 62 do not, and every one of those 62 carries `itemsJson` — 554
-item lines, 548 of them (98.9%) with an eleven-digit NDC and a cost. More than half the buying by
-value, with the data to price it complete.
+**Money: $146,612.51, and it is not a chase.** Corrected 14 September. The first figure —
+$157,264.78 across 62 deliveries — was a raw SQL join that ignored the site's own rules, and the
+site's own answer is different in both directions. `invoicesStillOwed()` reports **0 invoices still
+to chase, $0.00**, and 50 invoices worth $146,612.51 from before the mailbox was watching, across
+four suppliers. JamsRX and Xymogen carry `invoice_from_pioneer`, so their receipts already are their
+invoices; ParMed's nine are settled; McKesson, IPC, IPD and ANDA all pre-date `filingSince`. Nothing
+is waiting on anybody, the owner has said he does not want the 1–8 September backlog chased, and
+McKesson is now sending everything — every McKesson gap is before 9 September, zero after it, 29 of
+31 deliveries invoiced since.
 
-**The ceiling was real in principle and nearly empty in fact.** Session 1 measured it on
-14 September: there are only **35 invoice documents in the whole estate**, 34 already matched to a
-delivery and 1 unmatched. So whatever the numbering or the naming does, the 62 can fall by at most
-one. These are not invoices the site failed to match — they are invoices that do not exist yet. The
-caveat is withdrawn rather than carried, because a caveat nobody can act on costs a reader more than
-it protects them.
+**So the gap is real and it is not the gap it looked like.** Those 50 deliveries have no
+`invoice_lines`, therefore no per-drug cost on any screen that prices a buy or times a return. That
+is what `drug-cost-source.ts` answers and nothing reads it yet. Wiring it into the buying-side
+consumers is session 1's, by agreement on 14 September, because the consumers are its files — with
+two constraints carried from the module's docstring: `provable()` gates anything that reaches a
+payer, since a receipt is not a document the pharmacy can produce; and nothing receipt-derived may
+reach `profit-and-loss.ts`, which sources purchases from the wholesaler invoices dated in the month
+and would double-count the stock check.
+
+**The six lines with no drug code: answered, and there is nothing to build.** All six are correctly
+codeless — the field is empty rather than malformed, so `ndc11()`, `ndcFromUpc()` and the
+twelve-to-eleven reading are all inapplicable. Two McKesson front-end items, a dressing and an elbow
+support, and four Xymogen nutraceuticals; Xymogen is a supplements house and none of its catalogue is
+an NDC drug. $429.45, correctly outside every per-drug figure, and `coverage` says so in a sentence
+rather than dropping them silently as it used to.
 
 ### The site had no answer to "are these two names the same wholesaler"
 
