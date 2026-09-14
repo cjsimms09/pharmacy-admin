@@ -254,7 +254,13 @@ export type CoverageSummary = {
    * either, because nothing establishes that they are drugs. They are outside every other number
    * here, and the only dishonest thing to do with them is leave them out silently: a delivery can
    * be reported ninety per cent priced while the other ten per cent was never a candidate for the
-   * question. Six of them are on file as at 14 September and nobody has looked at them yet.
+   * question.
+   *
+   * All six on file as at 14 September were looked at and all six are correctly codeless — the code
+   * field is empty rather than malformed, so there is nothing to recover. Two McKesson front-end
+   * items (a dressing and an elbow support) and four Xymogen nutraceuticals; Xymogen is a supplements
+   * house and none of its catalogue is an NDC drug. $429.45 of real money that belongs outside every
+   * per-drug figure rather than inside one as a failure.
    */
   noCode: number;
   says: string;
@@ -297,6 +303,6 @@ export function coverage(costs: DrugCost[], noCode = 0): CoverageSummary {
   const tail =
     noCode === 0
       ? ""
-      : ` Separately, ${noCode} delivery line${noCode === 1 ? "" : "s"} carr${noCode === 1 ? "ies" : "y"} no drug code — a device, a fee or a front-end item — and ${noCode === 1 ? "is" : "are"} outside every figure above rather than counted as unpriced.`;
+      : ` Separately, ${noCode} delivery line${noCode === 1 ? "" : "s"} carr${noCode === 1 ? "ies" : "y"} no drug code — a front-end item or a supplement — and ${noCode === 1 ? "is" : "are"} outside every figure above rather than counted as unpriced.`;
   return { ndcs: costs.length, fromInvoice, fromReceipt, notYetArrived, neverBought, noCode, says: `${bits.join(", ")}.${tail}` };
 }

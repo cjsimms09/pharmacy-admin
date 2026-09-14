@@ -203,6 +203,7 @@ describe("how much can be priced, and on what", () => {
     const s = coverage([costOf("1", [inv({ ndc11: "1" })], [])], 6);
     assert.equal(s.noCode, 6);
     assert.match(s.says, /Separately, 6 delivery lines carry no drug code/);
+    assert.match(s.says, /a front-end item or a supplement/, "named for what the six actually were: two McKesson front-end items and four Xymogen nutraceuticals");
     assert.match(s.says, /outside every figure above rather than counted as unpriced/);
   });
 
