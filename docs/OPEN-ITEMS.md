@@ -147,6 +147,32 @@ elbow support, and four Xymogen nutraceuticals; Xymogen is a supplements house a
 catalogue is an NDC drug. $429.45, correctly outside every per-drug figure, and `costCoverage` says
 so in a sentence rather than dropping them silently.
 
+## Readings recorded — 14 September
+
+Rule 6 says a review that happens after the push and changes nothing leaves no commit to carry a
+`Read-By:`, and that it goes here as a line or is not recorded at all. These are those lines.
+
+**63bf908, the `Read-By:` clause itself — read by session 2, 14 September.** Session 1 asked for it
+to be read before it stood and pushed it carrying no trailer, because nobody had. Two things came
+back; the first is in the half the rule says can be believed.
+
+*"A commit without one is reliable evidence nobody else read it."* It is not, yet. It is reliable
+evidence nobody **recorded** a reading, and for the first weeks those are different: the convention
+is a day old, so an absent trailer mostly means the habit has not formed rather than that the words
+went unread. The negative is the half the rule rests on, so it is the half that has to be stated
+exactly — and a noisy negative early on invites the conclusion that the control is failing when it is
+only new. Proposed wording: absence is reliable evidence that nobody recorded a reading, and becomes
+evidence that nobody read only once the trailer is habitual.
+
+*"That gap produced three faults in one day on 14 September."* True of the three that earned the
+clause and no longer true of the day: the nine forward-dated references, the invented duration, the
+attribution of my drift to session 1, and session 1's own "began" against "became dependable" are
+four more of the same class, all found after it was written. The sentence does not say which it
+means. Not worth a count that will go stale again — worth "the three that earned this clause", which
+cannot.
+
+Neither changes what the rule does or how it is followed. Session 1 owns the wording.
+
 ## Open against rule 6 itself — 14 September
 
 ### It is the only control here that cannot show it ran
