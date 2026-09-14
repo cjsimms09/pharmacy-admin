@@ -67,7 +67,7 @@ Work down this list. Each line names what "wrong" looks like.
 
 ## Then fix the underlying problem, not the symptom
 
-Every fault found so far has been one of six shapes. Look for the shape, not the instance:
+Every fault found so far has been one of seven shapes. Look for the shape, not the instance:
 
 - **The same money down two roads.** Two feeds carrying one dollar. Ask which pairs can, and whether
   a rule exists for each.
@@ -81,6 +81,14 @@ Every fault found so far has been one of six shapes. Look for the shape, not the
   per-package into per-unit. A silent factor of 25 lives here.
 - **A date deciding a period.** Filled, sold, paid, deposited, invoiced, posted. Mixing two inside
   one figure is invisible and wrong.
+- **A denominator nobody stated.** A percentage or a fraction is a claim about what the question
+  is, and the bottom half is the half nobody reads. Found twice on 14 September, in opposite
+  directions, within an hour: a coverage figure read as *"608 of 45,906 drugs priced"* — 1.3%, and
+  alarming — because the denominator was every NDC in every supplier catalogue, 44,886 of which
+  this pharmacy has never bought; and a figure reported to him as "51%" without ever saying 51% of
+  what. Neither of us found our own. **So: whenever a figure is a percentage or a fraction, say what
+  the denominator is, and check it is the population the question is about.** A number that is
+  right about the wrong population is worse than no number, because it survives being checked.
 
 ## Decisions he has made, so nobody reopens them
 
