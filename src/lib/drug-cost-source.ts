@@ -6,7 +6,7 @@
  * It began as a second answer to "what did this drug cost": it took invoice lines and receipt lines
  * and decided between them, matching a delivery to its invoice on the wholesaler's own number. That
  * work was right and it is not here any more, because session 1 wired receipts into `buildLedger`
- * on 15 September and the ledger now decides it — one place, the one every buying screen already
+ * on 14 September and the ledger now decides it — one place, the one every buying screen already
  * reads.
  *
  * Keeping both would have been the fault this project keeps finding, in its worst form. Two readers
@@ -49,7 +49,7 @@
  *
  * `claims.acquisition_cents` is PioneerRx's record of what a drug cost on the fill, populated on
  * 2,571 of 2,632 paid in-books claims. The MAC appeal engine has always used it and claim-remedy's
- * below-cost router runs on it. Measured 15 September: of the 412 drugs here with no purchase
+ * below-cost router runs on it. Measured 14 September: of the 412 drugs here with no purchase
  * record, PioneerRx knows the cost on **all 412** — 993 fills, $16,219.38 of acquisition. Not most
  * of them. Every one.
  *
@@ -73,7 +73,7 @@
  *
  * ── The denominator, which is the whole of the difficulty ──
  *
- * The ledger holds a row for every NDC in every supplier catalogue: 45,906 of them on 15 September,
+ * The ledger holds a row for every NDC in every supplier catalogue: 45,906 of them on 14 September,
  * of which 44,886 this pharmacy has never bought and never dispensed. Counting those would have put
  * "608 of 45,906 drugs priced" on the screen — 1.3%, when the true answer to the question being
  * asked is 423 of 835, or fifty-one per cent. Session 1 caught it before it reached him.
