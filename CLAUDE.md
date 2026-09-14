@@ -49,17 +49,22 @@ import, and an explicit state for anything incomplete — *not yet arrived*, *ne
 
 **6. A sentence he will act on gets read by somebody who did not write it.** Every dataset here is
 re-proved nightly against its source; no sentence on any screen or register is ever re-read by
-anybody but its author. That gap produced three faults in one day on 14 September — *"608 of 45,906
-drugs priced"* (the denominator was the supplier catalogue), *"412 are not priced at all"* (every one
-of the 412 has a cost), and a register heading an edit consumed, orphaning four tracked items. All
-three had correct arithmetic and passing tests; none could have failed one. **Ask what the number
+anybody but its author. The three that earned this clause — *"608 of 45,906 drugs priced"* (the
+denominator was the supplier catalogue), *"412 are not priced at all"* (every one of the 412 has a
+cost), and a register heading an edit consumed, orphaning four tracked items — all had correct
+arithmetic and passing tests; none could have failed one. Four more of the same class turned up on
+the same day after the clause was written, which is why this says *the three that earned it* and not
+a count of a day: the day kept moving. **Ask what the number
 would make him do, not whether it is right.** Where another session exists it reads the words before
 they ship; where none does — usually — the author reads it cold, as him. That is the weaker form, and
 a figure shipped without a second reader says so in the same breath.
 
 **Record it with a `Read-By:` trailer**, same shape as `Co-Authored-By:`. It is **trustworthy only in
-the negative**: nobody forges an absence, so a commit without one is reliable evidence nobody else
-read it, while a commit with one is weak evidence that somebody did — it can be typed without
+the negative**: a commit without one is reliable evidence that **nobody recorded a reading** — and
+becomes evidence that nobody read only once the trailer is habitual, which it is not yet, so an
+absent trailer this month mostly means the habit has not formed. Saying more than that early invites
+the reading that the control is failing when it is merely new, and that is how a control gets
+abandoned in week three. A commit *with* one is weak evidence that somebody did read — it can be typed without
 reading and proves nothing about whether the sentence is true. So it is an instrument for finding
 unread work, never for certifying read work, and it must never be described as the second. It cannot
 cover the commonest case either — a review that happens after the push and changes nothing leaves no

@@ -183,7 +183,7 @@ five, a claims count set against a copy that stopped a day short.
 **Nothing on any screen, and nothing in any register, is ever read by anybody but the person who
 wrote it.**
 
-That gap cost three faults on 14 September, in one day, between two sessions:
+Three faults earned this clause, on 14 September, between two sessions:
 
 | Sentence | Arithmetic | Tests | What was wrong |
 |---|---|---|---|
@@ -193,6 +193,13 @@ That gap cost three faults on 14 September, in one day, between two sessions:
 
 Not one could have failed a test. All three were sentences. All three were found by somebody reading
 text they had not written, and none by its author re-reading their own.
+
+**Four more of the same class turned up the same day, after this clause was written**: nine
+forward-dated references in a module's own measurements, a duration stated without checking, one
+session attributing its date drift to the other inside the message owning it, and *"the mailbox
+began capturing invoices on 9 September"* when it began on the 4th and became dependable on the 9th.
+Seven in a day, not three. This clause names the three that earned it rather than counting the day,
+because a count of a day still running goes stale — which is the sixth shape, and it would have.
 
 So: **a sentence a person will act on gets read by the other session before it ships** — the same way
 a migration takes a fresh slot and a deploy takes a `netstat` first. Not a review of the code. A
@@ -211,8 +218,9 @@ has read it.
 this site re-reads a file and compares, and each can show its working. This one has no source to
 compare against — the only instrument is a person reading — so it is the only rule in the set with no
 way to demonstrate that it ran. A `Read-By:` trailer narrows that and does not close it: absence is
-reliable because nobody forges an absence, presence is weak because it can be typed without reading,
-and neither says anything about whether the sentence was true. It buys exactly what a proof's date
+reliable only about *recording* — and only becomes evidence about reading once the trailer is
+habitual — presence is weak because it can be typed without reading, and neither says anything about
+whether the sentence was true. It buys exactly what a proof's date
 buys — that *not* running stops being invisible — and nothing beyond it. **It is the weakest-attested
 rule here and it should be described that way** whenever it is relied on, including to him.
 
