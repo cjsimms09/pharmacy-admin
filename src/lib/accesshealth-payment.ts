@@ -280,3 +280,42 @@ export function readAccessHealthPayment(text: string, ownNcpdp: string | null = 
     },
   };
 }
+
+/** One claim payment under an EFT, as far as saying what it is needs. */
+export type EftPaymentState = { amountCents: number; matched: boolean; filledBeforeBooks: boolean; onReversedClaim: boolean };
+
+/**
+ * What an EFT's claim payments are, in the three kinds that matter, for the inbox line.
+ *
+ * The owner read "$164,026.13 across 2135 payments, 80 matched to a claim" as 2,055 payments that had failed. They had
+ * not: most pay for prescriptions filled before the site's books start, which it holds no claims for by design, and a
+ * few are a plan paying and taking back a fill the pharmacy itself reversed. So the line counts each kind apart:
+ *
+ *   settle a claim on this site                                  matched
+ *   filled before the books start: nothing to match, nothing owed
+ *   paid and taken back on a claim the pharmacy reversed
+ *   a fill from the books' own period with no claim here yet      the only kind worth a look
+ *
+ * Pure.
+ */
+export function describeEftPayments(rows: EftPaymentState[], booksStartOn: string): string {
+  const money = (c: number) => `${c < 0 ? "-" : ""}$${(Math.abs(c) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const n = (k: number) => k.toLocaleString("en-US");
+  const kinds = { matched: [] as number[], before: [] as number[], reversed: [] as number[], waiting: [] as number[] };
+  for (const r of rows) {
+    if (r.matched) kinds.matched.push(r.amountCents);
+    else if (r.filledBeforeBooks) kinds.before.push(r.amountCents);
+    else if (r.onReversedClaim) kinds.reversed.push(r.amountCents);
+    else kinds.waiting.push(r.amountCents);
+  }
+  const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+  const start = new Date(`${booksStartOn}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "long", timeZone: "UTC" });
+  const parts = [
+    kinds.matched.length ? `${n(kinds.matched.length)} (${money(sum(kinds.matched))}) settle claims on this site` : "",
+    kinds.before.length ? `${n(kinds.before.length)} (${money(sum(kinds.before))}) pay for prescriptions filled before the books start on ${start}: nothing to match, nothing owed` : "",
+    kinds.reversed.length ? `${n(kinds.reversed.length)} (net ${money(sum(kinds.reversed))}) are paid and taken back on claims the pharmacy reversed` : "",
+    kinds.waiting.length ? `${n(kinds.waiting.length)} (${money(sum(kinds.waiting))}) are for fills since ${start} with no claim on this site yet` : "",
+  ].filter(Boolean);
+  if (rows.length === 0) return "";
+  return `Of the ${n(rows.length)} claim payment${rows.length === 1 ? "" : "s"} under this EFT (${money(sum(rows.map((r) => r.amountCents)))}): ${parts.join("; ")}.`;
+}
