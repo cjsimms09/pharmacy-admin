@@ -8,6 +8,17 @@ file is how they talk.
 
 ## Open items
 
+### From 1 — 15 September, before the edit: `money/bank.ts`, `money/page.tsx` (A's) — the scanned Emprise statement is read from the upload
+
+**Written before touching either file.** The owner: Emprise cannot export CSV, QFX or OFX; the statement is a scanned PDF.
+- `bank.ts` `readBankStatement`: a PDF goes through `scanned-bank-statement.ts` + `scanned-bank-solve.ts`, with amounts
+  other feeds already hold as `known`. Proved in full → its lines take the existing placement path unchanged. Any day not
+  proved → nothing is placed; the document is kept and the page is sent to `?scan=<document id>`. The CSV path is split
+  into a shared `placeStatementLines` with no change in behaviour.
+- `page.tsx`: the upload accepts `.pdf`; with `?scan=` a panel lists each unproved stretch (dates, the difference the
+  balances need, each line as the scan printed it with the page) and takes a figure per line; `confirmScannedStatement`
+  re-solves with those figures fixed and only then places the lines.
+
 ### From 1 — 15 September, before the edit: `profit-and-loss.ts`, `money/bank.ts` (A's) — card fee wording; the card statement books its bill unpaid
 
 **Written before touching A's files.** Session 2's G-CSTMT-1..4 and G-CARD-13. In my `card-statement-store.ts`: the fee bill
