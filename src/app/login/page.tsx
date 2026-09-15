@@ -3,10 +3,16 @@ import { sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { getCurrentUser, login } from "@/lib/auth";
 import { SubmitButton } from "@/components/submit-button";
+import { noteRequest } from "@/lib/activity";
 
 export const metadata = { title: "Sign in" };
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+  /*
+   * Somebody on the sign-in page is somebody using the site. It was not counted, so every heavy
+   * background job ran while he was trying to get in. See src/lib/activity.ts.
+   */
+  noteRequest();
   const user = await getCurrentUser();
   if (user) redirect("/");
   if ((await db.select({ n: sql<number>`count(*)` }).from(schema.users))[0].n === 0) redirect("/setup");
