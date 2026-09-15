@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { SITE_STARTS_ON } from "../src/lib/books-start";
 /**
  * Writes the registers, from the data rather than from memory.
  *
@@ -46,6 +47,18 @@ const DECIDED: Record<string, { state: State; note: string }> = {
   "expense:Rent and occupancy": { state: "captured", note: "standing cost" },
   "expense:Professional fees": { state: "captured", note: "standing cost: accounting and PSAO fees" },
   "expense:DIR fees and price concessions": { state: "not-captured", note: "arrives months later, retroactively per claim, entered by hand" },
+
+  /*
+   * Which document settles which payer, where somebody has told us.
+   *
+   * Everything absent is "never-measured": the site has billed that BIN and no document has ever settled one of its
+   * claims. That is not an accusation — no real payer 835 has reached this pharmacy yet — but it is the whole of
+   * G-LC-4, and it is what this register exists to make impossible to lose track of.
+   */
+  "routing:028249": { state: "expected-not-yet", note: "RedSail's RAS copay voucher: settled by its own remittance, read on a sample and not yet on live" },
+  "routing:024284": { state: "expected-not-yet", note: "Aytu / IPD RxRescue: settled by a credit memo applied against IPD's invoices, never as cash. August's and September's were declined by the owner; future ones arrive by email" },
+  "routing:028918": { state: "never-measured", note: "DST/Argus GLP-1 bridge: a copay processor that remits like a payer; nothing has ever arrived" },
+  "routing:019158": { state: "never-measured", note: "DST Pharmacy Solutions: a copay processor that remits like a payer; nothing has ever arrived" },
 };
 
 async function main() {
@@ -155,11 +168,63 @@ async function main() {
   out += `  \`DIR fees and price concessions\` is arguably its home, and nobody has ruled on that.\n`;
   await fs.writeFile(`${dir}/money-channels.md`, out);
 
+  // ── Payer routing: which document settles which payer ─────────────────────
+  /*
+   * The register behind G-LC-4, and the one the owner's question sits under: every payer that has billed money needs a
+   * document that settles it, and a BIN with none is money on its way to nowhere in particular.
+   *
+   * Claims and payments are the measurement; which document SHOULD settle a payer is a fact about how this pharmacy is
+   * paid — PSAO, direct, a copay programme — that only the owner and the payment reports can supply, so it lives in the
+   * decisions table above and shows as "never-measured" until somebody says.
+   */
+  const routing = (await q(
+    `SELECT c.bin AS bin, coalesce(max(c.pbm_name), max(c.payer_label)) AS payer,
+            count(DISTINCT c.id) AS claims, sum(coalesce(c.remit_cents,0)) AS billed,
+            count(DISTINCT p.id) AS payments, coalesce(sum(p.amount_cents),0) AS received,
+            group_concat(DISTINCT p.source) AS sources
+       FROM claims c
+       LEFT JOIN claim_payments p ON p.claim_id = c.id AND p.out_of_books = 0
+      WHERE c.status = 'paid' AND c.date_filled >= '${SITE_STARTS_ON}'
+      GROUP BY c.bin
+      ORDER BY sum(coalesce(c.remit_cents,0)) DESC`,
+  )) as { bin: string; payer: string; claims: number; billed: number; payments: number; received: number; sources: string | null }[];
+  const cashBins = new Set(((await q(`SELECT bin FROM cash_plans`)) as { bin: string }[]).map((r) => r.bin));
+  /*
+   * A measurement first, then what a person said, and the cash-plan register last.
+   *
+   * That order matters on BIN 028249: it is registered as a cash plan, and it is also the BIN RedSail's copay voucher
+   * remittance pays. Reading the register first called it "nothing is ever remitted", which is exactly the sentence that
+   * would stop somebody chasing a voucher statement that has not arrived.
+   */
+  const stateOf = (r: (typeof routing)[number]): { state: State; note: string } => {
+    if (r.payments > 0) return { state: "captured", note: `settled through ${r.sources ?? "a payment"}` };
+    const decided = DECIDED[`routing:${r.bin}`];
+    if (decided) return decided;
+    if (cashBins.has(r.bin)) return { state: "measured-none", note: "a cash plan: the copay is the money, and nothing is ever remitted" };
+    return { state: "never-measured", note: "no document has ever settled one of its claims, and none is named" };
+  };
+  const routed = routing.map((r) => ({ ...r, ...stateOf(r) }));
+  const owed = routed.filter((r) => r.state !== "captured" && r.state !== "measured-none");
+  out = head(
+    "Every payer that bills, and the document that settles it",
+    "A payer with no settling document is not a missing payment — it is a payment nobody would notice the absence of. " +
+      "The state is measured from the claims and payments; which document *should* settle a payer is a fact about how " +
+      "this pharmacy is paid, so it comes from `decisions.md` and reads never-measured until somebody says.",
+  );
+  out += `${routed.length} payers have billed inside the books. ${routed.filter((r) => r.state === "captured").length} have had money settle a claim; `;
+  out += `${owed.length} have had none, ${money(owed.reduce((n, r) => n + Number(r.billed), 0))} billed between them.\n\n`;
+  out += `| BIN | Payer | Claims | Billed | Received | Through | State | What should settle it |\n|---|---|---|---|---|---|---|---|\n`;
+  for (const r of routed) {
+    out += `| ${r.bin ?? "(none)"} | ${String(r.payer ?? "—").slice(0, 30)} | ${r.claims} | ${money(Number(r.billed))} | ${money(Number(r.received))} | ${r.sources ?? "—"} | ${r.state} | ${r.note} |\n`;
+  }
+  await fs.writeFile(`${dir}/payer-routing.md`, out);
+
   console.log(`registers written to ${dir}/ at ${now}`);
   console.log(`  expenses.md        ${cats.length} categories, ${unresolved.length} unresolved`);
   console.log(`  claim-fields.md    ${cols.length} fields, ${empties.length} never populated`);
   console.log(`  documents.md       ${routes.length} routes`);
   console.log(`  money-channels.md  ${chans.length} payment channels, ${receipts.length} receipt kinds`);
+  console.log(`  payer-routing.md   ${routed.length} payers, ${owed.length} with no settling document`);
 }
 
 main().catch((e) => {
