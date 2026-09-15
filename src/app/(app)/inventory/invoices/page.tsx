@@ -9,6 +9,7 @@ import {
   awaitingReview,
   invoiceCounts,
   invoiceIssues,
+  backfillDueDates,
   invoiceSuppliers,
   invoiceMonths,
   setSchedule,
@@ -412,6 +413,30 @@ export default async function InvoicesPage({
               (r.stillMissing > 0
                 ? ` ${r.stillMissing} still print no total that can be read — type those in below.`
                 : " Every invoice now has an amount."),
+        ),
+    );
+  }
+
+  /**
+   * Reads the printed due date off every invoice that has none held.
+   *
+   * The date says which invoices one ACH pays, which is what a supplier paid by statement needs (`supplier-payments.ts`).
+   * It is read off the invoice and never worked out from terms: an invoice that prints none is left saying nothing.
+   */
+  async function readDueDates() {
+    "use server";
+    const u = await requireManager();
+    const r = await backfillDueDates();
+    await audit({ action: "invoice.due_dates.backfill", userId: u.id, userName: u.name, details: `${r.read} read, ${r.printsNone} print none` });
+    revalidatePath("/inventory/invoices");
+    redirect(
+      "/inventory/invoices?ok=" +
+        encodeURIComponent(
+          r.read === 0
+            ? `No due date is printed on any of the ${r.printsNone} invoice${r.printsNone === 1 ? "" : "s"} without one. Nothing to fix: a supplier that prints no due date simply does not name the day.`
+            : `${r.read} due date${r.read === 1 ? "" : "s"} read off the invoices themselves.` +
+              (r.printsNone > 0 ? ` ${r.printsNone} print none, which is not a fault.` : "") +
+              (r.unreadable > 0 ? ` ${r.unreadable} are scans with no text to read.` : ""),
         ),
     );
   }
@@ -1757,6 +1782,9 @@ export default async function InvoicesPage({
               <SubmitButton className="btn btn-sm" pendingLabel="Reading them again…" formNoValidate formAction={recheckAll}>
                 Check these are all really invoices
               </SubmitButton>
+              <SubmitButton className="btn btn-sm ml-2" pendingLabel="Reading the due dates…" formNoValidate formAction={readDueDates}>
+                Read the due dates off them
+              </SubmitButton>
               <span className="ml-2 text-xs text-ink-3">
                 Reads each filed document again on its own words and takes out anything that turns out to be a statement,
                 a rebate breakdown or a credit memo. It only ever moves things out of the invoice file.
@@ -1822,6 +1850,19 @@ export default async function InvoicesPage({
                                 {money(allocated.get(i.id) ?? 0)}
                                 {i.totalCents !== null && (allocated.get(i.id) ?? 0) !== i.totalCents ? ` of ${money(i.totalCents)}` : ""} by payment
                               </span>
+                            </span>
+                          ) : i.dueOn && !i.paidOn ? (
+                            /* The invoice names the day it will be taken, so the page says that rather than "on terms". */
+                            <span className="block text-xs">
+                              {canManage ? (
+                                <span className="flex items-center gap-1">
+                                  <input type="date" name={`paidOn_${i.id}`} defaultValue="" aria-label="Date paid" className="field w-auto py-0.5 text-xs" />
+                                  <button formAction={paidIt} formNoValidate name="paidId" value={i.id} className="btn btn-sm">
+                                    Paid
+                                  </button>
+                                </span>
+                              ) : null}
+                              <span className="mt-0.5 block text-[11px] text-ink-3">due {fmt(i.dueOn)}, as the invoice prints it</span>
                             </span>
                           ) : canManage ? (
                             /* Inside the table's one form: the id travels on the button, the date under this row's own name. */
