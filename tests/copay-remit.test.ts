@@ -19,9 +19,9 @@ describe("reading the statement", () => {
 
   test("the payment's own identity comes off the header, because that is what stops it being banked twice", () => {
     assert.equal(r.paidOn, "2026-09-01");
-    assert.equal(r.reference, "10261385");
+    assert.equal(r.reference, "40517203");
     assert.equal(r.paymentAmountCents, 17_725);
-    assert.equal(r.npi, "1548737182");
+    assert.equal(r.npi, "1234567893");
     assert.equal(r.payer, COPAY_PAYER);
   });
 

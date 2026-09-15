@@ -145,13 +145,25 @@ const EFFECTS: Record<string, KindEffect> = {
     short: "pays fills, banks nothing",
     writes: "a payment against each claim the EFT itemises, revenue nought, and nothing on the cash account",
     reversal: "removable",
-    leaves: "payments against those fills, which this site can take back out. No deposit: the payer payment report and the EFT notice bank that money.",
+    /*
+     * Measured on a snapshot: whichever of this report and the same EFT's 835 arrived first posted the claim payments, and
+     * the second posted none. Undo removes only the rows its own document posted — so undoing the first leaves that EFT's
+     * claims on no row while the other document is still on file, until that one is read again.
+     */
+    leaves:
+      "payments against those fills, which this site can take back out. No deposit: the payer payment report and the EFT notice bank that money. If the same EFT's 835 is also on file, it posted nothing while these rows stood — re-route it afterwards so its claims are posted again.",
   },
   remittance_835: {
-    short: "pays fills and banks money",
-    writes: "a payment against each claim the remittance names, and the total as a bank deposit",
+    short: "pays fills; may bank money",
+    /*
+     * Since d477ee4 a remittance through ProviderPay (Health Mart Atlas and the direct payers) or from the Medicare
+     * facilitator posts claim payments and banks nothing: their money is banked by the payer payment report, the EFT
+     * notice, or read payment by payment. Any other payer's 835 still banks its total.
+     */
+    writes: "a payment against each claim the remittance names; for a payer other than ProviderPay or the Medicare facilitator, the total as a bank deposit too",
     reversal: "removable",
-    leaves: "payments against those fills and a deposit on the cash account — all of which this site can take back out.",
+    leaves:
+      "payments against those fills, and for other payers a deposit on the cash account — all of which this site can take back out. If the same EFT's AccessHealth report is also on file, it posted nothing while these rows stood — re-route it afterwards so its claims are posted again.",
     at: { href: "/money", label: "Money" },
   },
   copay_remit: {

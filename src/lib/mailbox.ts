@@ -1222,7 +1222,17 @@ export async function importRecognised(
        * add to the total it prints, or that prints no total at all to add to.
        */
       const { importCopayRemit } = await import("./copay-remit-store");
-      const c = await importCopayRemit(buf.toString("utf8"), fileName, { name: ctx.userName ?? "Automatic check", id: ctx.userId ?? undefined }, { bank: true, documentId: filed?.documentId ?? null });
+      /*
+       * A PDF's text, never its bytes. This passed `buf.toString("utf8")` for a PDF too, so a voucher recognised from a
+       * PDF could never import. A scan's printed lines are rebuilt from the page (copay-remit-scan.ts).
+       */
+      let copayText = buf.toString("utf8");
+      if (/^%PDF/.test(buf.subarray(0, 8).toString("latin1"))) {
+        const { pdfText, pdfItems } = await import("./pdf-text");
+        const { copayRemitTextFromPdf } = await import("./copay-remit-scan");
+        copayText = copayRemitTextFromPdf(pdfText(buf), pdfItems(buf)).text;
+      }
+      const c = await importCopayRemit(copayText, fileName, { name: ctx.userName ?? "Automatic check", id: ctx.userId ?? undefined }, { bank: true, documentId: filed?.documentId ?? null });
       const held = c.problems.find((p) => /^Held, nothing stored/i.test(p));
       routeResult = held
         ? held
