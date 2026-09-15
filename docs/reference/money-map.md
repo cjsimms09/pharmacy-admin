@@ -1058,7 +1058,10 @@ holds it: the same trace (for an 835-banked receipt), or the same cents on the s
 August, 7 of 7). (b) An MTF 835 never banks, whatever door it comes through, since its money is already on
 the account through the stand-in. The same principle as G-835-1.
 
-**G-MTF-2. An MTF bank credit with no remittance for its day can confirm another payer's receipt.**
+**G-MTF-2. An MTF bank credit with no remittance for its day can confirm another payer's receipt. — FIXED, 7b71c14 (deployed).**
+Re-run (17:57 UTC): the $123.45 MTF credit is placed `facilitator_unmatched`, is not matched, and the HMA receipt
+of $123.45 stays unclaimed.
+The finding as first recorded:
 OBSERVATION: at d477ee4, an MTF credit whose day's remittances do not equal it is placed `unplaced`, and
 `bank.ts` then matches every unplaced credit against all receipts in the window. Rehearsed: an MTF credit of
 $123.45 on 9/17, with no MTF remittance that day, **confirmed a Health Mart Atlas receipt of $123.45 from 9/16**.
@@ -1141,7 +1144,16 @@ Xymogen) are counted from invoice dates and receiving, and the account names the
 
 ### Gaps for this feed
 
-**G-MCK-1. The McKesson ACH tie is built and never runs: a real bank read leaves every McKesson debit unplaced and every McKesson invoice unpaid.**
+**G-MCK-1. The McKesson ACH tie is built and never runs: a real bank read leaves every McKesson debit unplaced and every McKesson invoice unpaid. — FIXED, 7b71c14 (deployed).**
+Re-run on fresh snapshots (17:57 UTC), reproducing `bank.ts` at 7b71c14:
+- the real $106,322.62 debit → `settles_ach`, agrees, covers 27 invoices. **0 marked paid, because none of that
+  ACH's 27 invoices is on file** (the 27 McKesson invoices on file are later ones);
+- a debit a dollar short → recorded unplaced: *"coming to 106322.62, and the bank took 106321.62 — worth a look"*;
+- **next week's report, simulated** by clearing the 36 real open rows ($141,857.92) under one ACH: the matching
+  debit → `settles_ach`, agrees, **21 of the 21 invoices on file marked paid** on the bank date; a dollar short
+  → unplaced.
+
+The finding as first recorded:
 OBSERVATION:
 - `placeLine` ties a McKesson debit to the invoices inside it only when its context carries the AP ledger
   (`bank-statement.ts` 229, `ctx.settled`). `matchContext` in `bank.ts` (21–47) never supplies it.
@@ -1260,4 +1272,99 @@ should use belongs with Q-CARD-2 (whether account payments appear).
 
 - The card and prescription checks (above).
 - A report covering a single day, which is how the owner sends them: the sample covers two.
+
+---
+
+## 8. The other suppliers, and wholesaler rebates — rehearsed
+
+**Checkpoint 8. Code at 7b71c14.** Samples:
+- the invoices and PioneerRx receiving rows on file for IPC, IPD, ParMed, Anda, JamsRX and Xymogen;
+- the real McKesson rebate statement on file (July, $9,706.52) and the three real bank credits that paid it
+  (August bank statement, read by eye).
+
+Fresh snapshot, 17:54 UTC.
+
+### Suppliers without a ledger feed
+
+**Cash cost of goods for September, from the real `cashCostOfGoods`: $136,551.40.** That is McKesson's ledger
+$106,322.62, plus invoice dates $15,000.21 (IPC, IPD, ParMed), plus PioneerRx receiving where no invoice
+arrived $15,228.57. `countedTwiceInCash`: 0.
+
+That check matches exact invoice numbers only, so each supplier was also searched for the same delivery held
+under two spellings or matching by amount:
+
+| supplier | invoices | receiving | numbers equal | equal once letters/zeros removed | same cents, different number | receiving with no invoice |
+|---|---:|---:|---:|---:|---:|---|
+| IPC | 11, $10,283.05 | 14, $12,195.81 | 8 | 0 | 0 | 6, $4,197.26, all dated 1–3 Sep, before invoices began arriving on the 4th |
+| IPD | 1, $3,255.70 | 2, $3,483.64 | 1 | 0 | 0 | 1, $227.94 |
+| ParMed | 6, $1,461.46 | 14, $3,417.21 | 5 | 0 | 0 | 9, $2,049.02 |
+| Anda / JamsRX / Xymogen | 0 | 1 / 2 / 1 | — | — | — | all, $8,754.35 |
+
+- **No delivery is counted twice.**
+- Of the invoices whose numbers match receiving, every IPC and IPD one agrees to the cent. Two ParMed
+  invoices are **$4.83 and $1.57 above** their receiving rows; cash takes the invoice, which is what is paid.
+- IPC's one letter-numbered invoice is a **−$199.00 credit memo**, with no receiving row, and reduces cash cost.
+- Invoices on 14 September with no receiving row yet (IPC $2,279.83 and $203.67, ParMed $86.87) are
+  counted from their invoices.
+
+These suppliers stay on invoice dates, which the account says in words. Whether IPC's daily "Independent
+Phar/WAREHOUSE" debits match those dates is for the bank rehearsal.
+
+### Wholesaler rebates
+
+**Where it lands, and which basis reads it** (`rebate-report-store.ts` 380–430, `profit-and-loss.ts` 487–503):
+- the statement books a bill in "Wholesaler rebates", negative, dated the **period earned**;
+- where the statement prints a paid date, it also books a cash receipt of kind `rebate`, keyed on the statement;
+- **accrual:** the stated bill replaces the ladder's estimate in the month earned;
+- **cash:** the receipt counts in the month it arrived, and the bill is dropped so it is not counted twice.
+
+Rebate receipts are excluded from cash revenue and reduce cost of goods instead.
+
+**Live:** July's statement gives a bill of −$9,706.52 dated 31 July, paid 19 August, and one receipt of
+$9,706.52 received 19 August. Both are out of books.
+
+**Against the bank:** the August statement shows the rebate as **three credits on 19 August: "HEW LLC/BRAND"
+$1,109.76, "HEW LLC/GENERIC" $8,246.76 and "HEW LLC/FEES MISC" $350.00**. That is exactly the statement's own
+brand, generic and fees split.
+
+**Rehearsed:** the three real lines read against that receipt, with the real `placeLine` and
+`matchHeldDeposit`, and the `/money` form's check for each:
+
+| bank line | placed | matched | typed on /money |
+|---|---|---|---|
+| HEW LLC/FEES MISC $350.00 | unplaced: *"a deposit from nobody the site knows; bank it by hand with the payer"* | nothing | **form banks it** |
+| HEW LLC/BRAND $1,109.76 | unplaced, same | nothing | **form banks it** |
+| HEW LLC/GENERIC $8,246.76 | unplaced, same | nothing | **form banks it** |
+
+### Gaps
+
+**G-REB-1. A rebate paid as several bank credits is not recognised, and the screen's advice for it counts the rebate twice.**
+OBSERVATION: rehearsed with July's real rebate.
+- The bank pays it as three "HEW LLC" credits that sum to the one receipt already banked.
+- No descriptor knows "HEW LLC", so each is unplaced with *"bank it by hand with the payer"*.
+- `matchHeldDeposit` looks for receipts summing to a line, never lines summing to a receipt, so the
+  receipt is not confirmed.
+- The `/money` form does not refuse any of the three amounts.
+
+Typing them in would bank $9,706.52 a second time. If typed under any kind other than `rebate`, it would
+count as revenue.
+SHOULD BE: one rebate is one receipt, whether it arrives as one credit or three. The site's instruction for
+a line must not be the step that doubles it (the principle of G-CARD-8).
+DIFFERENCE: yes, rehearsed. Each month's McKesson rebate ($9,706.52 for July) arrives this way. Live exposure:
+measured-and-none (no bank statement read).
+Owner:
+- `bank-descriptors.ts` / `bank-statement.ts` — not in the table;
+- `money/page.tsx` — **A**;
+- the matching engine (many lines ↔ one receipt) — session 1's queue.
+
+Proposed fix: (a) a descriptor for HEW LLC as McKesson's rebate, whose unplaced message says the rebate
+statement banks it; (b) the matcher also tries 2–3 same-day lines from one counterparty summing to one
+unconfirmed receipt, and links them.
+
+### Not checked, said out loud
+
+- Whether "HEW LLC" is McKesson's rebate entity in name: the identification rests on the three amounts
+  equalling the statement's own split, to the cent.
+- IPC's, ParMed's and Anda's bank debits against their invoices: waits for the bank reader.
+- The ladder estimate itself (`earningSoFar`): not re-derived.
 
