@@ -143,7 +143,7 @@ const EFFECTS: Record<string, KindEffect> = {
   },
   accesshealth_payment: {
     short: "pays fills, banks nothing",
-    writes: "a payment against each claim the EFT itemises, revenue nought, and nothing on the cash account",
+    writes: "a payment against each claim the EFT itemises, revenue nought; the EFT's origination fees and recoupments as revenue offsets with no paid date; and nothing on the cash account",
     reversal: "removable",
     /*
      * Measured on a snapshot: whichever of this report and the same EFT's 835 arrived first posted the claim payments, and

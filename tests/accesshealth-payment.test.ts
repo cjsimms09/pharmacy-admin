@@ -120,17 +120,36 @@ describe("the report's remittance-level adjustments", () => {
     .replace("Paid claims: 4Paid Amount: $84.67", "Paid claims: 7Paid Amount: $81.01")
     .replace("Total Paid: $118.77", "Total Paid: $115.11");
 
-  test("an origination fee is booked as a positive revenue offset in the EFT's month, keyed per EFT, code and reference", () => {
+  test("origination fees and a recoupment are booked as positive revenue offsets in the EFT's month, keyed per EFT, code and reference", () => {
     const r = readAccessHealthPayment(withFees);
     assert.ok(r.ok, r.ok ? "" : r.why);
     const { post, held } = adjustmentPostings(r.report);
-    assert.deepEqual(post.map((a) => [a.key, a.amountCents, a.on, a.plan]), [
-      ["AHADJ|EFT-12345678|AH|530", 116, "2026-09-04", "PLAN ONE"],
-      ["AHADJ|EFT-12345678|AH|530#2", 50, "2026-09-04", "PLAN ONE"],
-      ["AHADJ|EFT-12345678|AH|777", 200, "2026-09-04", "PLAN ONE"],
+    assert.deepEqual(post.map((a) => [a.key, a.amountCents, a.on, a.plan, a.category]), [
+      ["AHADJ|EFT-12345678|CS|1234567", 33, "2026-09-04", "PLAN ONE", "Chargebacks and audit recoveries"],
+      ["AHADJ|EFT-12345678|AH|530", 116, "2026-09-04", "PLAN ONE", "PSAO fees"],
+      ["AHADJ|EFT-12345678|AH|530#2", 50, "2026-09-04", "PLAN ONE", "PSAO fees"],
+      ["AHADJ|EFT-12345678|AH|777", 200, "2026-09-04", "PLAN ONE", "PSAO fees"],
     ]);
-    /* CS is not agreed, so it is held rather than booked. */
-    assert.deepEqual(held, [{ code: "CS", plan: "PLAN ONE", reference: "1234567", amountCents: -33 }]);
+    assert.deepEqual(held, []);
+  });
+
+  test("a CS adjustment that adds money is not a recoupment, and is held; so is any code not agreed", () => {
+    const adds = withFees
+      .replace(
+        "12/31/26Adj-CS1234567         0.00        -0.33         0.00         0.00         0.00        -0.33",
+        "12/31/26Adj-CS1234567         0.00         0.33         0.00         0.00         0.00         0.33",
+      )
+      .replace("Adj-AH777", "Adj-FB777")
+      .replace("Paid claims: 7Paid Amount: $81.01", "Paid claims: 7Paid Amount: $81.67")
+      .replace("Total Paid: $115.11", "Total Paid: $115.77");
+    const r = readAccessHealthPayment(adds);
+    assert.ok(r.ok, r.ok ? "" : r.why);
+    const { post, held } = adjustmentPostings(r.report);
+    assert.deepEqual(post.map((a) => a.key), ["AHADJ|EFT-12345678|AH|530", "AHADJ|EFT-12345678|AH|530#2"]);
+    assert.deepEqual(held, [
+      { code: "CS", plan: "PLAN ONE", reference: "1234567", amountCents: 33 },
+      { code: "FB", plan: "PLAN ONE", reference: "777", amountCents: -200 },
+    ]);
   });
 
   test("the same report read twice produces the same keys, which is what makes the second read book nothing", () => {
@@ -143,6 +162,6 @@ describe("the report's remittance-level adjustments", () => {
   test("a different EFT with the same fee reference is a different key", () => {
     const r = readAccessHealthPayment(withFees.replace("EFT-12345678", "EFT-87654321"));
     assert.ok(r.ok, r.ok ? "" : r.why);
-    assert.equal(adjustmentPostings(r.report).post[0].key, "AHADJ|EFT-87654321|AH|530");
+    assert.deepEqual(adjustmentPostings(r.report).post.map((a) => a.key).slice(0, 2), ["AHADJ|EFT-87654321|CS|1234567", "AHADJ|EFT-87654321|AH|530"]);
   });
 });

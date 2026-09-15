@@ -83,11 +83,12 @@ export async function undoInboxItem(itemId: string, user: { id?: string | null; 
     .where(eq(schema.cashReceipts.documentId, doc));
 
   /*
-   * The origination fees an AccessHealth report books as revenue offsets, keyed `AHADJ|…`. Only those: other bills can
-   * carry a document id too (a card statement's fee bill) and belong to kinds this undo does not remove.
+   * The origination fees (AH) and recoupments (CS) an AccessHealth report books as revenue offsets, keyed `AHADJ|…`. Only
+   * those: other bills can carry a document id too (a card statement's fee bill) and belong to kinds this undo does not
+   * remove.
    */
   const fees = await db
-    .select({ id: schema.expenses.id, amountCents: schema.expenses.amountCents })
+    .select({ id: schema.expenses.id, amountCents: schema.expenses.amountCents, invoiceNumber: schema.expenses.invoiceNumber })
     .from(schema.expenses)
     .where(and(eq(schema.expenses.documentId, doc), like(schema.expenses.invoiceNumber, "AHADJ|%")));
 
@@ -107,10 +108,16 @@ export async function undoInboxItem(itemId: string, user: { id?: string | null; 
   await db.delete(schema.cashReceipts).where(eq(schema.cashReceipts.documentId, doc));
   if (fees.length) await db.delete(schema.expenses).where(and(eq(schema.expenses.documentId, doc), like(schema.expenses.invoiceNumber, "AHADJ|%")));
 
+  /* Named by what each is: the code sits third in the key, `AHADJ|<EFT>|<code>|<ref>`. */
+  const ofCode = (code: string, one: string, many: string) => {
+    const rows = fees.filter((f) => (f.invoiceNumber ?? "").split("|")[2] === code);
+    return rows.length ? `${rows.length} ${rows.length === 1 ? one : many} (${money(rows.reduce((n, f) => n + f.amountCents, 0))})` : "";
+  };
+  const adjustments = [ofCode("AH", "origination fee", "origination fees"), ofCode("CS", "recoupment", "recoupments")].filter(Boolean);
   const said =
     `${payments.length} payment${payments.length === 1 ? "" : "s"} (${money(paymentCents)}), ` +
     `${deposits.length} bank deposit${deposits.length === 1 ? "" : "s"} (${money(depositCents)})` +
-    `${fees.length ? ` and ${fees.length} origination fee${fees.length === 1 ? "" : "s"} (${money(fees.reduce((n, f) => n + f.amountCents, 0))})` : ""} removed, ` +
+    `${adjustments.length ? ` and ${adjustments.join(" and ")}` : ""} removed, ` +
     `read from ${item.fileName ?? "this document"} as ${(item.routedAs ?? "").replace(/_/g, " ")}.`;
 
   await db
