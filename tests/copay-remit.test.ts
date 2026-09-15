@@ -37,8 +37,8 @@ describe("reading the statement", () => {
   });
 
   test("a prescription number broken across two runs by the text layer is still one number", () => {
-    // The fixture prints "0000004 07155"; the claim it settles is 407155.
-    const l = r.lines.find((x) => x.rxNumber === "407155");
+    // The fixture prints "0000009 90201"; the claim it settles is 990201.
+    const l = r.lines.find((x) => x.rxNumber === "990201");
     assert.ok(l, "the split prescription number was not put back together");
     assert.equal(l.ndc11, "00002150680");
     assert.equal(l.paidCents, 17_431);
@@ -52,22 +52,22 @@ describe("reading the statement", () => {
 
   test("the twelve-digit reference keeps its zeros for tracing but the prescription number does not", () => {
     const l = r.lines[0];
-    assert.equal(l.reference, "000000410088");
-    assert.equal(l.rxNumber, "410088");
+    assert.equal(l.reference, "000000990101");
+    assert.equal(l.rxNumber, "990101");
   });
 });
 
 describe("the three arithmetic gates", () => {
   test("a row that does not hold together is returned unreadable, not as three plausible figures", () => {
     // Submitted less patient paid is 174.31; this row claims 174.13, two digits transposed.
-    const bad = "000000410088 20260821 00002150680 Mounjaro 2.5 MG/0.5ML SOPN 2.00 1331.24 1156.93 174.13";
+    const bad = "000000990101 20260821 00002150680 Mounjaro 2.5 MG/0.5ML SOPN 2.00 1331.24 1156.93 174.13";
     const r = parseCopayRemitLine(bad);
     assert.ok("why" in r);
     assert.match(r.why, /submitted less patient paid is 174\.31, but the row pays 174\.13/);
   });
 
   test("the identity survives a reversal, because every figure on it is negated together", () => {
-    const rev = "000000410088 20260821 00002150680 Mounjaro 2.5 MG/0.5ML SOPN -2.00 -1331.24 -1156.93 -174.31";
+    const rev = "000000990101 20260821 00002150680 Mounjaro 2.5 MG/0.5ML SOPN -2.00 -1331.24 -1156.93 -174.31";
     const r = parseCopayRemitLine(rev);
     assert.ok("line" in r);
     assert.equal(r.line.paidCents, -17_431);
@@ -76,7 +76,7 @@ describe("the three arithmetic gates", () => {
 
   test("eight digits that are not a date mean the fields are not where they look", () => {
     // 20261332: no thirteenth month. A row that borrowed a digit reads exactly like this.
-    const shifted = "000000410088 20261332 00002150680 Mounjaro 2.5 MG SOPN 2.00 1331.24 1156.93 174.31";
+    const shifted = "000000990101 20261332 00002150680 Mounjaro 2.5 MG SOPN 2.00 1331.24 1156.93 174.31";
     const r = parseCopayRemitLine(shifted);
     assert.ok("why" in r);
     assert.match(r.why, /is not a date/);
@@ -133,7 +133,7 @@ describe("netting a fill against its reversal", () => {
   });
 
   test("a fill paid and taken back records nothing and is counted as reversed", () => {
-    const mounjaro = r.net.find((n) => n.rxNumber === "410088")!;
+    const mounjaro = r.net.find((n) => n.rxNumber === "990101")!;
     assert.equal(mounjaro.rows, 2);
     assert.equal(mounjaro.paidCents, 0);
     assert.equal(mounjaro.reversed, true);
@@ -142,13 +142,13 @@ describe("netting a fill against its reversal", () => {
   test("only two prescriptions are actually owed money, and they are the printed total", () => {
     const toRecord = r.net.filter((n) => !n.reversed);
     assert.equal(toRecord.length, 2);
-    assert.deepEqual(toRecord.map((n) => n.rxNumber).sort(), ["407155", "410265"]);
+    assert.deepEqual(toRecord.map((n) => n.rxNumber).sort(), ["990103", "990201"]);
     assert.equal(toRecord.reduce((n, x) => n + x.paidCents, 0), 17_725);
   });
 
   test("a fill reversed and re-paid at a different submitted amount nets to one real payment", () => {
     // Eliquis: 288.40 paid, reversed, then re-submitted at 155.00. The voucher pays 2.94 once.
-    const eliquis = r.net.find((n) => n.rxNumber === "410265")!;
+    const eliquis = r.net.find((n) => n.rxNumber === "990103")!;
     assert.equal(eliquis.rows, 3);
     assert.equal(eliquis.reversed, false, "three rows that do not cancel are a payment, not a reversal");
     assert.equal(eliquis.paidCents, 294);
@@ -160,7 +160,7 @@ describe("netting a fill against its reversal", () => {
 
   test("two fills of the same drug on different prescriptions are not netted together", () => {
     const mounjaro = r.net.filter((n) => n.ndc11 === "00002150680");
-    assert.equal(mounjaro.length, 2, "410088 and 407155 are different fills of the same product");
+    assert.equal(mounjaro.length, 2, "990101 and 990201 are different fills of the same product");
   });
 
   test("two prescriptions alike in every field but the number stay two", () => {
@@ -172,7 +172,7 @@ describe("netting a fill against its reversal", () => {
      */
     const wegovy = r.net.filter((n) => n.ndc11 === "00169452514");
     assert.equal(wegovy.length, 2);
-    assert.deepEqual(wegovy.map((n) => n.rxNumber).sort(), ["414100", "414277"]);
+    assert.deepEqual(wegovy.map((n) => n.rxNumber).sort(), ["990105", "990106"]);
     assert.ok(wegovy.every((n) => n.reversed && n.rows === 2));
   });
 
@@ -225,7 +225,7 @@ describe("recognising one of these files", () => {
   });
 
   test("one row is not enough, because one line of numbers is an accident", () => {
-    const oneRow = "Payment Date: 09/01/2026\nPayment Amount: 174.31\n000000410088 20260821 00002150680 Mounjaro 2.5 MG/0.5ML SOPN 2.00 1331.24 1156.93 174.31";
+    const oneRow = "Payment Date: 09/01/2026\nPayment Amount: 174.31\n000000990101 20260821 00002150680 Mounjaro 2.5 MG/0.5ML SOPN 2.00 1331.24 1156.93 174.31";
     assert.equal(looksLikeCopayRemit(oneRow), false);
   });
 
