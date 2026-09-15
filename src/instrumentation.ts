@@ -345,7 +345,14 @@ export async function register() {
       const { getSettings } = await import("./lib/settings");
       const s = await getSettings();
       if (!s.pioneer_sql_server || !s.pioneer_sql_user) return;
-      const today = new Date().toISOString().slice(0, 10);
+      /*
+       * Local, like the hour on the line above. This was the UTC date, so from 7pm Central the
+       * guard saw tomorrow, started the pull that evening and stamped tomorrow done — and the eight
+       * o'clock run was skipped every morning. See the note in scripts/pioneer-pull.ts, which writes
+       * the markers this reads and must stay on the same clock.
+       */
+      const { todayIso } = await import("./lib/dates");
+      const today = todayIso();
       const catalogueDue = new Date().getDay() === 1 || !s.pioneer_pull_catalogue_on;
       if (s.pioneer_pull_on_hand_on === today && s.pioneer_pull_claims_on === today && s.pioneer_pull_invoices_on === today && s.pioneer_pull_retail_on === today && !catalogueDue) return;
       const { spawn } = await import("node:child_process");
