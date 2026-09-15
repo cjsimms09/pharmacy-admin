@@ -201,7 +201,7 @@ const RULES: Rule[] = [
     kind: "card_fees",
     counterparty: "Heartland",
     /* HRTLAND, HRTI-AND, HRTTAN D, HRTIAND — the scan is worst on this one. */
-    test: /HRT[A-Z]?[LIT]?AND|HEARTLAND/,
+    test: /HRT[A-Z]?[LIT]?AND|HEARTLAND|HRT[A-Z0-9]{1,6}PMTSYS/,
     side: "out",
     lands: "operating",
     category: "Card processing and bank fees",
@@ -355,7 +355,7 @@ const RULES: Rule[] = [
   {
     kind: "card_settlement",
     counterparty: "Heartland",
-    test: /HRT[A-Z]?[LIT]?AND|HEARTLAND/,
+    test: /HRT[A-Z]?[LIT]?AND|HEARTLAND|HRT[A-Z0-9]{1,6}PMTSYS/,
     side: "in",
     lands: "revenue",
     category: "patient",

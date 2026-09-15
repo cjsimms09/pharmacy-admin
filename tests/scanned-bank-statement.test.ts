@@ -93,3 +93,20 @@ describe("a scanned statement solved against its own balances", () => {
     assert.equal(r.unproven[0].from, "2026-09-01");
   });
 });
+
+describe("proved, and still doubtful (G-BANK-2)", () => {
+  test("REGRESSION: on a day that needed a correction, a line one character from a known amount goes to a person", () => {
+    /*
+     * The balances need 1,100.00 on 9/01. The scan reads 550.00 and 450.00 (truly 540.00 and 460.00: misreads that cancel)
+     * and 109.00 (truly 100.00), so a correction is needed that day. 460.00 is money another document already shows.
+     */
+    const r = solveStatement(
+      readRaw(statement({ opening: "10,000.00", closing: "10,800.00", balances: [["9/01", "11,100.00"], ["9/02", "10,800.00"]], debits: [["9/02", "300.00", "MCKESSON DRUG/AUTO ACH"]], lines: [["9/01", "550.00", "Deposit"], ["9/01", "450.00", "ACCESS HEALTH"], ["9/01", "109.00", "Deposit"]] })),
+      { known: [46_000] },
+    );
+    assert.ok(r.ok);
+    const doubt = r.unproven.find((u) => u.reason);
+    assert.ok(doubt, "the 450.00 line is held");
+    assert.equal(doubt!.lines[0].amountText, "450.00");
+  });
+});

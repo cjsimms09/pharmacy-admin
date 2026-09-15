@@ -444,9 +444,9 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
                   The scan is unclear in {scanReview.unproven.length === 1 ? "one place" : `${scanReview.unproven.length} places`}: the lines it reads do not reach the bank's own balance, and more than one correction would. Open the statement at the page shown, type each figure as printed, and check again. Nothing from this statement is placed until every day agrees.
                 </p>
                 {scanReview.unproven.map((u) => (
-                  <fieldset key={u.from} className="grid gap-1 border-t border-line pt-2">
+                  <fieldset key={`${u.from}-${u.lines[0]?.index ?? 0}`} className="grid gap-1 border-t border-line pt-2">
                     <legend className="font-semibold">
-                      {fmt(u.from)}{u.to === u.from ? "" : ` to ${fmt(u.to)}`}: the lines must come to {formatCents(Math.abs(u.differenceCents))} {u.differenceCents > 0 ? "more" : "less"} than the scan reads
+                      {fmt(u.from)}{u.to === u.from ? "" : ` to ${fmt(u.to)}`}: {u.reason ?? `the lines must come to ${formatCents(Math.abs(u.differenceCents))} ${u.differenceCents > 0 ? "more" : "less"} than the scan reads`}
                     </legend>
                     {u.lines.map((l) => (
                       <label key={l.index} className="flex flex-wrap items-center gap-2">

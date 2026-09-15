@@ -127,6 +127,8 @@ export type Placement =
    * report is the one door for that money, and this line only confirms the batch. See `placeLine`.
    */
   | { kind: "card_deposit"; why: string }
+  /** A PSAO deposit (Access Health, ProviderPay). Confirms the receipt its report or EFT notice banked; never banked here. */
+  | { kind: "psao_deposit"; why: string }
   | { kind: "pays_bill"; expenseId: string; vendorName: string; why: string }
   | { kind: "pays_invoice"; invoiceId: string; supplier: string; why: string }
   /**
@@ -207,11 +209,21 @@ function names(name: string): string[] {
   return [n, ...words];
 }
 
+/*
+ * The pharmacy's own name and address, which the bank prints on nearly every line. A payer label "005377 (10000019)- City
+ * of Wichita" was mentioned by every credit that said WEST WICHITA FAMILY PH, and 22 lines, $78,726.92, banked as its
+ * money on a rehearsal of August's scan (Session 2, money map G-BANK-1). These words never name a counterparty.
+ */
+const OWN_WORDS = new Set(["west", "wichita", "family", "fam", "pharmacy", "phcy", "ph", "llc", "central", "ave", "treasury", "mgmt"]);
+
 function mentions(description: string, name: string): boolean {
   const d = description.toLowerCase();
+  /* Whole words only: "script" is not in "Prescription". */
+  const tokens = new Set(d.split(/[^a-z0-9]+/).filter(Boolean));
   const [whole, ...words] = names(name);
-  if (whole.length >= 4 && d.includes(whole)) return true;
-  return words.some((w) => w.length >= 5 && d.includes(w));
+  const distinctive = whole.split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !OWN_WORDS.has(w));
+  if (whole.length >= 4 && d.includes(whole) && distinctive.some((w) => tokens.has(w))) return true;
+  return words.some((w) => w.length >= 5 && !OWN_WORDS.has(w) && tokens.has(w));
 }
 
 /** Where each line goes, or why it does not. */
@@ -325,8 +337,23 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
           "Nothing is banked from the line — banking it would drop every MTF payment from the month's cash. The remittance for it is what is missing.",
       };
     }
+    /*
+     * The PSAO's deposits — Access Health and ProviderPay — are banked by the payer payment report and the EFT notice.
+     * The line confirms one of those receipts or waits; it never banks, or a misread amount banks the deposit twice.
+     */
+    if (meaning.kind === "psao_remittance") return { kind: "psao_deposit", why: meaning.says };
+    /* Named receipts nobody has said how to count yet (prescription transfers, Veridian, POC Network): a person decides. */
+    if (meaning.kind === "transfer_in" || meaning.kind === "other_receipt") {
+      return { kind: "unplaced", why: `${meaning.says} Not banked from the statement until it is agreed what this money is and where it belongs.` };
+    }
+    /*
+     * A credit that only mentions a plan by name is not banked either: every plan's money reaches the bank through the
+     * PSAO and has its own door. It is left for a person, named.
+     */
     const payer = ctx.payers.find((p) => mentions(d, p));
-    if (payer) return { kind: "deposit", receiptKind: "third_party", payer, why: `names ${payer}` };
+    if (payer) {
+      return { kind: "unplaced", why: `mentions ${payer}, whose money normally arrives through the PSAO and is banked from its report; if this really is a separate payment, bank it with the form` };
+    }
     const supplier = ctx.suppliers.find((s) => mentions(d, s.name));
     if (supplier) return { kind: "deposit", receiptKind: "rebate", payer: supplier.name, why: `names ${supplier.name}: a wholesaler paying in is a rebate or a credit` };
     if (RETAIL.test(d)) return { kind: "deposit", receiptKind: "retail", payer: null, why: "reads as card or cash takings" };

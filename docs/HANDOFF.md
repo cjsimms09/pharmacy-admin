@@ -27,6 +27,27 @@ PDF voucher can never import.
 **Changes in B's files, and nothing else in them:**
 - `autoroute.ts`: in the PDF branch, a copay remit is also recognised from the rebuilt lines.
 - `mailbox.ts`: the `copay_remit` branch passes the PDF's rebuilt text for a PDF, and the text as before otherwise.
+### From 1 — 15 September, before the edit: `expense-categories.ts`, `profit-and-loss.ts` (A's) — a "PSAO fees" offset, and DIR "missing" asks about DIR only
+
+**Written before touching A's files.** Session 2's AccessHealth origination fees (approved as a revenue offset like DIR)
+would, filed under "DIR fees and price concessions", stop the monthly account saying DIR is missing on a month with a
+$1.16 fee and no DIR entered. Changes: a seeded category "PSAO fees" (`revenue_offset`, sortOrder 42) for fees the PSAO
+takes out of plan payments; `profit-and-loss.ts` lists DIR as missing unless an expense in the DIR category itself is on
+file, rather than any revenue offset. Session 2's branch posts the fee under "PSAO fees".
+
+### From 1 — 15 September, before the edit: `money/bank.ts`, `money/page.tsx` (A's), `bank-statement.ts`, `bank-descriptors.ts` — a bank credit no feed names is never banked from the statement
+
+**Written before touching A's files.** Session 2's scanned-bank rehearsal (G-BANK-1..3): every unrecognised credit banked as
+third-party money from "City of Wichita", because that payer label's word is in the pharmacy's own name — 22 lines,
+$78,726.92, at least $48,889.32 twice. Changes:
+- `bank-statement.ts`: a payer or supplier is "mentioned" only by a whole word that is not one of the pharmacy's own
+  name and address words; a credit that only mentions one is left for a person, not banked. PSAO credits (Access Health,
+  ProviderPay) place as `psao_deposit`: confirm a held receipt or stay unplaced — the payer payment report and the EFT
+  notice are their doors. Prescription transfers and other named receipts stay unplaced until the owner says what they are.
+- `bank.ts`: `psao_deposit` beside `card_deposit`, never banked.
+- `bank-descriptors.ts`: Heartland spellings the scan produced (HRTI3ND, HRTTJqN D) via `HRT…PMTSYS`.
+- `scanned-bank-solve.ts` + `page.tsx`: a proved line whose reading is not a known amount while a one-character
+  alternative is goes to the person panel with that reason (three cancelling misreads proved 11–12 Aug).
 
 ### From 1 — 15 September, before the edit: `money/bank.ts`, `money/page.tsx` (A's) — the scanned Emprise statement is read from the upload
 

@@ -583,7 +583,8 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
    * often than it means "there were none". Silence on a line that only ever reduces profit reads as
    * good news, which is exactly the wrong way for a missing figure to read.
    */
-  if (offsets.length === 0) {
+  /* DIR itself, not any offset: a PSAO fee or a chargeback on file says nothing about whether DIR has been entered. */
+  if (!i.expenses.some((e) => e.categoryName === "DIR fees and price concessions")) {
     missing.push("DIR fees and price concessions for the month. These are entered by hand, so an empty line means nobody has entered them rather than that there were none.");
   }
 

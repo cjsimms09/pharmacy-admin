@@ -49,6 +49,13 @@ export const SEED_CATEGORIES: SeedCategory[] = [
       "Clawed back by a plan after the claim was paid. Not an operating cost: it is revenue the pharmacy was told it had and then did not. Kept apart so the dispensing margin is not quietly flattered by it. If the plan took it out of a remittance, leave the paid date blank: the cash account already sees it in the smaller deposit, and a paid date would count it twice there.",
   },
   {
+    name: "PSAO fees",
+    kind: "revenue_offset",
+    sortOrder: 42,
+    notes:
+      "What the PSAO takes out of plan payments before they reach the bank — Health Mart Atlas's origination fee on each EFT. Out of revenue, like DIR, and kept apart from it: a month with these on file has still not had its DIR entered. Booked from the AccessHealth payment reports with no paid date, because the deposit already arrives net.",
+  },
+  {
     name: "Chargebacks and audit recoveries",
     kind: "revenue_offset",
     sortOrder: 45,
