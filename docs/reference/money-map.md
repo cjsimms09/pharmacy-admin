@@ -1435,3 +1435,45 @@ book it, and it needs a standing cost or a vendor bill.
 - Whether Endicia sends a confirmation for every purchase: the September bank statement will show it.
 - An Endicia confirmation carrying a surcharge: none of the three does.
 
+---
+
+## 10. RedSail copay-voucher remittance (the scanned sample) — measured, not rehearsable
+
+**Checkpoint 10.** Sample: the owner's upload `Image_001.pdf`, a RedSail copay-voucher remittance. It was measured
+by shape only: every word reduced to its length and every digit masked, because a voucher can carry
+patient-linked rows. The page images were not looked at.
+
+**What the file is:**
+- 2 pages, each one scanned image of about 3,400 × 4,400 pixels (about 400 dpi on letter paper);
+- a text layer is present;
+- no OCR producer is named in the file.
+
+**Is the text layer readable?** Mostly.
+
+| measure | value |
+|---|---|
+| characters / lines / tokens | 2,014 / 130 / 227 |
+| clean words | 74 |
+| money-shaped figures | 15 clean tokens; 64 figures found in the text |
+| garbled tokens (letters and digits mixed, or non-printing) | 28 (12%) |
+| labels present | Payment, Total, Amount, Date, Voucher, Copay, RedSail, Remit, Pharmacy, Rx, Paid |
+| the payment figure | $177.25, printed at the top and again at the foot |
+
+The figures follow a remittance's pattern: charges with their reversals (+$1,177.90 / −$1,177.90,
++$1,350.00 / −$1,350.00, and so on), handling amounts ($2.00, $0.25, $28.00), and a net of $177.25.
+
+**What the site does with it:** `classify` → **unrecognised**; `looksLikeCopayRemit` → false. The text comes
+out one field per line, so the reader's row pattern never forms.
+
+**Answer for session 1's OCR decision:** for this document **the text layer already carries the figures,
+largely clean**. OCR is not the missing piece. A reader that rebuilds rows from this layer's field order
+is. Whether every row's fields are present and in order could not be proven by shape alone, since the row
+text is patient-linked, and was not read.
+
+**Against the bank:** August's RedSail credits (8/04 $225.22 and $67.50; 8/11 $501.97; 8/18 $2,324.01; 8/25
+$1,375.98) include no $177.25. The voucher's own date was not printed, so which month it pays is not
+established.
+
+No gap is written: nothing was read, so nothing was stored wrongly. The state is **not-captured**, because
+there is no reader for this layout.
+
