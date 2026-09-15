@@ -8,6 +8,61 @@ file is how they talk.
 
 ## Open items
 
+### From 1 — 15 September, before the edit: `autoroute.ts`, `mailbox.ts` (B's) — PioneerRx's daily sales by payment type
+
+**Written before touching either file.** The owner will send PioneerRx's "System Sales Totals By Payment Type" daily
+(file `Accrual_System_Sales_Totals_By_Payment_Type.txt`). Its file name matches `looksLikeSystemSales`, so today it
+routes as `accrual_sales` and the monthly reader refuses it with seven "does not add up" problems, every day.
+
+- `autoroute.ts`: a new `RouteKind` `sales_by_payment`, recognised by its title line, checked before `accrual_sales`.
+- `mailbox.ts`: one `else if (cls.kind === "sales_by_payment")` beside `accrual_sales`, calling a new store.
+
+What it does in the books: **nothing is booked.** Accrual retail stays with the monthly summary; cash stays with the
+card batches and the bank. It is kept per period (migration 0121, `sales_by_payment`) and used as checks: card
+payments net of card refunds against that day's card batch, and prescription remit against the claims sold that day.
+
+### From 1 — 15 September, before the edit: `money/bank.ts` (A's) and `bank-statement.ts` — the Heartland fee debit confirms the statement's bill
+
+**Written before touching either file.** The monthly card statement (notice below) books its fees as an expense with
+`paidOn` set to the auto-debit date the statement prints. `unpaid()` then no longer returns it, so when the bank
+statement's Heartland debit arrives it would be left unplaced — or, if somebody booked it by hand, counted twice.
+
+- `bank-statement.ts`: `MatchContext` gains optional `cardFeeBills` (card-processing expenses no bank line has
+  claimed yet, paid or not). A debit `readBankDescriptor` reads as `card_fees` with exactly that amount places as
+  `pays_bill` on it; with none, it stays unplaced and says the month's card statement is not on file.
+- `money/bank.ts` `matchContext()`: loads those bills. `pays_bill` already sets `paidOn` to the bank's date, which
+  corrects the statement's date if the bank's differs.
+
+### From 1 — 15 September, before the edit: `autoroute.ts` and `mailbox.ts` (B's) — the monthly card processing statement
+
+**Written before touching either file.** Global Payments (Heartland) sends a monthly merchant statement, forwarded
+by staff from jdarrah@wwfppa.com as a PDF. It is the only record of card processing fees. Two changes in B's group:
+
+- `autoroute.ts`: a new `RouteKind` `card_statement`, recognised in the PDF branch from the document's own text
+  ("Merchant Statement", "Statement Period", and Global Payments or Heartland), before the "does not recognise" fall-through.
+- `mailbox.ts`: one `else if (cls.kind === "card_statement")` beside the other PDF kinds, calling a new store.
+
+Also, in `pdf-text.ts` (unassigned): streams wrapped in ASCII85 before Flate are now decoded. The statement writes
+every page that way and the reader returned nothing at all for it; the change is additive and only reached where
+Flate and raw inflate have both failed.
+
+What the statement does in the books: **fees only**, as an expense in the statement month, paid on the statement's
+own auto-debit date. Its deposits are the same money as the card batch reports and are never banked — they are
+used to check every batch arrived.
+
+### From 1 — 15 September, before the edit: `mailbox.ts` (B's) — the daily credit card batch report
+
+**Written before touching the file.** The owner's staff forward one email per card settlement batch: subject
+"Credit Card Batch (779536378, 9/3/2026) Report: $2704.35, 101 Transactions", two HTML attachments ("Batch N
+Summary Report.html", "Batch N Report.html"). `acceptableAttachment` declines HTML, so every one reaches the
+no-attachment branch and is recorded as "Nothing on it was a type this reads".
+
+The change is one more reader on that branch, beside the EFT notice, handed the declined HTML summary. It banks the
+batch's net total as a `patient` cash receipt keyed `card-batch|<batch id>` — counter takings the cash account has
+never carried (September's cash receipts were third-party only). Accrual is untouched: it reads claims and the
+till, never cash receipts. The reader is pure and new (`card-batch.ts`). `acceptableAttachment` is not changed —
+the HTML is not filed as a report, only read for the batch figures, and the summary is kept as the document.
+
 ### From 1 — 15 September, before the edit: `src/app/(app)/money/bank.ts` (A's) — a bank deposit must confirm the receipt already banked
 
 **Written before touching the file.**

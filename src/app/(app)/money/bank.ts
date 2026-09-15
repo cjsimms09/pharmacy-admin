@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { and, eq, gte, inArray, lte } from "drizzle-orm";
+import { and, eq, gte, inArray, like, lte } from "drizzle-orm";
 import { matchHeldDeposit, shiftDays, DEPOSIT_WINDOW_DAYS, type HeldForBank } from "@/lib/deposit-gate";
 import { db, schema } from "@/db";
 import { requireManager } from "@/lib/auth";
@@ -13,6 +13,7 @@ import { parseCsv } from "@/lib/reference";
 import { parseBankStatement, placeLines, type MatchContext } from "@/lib/bank-statement";
 import { addCashReceipt, unpaid, vendors } from "@/lib/expenses";
 import { allSuppliers } from "@/lib/suppliers-registry";
+import { CARD_STATEMENT_BILL } from "@/lib/card-statement";
 
 const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -30,11 +31,17 @@ async function matchContext(): Promise<MatchContext> {
   for (const c of claims) for (const n of [c.pbmName, c.payerLabel]) if (n && n.trim().length >= 4) payers.add(n.trim());
   for (const r of receipts) if (r.payer && r.payer.trim().length >= 4) payers.add(r.payer.trim());
   const vendorName = new Map(ven.map((v) => [v.id, v.name]));
+  /* The card statement's fee bills no bank line has claimed. Booked already paid, so `unpaid()` never returns them. */
+  const claimedBills = new Set((await db.query.bankLines.findMany({ columns: { expenseId: true } })).map((r) => r.expenseId).filter((id): id is string => id !== null));
+  const cardFeeBills = (await db.query.expenses.findMany({ where: and(like(schema.expenses.invoiceNumber, `${CARD_STATEMENT_BILL}%`), eq(schema.expenses.status, "confirmed")) }))
+    .filter((b) => !claimedBills.has(b.id))
+    .map((b) => ({ id: b.id, vendorName: b.vendorId ? vendorName.get(b.vendorId) ?? null : null, amountCents: b.amountCents, invoiceDate: b.invoiceDate }));
   return {
     payers: [...payers],
     suppliers: sup.map((s) => ({ id: s.id, name: s.name })),
     vendors: ven.map((v) => ({ id: v.id, name: v.name })),
     unpaidBills: bills.map((b) => ({ id: b.id, vendorId: b.vendorId, vendorName: b.vendorId ? vendorName.get(b.vendorId) ?? null : null, amountCents: b.amountCents, invoiceDate: b.invoiceDate })),
+    cardFeeBills,
     unpaidInvoices: invoices.filter((v) => !v.paidOn).map((v) => ({ id: v.id, supplierId: v.supplierId, supplier: v.supplier, totalCents: v.totalCents, invoiceDate: v.invoiceDate })),
   };
 }

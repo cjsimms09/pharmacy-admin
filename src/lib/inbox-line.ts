@@ -76,6 +76,10 @@ const KIND_WORDS: Record<string, string> = {
   ap_transactions: "McKesson accounts payable",
   mck_returns: "McKesson returns and credits",
   report_summary: "A totals sheet",
+  /* One card settlement batch: counter takings, banked as cash only. See card-batch.ts. */
+  card_batch: "Credit card batch",
+  /* The month's card fees, booked as a bill; its deposits only checked against the batches. See card-statement.ts. */
+  card_statement: "Card processing statement",
   /* It ran, and there was nothing in it. A closed Sunday, not a reader that failed. */
   empty_report: "A report with nothing in it",
   unrecognised: "Not recognised",

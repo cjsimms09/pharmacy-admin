@@ -154,6 +154,8 @@ export type MatchContext = {
   vendors: { id: string; name: string }[];
   unpaidBills: { id: string; vendorId: string | null; vendorName: string | null; amountCents: number; invoiceDate: string }[];
   unpaidInvoices: { id: string; supplierId: string | null; supplier: string | null; totalCents: number | null; invoiceDate: string | null }[];
+  /** Card processing bills no bank line has claimed yet, paid or not — the card statement books its fees already paid. */
+  cardFeeBills?: { id: string; vendorName: string | null; amountCents: number; invoiceDate: string }[];
   /**
    * What each wholesaler's own ledger says cleared, and under which reference.
    *
@@ -335,6 +337,25 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
       why:
         "A cheque. The bank prints no payee on one, and its amount matches nothing the site can work out for this month, " +
         "so it is yours to categorise — and once you have, the account has it.",
+    };
+  }
+  /*
+   * The card processor's monthly fee debit, against the bill its own statement booked.
+   *
+   * The statement is read by `card-statement-store.ts` and books the fees already paid, on the auto-debit
+   * date it prints — so the bill is not in `unpaidBills`, and the bank's description ("HRTLAND PMT SYS")
+   * never mentions the vendor by the name it is filed under. Matched by exact amount among card
+   * processing bills no bank line has claimed. With none, the fees are not in the books at all, and the
+   * line says what is missing rather than inviting somebody to book it by hand beside a statement that
+   * may yet arrive.
+   */
+  if (meaning.kind === "card_fees" && ctx.cardFeeBills) {
+    const fee = ctx.cardFeeBills.filter((b) => b.amountCents === out);
+    if (fee.length === 1) return { kind: "pays_bill", expenseId: fee[0].id, vendorName: fee[0].vendorName ?? meaning.counterparty, why: `the card processing fees on the ${fee[0].invoiceDate.slice(0, 7)} statement, exactly this amount` };
+    if (fee.length > 1) return { kind: "unplaced", why: `${fee.length} card processing statements are for exactly this amount; mark the right one paid by hand` };
+    return {
+      kind: "unplaced",
+      why: "the card processor taking its monthly fees, but no card processing statement for this amount is on file. Forward that month's statement to the inbox rather than booking this by hand, or the fees will be counted twice when it arrives.",
     };
   }
   const bills = ctx.unpaidBills.filter((b) => b.amountCents === out);
