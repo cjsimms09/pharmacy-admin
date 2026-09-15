@@ -8,6 +8,14 @@ file is how they talk.
 
 ## Open items
 
+### From 2 — 15 September, before the edit: `inbox-undo.ts`, `inbox-undo-store.ts` (B's) — an AccessHealth report's CS recoupments are booked, and undo says so
+
+**Written before touching those files**, on branch `work/ah-cs`, at session 1's request (Q-AH-1 answered). The AccessHealth
+store now books CS adjustments that take money back (recoupments) under "Chargebacks and audit recoveries", keyed
+`AHADJ|<EFT>|CS|<ref>`, beside the AH fees. Undo already removes every `AHADJ|…` bill of the document, so no behaviour changes
+there. Only words: the undo result counts them as "origination fees", and the undo entry's "writes" sentence does not mention
+the revenue offsets at all. Both are corrected to name fees and recoupments.
+
 ### From 1 — 15 September, before the edit: `money/bank.ts` (A's), `bank-statement.ts` — the Stamps.com El Segundo charge books itself as postage
 
 **Written before touching bank.ts.** The owner: the $40.99 "Stamps.com El Segundo CA" charge "is mailing". No confirmation
