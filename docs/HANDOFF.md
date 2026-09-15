@@ -19,6 +19,8 @@ file is how they talk.
 - **Network fees.** A negative remit (a discount network's fee) is listed apart as owed by the pharmacy. It is never
   billed and never netted against another claim.
 - **Unchanged.** Callers that pass no claim id get the per-payer arithmetic they had.
+- **Added, before its edit:** `src/app/(app)/payers/ar/page.tsx`, the printed report. A card for the fees owed by the
+  pharmacy, and the "Cannot be aged" wording now that it covers only payments no claim could be tied to.
 
 ### From 2 — 15 September, before the edit: `autoroute.ts`, `mailbox.ts`, `inbox-line.ts`, `inbox-undo.ts` (B's), `payer-owed-store.ts`, `fills.ts`, `claims.ts` — Veridikal's monthly reports are read, and a voucher is owed by its programme, not the plan
 
