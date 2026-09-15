@@ -505,11 +505,22 @@ async function importOneRemittance(
   }
 
   const held = await db.query.claimPayments.findMany({ columns: { reference: true, rxNumber: true, amountCents: true } });
-  const seen = new Set(held.map((h) => `${h.reference ?? ""}|${h.rxNumber}|${h.amountCents}`));
+  /*
+   * Counted, not a set. A claim paid, taken back and paid again for the same amount inside one remittance is two lines
+   * with one key, and a set skipped the second on the first read: $15,001.38 across the nine real AccessHealth reports,
+   * proven on EFT …5975 (Session 2, money map G-835-3). A held row now accounts for one line; a re-read still posts nothing.
+   */
+  const heldCount = new Map<string, number>();
+  for (const h of held) {
+    const k = `${h.reference ?? ""}|${h.rxNumber}|${h.amountCents}`;
+    heldCount.set(k, (heldCount.get(k) ?? 0) + 1);
+  }
 
   for (const p of keep) {
     const reference = [r.traceNumber, p.reference].filter(Boolean).join("/") || fileName;
-    if (seen.has(`${reference}|${p.rxNumber}|${p.paidCents}`)) {
+    const heldKey = `${reference}|${p.rxNumber}|${p.paidCents}`;
+    if ((heldCount.get(heldKey) ?? 0) > 0) {
+      heldCount.set(heldKey, heldCount.get(heldKey)! - 1);
       out.alreadyHeld++;
       continue;
     }
@@ -539,7 +550,6 @@ async function importOneRemittance(
       out.ambiguous++;
       if (out.problems.length < 12) out.problems.push(`Rx ${p.rxNumber}: ${rec.ambiguous.why}`);
     } else out.unmatched++;
-    seen.add(`${reference}|${p.rxNumber}|${p.paidCents}`);
   }
   /*
    * A remittance that comes through ProviderPay — Health Mart Atlas's plans and the direct payers alike — posts

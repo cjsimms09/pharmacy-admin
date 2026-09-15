@@ -230,3 +230,10 @@ describe("the wholesaler's ACH and the facilitator's unexplained credit (G-MCK-1
     assert.ok(isCredit.includes(`placement.kind === "unplaced"`));
   });
 });
+
+test("REGRESSION: a remittance's second identical claim line posts on the first read (G-835-3)", async () => {
+  /* Paid, taken back and paid again for the same amount inside one EFT: $15,001.38 across nine real reports was skipped. */
+  const text = await readFile("src/lib/claim-payments.ts", "utf8");
+  assert.ok(text.includes("const heldCount = new Map<string, number>();"));
+  assert.ok(!text.includes("seen.add(`${reference}|${p.rxNumber}|${p.paidCents}`)"));
+});
