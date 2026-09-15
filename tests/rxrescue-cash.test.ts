@@ -40,6 +40,30 @@ describe("an RxRescue credit memo in the cash account", () => {
     assert.equal(receipts[0].sourceKey, rxRescueMemoKey("2026-09-20", 62_114));
   });
 
+  test("REGRESSION: with the primary's claim beside the programme's, the memo settles the programme's", async () => {
+    /*
+     * Measured 15 September 2026: on 23 of September's 26 RxRescue fills the site holds both claims. Without the
+     * programme's BIN the matcher has two candidates and an amount (assistance plus top-off) equal to neither claim's
+     * remit, so it refuses — and the credit attaches to no claim, the fill stays on the loss list, and it goes on saying
+     * a top-off is expected after it has been paid.
+     */
+    const { newId } = await import("../src/lib/crypto");
+    const importId = newId();
+    await db.insert(schema.claimImports).values({ id: importId, fileName: "the test", createdBy: "the test" });
+    const claim = (bin: string, remitCents: number) => ({
+      id: newId(), importId, rxNumber: "900500", fillNumber: 0, dateFilled: "2026-09-05", ndc11: "62542002030",
+      bin, status: "paid" as const, remitCents, copayCents: 0, source: "transaction_report",
+    });
+    const acr = claim("024284", 1_000);
+    await db.insert(schema.claims).values([claim("610097", 20_000), acr]);
+    const memo = [HEAD, "tx-9,000000900500,99991001,62542002030,EXAMPLE AG,2026-09-05,0000000,EXAMPLE PHARMACY,08,30.0,200.0,10.0,25.0,0.0,10.0,0.0,35.0,C-00000002C20260915,2026-09-21"].join("\n");
+    await importRxRescueCredit(Buffer.from(memo), "credit memo.csv", { name: "the test" });
+    const payment = (await db.select().from(schema.claimPayments)).find((p) => p.reference === "tx-9");
+    assert.equal(payment?.claimId, acr.id, "the programme's claim, not the primary's and not nothing");
+    assert.equal(payment?.amountCents, 3_500, "the whole credit");
+    assert.equal(payment?.revenueCents, 2_500, "of which the top-off is what the claim never carried");
+  });
+
   test("IPD's statement names the same credit by another id, so the key is its day and amount", () => {
     assert.equal(rxRescueMemoKey("2026-09-03", -1_070_620), rxRescueMemoKey("2026-09-03", 1_070_620), "the statement prints the credit negative");
     assert.notEqual(rxRescueMemoKey("2026-09-03", 1_070_620), rxRescueMemoKey("2026-08-18", 1_070_620));

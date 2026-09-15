@@ -1141,6 +1141,16 @@ export async function importRxRescueCredit(
         ndc11: r.ndc11,
         source: RXRESCUE,
         payer: "Aytu / IPD (RxRescue)",
+        /*
+         * The programme's own BIN, so the memo settles the programme's claim and not the primary's.
+         *
+         * Measured 15 September 2026 (session 2): on 23 of September's 26 RxRescue fills the site holds two claims — the
+         * primary plan's and this programme's — and without a BIN the matcher has two candidates at its tightest level
+         * and an amount (assistance plus top-off) that equals neither claim's remit. It rightly refused to choose, so
+         * every one of those memos would have been recorded against no claim at all: the top-off would never reach the
+         * fill, the loss list would never clear, and the fill would go on saying a top-off was expected after it was paid.
+         */
+        bin: TOP_OFF_BIN,
         amountCents: r.totalCreditCents,
         /*
          * Only the top-off is money the claim did not already carry.
