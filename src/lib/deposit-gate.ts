@@ -175,7 +175,37 @@ export function matchHeldDeposit(
   claimed: Set<string>,
 ): BankDepositMatch {
   const candidates = held.filter((h) => !claimed.has(h.id) && h.amountCents === line.amountCents && withinWindow(h.receivedOn, line.on));
-  if (candidates.length === 0) return { kind: "none" };
+  if (candidates.length === 0) {
+    /*
+     * Two or three receipts the bank paid in as one deposit — two card batches settled together, say.
+     * No single receipt matches, so this used to bank the line as new money on top of both (Session 2,
+     * money map checkpoint 1, case D, proven on a snapshot). Which receipts they are cannot be recorded
+     * against one bank line, so the line goes to a person, named — never banked.
+     */
+    const pool = held.filter((h) => !claimed.has(h.id) && h.amountCents > 0 && h.amountCents < line.amountCents && h.receivedOn && h.receivedOn <= line.on && withinWindow(h.receivedOn, line.on));
+    const combos: HeldForBank[][] = [];
+    for (let i = 0; i < pool.length && combos.length < 5; i++) {
+      for (let j = i + 1; j < pool.length && combos.length < 5; j++) {
+        const two = pool[i].amountCents + pool[j].amountCents;
+        if (two === line.amountCents) combos.push([pool[i], pool[j]]);
+        else if (two < line.amountCents) {
+          for (let k = j + 1; k < pool.length && combos.length < 5; k++) {
+            if (two + pool[k].amountCents === line.amountCents) combos.push([pool[i], pool[j], pool[k]]);
+          }
+        }
+      }
+    }
+    if (combos.length === 0) return { kind: "none" };
+    const describeAll = (c: HeldForBank[]) => c.map((h) => `${money(h.amountCents)}${h.payer ? ` from ${h.payer}` : ""}${h.receivedOn ? ` on ${h.receivedOn}` : ""}`).join(" + ");
+    return {
+      kind: "ambiguous",
+      candidates: combos[0],
+      why:
+        combos.length === 1
+          ? `This deposit is exactly ${describeAll(combos[0])}, already banked separately — probably paid in together. Nothing is banked; confirm it by hand.`
+          : `This deposit equals more than one combination of receipts already banked (${combos.map(describeAll).join("; or ")}). Nothing is banked; it needs a person.`,
+    };
+  }
   const describe = (h: HeldForBank) =>
     `already banked as ${money(h.amountCents)}${h.payer ? ` from ${h.payer}` : ""}${h.reference ? ` (${h.reference})` : ""}${h.receivedOn ? ` on ${h.receivedOn}` : ""}`;
   let pick = candidates;

@@ -141,7 +141,12 @@ export async function readBankStatement(fd: FormData) {
       why = match.why;
       unplaced++;
     } else if (placement.kind === "deposit") {
-      receiptId = (await addCashReceipt({ month: line.on.slice(0, 7), kind: placement.receiptKind, amountCents: line.amountCents, payer: placement.payer, notes: `From the bank statement: ${line.description}`, createdBy: user.id })).id;
+      receiptId = (await addCashReceipt({ month: line.on.slice(0, 7), kind: placement.receiptKind, amountCents: line.amountCents, payer: placement.payer, notes: `From the bank statement: ${line.description}`, receivedOn: line.on, createdBy: user.id })).id;
+      /*
+       * `receivedOn` so a feed forwarded after the statement can see this deposit and not bank it again.
+       * Without it the deposit gate's window query skipped it: a card batch forwarded after the statement
+       * was counted twice (Session 2, money map checkpoint 1, case C, proven on a snapshot).
+       */
       deposits++;
       depositCents += line.amountCents;
     } else if (placement.kind === "pays_bill") {
