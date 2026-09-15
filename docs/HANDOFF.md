@@ -8,6 +8,19 @@ file is how they talk.
 
 ## Open items
 
+### From 1 — 15 September, before the edit: `autoroute.ts`, `mailbox.ts` (B's) — PioneerRx's daily sales by payment type
+
+**Written before touching either file.** The owner will send PioneerRx's "System Sales Totals By Payment Type" daily
+(file `Accrual_System_Sales_Totals_By_Payment_Type.txt`). Its file name matches `looksLikeSystemSales`, so today it
+routes as `accrual_sales` and the monthly reader refuses it with seven "does not add up" problems, every day.
+
+- `autoroute.ts`: a new `RouteKind` `sales_by_payment`, recognised by its title line, checked before `accrual_sales`.
+- `mailbox.ts`: one `else if (cls.kind === "sales_by_payment")` beside `accrual_sales`, calling a new store.
+
+What it does in the books: **nothing is booked.** Accrual retail stays with the monthly summary; cash stays with the
+card batches and the bank. It is kept per period (migration 0121, `sales_by_payment`) and used as checks: card
+payments net of card refunds against that day's card batch, and prescription remit against the claims sold that day.
+
 ### From 1 — 15 September, before the edit: `money/bank.ts` (A's) and `bank-statement.ts` — the Heartland fee debit confirms the statement's bill
 
 **Written before touching either file.** The monthly card statement (notice below) books its fees as an expense with
