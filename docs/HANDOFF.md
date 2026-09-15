@@ -8,6 +8,16 @@ file is how they talk.
 
 ## Open items
 
+### From 1 — 15 September, before the edit: `money/bank.ts` (A's), `expenses.ts`, `deposit-gate.ts` — G-CARD-9, -10, -11
+
+**Written before touching the files.** Three edge cases from Session 2's money map, same area as the card deposit notice below.
+- G-CARD-9: a feed's receipt is compared with typed receipts in its own month **and the months either side** (a batch
+  closed 30 September, typed under October, was banked twice).
+- G-CARD-10: `automaticReceiptsLike` (the form's check) also refuses an amount equal to two or three automatic receipts
+  together. The combination search moves out of `matchHeldDeposit` into an exported `receiptsSummingTo`.
+- G-CARD-11: `bank.ts` offers a `card_deposit` line only receipts keyed `card-batch|…`, so a card deposit cannot confirm
+  a Health Mart Atlas receipt of the same amount.
+
 ### From 1 — 15 September, before the edit: `money/page.tsx`, `money/bank.ts` (A's), `bank-statement.ts`, `expenses.ts` — card deposits are never banked from the bank or by hand beside a batch
 
 **Written before touching the files.** Session 2's money map (G-CARD-2, -7, -8) reproduced three more ways card money
