@@ -8,6 +8,21 @@ file is how they talk.
 
 ## Open items
 
+### From 1 — 15 September, before the edit: `money/page.tsx`, `money/bank.ts` (A's), `bank-statement.ts`, `expenses.ts` — card deposits are never banked from the bank or by hand beside a batch
+
+**Written before touching the files.** Session 2's money map (G-CARD-2, -7, -8) reproduced three more ways card money
+is counted twice: a combined deposit read before its batches; a batch banked then the same deposit typed with the form;
+the form first, then the batch. Changes:
+
+- `bank-statement.ts` `placeLine`: an incoming line `readBankDescriptor` reads as `card_settlement` (every scanned
+  Heartland spelling) places as a new kind `card_deposit`, before the generic RETAIL rule.
+- `money/bank.ts`: a `card_deposit` line confirms a card batch receipt or stays unplaced saying which batch report to
+  forward. It never banks — the card batch report is the only door for card takings.
+- `money/page.tsx` `bankIt`: refuses an amount already banked automatically in that month unless "this is different
+  money" is ticked; the unplaced-lines hint stops telling a person to bank card deposits with the form.
+- `deposit-gate.ts` / `expenses.ts` `addCashReceipt`: a feed's receipt is compared with undated receipts typed by hand
+  in the same month, by amount.
+
 ### From 1 — 15 September, before the edit: `money/bank.ts` (A's) — a deposit the statement banks carries its date
 
 **Written before touching the file.** Session 2 proved on a snapshot (money-map checkpoint 1, case C) that a deposit
