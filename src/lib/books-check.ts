@@ -302,11 +302,17 @@ export function countedTwice(i: PLInputs, pl: MonthlyPL): CountedTwice[] {
     rule:
       "A supplier whose own ledger arrives is counted ONLY from it: not their invoices by date, not their PioneerRx deliveries, either of which on top would be the same purchase twice. " +
       "Everyone else is counted from invoice dates exactly as before. Only what has actually CLEARED counts — an invoice still pending is money in the bank, however certain its due date. " +
-      "`countedTwiceInCash` proves it by counting rather than by reasoning, which is what catches the case nobody thought of.",
+      "`countedTwiceInCash` proves it by counting rather than by reasoning, which is what catches the case nobody thought of, and it is run on every month's account rather than only tested.",
     /* Only a question on the cash side; on the accrual one the two records are not alternatives at all. */
     bothPresent: i.basis === "cash" && Boolean(i.cashCogsSays && /actually taken by/.test(i.cashCogsSays)),
     keptOutCents: null,
-    says: i.basis === "cash" ? (i.cashCogsSays ?? "Nothing left the bank for goods that the site can see.") : "Not a cash-account question: the accrual side counts what the month's dispensings cost to buy, whenever they were paid for.",
+    says:
+      i.basis === "cash"
+        ? (i.cashCogsSays ?? "Nothing left the bank for goods that the site can see.") +
+          (i.cashCountedTwice?.length
+            ? ` COUNTED TWICE: ${i.cashCountedTwice.map((x) => `${x.supplier} invoice ${x.invoiceNumber} is in ${x.inBoth.join(" and ")}`).join("; ")}. The figure above is wrong by those invoices.`
+            : " Checked by counting: no purchase reached this month's figure by two routes.")
+        : "Not a cash-account question: the accrual side counts what the month's dispensings cost to buy, whenever they were paid for.",
   });
 
   /*
