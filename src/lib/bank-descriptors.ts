@@ -28,9 +28,10 @@
  * August's arrived as a scan. Its text layer is optical-recognition guesswork: "HRTLAND" comes out
  * as "HRTI-AND" and "HRTTAN D", "FAMILY" as "TAMILY", "10689648" as "106896,48". Every pattern
  * below is therefore matched on squashed letters with the noise removed, and several deliberately
- * accept more than one spelling. That is enough to be useful and it is not enough to keep books on:
- * the bank's own CSV or QFX download has clean descriptors, and getting that instead is worth more
- * than any amount of cleverness here.
+ * accept more than one spelling. On its own that is not enough to keep books on, and it is not asked
+ * to: Emprise cannot export CSV, QFX or OFX (the owner, 15 September), so every figure read from the
+ * scan is proved against the statement's own balances first (scanned-bank-solve.ts), and a line these
+ * patterns do not recognise is left for a person rather than banked.
  *
  * Pure. Every pattern is tested against the real strings the scan produced.
  */
@@ -504,7 +505,8 @@ const RULES: Rule[] = [
      */
     kind: "transfer_in",
     counterparty: "WWFP (drugs sold at cost)",
-    test: /PRESCRIPTION.?TRAN|PRESCRIPTIONTRANSFER|PRESCRI.{0,6}TRAN/,
+    /* The scan spells it PRESCRIPTIONFLRANSFER, PRESCRIPTICNFFRANSFER, PRESERIPTIONTRANSFER, PRESCRIPTIONFLLN5FER (G-BANK-5). */
+    test: /PRESCRIPTION.?TRAN|PRESCRIPTIONTRANSFER|PRESCRI.{0,6}TRAN|PRES.{0,3}PT.{0,3}N.{0,8}FER/,
     side: "in",
     lands: "revenue",
     category: "other",

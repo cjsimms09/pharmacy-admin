@@ -245,3 +245,9 @@ test("REGRESSION: a re-scanned statement whose descriptions read differently pla
   assert.ok(block.includes("onFile"));
   assert.ok(block.indexOf("fresh.push(l)") > block.indexOf("(onFile.get(k) ?? 0) > 0"));
 });
+
+test("REGRESSION: two identical lines in one statement get their own keys (G-BANK-4)", async () => {
+  const text = await readFile("src/app/(app)/money/bank.ts", "utf8");
+  assert.ok(text.includes("key: `${l.key}#${n}`"));
+  assert.ok(text.indexOf("seenKeys") < text.indexOf("const heldKeys"));
+});

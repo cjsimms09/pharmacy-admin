@@ -190,6 +190,17 @@ async function placeStatementLines(
   o: { documentId: string | null; fileName: string; skipped: number; user: { id: string; name: string }; back: string; notes?: string[] },
 ) {
   const { documentId, user, back } = o;
+  /*
+   * Two lines alike in date, amount and description are two lines. They shared one key, the key is unique, and the
+   * second insert threw — aborting the read there and leaving the rest unplaced (Session 2, money map G-BANK-4). A
+   * repeat within the statement is numbered; reading the same statement again numbers it the same way.
+   */
+  const seenKeys = new Map<string, number>();
+  lines = lines.map((l) => {
+    const n = (seenKeys.get(l.key) ?? 0) + 1;
+    seenKeys.set(l.key, n);
+    return n === 1 ? l : { ...l, key: `${l.key}#${n}` };
+  });
   const parsed = { lines };
   const file = { name: o.fileName };
 

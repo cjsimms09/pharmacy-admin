@@ -130,3 +130,10 @@ describe("the owner's answers about August's unnamed lines (Q-BANK-1)", () => {
     assert.match(waits.why, /forward their invoice/);
   });
 });
+
+test("REGRESSION: every scanned spelling of Prescription/TRANSFER is the practice's payment (G-BANK-5)", () => {
+  const ctx4 = { payers: [], suppliers: [], vendors: [], unpaidBills: [], unpaidInvoices: [] };
+  for (const d of ["PrescriptionflRAN S FER", "Prescripticn/FfRANSFER", "PreseriptionTRANSFER", "Prescription/fLLN5FER"]) {
+    assert.equal(placeLines([{ on: "2026-08-10", description: d, amountCents: 100_00, key: d }], ctx4)[0].placement.kind, "deposit", d);
+  }
+});
