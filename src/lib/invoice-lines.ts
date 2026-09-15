@@ -100,8 +100,23 @@ const MCK = new RegExp(
    * pattern that only knew the first shape read no line at all off that invoice, and $91.97 of
    * purchases sat in the site with a total and no items under it.
    */
-  String.raw`^(\d{5}-\d{4}-\d{2}|\d{6}-\d{5})` + // NDC, or a UPC on a front-end item
-    String.raw`(\d{3}-\d{4})` + // McKesson item number
+  /*
+   * And a third: a fourteen-digit GTIN, unhyphenated, with spaces before the item number.
+   *
+   * McKesson prints it for a device sold through the pharmacy counter. On invoice 7657944598, 15
+   * September: "00357599835002   299-2394975096819   2EA FREESTYLE LIBRE 2 PLUS SENSOR   103.92 R
+   * 81.94   163.88". The pattern knew only the two hyphenated shapes, so it failed on the first
+   * character; no other format claimed the line either, so it vanished without being counted as
+   * unreadable. The fifty-five lines left came to $163.88 under the printed total, the
+   * all-or-nothing rule refused every one, and $10,044.80 of purchases reached no drug's cost —
+   * the third time a single line of an unexpected shape has cost a whole McKesson invoice.
+   *
+   * A GTIN-14 carrying a UPC-A is two packaging digits, the UPC's eleven, and a check digit, so the
+   * eleven the `\d{6}-\d{5}` shape already hands to `ndcFromUpc` are characters 2 to 12. Whitespace
+   * before the item number is optional so the two older shapes, which print none, are untouched.
+   */
+  String.raw`^(\d{5}-\d{4}-\d{2}|\d{6}-\d{5}|\d{14})` + // NDC, a UPC on a front-end item, or a GTIN-14
+    String.raw`\s*(\d{3}-\d{4})` + // McKesson item number
     String.raw`\d{9}` + // document number, not kept
     String.raw`\s+(\d+)\*?([A-Z]{2})\s+` + // quantity, an optional asterisk, unit of measure
     String.raw`(.*?)` + // description
@@ -620,7 +635,11 @@ export function parseInvoiceLines(
        * ndcFromUpc — the old reading put $1,040.83 of front-end purchases against eleven digits
        * that are not any drug.
        */
-      const key = /^\d{6}-\d{5}$/.test(ndc) ? ndcFromUpc(ndc, known) : ndc11(ndc);
+      const key = /^\d{14}$/.test(ndc)
+        ? ndcFromUpc(ndc.slice(2, 13), known) // GTIN-14: the UPC's eleven digits sit between the packaging digits and the check digit
+        : /^\d{6}-\d{5}$/.test(ndc)
+          ? ndcFromUpc(ndc, known)
+          : ndc11(ndc);
       // The line's own arithmetic. A description containing something that looks like money would
       // otherwise shift every field after it, and the wrong cost would look perfectly plausible.
       if (!key || !lineAddsUp(quantity, unitCostCents, extendedCents)) {
