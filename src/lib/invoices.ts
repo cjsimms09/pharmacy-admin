@@ -2198,8 +2198,10 @@ export async function setInvoiceDate(id: string, invoiceDate: string, user: { na
 /**
  * The day an invoice was paid, as somebody recorded it.
  *
- * The cash account's cost of goods is drawn from this: until a date is here the invoice is counted
- * on its own date plus the supplier's terms and said to be. Blank clears it.
+ * For a supplier with no ledger feed the cash account's cost of goods counts the invoice in the month
+ * of this date, and on its own invoice date until one is here, and says which (`cash-cogs.ts`). A
+ * ledger-fed supplier's cash comes from its ledger alone, so a date here is kept but moves nothing.
+ * Blank clears it.
  */
 export async function setInvoicePaidOn(id: string, paidOn: string, user: { name: string }): Promise<void> {
   if (paidOn && !/^\d{4}-\d{2}-\d{2}$/.test(paidOn)) throw new Error("That is not a date.");
@@ -2209,6 +2211,55 @@ export async function setInvoicePaidOn(id: string, paidOn: string, user: { name:
     .update(schema.supplierInvoices)
     .set({ paidOn: paidOn || null, basis: `${inv.basis ?? ""} ${paidOn ? `Paid ${paidOn}` : "Payment date cleared"}, entered by ${user.name} on ${todayIso()}.`.trim() })
     .where(eq(schema.supplierInvoices.id, id));
+}
+
+/**
+ * Several invoices marked paid by one payment: a supplier paid by statement (`paid-together.ts` for the rules).
+ *
+ * Refuses, writing nothing, unless the ticked invoices are one supplier's, all have an amount, none is already paid on
+ * another day, and they add to the payment (or the person has said the difference is a discount or credit). Says
+ * whether the supplier's cash comes from its own ledger, where the date moves nothing.
+ */
+export async function markInvoicesPaidTogether(
+  input: { ids: string[]; paidOn: string; paymentCents: number | null; acceptDifference: boolean },
+  user: { name: string; id?: string },
+): Promise<{ ok: true; says: string } | { ok: false; why: string }> {
+  const { checkPaidTogether } = await import("./paid-together");
+  const ids = [...new Set(input.ids.filter(Boolean))];
+  const rows = ids.length
+    ? await db.query.supplierInvoices.findMany({
+        where: inArray(schema.supplierInvoices.id, ids),
+        columns: { id: true, supplier: true, invoiceNumber: true, totalCents: true, paidOn: true, basis: true, invoiceDate: true },
+      })
+    : [];
+  if (rows.length !== ids.length) return { ok: false, why: "One of the ticked invoices no longer exists. Reload the page and tick them again." };
+  const check = checkPaidTogether({ invoices: rows, paidOn: input.paidOn, paymentCents: input.paymentCents, acceptDifference: input.acceptDifference });
+  if (!check.ok) return check;
+
+  const fold = (v: string | null) => (v ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  const ledgerFed = (await db.selectDistinct({ supplier: schema.supplierStatementLines.supplier }).from(schema.supplierStatementLines)).some((l) => fold(l.supplier) === fold(check.supplier));
+  const agreed = check.differenceCents === 0 ? `their total, ${money(check.totalCents)}` : `against their total of ${money(check.totalCents)}, ${money(Math.abs(check.differenceCents))} ${check.differenceCents > 0 ? "more" : "less"}, recorded as a discount or credit`;
+  const note = `Paid ${input.paidOn} with ${rows.length - 1} other invoice${rows.length === 2 ? "" : "s"} by one payment of ${money(check.paymentCents)} (${agreed}), entered by ${user.name} on ${todayIso()}.`;
+  for (const r of rows) {
+    await db.update(schema.supplierInvoices).set({ paidOn: input.paidOn, basis: `${r.basis ?? ""} ${note}`.trim() }).where(eq(schema.supplierInvoices.id, r.id));
+  }
+  await audit({
+    action: "invoice.paid_together",
+    userId: user.id ?? null,
+    userName: user.name,
+    entity: "invoice",
+    entityId: rows[0].id,
+    details: `${rows.length} ${check.supplier} invoices, ${money(check.totalCents)}, paid ${input.paidOn} by ${money(check.paymentCents)}: ${rows.map((r) => r.invoiceNumber ?? r.id).join(", ")}`,
+  });
+  const month = input.paidOn.slice(0, 7);
+  return {
+    ok: true,
+    says:
+      `${rows.length} ${check.supplier} invoice${rows.length === 1 ? "" : "s"} marked paid on ${input.paidOn}: one payment of ${money(check.paymentCents)}, ${agreed}. ` +
+      (ledgerFed
+        ? `${check.supplier}'s cash cost comes from its own ledger, so this date is kept on the invoices and moves nothing in the cash account.`
+        : `The cash account counts them in ${month}.`),
+  };
 }
 
 /**

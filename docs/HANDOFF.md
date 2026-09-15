@@ -14,6 +14,25 @@ file is how they talk.
 third-party cash receipt (IPD applies it against its invoices, so it reaches no bank), keyed `rxrescue-memo|<issued>|<cents>`
 with `rxRescueMemoKey` in `rxrescue-credit.ts`, which IPD's statement reader (session 2) will share. Undo's entry for
 `rxrescue_credit` still keeps what it wrote; only its "writes" and "leaves" sentences now name the cash receipt.
+### From 2 — 15 September, before the edit: `cash-cogs.ts`, `profit-and-loss.ts` (A's), `inventory/invoices/page.tsx`, `invoices.ts` — a supplier invoice counts in the cash cost of the month it is paid, and a statement payment marks several invoices paid at once
+
+**Written before touching those files**, on branch `work/paid-dates`, at session 1's request (cutover C-4 option a,
+`docs/reference/cutover-2026-10-01.md`). The owner, 15 September: *"cash would be the month that we receive it..."*, and of
+the suppliers: *"ipc is per invoice.. believe parmed and ipd are per statement"*.
+- **`cash-cogs.ts`.** A supplier with no ledger feed is counted in the month of the invoice's `paidOn` where one is set,
+  and on its invoice date where not, as today. The two are reported apart, and the account names which suppliers are on
+  which. Ledger-fed suppliers (McKesson) are unchanged: their ledger stays the only authority. PioneerRx receiving with no
+  invoice stays on its invoice date. `countedTwiceInCash` uses the same month rule, or it would pass for the wrong reason.
+- **`profit-and-loss.ts`.** The comment above the cash cost of goods, which records the owner's earlier *"let's just use
+  invoices in September"*, says what changed and why: an invoice with no paid date still counts on its own date, so
+  nobody is asked to key in dates; dates come from the bank statement's rules or one statement-level action.
+- **`inventory/invoices/page.tsx`.** The per-invoice "Paid" form is nested inside the table's send form, which is not
+  valid HTML. It is suspected of never having recorded a date (not proven by a click). It becomes a button with its own
+  `formAction`, as the row's other buttons already are. New action on the same ticked rows: "Mark the ticked invoices
+  paid together", with one date and the amount paid. It refuses when the ticked total differs from the payment, unless a
+  box says the difference is a discount or credit. It also refuses invoices from more than one supplier, and invoices
+  already marked paid on another date.
+- **`invoices.ts`** (2's). The action's rules, with a pure check that the tests hold.
 
 ### From 2 — 15 September, before the edit: `autoroute.ts`, `mailbox.ts`, `inbox-line.ts`, `inbox-undo.ts` (B's), `payer-owed-store.ts`, `fills.ts`, `claims.ts` — Veridikal's monthly reports are read, and a voucher is owed by its programme, not the plan
 
