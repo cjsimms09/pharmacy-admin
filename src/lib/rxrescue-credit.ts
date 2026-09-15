@@ -60,6 +60,14 @@ export type CreditMemo = {
   problems: string[];
 };
 
+/**
+ * The cash receipt key for one Aytu / IPD credit, shared by the memo import and IPD's statement reader: the day it issued and
+ * its amount, the two things both documents print. Their ids for it differ ("C-00004862C20260815" against "599520260903CM").
+ */
+export function rxRescueMemoKey(issuedOn: string, creditCents: number): string {
+  return `rxrescue-memo|${issuedOn}|${Math.abs(Math.round(creditCents))}`;
+}
+
 const HEADERS = ["Transaction ID", "Rx Number", "RxRescue Top Off Amount/Credit", "Total Credit Payment to Pharmacy"];
 
 export function looksLikeRxRescueCredit(text: string, fileName = ""): boolean {

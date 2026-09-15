@@ -1214,6 +1214,40 @@ export async function importRxRescueCredit(
     );
   }
 
+  /*
+   * ── And the cash it is ──────────────────────────────────────────────────────────
+   *
+   * The memo's lines settle claims and move accrual revenue by the top-off, above. Nothing banked it: IPD applies the
+   * credit against its own invoices ("AutoAROffset" on its statement), so no deposit ever reaches the bank and no other
+   * feed would bring it in. On a cash basis that made the IPD invoices the credit paid a cost with no money beside it —
+   * $10,706.20 of them on 3 September alone. The owner, 15 September: the statement's credit is "the top off amounts from
+   * aytu".
+   *
+   * So the whole credit (assistance and top-off: the claims' own amounts arrive no other way) is one third-party cash
+   * receipt on the day the memo issued. IPD's statement names the same credit differently — the memo's id is
+   * "C-00004862C20260815", the statement's "599520260903CM" — but both carry its date and amount ($10,706.20 on 3 September
+   * in each), so the key is those two. IPD's statement reader writes the same key from its credit line, so whichever
+   * arrives first banks it and the other is refused at the gate.
+   */
+  if (memo.memoId && memo.issuedOn && memo.totalCreditCents > 0) {
+    const { addCashReceipt } = await import("./expenses");
+    const { rxRescueMemoKey } = await import("./rxrescue-credit");
+    const banked = await addCashReceipt({
+      month: memo.issuedOn.slice(0, 7),
+      kind: "third_party",
+      amountCents: memo.totalCreditCents,
+      payer: "Aytu / IPD (RxRescue)",
+      notes: `RxRescue credit memo ${memo.memoId}: applied by IPD against its invoices, so it reaches no bank account. Copay assistance and top-off together, across ${memo.rows.length} line${memo.rows.length === 1 ? "" : "s"}.`,
+      sourceKey: rxRescueMemoKey(memo.issuedOn, memo.totalCreditCents),
+      receivedOn: memo.issuedOn,
+      reference: memo.memoId,
+      createdBy: user.name,
+    });
+    if (banked.duplicate && !/already banked from/.test(banked.why)) problems.push(`The memo's ${formatCents(memo.totalCreditCents)} was not banked as cash: ${banked.why}.`);
+  } else if (memo.totalCreditCents > 0) {
+    problems.push("The memo carries no memo id or issue date, so its credit could not be banked as cash; it is applied to the claims only.");
+  }
+
   return { memoId: memo.memoId, applied, alreadyHeld, matched, totalCents, problems, check };
 }
 

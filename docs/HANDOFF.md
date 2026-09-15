@@ -8,6 +8,13 @@ file is how they talk.
 
 ## Open items
 
+### From 1 — 15 September, before the edit: `inbox-undo.ts` (B's) — an RxRescue memo also banks one cash receipt, and undo says so
+
+**Written before touching the file.** The Aytu / IPD credit memo import now banks the memo's whole credit as one
+third-party cash receipt (IPD applies it against its invoices, so it reaches no bank), keyed `rxrescue-memo|<issued>|<cents>`
+with `rxRescueMemoKey` in `rxrescue-credit.ts`, which IPD's statement reader (session 2) will share. Undo's entry for
+`rxrescue_credit` still keeps what it wrote; only its "writes" and "leaves" sentences now name the cash receipt.
+
 ### From 2 — 15 September, before the edit: `autoroute.ts`, `mailbox.ts`, `inbox-line.ts`, `inbox-undo.ts` (B's), `payer-owed-store.ts`, `fills.ts`, `claims.ts` — Veridikal's monthly reports are read, and a voucher is owed by its programme, not the plan
 
 **Written before touching those files**, on branch `work/veridikal`, at session 1's request (money map section 15, design

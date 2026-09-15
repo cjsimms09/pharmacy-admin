@@ -79,10 +79,10 @@ const EFFECTS: Record<string, KindEffect> = {
   },
   rxrescue_credit: {
     short: "pays fills",
-    writes: "payments against the fills the memo names, keyed on the memo's own transaction numbers",
+    writes: "payments against the fills the memo names, keyed on the memo's own transaction numbers, and one cash receipt for the memo's whole credit, keyed on the memo",
     reversal: "kept",
     leaves:
-      "the payments it applied stay against those prescriptions. They were keyed on the memo's transaction numbers, so this file cannot apply them twice — but nothing removes them either.",
+      "the payments it applied stay against those prescriptions, and the memo's cash receipt stays in the cash account. Both were keyed on the memo, so this file cannot apply or bank them twice — but nothing removes them either.",
   },
   on_hand: {
     short: "replaces a day's shelf",
