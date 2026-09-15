@@ -2160,6 +2160,96 @@ it), NCPDP and account references in `src` and script comments, a staff e-mail i
 Two commit messages carry the NCPDP and one the pharmacy e-mail; those cannot be changed without a force push.
 Also real, and not yet replaced: McKesson invoice and ACH numbers in 15 test files. They are business identifiers, not
 patient information, and the change is session 1's call.
+Session 1's scrub of `src` and scripts: 2d451c3, then 6bdeda5 for three zero-padded prescription numbers in comments that
+a second read here found (a count that keeps leading zeros, or wants a word boundary before "FILL1", misses them).
+
+---
+
+## 15. Veridikal — the eVoucher and Denial Conversion client summaries (design, before building)
+
+**Checkpoint 15, part 1: the samples read, and the design, written before the code.** Samples: the owner's
+`eVoucher Program - Client Summary` and `Denial Conversion Activity - Client Summary` workbooks (July 2026 activity).
+Read-only, with every row value masked.
+
+### What the reports are, measured
+
+| measure | eVoucher | Denial Conversion |
+|---|---|---|
+| data rows (negative) | 82 (8) | 22 (6) |
+| every money column = its totals row | yes | yes |
+| Total Due to Pharmacy | **$7,971.34** = the 3 August Veridikal credit | **$3,822.46** = the 11 August Veridikal credit |
+| Deposit Date | one value, 28 July 2026 (an Excel date number) | the same |
+| fills | 1–30 June | 14 May – 29 June |
+| NABP = the pharmacy's NCPDP | every row | every row |
+| tabs | the month and "Total", identical | the same |
+| unnamed six-digit column | distinct on every row (Veridikal's transaction number) | the same |
+| per-row formula, exact on every row | **Total Due = Voucher Amount + eVoucher Fee**; Voucher Amount = Original 3rd Party Copay − Patient Out Of Pocket | **Total Due = Ing Cost Pd by Manufacturer + Denial Conversion Fee** (Fax Admin Fee is $0.00 on every row, so its sign is unknown) |
+
+Both bank descriptors print "VT - 07-28-2026", which is the Deposit Date. So the Deposit Date is Veridikal's batch
+date; the bank dates are 3 and 11 August.
+
+### Three-line reasoning
+
+**The fees.**
+OBSERVATION: the eVoucher Fee and the Denial Conversion Fee are added to what Veridikal pays the pharmacy, on every
+row ($165.00 and $20.00 in July).
+SHOULD BE: a fee paid to the pharmacy for handling a programme's claim is income, not a charge: revenue.
+DIFFERENCE: the first proposal booked them as a revenue offset, which would have subtracted money the pharmacy was
+paid. Revenue instead; no expense category.
+
+**Where the voucher money already is.**
+OBSERVATION: on live, 52 September claims carry a voucher (`evoucher_cents`); 47 paid. Of the paid ones, 25 have
+remit = voucher (3 on RxLocal) and 22 have remit ≠ voucher. On 9 of the 22 with plan money matched, one plan payment
+equals remit − voucher exactly on 7, within $0.14 on 1, and equals the remit on none.
+SHOULD BE: PioneerRx's remit carries the voucher; the plan pays the remit less the voucher, and the programme pays
+the voucher.
+DIFFERENCE: the first design owed the plan its whole remit and the programme the voucher on top, which would have
+billed the voucher twice. And a programme payment attaching to the claim settled the plan's share, making an unpaid
+plan look paid.
+
+**Cash and accrual.**
+OBSERVATION: the Veridikal bank credit is banked from the statement (`direct_payer`, 2d451c3); these reports itemise
+it, to the cent.
+SHOULD BE: cash is counted once, by the bank line. Accrual counts the voucher once, inside the claim's remit, and the
+fee once, as the programme's payment adds it.
+DIFFERENCE: none, if the reports bank nothing and post the voucher with revenue nought.
+
+### The design (confirmed with session 1)
+
+**Reader** (`veridikal-report.ts`, pure). One tab only: the month tab, or "Total" where it is the only one. It refuses
+if two tabs disagree. Each row: transaction number, BIN, PCN, fill date, Rx, NDC, deposit date, amount and fee. Checks,
+each refusing the report:
+- every money column adds to its totals row;
+- each row's formula holds;
+- a non-zero Fax Admin Fee (sign unknown);
+- a row for another NABP.
+
+**Store.** One claim payment per row through `recordClaimPayment`:
+- source `copay_card`; payer "Veridikal (eVoucher)" or "Veridikal (Denial Conversion)";
+- amount = the voucher or the manufacturer's ingredient payment; **revenue = the fee**;
+- received on = the Deposit Date;
+- reference `VERIDIKAL|<programme>|<transaction number>`, held rows counted on a re-read, as AccessHealth does.
+It banks nothing. Undo removes its rows by document.
+
+**Receivables** (`payer-owed-store.ts`; `fills.ts` carries the voucher per payer row):
+- plan share = remit − voucher, floored at nought, settled only by plan payments;
+- voucher share = the voucher, owed by the voucher programme, settled only by `copay_card` payments on that claim;
+- the programme is named by the claim's BIN: RedSail's copay voucher on 028249, Veridikal otherwise.
+  **Inferred**, from the July eVoucher sample carrying no 028249 row and RedSail's voucher paying 028249 claims
+  (section 10). Not proven.
+- A claim with no voucher is unchanged: its payments settle its plan as before.
+- `payerShares` (the fill's economics) is not changed.
+
+### Open before building, said out loud
+
+- **O-VER-1**: 1 claim has remit = voucher ($101.18), yet a plan paid $86.92 against it. Unexplained; OPEN.
+- Denial conversion on September claims: none can be measured. No September report exists, and whether PioneerRx
+  shows a converted denial as remit = ingredient, or remit nought, is unknown. A Veridikal payment on a claim with no
+  voucher share settles no receivable and shows as money beyond what was billed.
+- The fee lands on accrual under "Facilitator and top-off payments", the label later claim-payment money carries.
+  Correct money, imprecise label.
+- Rx-level joins on the samples: impossible, since their fills predate the books. Measured instead with synthetic
+  Veridikal rows on September's voucher claims.
 
 ---
 
