@@ -61,6 +61,17 @@ export type ClaimRow = {
   payerLabel: string | null;
   quantityThousandths: number | null;
   remitCents: number | null;
+  /**
+   * The manufacturer e-voucher PioneerRx records on the claim (`EvoucherAmountPaid`), which the remit already includes.
+   *
+   * Measured on September's voucher claims (money map section 15): where a plan payment is on file it is the remit less
+   * the voucher, never the remit. Who owes what is `claimShares` (payer-owed.ts), which also reads the two below.
+   */
+  evoucherCents?: number | null;
+  /** EvoucherAmountFromMessage: where Veridikal's voucher, or a denial conversion's whole net, is. */
+  evoucherMessageCents?: number | null;
+  /** "RedSail" or "Veridikal", from the message wording; null where not read. */
+  evoucherProgramme?: string | null;
   copayCents: number | null;
   /**
    * What the patient was left owing after this adjudication — the report's "Total", not its "Copay".
@@ -95,6 +106,10 @@ export type FillPayer = {
   groupNumber: string | null;
   name: string | null;
   remitCents: number;
+  /** The voucher fields of this payer's claim, for `claimShares`. Nought and null where there is none. */
+  evoucherCents: number;
+  evoucherMessageCents: number | null;
+  evoucherProgramme: string | null;
   /** What the patient was left owing after this payer adjudicated. */
   copayCents: number;
 };
@@ -371,6 +386,9 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
       groupNumber: r.groupNumber ?? null,
       name: r.pbmName ?? r.payerLabel,
       remitCents: r.remitCents ?? 0,
+      evoucherCents: r.evoucherCents ?? 0,
+      evoucherMessageCents: r.evoucherMessageCents ?? null,
+      evoucherProgramme: r.evoucherProgramme ?? null,
       /*
        * The patient's residual, from the column that actually carries it.
        *

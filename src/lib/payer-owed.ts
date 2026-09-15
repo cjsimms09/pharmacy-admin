@@ -43,6 +43,113 @@
  */
 
 import { normalisePayerName } from "./payer-name";
+import { COPAY_PAYER } from "./copay-remit";
+import { VERIDIKAL_CLAIM_FEE_CENTS, VERIDIKAL_CONVERSION_FEE_CENTS, VERIDIKAL_PAYER, type VeridikalProgram, type VeridikalRow } from "./veridikal-report";
+
+/** The voucher fields a claim carries, as `claims` holds them. */
+export type VoucherFields = {
+  remitCents: number | null;
+  /** EvoucherAmountPaid: where RedSail's switch vouchers carry their amount. */
+  evoucherCents: number | null;
+  /** EvoucherAmountFromMessage: where Veridikal's amount is. */
+  evoucherMessageCents?: number | null;
+  /** "RedSail" or "Veridikal", from the message wording; null where the message has not been read. */
+  evoucherProgramme?: string | null;
+};
+
+export type ClaimShares = {
+  kind: "none" | "redsail_voucher" | "veridikal_evoucher" | "veridikal_conversion";
+  /** What the plan whose BIN is on the claim owes. */
+  planCents: number;
+  /** Who owes the rest, as the programme's own payments name it; null where there is no voucher. */
+  programme: string | null;
+  /** What the programme is expected to pay for this claim. */
+  programmeCents: number;
+  /** Carried inside the claim's net but paid by nobody: a programme's fee. planCents + programmeCents + this = remit. */
+  unpaidFeeCents: number;
+  /** Whether the programme was read off the claim, or taken from which column holds the amount because it was not. */
+  from: "programme" | "column" | null;
+};
+
+/**
+ * Who owes what on one payer's claim, when a manufacturer programme pays part or all of it. The owner, 15 September:
+ * "the evoucher is a secondary". The claim's net (NetAmountPaid, the remit) includes the programme's money, and the three
+ * cases below were measured on PioneerRx and the programmes' own reports:
+ *
+ *   RedSail voucher        plan = net − voucher                   RedSail pays the voucher (EvoucherAmountPaid)
+ *   Veridikal eVoucher     plan = net − message − $2.50           Veridikal pays message + $2.50: the eVoucher Fee is $2.50
+ *                                                                 on all 74 paid and 8 reversed rows of its report, returning
+ *                                                                 the $2.50 the claim carries
+ *   Veridikal conversion   plan = $0; the message is the whole    Veridikal pays net − $0.50: ingredient + a $2.00 fee, where
+ *                          net (a denied claim a manufacturer     the claim carries ingredient + $2.50 (P-5, on every row of
+ *                          paid, recorded under a plan's BIN)     the Denial Conversion sample). The $0.50 is paid by nobody.
+ *
+ * Nothing is added: the shares and the unpaid fee add back to the net, which stays the claim's one figure. An amount
+ * larger than the net is capped at it rather than billing more than the claim carries.
+ *
+ * ── A claim whose message has not been read ──
+ *
+ * Measured 15 September on live: no claim yet has `evoucher_programme` or `evoucher_message_cents` (the pull writes them
+ * from 16 September), and all 53 voucher claims carry their amount in `evoucher_cents`. PioneerRx puts RedSail's amount in
+ * that column and Veridikal's in the message column (zero in `evoucher_cents` on 66 of 67 Veridikal claims), and
+ * September has no Veridikal voucher fill. So where the programme is not read, the column decides, and `from` says so.
+ */
+export function claimShares(c: VoucherFields): ClaimShares {
+  const remit = c.remitCents ?? 0;
+  const paid = Math.max(0, c.evoucherCents ?? 0);
+  const message = Math.max(0, c.evoucherMessageCents ?? 0);
+  const none: ClaimShares = { kind: "none", planCents: remit, programme: null, programmeCents: 0, unpaidFeeCents: 0, from: null };
+  if (remit <= 0 || (paid === 0 && message === 0)) return none;
+  const read = c.evoucherProgramme === "RedSail" || c.evoucherProgramme === "Veridikal" ? c.evoucherProgramme : null;
+  const programme = read ?? (message > 0 ? "Veridikal" : "RedSail");
+  const from = read ? "programme" : "column";
+  const cap = (n: number) => Math.min(n, remit);
+
+  if (programme === "RedSail") {
+    const voucher = cap(paid || message);
+    return { kind: "redsail_voucher", planCents: remit - voucher, programme: COPAY_PAYER, programmeCents: voucher, unpaidFeeCents: 0, from };
+  }
+  const amount = message || paid;
+  if (amount >= remit) {
+    const fee = Math.min(remit, VERIDIKAL_CLAIM_FEE_CENTS - VERIDIKAL_CONVERSION_FEE_CENTS);
+    return { kind: "veridikal_conversion", planCents: 0, programme: VERIDIKAL_PAYER.denial_conversion, programmeCents: remit - fee, unpaidFeeCents: fee, from };
+  }
+  const share = cap(amount + VERIDIKAL_CLAIM_FEE_CENTS);
+  return { kind: "veridikal_evoucher", planCents: remit - share, programme: VERIDIKAL_PAYER.evoucher, programmeCents: share, unpaidFeeCents: 0, from };
+}
+
+/** The part of a programme's payment beyond what its claim carries: new revenue, with the payment's sign (never −0). */
+export function newRevenueCents(paidCents: number, carriedCents: number): number {
+  const beyond = Math.max(0, Math.abs(paidCents) - carriedCents);
+  return beyond === 0 ? 0 : Math.sign(paidCents) * beyond;
+}
+
+/**
+ * How much of one Veridikal row the claim it settles already carries in its net: the part of the payment that is not new
+ * revenue. Revenue is `sign × max(0, |Total Due| − this)`.
+ *
+ *   eVoucher on a Veridikal eVoucher claim           voucher + $2.50, so voucher + the $2.50 fee adds nothing
+ *   conversion on a Veridikal conversion claim       the whole net, so ingredient + the $2.00 fee adds nothing (and is $0.50
+ *                                                    short of it, which is a fee, not revenue given back)
+ *
+ * Where the claim's programme is not read or says otherwise, the row itself is asked whether it describes this claim: an
+ * eVoucher row whose plan share, voucher and $2.50 add to the net, or a conversion row whose ingredient and $2.50 do. If
+ * neither, the claim does not carry this money and all of it is new, as `copay-remit-store.ts` counts a voucher with no
+ * claim. `newRevenueCents` is the arithmetic, signed so a reversal takes back what its row added and no more.
+ */
+export function carriedForVeridikalRow(program: VeridikalProgram, row: Pick<VeridikalRow, "paymentCents" | "thirdPartyDueCents">, claim: VoucherFields): number {
+  const shares = claimShares(claim);
+  const remit = claim.remitCents ?? 0;
+  if (program === "evoucher") {
+    if (shares.kind === "veridikal_evoucher") return shares.programmeCents;
+    const payment = Math.abs(row.paymentCents);
+    if (row.thirdPartyDueCents !== null && row.thirdPartyDueCents + payment + VERIDIKAL_CLAIM_FEE_CENTS === remit) return payment + VERIDIKAL_CLAIM_FEE_CENTS;
+    return 0;
+  }
+  if (shares.kind === "veridikal_conversion") return remit;
+  if (Math.abs(row.paymentCents) + VERIDIKAL_CLAIM_FEE_CENTS === remit) return remit;
+  return 0;
+}
 
 /** One payer's claim on one fill: what it said it would pay. */
 export type Receivable = {

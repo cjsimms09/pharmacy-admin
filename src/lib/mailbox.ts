@@ -935,6 +935,16 @@ export async function importRecognised(
       const r = await fileAccessHealthPayment({ text: pdfText(buf), documentId: filed?.documentId ?? null, fileName }, { name: ctx.userName ?? "Automatic check", id: ctx.userId ?? undefined });
       routeResult = r.refused ? `Held, nothing stored: ${r.says}` : r.says;
       imported = !r.refused && r.posted > 0;
+    } else if (cls.kind === "veridikal_report") {
+      /*
+       * Veridikal's itemised ACH: a claim payment per row, revenue only beyond what the claim carries, never banked (the bank statement banks the
+       * Veridikal credit). Before the vendor-bill rule, as the other forwarded payment reports are.
+       */
+      const { fileVeridikalReport } = await import("./veridikal-report-store");
+      const { readSheets } = await import("./xlsx");
+      const r = await fileVeridikalReport({ sheets: readSheets(buf), documentId: filed?.documentId ?? null, fileName }, { name: ctx.userName ?? "Automatic check", id: ctx.userId ?? undefined });
+      routeResult = r.refused ? `Held, nothing stored: ${r.says}` : r.says;
+      imported = !r.refused && r.posted > 0;
     } else if (await vendorBill(from)) {
       /*
        * A bill from somebody the pharmacy has told us about.

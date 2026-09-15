@@ -153,6 +153,12 @@ const EFFECTS: Record<string, KindEffect> = {
     leaves:
       "payments against those fills, which this site can take back out. No deposit: the payer payment report and the EFT notice bank that money. If the same EFT's 835 is also on file, it posted nothing while these rows stood — re-route it afterwards so its claims are posted again.",
   },
+  veridikal_report: {
+    short: "pays vouchers, banks nothing",
+    writes: "a payment against each claim the Veridikal summary names, counting as revenue only what the claim did not already carry; nothing on the cash account",
+    reversal: "removable",
+    leaves: "payments against those fills, which this site can take back out. No deposit: the bank statement banks the Veridikal credit.",
+  },
   remittance_835: {
     short: "pays fills; may bank money",
     /*

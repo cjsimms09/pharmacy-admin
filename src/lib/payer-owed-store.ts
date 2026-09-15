@@ -1,7 +1,7 @@
 import "server-only";
 import { db, schema } from "@/db";
 import { eq } from "drizzle-orm";
-import { owedByPayer, type Receivable, type Received, type OwedSummary } from "./payer-owed";
+import { claimShares, owedByPayer, type Receivable, type Received, type OwedSummary } from "./payer-owed";
 
 /**
  * Loads what each payer owes: its own receivables from the fills, and what has actually arrived.
@@ -65,8 +65,13 @@ export async function owedRows(range?: { from?: string; to?: string }): Promise<
         receivedOn: schema.claimPayments.receivedOn,
         claimId: schema.claimPayments.claimId,
         payer: schema.claimPayments.payer,
+        source: schema.claimPayments.source,
         claimBin: schema.claims.bin,
         claimPayer: schema.claims.pbmName,
+        claimRemit: schema.claims.remitCents,
+        claimVoucher: schema.claims.evoucherCents,
+        claimVoucherMessage: schema.claims.evoucherMessageCents,
+        claimVoucherProgramme: schema.claims.evoucherProgramme,
       })
       .from(schema.claimPayments)
       .leftJoin(schema.claims, eq(schema.claimPayments.claimId, schema.claims.id))
@@ -96,15 +101,24 @@ export async function owedRows(range?: { from?: string; to?: string }): Promise<
     const shares = payerShares(f);
     for (let i = 0; i < f.payers.length; i++) {
       const p = f.payers[i];
+      /*
+       * `payerShares` returns one share per payer in the same order, so the index is the join.
+       * Matching on bin and name instead would merge two rows of a fill billed twice to one BIN.
+       */
+      const remit = shares[i]?.receivableCents ?? p.remitCents;
+      /*
+       * A manufacturer programme's money inside the remit is owed by the programme, not the plan: a RedSail voucher, a
+       * Veridikal eVoucher with its $2.50, or a Veridikal denial conversion's whole net (`claimShares`). Without this, the
+       * programme's payment settled the plan's receivable — an unpaid plan looked paid — and a claim the plan will never
+       * pay any of sat "owed" by the plan for ever. A conversion's unpaid $0.50 is owed by nobody and is left out.
+       */
+      const owes = claimShares({ remitCents: remit, evoucherCents: p.evoucherCents, evoucherMessageCents: p.evoucherMessageCents, evoucherProgramme: p.evoucherProgramme });
+      const planCents = owes.planCents;
       receivables.push({
         bin: p.bin,
         name: p.name ?? null,
         dateFilled: f.dateFilled,
-        /*
-         * `payerShares` returns one share per payer in the same order, so the index is the join.
-         * Matching on bin and name instead would merge two rows of a fill billed twice to one BIN.
-         */
-        cents: shares[i]?.receivableCents ?? p.remitCents,
+        cents: planCents,
         /*
          * Asked of the plan register rather than taken off the fill. `Fill.cashPlan` is true when
          * the whole fill was cash-priced; a coordinated fill can carry one cash plan and one that
@@ -112,12 +126,22 @@ export async function owedRows(range?: { from?: string; to?: string }): Promise<
          */
         cashPlan: cashPlanFor(p.bin, p.pcn, plans) !== null,
       });
+      if (owes.programme && owes.programmeCents > 0) {
+        receivables.push({ bin: null, name: owes.programme, dateFilled: f.dateFilled, cents: owes.programmeCents, cashPlan: false });
+      }
     }
   }
 
   const received: Received[] = payments.map((p) => ({
-    bin: p.claimBin,
-    payer: p.claimPayer ?? p.payer,
+    /*
+     * A programme's payment on a claim the programme owes part of settles the programme's share, never the plan; a plan's
+     * payment on the same claim settles the plan, as before. It settles under the payer the payment itself names
+     * (RedSail, Veridikal eVoucher or Veridikal Denial Conversion), so a payment from one programme on a claim read as the
+     * other's shows as over on one line and owed on the other rather than quietly settling the wrong one.
+     */
+    ...(p.source === "copay_card" && claimShares({ remitCents: p.claimRemit, evoucherCents: p.claimVoucher, evoucherMessageCents: p.claimVoucherMessage, evoucherProgramme: p.claimVoucherProgramme }).programme !== null
+      ? { bin: null, payer: p.payer }
+      : { bin: p.claimBin, payer: p.claimPayer ?? p.payer }),
     cents: p.amountCents,
     receivedOn: p.receivedOn,
     /*

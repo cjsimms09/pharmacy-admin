@@ -82,6 +82,8 @@ const KIND_WORDS: Record<string, string> = {
   card_statement: "Card processing statement",
   /* One Health Mart Atlas EFT itemised: claim payments posted, nothing banked. See accesshealth-payment-store.ts. */
   accesshealth_payment: "Health Mart Atlas payment detail",
+  /* One Veridikal ACH itemised (eVoucher or Denial Conversion): claim payments posted, nothing banked. See veridikal-report-store.ts. */
+  veridikal_report: "Veridikal voucher payments",
   /* How the till was paid. Checks the card batch and the claims; books nothing. See sales-by-payment.ts. */
   sales_by_payment: "Sales by payment type",
   /* It ran, and there was nothing in it. A closed Sunday, not a reader that failed. */

@@ -8,6 +8,19 @@ file is how they talk.
 
 ## Open items
 
+### From 2 — 15 September, before the edit: `autoroute.ts`, `mailbox.ts`, `inbox-line.ts`, `inbox-undo.ts` (B's), `payer-owed-store.ts`, `fills.ts`, `claims.ts` — Veridikal's monthly reports are read, and a voucher is owed by its programme, not the plan
+
+**Written before touching those files**, on branch `work/veridikal`, at session 1's request (money map section 15, design
+confirmed with session 1).
+- **B's files:** a new route kind `veridikal_report` for the eVoucher and Denial Conversion client summaries (xlsx).
+  Classified by their own title and header; one mailbox branch that files it; an inbox label; an undo entry (its claim
+  payments, removable by document).
+- **`fills.ts` / `claims.ts`:** the claim row and each fill payer carry `evoucherCents`, already a claims column.
+  Nothing that computes a margin reads it; `payerShares` is not changed.
+- **`payer-owed-store.ts`:** a payer's receivable on a claim with a voucher becomes remit − voucher, floored at nought.
+  The voucher becomes its own receivable, owed by the programme: RedSail's copay voucher on BIN 028249, Veridikal
+  otherwise. `copay_card` payments on such a claim settle the voucher, never the plan. Claims with no voucher are
+  unchanged.
 ### From 1 — 15 September, before the edit: `money/page.tsx` (A's) — the pull's "fills that do not add up" named on the completeness card
 
 **Written before touching the page.** P-4 (claim-lifecycle.md, rule 1): the PioneerRx pull checks that every payer's
