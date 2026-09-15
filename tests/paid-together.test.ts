@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { checkPaidTogether, paymentCentsFrom, type PaidTogetherInvoice } from "../src/lib/paid-together";
+import { checkAllocations, checkPaidTogether, paymentCentsFrom, type PaidTogetherInvoice } from "../src/lib/paid-together";
 
 /*
  * A statement payment marking several invoices paid. The owner, 15 September: "believe parmed and ipd are per statement".
@@ -68,6 +68,58 @@ describe("marking a statement's invoices paid by one payment", () => {
 
   test("a credit memo on the statement counts against the total", () => {
     assert.equal(checkPaidTogether({ invoices: [inv("1", 50_000), inv("2", -5_000)], paidOn: DAY, paymentCents: 45_000, acceptDifference: false }).ok, true);
+  });
+});
+
+/*
+ * A payment that names its own amounts: IPD's statement pays one invoice $1,125.36 on 19 August and the remaining
+ * $2,152.03 on 3 September, by two credit-memo offsets. Figures from that shape, invoice numbers invented.
+ */
+describe("a payment that says what it put against each invoice", () => {
+  const big = inv("1", 327_739, { supplier: "IPD" });
+  const other = inv("2", 100_000, { supplier: "IPD" });
+  const none: Record<string, number> = {};
+
+  test("part of an invoice is allowed: it is not paid until later payments finish it", () => {
+    const r = checkAllocations({ invoices: [big], allocations: [{ invoiceId: "1", amountCents: 112_536 }], allocatedAlready: none, paidOn: "2026-08-19", paymentCents: 112_536, acceptDifference: false });
+    assert.deepEqual(r, { ok: true, supplier: "IPD", allocatedCents: 112_536, differenceCents: 0 });
+  });
+
+  test("the rest of it is allowed on a later day", () => {
+    const r = checkAllocations({ invoices: [big], allocations: [{ invoiceId: "1", amountCents: 215_203 }], allocatedAlready: { "1": 112_536 }, paidOn: "2026-09-03", paymentCents: 215_203, acceptDifference: false });
+    assert.equal(r.ok, true);
+  });
+
+  test("more than is left owing is refused, which is what stops one cost counting in two months", () => {
+    const r = checkAllocations({ invoices: [big], allocations: [{ invoiceId: "1", amountCents: 215_204 }], allocatedAlready: { "1": 112_536 }, paidOn: "2026-09-03", paymentCents: 215_204, acceptDifference: false });
+    assert.equal(r.ok, false);
+    assert.match(r.ok ? "" : r.why, /already paid.*cannot pay more than is owed/s);
+  });
+
+  test("an invoice already marked paid with no payment behind it is not allocated again", () => {
+    const paidByBank = inv("3", 50_000, { supplier: "IPD", paidOn: "2026-09-01" });
+    const r = checkAllocations({ invoices: [paidByBank], allocations: [{ invoiceId: "3", amountCents: 50_000 }], allocatedAlready: none, paidOn: "2026-09-03", paymentCents: 50_000, acceptDifference: false });
+    assert.match(r.ok ? "" : r.why, /already marked paid on 2026-09-01/);
+  });
+
+  test("the amounts must add up to the payment unless a difference is declared", () => {
+    const parts = [{ invoiceId: "1", amountCents: 112_536 }, { invoiceId: "2", amountCents: 100_000 }];
+    const r = checkAllocations({ invoices: [big, other], allocations: parts, allocatedAlready: none, paidOn: "2026-08-19", paymentCents: 200_000, acceptDifference: false });
+    assert.match(r.ok ? "" : r.why, /the payment is \$2,000\.00 and what it puts against invoices comes to \$2,125\.36/i);
+    assert.equal(checkAllocations({ invoices: [big, other], allocations: parts, allocatedAlready: none, paidOn: "2026-08-19", paymentCents: 200_000, acceptDifference: true }).ok, true);
+  });
+
+  test("nought, a negative amount, or the same invoice twice is refused", () => {
+    const bad = (allocations: { invoiceId: string; amountCents: number }[]) =>
+      checkAllocations({ invoices: [big, other], allocations, allocatedAlready: none, paidOn: "2026-08-19", paymentCents: 1, acceptDifference: true });
+    assert.equal(bad([{ invoiceId: "1", amountCents: 0 }]).ok, false);
+    assert.equal(bad([{ invoiceId: "1", amountCents: -5 }]).ok, false);
+    assert.match(bad([{ invoiceId: "1", amountCents: 10 }, { invoiceId: "1", amountCents: 20 }]).ok ? "" : "names one invoice twice", /twice/);
+  });
+
+  test("an invoice the payment names that is not on file stops the whole payment", () => {
+    const r = checkAllocations({ invoices: [big], allocations: [{ invoiceId: "1", amountCents: 10 }, { invoiceId: "99", amountCents: 10 }], allocatedAlready: none, paidOn: "2026-08-19", paymentCents: 20, acceptDifference: false });
+    assert.match(r.ok ? "" : r.why, /not on file/);
   });
 });
 

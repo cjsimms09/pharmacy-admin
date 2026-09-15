@@ -40,7 +40,7 @@
  * printing a confident total over a hole.
  */
 import { reconcileCogs, reconcileRevenue, type Check as ReconCheck } from "./reconcile";
-import { cashCostOfGoods } from "./cash-cogs";
+import { cashCostOfGoods, countedTwiceInCash } from "./cash-cogs";
 import { standingLines } from "./standing-math";
 import { todayIso } from "./dates";
 import { formatCents } from "./money";
@@ -208,6 +208,11 @@ export type PLInputs = {
   /** Billed by a supplier whose payments the site can see, and not taken yet. Owed, not spent. */
   notYetTakenCents?: number;
   /**
+   * Any purchase the cash figure could have counted twice, found by counting rather than by reasoning
+   * (`countedTwiceInCash`). Empty is the answer every month should give; `books-check.ts` says so either way.
+   */
+  cashCountedTwice?: { invoiceNumber: string; supplier: string; inBoth: string[] }[];
+  /**
    * The standing costs the month carries so far: payroll and rent by the day, each already reduced
    * to the month's share. Dropped where a real bill from the same vendor is entered for the month.
    */
@@ -272,6 +277,7 @@ export function beforeBooksInputs(month: string, basis: "accrual" | "cash"): PLI
     uninvoicedPurchases: 0,
     cashCogsSays: null,
     notYetTakenCents: 0,
+    cashCountedTwice: [],
     standing: [],
     rebatesCents: null,
     expenses: [],
@@ -803,6 +809,13 @@ export type SharedInputs = {
   byMonth: Map<string, { bills: Awaited<ReturnType<typeof import("./expenses").expensesIn>>; receipts: { kind: string; amountCents: number }[]; rebatesCents: number | null; driverCents: number }>;
   /** The wholesalers' own ledgers: what cleared, when, and under which ACH. */
   statementLines: { supplier: string; invoiceNumber: string; netCents: number; clearingDate: string | null; checkNumber: string | null }[];
+  /**
+   * What each supplier payment put against each invoice, with the day it was paid (`supplier-payments.ts`).
+   *
+   * The cash account counts each of these in its own month, which is the only way an invoice IPD settled in part in one
+   * month and finished in the next is in both for what it really was.
+   */
+  paymentAllocations: { invoiceId: string; paidOn: string; amountCents: number }[];
 };
 
 export async function loadShared(months: string[], basis: "accrual" | "cash"): Promise<SharedInputs> {
@@ -835,12 +848,16 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
    * stops guessing from invoice dates. See cash-cogs.ts.
    */
   const statementLines = await db.select().from(schema.supplierStatementLines);
+  const paymentAllocations = await db
+    .select({ invoiceId: schema.supplierPaymentAllocations.invoiceId, amountCents: schema.supplierPaymentAllocations.amountCents, paidOn: schema.supplierPayments.paidOn })
+    .from(schema.supplierPaymentAllocations)
+    .innerJoin(schema.supplierPayments, eq(schema.supplierPaymentAllocations.paymentId, schema.supplierPayments.id));
   const [sales, cats, fills, suppliers, invoices, lines, counts, payments, standing] = await Promise.all([
     salesMonths(),
     categories(true),
     allFills({ from, to }),
     allSuppliers(true),
-    db.query.supplierInvoices.findMany({ columns: { totalCents: true, paidOn: true, invoiceDate: true, supplierId: true, supplier: true, invoiceNumber: true, documentId: true } }),
+    db.query.supplierInvoices.findMany({ columns: { id: true, totalCents: true, paidOn: true, invoiceDate: true, supplierId: true, supplier: true, invoiceNumber: true, documentId: true } }),
     db.query.invoiceLines.findMany({ where: and(gte(schema.invoiceLines.invoiceDate, from), lte(schema.invoiceLines.invoiceDate, to)), columns: { invoiceDate: true, extendedCents: true } }),
     /*
      * Every count, not just the ones inside the months asked for: a month opens on the last count
@@ -899,6 +916,7 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
     standing,
     pioneerPurchases,
     statementLines,
+    paymentAllocations,
     today: todayIso(),
   };
 }
@@ -1032,7 +1050,20 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
     settled: shared.statementLines,
     invoices,
     receiving: shared.pioneerPurchases,
+    allocations: shared.paymentAllocations,
   });
+  /*
+   * The belt to that braces, run rather than only tested: any purchase this month's cash figure could have counted
+   * twice, found by counting. The owner: "make sure we are not duplicating!!!!! cant stress this enough". It was written
+   * with the rules it checks and then called by nothing, so the books check said it proved something nobody ran.
+   */
+  const cashCountedTwice = countedTwiceInCash({
+    month,
+    settled: shared.statementLines,
+    invoices,
+    receiving: shared.pioneerPurchases,
+    allocations: shared.paymentAllocations,
+  }).map((x) => ({ invoiceNumber: x.invoiceNumber, supplier: x.supplier, inBoth: x.inBoth }));
   const uninvoicedPurchasesCents = cash.fromReceivingCents || null;
   const uninvoiced = { length: cash.fromReceivingCents > 0 ? 1 : 0 };
   const billedPurchasesCents = cash.cents;
@@ -1105,6 +1136,7 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
     invoicesInMonth: billedThisMonth.map((v) => ({ invoiceNumber: v.invoiceNumber, totalCents: v.totalCents, invoiceDate: v.invoiceDate, fingerprint: v.fingerprint })),
     uninvoicedPurchasesCents,
     cashCogsSays: cash.says,
+    cashCountedTwice,
     notYetTakenCents: cash.notYetTakenCents,
     uninvoicedPurchases: uninvoiced.length,
 

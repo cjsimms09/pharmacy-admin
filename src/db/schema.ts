@@ -1014,6 +1014,14 @@ export const supplierInvoices = sqliteTable(
     invoiceNumber: text("invoice_number"),
     /** The date on the invoice, not the date it arrived. */
     invoiceDate: text("invoice_date"),
+    /**
+     * The day the invoice itself says it will be taken (migration 0124).
+     *
+     * Read off the invoice, never worked out here. Parmed prints "Semi mthly 15/EOM" terms and a DUE DATE on every one;
+     * IPD's statement prints one per invoice. It is what says which invoices a single ACH debit pays, so that allocation
+     * comes from the documents rather than from matching sums.
+     */
+    dueOn: text("due_on"),
     schedule: text("schedule", { enum: INVOICE_SCHEDULES }).notNull().default("unknown"),
     /** How the schedule was decided, so a filing can be defended or corrected. */
     basis: text("basis"),
@@ -1090,6 +1098,60 @@ export const supplierInvoices = sqliteTable(
     index("supplier_invoices_date_idx").on(t.invoiceDate),
     index("supplier_invoices_supplier_idx").on(t.supplier),
   ],
+);
+
+export const SUPPLIER_PAYMENT_METHODS = ["offset", "ach", "cheque", "card", "unknown"] as const;
+export const SUPPLIER_PAYMENT_SOURCES = ["hand", "ipd_statement", "parmed_portal", "bank_debit"] as const;
+/** How a payment's allocations were known. "inferred" is reserved: no rule writes it until the owner decides one may. */
+export const SUPPLIER_PAYMENT_BASES = ["document", "hand", "inferred"] as const;
+
+/**
+ * A payment to a supplier: one ACH, cheque or card charge, or one offset against a credit memo (migration 0124).
+ *
+ * The suppliers without a ledger feed pay several invoices at once, and IPD sometimes pays one in part, so a paid date
+ * on the invoice cannot hold it. What the payment put against each invoice is `supplierPaymentAllocations`; the cash
+ * account counts each allocation in the payment's month (cash-cogs.ts).
+ */
+export const supplierPayments = sqliteTable(
+  "supplier_payments",
+  {
+    id: text("id").primaryKey(),
+    supplier: text("supplier").notNull(),
+    /** The day the money left, or the day the offset was applied. */
+    paidOn: text("paid_on").notNull(),
+    /** What the payment was for, as the bank, the portal or the statement prints it. */
+    amountCents: integer("amount_cents").notNull(),
+    method: text("method", { enum: SUPPLIER_PAYMENT_METHODS }).notNull().default("unknown"),
+    /** The supplier's own number for it: IPD's Payment Ref, Parmed's payment number. */
+    reference: text("reference"),
+    /** An offset's credit memo, as the statement names it. */
+    creditMemo: text("credit_memo"),
+    source: text("source", { enum: SUPPLIER_PAYMENT_SOURCES }).notNull(),
+    basis: text("basis", { enum: SUPPLIER_PAYMENT_BASES }).notNull().default("document"),
+    /** What makes a second reading of the same payment a no-op. */
+    sourceKey: text("source_key").notNull(),
+    documentId: text("document_id"),
+    notes: text("notes"),
+    createdBy: text("created_by").notNull(),
+    createdAt: text("created_at").notNull().default(now()),
+  },
+  (t) => [uniqueIndex("supplier_payments_source_key_idx").on(t.sourceKey), index("supplier_payments_paid_on_idx").on(t.paidOn)],
+);
+
+/** One payment's amount against one invoice. A payment pays many invoices; an invoice can be paid by many payments. */
+export const supplierPaymentAllocations = sqliteTable(
+  "supplier_payment_allocations",
+  {
+    id: text("id").primaryKey(),
+    paymentId: text("payment_id")
+      .notNull()
+      .references(() => supplierPayments.id, { onDelete: "cascade" }),
+    invoiceId: text("invoice_id")
+      .notNull()
+      .references(() => supplierInvoices.id, { onDelete: "cascade" }),
+    amountCents: integer("amount_cents").notNull(),
+  },
+  (t) => [index("supplier_payment_allocations_payment_idx").on(t.paymentId), uniqueIndex("supplier_payment_allocations_once_idx").on(t.paymentId, t.invoiceId)],
 );
 
 /*

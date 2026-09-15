@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { cashCostOfGoods, countedTwiceInCash, type SettledLine } from "../src/lib/cash-cogs";
+import { cashCostOfGoods, cashPortionsOf, countedTwiceInCash, type SettledLine } from "../src/lib/cash-cogs";
 
 /**
  * September 2026, in miniature, with the figures the real month actually carried.
@@ -160,6 +160,44 @@ describe("cash cost of goods by the day an invoice was paid", () => {
     assert.equal(oct.settledCents, 99_999);
     assert.ok(!oct.onPaidDates.includes("Mckesson"));
     assert.equal(oct.cents, 99_999 + 40_000 + 30_000);
+  });
+
+  /*
+   * IPD settles an invoice by offset against an Aytu credit memo, and sometimes across two of them: its statement shows
+   * one $3,277.39 invoice paid $1,125.36 on 19 August and $2,152.03 on 3 September. Invented invoice number.
+   */
+  describe("an invoice paid across two months", () => {
+    const split = { id: "v1", supplier: "IPD", invoiceNumber: "T-5001", invoiceDate: "2026-08-24", totalCents: 327_739, paidOn: "2026-09-03" };
+    const allocations = [
+      { invoiceId: "v1", paidOn: "2026-08-19", amountCents: 112_536 },
+      { invoiceId: "v1", paidOn: "2026-09-03", amountCents: 215_203 },
+    ];
+    const cash = (month: string) => cashCostOfGoods({ month, settled: [], invoices: [split], receiving: [], allocations });
+
+    test("each part counts in the month it was paid, not the whole in one", () => {
+      assert.equal(cash("2026-08").fromPaidDatesCents, 112_536);
+      assert.equal(cash("2026-09").fromPaidDatesCents, 215_203);
+      assert.equal(cash("2026-08").cents! + cash("2026-09").cents!, 327_739);
+    });
+
+    test("nothing is left in the month of its invoice date", () => {
+      assert.equal(cash("2026-08").fromInvoiceDatesCents, 0);
+      assert.equal(cash("2026-09").fromInvoiceDatesCents, 0);
+    });
+
+    test("what no payment has covered yet stands on the invoice date, and the portions still add to the total", () => {
+      const partly = cashPortionsOf(split, [allocations[0]]);
+      assert.deepEqual(partly, [
+        { month: "2026-08", cents: 112_536, paid: true },
+        { month: "2026-08", cents: 215_203, paid: false },
+      ]);
+      assert.equal(partly.reduce((n, p) => n + p.cents, 0), 327_739);
+    });
+
+    test("an invoice with no payments behind it is unchanged: one portion, on its paid or invoice date", () => {
+      assert.deepEqual(cashPortionsOf(split, []), [{ month: "2026-09", cents: 327_739, paid: true }]);
+      assert.deepEqual(cashPortionsOf({ ...split, paidOn: null }, []), [{ month: "2026-08", cents: 327_739, paid: false }]);
+    });
   });
 
   test("the double-count check reads the same months as the figure", () => {

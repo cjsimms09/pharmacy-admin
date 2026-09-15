@@ -49,6 +49,8 @@ export type SettledLine = {
 };
 
 export type InvoiceLike = {
+  /** Needed only to join payments to it; absent on the fixtures that predate supplier payments. */
+  id?: string;
   supplier: string | null;
   invoiceNumber: string | null;
   invoiceDate: string | null;
@@ -56,6 +58,9 @@ export type InvoiceLike = {
   /** The day it was paid, where the bank statement or a person recorded it. */
   paidOn?: string | null;
 };
+
+/** What one payment put against one invoice, and the day that payment was made (`supplier-payments.ts`). */
+export type PaidAllocation = { invoiceId: string; paidOn: string; amountCents: number };
 export type PurchaseLike = { supplier: string | null; invoiceNumber: string | null; invoiceDate: string | null; totalCents: number | null };
 
 /**
@@ -65,6 +70,26 @@ export type PurchaseLike = { supplier: string | null; invoiceNumber: string | nu
 export function cashMonthOf(v: Pick<InvoiceLike, "invoiceDate" | "paidOn">): string | null {
   const on = v.paidOn || v.invoiceDate;
   return on ? on.slice(0, 7) : null;
+}
+
+/**
+ * One invoice's cost, split into the months the cash account counts it in.
+ *
+ * An invoice paid by payments that name their amounts (a statement, a portal page) is counted where each of those
+ * payments fell, which is the only way an invoice IPD settled $1,125.36 of in August and $2,152.03 of in September is in
+ * both months for what it really was. What no payment has covered yet stands on the invoice's own date, as an invoice
+ * with no payment at all does — the stand-in, not a claim that the money moved.
+ *
+ * The portions always add back to the invoice's total, so nothing is counted twice and nothing is lost.
+ */
+export function cashPortionsOf(v: InvoiceLike, allocations: PaidAllocation[] = []): { month: string | null; cents: number; paid: boolean }[] {
+  const total = v.totalCents ?? 0;
+  const mine = v.id ? allocations.filter((a) => a.invoiceId === v.id) : [];
+  if (mine.length === 0) return [{ month: cashMonthOf(v), cents: total, paid: Boolean(v.paidOn) }];
+  const portions: { month: string | null; cents: number; paid: boolean }[] = mine.map((a) => ({ month: a.paidOn.slice(0, 7), cents: a.amountCents, paid: true }));
+  const remainder = total - mine.reduce((n, a) => n + a.amountCents, 0);
+  if (remainder !== 0) portions.push({ month: v.invoiceDate ? v.invoiceDate.slice(0, 7) : null, cents: remainder, paid: false });
+  return portions;
 }
 
 export type CashCogs = {
@@ -100,8 +125,11 @@ export function cashCostOfGoods(input: {
   invoices: InvoiceLike[];
   /** PioneerRx deliveries, used only where no invoice and no statement covers them. */
   receiving: PurchaseLike[];
+  /** What each supplier payment put against each invoice, where the site holds payments. */
+  allocations?: PaidAllocation[];
 }): CashCogs {
   const { month, settled, invoices, receiving } = input;
+  const allocations = input.allocations ?? [];
 
   /*
    * Which suppliers the site can see paying.
@@ -137,11 +165,15 @@ export function cashCostOfGoods(input: {
    * One month per invoice, so an invoice is never in two: once a paid date is recorded it leaves the month of its
    * invoice date for the month it was paid. An invoice from before the books that was paid inside them counts there.
    */
-  const otherInvoices = invoices.filter((v) => !covered.has(fold(v.supplier)) && v.totalCents !== null && cashMonthOf(v) === month);
-  const paidInvoices = otherInvoices.filter((v) => v.paidOn);
-  const datedInvoices = otherInvoices.filter((v) => !v.paidOn);
-  const fromPaidDatesCents = paidInvoices.reduce((n, v) => n + (v.totalCents ?? 0), 0);
-  const fromInvoiceDatesCents = datedInvoices.reduce((n, v) => n + (v.totalCents ?? 0), 0);
+  const uncoveredInvoices = invoices.filter((v) => !covered.has(fold(v.supplier)) && v.totalCents !== null);
+  const inMonth = uncoveredInvoices
+    .map((v) => ({ invoice: v, portions: cashPortionsOf(v, allocations).filter((p) => p.month === month) }))
+    .filter((x) => x.portions.length > 0);
+  const otherInvoices = inMonth.map((x) => x.invoice);
+  const paidInvoices = inMonth.filter((x) => x.portions.some((p) => p.paid)).map((x) => x.invoice);
+  const datedInvoices = inMonth.filter((x) => x.portions.some((p) => !p.paid)).map((x) => x.invoice);
+  const fromPaidDatesCents = inMonth.reduce((n, x) => n + x.portions.filter((p) => p.paid).reduce((m, p) => m + p.cents, 0), 0);
+  const fromInvoiceDatesCents = inMonth.reduce((n, x) => n + x.portions.filter((p) => !p.paid).reduce((m, p) => m + p.cents, 0), 0);
 
   /* ── 3. And their deliveries that no invoice ever arrived for ── */
   const invoiceNumbers = new Set(invoices.map((v) => (v.invoiceNumber ?? "").trim().toUpperCase()).filter(Boolean));
@@ -171,7 +203,7 @@ export function cashCostOfGoods(input: {
     );
   }
   if (fromPaidDatesCents > 0)
-    parts.push(`${money(fromPaidDatesCents)} paid to ${onPaidDates.join(", ")} on ${paidInvoices.length} invoice${paidInvoices.length === 1 ? "" : "s"} marked paid this month`);
+    parts.push(`${money(fromPaidDatesCents)} paid to ${onPaidDates.join(", ")} on ${paidInvoices.length} invoice${paidInvoices.length === 1 ? "" : "s"} paid this month`);
   if (fromInvoiceDatesCents > 0)
     parts.push(
       `${money(fromInvoiceDatesCents)} from ${onInvoiceDates.join(", ")}, whose payments this site cannot see: ${datedInvoices.length} invoice${datedInvoices.length === 1 ? "" : "s"} with no paid date recorded, so ${datedInvoices.length === 1 ? "its invoice date stands" : "their invoice dates stand"} in`,
@@ -216,8 +248,10 @@ export function countedTwiceInCash(input: {
   settled: SettledLine[];
   invoices: InvoiceLike[];
   receiving: PurchaseLike[];
+  allocations?: PaidAllocation[];
 }): { invoiceNumber: string; supplier: string; inBoth: string[]; cents: number }[] {
   const { month, settled, invoices, receiving } = input;
+  const allocations = input.allocations ?? [];
   const covered = new Set(settled.map((l) => fold(l.supplier)));
   const key = (n: string | null | undefined) => (n ?? "").trim().toUpperCase();
 
@@ -231,8 +265,8 @@ export function countedTwiceInCash(input: {
   };
 
   for (const l of settled.filter((x) => x.clearingDate?.startsWith(month))) note(l.invoiceNumber, l.supplier, l.netCents, "the wholesaler's own ledger");
-  // The same month rule as the figure: counting the invoice file by invoice date here would check a set the figure never used.
-  for (const v of invoices.filter((x) => !covered.has(fold(x.supplier)) && x.totalCents !== null && cashMonthOf(x) === month))
+  // The same months as the figure: counting the invoice file by invoice date here would check a set the figure never used.
+  for (const v of invoices.filter((x) => !covered.has(fold(x.supplier)) && x.totalCents !== null && cashPortionsOf(x, allocations).some((p) => p.month === month)))
     note(v.invoiceNumber, v.supplier, v.totalCents ?? 0, "the invoice file");
   const invoiceNumbers = new Set(invoices.map((v) => key(v.invoiceNumber)).filter(Boolean));
   const statementNumbers = new Set(settled.map((l) => key(l.invoiceNumber)));

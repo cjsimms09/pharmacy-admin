@@ -15,6 +15,7 @@ import {
   setInvoiceDate,
   setInvoicePaidOn,
   markInvoicesPaidTogether,
+
   forwardInvoices,
   recentForwards,
   parseExpected,
@@ -42,6 +43,7 @@ import {
   invoicesOnFileTwice,
   settleDeliveriesOnReceipt,
 } from "@/lib/invoices";
+import { supplierPayments, allocatedByInvoice, removeSupplierPayment } from "@/lib/supplier-payments";
 import { stillToChase, fromBeforeWeWatched } from "@/lib/invoices-owed";
 import { checkInvoicePrices } from "@/lib/invoice-price-check";
 import { invoiceCompliance, RETENTION_YEARS } from "@/lib/invoice-compliance";
@@ -124,7 +126,7 @@ export default async function InvoicesPage({
   // An empty box and a zero are different answers, so a blank never becomes a filter.
   const dollars = (v: string | undefined) => (v && v.trim() !== "" && Number.isFinite(Number(v)) ? Number(v) : undefined);
 
-  const [rows, review, counts, issues, suppliers, months, sent, s, adoptable, complianceRows] = await Promise.all([
+  const [rows, review, counts, issues, suppliers, months, sent, s, adoptable, complianceRows, payments, allocated] = await Promise.all([
     invoices({
       schedule: active === "all" ? undefined : active,
       text: sp.q,
@@ -148,6 +150,8 @@ export default async function InvoicesPage({
     getSettings(),
     adoptableDocuments(),
     invoiceCompliance(),
+    supplierPayments(),
+    allocatedByInvoice(),
   ]);
   /*
    * Rows whose document is gone.
@@ -328,6 +332,19 @@ export default async function InvoicesPage({
       if (e && typeof e === "object" && "digest" in e) throw e;
       redirect("/inventory/invoices?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not record that date."));
     }
+  }
+
+  /** Takes a payment back out, with the paid dates its allocations set. Nothing ships without the means to correct it. */
+  async function removePayment(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const r = await removeSupplierPayment(String(fd.get("paymentId") ?? ""), u);
+    if (r.ok) {
+      revalidatePath("/inventory/invoices");
+      revalidatePath("/money");
+      revalidatePath("/money/monthly");
+    }
+    redirect(`/inventory/invoices?${r.ok ? "ok" : "error"}=` + encodeURIComponent(r.says));
   }
 
   /**
@@ -1791,7 +1808,22 @@ export default async function InvoicesPage({
                           )}
                         </td>
                         <td className="whitespace-nowrap align-top text-xs">
-                          {canManage ? (
+                          {allocated.has(i.id) ? (
+                            /* A payment on file pays it: the payment owns the date, and part of an invoice can be paid. */
+                            <span className="block text-xs">
+                              {i.paidOn ? (
+                                fmt(i.paidOn)
+                              ) : (
+                                <span className="badge badge-warn" title="One payment has paid part of this invoice. It is paid in full on the day a later payment finishes it.">
+                                  part paid
+                                </span>
+                              )}
+                              <span className="mt-0.5 block text-[11px] text-ink-3">
+                                {money(allocated.get(i.id) ?? 0)}
+                                {i.totalCents !== null && (allocated.get(i.id) ?? 0) !== i.totalCents ? ` of ${money(i.totalCents)}` : ""} by payment
+                              </span>
+                            </span>
+                          ) : canManage ? (
                             /* Inside the table's one form: the id travels on the button, the date under this row's own name. */
                             <span className="flex items-center gap-1">
                               <input type="date" name={`paidOn_${i.id}`} defaultValue={i.paidOn ?? ""} aria-label="Date paid" className="field w-auto py-0.5 text-xs" />
@@ -1986,6 +2018,77 @@ export default async function InvoicesPage({
           </p>
         </Card>
       </form>
+
+      {/*
+        What has actually been paid to a supplier, and which invoices each payment covered.
+
+        The invoice rows show a date; this shows the payment behind it, which is the thing the bank statement can be
+        checked against and the only thing that can hold one invoice paid across two days. Removing one puts its invoices
+        back to unpaid, so a statement read wrongly can be undone.
+      */}
+      {payments.length > 0 && (
+        <Card
+          title="Payments to suppliers"
+          count={payments.length}
+          className="mt-4"
+          subtitle="One payment for several invoices: an ACH, a cheque, or a credit memo applied against them. The cash cost of goods counts each one in the month it was paid."
+        >
+          <div className="overflow-x-auto">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Paid</th><th>Supplier</th><th className="text-right">Amount</th><th>How</th><th>Against</th>{canManage && <th></th>}
+                </tr>
+              </thead>
+              <tbody>
+                {payments.map((p) => {
+                  const against = p.invoices.reduce((n, v) => n + v.amountCents, 0);
+                  return (
+                    <tr key={p.id}>
+                      <td className="whitespace-nowrap align-top text-xs">{fmt(p.paidOn)}</td>
+                      <td className="align-top text-sm">{p.supplier}</td>
+                      <td className="whitespace-nowrap align-top text-right font-mono text-xs">{money(p.amountCents)}</td>
+                      <td className="align-top text-xs text-ink-2">
+                        {p.method === "unknown" ? "not said" : p.method}
+                        {p.reference ? <span className="block font-mono text-[11px] text-ink-3">{p.reference}</span> : null}
+                        {p.creditMemo ? <span className="block text-[11px] text-ink-3">credit memo {p.creditMemo}</span> : null}
+                        <span className="block text-[11px] text-ink-3">
+                          {p.source === "hand" ? "ticked by hand" : `read from ${p.source === "ipd_statement" ? "IPD's statement" : p.source === "parmed_portal" ? "Parmed's payment page" : "the bank statement"}`}
+                        </span>
+                      </td>
+                      <td className="align-top text-xs text-ink-2">
+                        {p.invoices.length} invoice{p.invoices.length === 1 ? "" : "s"}, {money(against)}
+                        {against !== p.amountCents && (
+                          <span className="block text-[11px] text-ink-3">
+                            {money(Math.abs(p.amountCents - against))} {p.amountCents > against ? "more than" : "less than"} the invoices: a discount or credit
+                          </span>
+                        )}
+                        <span className="mt-0.5 block text-[11px] text-ink-3">
+                          {p.invoices.map((v) => `${v.invoiceNumber ?? "no number"} ${money(v.amountCents)}${v.paidInFull ? "" : " (part)"}`).join(", ")}
+                        </span>
+                      </td>
+                      {canManage && (
+                        <td className="whitespace-nowrap align-top">
+                          <form action={removePayment}>
+                            <button
+                              name="paymentId"
+                              value={p.id}
+                              className="btn btn-sm"
+                              title="Removes this payment and the paid dates it set. The invoices go back to unpaid, and the cash account stops counting them in that month."
+                            >
+                              Remove
+                            </button>
+                          </form>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
 
       {onlyUndated && canManage && shown.length > 0 && (
         <Card title="Put a date on each of these" className="mt-4" subtitle="Taken from the invoice itself — the billing date, not the day it arrived.">

@@ -2207,6 +2207,12 @@ export async function setInvoicePaidOn(id: string, paidOn: string, user: { name:
   if (paidOn && !/^\d{4}-\d{2}-\d{2}$/.test(paidOn)) throw new Error("That is not a date.");
   const inv = await db.query.supplierInvoices.findFirst({ where: eq(schema.supplierInvoices.id, id) });
   if (!inv) throw new Error("That invoice no longer exists.");
+  /*
+   * A payment on file owns this invoice's date, and it is the thing the bank can be checked against. Typing over it here
+   * would leave the payment saying one thing and the invoice another, so the payment is removed instead.
+   */
+  const held = await db.query.supplierPaymentAllocations.findFirst({ where: eq(schema.supplierPaymentAllocations.invoiceId, id), columns: { paymentId: true } });
+  if (held) throw new Error("A payment on file pays this invoice, so its date comes from that payment. Remove the payment under “Payments to suppliers” to change it.");
   await db
     .update(schema.supplierInvoices)
     .set({ paidOn: paidOn || null, basis: `${inv.basis ?? ""} ${paidOn ? `Paid ${paidOn}` : "Payment date cleared"}, entered by ${user.name} on ${todayIso()}.`.trim() })
@@ -2239,25 +2245,37 @@ export async function markInvoicesPaidTogether(
   const fold = (v: string | null) => (v ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
   const ledgerFed = (await db.selectDistinct({ supplier: schema.supplierStatementLines.supplier }).from(schema.supplierStatementLines)).some((l) => fold(l.supplier) === fold(check.supplier));
   const agreed = check.differenceCents === 0 ? `their total, ${money(check.totalCents)}` : `against their total of ${money(check.totalCents)}, ${money(Math.abs(check.differenceCents))} ${check.differenceCents > 0 ? "more" : "less"}, recorded as a discount or credit`;
-  const note = `Paid ${input.paidOn} with ${rows.length - 1} other invoice${rows.length === 2 ? "" : "s"} by one payment of ${money(check.paymentCents)} (${agreed}), entered by ${user.name} on ${todayIso()}.`;
-  for (const r of rows) {
-    await db.update(schema.supplierInvoices).set({ paidOn: input.paidOn, basis: `${r.basis ?? ""} ${note}`.trim() }).where(eq(schema.supplierInvoices.id, r.id));
-  }
-  await audit({
-    action: "invoice.paid_together",
-    userId: user.id ?? null,
-    userName: user.name,
-    entity: "invoice",
-    entityId: rows[0].id,
-    details: `${rows.length} ${check.supplier} invoices, ${money(check.totalCents)}, paid ${input.paidOn} by ${money(check.paymentCents)}: ${rows.map((r) => r.invoiceNumber ?? r.id).join(", ")}`,
-  });
+
+  /*
+   * One payment with what it put against each invoice, not a date written on each row. The payment is the thing that can
+   * be shown, checked against the bank and taken back out again; the paid dates follow from its allocations.
+   */
+  const { recordSupplierPayment } = await import("./supplier-payments");
+  const key = createHash("sha256").update([fold(check.supplier), input.paidOn, check.paymentCents, ...ids.slice().sort()].join("|")).digest("hex").slice(0, 32);
+  const recorded = await recordSupplierPayment(
+    {
+      supplier: check.supplier,
+      paidOn: input.paidOn,
+      amountCents: check.paymentCents,
+      source: "hand",
+      basis: "hand",
+      sourceKey: `hand|${key}`,
+      notes: `Ticked on the invoices page by ${user.name} on ${todayIso()}: ${rows.length} invoice${rows.length === 1 ? "" : "s"}, ${agreed}.`,
+      allocations: rows.map((r) => ({ invoiceId: r.id, amountCents: r.totalCents ?? 0 })),
+      acceptDifference: input.acceptDifference,
+    },
+    user,
+  );
+  if (!recorded.ok) return recorded;
+  if (recorded.alreadyHeld) return { ok: true, says: recorded.says };
+
   const month = input.paidOn.slice(0, 7);
   return {
     ok: true,
     says:
       `${rows.length} ${check.supplier} invoice${rows.length === 1 ? "" : "s"} marked paid on ${input.paidOn}: one payment of ${money(check.paymentCents)}, ${agreed}. ` +
       (ledgerFed
-        ? `${check.supplier}'s cash cost comes from its own ledger, so this date is kept on the invoices and moves nothing in the cash account.`
+        ? `${check.supplier}'s cash cost comes from its own ledger, so this payment is kept against the invoices and moves nothing in the cash account.`
         : `The cash account counts them in ${month}.`),
   };
 }
