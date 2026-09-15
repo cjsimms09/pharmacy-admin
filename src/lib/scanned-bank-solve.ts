@@ -53,6 +53,8 @@ export type Unproven = {
   differenceCents: number;
   /** The lines no other document already confirms. */
   lines: { index: number; page: number; section: string; dateText: string; amountText: string; readAsCents: number }[];
+  /** Set where the stretch proved but a line in it is doubtful for another reason; said to the person instead of the difference. */
+  reason?: string;
 };
 
 const CAP = 48;
@@ -333,6 +335,7 @@ export function solveStatement(
 
   const notes: string[] = [];
   const unproven: Unproven[] = [];
+  const correctedDays = new Set<number>();
   const closingOf: number[] = [];
   let before = opening;
   let a = 0;
@@ -379,6 +382,8 @@ export function solveStatement(
     if (b > a) notes.push(`The balance printed for ${iso(balanceDays[b - 1])} ("${table[b - 1].balanceText}") could not be relied on; ${iso(balanceDays[a])} to ${iso(balanceDays[b])} were proved together.`);
     trace(`${iso(balanceDays[a])}..${iso(balanceDays[b])} tier ${taken!.tier} ${taken!.changes.map((c) => `"${lines[c.i].amountText}" -> ${(c.cents / 100).toFixed(2)} (${c.how})`).join("; ")}`);
     for (const ch of taken!.changes) assign[ch.i] = { day: ch.day ?? assign[ch.i].day, cents: ch.cents, how: ch.how === "day" ? assign[ch.i].how : ch.how };
+    /* Days a correction was needed to prove: the only place misreads can have cancelled out. */
+    if (taken!.changes.length > 0) for (let k = a; k <= b; k++) correctedDays.add(balanceDays[k]);
     for (let k = a; k <= b; k++) closingOf[k] = k === b ? taken!.closing : NaN;
     before = [taken!.closing];
     a = b + 1;
@@ -398,6 +403,29 @@ export function solveStatement(
       unproven.splice(k - 1, 2, { from: a0.from, to: b0.to, differenceCents: net, lines: [...a0.lines, ...b0.lines] });
     }
   }
+  /*
+   * Proved, and still doubtful. On August's scan the 11th and 12th proved by three misreads that cancelled: an Access
+   * Health credit read $10 low, a counter deposit $9 high, a McKesson debit $1 high — and the true $36,568.71 was money
+   * another document already showed (Session 2, money map G-BANK-2). A line whose reading is not a known amount while
+   * a one-character alternative is goes to the person, whatever the balances say.
+   */
+  const inUnproven = new Set(unproven.flatMap((u) => u.lines.map((l) => l.index)));
+  const usedAmounts = new Set(assign.map((p) => p.cents));
+  for (let i = 0; i < lines.length; i++) {
+    const cents = assign[i].cents;
+    if (inUnproven.has(i) || known.has(cents) || options.confirmed?.[i] !== undefined || !correctedDays.has(assign[i].day)) continue;
+    /* Not money another line of this statement already is: that known amount is accounted for. */
+    const alternative = [...amountChoices[i], ...digitSwaps(cents)].find((c) => c !== cents && known.has(c) && !usedAmounts.has(c));
+    if (alternative === undefined) continue;
+    unproven.push({
+      from: iso(assign[i].day),
+      to: iso(assign[i].day),
+      differenceCents: 0,
+      lines: [{ index: i, page: lines[i].page, section: lines[i].section, dateText: lines[i].dateText, amountText: lines[i].amountText, readAsCents: sign(i) * cents }],
+      reason: `The balances prove this day, but this line reads ${(cents / 100).toFixed(2)} while ${(alternative / 100).toFixed(2)}, one character away, is money another document already shows. Misreads can cancel out; check the figure printed.`,
+    });
+  }
+  unproven.sort((x, y) => x.from.localeCompare(y.from));
   const closingCents = before[0];
   const unexplained = unproven.reduce((n, u) => n + u.differenceCents, 0);
   const openingCents = closingCents - unexplained - lines.reduce((n, _, i) => n + sign(i) * assign[i].cents, 0);

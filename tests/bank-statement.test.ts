@@ -63,7 +63,12 @@ describe("placing each line", () => {
   const at = (i: number) => placed[i].placement;
   test("deposits: a known payer, a wholesaler paying in, card takings, the facilitator, and a stranger", () => {
     assert.equal(placeLines([lines[3]], { ...ctx, facilitatorPaid: [{ on: lines[3].on, cents: lines[3].amountCents }] })[0].placement.kind, "already_counted");
-    assert.deepEqual([at(0).kind, (at(0) as { payer: string }).payer], ["deposit", "CVS Caremark"]);
+    /*
+     * CHANGED 15 September: a credit that only mentions a plan is no longer banked. Plan money arrives through the PSAO
+     * and is banked from its report; banking by a mention banked $78,726.92 as "City of Wichita" on August's scan (G-BANK-1).
+     */
+    assert.equal(at(0).kind, "unplaced");
+    assert.match(at(0).why, /mentions CVS Caremark/);
     assert.equal((at(1) as { receiptKind: string }).receiptKind, "rebate");
     assert.equal((at(2) as { receiptKind: string }).receiptKind, "retail");
     /* Not banked: the MTF remittances count it (G-MTF-1). With none on file for the day it is left for a person. */
@@ -81,5 +86,28 @@ describe("placing each line", () => {
     const twice = placeLines([lines[5], { ...lines[5], on: "2026-09-07", key: "k2" }], ctx);
     assert.equal(twice[0].placement.kind, "pays_bill");
     assert.equal(twice[1].placement.kind, "unplaced");
+  });
+});
+
+describe("the pharmacy's own name is not a counterparty (G-BANK-1)", () => {
+  const ctx2 = { payers: ["005377 (10000019)- City of Wichita", "Script Care & Tredium Solutions"], suppliers: [], vendors: [], unpaidBills: [], unpaidInvoices: [] };
+  test("REGRESSION: a credit naming WEST WICHITA FAMILY PH is not City of Wichita's money", () => {
+    const p = placeLines([{ on: "2026-08-12", description: "Deposit ST.V6TOS6L7MOO6 WEST WICHITA FAMILY PH", amountCents: 64_558, key: "a" }], ctx2)[0].placement;
+    assert.notEqual(p.kind, "deposit");
+    assert.doesNotMatch(p.why, /City of Wichita/);
+  });
+  test("REGRESSION: 'script' is not found inside 'Prescription'", () => {
+    const p = placeLines([{ on: "2026-08-10", description: "PrescriptionTRANSFER ST.V6TOS6L7MOO6", amountCents: 242_474, key: "b" }], ctx2)[0].placement;
+    assert.doesNotMatch(p.why, /Script Care/);
+  });
+  test("REGRESSION: a PSAO deposit is never banked from the statement", () => {
+    for (const d of ["ACCESS HEALTH/ACCESS HEA 1722734 West Wichita", "ProviderPay/EDI PYMNTS West Wichita"]) {
+      assert.equal(placeLines([{ on: "2026-08-26", description: d, amountCents: 1_233_061, key: d }], ctx2)[0].placement.kind, "psao_deposit");
+    }
+  });
+  test("the Heartland spellings the scan produced are card lines", () => {
+    for (const d of ["HRTI3ND PMT SYS/TXNS/FEES", "HRTTJqN D PMT SYSTTXNS/FEES"]) {
+      assert.equal(placeLines([{ on: "2026-08-12", description: d, amountCents: 366_277, key: d }], ctx2)[0].placement.kind, "card_deposit", d);
+    }
   });
 });

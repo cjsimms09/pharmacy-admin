@@ -243,7 +243,7 @@ async function placeStatementLines(
      * useful is exactly the line most likely to be a deposit a feed already banked, and leaving it on
      * the unplaced pile would hand a person work the receipts on file already answer.
      */
-    const isCredit = placement.kind === "deposit" || placement.kind === "card_deposit" || (placement.kind === "unplaced" && line.amountCents > 0);
+    const isCredit = placement.kind === "deposit" || placement.kind === "card_deposit" || placement.kind === "psao_deposit" || (placement.kind === "unplaced" && line.amountCents > 0);
     const match = isCredit
       ? matchHeldDeposit(
           /* A card deposit confirms only a card batch, never another payer's receipt of the same amount (G-CARD-11). */
@@ -262,6 +262,11 @@ async function placeStatementLines(
     } else if (match.kind === "ambiguous") {
       placedAs = "unplaced";
       why = match.why;
+      unplaced++;
+    } else if (placement.kind === "psao_deposit") {
+      /* Never banked here: the payer payment report and the EFT notice bank PSAO money (G-BANK-1). */
+      placedAs = "unplaced";
+      why = `${placement.why} No payment on file for exactly this amount, so nothing is banked from the line. The payer payment report or the EFT notice banks it: if neither has arrived, forward it; if this deposit is several payments together, tie it by hand.`;
       unplaced++;
     } else if (placement.kind === "card_deposit") {
       /* Never banked here: the card batch report is the one door for card takings. See `placeLine`. */
