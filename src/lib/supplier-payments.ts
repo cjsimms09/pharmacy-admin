@@ -216,6 +216,69 @@ export async function supplierPayments(limit = 50): Promise<SupplierPaymentRow[]
     }));
 }
 
+/**
+ * A wholesaler's debit, turned into a payment where the invoices themselves say it paid them.
+ *
+ * Called by the bank statement when a debit to a supplier finds no payment already on file. The bank says what left and
+ * on which day; the invoices say which of them were due then (`invoice-due-date.ts`); this writes a payment only when
+ * those two agree to the cent, and otherwise writes nothing and says what it saw, so the supplier's own payment page is
+ * what settles it. Idempotent on the bank line's key, so re-reading a statement writes nothing twice.
+ *
+ * Never for a supplier whose own ledger the site reads: there the ledger says what cleared and under which ACH, and a
+ * payment written here would be the same money a second time (`cash-cogs.ts`).
+ */
+export async function paymentFromBankDebit(
+  input: { supplier: string; on: string; amountCents: number; bankLineKey: string; reference?: string | null },
+  user: { name: string; id?: string },
+): Promise<{ ok: true; paymentId: string; alreadyHeld: boolean; says: string } | { ok: false; why: string }> {
+  const { invoicesDueForDebit } = await import("./paid-together");
+  const fold = (v: string | null) => (v ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  /*
+   * This line first, before the invoices are looked at.
+   *
+   * Re-reading a statement asks about a line whose payment is already on file, and its invoices are paid — by this very
+   * payment. Asking the invoices first answered "they are already paid, so this is not what paid them", which is true of
+   * a second debit and nonsense about the same one. Found on the rehearsal, re-reading one statement.
+   */
+  const sourceKey = `bank_debit|${input.bankLineKey}`;
+  const held = await db.query.supplierPayments.findFirst({ where: eq(schema.supplierPayments.sourceKey, sourceKey), columns: { id: true, paidOn: true, amountCents: true } });
+  if (held) {
+    return { ok: true, paymentId: held.id, alreadyHeld: true, says: `That debit of ${money(held.amountCents)} on ${held.paidOn} is already on file as a payment; nothing was written again.` };
+  }
+
+  const ledgerFed = (await db.selectDistinct({ supplier: schema.supplierStatementLines.supplier }).from(schema.supplierStatementLines)).some((l) => fold(l.supplier) === fold(input.supplier));
+  if (ledgerFed) return { ok: false, why: `${input.supplier}'s own ledger says what each ACH covered, so nothing is written from the bank line` };
+
+  const invoices = (await db.query.supplierInvoices.findMany({ columns: { id: true, supplier: true, invoiceNumber: true, totalCents: true, paidOn: true, dueOn: true } })).filter(
+    (v) => fold(v.supplier) === fold(input.supplier),
+  );
+  const already = await allocatedAlready(invoices.map((v) => v.id));
+  const chosen = invoicesDueForDebit({
+    invoices: invoices.map((v) => ({ ...v, allocatedCents: already.get(v.id) ?? 0 })),
+    on: input.on,
+    amountCents: input.amountCents,
+  });
+  if (!chosen.ok) return chosen;
+
+  return recordSupplierPayment(
+    {
+      supplier: input.supplier,
+      paidOn: input.on,
+      amountCents: input.amountCents,
+      method: "ach",
+      reference: input.reference ?? null,
+      source: "bank_debit",
+      /* Every part of it is printed: the invoices name the day they are due, and the bank names the money. */
+      basis: "document",
+      sourceKey,
+      notes: `From the bank statement: ${chosen.invoices.length} invoice${chosen.invoices.length === 1 ? "" : "s"} printing a due date within three days of ${input.on}, coming to the debit exactly.`,
+      allocations: chosen.invoices.map((v) => ({ invoiceId: v.id, amountCents: v.totalCents ?? 0 })),
+    },
+    user,
+  );
+}
+
 /** What each invoice has been paid so far, for the invoice rows: id → cents allocated. */
 export async function allocatedByInvoice(): Promise<Map<string, number>> {
   const rows = await db.select({ invoiceId: schema.supplierPaymentAllocations.invoiceId, amountCents: schema.supplierPaymentAllocations.amountCents }).from(schema.supplierPaymentAllocations);
