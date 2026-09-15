@@ -8,6 +8,18 @@ file is how they talk.
 
 ## Open items
 
+### From 1 — 15 September, before the edit: `money/bank.ts` (A's), `bank-statement.ts`, `claim-payments.ts` — 835s and MTF deposits never bank beside their other door
+
+**Written before touching bank.ts.** Session 2's money map G-835-1 and G-MTF-1:
+- `claim-payments.ts`: a remittance through ProviderPay (Health Mart Atlas and direct payers) or from the facilitator posts
+  claim payments and banks nothing. The payer payment report and EFT notice bank plan money; the MTF payments are read by
+  `profit-and-loss.ts` payment by payment, and a facilitator receipt there drops every MTF payment in the month.
+- `deposit-gate.ts`: an `835|…` receipt is compared by amount without the payer name.
+- `bank-statement.ts` `placeLine` + `money/bank.ts` `matchContext()`: `MatchContext.facilitatorPaid` (MTF claim payments
+  summed by received day). A facilitator credit equal to that day's sum is `already_counted`; otherwise unplaced, saying
+  the remittance for it is not on file. Never banked.
+- Still A's to decide: the per-payment stand-in in `profit-and-loss.ts` (G-MTF-1 (a)).
+
 ### From 1 — 15 September, before the edit: `money/bank.ts` (A's), `expenses.ts`, `deposit-gate.ts` — G-CARD-9, -10, -11
 
 **Written before touching the files.** Three edge cases from Session 2's money map, same area as the card deposit notice below.
