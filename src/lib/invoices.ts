@@ -543,6 +543,45 @@ function isoFrom(us: string): string | null {
  * catalogue the invoice price is compared against, and which supplier's record the invoice is filed
  * under for an inspection.
  */
+export type LinesShortfall =
+  /** Read before `lines_read_cents` existed. Nothing is known about what its lines came to. */
+  | { state: "neverMeasured" }
+  /** Measured, and not one line on it was recognised: a scan, or a layout the reader has not seen. */
+  | { state: "nothingRecognised" }
+  /** Lines were recognised and came to less than the total. */
+  | { state: "short"; readCents: number; shortCents: number }
+  /** Lines were recognised and the invoice total was never read, so there is nothing to fall short of. */
+  | { state: "noTotal"; readCents: number };
+
+/**
+ * What an invoice with a total and no lines kept can say about the lines it did not keep.
+ *
+ * Pure, because it is the difference between an alert that guesses and one that locates. McKesson
+ * 7657944598 was reported as "usually a scan" on 15 September: its 56 recognised lines came to
+ * $9,880.92 against $10,044.80, and the $163.88 between them was two FreeStyle Libre sensors on a
+ * line whose code the reader did not know. The figure finds the line without opening the PDF.
+ *
+ * **What the shortfall is not.** It is the total less what the recognised lines came to, which is
+ * the money the reader could not account for *in the lines* — and an invoice total can carry freight
+ * or a surcharge that no line does. So it is never described as goods: on an invoice with a
+ * charge, part of it is the charge. That was the fault in the prices alert an hour before this was
+ * written, and it would regrow here if the sentence said "unread goods".
+ *
+ * Null means never measured, and zero with nothing recognised is a real answer. They are kept apart.
+ */
+export function linesShortfall(totalCents: number | null, linesReadCents: number | null): LinesShortfall {
+  if (linesReadCents === null) return { state: "neverMeasured" };
+  if (linesReadCents === 0) return { state: "nothingRecognised" };
+  /*
+   * No total, no shortfall. This returned total-or-zero less the read figure, which for a missing
+   * total is a negative "shortfall" of everything read — nonsense that the alert only avoided
+   * because it happens to filter to invoices carrying a total. A pure function must not depend on
+   * a filter in another file staying correct; its test caught it.
+   */
+  if (totalCents === null) return { state: "noTotal", readCents: linesReadCents };
+  return { state: "short", readCents: linesReadCents, shortCents: totalCents - linesReadCents };
+}
+
 export function supplierNamedOn(text: string): string | null {
   /*
    * IPD and IPC print their names in full and nothing else does, so they are unambiguous wherever
@@ -1371,7 +1410,7 @@ export async function writeInvoiceLines(
 
   await db
     .update(schema.supplierInvoices)
-    .set({ linesRead: out.stored, linesUnread: out.unread })
+    .set({ linesRead: out.stored, linesUnread: out.unread, linesReadCents: out.readCents })
     .where(eq(schema.supplierInvoices.id, invoiceId));
   return { read: out.stored, unread: out.unread, reconciles: out.reconciles, readBy };
 }
@@ -1494,7 +1533,7 @@ export async function backfillInvoiceLines(
       const text = textOf(await readFile(doc.storageKey));
       if (!text) {
         // A scan. Recorded as read with nothing found, so it is not asked again every time.
-        await db.update(schema.supplierInvoices).set({ linesRead: 0, linesUnread: 0 }).where(eq(schema.supplierInvoices.id, row.id));
+        await db.update(schema.supplierInvoices).set({ linesRead: 0, linesUnread: 0, linesReadCents: 0 }).where(eq(schema.supplierInvoices.id, row.id));
         unreadable++;
         continue;
       }
@@ -1856,6 +1895,18 @@ export async function invoiceIssues(): Promise<InvoiceIssue[]> {
      * counted as unread either, so that sentence says both rather than guessing one.
      */
     const readNotReconciled = empty.filter((r) => (r.linesUnread ?? 0) > 0);
+    /*
+     * Where the recognised lines' money is on file, say it — one figure locates the missed line far
+     * better than a count of unread rows. Summed across the invoices that have it; the ones read
+     * before the column existed are left out of the sum rather than counted as nothing.
+     */
+    const measured = empty.map((r) => ({ r, s: linesShortfall(r.totalCents, r.linesReadCents) })).filter((x) => x.s.state === "short");
+    const shortCents = measured.reduce((n, x) => n + (x.s.state === "short" ? x.s.shortCents : 0), 0);
+    const shortMoney = `${(shortCents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const located =
+      measured.length === 0
+        ? ""
+        : ` On ${measured.length === 1 ? "one of them" : `${measured.length} of them`} the lines it did recognise come to ${shortMoney} less than the total — the money on the line${measured.length === 1 ? "" : "s"} it missed, and any freight or surcharge on the total with it.`;
     const why =
       readNotReconciled.length === empty.length
         ? `Lines were read on ${empty.length === 1 ? "it" : "every one"} and did not add up to the total, so none were kept. That points at the reader, not the document — a readable copy will not help; the reader needs to learn the line it missed.`
@@ -1867,7 +1918,7 @@ export async function invoiceIssues(): Promise<InvoiceIssue[]> {
       severity: "blocking",
       title: `${empty.length} invoice${empty.length === 1 ? "" : "s"} worth ${money} with no item lines kept`,
       detail:
-        `The total was read off the page and no line under it was kept. ${why} Until ${empty.length === 1 ? "it is" : "they are"} read properly, ` +
+        `The total was read off the page and no line under it was kept. ${why}${located} Until ${empty.length === 1 ? "it is" : "they are"} read properly, ` +
         `nothing on ${empty.length === 1 ? "this invoice" : "these invoices"} reaches the cost of any drug — so what the pharmacy ` +
         `paid per NDC, the rebate ladder and the purchase ratio are every one of them short by ${money} and look complete.`,
       href: "/inventory/invoices?nolines=1",
@@ -2600,7 +2651,23 @@ export async function storeInvoiceLines(
   },
 ): Promise<{ stored: number; unread: number; reconciles: boolean | null; readCents: number }> {
   const { parseInvoiceLines } = await import("./invoice-lines");
-  if (!meta.text || meta.text.length < 200) return { stored: 0, unread: 0, reconciles: null, readCents: 0 };
+  /*
+   * Every way out of here records what it found, on the invoice, before returning.
+   *
+   * Two callers use this, and the one that files a fresh invoice wrote nothing at all when the lines
+   * did not reconcile — the invoice kept a null for lines read and lines unread, which the site reads
+   * as never measured, about an invoice it had just measured and refused. The success path already
+   * wrote its own counts for exactly this reason (see below). Now every path does, including the
+   * figure the refusal alert needs: what the recognised lines came to.
+   */
+  const record = async (r: { stored: number; unread: number; reconciles: boolean | null; readCents: number }) => {
+    await db
+      .update(schema.supplierInvoices)
+      .set({ linesRead: r.stored, linesUnread: r.unread, linesReadCents: r.readCents })
+      .where(eq(schema.supplierInvoices.id, invoiceId));
+    return r;
+  };
+  if (!meta.text || meta.text.length < 200) return record({ stored: 0, unread: 0, reconciles: null, readCents: 0 });
   // Item lines add up to the goods, not to the amount due: shipping and tax are on the invoice and
   // are not items. Where the invoice prints both, the goods figure is what proves the reading.
   /*
@@ -2616,8 +2683,13 @@ export async function storeInvoiceLines(
     await knownNdcs(),
     await ndcPackages(),
   );
-  if (parsed.lines.length === 0) return { stored: 0, unread: parsed.unreadable.length, reconciles: parsed.reconciles, readCents: 0 };
-  if (parsed.reconciles === false) return { stored: 0, unread: parsed.lines.length + parsed.unreadable.length, reconciles: false, readCents: parsed.totalCents };
+  if (parsed.lines.length === 0) return record({ stored: 0, unread: parsed.unreadable.length, reconciles: parsed.reconciles, readCents: 0 });
+  /*
+   * The refusal. The recognised lines are not kept — a partial invoice would put a short cost on
+   * every drug and look complete — but what they came to is, because total less this is the money
+   * the reader could not account for in the lines, and that is what locates the line it missed.
+   */
+  if (parsed.reconciles === false) return record({ stored: 0, unread: parsed.lines.length + parsed.unreadable.length, reconciles: false, readCents: parsed.totalCents });
 
   /*
    * What is already on this invoice, and whether this read has earned the right to replace it.
@@ -2645,12 +2717,12 @@ export async function storeInvoiceLines(
       printedTotalCents: meta.printedTotalCents,
     })
   ) {
-    return {
+    return record({
       stored: existing.length,
       unread: parsed.unreadable.length,
       reconciles: true,
       readCents: existing.reduce((n, l) => n + l.extendedCents, 0),
-    };
+    });
   }
 
   await db.delete(schema.invoiceLines).where(eq(schema.invoiceLines.invoiceId, invoiceId));
@@ -2685,12 +2757,7 @@ export async function storeInvoiceLines(
    *
    * Written together now, so they cannot disagree.
    */
-  await db
-    .update(schema.supplierInvoices)
-    .set({ linesRead: rows.length, linesUnread: parsed.unreadable.length })
-    .where(eq(schema.supplierInvoices.id, invoiceId));
-
-  return { stored: rows.length, unread: parsed.unreadable.length, reconciles: parsed.reconciles, readCents: parsed.totalCents };
+  return record({ stored: rows.length, unread: parsed.unreadable.length, reconciles: parsed.reconciles, readCents: parsed.totalCents });
 }
 
 /**
