@@ -13,6 +13,7 @@ import { looksLikeRxRescueCredit } from "./rxrescue-credit";
 import { looksLikePayerPayments } from "./payer-payments";
 import { pdfText } from "./pdf-text";
 import { looksLikeCardStatement } from "./card-statement";
+import { looksLikeAccessHealthPayment } from "./accesshealth-payment";
 import { looksLikeSalesByPayment } from "./sales-by-payment";
 import { looksLikeRebateReport } from "./rebate-report";
 import { isDrillDownText } from "./drill-down-read";
@@ -33,7 +34,7 @@ import { ALLOWED_MIME } from "./files";
  * behaviour we already had and is never wrong, only unhelpful.
  */
 
-export type RouteKind = "claims" | "rx_transactions" | "payer_payments" | "accrual_sales" | "on_hand" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "ap_transactions" | "mck_returns" | "report_summary" | "return_policy" | "nadac" | "remittance_835" | "copay_remit" | "card_statement" | "sales_by_payment" | "empty_report" | "unrecognised";
+export type RouteKind = "claims" | "rx_transactions" | "payer_payments" | "accrual_sales" | "on_hand" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "ap_transactions" | "mck_returns" | "report_summary" | "return_policy" | "nadac" | "remittance_835" | "copay_remit" | "card_statement" | "accesshealth_payment" | "sales_by_payment" | "empty_report" | "unrecognised";
 
 export type Classification = {
   kind: RouteKind;
@@ -214,6 +215,10 @@ export function classify(fileName: string, buf: Buffer): Classification {
       /* The monthly card processing statement: the only record of card fees. See card-statement.ts. */
       if (looksLikeCardStatement(text)) {
         return { kind: "card_statement", why: "A Global Payments merchant statement: the month's card processing fees and every batch deposited.", headers: [] };
+      }
+      /* Health Mart Atlas's itemised EFT: the claim payments inside one deposit. See accesshealth-payment.ts. */
+      if (looksLikeAccessHealthPayment(text)) {
+        return { kind: "accesshealth_payment", why: "A Health Mart Atlas AccessHealth payment report: one EFT, its total, and every claim payment and adjustment inside it.", headers: [] };
       }
       if (looksLikeRebateReport(text)) {
         return {

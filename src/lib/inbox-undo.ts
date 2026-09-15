@@ -141,6 +141,12 @@ const EFFECTS: Record<string, KindEffect> = {
     reversal: "nothing",
     leaves: "nothing. It was never stored; reading another policy replaces the proposal.",
   },
+  accesshealth_payment: {
+    short: "pays fills, banks nothing",
+    writes: "a payment against each claim the EFT itemises, revenue nought, and nothing on the cash account",
+    reversal: "removable",
+    leaves: "payments against those fills, which this site can take back out. No deposit: the payer payment report and the EFT notice bank that money.",
+  },
   remittance_835: {
     short: "pays fills and banks money",
     writes: "a payment against each claim the remittance names, and the total as a bank deposit",
