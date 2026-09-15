@@ -1045,3 +1045,119 @@ the account through the stand-in. The same principle as G-835-1.
 - Facilitator money on the accrual account: all MTF rows are unmatched to claims (their fills are July and
   August, before the books). The accrual side waits for fills inside the books.
 
+---
+
+## 6. McKesson: Accounts Payable report, Returns Details, and their invoices — rehearsed
+
+**Checkpoint 6. Code at 7f89689.** Samples, read-only from the document store (owner-approved):
+- **the real Accounts Payable Open & Closed Transactions report** received 11 September;
+- **the real Returns Details report** received 15 September.
+
+Rehearsed on a fresh snapshot (17:46 UTC). Note: session 2 built the invoice reader. This section audits the
+feeds around it and does not re-prove that reader.
+
+### 1 · What they are, who sends them, how often, through which door
+
+From era@mckesson.com as zipped CSVs:
+- the AP report, **weekly** (one received so far);
+- the Returns Details, **daily** (five received, 11–15 September);
+- two totals sheets beside each, recognised and deliberately not read.
+
+Door: mailbox → `classify` by header → `ap_transactions` / `mck_returns` → `fileApTransactions` /
+`fileReturnCredits` (`mailbox.ts` 1086–1109). **Neither books a cost.** The AP report is McKesson's own ledger:
+when each invoice is due, whether it cleared, and the ACH it cleared under.
+
+### 3 · Read correctly?
+
+**AP report:** 63 rows, 0 unreadable, 0 without a due date.
+- 27 "Closed – Cleared", all under **one ACH, …7740, cleared 7 September, $106,322.62**;
+- 36 "Open – Pending Approval", all due 15 September, $141,857.92;
+- every row's gross less its 2% discount equals its net (the reader refuses otherwise); discounts total $5,064.91.
+
+**Independent check against the invoices the site read from McKesson's PDFs: 21 on both agree to the cent, 0
+differ.** The other 42 ($142,036.21) are on the report with no invoice on file, and all 42 are in PioneerRx's
+receiving record.
+
+**Returns Details:** 67 items, 0 unreadable, 9 credit notes, **−$10,411.15**, all "Saleable Return". Handling
+$58.80. 66 of 67 name the invoice the goods were bought on.
+
+### 4 · Where it lands
+
+`supplier_statement_lines`, keyed supplier + number + due date. Credits go in the same table, negative, with
+status "Credited".
+
+### 5 · Which basis reads it
+
+**Cash cost of goods only** (`cash-cogs.ts`). McKesson is "covered", so its cash cost is exactly its cleared
+lines, by clearing month, and nothing from its invoice dates or receiving. Supplier names fold to one key in all
+three tables ("Mckesson" / "McKesson"), so coverage holds. Other suppliers (IPC, IPD, ParMed, Anda, JamsRX,
+Xymogen) are counted from invoice dates and receiving, and the account names them.
+`countedTwiceInCash` for September: **0 rows**. The accrual account does not read this table.
+
+### 6–7 · Matching and duplication
+
+| # | rehearsal | result |
+|---|---|---|
+| 1 | the AP report re-filed | 0 new, 63 updated; lines 72 → 72 |
+| 1 | the returns report re-filed | 0 new, 9 updated (live: five daily copies, each "already held") |
+| 2 | next week's report moves one open invoice's due date (…5034, $22,118.56) | **a second row**; after it clears, the old open row stays |
+| 4 | the real ACH debit of $106,322.62 read from a bank statement, **as `bank.ts` builds the context** | **unplaced** — *"names Mckesson but no open invoice of theirs is for this amount"* |
+| 4 | the same debit **with the ledger supplied** | `settles_ach` — *"covers 27 Mckesson invoices and comes to exactly this debit"* |
+
+### Gaps for this feed
+
+**G-MCK-1. The McKesson ACH tie is built and never runs: a real bank read leaves every McKesson debit unplaced and every McKesson invoice unpaid.**
+OBSERVATION:
+- `placeLine` ties a McKesson debit to the invoices inside it only when its context carries the AP ledger
+  (`bank-statement.ts` 229, `ctx.settled`). `matchContext` in `bank.ts` (21–47) never supplies it.
+- Rehearsed with the real ACH: unplaced as `bank.ts` runs; `settles_ach` to the cent with the ledger.
+- Even when placed, `bank.ts` has no branch for `settles_ach` (the `else` at 170 counts it as not placed) and
+  marks none of its invoices paid.
+- **Live: 27 of 27 McKesson invoices on file have no paid date.**
+
+August's bank statement carries four such debits ($500,597.61).
+SHOULD BE: the wholesaler's own ledger, the ACH reference and the bank debit are three records of one payment,
+and reading the bank statement should join them, which is what the rule was written to do.
+DIFFERENCE: yes, rehearsed. Not a double count: cash cost comes from the ledger either way. But the largest
+debits on every statement stay on the unplaced list, and no McKesson invoice is ever shown paid.
+Owner: `money/bank.ts` — **A**; session 1's matching engine (item 2 on its queue) is the natural home.
+Proposed fix: pass `settled` from `supplier_statement_lines` in `matchContext`; add a `settles_ach` branch that
+records the line as placed and stamps `paidOn` on the covered invoices.
+
+**G-MCK-2. Return credits, $10,411.15 so far, reach neither account.**
+OBSERVATION: credits are filed with status "Credited" and no clearing date. Cash cost of goods counts only
+cleared lines, so they never reduce it. The AP report carries no credit rows. The 7 September ACH equals its
+27 invoices exactly, though 6 credit notes ($8,526.77) were already on McKesson's returns report by
+11 September. So those credits were not taken off that debit.
+SHOULD BE: a wholesaler credit is money back when the wholesaler applies it: netted from a later payment,
+listed as a credit on the account, or refunded. The cash account records it then.
+**How McKesson applies these credits cannot be written from the data held → Q-MCK-1.**
+DIFFERENCE: waits on the answer. The code has no path from "Credited" to any account, whatever the answer.
+Owner: `ap-transactions.ts`, `cash-cogs.ts` — not in the ownership table.
+
+**G-MCK-3. A changed due date leaves a paid invoice looking unpaid.**
+OBSERVATION: rehearsal 2. The ledger key includes the due date, so an invoice re-reported with a new due date
+becomes a second row. The old "Open" row is never updated, and after the new row clears, "not yet taken"
+still counts **$22,118.56** that was paid. `countedTwiceInCash` does not see it: it checks cleared money only.
+SHOULD BE: one invoice is one ledger line whose status moves; a payable already paid is not owed.
+DIFFERENCE: in code, rehearsed. Whether McKesson ever moves a due date: never-measured (one report so far).
+Owner: `ap-transactions.ts` — not in the table.
+Proposed fix: key on supplier + invoice number (+ transaction type), and update the due date in place.
+
+**G-MCK-4 (wording). After a bank read, "N not placed" counts lines that were placed.**
+`bank.ts` 170 adds every `already_counted`, `own_transfer`, `confirms_standing` and `settles_ach` line to the
+"not placed" number in the message. The list on the page (`lastStatementLines`) is right, because it reads
+the recorded placement. Owner: `money/bank.ts` — A.
+
+**Q-MCK-1 (question for the owner).** When McKesson credits a return, how does the money come back? Is it taken
+off a weekly ACH, shown as a credit on the Accounts Payable report, or paid out separately? $10,411.15 of
+saleable-return credits have been issued since 19 August.
+
+### Not checked, said out loud
+
+- McKesson's September bank debit for ACH …7740: no September bank statement. The tie above is rehearsed
+  against the real ledger, not a real bank line; August's debits have no AP report beside them.
+- The invoice PDFs themselves: the 21-of-21 agreement is the check used here.
+- The weekly transition from open to cleared on a second real report: only one AP report exists.
+- Cash cost of goods for September as a total was not recomputed this checkpoint.
+
