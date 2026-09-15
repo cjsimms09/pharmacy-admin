@@ -685,3 +685,154 @@ because it arrived before the books; this left after they began. Today it is on 
   on its being the only Heartland debit in August and on the pattern August's own fees follow.
 - The year-on rehearsal changes only the year. Weekdays in 2027 differ, and no code reads them.
 
+---
+
+## 3. ProviderPay payer payment report and the Health Mart Atlas EFT notice — rehearsed
+
+**Checkpoint 3. Code at c898bb4. Samples, from the owner's uploads:**
+- the real ProviderPay payer payment reports for **1–31 August** (44 payments) and **1–9 September** (12);
+- the real August bank statement's **20 Access Health and 15 ProviderPay credits**, read by eye as in section 2.
+
+Rehearsed on a fresh snapshot (17:08 UTC). No real EFT notice text was used: stored notices are under
+`data/`. The notice was built in the layout the reader's header quotes, carrying a real EFT number, amount
+and date from the September report.
+
+### 1 · What they are, who sends them, how often, through which door
+
+- **Payer payment report** (CSV from the ProviderPay portal): one row per payment into the pharmacy's
+  ProviderPay arrangement — payer, payment number, deposit date, payment date, amount, type, and match
+  columns. Forwarded by staff, a date range each time.
+  Door: mailbox sweep → `classify` by header → `payer_payments` → `importPayerPayments` (`mailbox.ts` 997).
+  **Rehearsed: both real reports classify `payer_payments`.**
+- **Health Mart Atlas "EFT completed" email**, daily, no attachment: the EFT number, the NCPDP, the
+  amount, and the plans inside it. Door: the no-attachment branch of the sweep → `bankEftNotice`
+  (`mailbox.ts` ~487). **Live: 2 received and banked** (11 and 14 September).
+
+**What the rows are, measured against the bank** (August):
+- the **20 "Health Mart Atlas" payments** (type COPY, number `EFT-…`) equal the **20 "ACCESS HEALTH/ACCESS HEA"
+  bank credits** to the cent, one to one;
+- the **24 direct-payer payments** (Argus, Express Scripts, DomaniRx, Tricare, Medicare-dual, RxCrossroads;
+  type EFT) total **$135,053.52**, exactly the **15 "ProviderPay/EDI PYMNTS" credits**. They are singles or
+  daily sweeps of 2, 3 and once 4 payments. On 8/26, four payments made $12,330.61 (session 1's example).
+
+### 2 · Recognised automatically? Malformed or lookalike — loud or silent?
+
+- Report: recognised by four header columns together (payment number, payer name, deposit date, payment
+  amt). A row without a number, payer, readable date or readable amount is skipped with its row and reason.
+  **Rehearsed: August skips 1 row, "the payment is zero"; September skips none.**
+- Notice: subject *"Health Mart Atlas EFT completed"* and the sentence *"electronic funds transfer for m/d/yyyy
+  is complete"* both required. **Rehearsed: a notice for another NCPDP is refused and says so.**
+
+### 3 · Read correctly?
+
+**August: 44 payments, $510,990.21. September 1–9: 12, $168,943.43.** Payer names as printed.
+- **The independent check is the bank:** every HMA payment and the direct-payer total agree with the August
+  bank statement to the cent (section 3 · 1).
+- Amounts are parsed as text (`moneyCents`), so no float cent loss. Every figure agreed to the cent.
+
+**The report's "Deposit date" is not the bank's date for HMA payments.** Bank date minus report date:
+0 days ×13, +2 ×4 (Saturday report dates, credited Monday), −2 ×2, and **−6 ×1** ($15,041.00: report 8/26,
+bank 8/20). For the direct payers the report date is the bank date.
+
+### 4 · Where it lands, and which date decides the month
+
+Each payment is one `cash_receipts` row: kind `third_party`, payer as printed, `receivedOn` = the report's
+deposit date (or the notice's transfer date), month from that. `outOfBooks` comes from `receivedOn`.
+**Rehearsed: August's 43 banked rows are all out of books; September's are in.** Key
+`payer-payment|<payer lowercased>|<payment number>`, shared by the report and the notice.
+
+### 5 · Which basis reads it
+
+Cash only, as `third_party` receipts. The accrual account never reads cash receipts (it reads claims). So
+once on cash and never on accrual, by the same code path as section 1 · 5. This checkpoint did not re-run
+`monthlyAccount`.
+
+### 6 · What it matches to
+
+- **Report ↔ notice**: the shared key. Rehearsed below.
+- **Receipt ↔ bank line**: `matchHeldDeposit` — exact cents, ±7 days, one to one, and combinations of 2–3
+  since 6ad1c04. **Rehearsed on the real August bank lines** (reproducing `bank.ts` 88–150):
+
+| bank lines | result |
+|---|---|
+| 20 Access Health, $375,936.69 | **20 confirm** the HMA receipts. All inside the ±7 days, the −6-day one included |
+| 9 ProviderPay singles, $78,193.25 | 9 confirm |
+| 5 ProviderPay sweeps of 2 or 3, $44,529.66 | ambiguous, named, **nothing banked** |
+| 1 ProviderPay sweep of 4 (8/26), $12,330.61 | unplaced, nothing banked (session 1 is extending the search past 3) |
+| confirmed against the wrong feed's receipt | **none** |
+
+Nothing was banked twice from the bank. The six sweep lines stay on the unplaced list, and their money is
+already on file.
+
+### 7 · Duplication
+
+| # | rehearsal | result |
+|---|---|---|
+| 1 | August report, first arrival | **43 banked, 1 refused** — see G-PP-1 |
+| 2 | August report again | 0 banked, 43 already held |
+| 3 | September 1–9 report again (already live) | 0 banked, 12 already held |
+| 4a | report first, then the notice for the same EFT | *"1 already on file under its EFT number, so not banked again"* |
+| 4b | a notice a dollar different from the held figure | kept the held figure; *"one of the two is wrong"* |
+| 4c | notice first (dated 9/5), then the report (dated 9/8) | 1 receipt, **dated 9/5 — the first arrival's date is kept** |
+| 4d | another store's NCPDP | refused, named |
+
+### Gaps for this feed
+
+**G-PP-1. A payer's second payment of the same amount within seven days is refused as a duplicate, so real money is not counted.**
+OBSERVATION: rehearsal 1. The real August report holds two DomaniRx payments of **$904.00**: payment …4538
+deposited 8/26 and payment …2227 deposited 8/28, with different payment numbers. The second was refused:
+*"904.00 from DOMANIRX on 2026-08-28 is already banked as …4538 under 2026-08-26"*. **The live database shows
+the same: 5 DomaniRx receipts for August, $10,780.08, against the report's 6, $11,684.08.** The cause is
+`gateDeposit`'s cross-feed rule (`deposit-gate.ts` 133–137): same amount, within 7 days, and the same payer
+head. It is applied even when both receipts carry different payment numbers from the same feed. The real bank
+statement shows both: $904.00 inside the 8/26 sweep and $904.00 alone on 8/28. The 8/28 bank line then
+confirms the 8/26 receipt, so **the bank reconciliation looks clean while the cash account is $904.00 short.**
+SHOULD BE: a payer's own payment number is unique to the payment. Two payments with different numbers from
+the same payer are two sums of money, however alike their amounts. Repeat identical amounts are ordinary for a
+payer paying a fixed fee or a recurring claim.
+DIFFERENCE: yes, rehearsed and live. **$904.00 in August** (out of books, so no current account moved). The
+same rule runs on every in-books month. September 1–9 had no such pair; later September reports were not
+among the samples.
+Owner: `deposit-gate.ts` — **1**.
+Proposed fix: in `gateDeposit`, when the incoming receipt and the held one both carry a reference of 6+ digits
+**from the same feed** (same source-key prefix) and the references differ, they are different money: skip the
+amount rule for that pair. Keep the amount rule across feeds, where one deposit really does carry different
+references (an 835 trace against a portal payment number).
+
+**G-PP-2. A deposit's date and month are whichever document arrived first.**
+OBSERVATION: rehearsal 4c. The notice (dated 9/5) banked first and the report (9/8) was then recognised by key;
+the receipt kept 9/5. In the other order it would carry 9/8. Measured in August: the report's own deposit date
+differs from the bank by −6 to +2 days. How the notice's transfer date relates to the report's deposit date for
+the same EFT is **never-measured** (no real notice and report cover the same EFT among the samples; the
+reader's header says the same).
+SHOULD BE: a receipt's date does not depend on reading order. On the cash basis the date that decides the month
+is when the money reached the bank, and neither document is the bank.
+DIFFERENCE: only when the two dates straddle a month end. None in August's sample. Dollars: one HMA deposit
+per occurrence (August's ranged $1,119.93–$40,084.14).
+Owner: `payer-payments-store.ts` / `health-mart-eft-store.ts` — **not in the ownership table**;
+`money/bank.ts` — **A**.
+Proposed fix: when the bank line confirms a receipt, move `receivedOn` and `month` to the bank date. The bank
+statement becomes the date authority on cash, as it already is for the card fee bill (section 2 · 5). Until a
+bank statement is read, the first arrival stands.
+
+**G-PP-3. ProviderPay sweeps stay on the unplaced list though their money is on file.**
+OBSERVATION: 6 of August's 15 ProviderPay lines, $56,860.27, are combinations. Five are named as ambiguous
+("those receipts are this money"); the 4-payment sweep is unplaced. None is linked to its receipts, and none
+ever clears (G-CARD-12's shape).
+SHOULD BE: a line whose money is fully accounted for leaves the work list.
+DIFFERENCE: not a money error; list noise, every month.
+Owner: session 1 is building the ProviderPay account reader and the wider combination search.
+Proposed: when the combination is unique and exact, link the bank line to all its receipts and mark it placed.
+
+### Not checked, said out loud
+
+- A real EFT notice's text: the reader's quoted layout was used. The two live notices were read and banked by
+  the site on 15 September, but their stored text is under `data/`.
+- The notice's transfer date against the report's deposit date for one EFT (G-PP-2).
+- September reports after the 9th: live receipts to 9/10 came from a report not among the samples.
+- The report's match columns (remit match, claim match, no-claim match, adjustments): stored, read by nothing.
+  They are the 835 checkpoint's.
+- The ProviderPay holding account's own history (Wells Fargo CSV): no reader yet (session 1).
+- The recoupment debit on the bank statement (`SHA PROVIDERPAY/AUTO ACH`, $635.58 on 8/25): the recoupments
+  checkpoint.
+
