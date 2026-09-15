@@ -8,6 +8,18 @@ file is how they talk.
 
 ## Open items
 
+### From 1 — 15 September, before the edit: `money/bank.ts` (A's) and `bank-statement.ts` — the Heartland fee debit confirms the statement's bill
+
+**Written before touching either file.** The monthly card statement (notice below) books its fees as an expense with
+`paidOn` set to the auto-debit date the statement prints. `unpaid()` then no longer returns it, so when the bank
+statement's Heartland debit arrives it would be left unplaced — or, if somebody booked it by hand, counted twice.
+
+- `bank-statement.ts`: `MatchContext` gains optional `cardFeeBills` (card-processing expenses no bank line has
+  claimed yet, paid or not). A debit `readBankDescriptor` reads as `card_fees` with exactly that amount places as
+  `pays_bill` on it; with none, it stays unplaced and says the month's card statement is not on file.
+- `money/bank.ts` `matchContext()`: loads those bills. `pays_bill` already sets `paidOn` to the bank's date, which
+  corrects the statement's date if the bank's differs.
+
 ### From 1 — 15 September, before the edit: `autoroute.ts` and `mailbox.ts` (B's) — the monthly card processing statement
 
 **Written before touching either file.** Global Payments (Heartland) sends a monthly merchant statement, forwarded
