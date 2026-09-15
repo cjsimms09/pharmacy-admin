@@ -149,7 +149,9 @@ export type Placement =
    * really was paid, and the day it really left — and, where the figure has moved, that it has.
    */
   | { kind: "confirms_standing"; name: string; exact: boolean; why: string }
-  | { kind: "settles_ach"; supplier: string; reference: string; invoices: string[]; why: string }
+  | { kind: "settles_ach"; supplier: string; reference: string; invoices: string[]; agrees: boolean; why: string }
+  /** A facilitator credit no remittance on file explains. Never matched to other receipts, never banked. */
+  | { kind: "facilitator_unmatched"; why: string }
   | { kind: "unplaced"; why: string };
 
 export type MatchContext = {
@@ -239,6 +241,7 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
         supplier: meaning.counterparty,
         reference: ref,
         invoices: covered.map((x) => x.invoiceNumber),
+        agrees,
         why: agrees
           ? `${ref} covers ${covered.length} ${meaning.counterparty} invoices and comes to exactly this debit. The money is already the cash cost of goods, from their own report, so nothing is booked from this line.`
           : `${ref} covers ${covered.length} ${meaning.counterparty} invoices coming to ${(cents / 100).toFixed(2)}, and the bank took ${((-line.amountCents) / 100).toFixed(2)} — worth a look.`,
@@ -288,7 +291,7 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
         };
       }
       return {
-        kind: "unplaced",
+        kind: "facilitator_unmatched",
         why:
           `The Medicare facilitator paying, but ${paid === null ? "no MTF remittance for this day is on file" : `the MTF remittances for this day come to ${(paid / 100).toFixed(2)}`}. ` +
           "Nothing is banked from the line — banking it would drop every MTF payment from the month's cash. The remittance for it is what is missing.",

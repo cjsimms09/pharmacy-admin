@@ -8,6 +8,17 @@ file is how they talk.
 
 ## Open items
 
+### From 1 — 15 September, before the edit: `money/bank.ts` (A's), `bank-statement.ts` — the McKesson ACH tie runs, and an unmatched MTF credit confirms nothing
+
+**Written before touching the files.** Session 2's money map:
+- G-MCK-1: `matchContext()` never passed `settled`, and `bank.ts` had no `settles_ach` branch, so the real $106,322.62
+  McKesson debit came back unplaced and 27 of 27 invoices stayed unpaid. `matchContext()` now loads
+  `supplier_statement_lines` with a check number; `settles_ach` carries `agrees`; where it agrees the covered invoices get
+  the bank date as `paidOn` (cash cost of goods reads McKesson from its own ledger only — `cash-cogs.ts` — so this adds no
+  cost). Where it does not agree the line is left for a person.
+- G-MTF-2: a facilitator credit with no equal remittance is a new placement kind `facilitator_unmatched`, which `bank.ts`
+  never offers to the receipt match (it confirmed a Health Mart Atlas receipt of the same amount on a snapshot).
+
 ### From 1 — 15 September, before the edit: `money/bank.ts` (A's), `bank-statement.ts`, `claim-payments.ts` — 835s and MTF deposits never bank beside their other door
 
 **Written before touching bank.ts.** Session 2's money map G-835-1 and G-MTF-1:

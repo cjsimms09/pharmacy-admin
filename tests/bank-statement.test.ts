@@ -67,7 +67,7 @@ describe("placing each line", () => {
     assert.equal((at(1) as { receiptKind: string }).receiptKind, "rebate");
     assert.equal((at(2) as { receiptKind: string }).receiptKind, "retail");
     /* Not banked: the MTF remittances count it (G-MTF-1). With none on file for the day it is left for a person. */
-    assert.equal(at(3).kind, "unplaced");
+    assert.equal(at(3).kind, "facilitator_unmatched");
     assert.match(at(3).why, /no MTF remittance for this day is on file/);
     assert.equal(at(4).kind, "unplaced");
   });
