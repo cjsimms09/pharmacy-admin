@@ -64,9 +64,12 @@ export type RowCheck = { compared: boolean; agrees: boolean; differences: { what
  * expecting from the primary payor as well, this should match what we show from claims."*
  *
  *   eVoucher           Total Due From Third Party = the plan's share (remit less voucher, money map section 15)
- *                      Original 3rd Party Copay   = the claim's copay, as the plan adjudicated it
  *                      Patient Out Of Pocket      = what the claim says the patient was left owing
  *                      Voucher Amount             = the claim's voucher
+ *                      (Original 3rd Party Copay is not compared on its own. The reader already holds it to voucher plus
+ *                      patient, so it agrees whenever those two do; and PioneerRx's copay column equals its patient total
+ *                      on 46 of September's 47 paid voucher claims, so it is not the copay before the voucher and would
+ *                      call every voucher row a disagreement.)
  *   Denial Conversion  the plan's share is nought, and the remit is the manufacturer's ingredient payment
  *                      Patient Out Of Pocket      = what the claim says the patient was left owing
  *
@@ -84,7 +87,6 @@ export function checkRowAgainstClaim(program: VeridikalProgram, row: VeridikalRo
   };
   if (program === "evoucher") {
     check("the plan's expected payment", row.thirdPartyDueCents, remit - voucher);
-    check("the plan's copay", row.originalCopayCents, claim.copayCents ?? 0);
     check("what the patient paid", row.patientOutOfPocketCents, claim.patientTotalCents ?? 0);
     check("the voucher", row.paymentCents, voucher);
   } else {

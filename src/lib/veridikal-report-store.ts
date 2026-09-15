@@ -107,9 +107,10 @@ export async function fileVeridikalReport(
         ? await db.query.claims.findFirst({ where: eq(schema.claims.id, pay.claimId), columns: { remitCents: true, evoucherCents: true, copayCents: true, patientTotalCents: true } })
         : null;
       if (row.paymentCents !== 0) {
+        // Only the part the claim does not already carry is new: a voucher $1.00 over the claim's adds $1.00, not $101.00.
         const size = Math.abs(row.paymentCents);
-        const carried = p.program === "evoucher" ? (claim?.evoucherCents ?? 0) >= size : (claim?.remitCents ?? 0) >= size;
-        if (!carried) revenue += row.paymentCents;
+        const onClaim = Math.max(0, p.program === "evoucher" ? claim?.evoucherCents ?? 0 : claim?.remitCents ?? 0);
+        revenue += Math.sign(row.paymentCents) * Math.max(0, size - onClaim);
       }
       if (claim) {
         const c = checkRowAgainstClaim(p.program, row, claim);
