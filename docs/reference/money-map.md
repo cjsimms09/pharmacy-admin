@@ -1479,7 +1479,59 @@ book it, and it needs a standing cost or a vendor bill.
 
 ---
 
-## 10. RedSail copay-voucher remittance (the scanned sample) — measured, not rehearsable
+## 10. RedSail copay-voucher remittance (the scanned sample) — reader built, rehearsed
+
+**Re-checkpoint 10. Reader `copay-remit-scan.ts` at 8b14cc1 (branch `work/accesshealth-reader`), built on the
+finding below.** What follows this part is the first measurement, kept as it was.
+
+**What the reader does.** The page's words carry their positions, so the printed lines are rebuilt from them (the
+scanned bank statement's `rowsOf`) and handed to the existing `parseCopayRemit`. That parser checks each row
+(submitted less the patient's share is what is paid) and the rows against the printed payment. Scanner damage is
+repaired only where something proves the repair:
+- a character inside a row's figures ("I" for 1, "s" for 5 or 8), only where exactly one reading passes the row's
+  own arithmetic;
+- the payment date's slash read as a 1 ("09/01 12026");
+- the check/ACH number: a streak down the scan's left margin breaks its label ("ChecUACH") and cuts the number into
+  groups. The groups are joined, never read differently. The page image was looked at for this line only: the
+  number is printed as one run.
+
+A PDF whose text layer already reads is used as it is. `mailbox.ts` passed a PDF's raw bytes to the importer, so
+**no PDF voucher could ever import** before this; it now passes the rebuilt text.
+
+**Rehearsed on a fresh snapshot, with the real scan:**
+
+| rehearsal | result |
+|---|---|
+| `classify` | `copay_remit` (was unrecognised) |
+| the rows | 14 rows, netting by prescription to **2 payments, $177.25 = the printed payment**; payment date 1 September 2026 |
+| against the fixture `copay-remit-redsail.txt` | every row's money identical, as a multiset |
+| first read | 2 payments recorded (both fills from August, before the books start, named as such); **banked once, $177.25** |
+| read again | **2 already held, 0 posted, nothing banked** |
+| read again, before the check-number repair | **both payments posted a second time.** The duplicate check keys on the check number, and the scan had lost it |
+| on live before the rehearsal | 0 copay receipts: this voucher is not on file |
+
+**G-COPAY-1. The copay-voucher fixture carries two of the pharmacy's real identifiers.**
+OBSERVATION: `fixtures/copay-remit-redsail.txt` (5157f86, 8 September) says in its header that the check/ACH
+number and the NPI are invented. Compared by script with the real voucher: **the check/ACH number and the NPI are
+the real ones.** Its prescription numbers are not (no patient-linked value is shared). The NPI also appears in
+`docs/HANDOFF.md`, `tests/bank-descriptors.test.ts` and `tests/x12-835.test.ts`.
+SHOULD BE: CLAUDE.md, "a feed's shape goes in `fixtures/` with every identifier changed". A pharmacy's NPI is
+public, but the rule does not make an exception for it, and a check number is a banking reference.
+DIFFERENCE: yes: two real identifiers are in git, pushed on every branch cut since 8 September. Force pushes are
+refused, so history keeps them whatever is done.
+Owner: the fixture has no owner in the table (session 1 last edited it).
+**Question for session 1 / the owner:** is the pharmacy's own NPI allowed in tests (it is in three other files), or
+should all four be changed? The check number can be changed in the fixture and `tests/copay-remit.test.ts` alone.
+
+**Not checked, said out loud:**
+- A voucher that matches a claim on this site: both payments here are for August fills, so `matched` is 0.
+- The voucher's deposit against the bank: it is dated 1 September, and no September statement is on file.
+- A scan whose check number the streak damages differently (a digit lost, not just split): the groups would join
+  into a wrong number, and a second read would still be caught (the same scan reads the same way), but a text
+  copy of the same voucher would not.
+- Page 2 of the PDF was not viewed.
+
+**The first measurement (before the reader):**
 
 **Checkpoint 10.** Sample: the owner's upload `Image_001.pdf`, a RedSail copay-voucher remittance. It was measured
 by shape only: every word reduced to its length and every digit masked, because a voucher can carry
@@ -1665,6 +1717,31 @@ paid on its second line reads as unpaid or short on the receivables. Cash is una
 Owner: `claim-payments.ts` — not in the ownership table (session 1 last edited it).
 Proposed fix: count held rows by `reference|rx|amount`, as `accesshealth-payment-store.ts` does. Reading the
 AccessHealth report after an 835 already completes that EFT, which is what the rehearsal shows.
+**FIXED 9588193, re-rehearsed.** EFT …5975, with its ProviderPay 835 rebuilt from the report's rows, in both orders:
+
+| order | result |
+|---|---|
+| 835, then the AccessHealth report | the 835 posts all 11 rows, the repeat included; the report then holds 11 and posts 0 |
+| AccessHealth report, then the 835 | the report posts 11; the 835 holds 11 and posts 0 |
+| either, read again | 0 posted |
+
+Both orders end with **11 rows, $378.15**, the report's claim rows.
+
+**G-UNDO-1. Undoing the first of two documents for one EFT leaves the other document's claims on no row.**
+OBSERVATION: the 835 and the AccessHealth report for one EFT share their rows: whichever is read second posts
+nothing and holds all of them. Undo removes the rows carrying the document it undoes. Rehearsed on …5975:
+- undo the second document: 0 rows removed, and the first still carries all 11;
+- undo the first: **11 rows removed**. The second document is still filed and still says it paid those claims, but
+  its claims now sit on no row until it is read again.
+SHOULD BE: an undo takes back only what that document alone put on file; what another document on file also says
+stays said.
+DIFFERENCE: yes, rehearsed: $378.15 of claim payments leave the receivables while a document still on file carries
+them.
+Owner: `inbox-undo-store.ts` — B / 2.
+Now: both undo entries warn in words that undoing the first leaves the other's claims on no row until it is read
+again (54f699b). Proper fix (session 1 agrees, not built): after the undo, offer the other document again, or
+re-read it automatically.
+**OPEN.**
 
 ### Proposal — how the Adj codes should post (not built; data only until session 1 has read this)
 
@@ -1680,6 +1757,22 @@ It reduces what the prescriptions earned, which is a revenue offset (the treatme
 fees), in the month of the EFT.
 DIFFERENCE: today it is on no account; accrual revenue is overstated by it. Proposed: a revenue offset in the
 EFT's month.
+**Built and rehearsed, b653b35 (branch; session 1 merges).** Each AH row is a confirmed bill keyed `AHADJ|<EFT>|AH|…`,
+dated the EFT, with **no paid date**, under **"PSAO fees"**. That is a revenue offset session 1 seeded (a5552e6),
+kept apart from DIR.
+- The first build (54f699b) booked these under "DIR fees and price concessions". Every month with a fee on file
+  then **stopped listing DIR as missing**, although nobody had entered DIR. It was held back from merging. Session 1
+  added PSAO fees and made the notice look at the DIR category alone.
+
+| rehearsal (fresh snapshot, feature/compliance merged) | result |
+|---|---|
+| first read of all 9 | 8 fee bills, **$142.20**, all under PSAO fees; paid dates set: 0 |
+| September accrual | offsets $0.00 → **$141.46** (the eighth fee, $0.74, is in August); revenue unchanged |
+| September cash | offsets $0.00 → $0.00: the net deposit already carries them |
+| "DIR listed missing", with the fees on file | **still listed**, on both bases |
+| control: a $1.00 DIR bill, no paid date | accrual **no longer lists DIR**; cash still does (the bill is unpaid), as it should |
+| all 9 read again | 0 posted, 0 fees booked |
+| undo of EFT …5402 | its 305 payments and its **$73.04 fee** removed; September accrual offsets $68.42 |
 
 **CS — "Adjustment".**
 OBSERVATION: two negative amounts ($1.16 and $3.35) with a seven-digit reference each.
@@ -1812,6 +1905,10 @@ DIFFERENCE: yes. With G-BANK-1 fixed these stay unplaced rather than misfiled; u
 Owner: `bank-descriptors.ts` — not in the table.
 Proposed fix: match Heartland on `HRT` + up to 3 scan characters + `ND PMT`; IPC on `INDEPENDENT` with letters
 squashed; add the rest with the owner naming each (see Q-BANK-1).
+**The IPC half of that proposal is withdrawn.** The IPC descriptor requires IPC's account number on purpose: without
+it, "Independent Pharmacy" collides with IPD, and IPD's money would be put against IPC's invoices while the account
+still balanced (`bank-descriptors.ts`, the owner's own question). Matching on the squashed words would have brought
+that back.
 
 **Q-BANK-1 (question for the owner).** What are these August credits and debits?
 - **Prescription/TRANSFER "ST-…"** credits: 15 in August by the page images, $18,028.74, from $227.61 to
@@ -1820,6 +1917,48 @@ squashed; add the rest with the owner naming each (see Q-BANK-1).
 - **DRHOUSE INC/PAYMENT** $38.35;
 - the **$15,912.81 "Ref … To *6728 Medications Aug"** transfer, and the account ending 6728;
 - **RRC PHARMA SOLUTIONS** card purchases, $7,380.00 and $9,360.00.
+
+### Re-rehearsed against session 1's fixes (de67a77)
+
+Fresh snapshot, the same August feeds set up, `bank.ts` at de67a77 reproduced (a `psao_deposit` line may confirm a
+held receipt and is otherwise left unplaced, never banked). Three runs: as scanned; with the nine page figures
+confirmed; and then with the person's corrections G-BANK-2 asks for.
+
+**G-BANK-1 — FIXED de67a77.**
+
+| lines | 19e3dd4 | de67a77 |
+|---|---|---|
+| credits banked from the statement | 22 lines, $78,726.92 | **0 lines, $0.00**, in every run |
+| counted twice | at least $48,889.32 | **$0.00** |
+| the Access Health credit that banked | banked beside its own receipt | `psao_deposit`, unplaced, then **confirms** its receipt once corrected (below) |
+| the ProviderPay 4-payment sweep, $12,330.61 | banked | `psao_deposit`, unplaced (the sweep is G-PP-3) |
+| Prescription/TRANSFER, VERIDIKAL, DRHOUSE, RedSail copay credits | banked as City of Wichita / Script Care | unplaced (Q-BANK-1) |
+| confirmed against the wrong feed | none | none |
+
+**G-BANK-2 — FIXED de67a77.** Run as scanned, 12 August is **held for a person**: $36,558.71 is one character from
+$36,568.71, money a document already shows, on a day that needed a correction. Nothing else on the day is held.
+When the person confirms $36,568.71, the day stops closing:
+- 12 August now proves on its own printed balance. The counter deposits come to $9.00 less by that balance: the
+  $499.10 line is now **$490.10** (measured on the family total, not printed line by line);
+- 11 August opens as unproven, **$1.00 out**, with the McKesson $129,645.33 among its lines.
+
+Confirming $129,646.33 leaves **0 unproven**:
+- credits **$681,761.07**, which is the printed summary "681,76L.07", so the deposits note is gone;
+- debits $662,649.93, against the printed "552,649.93", the first digit misread;
+- **all 20 Access Health credits confirm** their receipts ($375,936.69).
+
+The three cancelling misreads are all corrected by the person in two steps. The check never guessed.
+Session 1 saw a $6.00 cheque held too, on live. It was not held in this run. Why was not checked: the known amounts
+differ between live then and this snapshot with August's feeds.
+
+**G-BANK-3 — FIXED de67a77 as far as it should be.**
+- Heartland: **26 of 26** credits read as `card_settlement` (HRTI3ND, HRTTJqN D and the rest), all 26 confirm a card
+  batch, $98,224.46, and the fee debit reads `card_fees`;
+- ParMed: 2 of 2 read as `wholesaler_payment`;
+- IPC: 11 of 18 read. The other 7 are the lines whose account number the scan damaged ("#8", "10689tr8").
+  They stay unplaced **by design**, as above;
+- Prescription/TRANSFER, VERIDIKAL, DRHOUSE and the rest: no descriptor, pending Q-BANK-1;
+- cheques read as unknown: for the cheque checkpoint.
 
 ### Not checked, said out loud
 
@@ -1858,9 +1997,11 @@ flowchart LR
 | HMA EFT notice ↔ payer payment report | `payer-payment|<payer>|<EFT number>` (shared) | both orders hold one receipt (section 3) | holds |
 | Payer payment receipt ↔ bank credit | exact cents, ±7 days; combinations of 2–3 | 20/20 HMA and 9/9 single ProviderPay confirm; 6 sweeps named, not linked (G-PP-3) | holds; sweeps open |
 | ProviderPay 835 ↔ payer payment report | trace digits = payment number (HMA); **none for direct payers** | 20/20 HMA by number; 15 direct payers equal only by amount | fixed by never banking a ProviderPay 835 (G-835-1) |
-| 835 claim payments ↔ deposit | trace → deposit | $14,506.16 net across 20 HMA remittances (G-835-2); on EFT …5975 fully explained by a dropped repeat (G-835-3) | open |
-| AccessHealth report ↔ deposit | EFT number | 8/9 totals equal their deposit to the cent; 1 deposit not yet on file | holds (403985f, branch) |
-| AccessHealth report ↔ 835 claim payments | `EFT-…/<rx>` counted by rx and amount (the rx on 8,162/8,162 HMA rows) | …5975: 10 held, 1 posted, total = the report | holds (403985f, branch) |
+| 835 claim payments ↔ deposit | trace → deposit | $14,506.16 net across 20 HMA remittances (G-835-2); on EFT …5975 fully explained by a dropped repeat (G-835-3) | cause fixed (9588193); the April and August 835s stay short, their files were not kept and they are before the books |
+| AccessHealth report ↔ deposit | EFT number | 8/9 totals equal their deposit to the cent; 1 deposit not yet on file | holds (403985f) |
+| AccessHealth report ↔ 835 claim payments | `EFT-…/<rx>` counted by rx and amount (the rx on 8,162/8,162 HMA rows) | …5975, both orders: 11 rows, $378.15 = the report | holds (403985f, 9588193); undo across the two is G-UNDO-1 |
+| Copay voucher ↔ its own re-read | `copay|<check/ACH number>|<date>` and check number + rx + amount | the real scan read twice: banked once, posted once (after the check-number repair) | holds (8b14cc1, branch) |
+| Copay voucher ↔ bank credit | exact cents ±7 days, as any held receipt | not rehearsed: the voucher is dated 1 Sep, no September statement on file; August's 6 RedSail credits stay unplaced | expected-not-yet |
 | MTF 835 ↔ bank credit | MTF payments summed per day = the credit | 7/7 August, same day (section 5) | holds (d477ee4) |
 | Card batch ↔ bank credit | exact cents, ±7 days, `card-batch|…` receipts only | 25/25 August statement deposits = bank credits; close → bank 2–4 days | holds (c898bb4, 56f0ce2) |
 | Card batch ↔ card statement row | batch date ±1 day, exact cents | 22/25 on a year-on rehearsal, the 3 left out named; no false "extra" (G-CSTMT-2) | holds (54bee8c) |
@@ -1902,7 +2043,12 @@ FIXED means fixed by its owner and re-rehearsed here; the commit is the one that
 | G-PP-2 | a receipt's date is whichever document arrived first | one deposit per month edge | A | OPEN (matching engine) |
 | G-PP-3 | ProviderPay sweeps never clear the list | $56,860.27 of lines (August) | 1 | OPEN (matching engine) |
 | G-835-2 | HMA 835 payments short of their deposits | **$14,506.16** net; explained on EFT …5975 by G-835-3 | — | OPEN |
-| G-835-3 | the 835 import drops a repeated same-rx, same-amount payment in one remittance | $15,001.38 of repeats across the nine September EFTs; $11.62 proven on …5975 | — | OPEN |
+| G-835-3 | the 835 import drops a repeated same-rx, same-amount payment in one remittance | $15,001.38 of repeats across the nine September EFTs; $11.62 proven on …5975 | 1 | **FIXED** 9588193 (both orders: 11 rows, $378.15) |
+| G-BANK-1 | an unrecognised bank credit banked as revenue from a payer sharing the pharmacy's own name words | **$78,726.92** banked; **≥ $48,889.32** counted twice (August) | 1 | **FIXED** de67a77 (0 banked) |
+| G-BANK-2 | a scanned day "proves" with misreads that cancel | $36,558.71 banked beside its receipt; McKesson $1.00 off | 1 | **FIXED** de67a77 (held; two corrections leave 0 unproven) |
+| G-BANK-3 | descriptors miss the scan's spellings | 6 Heartland credits, 7 IPC debits, the ParMed spelling | 1 | **FIXED** de67a77; the 7 IPC lines with a damaged account number stay unplaced by design |
+| G-UNDO-1 | undoing the first of 835/AccessHealth for one EFT leaves the other's claims on no row | **$378.15** on …5975 | B / 2 | OPEN (warned in words, 54f699b) |
+| G-COPAY-1 | the copay-voucher fixture carries the real check/ACH number and NPI | 2 identifiers in git | 1 | QUESTION (section 10) |
 | G-MTF-1 (a) | the facilitator stand-in is all-or-nothing | only a typed receipt triggers it now | **A** | OPEN |
 | G-MCK-2 | McKesson return credits reach no account | **$10,411.15** | — | QUESTION Q-MCK-1 |
 | G-MCK-3 | a moved due date leaves a paid invoice owed | $22,118.56 test | — | OPEN |
@@ -1922,6 +2068,7 @@ FIXED means fixed by its owner and re-rehearsed here; the commit is the one that
 | Q-835-1 | a sample request: one real ProviderPay 835 file (for G-835-2 and the 835 reader) | open. The owner says one exists; session 1 has explained the April and August files were not kept and asked for another |
 | Q-SBP-1 | a sample request: PioneerRx's payment-type report run for 3–14 September (for G-CARD-5) | open. The owner re-sent 30–31 August; 3–14 September asked for again |
 | Q-AH-1 | what the "CS — Adjustment" rows on the AccessHealth reports represent ($4.51 across two EFTs) | open |
+| Q-BANK-1 | what August's Prescription/TRANSFER, VERIDIKAL, DRHOUSE credits, the $15,912.81 transfer to *6728 and the RRC PHARMA purchases are (section 13) | open; unplaced meanwhile, never banked (de67a77) |
 
 **Notes for A:**
 - **Blame on `profit-and-loss.ts` across 54bee8c:** use `git blame -w`. That commit normalised the file's line
@@ -1930,11 +2077,10 @@ FIXED means fixed by its owner and re-rehearsed here; the commit is the one that
   card-fee line that says not to type card fees. A's page.
 
 **Not rehearsable yet, and why:**
-- the bank statement feed: no reader for the scanned PDF yet (session 1 is building it). The owner says Emprise
-  cannot export CSV, QFX or OFX, so the scan is the only form;
-- AccessHealth payment PDFs and the ProviderPay account history: no readers yet (session 1);
+- ~~the bank statement feed~~: rehearsed, section 13 (the scan is the only form Emprise offers);
+- ~~AccessHealth payment PDFs~~: rehearsed, section 12. The ProviderPay account history: no reader yet;
 - plan 835s: no file kept (a sample is being asked for);
 - the payment-type checks: sample requested;
-- the copay-voucher scan: no reader for its layout (section 10);
+- ~~the copay-voucher scan~~: rehearsed, section 10;
 - till and paper cash, DIR fees, clawbacks, recoupments, and MAC/NADAC recoveries: no sample of any among the uploads.
 
