@@ -163,7 +163,7 @@ export type Placement =
 export type MatchContext = {
   /** PBMs and plans seen on the claims, and any payer typed before. */
   payers: string[];
-  suppliers: { id: string; name: string }[];
+  suppliers: { id: string; name: string; accountNumber?: string | null }[];
   vendors: { id: string; name: string }[];
   unpaidBills: { id: string; vendorId: string | null; vendorName: string | null; amountCents: number; invoiceDate: string }[];
   unpaidInvoices: { id: string; supplierId: string | null; supplier: string | null; totalCents: number | null; invoiceDate: string | null }[];
@@ -238,7 +238,7 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
    * The rules below this are sound and answer almost none of these lines: the money does not
    * arrive or leave one invoice at a time. See bank-descriptors.ts for what each one is.
    */
-  const meaning = readBankDescriptor(d, line.amountCents);
+  const meaning = readBankDescriptor(d, line.amountCents, { supplierAccounts: Object.fromEntries(ctx.suppliers.map((x) => [x.name, x.accountNumber ?? null])) });
 
 
   /*

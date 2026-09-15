@@ -74,7 +74,7 @@ describe("what each line on the bank statement is", () => {
   });
 
   test("the wholesalers are told apart from each other", () => {
-    assert.equal(readBankDescriptor("Independent Phar/WAREHOU SE 10689648 WEST WICHITA FAMILY PH", -157_18).counterparty, "IPC");
+    assert.equal(readBankDescriptor("Independent Phar/WAREHOU SE 55501234 WEST WICHITA FAMILY PH", -157_18, { supplierAccounts: { IPC: "55501234" } }).counterparty, "IPC");
     assert.equal(readBankDescriptor("ParMed/)OOOOOOOOC( 2A571.67t99 222A Scott Kardatzke", -287_127).counterparty, "Parmed");
     assert.equal(readBankDescriptor("ANDA INC/BILL PMT KLXGSGNRgU 101100579", -820_502).counterparty, "Anda");
     assert.equal(readBankDescriptor("PuTch IN PHARMA SOLUTIO INGLEWOOD CA", -738_000).counterparty, "IN Pharma Solutions");
@@ -338,14 +338,14 @@ describe("a standing cost paid by card is not a second cost", () => {
  * Two wholesalers whose names both begin "Independent Pharmacy".
  *
  * The owner: "are we able to see difference between IPD and IPC on bank statement?" Only by the
- * customer number — every one of August's eleven debits carries 10689648, which is this pharmacy's
+ * customer number — every one of August's eleven debits carries 55501234, which is this pharmacy's
  * number with IPC and is printed on IPC's own credit memo.
  */
 describe("telling IPC from IPD", () => {
   test("a debit carrying IPC's own customer number is IPC", () => {
-    assert.equal(readBankDescriptor("Independent Phar/WAREHOUSE 10689648 WEST WICHITA FAMILY PH", -157_18).counterparty, "IPC");
+    assert.equal(readBankDescriptor("Independent Phar/WAREHOUSE 55501234 WEST WICHITA FAMILY PH", -157_18, { supplierAccounts: { IPC: "55501234" } }).counterparty, "IPC");
     /* The scan renders the same line several ways; all of them carry the number. */
-    assert.equal(readBankDescriptor("Independent P ha r/WAREHOU S[ 10689648 WEST WICHITA FAMILY PH", -314_093).counterparty, "IPC");
+    assert.equal(readBankDescriptor("Independent P ha r/WAREHOU S[ 55501234 WEST WICHITA FAMILY PH", -314_093, { supplierAccounts: { IPC: "55501234" } }).counterparty, "IPC");
   });
 
   test("a similarly named wholesaler with a different number is not claimed as IPC", () => {

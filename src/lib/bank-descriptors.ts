@@ -26,7 +26,7 @@
  * ── On reading the statement at all ──
  *
  * August's arrived as a scan. Its text layer is optical-recognition guesswork: "HRTLAND" comes out
- * as "HRTI-AND" and "HRTTAN D", "FAMILY" as "TAMILY", "10689648" as "106896,48". Every pattern
+ * as "HRTI-AND" and "HRTTAN D", "FAMILY" as "TAMILY", "########" as "106896,48". Every pattern
  * below is therefore matched on squashed letters with the noise removed, and several deliberately
  * accept more than one spelling. On its own that is not enough to keep books on, and it is not asked
  * to: Emprise cannot export CSV, QFX or OFX (the owner, 15 September), so every figure read from the
@@ -113,6 +113,11 @@ type Rule = {
   alreadyCounted?: string | null;
   mayAlreadyBeCounted?: string | null;
   why: string;
+  /**
+   * A supplier whose account number, where the line carries digits, must be the pharmacy's own account with them, taken
+   * from the supplier registry. Two wholesalers both named "Independent Pharmacy" are told apart by it.
+   */
+  accountOf?: string;
 };
 
 const RULES: Rule[] = [
@@ -157,10 +162,10 @@ const RULES: Rule[] = [
     kind: "wholesaler_payment",
     counterparty: "IPC",
     /*
-     * "Independent Phar/WAREHOUSE 10689648" — and the number is the point.
+     * "Independent Phar/WAREHOUSE ########" — and the number is the point.
      *
      * The owner: "are we able to see difference between IPD and IPC on bank statement?" On August's
-     * statement only one of them appears: every one of these eleven debits carries 10689648, which
+     * statement only one of them appears: every one of these eleven debits carries ########, which
      * is this pharmacy's customer number with IPC — it is printed on their own credit memo. IPD is
      * not on the statement at all under any descriptor the scan could read.
      *
@@ -168,7 +173,9 @@ const RULES: Rule[] = [
      * "Independent Pharmacy" is exactly the collision that would put IPD's money against IPC's
      * invoices, and the account would balance while every supplier total was wrong.
      */
-    test: /INDEPENDENTPHAR(?!.*\d)|INDEPENDENTPHAR[A-Z0-9]*?10689648/,
+    /* The account number comes from the supplier registry, never from this file: see readBankDescriptor. */
+    test: /INDEPENDENTPHAR(?!.*\d)/,
+    accountOf: "IPC",
     side: "out",
     lands: "cost_of_goods",
     category: null,
@@ -558,13 +565,15 @@ const RULES: Rule[] = [
  * them. The direction is part of the answer, not a detail: Heartland's name appears on the takings
  * and on the fees, and only the sign tells them apart.
  */
-export function readBankDescriptor(description: string, amountCents: number): BankMeaning {
+export function readBankDescriptor(description: string, amountCents: number, own: { supplierAccounts?: Record<string, string | null> } = {}): BankMeaning {
   const side: BankSide = amountCents >= 0 ? "in" : "out";
   const s = squash(description);
 
   for (const r of RULES) {
     if (r.side && r.side !== side) continue;
-    if (!r.test.test(s)) continue;
+    const account = r.accountOf ? (own.supplierAccounts?.[r.accountOf] ?? "").replace(/\D/g, "") : "";
+    const byAccount = r.accountOf !== undefined && account.length >= 6 && /INDEPENDENTPHAR/.test(s) && s.includes(account);
+    if (!r.test.test(s) && !byAccount) continue;
     const reference = r.reference?.(description) ?? null;
     return {
       kind: r.kind,
