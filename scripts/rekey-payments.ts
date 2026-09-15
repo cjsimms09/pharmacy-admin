@@ -1,7 +1,7 @@
 /**
  * Re-keys the payments the facilitator sent under its own spelling of the prescription.
  *
- * Until 8 September the 835 reader filed "000000318553FILL1" whole as the prescription number, so
+ * Until 8 September the 835 reader filed "000000990007FILL1" whole as the prescription number, so
  * none of the facilitator's payments could find its claim or its fill. The reader now splits that
  * spelling; this puts the rows already held on the same footing, and looks the claim up again the
  * way the reader does. The original reference is kept on the row's `reference`, so nothing is

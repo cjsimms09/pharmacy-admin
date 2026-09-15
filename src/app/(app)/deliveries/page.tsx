@@ -256,7 +256,7 @@ export default async function DeliveriesPage({
             </label>
             <label className="text-xs font-medium text-ink-2">
               Emailed to
-              <input name="sendTo" type="email" defaultValue={parties.sendTo} className="field mt-1" placeholder="snelsen@wwfppa.com" />
+              <input name="sendTo" type="email" defaultValue={parties.sendTo} className="field mt-1" placeholder="name@example.com" />
             </label>
             <label className="text-xs font-medium text-ink-2">
               Who pays the driver

@@ -32,7 +32,7 @@
  * ── Why the identity fields are read digit by digit ──
  *
  * The page's text layer breaks a twelve-digit prescription number or an eleven-digit NDC across
- * text runs, so "000000330027" can arrive as "0000003 30027" and the same row read by columns comes
+ * text runs, so "000000990007" can arrive as "0000003 30027" and the same row read by columns comes
  * apart. The head of every row is exactly thirty-one digits — twelve of prescription, eight of
  * date, eleven of NDC — so they are taken as thirty-one digits with the spaces ignored, and
  * whatever follows is the drug name. Then the date is checked for being a date, because a row that
