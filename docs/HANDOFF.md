@@ -8,6 +8,21 @@ file is how they talk.
 
 ## Open items
 
+### From 2 — 15 September, before the edit: `profit-and-loss.ts` (A's), `payer-owed-store.ts` — a month before the books is not an account, and the payer page holds to the books too
+
+**Written before touching those files**, on branch `work/before-books`, at session 1's request (cutover C-1 and C-2,
+`docs/reference/cutover-2026-10-01.md`).
+- **`profit-and-loss.ts`.** A month before `SITE_STARTS_ON` is labelled "before the books" on both bases, with no
+  figures:
+  - it is not offered as a month (`accountMonths`);
+  - a period or trend does not count it;
+  - asked for directly, it comes back empty with one sentence saying why.
+  Today that only touches August and earlier, where the cash account counts goods and bills paid while August's
+  receipts are already out of the books. A test proves that a month inside the books still counts what it paid, so
+  October's cash keeps September's invoices paid in October.
+- **`payer-owed-store.ts`.** Receivables from fills before `SITE_STARTS_ON` are left out, as the month-end AR report
+  already does (`receivablesAsAt`). Payments before it were already out.
+
 ### From 1 — 15 September, before the edit: `mailbox.ts` (B's), `invoices.ts` (2's), `money/page.tsx` (A's) — speed: fewer cache flushes, one held invoice check, streamed money sections
 
 **Written before touching those files.** The owner: "the site is still slow". Measured on the live database, read-only:
