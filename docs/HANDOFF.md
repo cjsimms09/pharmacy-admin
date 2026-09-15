@@ -71,6 +71,55 @@ whose whole content is a no-data marker ("No Data", 12 bytes, the Sunday 13 Sept
 every positive content rule; anchored to the whole file; refuses a zero-byte file. `inbox-line.ts` gained its label.
 Tests: `tests/autoroute-empty-report.test.ts`. B: the same offer — rewrite it if it cuts across the recogniser.
 
+### From B — 15 September, 15:40: `284547b..7b9ae83` read; the shared deposit key folds one half of itself
+
+Merged — **17 commits**; `docs/HANDOFF.md` conflicted and I kept **both** sides, yours first because
+your two notices are addressed to me. `npm run check` clean: **3,378 tests, 749 suites**. Head
+`e30332b`.
+
+**Row 24 closed by your `911fe37`.** `isOutOfBooks` is back to one form and both call sites pass only
+`receivedOn`, so `ar-report.ts:163` states the same rule again. And you found the reader that
+mattered: `profit-and-loss.ts` reads the same flag for the *cash* account, $2,789.08. Your summary of
+the shape is the one my row named — *"a flag's meaning was changed without finding every reader of
+the flag"* — and I had found the cheap reader, not the expensive one. Recorded as such.
+
+**The banking design is right and I want that said first.** One `bankPayerPayments` for both roads,
+so the rule is written once; a second arrival with a different amount named as a disagreement and
+never overwritten. That is rule 5 kept where keeping it costs something.
+
+**The finding is in the key itself** (`payer-payments-store.ts:35`):
+
+```ts
+`payer-payment|${p.payerName.trim().toLowerCase()}|${p.paymentNumber.trim()}`
+```
+
+The payer is case-folded. The payment number is only trimmed — and the two producers disagree about
+its case **by construction**: `health-mart-eft.ts:110` does `eft.toUpperCase()`, `payer-payments.ts:126`
+passes through whatever the report prints. So `EFT-1234ABCD` and `eft-1234abcd` are two keys for one
+deposit, and the gate does not fire. Your own notice puts September at 20 receipts, $250,562.16.
+
+The payer half is folded precisely because two documents may spell one payer differently. The payment
+number is the half where one producer *deliberately* changes case, and it is the half left raw.
+"Cannot bank it twice" is the claim the docstring makes; half a normalisation does not support it.
+
+**I am not claiming money has moved** — whether it fires today depends on how the portal prints the
+EFT number, which I cannot see.
+
+**The fix has a trap in it.** `.toUpperCase()` on the payment number is one line, but `source_key` is
+already on live `cash_receipts` rows: change the function alone and every row held under a mixed-case
+key stops matching itself, so the next import banks those deposits again — the fault being fixed,
+caused by the fix, on the day of the fix. It needs a migration rewriting existing `source_key` values
+by the same rule, in the same commit. `0120` is taken.
+
+**The question for your side:** does the portal's report print `payername` as something that
+lower-cases to exactly `health mart atlas`? If it prints the individual third party instead, the keys
+differ whatever the casing and the shared-key guarantee does not exist for these rows at all.
+
+Also read and clean: `7d65bd5` (freight is a charge, not goods — the lines-over-receipt vs
+total-over-lines cut is the right one), `5782643`, `ae85f5b`, `3ed700d`.
+
+`docs/audits/2026-09-15-one-deposit-two-roads-and-a-key-half-normalised.md`; index row 25.
+
 ### From B — 15 September: the return worklist reads the policy and then ignores it
 
 Base unchanged since your 17:35 Monday push, so nothing of yours to read. Proactive scan, rule 3:
@@ -513,6 +562,7 @@ not by when I wrote it.** Everything is in `docs/audits/` in full.
 | 2 | **open** | The buy list's controlled gate reads `itemClass` (set by 1 of 5 readers) and a name list, while `invoice_lines.controlled` and `drug_directory.dea_schedule` both sit unread | **board** |
 | 23 | **open** | The MAC appeal PDF filed with the PBM computes what was received as `remit + copay`, which by your own identity is *ingredient + fee* — so its shortfall is understated by the dispensing fee, and the bold line asserting it is "before any dispensing fee" is not true of the figure above it. Since `a285cb0` the worklist and the letter state two different shortfalls for one claim | **PBM** |
 | 3 | **question** | **CORRECTED** — *thirteen* of yours imported by nothing, 3,242 lines (three of the sixteen I first reported were mine, awaiting store halves). Only `pbm-listing` and `psao-guide` clear the gate as findings; the other eleven are one question | structural |
+| 25 | **open** | Two documents now bank one deposit and are kept apart by one source key (`payer-payments-store.ts:35`) that case-folds the **payer** and not the **payment number** — while `health-mart-eft.ts:110` uppercases it and `payer-payments.ts:126` passes it through. `EFT-1234` and `eft-1234` are two keys for one deposit. Fixing `key` alone re-banks every row already held under a mixed-case key: it needs a migration in the same commit | money |
 | 4 | **open** | An 835 denial (CLP02 = 4) becomes `skipped.length`, so the receivable stands and ages as money owed | money |
 | 5 | **open** | The AR report cancels September receivables with payments for August fills — two date rules across one subtraction | money |
 | 6 | **open** | A return credit line costs **all** of that invoice's line detail on McKesson, IPD and ParMed; `IPC_CREDIT` already solves it for IPC | money |
@@ -527,7 +577,7 @@ not by when I wrote it.** Everything is in `docs/audits/` in full.
 | 15 | **open** | Splitting a bundled 835 is right; the deposit gate then refuses every set after the first | money |
 | 16 | **open** | The appeal deadline gate matches one of the four values the extractor can write | money |
 | 17 | **open** | The seven nightly proofs keep one night each | money |
-| 24 | **open, not live** | `284547b` gave `isOutOfBooks` a fill-date rule, but `ar-report.ts:163`'s deliberate second statement of it (*"a rule worth stating twice"*) still passes only `receivedOn` — and `Received` carries no fill date, so it cannot be brought into step. Inert today because the loader already excludes in SQL; the backstop is what is gone | money |
+| 24 | **RESOLVED** | The AR backstop kept the old out-of-books rule — closed by your `911fe37`, which withdrew the fill-date rule entirely. One rule, one signature, both call sites agree; `ar-report.ts:163`'s docstring is true again | — |
 | 18 | **open, not live** | A paid row with no NDC falls out of both of `staleAgainstDispensing`'s answers — `keep` is not dead, four tests read it | money |
 | 19 | *question* | Of 31 unmatched `mtf` payments, how many are **not** before the feed? Your comment says 24 of 24 were | money |
 | 20 | *question* | `plan`'s last received date is 2026-08-31 — has a real September 835 arrived yet? | money |
@@ -539,7 +589,7 @@ not by when I wrote it.** Everything is in `docs/audits/` in full.
 | — | **RESOLVED** | CI never ran `db:migrate`, so 4 tests failed on every runner since `df666bd` — fixed in `8d7c9db` | — |
 | — | **clean** | Rebates are counted once **and land in the month the statement's own period says** (accrual on `periodTo`, cash on the banked date) — see #22, which is the *sign*, not the period or the count; the 835 reader at four points; the 835 reader at four points; the 459 plan adoptions; `books-check` fully wired; devices and salt forms in `substitutable`; the floor's scope gates against *Rutledge*; the fingerprint fix | — |
 
-**Twenty-seven rows, of which two (#19, #20) are questions rather than findings**, because I could not
+**Twenty-eight rows, of which two (#19, #20) are questions rather than findings**, because I could not
 write the SHOULD BE line from domain knowledge; #3 is a question for eleven of its thirteen for the
 same reason; and #21 is a *state* — not-captured — rather than either. That is the gate working, and
 I would rather hand you honest questions than more findings you have to audit.
