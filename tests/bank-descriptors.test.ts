@@ -357,3 +357,14 @@ describe("telling IPC from IPD", () => {
     assert.notEqual(other.counterparty, "IPC");
   });
 });
+
+describe("McKesson's rebate arriving in pieces (G-REB-1)", () => {
+  test("REGRESSION: the three HEW LLC credits are pieces of the rebate, never money to bank by hand", () => {
+    for (const [d, cents] of [["HEW LLC/BRAND West Wichita", 110_976], ["HEW LLC/GENERIC West Wichita", 824_676], ["HEW LLC/FEES MISC West Wichita", 35_000]] as const) {
+      assert.equal(readBankDescriptor(d, cents).kind, "wholesaler_rebate");
+      const p = placeLine({ on: "2026-08-19", description: d, amountCents: cents, key: d }, { payers: [], suppliers: [{ id: "m", name: "Mckesson" }], vendors: [], unpaidBills: [], unpaidInvoices: [] });
+      assert.equal(p.kind, "rebate_part");
+      assert.match(p.why, /do not bank these by hand/);
+    }
+  });
+});

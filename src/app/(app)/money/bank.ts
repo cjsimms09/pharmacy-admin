@@ -193,7 +193,7 @@ export async function readBankStatement(fd: FormData) {
       invoices += open.length;
       why = `${placement.why} ${open.length} of the ${placement.invoices.length} invoices were on file and are marked paid ${line.on}.`;
     } else {
-      if (placement.kind === "settles_ach" || placement.kind === "facilitator_unmatched") placedAs = "unplaced";
+      if (placement.kind === "settles_ach" || placement.kind === "facilitator_unmatched" || placement.kind === "rebate_part") placedAs = "unplaced";
       unplaced++;
     }
     await db.insert(schema.bankLines).values({

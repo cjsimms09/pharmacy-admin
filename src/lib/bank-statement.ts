@@ -152,6 +152,8 @@ export type Placement =
   | { kind: "settles_ach"; supplier: string; reference: string; invoices: string[]; agrees: boolean; why: string }
   /** A facilitator credit no remittance on file explains. Never matched to other receipts, never banked. */
   | { kind: "facilitator_unmatched"; why: string }
+  /** A piece of a wholesaler rebate paid in several credits. Never matched one at a time, never banked. */
+  | { kind: "rebate_part"; why: string }
   | { kind: "unplaced"; why: string };
 
 export type MatchContext = {
@@ -273,6 +275,17 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
      * this confirms.
      */
     if (meaning.kind === "card_settlement") return { kind: "card_deposit", why: meaning.says };
+    /*
+     * Pieces of a wholesaler rebate. Not banked, and not offered to the receipt match one at a time: the rebate
+     * statement banks the whole, and a piece that happened to equal some other receipt would confirm the wrong one.
+     * Until the pieces can be tied to that receipt together, a person sees them with this said.
+     */
+    if (meaning.kind === "wholesaler_rebate") {
+      return {
+        kind: "rebate_part",
+        why: "Part of McKesson's rebate, which arrives as separate brand, generic and fee credits on one day. The rebate statement banks the whole rebate; do not bank these by hand, or it is counted twice.",
+      };
+    }
     /*
      * The facilitator's money is counted from its remittances, payment by payment, and a banked facilitator
      * receipt made the cash account drop every MTF payment in that month (profit-and-loss.ts reads the
