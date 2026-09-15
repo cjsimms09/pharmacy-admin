@@ -11,7 +11,8 @@ import { looksLikeSystemSales } from "./system-sales";
 import { looksLikeOnHand } from "./on-hand";
 import { looksLikeRxRescueCredit } from "./rxrescue-credit";
 import { looksLikePayerPayments } from "./payer-payments";
-import { pdfText } from "./pdf-text";
+import { pdfItems, pdfText } from "./pdf-text";
+import { copayRemitTextFromPdf } from "./copay-remit-scan";
 import { looksLikeCardStatement } from "./card-statement";
 import { looksLikeAccessHealthPayment } from "./accesshealth-payment";
 import { looksLikeSalesByPayment } from "./sales-by-payment";
@@ -237,6 +238,14 @@ export function classify(fileName: string, buf: Buffer): Classification {
        */
       if (looksLikeDrillDown(text, fileName)) {
         return { kind: "purchase_drilldown", why: "McKesson's Purchase Drill Down: it carries the compliance ratio and the OneStop share, month by month.", headers: [] };
+      }
+      /*
+       * A scanned voucher remittance whose text layer comes out one field per line. Its printed lines are rebuilt from
+       * the words' positions and tested again (copay-remit-scan.ts). Only tried where the words say copay voucher, so no
+       * other PDF pays for the rebuild.
+       */
+      if (/copay/i.test(text) && /voucher|redsail/i.test(text) && copayRemitTextFromPdf(text, pdfItems(buf)).from !== null) {
+        return { kind: "copay_remit", why: "A scanned copay-voucher remittance: its printed lines, rebuilt from the page, carry a payment header and item rows that hold together.", headers: [] };
       }
     } catch {
       // Not readable as text — a scan. It is filed as a document like anything else.
