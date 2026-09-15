@@ -352,7 +352,13 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
      */
     if (meaning.kind === "psao_remittance") return { kind: "psao_deposit", why: meaning.says };
     /* Named receipts nobody has said how to count yet (prescription transfers, Veridian, POC Network): a person decides. */
-    if (meaning.kind === "transfer_in" || meaning.kind === "other_receipt") {
+    /*
+     * Money with no other document, named by the owner (15 September): the practice paying for drugs sold to it at cost,
+     * and DrHouse paying for its scripts. Their claims count them on accrual; only the bank line counts the cash.
+     */
+    if (meaning.kind === "transfer_in") return { kind: "deposit", receiptKind: "other", payer: "WWFP (drugs sold at cost)", why: meaning.says };
+    if (meaning.kind === "direct_payer") return { kind: "deposit", receiptKind: "third_party", payer: meaning.counterparty, why: meaning.says };
+    if (meaning.kind === "other_receipt") {
       return { kind: "unplaced", why: `${meaning.says} Not banked from the statement until it is agreed what this money is and where it belongs.` };
     }
     /*
@@ -465,6 +471,14 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
       kind: "unplaced",
       why: "the card processor taking its monthly fees, but no card processing statement for this amount is on file. Forward that month's statement to the inbox rather than booking this by hand, or the fees will be counted twice when it arrives.",
     };
+  }
+  /* A supplier paid by debit card: the purchase pays its invoice, or waits for one — its cost comes from the invoice, never from this line. */
+  if (meaning.kind === "supplier_card") {
+    const fold = (x: string | null) => (x ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const key = fold(meaning.counterparty).slice(0, 6);
+    const inv = ctx.unpaidInvoices.filter((v) => fold(v.supplier).startsWith(key) && v.totalCents === out);
+    if (inv.length === 1) return { kind: "pays_invoice", invoiceId: inv[0].id, supplier: inv[0].supplier ?? meaning.counterparty, why: `the ${meaning.counterparty} invoice for exactly this amount, paid by debit card` };
+    return { kind: "unplaced", why: `${meaning.says} ${inv.length > 1 ? "More than one of their invoices is for this amount; mark the right one paid by hand." : "No invoice of theirs for this amount is on file, so the cost of goods does not have it yet: forward their invoice, which books it and this line will mark it paid."}` };
   }
   const bills = ctx.unpaidBills.filter((b) => b.amountCents === out);
   const billByName = bills.filter((b) => b.vendorName && mentions(d, b.vendorName));

@@ -193,8 +193,30 @@ async function placeStatementLines(
   const parsed = { lines };
   const file = { name: o.fileName };
 
-  const held = new Set((await db.query.bankLines.findMany({ where: inArray(schema.bankLines.key, parsed.lines.map((l) => l.key)), columns: { key: true } })).map((r) => r.key));
-  const fresh = parsed.lines.filter((l) => !held.has(l.key));
+  /*
+   * A line already on file is not read again. By its key, and also by its date and amount counted line for line: a
+   * second scan of the same paper statement reads a description a character differently, gets a new key, and booked the
+   * El Segundo postage bill a second time on a rehearsal (Session 2, money map G-POST-2) — as it would have banked any
+   * deposit taken from the line. Two genuine lines of one date and amount are two: the count keeps both.
+   */
+  const heldKeys = new Set((await db.query.bankLines.findMany({ where: inArray(schema.bankLines.key, parsed.lines.map((l) => l.key)), columns: { key: true } })).map((r) => r.key));
+  const onFile = new Map<string, number>();
+  for (const r of await db.query.bankLines.findMany({ where: inArray(schema.bankLines.on, [...new Set(parsed.lines.map((l) => l.on))]), columns: { on: true, amountCents: true, key: true } })) {
+    const k = `${r.on}|${r.amountCents}`;
+    onFile.set(k, (onFile.get(k) ?? 0) + 1);
+  }
+  const held = new Set<string>();
+  const fresh: BankLine[] = [];
+  for (const l of parsed.lines) {
+    const k = `${l.on}|${l.amountCents}`;
+    if (heldKeys.has(l.key) || (onFile.get(k) ?? 0) > 0) {
+      held.add(l.key + "|" + held.size);
+      if (!heldKeys.has(l.key)) onFile.set(k, onFile.get(k)! - 1);
+      else if ((onFile.get(k) ?? 0) > 0) onFile.set(k, onFile.get(k)! - 1);
+      continue;
+    }
+    fresh.push(l);
+  }
   const placed = placeLines(fresh, await matchContext());
 
   /*

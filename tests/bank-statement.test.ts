@@ -111,3 +111,22 @@ describe("the pharmacy's own name is not a counterparty (G-BANK-1)", () => {
     }
   });
 });
+
+describe("the owner's answers about August's unnamed lines (Q-BANK-1)", () => {
+  const ctx3 = { payers: [], suppliers: [{ id: "rrc", name: "RrcPharmaSolution" }], vendors: [], unpaidBills: [], unpaidInvoices: [{ id: "inv-rrc", supplierId: "rrc", supplier: "RrcPharmaSolution", totalCents: 738_000, invoiceDate: "2026-08-20" }] };
+  test("a prescription transfer is the practice paying for drugs sold at cost: cash only, banked once from the line", () => {
+    const p = placeLines([{ on: "2026-08-03", description: "Prescription/TRA N S FER ST.J2HsP3LOMlL8 WTST WICHTTA FAMILY PH", amountCents: 337_322, key: "t" }], ctx3)[0].placement;
+    assert.deepEqual([p.kind, p.kind === "deposit" ? p.receiptKind : null, p.kind === "deposit" ? p.payer : null], ["deposit", "other", "WWFP (drugs sold at cost)"]);
+  });
+  test("DrHouse pays for its scripts straight to the bank: banked as plan money on cash, while its claims count it on accrual", () => {
+    const p = placeLines([{ on: "2026-08-24", description: "DRHOUSE PAYMENTS West Wichita", amountCents: 3_835, key: "d" }], ctx3)[0].placement;
+    assert.deepEqual([p.kind, p.kind === "deposit" ? p.payer : null], ["deposit", "DrHouse"]);
+  });
+  test("an RRC Pharma debit-card purchase pays its invoice, or waits for one - it never books cost itself", () => {
+    const paid = placeLines([{ on: "2026-08-24", description: "PuTch IN *RRC PHARMA SOLUTIO INGLEWOOD cA", amountCents: -738_000, key: "r1" }], ctx3)[0].placement;
+    assert.equal(paid.kind, "pays_invoice");
+    const waits = placeLines([{ on: "2026-08-28", description: "Purch IN *RRC PHARMA SOLUTIO INGLEWOOD", amountCents: -936_000, key: "r2" }], ctx3)[0].placement;
+    assert.equal(waits.kind, "unplaced");
+    assert.match(waits.why, /forward their invoice/);
+  });
+});

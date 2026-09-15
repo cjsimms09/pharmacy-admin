@@ -237,3 +237,11 @@ test("REGRESSION: a remittance's second identical claim line posts on the first 
   assert.ok(text.includes("const heldCount = new Map<string, number>();"));
   assert.ok(!text.includes("seen.add(`${reference}|${p.rxNumber}|${p.paidCents}`)"));
 });
+
+test("REGRESSION: a re-scanned statement whose descriptions read differently places nothing twice (G-POST-2)", async () => {
+  /* The line key carries the scan's text; a line is also on file when its date and amount are, counted line for line. */
+  const text = await readFile("src/app/(app)/money/bank.ts", "utf8");
+  const block = text.slice(text.indexOf("const heldKeys"), text.indexOf("const placed = placeLines(fresh"));
+  assert.ok(block.includes("onFile"));
+  assert.ok(block.indexOf("fresh.push(l)") > block.indexOf("(onFile.get(k) ?? 0) > 0"));
+});

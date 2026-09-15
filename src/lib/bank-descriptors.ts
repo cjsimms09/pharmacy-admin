@@ -498,14 +498,40 @@ const RULES: Rule[] = [
       "which is counted nowhere. Sold at cost the two cancel, so counting one half alone understates the month by the whole amount.",
   },
   {
+    /*
+     * The owner, 15 September: "transfer/prescription are the drugs sold to wwfp at cost" — the practice paying the
+     * pharmacy for the medicines passed to it. No other document carries this money, so the bank line banks it.
+     */
     kind: "transfer_in",
-    counterparty: "a prescription transfer",
-    test: /PRESCRIPTION.?TRAN|PRESCRIPTIONTRANSFER/,
+    counterparty: "WWFP (drugs sold at cost)",
+    test: /PRESCRIPTION.?TRAN|PRESCRIPTIONTRANSFER|PRESCRI.{0,6}TRAN/,
     side: "in",
     lands: "revenue",
     category: "other",
     feed: null,
-    why: "A prescription transfer payment.",
+    why: "The practice paying for drugs the pharmacy passed to it at cost.",
+  },
+  {
+    /* The owner: "dr house is a telehealth company that pays us for scripts". Paid straight to the bank, no remittance. */
+    kind: "direct_payer",
+    counterparty: "DrHouse",
+    test: /DRHOUSE/,
+    side: "in",
+    lands: "revenue",
+    category: "third_party",
+    feed: null,
+    why: "The telehealth company paying for the prescriptions it sends.",
+  },
+  {
+    /* The owner: "RRC pharma is a supplier (which we have in system) and we pay them via debit card". */
+    kind: "supplier_card",
+    counterparty: "RrcPharmaSolution",
+    test: /RRCPHARMA/,
+    side: "out",
+    lands: "cost_of_goods",
+    category: null,
+    feed: "RRC Pharma's invoices",
+    why: "A purchase from RRC Pharma, paid by debit card.",
   },
   { kind: "other_receipt", counterparty: "Veridian", test: /VERIDI/, side: "in", lands: "revenue", category: "other", feed: null, why: "A Veridian payment." },
   { kind: "other_receipt", counterparty: "POC Network", test: /POCNETWORK/, side: "in", lands: "revenue", category: "other", feed: null, why: "A POC Network handling payment." },
