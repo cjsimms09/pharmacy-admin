@@ -1533,3 +1533,101 @@ Every other exit writes an inbox row with its reason:
 - The SFTP door: its folder holds a key pair (not opened), and what it fetches was not examined.
 - The Inbox screen's "resort" and "undo" paths (`inbox-resort.ts`, `inbox-undo.ts`) were not rehearsed here.
 
+---
+
+## LINKS — how the records join, on what key, and how well it held on real data
+
+```mermaid
+flowchart LR
+  claims[PioneerRx claims] -->|rx, fill, date, NDC| r835[835 claim payments]
+  r835 -->|trace = EFT number| pp[Payer payment report]
+  eft[HMA EFT notice] -->|same key| pp
+  pp -->|cents ±7 days; sweeps 2–3| bank[Bank statement]
+  mtf[MTF 835s] -->|sum per day = credit| bank
+  batch[Card batch report] -->|cents ±7 days, card-batch only| bank
+  batch -->|batch date ±1, cents| cstmt[Card statement]
+  cstmt -->|fee bill cents| bank
+  sbp[Payment-type report] -.->|period days, unrehearsed| batch
+  sbp -.->|period days, unrehearsed| claims
+  inv[Supplier invoices] -->|invoice number| ap[McKesson AP report]
+  ap -->|CKACH = ACH reference| bank
+  inv -->|invoice number| recv[PioneerRx receiving]
+  rebate[Rebate statement] -->|statement key| receipt[Rebate receipt]
+  receipt -.->|no key: split into 3 credits| bank
+  post[Endicia confirmation] -.->|no key: bank says already counted| bank
+  ret[McKesson returns] -.->|no path| ap
+```
+
+| join | key | measured on real data | status |
+|---|---|---|---|
+| HMA EFT notice ↔ payer payment report | `payer-payment|<payer>|<EFT number>` (shared) | both orders hold one receipt (section 3) | holds |
+| Payer payment receipt ↔ bank credit | exact cents, ±7 days; combinations of 2–3 | 20/20 HMA and 9/9 single ProviderPay confirm; 6 sweeps named, not linked (G-PP-3) | holds; sweeps open |
+| ProviderPay 835 ↔ payer payment report | trace digits = payment number (HMA); **none for direct payers** | 20/20 HMA by number; 15 direct payers equal only by amount | fixed by never banking a ProviderPay 835 (G-835-1) |
+| 835 claim payments ↔ deposit | trace → deposit | $14,506.16 net unexplained across 20 HMA remittances (G-835-2) | open, needs a real 835 |
+| MTF 835 ↔ bank credit | MTF payments summed per day = the credit | 7/7 August, same day (section 5) | holds (d477ee4) |
+| Card batch ↔ bank credit | exact cents, ±7 days, `card-batch|…` receipts only | 25/25 August statement deposits = bank credits; close → bank 2–4 days | holds (c898bb4, 56f0ce2) |
+| Card batch ↔ card statement row | batch date ±1 day, exact cents | 22/25 on a year-on rehearsal, the 3 left out named; false "extra" at month edges (G-CSTMT-2) | holds; wording open |
+| Card fee bill ↔ bank fee debit | exact cents among unclaimed `GP-…` bills | ties when the statement came first; never re-placed if the bank came first (G-CSTMT-3) | open |
+| McKesson invoice ↔ AP line | invoice number | 21/21 agree to the cent; 42 on AP with no invoice | holds |
+| AP ACH ↔ bank debit | `CKACH<n>` = bank `ACH<n>` | real ACH ties to 27 invoices; simulated next ACH marks 21/21 paid | holds (7b71c14) |
+| Supplier invoice ↔ PioneerRx receiving | invoice number, exact | 14/18 non-McKesson invoices match; no double by number, digits or amount | holds |
+| Rebate statement ↔ receipt ↔ bank | statement key; **no bank key** | July's receipt is three HEW LLC credits, unrecognised (G-REB-1) | open |
+| Postage confirmation ↔ bank charge | **none**: the bank line is called already counted | 10/10 August charges with no bill (G-POST-1) | open |
+| McKesson return credit ↔ anything | **none** | $10,411.15 on no account (G-MCK-2) | question |
+| Payment-type report ↔ batches, claims | the report's period days | not rehearsable on the 30–31 August sample | sample requested (3–14 Sep) |
+
+---
+
+## GAPS — every finding, with its status
+
+FIXED means fixed by its owner and re-rehearsed here; the commit is the one that passed.
+
+| id | finding | dollars (rehearsed or measured) | owner | status |
+|---|---|---|---|---|
+| G-CARD-1 | statement before batch counted card money twice | $234.56 test | 1 / A | **FIXED** 6ad1c04 |
+| G-CARD-2 | a deposit of two batches counted twice, either order | $333.33 / $393.97 tests | 1 | **FIXED** 6ad1c04, c898bb4 |
+| G-CARD-7 | card money's line and month followed reading order | $234.56 test | A / 1 | **FIXED** c898bb4 |
+| G-CARD-8 | Heartland scan spellings unplaced; the form doubled them | H1/H2 tests | A / 1 | **FIXED** c898bb4 |
+| G-CARD-9 | typed under the bank's month, batch closed the month before | $535.35 test | 1 | **FIXED** 56f0ce2 |
+| G-CARD-10 | a combined deposit typed with the form | $150.15 test | A / 1 | **FIXED** 56f0ce2 |
+| G-CARD-11 | a card deposit confirmed a non-card receipt | wrong link | 1 / A | **FIXED** 56f0ce2 |
+| G-PP-1 | a payer's second same-amount payment refused as a duplicate | **$904.00** real (August) | 1 | **FIXED** 882307e; live still holds 5 of 6 until the report is re-read |
+| G-835-1 | ProviderPay 835s would bank direct-payer deposits a second time | **$148,965.45** (August, rebuilt) | 1 | **FIXED** d477ee4 |
+| G-MTF-1 (b) | an MTF 835 or a bank line replaced the month's MTF money | **$2,783.72 / $1,556.14** (September) | 1 | **FIXED** d477ee4 |
+| G-MTF-2 | an unmatched MTF credit confirmed another payer's receipt | wrong link | A | **FIXED** 7b71c14 |
+| G-MCK-1 | the McKesson ACH tie never ran; invoices never paid | $106,322.62 debit; 21 invoices | A | **FIXED** 7b71c14 |
+| G-CSTMT-1 | card fees typed on Spending plus the statement counted twice | **$4,778.73** (August's fees) | A / 1 | OPEN (session 1's queue) |
+| G-CSTMT-2 | the batch check calls a neighbouring month's batch "extra" | wording | 1 | OPEN (queue) |
+| G-CSTMT-3 | card fees in the wrong cash month; permanent if the bank reads first | **$4,778.73** a month | 1 / A | OPEN (matching engine) |
+| G-CSTMT-4 | August's fees left the bank in September, on no account | **$4,778.73** | 1 | OPEN → Q-CSTMT-1 |
+| G-CARD-13 | the card-deposit message names the wrong day (0 of 25) | wording | A / 1 | OPEN (queue) |
+| G-CARD-12 | unplaced card lines never re-matched | list noise | A / 1 | OPEN (matching engine) |
+| G-PP-2 | a receipt's date is whichever document arrived first | one deposit per month edge | A | OPEN (matching engine) |
+| G-PP-3 | ProviderPay sweeps never clear the list | $56,860.27 of lines (August) | 1 | OPEN (matching engine) |
+| G-835-2 | HMA 835 payments short of their deposits, unexplained | **$14,506.16** net | — | OPEN (needs a real 835) |
+| G-MTF-1 (a) | the facilitator stand-in is all-or-nothing | only a typed receipt triggers it now | **A** | OPEN |
+| G-MCK-2 | McKesson return credits reach no account | **$10,411.15** | — | QUESTION Q-MCK-1 |
+| G-MCK-3 | a moved due date leaves a paid invoice owed | $22,118.56 test | — | OPEN |
+| G-MCK-4 | "N not placed" counts placed lines | wording | A | OPEN |
+| G-REB-1 | a rebate paid as three credits is unrecognised and the form would double it | **$9,706.52** (July) | A / 1 | OPEN |
+| G-POST-1 | every Stamps.com charge is called already counted | **$940.99** of August charges with no bill | — | OPEN |
+| G-CARD-3 | a batch email with an image attached is never banked, silently | 0 of 8 affected | B | OPEN (Phase B) |
+| G-CARD-5 | the payment-type checks have never run on real, overlapping data | — | 1 | sample requested |
+| M-CSTMT-1 | card processing cost 5.06% of deposits; Global Payments' own markup 2.15% + $0.3164/txn | **~$26,000 a year** at an illustrative 0.50% + $0.10 | owner | for the owner |
+
+| id | question for the owner | status |
+|---|---|---|
+| Q-CARD-1 | which day card money counts on | **DECIDED**: batch close date |
+| Q-CARD-2 | whether account payments appear in the payment-type report | open |
+| Q-CSTMT-1 | whether September's cash account carries August's card fees ($4,778.73) | open |
+| Q-MCK-1 | how McKesson applies return credits | open |
+| Q-POST-1 | what the monthly $40.99 "Stamps.com El Segundo CA" charge is | open |
+
+**Not rehearsable yet, and why:**
+- the bank statement feed: no reader for the scanned PDF (session 1 is building it; CSV asked of the owner);
+- AccessHealth payment PDFs and the ProviderPay account history: no readers yet (session 1);
+- plan 835s: no file kept (a sample is being asked for);
+- the payment-type checks: sample requested;
+- the copay-voucher scan: no reader for its layout (section 10);
+- till and paper cash, DIR fees, clawbacks, recoupments, and MAC/NADAC recoveries: no sample of any among the uploads.
+
