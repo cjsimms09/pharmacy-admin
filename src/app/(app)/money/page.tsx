@@ -660,6 +660,25 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
                 this was compared against, so a fresh run carries the fills the first one missed.
               </p>
             )}
+            {/*
+              PioneerRx's own arithmetic, checked every morning: each payer's payment plus the patient's pay is the fill's
+              total price. It was counted into a setting nothing read (claim-lifecycle.md, rule 1). A fill that does not
+              add up has a share nobody can attribute, so it is named here, by prescription, where it can be looked up.
+            */}
+            {completeness.notAddingUp > 0 && (
+              <div className="mt-2 rounded-lg bg-warn-soft/60 p-2 text-xs text-ink-2">
+                <b>
+                  {completeness.notAddingUp} fill{completeness.notAddingUp === 1 ? "" : "s"} where the payers and the patient do not add to
+                  the fill&rsquo;s price
+                </b>{" "}
+                in PioneerRx&rsquo;s own figures, so part of {completeness.notAddingUp === 1 ? "its" : "their"} money has no owner here:{" "}
+                {completeness.notAddingUpList
+                  .slice(0, 6)
+                  .map((d) => `Rx ${d.rxNumber}-${d.fillNumber} (${formatCents(d.addsToCents)} against ${formatCents(d.fillSaysCents)})`)
+                  .join("; ")}
+                {completeness.notAddingUp > 6 ? `, and ${completeness.notAddingUp - 6} more` : ""}.
+              </div>
+            )}
             <p className="mt-2 text-xs text-ink-3">
               Measured through {fmt(completeness.coverTo ?? "")}, which is as far as the day-old copy reaches.
               {completeness.aheadFills > 0 && (

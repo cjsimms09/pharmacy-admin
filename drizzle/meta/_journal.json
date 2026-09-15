@@ -855,6 +855,13 @@
       "when": 1788809188029,
       "tag": "0122_claims_voucher_programme",
       "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "6",
+      "when": 1788809248029,
+      "tag": "0123_claims_payer_position",
+      "breakpoints": true
     }
   ]
 }

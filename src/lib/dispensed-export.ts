@@ -44,6 +44,8 @@ export type DispensedRow = {
   filledOn: string | null;
   completedOn: string | null;
   netProfitCents: number | null;
+  /** The fill's total price, where the source states one (the PioneerRx pull). Written on the primary row only. */
+  fillTotalPriceCents?: number | null;
 };
 
 export type PayerSide = {
@@ -343,6 +345,8 @@ export async function enrichClaimsFrom(rows: DispensedRow[], stamp: string): Pro
         .set({
           ...shared,
           ...carriedBy(r.primary),
+          payerPosition: "primary",
+          ...(r.fillTotalPriceCents !== undefined ? { fillTotalPriceCents: r.fillTotalPriceCents } : {}),
           // The bottle's cost, and only if this row does not already carry one of its own.
           ...(p.acquisitionCents === null || p.acquisitionCents === 0 ? fillCost : {}),
           basisOfReimbursement: r.basisOfReimbursement ?? undefined,
@@ -355,7 +359,7 @@ export async function enrichClaimsFrom(rows: DispensedRow[], stamp: string): Pro
       report.primaryEnriched++;
     }
     if (s && r.secondary) {
-      await db.update(schema.claims).set({ ...shared, ...carriedBy(r.secondary), planId: r.secondary.planId ?? undefined, contractId: r.secondary.contractId ?? undefined, networkId: r.secondary.networkId ?? undefined }).where(eq(schema.claims.id, s.id));
+      await db.update(schema.claims).set({ ...shared, ...carriedBy(r.secondary), payerPosition: "secondary", fillTotalPriceCents: null, planId: r.secondary.planId ?? undefined, contractId: r.secondary.contractId ?? undefined, networkId: r.secondary.networkId ?? undefined }).where(eq(schema.claims.id, s.id));
       report.secondaryEnriched++;
     }
   }

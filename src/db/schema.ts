@@ -2376,6 +2376,13 @@ export const claims = sqliteTable(
     evoucherMessageCents: integer("evoucher_message_cents"),
     /** Who ran the voucher, from the message wording: "RedSail" or "Veridikal". Null where not read or no voucher. See voucherProgrammeFromMessage. */
     evoucherProgramme: text("evoucher_programme"),
+    /**
+     * This row's payer on its fill: "primary" or "secondary", from PioneerRx's PrimaryClaimID. Null has not been told.
+     * BIN, PCN and group do not settle it: six September fills had both payers under the same three (P-1).
+     */
+    payerPosition: text("payer_position"),
+    /** The fill's total price (PioneerRx TotalPricePaid): all payers plus the patient. On the primary row only; never sum it across rows. */
+    fillTotalPriceCents: integer("fill_total_price_cents"),
     /** The contract id the plan returned on the claim, as the export prints it. */
     contractId: text("contract_id"),
     gcn: text("gcn"),

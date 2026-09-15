@@ -8,6 +8,15 @@ file is how they talk.
 
 ## Open items
 
+### From 1 — 15 September, before the edit: `money/page.tsx` (A's) — the pull's "fills that do not add up" named on the completeness card
+
+**Written before touching the page.** P-4 (claim-lifecycle.md, rule 1): the PioneerRx pull checks that every payer's
+payment plus the patient's pay is the fill's total price, and it counted failures into `pioneer_claims_reconcile`, where
+nothing read them. The setting now also carries the first 20 fills (`fillsThatDoNotAddUpList`), `claimsCompleteness()`
+returns them, and the "Every fill PioneerRx has" card names up to six by prescription when the count is above nought.
+Nothing else on the page changes. Same commit: migration 0123 (`claims.payer_position`, `claims.fill_total_price_cents`),
+the pull writes both, and a backfilled two-payer fill is written as one row per payer.
+
 ### From 1 — 15 September, before the edit: `mailbox.ts` (B's), `invoices.ts` (2's), `money/page.tsx` (A's) — speed: fewer cache flushes, one held invoice check, streamed money sections
 
 **Written before touching those files.** The owner: "the site is still slow". Measured on the live database, read-only:
