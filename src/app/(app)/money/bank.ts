@@ -51,8 +51,21 @@ async function matchContext(): Promise<MatchContext> {
   }
   const postageBills = (await db.query.expenses.findMany({ where: and(like(schema.expenses.invoiceNumber, "POSTAGE|%"), eq(schema.expenses.status, "confirmed")), columns: { amountCents: true, paidOn: true, invoiceDate: true } }))
     .map((b) => ({ amountCents: b.amountCents, on: b.paidOn ?? b.invoiceDate }));
+  /*
+   * Payments to suppliers the site already holds with the invoices inside them.
+   *
+   * A Parmed ACH pays a fortnight of invoices at once and an IPD one pays whatever its Aytu credit did not, so no single
+   * invoice ever equals the debit and the amount rules would leave every one of them unplaced. Where the portal page or
+   * the statement has been read, each part is already counted in the month it was paid, so the bank line confirms it.
+   */
+  const payments = await db.query.supplierPayments.findMany({ columns: { id: true, supplier: true, paidOn: true, amountCents: true } });
+  const allocationCount = new Map<string, number>();
+  for (const a of await db.query.supplierPaymentAllocations.findMany({ columns: { paymentId: true } })) {
+    allocationCount.set(a.paymentId, (allocationCount.get(a.paymentId) ?? 0) + 1);
+  }
   return {
     postageBills,
+    supplierPayments: payments.map((p) => ({ id: p.id, supplier: p.supplier, paidOn: p.paidOn, amountCents: p.amountCents, invoices: allocationCount.get(p.id) ?? 0 })),
     facilitatorPaid: [...facilitatorByDay].map(([on, cents]) => ({ on, cents })),
     payers: [...payers],
     suppliers: sup.map((s) => ({ id: s.id, name: s.name, accountNumber: s.accountNumber ?? null })),

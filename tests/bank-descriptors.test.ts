@@ -400,3 +400,36 @@ test("the Stamps.com charge from El Segundo is mailing with no confirmation: the
   assert.equal(p.placement.kind, "books_bill");
   assert.equal(p.placement.kind === "books_bill" ? p.placement.category : "", "Postage and shipping");
 });
+
+describe("placing a supplier payment the site already holds", () => {
+  /*
+   * Parmed's portal, 15 September 2026: one ACH of $1,508.26 paid nine invoices and one of $3,561.38 paid thirteen. No
+   * invoice equals the debit, so without the payment record the line can only sit unplaced.
+   */
+  const ctx = {
+    payers: [],
+    suppliers: [{ id: "s2", name: "Parmed" }],
+    vendors: [],
+    unpaidBills: [],
+    unpaidInvoices: [],
+    supplierPayments: [{ id: "p1", supplier: "Parmed", paidOn: "2026-09-10", amountCents: 150_826, invoices: 9 }],
+  };
+  const line = { on: "2026-09-11", description: "PARMED 2057167199 WEST WICHITA FAM PHCY", amountCents: -150_826, key: "k" };
+
+  test("the debit confirms the payment and books nothing, because its invoices are already counted", () => {
+    const p = placeLine(line, ctx);
+    assert.equal(p.kind, "already_counted");
+    if (p.kind !== "already_counted") return;
+    assert.equal(p.what, "Parmed");
+    assert.match(p.why, /9 invoices inside it/);
+  });
+
+  test("the portal's day and the bank's day differ, and three days apart still ties", () => {
+    assert.equal(placeLine({ ...line, on: "2026-09-13" }, ctx).kind, "already_counted");
+    assert.equal(placeLine({ ...line, on: "2026-09-20" }, ctx).kind, "unplaced", "a week later is a different payment");
+  });
+
+  test("a different amount is not this payment", () => {
+    assert.equal(placeLine({ ...line, amountCents: -150_825 }, ctx).kind, "unplaced");
+  });
+});

@@ -169,6 +169,15 @@ export type MatchContext = {
   unpaidInvoices: { id: string; supplierId: string | null; supplier: string | null; totalCents: number | null; invoiceDate: string | null }[];
   /** Postage bills booked from purchase confirmations: what a Stamps.com debit must find to be already counted. */
   postageBills?: { amountCents: number; on: string }[];
+  /**
+   * Payments to suppliers the site already holds, with the invoices inside them (`supplier_payments`).
+   *
+   * A Parmed ACH pays a fortnight of invoices at once and an IPD one pays what its credit did not, so no single invoice
+   * ever equals the debit and the amount rules below can only leave it unplaced. Where the supplier's own page or
+   * statement has been read, the payment is on file with its invoices already marked paid, and this line is the bank
+   * confirming money that is counted — not a second cost.
+   */
+  supplierPayments?: { id: string; supplier: string; paidOn: string; amountCents: number; invoices: number }[];
   /** The facilitator's payments summed by the day they were paid, from the MTF remittances. */
   facilitatorPaid?: { on: string; cents: number }[];
   /** Card processing bills no bank line has claimed yet, paid or not — the card statement books its fees already paid. */
@@ -479,6 +488,30 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
     const inv = ctx.unpaidInvoices.filter((v) => fold(v.supplier).startsWith(key) && v.totalCents === out);
     if (inv.length === 1) return { kind: "pays_invoice", invoiceId: inv[0].id, supplier: inv[0].supplier ?? meaning.counterparty, why: `the ${meaning.counterparty} invoice for exactly this amount, paid by debit card` };
     return { kind: "unplaced", why: `${meaning.says} ${inv.length > 1 ? "More than one of their invoices is for this amount; mark the right one paid by hand." : "No invoice of theirs for this amount is on file, so the cost of goods does not have it yet: forward their invoice, which books it and this line will mark it paid."}` };
+  }
+  /*
+   * A payment to a supplier that is already on file with the invoices inside it.
+   *
+   * Measured on Parmed's portal, 15 September 2026: one ACH of $1,508.26 paid nine invoices and one of $3,561.38 paid
+   * thirteen, so no invoice equals the debit and the rules below would leave both unplaced for ever. The payment record
+   * has already put each part in the month it was paid, so the bank line confirms rather than books.
+   *
+   * Three days, because the portal's payment date is the day it was entered and the bank's is the day it left: 25 August
+   * on the portal, 26 August on the statement.
+   */
+  const plain = (x: string | null) => (x ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const daysApart = (a: string, b: string) => Math.abs(Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86_400_000;
+  const paymentMatch = (ctx.supplierPayments ?? []).filter(
+    (p) => p.amountCents === out && daysApart(p.paidOn, line.on) <= 3 && (mentions(d, p.supplier) || plain(meaning.counterparty) === plain(p.supplier)),
+  );
+  if (paymentMatch.length === 1) {
+    const p = paymentMatch[0];
+    return {
+      kind: "already_counted",
+      what: p.supplier,
+      where: "the cost of goods, from the payment already on file",
+      why: `${p.supplier}'s payment of this amount on ${p.paidOn}, which the site holds with ${p.invoices} invoice${p.invoices === 1 ? "" : "s"} inside it. Each is already counted in the month it was paid.`,
+    };
   }
   const bills = ctx.unpaidBills.filter((b) => b.amountCents === out);
   const billByName = bills.filter((b) => b.vendorName && mentions(d, b.vendorName));

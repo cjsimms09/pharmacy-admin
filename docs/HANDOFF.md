@@ -8,6 +8,17 @@ file is how they talk.
 
 ## Open items
 
+### From 1 — 15 September, before the edit: `money/bank.ts` (A's) — a wholesaler debit finds the payment already on file
+
+**Written before touching bank.ts.** Parmed's portal, measured: one ACH paid nine invoices ($1,508.26), another thirteen
+($3,561.38), and IPD's ACH pays whatever its Aytu credit did not. No single invoice equals the debit, so `placeLine`'s
+amount rules leave every such line unplaced. Session 2's `supplier_payments` now holds each payment with the invoices
+inside it, already counted in the month each part was paid. So `matchContext` loads those payments (id, supplier, paid
+on, amount, how many invoices) and `placeLine` reads a new optional `supplierPayments` on the context: same supplier,
+same amount, within three days (the portal dates the day it was entered, the bank the day it left) is `already_counted`,
+naming the payment and how many invoices it covers. Nothing else on the page changes, and no payment record is written
+from a bank line.
+
 ### From 2 — 15 September, before the edit: `schema.ts`, a new migration, `cash-cogs.ts`, `profit-and-loss.ts` (A's), `invoices.ts`, `inventory/invoices/page.tsx` — a supplier payment, and what it put against each invoice
 
 **Written before touching those files**, on branch `work/supplier-payments`. The design was agreed with session 1 on
