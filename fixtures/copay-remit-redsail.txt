@@ -14,9 +14,9 @@
 Remittance Advice - RAS Copay Voucher Reimbursement
 RedSail Technologies
 Payment Date: 09/01/2026
-Check/ACH Number: 10261385
+Check/ACH Number: 40517203
 Payment Amount: 177.25
-NPI: 1548737182
+NPI: 1234567893
 Kansas Family Pharmacy
 1200 Prairie Street, Suite 400, Wichita KS 67000
 

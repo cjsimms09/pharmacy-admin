@@ -16,7 +16,7 @@ const remittance = [
   "BPR*I*146.18*C*ACH*CCP*01*021000021*DA*1234567890*1234567890**01*021000021*DA*9876543210*20260906~",
   "TRN*1*MTF20260906001*1123456789~",
   "N1*PR*MEDICARE TRANSACTION FACILITATOR~",
-  "N1*PE*WEST WICHITA FAMILY PHARMACY*XX*1548737182~",
+  "N1*PE*WEST WICHITA FAMILY PHARMACY*XX*1234567893~",
   "LX*1~",
   "CLP*332359-1*1*328.23*146.18*0*MC*2026090600001*80~",
   "NM1*QC*1*DOE*JANE****MI*1EG4TE5MK73~",
@@ -127,7 +127,7 @@ const withPlb = [
   "TRN*1*EFT20260906XYZ*1123456789~",
   "DTM*405*20260904~",
   "N1*PR*BIG PBM INCORPORATED*XV*610014~",
-  "N1*PE*WEST WICHITA FAMILY PHARMACY*XX*1548737182~",
+  "N1*PE*WEST WICHITA FAMILY PHARMACY*XX*1234567893~",
   "LX*1~",
   "CLP*900001-1*1*5000.00*4000.00*100.00*MC*PBM0000123*80~",
   // Six adjustments in one segment: the format repeats reason/amount/quantity after the group code.
@@ -136,7 +136,7 @@ const withPlb = [
   "DTM*472*20260901~",
   "CAS*PR*1*100.00~",
   // The segment that used to be filed against prescription 900001.
-  "PLB*1548737182*20261231*CS:DIRFEE0926*57.50~",
+  "PLB*1234567893*20261231*CS:DIRFEE0926*57.50~",
   "SE*12*0001~",
 ].join("");
 
@@ -159,7 +159,7 @@ describe("provider-level money and the file's own arithmetic", () => {
 
   test("a file that does not add up says so and says by how much", () => {
     // The same file with the DIR fee removed: it now pays $57.50 less than its claims explain.
-    const noPlb = withPlb.replace("PLB*1548737182*20261231*CS:DIRFEE0926*57.50~", "");
+    const noPlb = withPlb.replace("PLB*1234567893*20261231*CS:DIRFEE0926*57.50~", "");
     const p = parse835(noPlb);
     assert.equal(p.balance?.differenceCents, -5_750);
     assert.equal(p.problems.length, 1);

@@ -1589,7 +1589,7 @@ pharmacies (Chain Code: 605, 630)", Capital Rx and ESI add 841, Caremark writes 
 ESI 0000630. Settings now holds "605, 630, 841" and `governsPharmacy` compares on the digits with
 leading zeros gone (`chainCodeKey`). **Re-applied: 176 documents, 369 rate lines, 18 appeal terms,
 380 contacts, 76 routings, 40 payer links; 1 not ours; 30 held only for rates whose quote is not
-in the text (scans).** NCPDP 1722734 and NPI 1548737182 were already in Settings.
+in the text (scans).** NCPDP 1722734 and the NPI were already in Settings.
 
 **Secondary payors, measured for A's audit (8 September, BACKLOG 2b-iv).** Of 1,054 insured paid
 fills, **22 have more than one payor** (2.1%), carrying $8,456.07 of remit between them. The

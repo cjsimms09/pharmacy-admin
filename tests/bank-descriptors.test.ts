@@ -82,7 +82,7 @@ describe("what each line on the bank statement is", () => {
 
   test("the running costs land in the categories the account already has", () => {
     assert.equal(readBankDescriptor("PIONEERRX/EPAY N51O-230 WEST WICHITA FAMILY PH", -223_312).category, "Software and systems");
-    assert.equal(readBankDescriptor("CPESN LLC/CPESN USA Augu 20261548737182", -212_500).category, "Professional fees");
+    assert.equal(readBankDescriptor("CPESN LLC/CPESN USA Augu 20261234567893", -212_500).category, "Professional fees");
     assert.equal(readBankDescriptor("Purch ALERT 360 TULSA OK", -21_469).category, "Software and systems");
   });
 
