@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { checkAllocations, checkPaidTogether, paymentCentsFrom, type PaidTogetherInvoice } from "../src/lib/paid-together";
+import { checkAllocations, checkPaidTogether, invoicesDueForDebit, paymentCentsFrom, type DueInvoice, type PaidTogetherInvoice } from "../src/lib/paid-together";
 
 /*
  * A statement payment marking several invoices paid. The owner, 15 September: "believe parmed and ipd are per statement".
@@ -120,6 +120,62 @@ describe("a payment that says what it put against each invoice", () => {
   test("an invoice the payment names that is not on file stops the whole payment", () => {
     const r = checkAllocations({ invoices: [big], allocations: [{ invoiceId: "1", amountCents: 10 }, { invoiceId: "99", amountCents: 10 }], allocatedAlready: none, paidOn: "2026-08-19", paymentCents: 20, acceptDifference: false });
     assert.match(r.ok ? "" : r.why, /not on file/);
+  });
+});
+
+/*
+ * Which invoices a wholesaler's debit paid, decided by the due date each invoice prints rather than by finding a subset
+ * that adds up. Parmed's September invoices all print 10/10/2026 and its portal shows that set paid as one ACH.
+ */
+describe("a bank debit against the invoices that say they are due", () => {
+  const due = (id: string, totalCents: number, dueOn: string | null, over: Partial<DueInvoice> = {}): DueInvoice => ({
+    id,
+    supplier: "Parmed",
+    invoiceNumber: `T-${id}`,
+    totalCents,
+    paidOn: null,
+    dueOn,
+    ...over,
+  });
+  const three = [due("1", 50_000, "2026-10-10"), due("2", 60_000, "2026-10-10"), due("3", 36_146, "2026-10-10")];
+
+  test("the invoices due that day, coming to the debit, are what it paid", () => {
+    const r = invoicesDueForDebit({ invoices: three, on: "2026-10-10", amountCents: 146_146 });
+    assert.ok(r.ok);
+    assert.equal(r.ok && r.invoices.length, 3);
+    assert.equal(r.ok && r.totalCents, 146_146);
+  });
+
+  test("a debit clearing the next day still ties: the money leaves after the payment is made", () => {
+    assert.equal(invoicesDueForDebit({ invoices: three, on: "2026-10-11", amountCents: 146_146 }).ok, true);
+    assert.equal(invoicesDueForDebit({ invoices: three, on: "2026-10-13", amountCents: 146_146 }).ok, true);
+  });
+
+  test("a week later is a different payment", () => {
+    const r = invoicesDueForDebit({ invoices: three, on: "2026-10-17", amountCents: 146_146 });
+    assert.match(r.ok ? "" : r.why, /no invoice of theirs prints a due date within 3 days/);
+  });
+
+  test("a cent out writes nothing and says what it saw, so the payment page settles it", () => {
+    const r = invoicesDueForDebit({ invoices: three, on: "2026-10-10", amountCents: 146_145 });
+    assert.match(r.ok ? "" : r.why, /come to \$1,461\.46, against a debit of \$1,461\.45\. Forward the supplier's payment page/);
+  });
+
+  test("invoices already paid are refused whole: a second debit must not pay them again", () => {
+    const paid = [three[0], { ...three[1], allocatedCents: 60_000 }, three[2]];
+    const r = invoicesDueForDebit({ invoices: paid, on: "2026-10-10", amountCents: 146_146 });
+    assert.match(r.ok ? "" : r.why, /1 of the 3 invoices due then is already paid/);
+    const byHand = [three[0], { ...three[1], paidOn: "2026-10-09" }, three[2]];
+    assert.equal(invoicesDueForDebit({ invoices: byHand, on: "2026-10-10", amountCents: 146_146 }).ok, false);
+  });
+
+  test("an invoice printing no due date chooses nothing, however well the amount fits", () => {
+    const r = invoicesDueForDebit({ invoices: [due("9", 146_146, null)], on: "2026-10-10", amountCents: 146_146 });
+    assert.equal(r.ok, false);
+  });
+
+  test("a credit on the account is not a payment", () => {
+    assert.equal(invoicesDueForDebit({ invoices: three, on: "2026-10-10", amountCents: 0 }).ok, false);
   });
 });
 
