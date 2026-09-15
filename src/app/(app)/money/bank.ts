@@ -125,9 +125,9 @@ export async function readBankStatement(fd: FormData) {
      * useful is exactly the line most likely to be a deposit a feed already banked, and leaving it on
      * the unplaced pile would hand a person work the receipts on file already answer.
      */
-    const isCredit = placement.kind === "deposit" || (placement.kind === "unplaced" && line.amountCents > 0);
+    const isCredit = placement.kind === "deposit" || placement.kind === "card_deposit" || (placement.kind === "unplaced" && line.amountCents > 0);
     const match = isCredit
-      ? matchHeldDeposit(heldForBank, { amountCents: line.amountCents, on: line.on, payer: placement.kind === "deposit" ? placement.payer : null }, claimed)
+      ? matchHeldDeposit(heldForBank, { amountCents: line.amountCents, on: line.on, payer: placement.kind === "deposit" ? placement.payer : placement.kind === "card_deposit" ? "Card batch" : null }, claimed)
       : { kind: "none" as const };
     if (match.kind === "confirms") {
       claimed.add(match.receipt.id);
@@ -139,6 +139,11 @@ export async function readBankStatement(fd: FormData) {
     } else if (match.kind === "ambiguous") {
       placedAs = "unplaced";
       why = match.why;
+      unplaced++;
+    } else if (placement.kind === "card_deposit") {
+      /* Never banked here: the card batch report is the one door for card takings. See `placeLine`. */
+      placedAs = "unplaced";
+      why = `Card takings with no card batch report on file for exactly this amount. Forward the batch report for the day before ${line.on} to the inbox — it banks the money and this line will match it. Do not bank this with the form: that counts it twice when the report arrives.`;
       unplaced++;
     } else if (placement.kind === "deposit") {
       receiptId = (await addCashReceipt({ month: line.on.slice(0, 7), kind: placement.receiptKind, amountCents: line.amountCents, payer: placement.payer, notes: `From the bank statement: ${line.description}`, receivedOn: line.on, createdBy: user.id })).id;

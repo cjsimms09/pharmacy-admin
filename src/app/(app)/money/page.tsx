@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { addCashReceipt, deleteCashReceipt, cashReceiptsFor } from "@/lib/expenses";
+import { addCashReceipt, automaticReceiptsLike, deleteCashReceipt, cashReceiptsFor } from "@/lib/expenses";
 import { readBankStatement, lastStatementLines } from "./bank";
 import { Field, Settled } from "@/components/ui";
 import { formatCents, parseCents } from "@/lib/money";
@@ -103,6 +103,18 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
     if (!/^\d{4}-\d{2}$/.test(month)) redirect(`${back}&error=${encodeURIComponent("Say which month the money arrived, as YYYY-MM.")}`);
     if (!KINDS.some((k) => k.key === kind)) redirect(`${back}&error=${encodeURIComponent("Say what kind of money it was.")}`);
     if (amountCents === null || amountCents === 0) redirect(`${back}&error=${encodeURIComponent("Put the amount in dollars.")}`);
+    /* Money a feed already banked is not typed again beside it. See `automaticReceiptsLike`. */
+    if (fd.get("different") !== "yes") {
+      const already = await automaticReceiptsLike(month, amountCents!);
+      if (already.length > 0) {
+        const a = already[0];
+        redirect(
+          `${back}&error=${encodeURIComponent(
+            `${formatCents(amountCents!)} is already banked automatically${a.payer ? ` from ${a.payer}` : ""}${a.receivedOn ? ` on ${a.receivedOn}` : ""}${a.reference ? ` (${a.reference})` : ""}. Nothing was banked. If this really is different money, tick "This is different money" and bank it again.`,
+          )}`,
+        );
+      }
+    }
     const { id } = await addCashReceipt({ month, kind, amountCents, payer: String(fd.get("payer") ?? "").trim() || null, notes: String(fd.get("notes") ?? "").trim() || null, createdBy: u.id });
     await audit({ action: "cash_receipt.add", userId: u.id, userName: u.name, entity: "cash_receipt", entityId: id ?? undefined, details: `${month} ${kind} ${formatCents(amountCents)}` });
     revalidatePath("/money");
@@ -397,7 +409,12 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
           <Field label="Notes">
             <input name="notes" className="w-full" />
           </Field>
-          <div className="flex items-end"><button className="btn btn-primary">Bank it</button></div>
+          <div className="flex flex-col items-start justify-end gap-1">
+            <label className="flex items-center gap-1 text-xs text-ink-3">
+              <input type="checkbox" name="different" value="yes" /> This is different money
+            </label>
+            <button className="btn btn-primary">Bank it</button>
+          </div>
         </form>
         {/*
           The bank's own statement, read in. Deposits from a payer the site knows are banked;
@@ -425,7 +442,7 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
                 </li>
               ))}
             </ul>
-            <p className="mt-1 text-xs text-ink-3">A deposit here is banked with the form above; a payment is marked paid on Spending or the invoices page.</p>
+            <p className="mt-1 text-xs text-ink-3">A card deposit here is never banked by hand — forward its card batch report. Any other deposit is banked with the form above, which refuses money a feed has already banked. A payment is marked paid on Spending or the invoices page.</p>
           </div>
         )}
         {bankLines.placed > 0 && bankLines.unplaced.length === 0 && (
