@@ -188,3 +188,17 @@ describe("the edges Session 2 found after the card fix (G-CARD-9, -10, -11)", ()
     assert.match(text, /placement\.kind === "card_deposit" \? heldForBank\.filter\(\(h\) => h\.sourceKey\?\.startsWith\("card-batch\|"\)\)/);
   });
 });
+
+describe("two payments of the same amount from the same payer", () => {
+  test("REGRESSION: the same feed's differently numbered payments both bank (DomaniRx, August, G-PP-1)", () => {
+    const first = { amountCents: 90_400, receivedOn: "2026-08-26", payer: "DOMANIRX", sourceKey: "payer-payment|domanirx|1234538", reference: "1234538" };
+    const v = gateDeposit([first], { amountCents: 90_400, receivedOn: "2026-08-28", payer: "DOMANIRX", sourceKey: "payer-payment|domanirx|9872227", reference: "9872227" });
+    assert.equal(v.bank, true);
+  });
+
+  test("across feeds, one deposit under two numbers is still refused", () => {
+    const fromPortal = { amountCents: 90_400, receivedOn: "2026-08-26", payer: "DOMANIRX", sourceKey: "payer-payment|domanirx|1234538", reference: "1234538" };
+    const v = gateDeposit([fromPortal], { amountCents: 90_400, receivedOn: "2026-08-25", payer: "DOMANIRX", sourceKey: "835|domanirx|555000111|20260825", reference: "555000111" });
+    assert.equal(v.bank, false);
+  });
+});

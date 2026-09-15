@@ -132,8 +132,18 @@ export function gateDeposit(held: BankedReceipt[], incoming: IncomingReceipt): G
       why: `${money(incoming.amountCents)} was already typed in by hand for ${typed.month}${typed.payer ? ` as ${typed.payer}` : ""}. If that is this money, nothing more is needed; if it is different money, remove the typed receipt and forward this again.`,
     };
   }
+  /*
+   * Two payments the same feed numbered differently are two payments, whatever their amounts. DomaniRx paid
+   * $904.00 as …4538 on 26 August and $904.00 as …2227 on 28 August; the bank shows both, and the amount rule
+   * refused the second (Session 2, money map G-PP-1). Across feeds the rule still holds, because one deposit
+   * really does carry different numbers in different feeds — an 835's trace against the portal's payment number.
+   */
+  const feedOf = (key: string | null | undefined) => (key ?? "").split("|")[0];
+  const numberedApart = (h: BankedReceipt) =>
+    digits(h.reference).length >= 6 && mine.length >= 6 && digits(h.reference) !== mine && feedOf(h.sourceKey) !== "" && feedOf(h.sourceKey) === feedOf(incoming.sourceKey);
   const clash = held.find(
     (h) =>
+      !numberedApart(h) &&
       h.amountCents === incoming.amountCents &&
       withinWindow(h.receivedOn, incoming.receivedOn) &&
       (!incoming.payer || !h.payer || head(h.payer) === head(incoming.payer)),
