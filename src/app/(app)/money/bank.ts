@@ -36,7 +36,12 @@ async function matchContext(): Promise<MatchContext> {
   const cardFeeBills = (await db.query.expenses.findMany({ where: and(like(schema.expenses.invoiceNumber, `${CARD_STATEMENT_BILL}%`), eq(schema.expenses.status, "confirmed")) }))
     .filter((b) => !claimedBills.has(b.id))
     .map((b) => ({ id: b.id, vendorName: b.vendorId ? vendorName.get(b.vendorId) ?? null : null, amountCents: b.amountCents, invoiceDate: b.invoiceDate }));
+  const facilitatorByDay = new Map<string, number>();
+  for (const p of await db.query.claimPayments.findMany({ where: eq(schema.claimPayments.source, "mtf"), columns: { receivedOn: true, amountCents: true } })) {
+    if (p.receivedOn) facilitatorByDay.set(p.receivedOn, (facilitatorByDay.get(p.receivedOn) ?? 0) + p.amountCents);
+  }
   return {
+    facilitatorPaid: [...facilitatorByDay].map(([on, cents]) => ({ on, cents })),
     payers: [...payers],
     suppliers: sup.map((s) => ({ id: s.id, name: s.name })),
     vendors: ven.map((v) => ({ id: v.id, name: v.name })),
