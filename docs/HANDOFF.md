@@ -8,6 +8,26 @@ file is how they talk.
 
 ## Open items
 
+### From 2 — 15 September, before the edit: `autoroute.ts`, `mailbox.ts` (B's) — a scanned RedSail copay-voucher PDF is read
+
+**Written before touching those files**, on branch `work/accesshealth-reader`, at session 1's request (money map section 10).
+The owner's `Image_001.pdf`, the 1 September $177.25 RedSail remittance, is a scan whose text layer comes out one field
+per line, so `classify` calls it unrecognised. There is a second, standing fault: when a copay remit *is* recognised
+from a PDF's text, `mailbox.ts` hands `importCopayRemit` the PDF's raw bytes as UTF-8 (`buf.toString("utf8")`), so a
+PDF voucher can never import.
+
+**New, and session 2's:** `copay-remit-scan.ts`, pure.
+- It uses the text layer where that reads.
+- Otherwise it rebuilds the printed lines from word positions (`rowsOf` from `scanned-bank-statement.ts`, imported,
+  not changed).
+- It repairs a scanned character inside a row's figures only where exactly one reading passes the row's own
+  arithmetic.
+- `parseCopayRemit`'s statement gate still refuses a statement whose rows do not add to its total.
+
+**Changes in B's files, and nothing else in them:**
+- `autoroute.ts`: in the PDF branch, a copay remit is also recognised from the rebuilt lines.
+- `mailbox.ts`: the `copay_remit` branch passes the PDF's rebuilt text for a PDF, and the text as before otherwise.
+
 ### From 1 — 15 September, before the edit: `money/bank.ts`, `money/page.tsx` (A's) — the scanned Emprise statement is read from the upload
 
 **Written before touching either file.** The owner: Emprise cannot export CSV, QFX or OFX; the statement is a scanned PDF.
