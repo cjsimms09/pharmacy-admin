@@ -214,3 +214,19 @@ describe("two payments of the same amount from the same payer", () => {
     assert.equal(v.bank, false);
   });
 });
+
+describe("the wholesaler's ACH and the facilitator's unexplained credit (G-MCK-1, G-MTF-2)", () => {
+  test("REGRESSION: the statement reader gives the matcher the wholesaler's ledger, and marks an agreeing ACH's invoices paid", async () => {
+    const text = await readFile("src/app/(app)/money/bank.ts", "utf8");
+    assert.ok(text.includes("settled: statementLines,"));
+    assert.ok(text.includes(`placement.kind === "settles_ach" && placement.agrees`));
+  });
+
+  test("REGRESSION: a facilitator credit nothing explains is not offered to the receipt match", async () => {
+    const text = await readFile("src/app/(app)/money/bank.ts", "utf8");
+    const isCredit = text.slice(text.indexOf("const isCredit ="), text.indexOf("\n", text.indexOf("const isCredit =")));
+    assert.ok(isCredit.length > 0);
+    assert.ok(!isCredit.includes("facilitator_unmatched"));
+    assert.ok(isCredit.includes(`placement.kind === "unplaced"`));
+  });
+});

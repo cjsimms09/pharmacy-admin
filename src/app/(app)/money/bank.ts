@@ -15,6 +15,8 @@ import { addCashReceipt, unpaid, vendors } from "@/lib/expenses";
 import { allSuppliers } from "@/lib/suppliers-registry";
 import { CARD_STATEMENT_BILL } from "@/lib/card-statement";
 
+/** The two systems spell one wholesaler several ways; compared with the noise removed, as cash-cogs.ts does. */
+const fold = (s: string | null | undefined) => (s ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
 const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 /** What the matcher needs to know about the business, read once per statement. */
@@ -36,6 +38,10 @@ async function matchContext(): Promise<MatchContext> {
   const cardFeeBills = (await db.query.expenses.findMany({ where: and(like(schema.expenses.invoiceNumber, `${CARD_STATEMENT_BILL}%`), eq(schema.expenses.status, "confirmed")) }))
     .filter((b) => !claimedBills.has(b.id))
     .map((b) => ({ id: b.id, vendorName: b.vendorId ? vendorName.get(b.vendorId) ?? null : null, amountCents: b.amountCents, invoiceDate: b.invoiceDate }));
+  /* The wholesaler's own ledger: what each ACH reference covered. What a McKesson debit is placed by. */
+  const statementLines = (await db.query.supplierStatementLines.findMany({ columns: { supplier: true, invoiceNumber: true, checkNumber: true, netCents: true } }))
+    .filter((l) => l.checkNumber)
+    .filter((l, i, all) => all.findIndex((x) => x.supplier === l.supplier && x.invoiceNumber === l.invoiceNumber && x.checkNumber === l.checkNumber) === i);
   const facilitatorByDay = new Map<string, number>();
   for (const p of await db.query.claimPayments.findMany({ where: eq(schema.claimPayments.source, "mtf"), columns: { receivedOn: true, amountCents: true } })) {
     if (p.receivedOn) facilitatorByDay.set(p.receivedOn, (facilitatorByDay.get(p.receivedOn) ?? 0) + p.amountCents);
@@ -47,6 +53,7 @@ async function matchContext(): Promise<MatchContext> {
     vendors: ven.map((v) => ({ id: v.id, name: v.name })),
     unpaidBills: bills.map((b) => ({ id: b.id, vendorId: b.vendorId, vendorName: b.vendorId ? vendorName.get(b.vendorId) ?? null : null, amountCents: b.amountCents, invoiceDate: b.invoiceDate })),
     cardFeeBills,
+    settled: statementLines,
     unpaidInvoices: invoices.filter((v) => !v.paidOn).map((v) => ({ id: v.id, supplierId: v.supplierId, supplier: v.supplier, totalCents: v.totalCents, invoiceDate: v.invoiceDate })),
   };
 }
@@ -172,7 +179,23 @@ export async function readBankStatement(fd: FormData) {
       await db.update(schema.supplierInvoices).set({ paidOn: line.on }).where(eq(schema.supplierInvoices.id, placement.invoiceId));
       invoiceId = placement.invoiceId;
       invoices++;
-    } else unplaced++;
+    } else if (placement.kind === "settles_ach" && placement.agrees) {
+      /*
+       * The wholesaler's ACH, tied to its invoices by their own reference and equal to them to the cent. The
+       * invoices are marked paid on the bank's date; the money is already the cash cost of goods from the
+       * wholesaler's own ledger (cash-cogs.ts), so nothing is booked (Session 2, money map G-MCK-1).
+       */
+      const numbers = new Set(placement.invoices);
+      const open = (await db.query.supplierInvoices.findMany({ columns: { id: true, invoiceNumber: true, supplier: true, paidOn: true } })).filter(
+        (v) => !v.paidOn && v.invoiceNumber && numbers.has(v.invoiceNumber) && fold(v.supplier) === fold(placement.supplier),
+      );
+      for (const v of open) await db.update(schema.supplierInvoices).set({ paidOn: line.on }).where(eq(schema.supplierInvoices.id, v.id));
+      invoices += open.length;
+      why = `${placement.why} ${open.length} of the ${placement.invoices.length} invoices were on file and are marked paid ${line.on}.`;
+    } else {
+      if (placement.kind === "settles_ach" || placement.kind === "facilitator_unmatched") placedAs = "unplaced";
+      unplaced++;
+    }
     await db.insert(schema.bankLines).values({
       id: newId(),
       key: line.key,
