@@ -854,3 +854,118 @@ Proposed: when the combination is unique and exact, link the bank line to all it
 - The recoupment debit on the bank statement (`SHA PROVIDERPAY/AUTO ACH`, $635.58 on 8/25): the recoupments
   checkpoint.
 
+---
+
+## 4. Plan 835 remittances (ProviderPay) — what could be rehearsed without a file
+
+**Checkpoint 4. Code at 882307e. The owner approved, 15 September, read-only access for the audit's scripts to
+stored files under `data/`, printing aggregates only.**
+
+**Samples: no real plan 835 file is kept anywhere the site stores files.** A script read the first 400 bytes of
+every file under `data/remits`, `data/remittances` and `data/files` (the document store, 360 files):
+- 14 files declare an 835;
+- 12 are the Medicare Transaction Facilitator's, in `data/remits/mtf/filed` (section 5's);
+- one is a test file ("TEST PAYER INC", $24.68);
+- one reads as nothing.
+
+The 9,550 plan payment rows in the database were read from files that were not kept: April by "Folder read",
+August by the owner. No row links a document. **So `parse835` and `importRemittance` could not be rehearsed
+on a real ProviderPay 835.** Session 1 is finding one with the owner. What the posted rows themselves can
+prove is below.
+
+### What is on file (live, read-only)
+
+| month | 835 rows | payer on every row | paid | out of books |
+|---|---:|---|---:|---|
+| April | 4,867 | "ProviderPay" | $381,341.52 | yes (test pull) |
+| August | 4,683 | "ProviderPay" | $518,125.46 | yes |
+
+- 90 distinct trace numbers: 40 shaped `EFT-…`, 50 plain numbers.
+- No cash receipt was banked from any 835 (none keyed `835|…`). Every door used so far posts without banking:
+  the folder read and the `/remits` page. The **mailbox** (email and the SFTP host) and the **intake drop**
+  call `importRemittance(…, { bank: true })`.
+
+### 1 · What it is, and whose money
+
+A ProviderPay 835 names **ProviderPay** as the payer (N1*PR) on every remittance, for money that reaches the bank
+two ways (section 3):
+- **Health Mart Atlas** deposits. The 835's trace is the `EFT-…` number. **All 20 August `EFT-…` traces equal an
+  HMA payment number in the payer payment report** (18 of 19 in April).
+- **Direct-payer** deposits. The 835's trace is a plain number that equals **no** payment number in the report.
+  **In August, 15 of them sum exactly to a direct-payer payment in the report within 7 days** (Argus, Tricare,
+  Medicare-dual, RxCrossroads, DomaniRx). The other 13 sum to no report payment.
+
+### 5 · Which basis reads it
+
+- A plan 835 posts `claim_payments` with `revenueCents` 0 (`settles`): the claim already carries its
+  remittance, so the accrual account is not moved.
+- It reaches the cash account only through the receipt a banking door adds. Both halves by the code
+  (`claim-payments.ts` 473–545).
+
+### 7 · Duplication — rehearsed with the real posted remittances
+
+Each August remittance was rebuilt from its own posted rows: trace, payer "ProviderPay", paid date, and the sum of
+its payments. It was banked on a fresh snapshot (17:34 UTC) with exactly the arguments `importOneRemittance`
+passes when `bank` is on (`claim-payments.ts` 546–572), through the real `addCashReceipt` and `gateDeposit`.
+
+| the August 835 remittance | gate | count | dollars |
+|---|---|---:|---:|
+| trace = an HMA payment number | **refused** (reference rule) | 20 | $321,723.80 |
+| amount = a direct-payer payment in the report, within 7 days | **banked beside it** | 15 | **$148,965.45** |
+| amount and number match nothing in the report | banked | 13 | $47,436.21 |
+| the same remittance read a second time | refused by its key | — | — |
+
+One approximation, said out loud: the real code banks BPR02, the remittance total. The rows give the sum of
+claim payments, which equals BPR02 only where nothing was held back at remittance level. For the 15, the sums
+equal the deposit to the cent, which is that case.
+
+### Gaps for this feed
+
+**G-835-1. A ProviderPay 835 for a direct payer, arriving by mail, SFTP or the intake drop, banks the deposit a second time.**
+OBSERVATION: rehearsed with August's real posted remittances. 15 direct-payer remittances, **$148,965.45**, were
+banked beside the payer payment report's receipts for the same money.
+- The 835 names the payer "ProviderPay"; the report names "ARGUS HEALTH SYS" and the rest.
+- The 835's trace differs from the report's payment number.
+- `gateDeposit`'s cross-feed rule needs a matching reference, or the same amount with the same payer head
+  (`deposit-gate.ts` 133–150), so it sees two different payers.
+
+The other 13 ($47,436.21) bank too. Whether they are the same money as report payments of different amounts
+is not proven. The reverse order (835 first, report second) meets the same rule, by the code; it was not run.
+SHOULD BE: an 835 is the advice of a payment, not the payment. The deposit is recorded once, by the document that
+records deposits: here the payer payment report and the EFT notice. A remittance advice arriving later adds
+claim detail, never cash.
+DIFFERENCE: yes, rehearsed. Had August's 835s come in through the mailbox, **$148,965.45 of receipts would have
+been counted twice**. The matching report payments were deposited in August and early September, and the
+September ones are in the books. The same would happen every month once ProviderPay 835s arrive by SFTP or
+email. Live: measured-and-none so far (no 835 has come through a banking door).
+Owner: `claim-payments.ts` — **not in the ownership table**; `mailbox.ts` routing — **B**; `deposit-gate.ts` — **1**.
+Proposed fix: (a) an 835 whose payer is the PSAO (ProviderPay) posts its claim payments and **does not bank**,
+because the report and the notice are the banking doors for that money; (b) belt and braces in the gate: an `835|…`
+receipt with no reference match is compared by amount within the window **without** the payer-head condition,
+and a match goes to a person.
+
+**G-835-2. 835 claim payments and the deposits they belong to do not add up, and nothing says by how much.**
+OBSERVATION: of August's 20 HMA remittances, whose trace equals the deposit's EFT number, the summed claim
+payments equal the deposit for **2**. For the other 18 they differ. (April: 1 of 18.) The 20 remittances' payments
+total **$321,723.80**; the 20 deposits their traces name total **$336,229.96** (deposited in August and
+September).
+SHOULD BE: a deposit is its claim payments less what the payer held back at remittance level. Each difference is
+money with a reason (fees, DIR, recoupments, or claims paid on another advice), and it belongs on an account
+or a list.
+DIFFERENCE: **$14,506.16** between those 20 remittances' claim payments and their deposits, the deposits being
+larger, explained nowhere on the site. It is a net figure: 18 remittances differ, in directions not measured
+here. It can't be classified without the files: the remittance-level adjustments (PLB) were not stored
+with the rows, and whether some deposits are split across several 835 files is not known.
+Owner: `claim-payments.ts` — not in the table; the reconciliation plan in `docs/ASSIGNMENTS.md` ("claim → 835
+line → deposit").
+Proposed: when a real 835 sample is in hand, rehearse `importRemittance` and store the provider-level adjustments
+per remittance, so this difference can be read rather than derived.
+
+### Not checked, said out loud
+
+- `parse835`, `importRemittance`, `payableOnly`, the balance check and the claim matching, on a real ProviderPay
+  file: no file.
+- April's pull is test data (out of books) and was not rehearsed beyond the trace counts.
+- Whether ProviderPay will send 835s by SFTP or email at all: the SFTP folder holds a key pair from 9 September
+  (not opened). What it fetches was not checked.
+
