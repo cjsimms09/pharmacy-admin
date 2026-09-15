@@ -14,7 +14,7 @@ import { lineKey, parseBankStatement, placeLines, type BankLine, type MatchConte
 import type { SolvedStatement, Unproven } from "@/lib/scanned-bank-solve";
 import { readFile } from "@/lib/files";
 import { parseCents } from "@/lib/money";
-import { addCashReceipt, unpaid, vendors } from "@/lib/expenses";
+import { addCashReceipt, categories, saveExpense, seedCategories, unpaid, vendors } from "@/lib/expenses";
 import { allSuppliers } from "@/lib/suppliers-registry";
 import { CARD_STATEMENT_BILL } from "@/lib/card-statement";
 
@@ -263,6 +263,18 @@ async function placeStatementLines(
       placedAs = "unplaced";
       why = match.why;
       unplaced++;
+    } else if (placement.kind === "books_bill") {
+      /* A cost whose only record is this line. Keyed by the line, so a statement read twice books it once. */
+      const key = `BANK|${line.key}`;
+      const existing = await db.query.expenses.findFirst({ where: eq(schema.expenses.invoiceNumber, key), columns: { id: true } });
+      if (existing) expenseId = existing.id;
+      else {
+        await seedCategories();
+        const category = (await categories(true)).find((c) => c.name === placement.category);
+        const vendor = (await vendors(true)).find((v) => v.name.toLowerCase().includes(placement.vendor.toLowerCase()));
+        expenseId = await saveExpense({ vendorId: vendor?.id ?? null, categoryId: category?.id ?? null, invoiceNumber: key, invoiceDate: line.on, paidOn: line.on, amountCents: -line.amountCents, description: line.description, notes: placement.why, documentId, status: "confirmed", source: "manual", createdBy: user.id });
+      }
+      bills++;
     } else if (placement.kind === "psao_deposit") {
       /* Never banked here: the payer payment report and the EFT notice bank PSAO money (G-BANK-1). */
       placedAs = "unplaced";

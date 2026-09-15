@@ -391,3 +391,12 @@ test("REGRESSION: a postage confirmation accounts for one charge - September's t
   });
   assert.deepEqual(placed.map((p) => p.placement.kind), ["already_counted", "already_counted", "unplaced", "already_counted"]);
 });
+
+test("the Stamps.com charge from El Segundo is mailing with no confirmation: the bank line books it as postage", async () => {
+  const { placeLines } = await import("../src/lib/bank-statement");
+  const [p] = placeLines([{ on: "2026-08-18", description: "Purch Stamps.com El Segundo CA **x**5921", amountCents: -4_099, key: "s" }], {
+    payers: [], suppliers: [], vendors: [], unpaidBills: [], unpaidInvoices: [], postageBills: [],
+  });
+  assert.equal(p.placement.kind, "books_bill");
+  assert.equal(p.placement.kind === "books_bill" ? p.placement.category : "", "Postage and shipping");
+});

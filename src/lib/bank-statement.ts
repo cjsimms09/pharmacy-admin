@@ -129,6 +129,8 @@ export type Placement =
   | { kind: "card_deposit"; why: string }
   /** A PSAO deposit (Access Health, ProviderPay). Confirms the receipt its report or EFT notice banked; never banked here. */
   | { kind: "psao_deposit"; why: string }
+  /** A cost whose only record is the bank line itself: booked from it, dated and paid on the bank's date. */
+  | { kind: "books_bill"; category: string; vendor: string; why: string }
   | { kind: "pays_bill"; expenseId: string; vendorName: string; why: string }
   | { kind: "pays_invoice"; invoiceId: string; supplier: string; why: string }
   /**
@@ -280,6 +282,13 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
   if (meaning.kind === "postage" && ctx.postageBills) {
     if (postageBillFor(ctx.postageBills, line) >= 0) {
       return { kind: "already_counted", what: meaning.counterparty, where: meaning.alreadyCounted ?? "postage", why: meaning.says };
+    }
+    /*
+     * The Stamps.com charge billed from El Segundo — $40.99 on 18 August — is mailing, the owner says, and no confirmation
+     * email ever comes for it. The bank line is its only door, so it books the bill itself.
+     */
+    if (/SEGUNDO/.test(d.toUpperCase().replace(/[^A-Z]/g, ""))) {
+      return { kind: "books_bill", category: "Postage and shipping", vendor: "Stamps.com", why: "Stamps.com's own charge from El Segundo, which is mailing and comes with no confirmation email. Booked as postage from this line." };
     }
     return {
       kind: "unplaced",
