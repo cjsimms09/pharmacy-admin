@@ -238,6 +238,39 @@ describe("deciding what each transaction does", () => {
     assert.equal(p2.insertUnmatchedReversal.length, 0);
   });
 
+  test("REGRESSION: billed and reversed twice, the report printing each reversal at double the claim, then billed again: both earlier claims are cancelled", () => {
+    /*
+     * P-1, 15 September 2026: PioneerRx holds each reversal at −$89.44 against a $89.44 claim; the report printed
+     * ($178.88) for both. Neither paired, and the fill counted two paid claims beside two unmatched reversals.
+     */
+    const rebills = file(
+      "Third Party:,012833 (EXAMPLE) - 012833",
+      "900020-0,P,$89.44,G1,,$74.99,$0.00,$74.99,,09/14/26,012833,30.0000,$1.00,EXAMPLE,00093505698,$3.00",
+      "900020-0,A,($178.88),G1,,($74.99),$0.00,($74.99),,09/14/26,012833,-30.0000,($1.00),EXAMPLE,00093505698,($3.00)",
+      "900020-0,P,$89.44,G1,,$74.99,$0.00,$74.99,,09/14/26,012833,30.0000,$1.00,EXAMPLE,00093505698,$3.00",
+      "900020-0,A,($178.88),G1,,($74.99),$0.00,($74.99),,09/14/26,012833,-30.0000,($1.00),EXAMPLE,00093505698,($3.00)",
+      "900020-0,P,$101.18,G1,,$74.99,$0.00,$74.99,,09/14/26,012833,30.0000,$1.00,EXAMPLE,00093505698,$3.00",
+    );
+    const p = planTransactions(parseRxTransactions(rebills).rows, { keys: new Set(), paid: [] });
+    assert.equal(p.insertReversedPaid.length, 2, "both $89.44 claims are cancelled");
+    assert.equal(p.insertUnmatchedReversal.length, 0);
+    assert.deepEqual(p.insertPaid.map((t) => t.remitCents), [10118], "only the last bill stands");
+  });
+
+  test("a reversal that does not pair by amount is not guessed onto one of two different claims from the same BIN", () => {
+    // A primary and a secondary adjudicated under one BIN, which six real fills on 15 September were.
+    const twoPayers = file(
+      "Third Party:,610097 (EXAMPLE) - 610097",
+      "900021-0,P,$44.10,G1,,$0.00,$0.00,$0.00,,09/08/26,610097,30.0000,$1.00,EXAMPLE,00093505698,$3.00",
+      "900021-0,P,$0.00,G1,,$0.00,$0.00,$0.00,,09/08/26,610097,30.0000,$1.00,EXAMPLE,00093505698,$3.00",
+      "900021-0,A,($88.20),G1,,$0.00,$0.00,$0.00,,09/08/26,610097,-30.0000,($1.00),EXAMPLE,00093505698,($3.00)",
+    );
+    const p = planTransactions(parseRxTransactions(twoPayers).rows, { keys: new Set(), paid: [] });
+    assert.equal(p.insertReversedPaid.length, 0);
+    assert.equal(p.insertUnmatchedReversal.length, 1);
+    assert.equal(p.insertPaid.length, 2);
+  });
+
   test("a reversal that matches nothing we hold is kept as a reversed row, never dropped", () => {
     assert.equal(plan.insertUnmatchedReversal.length, 1);
     assert.equal(plan.insertUnmatchedReversal[0].rxNumber, "900004");

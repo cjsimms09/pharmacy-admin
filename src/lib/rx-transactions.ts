@@ -995,6 +995,36 @@ export function planTransactions(
       plan.reverseExisting.push({ claimId: stored.id, reversal: t });
       continue;
     }
+    /*
+     * A reversal whose amount is not the negation of the claim it cancels.
+     *
+     * Measured against PioneerRx on 15 September 2026 (P-1): one fill was billed, reversed, billed and reversed again
+     * within fifteen minutes, then billed a third time. PioneerRx holds each reversal at exactly −$89.44 against a
+     * $89.44 claim, but the daily report printed both reversals' Amount as ($178.88) — so neither paired, both $89.44
+     * claims stayed paid beside two unmatched reversals, and the fill counted $77.70 of remit and $74.99 of copay more
+     * than it earned. The copay column was printed correctly.
+     *
+     * A claim reversal always cancels a whole claim for that prescription, fill and payer. So where the amount does
+     * not pair, the same fill, BIN and NDC with the copay negated does — but only when every candidate carries the same
+     * figures, so which one is cancelled cannot matter. Where the candidates differ (a primary and a secondary on one
+     * BIN, which six other fills that day were), nothing is guessed and the reversal stays unmatched as before.
+     *
+     * Only inside one file. A claim held from an earlier day whose figures differ is still never cancelled: there the
+     * mismatch can as well mean the reversal is for a transmission this site never received, and cancelling the wrong
+     * one would take a valid claim out of the books.
+     */
+    const loose = (c: { rxNumber: string; fillNumber: number | null; bin: string | null; ndc11: string | null; copayCents: number | null }) =>
+      fillKey(c.rxNumber, c.fillNumber) === fillKey(t.rxNumber, t.fillNumber) && c.bin === t.bin && c.ndc11 === t.ndc11 && c.copayCents === negate(t.copayCents);
+    const alike = (xs: { remitCents: number | null; copayCents: number | null }[]) => xs.length > 0 && new Set(xs.map((c) => `${c.remitCents}|${c.copayCents}`)).size === 1;
+    if ((t.remitCents ?? 0) < 0) {
+      const inFile = plan.insertPaid.map((c, i) => ({ c, i })).filter(({ c }) => loose(c));
+      const held = existing.paid.filter((c) => !usedExisting.has(c.id) && loose(c));
+      if (inFile.length > 0 && held.length === 0 && alike(inFile.map(({ c }) => c))) {
+        const [paid] = plan.insertPaid.splice(inFile[inFile.length - 1].i, 1);
+        plan.insertReversedPaid.push({ paid, reversal: t });
+        continue;
+      }
+    }
     plan.insertUnmatchedReversal.push(t);
   }
   return plan;
