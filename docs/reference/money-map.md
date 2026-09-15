@@ -1522,6 +1522,17 @@ refused, so history keeps them whatever is done.
 Owner: the fixture has no owner in the table (session 1 last edited it).
 **Question for session 1 / the owner:** is the pharmacy's own NPI allowed in tests (it is in three other files), or
 should all four be changed? The check number can be changed in the fixture and `tests/copay-remit.test.ts` alone.
+**Answered by session 1:** the rule makes no exception, and the fixture's own words were false. Change all of them.
+**FIXED 8430873.**
+- The fixture and `tests/copay-remit.test.ts` now carry an invented check/ACH number of the same length, and an
+  invented NPI with a valid check digit. So do `tests/bank-descriptors.test.ts` and `tests/x12-835.test.ts`; no
+  test depended on the exact value.
+- `HANDOFF.md` names the NPI without giving it.
+- Checked by script: 0 tracked files hold either real value; the four suites pass (102 tests).
+- **Earlier commits still hold the real values** (from 5157f86, on every branch cut since 8 September). Force pushes
+  are refused, so history is not rewritten.
+- Not checked: other real identifiers of the pharmacy's own in tracked files. The NCPDP number, for one, is in
+  `HANDOFF.md` beside where the NPI was; session 1 did not ask for it and it was left.
 
 **Not checked, said out loud:**
 - A voucher that matches a claim on this site: both payments here are for August fills, so `matched` is 0.
@@ -2048,7 +2059,7 @@ FIXED means fixed by its owner and re-rehearsed here; the commit is the one that
 | G-BANK-2 | a scanned day "proves" with misreads that cancel | $36,558.71 banked beside its receipt; McKesson $1.00 off | 1 | **FIXED** de67a77 (held; two corrections leave 0 unproven) |
 | G-BANK-3 | descriptors miss the scan's spellings | 6 Heartland credits, 7 IPC debits, the ParMed spelling | 1 | **FIXED** de67a77; the 7 IPC lines with a damaged account number stay unplaced by design |
 | G-UNDO-1 | undoing the first of 835/AccessHealth for one EFT leaves the other's claims on no row | **$378.15** on …5975 | B / 2 | OPEN (warned in words, 54f699b) |
-| G-COPAY-1 | the copay-voucher fixture carries the real check/ACH number and NPI | 2 identifiers in git | 1 | QUESTION (section 10) |
+| G-COPAY-1 | the copay-voucher fixture carries the real check/ACH number and NPI | 2 identifiers in git | 1 / 2 | **FIXED** 8430873; earlier commits still hold them (no force push) |
 | G-MTF-1 (a) | the facilitator stand-in is all-or-nothing | only a typed receipt triggers it now | **A** | OPEN |
 | G-MCK-2 | McKesson return credits reach no account | **$10,411.15** | — | QUESTION Q-MCK-1 |
 | G-MCK-3 | a moved due date leaves a paid invoice owed | $22,118.56 test | — | OPEN |
