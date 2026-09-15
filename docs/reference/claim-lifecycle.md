@@ -268,3 +268,135 @@ exhaust the adjudicated price.
   voucher. Counts and dollar totals by programme only.
 - **Q-P2:** on September's 37 two-payer fills, the primary's and secondary's `EvoucherAmountPaid` and `DirFeeTotal`
   separately, to show which row really carries them. Counts only.
+
+---
+
+# Part B — September measured against the standard
+
+**Checkpoint.** A fresh snapshot of live, 15 September 2026, evening, measured with
+`scripts/support/measure-lifecycle.ts`: read-only apart from the result cache's audit tick. Scope is September fill
+dates with test imports excluded: 3,841 claim rows (2,971 paid, 870 reversed), 2,894 fills. Counts and dollars only.
+
+## Rule 1 — who owes what
+
+| # | measured | result | state |
+|---|---|---|---|
+| B1 | fills whose shares + patient ≠ fill total price | the pull's last check (13:40 UTC): **2 of 2,903** fills do not add up; 2 fills are on the site only. The fill total price is not stored, so the site cannot re-check | captured (in a setting nobody reads) |
+| B2 | fills with 2+ paid rows | **76** (153 rows, remit $28,986.28): **65** on different BINs (real two-payer), **11** on the same BIN | measured |
+| B2c | same-BIN fills whose rows share PCN and group | **8**, all from the daily report, completed the same day, 7 with different figures on each row; the second rows add **$3,401.46** of revenue | **needs PioneerRx (Q-P3)** |
+| B2 | position (primary / secondary) stored | on **no** row | measured-and-none |
+| B2 | backfilled single rows | **30** (remit $2,710.13); how many were two-payer fills collapsed into one is not measurable from the site | never-measured |
+| B3 | voucher copied onto both rows of a two-payer fill | **2** fills, the same figure on each; a row-level sum counts **$50.04** twice | measured |
+| B3 | DIR on the claims | **0** claims carry `dir_fee_cents`, so the copy-onto-both-rows fault is latent, not live | measured-and-none |
+| B4 | negative remits (network fees) | **18**, **−$108.65** (see below), all netted into revenue today | measured |
+
+The 18 negative remits by payer:
+- CVS Caremark: 004336 ×4, 020099 ×1
+- OptumRx: 610011 ×2, 610127 ×2, 610652 ×1
+- ScriptSave ×3, Hippo ×2, Navitus ×2, Capital Rx ×1
+
+**G-LC-1. Eight fills carry two paid claims from the same plan.**
+OBSERVATION: 8 September fills have two paid rows with the same BIN, PCN and group, both from the daily report,
+adding $3,401.46 to revenue and receivables.
+SHOULD BE: a plan pays a fill once. A rebill replaces the claim it follows, which is reversed first. Two paid claims
+from one plan on one fill are a duplicate, unless PioneerRx shows two valid claims for that payer.
+DIFFERENCE: **cannot be settled from the site**. PioneerRx's own rule is one current valid claim per payer
+(`IsLastValidClaimForPayMethod = 1`, `pioneer-claims.ts` header).
+**Q-P3 for session 1:** on these fills, the count of `IsLastValidClaimForPayMethod = 1` paid claims per payer, and
+whether the site's second row matches a reversed or superseded transmission.
+
+## Rule 2 — accrual
+
+| # | measured | result |
+|---|---|---|
+| B5 | fills sold in September | 2,517, revenue $247,210.87 |
+| B5 | dropped from revenue for unknown cost | **4** fills, **$2,295.78** |
+| B5 | MTF promised on sold fills, not yet paid, therefore missing from accrual revenue | **14** fills, **$4,056.21**, none paid yet |
+| B6 | matched payments whose fill key differs from their claim's (never reach revenue) | **0** of 80 (the fault is latent) |
+
+**G-LC-2. Accrual revenue leaves out money the fills earned.**
+OBSERVATION: $2,295.78 on 4 fills is dropped because their cost is unknown. $4,056.21 of MTF promises on 14 fills is
+not revenue until the facilitator pays.
+SHOULD BE: revenue is recognised in full when the prescription is sold, whether or not its cost is known (margin is
+what cannot be computed) and whether or not the facilitator has paid (the promise is a receivable).
+DIFFERENCE: yes, **$6,351.99** of September accrual revenue understated.
+
+## Rule 3 — cash
+
+| # | measured | result |
+|---|---|---|
+| B7 | September cash receipts | third party $275,121.78; patient (card batches) $34,112.41 |
+| B7 | counter cash and cheque deposits | **no September bank statement on file**: expected-not-yet. In August all 7 counter "Deposit" lines were unplaced (money map section 13) |
+| B7 | charge-account fills sold | 5, with a patient receivable of $0.00; there is nowhere to record a charge-account payment |
+
+**G-LC-3. Cash copays and cheques never become cash revenue.**
+OBSERVATION: September's patient cash is card batches only. The counter deposits that carry cash and cheques stay
+unplaced on the bank statement (August: 7 of 7).
+SHOULD BE: every copay collected is cash when collected, whatever the tender.
+DIFFERENCE: yes, of unknown size until September's statement is read. Card batches also include retail card sales,
+so "patient payments banked" is not the copay figure.
+
+## Rule 4 — settlement
+
+| # | measured | result |
+|---|---|---|
+| B8 | payments on two-payer fills | **5** ($30.26), all plan, each equal to the remit of the row it chose (attributed by amount; no BIN passed) |
+| B8 | in-books payments for September fills with no claim | 10, net −$7.35 (the paid-and-reversed pairs); ambiguous choices are not stored, so how many were ambiguous is not measurable |
+| B9 | MTF payments settling a plan share | **0** on September claims (15 MTF payments in books, none on a September claim): latent |
+| B10 | paid September claim rows by state, on remit only | WAITING **1,717** $247,234.59; PAID **57** $4,120.30; OVERPAID **1** $9.67; PART-PAID **0**; cash plan 465 ($347.42); nothing owed 731 (−$108.65: fees and zero remits) |
+| B10 | reads PAID on remit but carries an unsettled voucher | 0 |
+| B11 | BINs with September remit that have never had a payment matched (not cash plans) | **47 of 52 BINs**, **$174,192.86** (largest below) |
+
+The five largest of those 47 BINs: 019158 ×41 $41,576.95; 610011 ×79 $24,880.49; 610097 ×133 $14,614.08;
+610279 ×106 $12,659.99; 015581 ×107 $10,551.65.
+
+**G-LC-4. Most of September's receivables have no settling document the site reads yet.**
+OBSERVATION: 47 of 52 paying BINs, $174,192.86 of remit, have never had a payment matched to any claim. The only
+settling documents read so far are 9 AccessHealth reports (to 11 September) and a handful of 835s.
+SHOULD BE: every share has an expected settling document:
+- a plan paid through the PSAO: its AccessHealth report or ProviderPay 835;
+- a direct payer: its own 835;
+- a voucher: its programme's report;
+- the MTF share: its MTF 835.
+DIFFERENCE: part expected-not-yet (the later AccessHealth reports), part **no reader**: direct payers' 835s are not
+received (Q-835-1 declined for September). Which BINs route through the PSAO and which pay direct is not recorded per
+claim, so the split cannot be measured today.
+
+**G-LC-5. Nothing says a claim is paid.**
+OBSERVATION: `claims.status` is only paid or reversed. The reconcile states in `claim-reconcile.ts` are used only by
+tests.
+SHOULD BE: a claim carries WAITING / PART-PAID / PAID / OVERPAID per share, from its shares and their payments.
+DIFFERENCE: yes. B10 above is the first count, computed on remit alone, before voucher, secondary and MTF shares.
+
+## Rule 5 — the till
+
+| # | measured | result |
+|---|---|---|
+| B12 | claims' patient pay on the sold day vs card batches | patient pay $44,044.71 over 11 sold days; card batches 8, $34,112.41; days with both 8; card ÷ copay per day, median **0.95** |
+
+On the days both exist, card takings are near the copays. Near, not equal, is expected: card batches carry retail
+sales, and cash and cheque copays are absent. Only the payment-type report splits the till by tender (G-CARD-5, sample
+declined), so the comparison stays unmeasured at the precision the standard asks.
+
+## Unmeasured, and why
+
+- **The voucher case of the identity:** whether `TotalPricePaid` includes the voucher, and whether a Veridikal
+  voucher sits inside the remit. Needs Q-P1 and the next pull (`evoucher_message_cents`).
+- **Which row really carries a voucher or DIR on a two-payer fill:** Q-P2.
+- **The 8 same-plan duplicate fills:** Q-P3.
+- **Cash copays and cheques:** the September bank statement.
+- **PSAO versus direct routing per BIN:** not recorded anywhere.
+- **The till by tender:** the payment-type report.
+
+## Summary for session 1
+
+| finding | dollars (September) | kind |
+|---|---|---|
+| G-LC-1 two paid claims from one plan on 8 fills | $3,401.46 possibly counted twice | needs Q-P3 |
+| G-LC-2 accrual leaves out unknown-cost fills and unpaid MTF promises | $6,351.99 understated | rule 2 |
+| G-LC-3 cash copays and cheques never banked | unknown until September's statement | rule 3 |
+| G-LC-4 receivables with no settling document read | $174,192.86 across 47 BINs | rule 4, part expected-not-yet |
+| G-LC-5 no claim state | 1,717 waiting, 57 paid, 1 overpaid | rule 4 |
+| rule 1 (c) voucher copied onto both rows | $50.04 counted twice by a row sum | rule 1 |
+| rule 1 (f) network fees netted | −$108.65 | rule 1; fixed for AR on a branch |
+| latent: fill-key vs claim-id revenue; MTF settling the plan share; DIR copied | $0 today | rules 2 and 4 |
