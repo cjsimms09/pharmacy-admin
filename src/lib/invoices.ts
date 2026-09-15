@@ -17,6 +17,7 @@ import { scheduleFromNames, linesMatching } from "./controlled-names";
 import { audit } from "./audit";
 import { invoicesOwed, type OwedLine } from "./invoices-owed";
 import { duplicateKey } from "./books-check";
+import { dueDateFrom } from "./invoice-due-date";
 import type { InvoiceSchedule, DocumentCategory } from "@/db/schema";
 
 /**
@@ -1149,6 +1150,8 @@ export async function fileInvoice(
     // should not push anything else out of the page it is shown on.
     itemsText: items.join("\n").slice(0, 20000),
     totalCents,
+    /* The day the invoice itself says it will be taken, where it prints one. Never worked out from terms. */
+    dueOn: text ? dueDateFrom(text) : null,
     supplierId,
     needsReview: !confident,
     receivedFrom: meta.from,
@@ -2508,6 +2511,7 @@ export async function adoptDocument(documentId: string, ctx: { userId: string; u
     controlledItems: controlled.join("\n"),
     itemsText: items.join("\n").slice(0, 20000),
     totalCents,
+    dueOn: text ? dueDateFrom(text) : null,
     supplierId: matched?.id ?? null,
     needsReview: !(fromText?.confident ?? false) && schedule === "unknown",
     receivedFrom: doc.notes ?? null,
@@ -2608,6 +2612,38 @@ export async function backfillTotals(): Promise<{ read: number; stillMissing: nu
   }
 
   return { read, stillMissing: rows.length - read, unreadable };
+}
+
+/**
+ * Reads the printed due date off invoices already filed, which is every invoice on the site today.
+ *
+ * The column arrived after them (migration 0124), and the date is the fact that says which invoices one ACH pays — so
+ * without this the answer sits in the PDFs and nowhere the site can use it. An invoice that prints no due date is left
+ * null, which is "not said": it is not a failure and there is nothing to type in.
+ */
+export async function backfillDueDates(): Promise<{ read: number; printsNone: number; unreadable: number }> {
+  const rows = await db.query.supplierInvoices.findMany({ where: isNull(schema.supplierInvoices.dueOn), columns: { id: true, documentId: true } });
+  const { readFile } = await import("./files");
+  let read = 0;
+  let printsNone = 0;
+  let unreadable = 0;
+  for (const row of rows) {
+    const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, row.documentId), columns: { storageKey: true } });
+    if (!doc) continue;
+    try {
+      const dueOn = dueDateFrom(pdfText(await readFile(doc.storageKey)));
+      if (dueOn === null) {
+        printsNone++;
+        continue;
+      }
+      await db.update(schema.supplierInvoices).set({ dueOn }).where(eq(schema.supplierInvoices.id, row.id));
+      read++;
+    } catch {
+      // A scan with no text layer, as with the totals: not an error, simply nothing to read.
+      unreadable++;
+    }
+  }
+  return { read, printsNone, unreadable };
 }
 
 /** How many invoices have no amount, so the page can offer to do something about it. */
