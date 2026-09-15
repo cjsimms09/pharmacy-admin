@@ -8,6 +8,27 @@ file is how they talk.
 
 ## Open items
 
+### From 2 — 15 September, before the edit: `schema.ts`, a new migration, `cash-cogs.ts`, `profit-and-loss.ts` (A's), `invoices.ts`, `inventory/invoices/page.tsx` — a supplier payment, and what it put against each invoice
+
+**Written before touching those files**, on branch `work/supplier-payments`. The design was agreed with session 1 on
+15 September. IPD settles invoices by offset against Aytu credit memos, sometimes in part (one invoice $1,125.36 on 19 Aug
+and $2,152.03 on 3 Sept). Parmed pays by one ACH listed on a portal page. A paid date alone holds neither.
+- **Migration (next free slot at merge) and `schema.ts`:** two new tables. `supplier_payments` holds supplier, paid on,
+  amount, method (offset, ach, cheque, card or unknown), reference, credit memo, source, a unique source key, document
+  and who. `supplier_payment_allocations` holds payment, invoice and amount. Nothing existing changes.
+- **`cash-cogs.ts`:** a supplier with no ledger feed whose invoice has allocations counts each allocation in its
+  payment's month, and any part not yet allocated on its invoice date. An invoice with a paid date and no allocations
+  counts whole in that month, as now. With neither, it counts on its invoice date. The double-count check uses the same
+  portions.
+- **`profit-and-loss.ts`:** loads the allocations with their payment dates and passes them in. Nothing else.
+- **`invoices.ts`, invoices page:**
+  - "Mark paid together" writes one payment with its allocations instead of bare dates.
+  - `supplier_invoices.paid_on` is set when allocations reach the total.
+  - A payment can be removed, which takes its allocations and the paid dates they set.
+  - A part-paid invoice says so on its row, and clearing a row's paid date is refused while a payment holds it.
+- **Later, same branch or next:** readers for IPD's statement (no revenue; the credit memo line banks through
+  `rxRescueMemoKey`) and Parmed's payment page, when their real samples are on hand.
+
 ### From 1 — 15 September, before the edit: `inbox-undo.ts` (B's) — an RxRescue memo also banks one cash receipt, and undo says so
 
 **Written before touching the file.** The Aytu / IPD credit memo import now banks the memo's whole credit as one
