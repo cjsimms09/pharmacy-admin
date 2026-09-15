@@ -1,5 +1,6 @@
 import { tillLine } from "@/lib/till-line";
 import Link from "next/link";
+import { Suspense } from "react";
 import { cqiSnapshot, csInventoryStatus } from "@/lib/compliance";
 import { dueList, type DueItem } from "@/lib/due";
 import { complianceSummary, type OpenItem } from "@/lib/compliance-status";
@@ -94,7 +95,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const { ok, error } = await searchParams;
   // The signer's own name, to fill in the attestation form without asking them to remember it.
   const user = await requireUser();
-  const [compliance, dated, matrix, cqi, cs, jobs, selfFindings, settings, mail, updates, invoiceProblems, alertList, money, found, books, clocks, returns, claimsProof] =
+  const [compliance, dated, matrix, cqi, cs, jobs, selfFindings, settings, mail, updates, invoiceProblems, alertList, clocks, returns, claimsProof] =
     await Promise.all([
     complianceSummary(),
     dueList({ horizonDays: 60 }),
@@ -108,14 +109,12 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     pendingUpdates(),
     invoiceIssues(),
     alerts(),
-    moneyPosition(),
-    moneyFound().catch(() => null),
     /*
-     * The month's bottom line so far, from the books: gross profit less the bills in and the
-     * standing costs accrued to today. The scoreboard's other figures are dispensing; this is the
-     * one that says whether the month is making money after the doors are kept open.
+     * The money figures are not here. Each is read by its own section below, inside a Suspense
+     * boundary, so the rest of the page is sent while they are worked out. Before, this list waited
+     * for all of them together: after any new file, money found alone was nineteen seconds from cold
+     * (measured 15 September 2026), and a lapsed licence could not be seen for as long as that took.
      */
-    booksFor(parsePeriod(todayIso().slice(0, 7))!).catch(() => null),
     // Contract deadlines with a date on them, so a renewal window is on the same list as a licence.
     contractClocksDue(90).catch(() => [] as Awaited<ReturnType<typeof contractClocksDue>>),
     /*
@@ -280,7 +279,6 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     });
   }
   const clocksNear = clocks.filter((c) => (daysUntil(c.on!) ?? 99) <= 14);
-  const net = books?.accrual ?? null;
 
   const stalled = jobs.filter((j) => j.state === "stale");
   // The feeds the figures come from, judged from their own tables; the sensors and backup are already in `jobs`.
@@ -381,215 +379,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         later. Where a link in the chain is missing the card says which link and where to fix it,
         because the alternative is a confident zero that somebody prices an order against.
       */}
-      <section className="mb-6">
-        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="text-sm font-semibold">Scoreboard</h2>
-          <span className="text-xs text-ink-3">
-            Month to date · {fmtLong(today)} · <Link href="/money" className="text-accent underline">the books</Link>
-          </span>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          {/*
-            What was dispensed and what it made — prescriptions only.
-
-            The transaction report does not carry front-of-shop merchandise, so this is not the
-            whole till and does not pretend to be. Cash fills are in it: a bottle the pharmacy
-            priced itself is revenue like any other, and for months they were thrown away on import,
-            which silently deleted the margin on the only business the pharmacy fully controls.
-          */}
-          <Figure
-            value={formatCents(money.dispensing.marginCents)}
-            label="Gross profit this month"
-            tone={money.dispensing.marginCents < 0 ? "crit" : "ok"}
-            href="/claims"
-            sub={
-              money.dispensing.fills === 0
-                ? "No fills loaded for this month yet."
-                : [
-                    `on ${formatCents(money.dispensing.revenueCents)} dispensed across ${money.dispensing.fills.toLocaleString()} fills`,
-                    money.dispensing.cashFills > 0
-                      ? `${formatCents(money.dispensing.cashMarginCents)} of it from cash`
-                      : null,
-                    /*
-                      Promised and unpaid, and whether any of it is late.
-
-                      The whole promise, as before — none of it has stopped being owed. What it now
-                      says is which part the payer still has time on, because "promised and unpaid"
-                      on money that adjudicated yesterday reads as a plan not paying.
-                    */
-                    money.dispensing.promisedCents > 0
-                      ? `${formatCents(money.dispensing.promisedCents)} promised and unpaid` +
-                        (money.dispensing.promisedNotDueCents > 0
-                          ? `, ${formatCents(money.dispensing.promisedNotDueCents)} of it not due yet`
-                          : "")
-                      : null,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")
-            }
-          />
-
-          {/*
-            The bottom line so far: gross profit less the bills in and the standing costs accrued to
-            today. The one figure here that includes keeping the doors open, and it says what it is
-            missing rather than looking finished.
-          */}
-          <Figure
-            value={net ? formatCents(net.netProfitCents) : "—"}
-            label={net && net.netProfitCents < 0 ? "Net loss so far" : "Net profit so far"}
-            tone={!net ? "muted" : !net.usable ? "warn" : net.netProfitCents < 0 ? "crit" : "ok"}
-            href="/money"
-            sub={
-              !net
-                ? "The books could not be drawn."
-                : [
-                    `${formatCents(net.operatingCents)} to keep the doors open so far`,
-                    net.missing.length > 0 ? `${net.missing.length} line${net.missing.length === 1 ? "" : "s"} not yet in` : "every line in",
-                    books?.pace?.netAfterBillsSoFarCents != null ? `${formatCents(books.pace.netAfterBillsSoFarCents)} at this pace` : null,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")
-            }
-          />
-
-          {/*
-            Money actually banked from the facilitator, and only that.
-
-            An earlier version put "still owed" here from the gap between the report's gross profit
-            and ours. That gap is real but its cause is not knowable from a fill — one was $146.18
-            of facilitator money, another $5.56 on a generic Losartan that no facilitator would ever
-            pay — so forecasting from it invented a receivable. The gap belongs on the claims screen
-            as a reconciliation, not here as money coming.
-          */}
-          <Figure
-            value={formatCents(money.facilitator.receivedCents)}
-            label="Facilitator money in"
-            tone={money.facilitator.receivedCents > 0 ? "ok" : "muted"}
-            href="/remits/mtf"
-            sub={
-              [
-                money.facilitator.payments > 0
-                  ? `${money.facilitator.payments} payment${money.facilitator.payments === 1 ? "" : "s"} this month`
-                  : "nothing received this month",
-                money.facilitator.lastMonthCents > 0 ? `${formatCents(money.facilitator.lastMonthCents)} last month` : null,
-                /* Only what can still be matched. The rest predate the feed and never will be. */
-                money.facilitator.unmatched > 0
-                  ? `${money.facilitator.unmatched} not yet matched to a claim`
-                  : money.facilitator.beforeTheFeed > 0
-                    ? `all matched, bar ${money.facilitator.beforeTheFeed} filled before this feed began`
-                    : null,
-              ]
-                .filter(Boolean)
-                .join(" · ")
-            }
-          />
-
-          {/* ── The ratio, which is the lever ───────────────────────── */}
-          <Figure
-            value={money.ratio?.percent !== null && money.ratio?.percent !== undefined ? `${money.ratio.percent.toFixed(2)}%` : "—"}
-            label={money.ratio ? `Scrubbed GCR — ${money.ratio.supplierName}` : "Scrubbed GCR"}
-            tone={money.ratio?.percent === null || money.ratio === null ? "muted" : money.ratio.next ? "warn" : "ok"}
-            href={money.ratio ? `/suppliers/${money.ratio.supplierId}/terms` : "/suppliers"}
-            sub={
-              money.ratio === null
-                ? "No supplier on file yet."
-                : money.ratio.percent === null
-                  ? "No drill down has been read yet — it arrives daily and files itself."
-                  : [
-                      money.ratio.contractGenericPercent !== null
-                        ? `${money.ratio.contractGenericPercent}% off a contract generic today`
-                        : "no ladder on file to price it",
-                      money.ratio.next
-                        ? `${money.ratio.next.shortByPercent.toFixed(2)}% short of ${money.ratio.next.rebatePercent}%`
-                        : "top band",
-                      money.ratio.source === "daily report" ? `today's report` : money.ratio.source === "monthly statement" ? `settled figure` : null,
-                      money.ratio.driftPercent !== null && Math.abs(money.ratio.driftPercent) > 0.5
-                        ? `today's drill down reads ${money.ratio.dailyPercent?.toFixed(2)}%, a different measure`
-                        : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")
-            }
-          />
-
-          {/* ── What the buying already done is earning ─────────────── */}
-          <Figure
-            value={formatCents(money.rebates.estimatedCents)}
-            label="Rebates earned this month"
-            tone={money.rebates.incomplete || money.rebates.unmarkedLines > 0 ? "warn" : money.rebates.estimatedCents > 0 ? "ok" : "muted"}
-            href="/suppliers"
-            sub={
-              money.rebates.purchasedCents === 0
-                ? "No invoices loaded for this month yet."
-                : [
-                    `on ${formatCents(money.rebates.purchasedCents)} bought`,
-                    money.rebates.bySupplier.length === 1 ? money.rebates.bySupplier[0].supplierName : `${money.rebates.bySupplier.length} suppliers`,
-                    money.rebates.unmarkedLines > 0 ? `${money.rebates.unmarkedLines} lines unmarked, earning nothing here` : null,
-                    money.rebates.incomplete ? "a supplier has no ladder on file" : null,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")
-            }
-          />
-        </div>
-        {/*
-          The whole till, which is the only figure here that includes the front of shop.
-
-          Every other number on this scoreboard is dispensing. The System Sales Summary is the one
-          report that carries over-the-counter business too, and it is drawn by the calendar month
-          rather than by the day a claim was transmitted — so it is the figure that reconciles
-          against the bank, and it is labelled with the month it actually covers rather than being
-          quietly presented as this one.
-        */}
-        {money.sales && (() => {
-          /*
-           * Built rather than templated, because three of these five figures can be absent and a
-           * `?? 0` turns "nobody has told us" into "nothing was taken". This line used to lead with a
-           * bold $0.00 and then list $2,115.07 of counter takings underneath it, from a document that
-           * has never been filed.
-           */
-          const line = tillLine(money.sales);
-          return (
-            <p className="mt-3 rounded-lg border border-line bg-surface p-3 text-xs text-ink-2">
-              <b>{line.headline}</b> — {line.detail} This is the only figure on this page that
-              includes the front of shop; everything above it is dispensing.
-            </p>
-          );
-        })()}
-
-        {/*
-          The report's own bottom line, which nothing on this site computed.
-
-          It is the only authoritative total sales figure the pharmacy has — the transaction report
-          prints a grand total, and that total is the thing to reconcile against the bank. Said as
-          the report's figure for the report's period, never quietly reinterpreted as the month's:
-          those are the same only when the file sent is the monthly one.
-        */}
-        {money.dispensing.reported && (
-          <p className="mt-2 text-xs text-ink-2">
-            <b>{formatCents(money.dispensing.reported.salesCents)} taken and{" "}
-            {formatCents(money.dispensing.reported.grossProfitCents)} made</b>{" "}
-            — the report&rsquo;s own grand total for the last file loaded
-            {money.dispensing.reported.from
-              ? `, covering ${money.dispensing.reported.from}${
-                  money.dispensing.reported.to && money.dispensing.reported.to !== money.dispensing.reported.from
-                    ? ` to ${money.dispensing.reported.to}`
-                    : ""
-                }`
-              : ""}
-            . This is the one figure here nobody worked out — PioneerRx printed it — so it is what to
-            reconcile against the bank.
-          </p>
-        )}
-        {money.unreconciled.fills > 0 && (
-          <p className="mt-2 text-xs text-ink-3">
-            Separately, {formatCents(money.unreconciled.cents)} across {money.unreconciled.fills} fills is revenue the
-            daily report booked that this site has not found in the claim rows. It is not money coming — it is a column
-            to identify, and it may already be in the bank.{" "}
-            <Link href="/claims" className="text-accent underline">Reconcile it on Claims</Link>.
-          </p>
-        )}
-      </section>
+      <Suspense fallback={<Pending title="Scoreboard" note="Working out the month to date…" tall />}>
+        <Scoreboard today={today} />
+      </Suspense>
 
       {/*
         The three things worth the most, before anything that is merely due.
@@ -598,38 +390,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         whole list, because the whole list is a page of its own and the point here is that a
         pharmacist who reads nothing else knows the one action worth the most this morning.
       */}
-      {found && found.rows.length > 0 && (
-        <section className="mb-6">
-          <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-            <h2 className="text-sm font-semibold">Worth the most this morning</h2>
-            <span className="text-xs text-ink-3">
-              {formatCents(found.firstYearCents)} in the first year if all of it is done ·{" "}
-              <Link href="/money/found" className="text-accent underline">all {found.rows.length}</Link>
-            </span>
-          </div>
-          <ol className="grid gap-3 lg:grid-cols-3">
-            {found.rows.slice(0, 3).map((r, i) => (
-              <li key={r.key} className="card flex flex-col">
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-xs text-ink-3">{i + 1}.</span>
-                  <span className="text-right">
-                    <span className="block text-lg font-semibold tabular-nums text-ink">{formatCents(r.amountCents)}</span>
-                    <span className="block text-[11px] text-ink-3">{r.cadence === "recurring_monthly" ? "a month" : "one-off"}</span>
-                  </span>
-                </div>
-                <p className="mt-1 text-sm font-medium">{r.says}</p>
-                <p className="mt-1 flex-1 text-xs text-ink-2">{r.todo}</p>
-                <div className="mt-2 flex items-center gap-2">
-                  <Link href={r.href} className="btn btn-sm btn-primary">Go and do it</Link>
-                  {found.ages[r.key] !== undefined && (
-                    <span className="text-[11px] text-ink-3">{found.ages[r.key] <= 1 ? "new today" : `${found.ages[r.key]} days on the list`}</span>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ol>
-        </section>
-      )}
+      <Suspense fallback={<Pending title="Worth the most this morning" note="Weighing what is worth the most…" />}>
+        <WorthTheMost />
+      </Suspense>
 
       {/*
         Two levels, and nothing else on the screen shouts.
@@ -1060,5 +823,291 @@ function AutomationStrip({ jobs }: { jobs: JobStatus[] }) {
         ))}
       </ul>
     </details>
+  );
+}
+
+/**
+ * The month to date, sent after the rest of the page.
+ *
+ * Its two readings are the heaviest on Today — the dispensing position and the books — and neither
+ * decides whether anything is late. Streamed in its own boundary, the checklist above and below it
+ * is on screen while these are worked out, and a failure here costs this section, not the page.
+ */
+async function Scoreboard({ today }: { today: string }) {
+  const [money, books] = await Promise.all([
+    moneyPosition(),
+    /*
+     * The month's bottom line so far, from the books: gross profit less the bills in and the
+     * standing costs accrued to today. The scoreboard's other figures are dispensing; this is the
+     * one that says whether the month is making money after the doors are kept open.
+     */
+    booksFor(parsePeriod(today.slice(0, 7))!).catch(() => null),
+  ]);
+  const net = books?.accrual ?? null;
+  return (
+        <section className="mb-6">
+          <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-sm font-semibold">Scoreboard</h2>
+            <span className="text-xs text-ink-3">
+              Month to date · {fmtLong(today)} · <Link href="/money" className="text-accent underline">the books</Link>
+            </span>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            {/*
+              What was dispensed and what it made — prescriptions only.
+
+              The transaction report does not carry front-of-shop merchandise, so this is not the
+              whole till and does not pretend to be. Cash fills are in it: a bottle the pharmacy
+              priced itself is revenue like any other, and for months they were thrown away on import,
+              which silently deleted the margin on the only business the pharmacy fully controls.
+            */}
+            <Figure
+              value={formatCents(money.dispensing.marginCents)}
+              label="Gross profit this month"
+              tone={money.dispensing.marginCents < 0 ? "crit" : "ok"}
+              href="/claims"
+              sub={
+                money.dispensing.fills === 0
+                  ? "No fills loaded for this month yet."
+                  : [
+                      `on ${formatCents(money.dispensing.revenueCents)} dispensed across ${money.dispensing.fills.toLocaleString()} fills`,
+                      money.dispensing.cashFills > 0
+                        ? `${formatCents(money.dispensing.cashMarginCents)} of it from cash`
+                        : null,
+                      /*
+                        Promised and unpaid, and whether any of it is late.
+
+                        The whole promise, as before — none of it has stopped being owed. What it now
+                        says is which part the payer still has time on, because "promised and unpaid"
+                        on money that adjudicated yesterday reads as a plan not paying.
+                      */
+                      money.dispensing.promisedCents > 0
+                        ? `${formatCents(money.dispensing.promisedCents)} promised and unpaid` +
+                          (money.dispensing.promisedNotDueCents > 0
+                            ? `, ${formatCents(money.dispensing.promisedNotDueCents)} of it not due yet`
+                            : "")
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")
+              }
+            />
+
+            {/*
+              The bottom line so far: gross profit less the bills in and the standing costs accrued to
+              today. The one figure here that includes keeping the doors open, and it says what it is
+              missing rather than looking finished.
+            */}
+            <Figure
+              value={net ? formatCents(net.netProfitCents) : "—"}
+              label={net && net.netProfitCents < 0 ? "Net loss so far" : "Net profit so far"}
+              tone={!net ? "muted" : !net.usable ? "warn" : net.netProfitCents < 0 ? "crit" : "ok"}
+              href="/money"
+              sub={
+                !net
+                  ? "The books could not be drawn."
+                  : [
+                      `${formatCents(net.operatingCents)} to keep the doors open so far`,
+                      net.missing.length > 0 ? `${net.missing.length} line${net.missing.length === 1 ? "" : "s"} not yet in` : "every line in",
+                      books?.pace?.netAfterBillsSoFarCents != null ? `${formatCents(books.pace.netAfterBillsSoFarCents)} at this pace` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")
+              }
+            />
+
+            {/*
+              Money actually banked from the facilitator, and only that.
+
+              An earlier version put "still owed" here from the gap between the report's gross profit
+              and ours. That gap is real but its cause is not knowable from a fill — one was $146.18
+              of facilitator money, another $5.56 on a generic Losartan that no facilitator would ever
+              pay — so forecasting from it invented a receivable. The gap belongs on the claims screen
+              as a reconciliation, not here as money coming.
+            */}
+            <Figure
+              value={formatCents(money.facilitator.receivedCents)}
+              label="Facilitator money in"
+              tone={money.facilitator.receivedCents > 0 ? "ok" : "muted"}
+              href="/remits/mtf"
+              sub={
+                [
+                  money.facilitator.payments > 0
+                    ? `${money.facilitator.payments} payment${money.facilitator.payments === 1 ? "" : "s"} this month`
+                    : "nothing received this month",
+                  money.facilitator.lastMonthCents > 0 ? `${formatCents(money.facilitator.lastMonthCents)} last month` : null,
+                  /* Only what can still be matched. The rest predate the feed and never will be. */
+                  money.facilitator.unmatched > 0
+                    ? `${money.facilitator.unmatched} not yet matched to a claim`
+                    : money.facilitator.beforeTheFeed > 0
+                      ? `all matched, bar ${money.facilitator.beforeTheFeed} filled before this feed began`
+                      : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")
+              }
+            />
+
+            {/* ── The ratio, which is the lever ───────────────────────── */}
+            <Figure
+              value={money.ratio?.percent !== null && money.ratio?.percent !== undefined ? `${money.ratio.percent.toFixed(2)}%` : "—"}
+              label={money.ratio ? `Scrubbed GCR — ${money.ratio.supplierName}` : "Scrubbed GCR"}
+              tone={money.ratio?.percent === null || money.ratio === null ? "muted" : money.ratio.next ? "warn" : "ok"}
+              href={money.ratio ? `/suppliers/${money.ratio.supplierId}/terms` : "/suppliers"}
+              sub={
+                money.ratio === null
+                  ? "No supplier on file yet."
+                  : money.ratio.percent === null
+                    ? "No drill down has been read yet — it arrives daily and files itself."
+                    : [
+                        money.ratio.contractGenericPercent !== null
+                          ? `${money.ratio.contractGenericPercent}% off a contract generic today`
+                          : "no ladder on file to price it",
+                        money.ratio.next
+                          ? `${money.ratio.next.shortByPercent.toFixed(2)}% short of ${money.ratio.next.rebatePercent}%`
+                          : "top band",
+                        money.ratio.source === "daily report" ? `today's report` : money.ratio.source === "monthly statement" ? `settled figure` : null,
+                        money.ratio.driftPercent !== null && Math.abs(money.ratio.driftPercent) > 0.5
+                          ? `today's drill down reads ${money.ratio.dailyPercent?.toFixed(2)}%, a different measure`
+                          : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")
+              }
+            />
+
+            {/* ── What the buying already done is earning ─────────────── */}
+            <Figure
+              value={formatCents(money.rebates.estimatedCents)}
+              label="Rebates earned this month"
+              tone={money.rebates.incomplete || money.rebates.unmarkedLines > 0 ? "warn" : money.rebates.estimatedCents > 0 ? "ok" : "muted"}
+              href="/suppliers"
+              sub={
+                money.rebates.purchasedCents === 0
+                  ? "No invoices loaded for this month yet."
+                  : [
+                      `on ${formatCents(money.rebates.purchasedCents)} bought`,
+                      money.rebates.bySupplier.length === 1 ? money.rebates.bySupplier[0].supplierName : `${money.rebates.bySupplier.length} suppliers`,
+                      money.rebates.unmarkedLines > 0 ? `${money.rebates.unmarkedLines} lines unmarked, earning nothing here` : null,
+                      money.rebates.incomplete ? "a supplier has no ladder on file" : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")
+              }
+            />
+          </div>
+          {/*
+            The whole till, which is the only figure here that includes the front of shop.
+
+            Every other number on this scoreboard is dispensing. The System Sales Summary is the one
+            report that carries over-the-counter business too, and it is drawn by the calendar month
+            rather than by the day a claim was transmitted — so it is the figure that reconciles
+            against the bank, and it is labelled with the month it actually covers rather than being
+            quietly presented as this one.
+          */}
+          {money.sales && (() => {
+            /*
+             * Built rather than templated, because three of these five figures can be absent and a
+             * `?? 0` turns "nobody has told us" into "nothing was taken". This line used to lead with a
+             * bold $0.00 and then list $2,115.07 of counter takings underneath it, from a document that
+             * has never been filed.
+             */
+            const line = tillLine(money.sales);
+            return (
+              <p className="mt-3 rounded-lg border border-line bg-surface p-3 text-xs text-ink-2">
+                <b>{line.headline}</b> — {line.detail} This is the only figure on this page that
+                includes the front of shop; everything above it is dispensing.
+              </p>
+            );
+          })()}
+
+          {/*
+            The report's own bottom line, which nothing on this site computed.
+
+            It is the only authoritative total sales figure the pharmacy has — the transaction report
+            prints a grand total, and that total is the thing to reconcile against the bank. Said as
+            the report's figure for the report's period, never quietly reinterpreted as the month's:
+            those are the same only when the file sent is the monthly one.
+          */}
+          {money.dispensing.reported && (
+            <p className="mt-2 text-xs text-ink-2">
+              <b>{formatCents(money.dispensing.reported.salesCents)} taken and{" "}
+              {formatCents(money.dispensing.reported.grossProfitCents)} made</b>{" "}
+              — the report&rsquo;s own grand total for the last file loaded
+              {money.dispensing.reported.from
+                ? `, covering ${money.dispensing.reported.from}${
+                    money.dispensing.reported.to && money.dispensing.reported.to !== money.dispensing.reported.from
+                      ? ` to ${money.dispensing.reported.to}`
+                      : ""
+                  }`
+                : ""}
+              . This is the one figure here nobody worked out — PioneerRx printed it — so it is what to
+              reconcile against the bank.
+            </p>
+          )}
+          {money.unreconciled.fills > 0 && (
+            <p className="mt-2 text-xs text-ink-3">
+              Separately, {formatCents(money.unreconciled.cents)} across {money.unreconciled.fills} fills is revenue the
+              daily report booked that this site has not found in the claim rows. It is not money coming — it is a column
+              to identify, and it may already be in the bank.{" "}
+              <Link href="/claims" className="text-accent underline">Reconcile it on Claims</Link>.
+            </p>
+          )}
+        </section>
+  );
+}
+
+/** The three things worth the most, streamed on their own: money found is nineteen seconds from cold. */
+async function WorthTheMost() {
+  const found = await moneyFound().catch(() => null);
+  if (!found || found.rows.length === 0) return null;
+  return (
+        <section className="mb-6">
+          <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-sm font-semibold">Worth the most this morning</h2>
+            <span className="text-xs text-ink-3">
+              {formatCents(found.firstYearCents)} in the first year if all of it is done ·{" "}
+              <Link href="/money/found" className="text-accent underline">all {found.rows.length}</Link>
+            </span>
+          </div>
+          <ol className="grid gap-3 lg:grid-cols-3">
+            {found.rows.slice(0, 3).map((r, i) => (
+              <li key={r.key} className="card flex flex-col">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-xs text-ink-3">{i + 1}.</span>
+                  <span className="text-right">
+                    <span className="block text-lg font-semibold tabular-nums text-ink">{formatCents(r.amountCents)}</span>
+                    <span className="block text-[11px] text-ink-3">{r.cadence === "recurring_monthly" ? "a month" : "one-off"}</span>
+                  </span>
+                </div>
+                <p className="mt-1 text-sm font-medium">{r.says}</p>
+                <p className="mt-1 flex-1 text-xs text-ink-2">{r.todo}</p>
+                <div className="mt-2 flex items-center gap-2">
+                  <Link href={r.href} className="btn btn-sm btn-primary">Go and do it</Link>
+                  {found.ages[r.key] !== undefined && (
+                    <span className="text-[11px] text-ink-3">{found.ages[r.key] <= 1 ? "new today" : `${found.ages[r.key]} days on the list`}</span>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ol>
+        </section>
+  );
+}
+
+/** What stands in a streamed section's place while it is worked out: its heading, and a line saying so. */
+function Pending({ title, note, tall = false }: { title: string; note: string; tall?: boolean }) {
+  return (
+    <section className="mb-6" aria-busy="true">
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-sm font-semibold">{title}</h2>
+        <span className="text-xs text-ink-3">{note}</span>
+      </div>
+      <div className={`grid gap-3 sm:grid-cols-2 ${tall ? "lg:grid-cols-5" : "lg:grid-cols-3"}`}>
+        {Array.from({ length: tall ? 5 : 3 }, (_, i) => (
+          <div key={i} className={`card animate-pulse motion-reduce:animate-none ${tall ? "h-28" : "h-32"}`} />
+        ))}
+      </div>
+    </section>
   );
 }

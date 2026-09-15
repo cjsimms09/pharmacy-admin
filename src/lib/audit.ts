@@ -35,6 +35,6 @@ export async function audit(e: {
    * Here rather than at each call site because every action that changes anything writes an audit
    * row, which makes this the one place the next action somebody adds cannot forget.
    */
-  const { forgetFingerprint } = await import("./held");
-  forgetFingerprint();
+  const { forgetFingerprint, changesNothing } = await import("./held");
+  if (!changesNothing(e.action)) forgetFingerprint();
 }

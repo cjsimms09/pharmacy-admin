@@ -54,6 +54,19 @@ describe("a counterparty's file", () => {
     assert.deepEqual(clocksDue(f, "2026-09-07", 30).map((c) => c.on), ["2026-10-02"]);
     assert.deepEqual(clocksDue(f, "2026-09-07", 10), []);
   });
+  test("REGRESSION: an end date written as the contract prints it gives the day, and one that is no date does not throw", () => {
+    /*
+     * "July 1, 2024" with a thirty-day notice threw inside toISOString, and Today catches that loader,
+     * so the whole list of contract deadlines would have gone from Today without a word.
+     */
+    const withEnd = (endDate: string) => counterpartyFile("Example PBM", [{ ...docs[1], terms: termsFromObject({ ...JSON.parse(JSON.stringify(base)), endDate }) }]).clocks.find((c) => c.what.startsWith("Notice to terminate"));
+    assert.equal(withEnd("July 1, 2024")?.on, "2024-04-02", "ninety days before, the notice the example agreement sets");
+    assert.equal(withEnd("6/30/2024")?.on, "2024-04-01");
+    assert.equal(withEnd("December 31, 2024 (end of Year 1); may continue beyond Year 1")?.on, "2024-10-02");
+    const none = withEnd("the end of the programme year");
+    assert.equal(none?.on, null, "no day where the text is not a date");
+    assert.match(none?.rule ?? "", /the end of the programme year/, "the rule still names the end date as printed");
+  });
   test("reports, fees, measures, the money rules and the definitions all land, each from its document", () => {
     assert.equal(f.reportsOwed[0].name, "Annual GER reconciliation");
     assert.equal(f.fees[0].amount, "$0.10 per claim");

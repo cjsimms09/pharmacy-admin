@@ -65,8 +65,29 @@ describe("a reading taken after a write is not the one taken before it", () => {
      */
     const { audit } = await import("../src/lib/audit");
     const before = await fingerprint();
-    await audit({ action: "test.held.stale", userName: "the test suite", details: "proving a write forgets the fingerprint" });
+    await audit({ action: "held.stale.proof", userName: "the test suite", details: "proving a write forgets the fingerprint" });
     const after = await fingerprint();
     assert.notEqual(after, before, "the newest audit event is a term in the fingerprint, so a write must move it");
+  });
+
+  test("somebody looking is not a change: a view or a sign-in leaves every held reading where it was", async () => {
+    /*
+     * 124 document views and 83 sign-ins in a week each emptied the cache, so the owner signing in
+     * made his own first page rebuild money found from cold. The rows are still written — who looked
+     * at a record is worth keeping — they just do not count as the tables moving.
+     */
+    const { audit } = await import("../src/lib/audit");
+    const { changesNothing } = await import("../src/lib/held");
+    await audit({ action: "held.stale.setup", userName: "the test suite" });
+    await new Promise((r) => setTimeout(r, 5));
+    forgetFingerprint();
+    const before = await fingerprint();
+    await new Promise((r) => setTimeout(r, 5));
+    await audit({ action: "document.view", userName: "the test suite" });
+    await audit({ action: "login.success", userName: "the test suite" });
+    forgetFingerprint();
+    assert.equal(await fingerprint(), before, "a look must not move the fingerprint");
+    assert.equal(changesNothing("invoice.confirmed"), false, "a confirmation is a change");
+    assert.equal(changesNothing("document.delete"), false, "deleting a document is a change even though viewing one is not");
   });
 });

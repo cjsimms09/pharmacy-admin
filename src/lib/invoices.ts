@@ -1774,6 +1774,17 @@ export type InvoiceIssue = {
 const SUPPLIER_SILENT_DAYS = 21;
 
 export async function invoiceIssues(): Promise<InvoiceIssue[]> {
+  /*
+   * Held, because Today asks for it twice — once itself and once inside the alerts — and each asking
+   * was 1.2 to 1.9 seconds on 15 September 2026, on every page load, cached or not. Every change an
+   * invoice can undergo writes an audit event or an invoice line, and the count of invoices is a term
+   * of the fingerprint besides, so a filed, confirmed or purged invoice is seen on the next page.
+   */
+  const { held } = await import("./held");
+  return held(`invoice-issues:${todayIso()}`, loadInvoiceIssues);
+}
+
+async function loadInvoiceIssues(): Promise<InvoiceIssue[]> {
   const rows = await db.query.supplierInvoices.findMany();
   const out: InvoiceIssue[] = [];
   const today = todayIso();

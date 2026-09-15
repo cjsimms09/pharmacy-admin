@@ -36,6 +36,26 @@ const MOST_HELD = 48;
 
 let fpCache: { at: number; fp: string } | null = null;
 
+/*
+ * Audit actions that record somebody looking, not something changing.
+ *
+ * The newest audit event is a term in the fingerprint, and before this list every event counted.
+ * Measured on 15 September 2026, over seven days: 124 document views, 83 sign-ins and 72 test-suite
+ * rows each threw away every held reading on the site, and so did 112 of the last 132 inbox sweeps,
+ * which found nothing. Money found takes nineteen seconds to rebuild from cold, so the owner signing
+ * in was enough to make his own first page slow.
+ *
+ * Only actions that write no row any reading depends on belong here. When in doubt, leave it out: a
+ * reading recomputed for nothing costs seconds, and a reading that missed a real change is the
+ * "I pressed it and nothing happened" fault this cache has already had once.
+ */
+const LOOKS_ONLY = ["document.view", "login.success", "login.failed", "login.blocked", "pioneer-sql.test", "mail.test", "diagnostics.export"] as const;
+
+/** Whether an audit action records a look rather than a change, so the held readings need not move. */
+export function changesNothing(action: string): boolean {
+  return (LOOKS_ONLY as readonly string[]).includes(action) || action.startsWith("test.");
+}
+
 /**
  * Forgets the cached fingerprint, so the next reading is taken against the tables as they are now.
  *
@@ -68,7 +88,9 @@ export async function fingerprint(): Promise<string> {
   if (fpCache && Date.now() - fpCache.at < 2_000) return fpCache.fp;
   const client = (db as unknown as { $client: { execute: (sql: string) => Promise<{ rows: Record<string, unknown>[] }> } }).$client;
   const r = await client.execute(
-    "select (select count(*) from claims) as c, (select max(at) from audit_events) as a, (select count(*) from supplier_items) as s, " +
+    "select (select count(*) from claims) as c, " +
+      `(select max(at) from audit_events where action not in (${LOOKS_ONLY.map((a) => `'${a}'`).join(",")}) and action not like 'test.%') as a, ` +
+      "(select count(*) from supplier_items) as s, (select count(*) from supplier_invoices) as si2, " +
       "(select max(file_as_of) from nadac_prices) as n, (select count(*) from invoice_lines) as l, (select max(counted_on) from on_hand_imports) as o, " +
       "(select count(*) from driver_invoices) as d, (select count(*) from expenses) as e, (select count(*) from claim_payments) as p, (select count(*) from plan_groups) as g, " +
       /*
@@ -92,7 +114,7 @@ export async function fingerprint(): Promise<string> {
       "(select count(*) from ndc_pack_fixes) as f, (select max(corrected_at) from ndc_pack_fixes) as fa",
   );
   const row = r.rows[0] ?? {};
-  const fp = ["c", "a", "s", "n", "l", "o", "d", "e", "p", "g", "si", "sm", "f", "fa"].map((k) => String(row[k] ?? "")).join("|");
+  const fp = ["c", "a", "s", "si2", "n", "l", "o", "d", "e", "p", "g", "si", "sm", "f", "fa"].map((k) => String(row[k] ?? "")).join("|");
   fpCache = { at: Date.now(), fp };
   return fp;
 }

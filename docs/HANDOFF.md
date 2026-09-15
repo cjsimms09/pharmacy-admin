@@ -8,6 +8,27 @@ file is how they talk.
 
 ## Open items
 
+### From 1 — 15 September, before the edit: `mailbox.ts` (B's), `invoices.ts` (2's), `money/page.tsx` (A's) — speed: fewer cache flushes, one held invoice check, streamed money sections
+
+**Written before touching those files.** The owner: "the site is still slow". Measured on the live database, read-only:
+money found 19.2 s from cold, the books 3.6 s, and `invoiceIssues()` 1.2–1.9 s on *every* Today load, never held, asked
+twice (itself and inside `alerts()`). Every audit event moves the fingerprint every held reading is keyed on, and in seven
+days 124 document views, 83 sign-ins, 72 test-suite rows and 112 of the last 132 inbox sweeps (which found nothing) each
+emptied the whole cache.
+
+- `mailbox.ts`: a sweep that stored, rejected and ignored nothing and had no error writes no audit row. The two settings
+  the feeds page reads (`mail_last_sweep`, `mail_last_result`) are still written every time; nothing reads the rows.
+- `invoices.ts`: `invoiceIssues()` is held under `invoice-issues:<today>`; the body is unchanged as `loadInvoiceIssues()`.
+  The count of `supplier_invoices` is now a fingerprint term, so an insert or delete with no audit row is still seen.
+- `money/page.tsx`: the "Worth the most right now" card reads money found inside its own `<Suspense>`; the books no longer
+  wait for it. Same change on Today (session 1's), where the scoreboard and the three cards are streamed too.
+- `held.ts` / `audit.ts`: `changesNothing(action)` — document views, sign-ins, connection and mail tests, diagnostics export
+  and `test.*` — write their row but do not move the fingerprint. Anything not on that list still does.
+- `npm test` now runs against a freshly migrated scratch database (`scripts/test.mjs`); all 3,404 pass on it. It had been
+  writing into the live database.
+- Found on the way: `contract-file.ts` threw on an end date written "July 1, 2024" (13 of the stored end dates are not ISO),
+  and Today's catch turned every contract deadline into none. None fell inside ninety days that day.
+
 ### From 2 — 15 September, before the edit: `inbox-undo.ts`, `inbox-undo-store.ts` (B's) — an AccessHealth report's CS recoupments are booked, and undo says so
 
 **Written before touching those files**, on branch `work/ah-cs`, at session 1's request (Q-AH-1 answered). The AccessHealth
