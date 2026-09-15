@@ -4,6 +4,7 @@ import path from "node:path";
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { readPostageEmail } from "./postage-email";
+import { bankEftNotice } from "./health-mart-eft-store";
 import { readZip, guessType } from "./zip-read";
 import { bookPostage } from "./expenses";
 import { eq, like } from "drizzle-orm";
@@ -456,7 +457,38 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
                 reason: booked.says,
               });
               result.stored++;
-              await client.messageFlagsAdd(String(uid), ["\Seen"], { uid: true });
+              // "\\Seen", the IMAP flag. This was "\Seen" — a single backslash is dropped by JavaScript,
+              // so postage confirmations were flagged with a keyword called Seen and stayed unread.
+              await client.messageFlagsAdd(String(uid), ["\\Seen"], { uid: true });
+              continue;
+            }
+
+            /*
+             * The Health Mart Atlas "EFT completed" notice: a deposit that arrives as a sentence.
+             *
+             * Sent daily by McKesson, nothing attached, so it was recorded as "No attachment on this
+             * message" and dropped — the first one, on 15 September, the day the owner asked for them
+             * to be read. Banked under the portal report's own key so neither can bank one deposit
+             * twice. See health-mart-eft.ts and health-mart-eft-store.ts.
+             */
+            const eft = await bankEftNotice(
+              { subject, text: parsed.text ?? "", from, messageId, receivedAt },
+              { userId: ctx.userId, userName: ctx.userName ?? "Automatic check" },
+            );
+            if (eft) {
+              await db.insert(schema.inboxItems).values({
+                id: newId(),
+                messageId,
+                receivedAt,
+                fromAddress: from,
+                subject,
+                status: "stored",
+                routedAs: "payer_payments",
+                routeResult: eft.says,
+                reason: eft.says,
+              });
+              result.stored++;
+              await client.messageFlagsAdd(String(uid), ["\\Seen"], { uid: true });
               continue;
             }
 

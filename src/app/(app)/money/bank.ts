@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, gte, inArray, lte } from "drizzle-orm";
+import { matchHeldDeposit, shiftDays, DEPOSIT_WINDOW_DAYS, type HeldForBank } from "@/lib/deposit-gate";
 import { db, schema } from "@/db";
 import { requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
@@ -71,16 +72,68 @@ export async function readBankStatement(fd: FormData) {
   const fresh = parsed.lines.filter((l) => !held.has(l.key));
   const placed = placeLines(fresh, await matchContext());
 
+  /*
+   * The receipts already banked for the statement's dates, so a deposit line confirms one instead of
+   * banking the same money again. See `matchHeldDeposit`: before this, every deposit the payer payment
+   * report or the Health Mart Atlas EFT notice had banked would have been banked a second time by the
+   * first statement read — $250,562.16 of September's third-party receipts on the day it was found.
+   */
+  const days = fresh.map((l) => l.on).sort();
+  /* A receipt an earlier statement already confirmed is not available to be confirmed again. */
+  const confirmedAlready = new Set(
+    (await db.query.bankLines.findMany({ columns: { receiptId: true } })).map((r) => r.receiptId).filter((id): id is string => id !== null),
+  );
+  const heldForBank: HeldForBank[] = days.length
+    ? (
+        await db.query.cashReceipts.findMany({
+          where: and(gte(schema.cashReceipts.receivedOn, shiftDays(days[0], -DEPOSIT_WINDOW_DAYS)), lte(schema.cashReceipts.receivedOn, shiftDays(days[days.length - 1], DEPOSIT_WINDOW_DAYS))),
+          columns: { id: true, amountCents: true, receivedOn: true, payer: true, reference: true },
+        })
+      ).filter((r) => !confirmedAlready.has(r.id))
+    : [];
+  const claimed = new Set<string>();
+
   let deposits = 0;
   let depositCents = 0;
+  let confirmed = 0;
+  let confirmedCents = 0;
   let bills = 0;
   let invoices = 0;
   let unplaced = 0;
   for (const { line, placement } of placed) {
+    /* What is recorded on the bank line. The placement itself keeps its type; only these are overridden. */
+    let placedAs: string = placement.kind;
+    let why: string = placement.why;
     let receiptId: string | null = null;
     let expenseId: string | null = null;
     let invoiceId: string | null = null;
-    if (placement.kind === "deposit") {
+    /*
+     * A credit to the account is matched before it is classified, for any kind the line was placed
+     * as — deposit, rebate, facilitator — because the match does not depend on what the description
+     * says. A ProviderPay deposit sent by McKesson may be placed as a rebate; it must still confirm
+     * the Health Mart Atlas receipt rather than bank a rebate beside it.
+     */
+    /*
+     * Also a credit the classifier could not place at all. A bank description that names nothing
+     * useful is exactly the line most likely to be a deposit a feed already banked, and leaving it on
+     * the unplaced pile would hand a person work the receipts on file already answer.
+     */
+    const isCredit = placement.kind === "deposit" || (placement.kind === "unplaced" && line.amountCents > 0);
+    const match = isCredit
+      ? matchHeldDeposit(heldForBank, { amountCents: line.amountCents, on: line.on, payer: placement.kind === "deposit" ? placement.payer : null }, claimed)
+      : { kind: "none" as const };
+    if (match.kind === "confirms") {
+      claimed.add(match.receipt.id);
+      receiptId = match.receipt.id;
+      placedAs = "confirms_deposit";
+      why = match.why;
+      confirmed++;
+      confirmedCents += line.amountCents;
+    } else if (match.kind === "ambiguous") {
+      placedAs = "unplaced";
+      why = match.why;
+      unplaced++;
+    } else if (placement.kind === "deposit") {
       receiptId = (await addCashReceipt({ month: line.on.slice(0, 7), kind: placement.receiptKind, amountCents: line.amountCents, payer: placement.payer, notes: `From the bank statement: ${line.description}`, createdBy: user.id })).id;
       deposits++;
       depositCents += line.amountCents;
@@ -99,8 +152,8 @@ export async function readBankStatement(fd: FormData) {
       on: line.on,
       description: line.description,
       amountCents: line.amountCents,
-      placedAs: placement.kind,
-      why: placement.why,
+      placedAs,
+      why,
       receiptId,
       expenseId,
       invoiceId,
@@ -114,7 +167,7 @@ export async function readBankStatement(fd: FormData) {
     userName: user.name,
     entity: "document",
     entityId: documentId ?? undefined,
-    details: `${file.name}: ${parsed.lines.length} lines, ${held.size} already held, ${deposits} deposits ${money(depositCents)}, ${bills} bills and ${invoices} invoices marked paid, ${unplaced} not placed`,
+    details: `${file.name}: ${parsed.lines.length} lines, ${held.size} already held, ${deposits} deposits ${money(depositCents)}, ${confirmed} confirming deposits already banked ${money(confirmedCents)}, ${bills} bills and ${invoices} invoices marked paid, ${unplaced} not placed`,
   });
   for (const p of ["/money", "/money/monthly", "/expenses", "/inventory/invoices"]) revalidatePath(p);
   const said =
