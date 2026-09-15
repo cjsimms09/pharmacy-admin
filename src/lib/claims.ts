@@ -842,6 +842,10 @@ export async function recheckHeldClaims(): Promise<{
   /** Reversals of dispensings from before the books begin. Counted, never a job. */
   reversalsBeforeTheBooks: number;
   paymentsMatched: number;
+  /** Payments taken off a claim for a different fill, and left waiting for their own. */
+  paymentsDetached: number;
+  /** Payments moved from a different fill to their own claim. */
+  paymentsMoved: number;
   before: { differenceCents: number; fillsOff: number };
   after: { differenceCents: number; fillsOff: number };
 }> {
@@ -900,7 +904,9 @@ export async function recheckHeldClaims(): Promise<{
   }
 
   const reversals = await repairReversals();
-  const { matchOrphanPayments } = await import("./claim-payments");
+  const { matchOrphanPayments, rematchMisattachedPayments } = await import("./claim-payments");
+  /* Payments attached to a different fill of the same prescription come off first, then everything waiting is matched. */
+  const misattached = await rematchMisattachedPayments();
   const { matched } = await matchOrphanPayments();
 
   const after = (await claimFlags({ all: true })).balance;
@@ -912,6 +918,8 @@ export async function recheckHeldClaims(): Promise<{
     stillStranded: reversals.stillStranded,
     reversalsBeforeTheBooks: reversals.beforeTheBooks,
     paymentsMatched: matched,
+    paymentsDetached: misattached.detached,
+    paymentsMoved: misattached.moved,
     before: { differenceCents: before.differenceCents, fillsOff: before.fillsOff },
     after: { differenceCents: after.differenceCents, fillsOff: after.fillsOff },
   };

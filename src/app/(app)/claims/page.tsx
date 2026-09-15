@@ -246,20 +246,22 @@ export default async function ClaimsPage({
       action: "claims.recheck",
       userId: u.id,
       userName: u.name,
-      details: `${r.restated} of ${r.read} restated, ${r.reversalsPaired} reversals paired, ${r.paymentsMatched} payments matched`,
+      details: `${r.restated} of ${r.read} restated, ${r.reversalsPaired} reversals paired, ${r.paymentsMatched} payments matched, ${r.paymentsDetached} detached and ${r.paymentsMoved} moved off other fills`,
     });
     revalidatePath("/claims");
     revalidatePath("/purchasing");
     revalidatePath("/payers/performance");
     revalidatePath("/");
 
-    const nothing = r.restated === 0 && r.reversalsPaired === 0 && r.paymentsMatched === 0;
+    const nothing = r.restated === 0 && r.reversalsPaired === 0 && r.paymentsMatched === 0 && r.paymentsDetached === 0 && r.paymentsMoved === 0;
     const did = [
       r.restated ? `${r.restated} claim${r.restated === 1 ? "" : "s"} restated from the row the report actually sent` : null,
       r.reversalsPaired
         ? `${r.reversalsPaired} reversal${r.reversalsPaired === 1 ? "" : "s"} finally matched the claim${r.reversalsPaired === 1 ? "" : "s"} they cancel, which had been standing as live revenue`
         : null,
       r.paymentsMatched ? `${r.paymentsMatched} payment${r.paymentsMatched === 1 ? "" : "s"} attached to the fill it belongs to` : null,
+      r.paymentsDetached ? `${r.paymentsDetached} payment${r.paymentsDetached === 1 ? "" : "s"} taken off a claim for a different fill of the same prescription, so that claim no longer looks paid` : null,
+      r.paymentsMoved ? `${r.paymentsMoved} payment${r.paymentsMoved === 1 ? "" : "s"} moved to the fill it actually paid` : null,
       /*
        * And the ones it could not pair, which used to be dropped from this sentence entirely.
        *

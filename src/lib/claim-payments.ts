@@ -214,6 +214,35 @@ export async function laterPayments(): Promise<LaterPayment[]> {
 }
 
 /**
+ * Takes payments off claims they cannot be paying, and gives each the claim it does belong to, if that one is on file.
+ *
+ * Until 15 September the matcher's two loosest levels ignored the fill date, so a payment for an earlier fill attached
+ * itself to a later refill of the same prescription whenever the earlier claim was not on the site: 709 payments,
+ * $65,829.59, received before the claim they were attached to had been filled. A claim credited with another fill's
+ * money looks paid when it is not, and the fill it really paid looks owed. `match-remittance.ts` no longer does it;
+ * this undoes what it already did. A payment whose fill date is more than three days from its claim's is matched again
+ * from scratch — to its own claim, or to nothing, where it waits like any other.
+ */
+export async function rematchMisattachedPayments(): Promise<{ looked: number; detached: number; moved: number }> {
+  const rows = await db
+    .select({ id: schema.claimPayments.id, rxNumber: schema.claimPayments.rxNumber, fillNumber: schema.claimPayments.fillNumber, paidDate: schema.claimPayments.dateFilled, ndc11: schema.claimPayments.ndc11, amountCents: schema.claimPayments.amountCents, claimId: schema.claimPayments.claimId, claimDate: schema.claims.dateFilled })
+    .from(schema.claimPayments)
+    .innerJoin(schema.claims, eq(schema.claimPayments.claimId, schema.claims.id));
+  const far = rows.filter((r) => r.paidDate && Math.abs(Date.parse(`${r.paidDate}T00:00:00Z`) - Date.parse(`${r.claimDate}T00:00:00Z`)) > 3 * 86_400_000);
+  let detached = 0;
+  let moved = 0;
+  for (const p of far) {
+    const { claim } = await findClaim(p.rxNumber, p.fillNumber, p.paidDate, p.ndc11, p.amountCents, null);
+    const next = claim?.id ?? null;
+    if (next === p.claimId) continue;
+    await db.update(schema.claimPayments).set({ claimId: next }).where(eq(schema.claimPayments.id, p.id));
+    if (next) moved++;
+    else detached++;
+  }
+  return { looked: far.length, detached, moved };
+}
+
+/**
  * Attaches payments recorded before their claim arrived.
  *
  * Run after a claims load. Cheap, and it means a remittance that beat the daily report is not money
