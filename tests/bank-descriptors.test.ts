@@ -381,3 +381,13 @@ describe("a postage charge on the bank (G-POST-1)", () => {
     assert.match(p.why, /no Endicia or Stamps\.com purchase confirmation/);
   });
 });
+
+test("REGRESSION: a postage confirmation accounts for one charge - September's three bills against four top-ups (G-POST-1)", async () => {
+  const { placeLines } = await import("../src/lib/bank-statement");
+  const charge = (on: string) => ({ on, description: "Purch STAMPS.COM WASHINGTON DC", amountCents: -10_000, key: on });
+  const placed = placeLines([charge("2026-09-09"), charge("2026-09-11"), charge("2026-09-12"), charge("2026-09-16")], {
+    payers: [], suppliers: [], vendors: [], unpaidBills: [], unpaidInvoices: [],
+    postageBills: [{ amountCents: 10_000, on: "2026-09-08" }, { amountCents: 10_000, on: "2026-09-10" }, { amountCents: 10_000, on: "2026-09-15" }],
+  });
+  assert.deepEqual(placed.map((p) => p.placement.kind), ["already_counted", "already_counted", "unplaced", "already_counted"]);
+});

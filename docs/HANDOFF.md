@@ -8,6 +8,16 @@ file is how they talk.
 
 ## Open items
 
+### From 1 — 15 September, before the edit: `profit-and-loss.ts`, `money/bank.ts` (A's) — card fee wording; the card statement books its bill unpaid
+
+**Written before touching A's files.** Session 2's G-CSTMT-1..4 and G-CARD-13. In my `card-statement-store.ts`: the fee bill
+is booked unpaid (the fees leave the bank the month after — July's on 3 August), including for a statement month before
+the books start, since its debit falls inside them; a bank fee debit already read and unplaced is linked when the
+statement arrives; a card-processing bill typed for the same month and amount stops the statement booking again; the
+batch check's "extra" is counted inside the statement's own batch dates. In A's files, wording only:
+`profit-and-loss.ts` — the missing card-fees line says to forward the processor's monthly statement, not to record
+fees on Spending; `money/bank.ts` — the card deposit message names the days before the deposit, not "the day before".
+
 ### From 1 — 15 September, before the edit: `money/bank.ts` (A's), `bank-statement.ts`, `bank-descriptors.ts` — a postage debit is already counted only with its confirmation
 
 **Written before touching bank.ts.** Session 2's G-POST-1: every Stamps.com/Endicia debit was `already_counted`

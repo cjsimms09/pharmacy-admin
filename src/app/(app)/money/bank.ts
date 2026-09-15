@@ -163,7 +163,7 @@ export async function readBankStatement(fd: FormData) {
     } else if (placement.kind === "card_deposit") {
       /* Never banked here: the card batch report is the one door for card takings. See `placeLine`. */
       placedAs = "unplaced";
-      why = `Card takings with no card batch report on file for exactly this amount. Forward the batch report for the day before ${line.on} to the inbox — it banks the money and this line will match it. Do not bank this with the form: that counts it twice when the report arrives.`;
+      why = `Card takings with no card batch report on file for exactly this amount. Forward the batch reports for the days just before ${line.on} to the inbox (a batch reaches the bank two to four days after it closes, so a Monday deposit can be the previous Thursday's to Saturday's) — it banks the money and this line will match it. Do not bank this with the form: that counts it twice when the report arrives.`;
       unplaced++;
     } else if (placement.kind === "deposit") {
       receiptId = (await addCashReceipt({ month: line.on.slice(0, 7), kind: placement.receiptKind, amountCents: line.amountCents, payer: placement.payer, notes: `From the bank statement: ${line.description}`, receivedOn: line.on, createdBy: user.id })).id;
