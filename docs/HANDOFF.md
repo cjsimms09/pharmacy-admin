@@ -126,6 +126,49 @@ whose whole content is a no-data marker ("No Data", 12 bytes, the Sunday 13 Sept
 every positive content rule; anchored to the whole file; refuses a zero-byte file. `inbox-line.ts` gained its label.
 Tests: `tests/autoroute-empty-report.test.ts`. B: the same offer — rewrite it if it cuts across the recogniser.
 
+### From B — 15 September, 16:30: the card money channel — I went looking for a double count and there isn't one
+
+`7b9ae83..b801d10` merged, **8 commits**. `npm run check` clean: **3,400 tests, 755 suites**. Head
+`be95083`.
+
+**No finding, and the reasoning is recorded so nobody re-derives it.** Counter money entering the
+cash account for the first time — $34,112.41 of card batches — is a third road to a dollar that also
+travels as a bank deposit, and `9cb9828`'s own note flagged the premise: *"Not proved: whether the
+processor deposits each batch whole… If fees are netted… an exact-amount bank match will miss."*
+
+My hypothesis was that a miss is not neutral. `matchHeldDeposit` (`deposit-gate.ts:177`) matches on
+exact amount and returns `none` otherwise, and on none the line banks as today — so a net-of-fees
+deposit would bank the same counter money twice, in the one direction that inflates revenue, with no
+bank statement yet read to have shown it.
+
+**You answered your own caveat three commits later and I checked before writing rather than after.**
+`card-statement.ts:18` reads *"each batch reaches the bank whole"* off the real statement rather than
+assuming it; `:25` deliberately never banks the statement's own deposit rows; and `:152` detects the
+exact condition my hypothesis needed —
+
+```ts
+if (row[3] !== "-") problems.push(`batch ${row[1]} has ${row[3]} held back as a daily discount — fees are now being netted from deposits`);
+```
+
+— and refuses the whole statement with *"Nothing was recorded."* The fee side fails closed too: an
+unmatched `card_fees` debit stays **unplaced** saying *"Forward that month's statement… or the fees
+will be counted twice when it arrives."* That is the asymmetry a deposit control should have.
+
+Also right: the accrual account untouched with a test that fails if it ever reads cash receipts; and
+the batch total net of returns, settled on a real batch with returns.
+
+**One residual, and I am deliberately not calling it a finding** because its premise is false today.
+The netting detection is on the **monthly** statement; the batches are banked **daily**. If netting
+began mid-month, that month's batches would be banked gross and the bank lines would arrive net — a
+miss, and a double bank — until the statement arrived and refused. At most one cycle, and cheap to
+close if you ever want to: the statement carries per-batch deposit rows, so a bank line equal to
+`batch total − that batch's discount` is matchable.
+
+**What would turn this from reasoned to proved:** no bank statement has been read yet, so nobody has
+seen whether those eight amounts appear unchanged. That is yours.
+
+`docs/audits/2026-09-15-the-card-money-channel-checked-and-clean.md`; index "clean" row updated.
+
 ### From B — 15 September, 15:40: `284547b..7b9ae83` read; the shared deposit key folds one half of itself
 
 Merged — **17 commits**; `docs/HANDOFF.md` conflicted and I kept **both** sides, yours first because
@@ -642,6 +685,7 @@ not by when I wrote it.** Everything is in `docs/audits/` in full.
 | 21 | **not-captured** | Partial fills: `fillKey` includes the service date, so a partial and its completion are two fills and two scripts — and dispensing status is not captured, so the site cannot tell such a pair from any other | money |
 | — | **RESOLVED** | The appeal scripts' own pack divisor — closed by your `pack-size.ts`, verified by running it | — |
 | — | **RESOLVED** | CI never ran `db:migrate`, so 4 tests failed on every runner since `df666bd` — fixed in `8d7c9db` | — |
+| — | **clean** | **The card money channel** (`7b9ae83..b801d10`): batch → cash receipt → deposit gate, and the netting case I went looking for is detected by name at `card-statement.ts:152` and refuses the statement; the fee debit fails closed too. No finding — see the audit for why, so it is not re-derived | — |
 | — | **clean** | Rebates are counted once **and land in the month the statement's own period says** (accrual on `periodTo`, cash on the banked date) — see #22, which is the *sign*, not the period or the count; the 835 reader at four points; the 835 reader at four points; the 459 plan adoptions; `books-check` fully wired; devices and salt forms in `substitutable`; the floor's scope gates against *Rutledge*; the fingerprint fix | — |
 
 **Twenty-eight rows, of which two (#19, #20) are questions rather than findings**, because I could not
