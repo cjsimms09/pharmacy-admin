@@ -40,7 +40,20 @@ async function main() {
   const asked = process.argv.slice(2).filter((a) => !a.startsWith("--")) as Feed[];
   const { setSetting, getSettings } = await import("../src/lib/settings");
   const s = await getSettings();
-  const today = new Date().toISOString().slice(0, 10);
+  /*
+   * The pharmacy's own day, not Greenwich's.
+   *
+   * This was `new Date().toISOString().slice(0, 10)` — the UTC date — while the tick that starts
+   * this script decides "is it eight yet" on the local hour. In Wichita the UTC date turns over at
+   * 7pm Central, so every evening the tick saw a new "today", ran the pull at 7pm, stamped
+   * tomorrow as done, and skipped the real eight o'clock run the next morning. Found on 15 September:
+   * every pull result timestamped 00:02Z (7:02pm the evening before), markers already reading the
+   * 15th, and nothing after 8am. The owner set eight so the day's order is planned on this
+   * morning's shelf; it was being planned on last night's. Both halves now use `todayIso()`, which
+   * is local, and must stay on the same clock as each other.
+   */
+  const { todayIso } = await import("../src/lib/dates");
+  const today = todayIso();
 
   const due: Feed[] = asked.length
     ? asked

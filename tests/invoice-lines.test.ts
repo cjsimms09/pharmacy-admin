@@ -198,6 +198,53 @@ describe("a front-end UPC is not an NDC", () => {
 });
 
 /**
+ * A fourteen-digit GTIN, printed unhyphenated with spaces before the item number.
+ *
+ * McKesson invoice 7657944598, 15 September 2026, $10,044.80. The pattern knew the 5-4-2 NDC and
+ * the 6-5 UPC and nothing else, so this line failed on its first character — and because no other
+ * format claimed it, it vanished without being counted as unreadable. The other fifty-six came to
+ * $163.88 under the total, the all-or-nothing rule refused all of them, and the site reported the
+ * invoice as "usually a scan". It was one line of FreeStyle Libre sensors.
+ *
+ * A GTIN-14 carrying a UPC-A is two packaging digits, the UPC's eleven, and a check digit.
+ */
+describe("a GTIN-14 on a device line", () => {
+  const LIBRE = "00357599835002   299-2394975096819            2EA FREESTYLE LIBRE 2 PLUS SENSOR      103.92 R       81.94       163.88";
+
+  test("REGRESSION: the line is read, at its own arithmetic", () => {
+    const [l] = parseInvoiceLines(LIBRE, null).lines;
+    assert.ok(l, "the GTIN line was dropped again");
+    assert.equal(l.quantity, 2);
+    assert.equal(l.unitCostCents, 8_194);
+    assert.equal(l.extendedCents, 16_388);
+    assert.equal(l.awpCents, 10_392);
+    assert.equal(l.itemNumber, "299-2394");
+    assert.equal(l.description, "FREESTYLE LIBRE 2 PLUS SENSOR");
+  });
+
+  test("the UPC inside it goes through the same FDA lookup as a hyphenated one", () => {
+    // 00 | 3 5759983500 | 2  ->  UPC eleven 35759983500  ->  Abbott 57599-0835-00 where the directory lists it.
+    const known = (n: string) => n === "57599083500";
+    assert.equal(parseInvoiceLines(LIBRE, null, known).lines[0].ndc11, "57599083500");
+    assert.equal(parseInvoiceLines(LIBRE, null, () => false).lines[0].ndc11, "35759983500", "a device the directory does not list keeps its digits rather than a guess");
+  });
+
+  test("one such line no longer costs the whole invoice", () => {
+    const drug = "00002-1436-11137-9593973485930            1EA SOME DRUG 10MG 30        10.00 R        10.00        10.00";
+    const p = parseInvoiceLines(`${drug}\n${LIBRE}`, 17_388);
+    assert.equal(p.lines.length, 2);
+    assert.equal(p.reconciles, true);
+  });
+
+  test("the two older code shapes still read exactly as before", () => {
+    const ndc = "00002-1436-11137-9593973485930            1EA SOME DRUG 10MG 30        10.00 R        10.00        10.00";
+    const upc = "305361-32710137-9593973485930            1EA ACETAM TAB 325MG RUG 1000@       21.80 R       21.80        21.80";
+    assert.equal(parseInvoiceLines(ndc, null).lines[0].ndc11, "00002143611");
+    assert.equal(parseInvoiceLines(upc, null).lines[0].ndc11, "30536132710");
+  });
+});
+
+/**
  * How many digits the NDC column printed, on a layout that runs it into the item number.
  *
  * IPD's invoice 1008931 prints, on its Non-CII half:

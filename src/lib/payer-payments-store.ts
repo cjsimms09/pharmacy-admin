@@ -50,14 +50,88 @@ export async function importPayerPayments(
     return { ok: false, why: `No payment was read. ${read.skipped.slice(0, 3).map((s) => `Row ${s.row}: ${s.why}`).join("; ") || "The file carried no rows."}` };
   }
 
-  const keys = read.payments.map(key);
-  const held = new Set(
-    (await db.query.cashReceipts.findMany({ where: inArray(schema.cashReceipts.sourceKey, keys), columns: { sourceKey: true } }))
-      .map((r) => r.sourceKey)
-      .filter((k): k is string => k !== null),
-  );
+  const b = await bankPayerPayments(read.payments, by);
 
-  const fresh = read.payments.filter((p) => !held.has(key(p)));
+  await audit({
+    action: "cash.payer_payments_imported",
+    userId: by.userId,
+    userName: by.userName,
+    entity: "cash_receipts",
+    entityId: read.from ?? "",
+    details: `${b.fresh} payment${b.fresh === 1 ? "" : "s"}, ${(b.bankedCents / 100).toFixed(2)}, ${read.from} to ${read.to}${b.alreadyHeld ? `; ${b.alreadyHeld} already held` : ""}`,
+  });
+
+  return {
+    ok: true,
+    banked: b.banked,
+    alreadyHeld: b.alreadyHeld,
+    /*
+     * Deposits another feed had already banked, named rather than counted as arrivals.
+     *
+     * Not the same as `alreadyHeld`, which is this feed meeting its own earlier import. These are
+     * the same money reaching the account down two different roads, and the screen has to say so —
+     * a payment that vanishes between the file and the total is what makes somebody type it in by
+     * hand and bank it a third time.
+     */
+    refused: [...b.refused, ...b.disagree],
+    bankedCents: b.bankedCents,
+    from: read.from,
+    to: read.to,
+    skipped: read.skipped,
+    byPayer: b.byPayer,
+  };
+}
+
+export type Banking = {
+  /** Payments not held before this call, whether or not the gate then took them. */
+  fresh: number;
+  banked: number;
+  alreadyHeld: number;
+  bankedCents: number;
+  /** Refused at the gate: another feed had already banked the same money. */
+  refused: string[];
+  /**
+   * Held already under this key, and the arriving figure is different. Named, never overwritten.
+   *
+   * Two sources for one deposit — the portal's payer payment report and the daily EFT notice — share
+   * one key so they cannot bank it twice. The price of sharing a key is that the second arrival is
+   * skipped, and a skip would hide a disagreement between them. Nothing is changed on the held row: a
+   * difference in what two documents say a deposit was is for a person, not for whichever came last.
+   */
+  disagree: string[];
+  byPayer: { payer: string; payments: number; cents: number }[];
+};
+
+/**
+ * Banks payer payments once each, through the duplicate gate, whatever document they came from.
+ *
+ * The one place a payer payment becomes a cash receipt. The portal's report and the Health Mart Atlas
+ * EFT notice both come through here, so the rule that keeps one deposit from being banked twice is
+ * written once — a second copy of it beside the notice reader would drift, and the first drift would
+ * be revenue the pharmacy did not earn.
+ */
+export async function bankPayerPayments(
+  payments: PayerPayment[],
+  by: { userId: string | null; userName: string; documentId?: string | null },
+): Promise<Banking> {
+  const keys = payments.map(key);
+  const heldRows = keys.length
+    ? await db.query.cashReceipts.findMany({ where: inArray(schema.cashReceipts.sourceKey, keys), columns: { sourceKey: true, amountCents: true } })
+    : [];
+  const heldAmount = new Map(heldRows.filter((r) => r.sourceKey !== null).map((r) => [r.sourceKey as string, r.amountCents]));
+  const held = new Set(heldAmount.keys());
+
+  const disagree: string[] = [];
+  for (const p of payments) {
+    const was = heldAmount.get(key(p));
+    if (was !== undefined && was !== p.amountCents) {
+      disagree.push(
+        `${p.paymentNumber} from ${p.payerName} is held at $${(was / 100).toFixed(2)} and this document says $${(p.amountCents / 100).toFixed(2)} — the held figure was kept; one of the two is wrong`,
+      );
+    }
+  }
+
+  const fresh = payments.filter((p) => !held.has(key(p)));
   /** Deposits another feed had already banked. Named, never silently dropped and never banked twice. */
   const refused: string[] = [];
   /** The ones that really were banked, which is what every total below must count. */
@@ -113,33 +187,13 @@ export async function importPayerPayments(
     byPayer.set(p.payerName, { payments: cur.payments + 1, cents: cur.cents + p.amountCents });
   }
 
-  const bankedCents = banked.reduce((n, p) => n + p.amountCents, 0);
-  await audit({
-    action: "cash.payer_payments_imported",
-    userId: by.userId,
-    userName: by.userName,
-    entity: "cash_receipts",
-    entityId: read.from ?? "",
-    details: `${fresh.length} payment${fresh.length === 1 ? "" : "s"}, ${(bankedCents / 100).toFixed(2)}, ${read.from} to ${read.to}${held.size ? `; ${held.size} already held` : ""}`,
-  });
-
   return {
-    ok: true,
+    fresh: fresh.length,
     banked: banked.length,
     alreadyHeld: held.size,
-    /*
-     * Deposits another feed had already banked, named rather than counted as arrivals.
-     *
-     * Not the same as `alreadyHeld`, which is this feed meeting its own earlier import. These are
-     * the same money reaching the account down two different roads, and the screen has to say so —
-     * a payment that vanishes between the file and the total is what makes somebody type it in by
-     * hand and bank it a third time.
-     */
+    bankedCents: banked.reduce((n, p) => n + p.amountCents, 0),
     refused,
-    bankedCents,
-    from: read.from,
-    to: read.to,
-    skipped: read.skipped,
+    disagree,
     byPayer: [...byPayer.entries()].map(([payer, v]) => ({ payer, ...v })).sort((a, b) => b.cents - a.cents),
   };
 }

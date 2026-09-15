@@ -1044,6 +1044,12 @@ export const supplierInvoices = sqliteTable(
      */
     linesRead: integer("lines_read"),
     linesUnread: integer("lines_unread"),
+    /**
+     * What the recognised lines came to, in cents — so an invoice that did not reconcile can say
+     * how much of it the reader could not read (total less this). Null where never measured.
+     * See drizzle/0120_invoice_lines_read_cents.sql.
+     */
+    linesReadCents: integer("lines_read_cents"),
     /** The supplier record this came from, where one is known. */
     supplierId: text("supplier_id"),
     /** Set until a person has confirmed anything the reader was unsure about. */

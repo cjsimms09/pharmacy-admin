@@ -190,8 +190,28 @@ export async function register() {
     try {
       const { warmHeld } = await import("./lib/warm");
       const { isIdle } = await import("./lib/activity");
-      // Each step checks that nobody has asked for a page in the last few seconds before it starts.
-      await warmHeld(() => isIdle(5));
+      /*
+       * Each step checks the site is still idle before it starts — by the SAME measure that let the
+       * warm-up start at all, not a looser one.
+       *
+       * This was `isIdle(5)` inside a job that `whenIdle` only starts after `IDLE_SECONDS` (90) of
+       * quiet: two answers to one question, and they drifted. Once running, the warm-up kept
+       * going step after step so long as five seconds had passed since the last page — and one
+       * step (the product ledger, 45,906 rows; the books; drug profit) blocks the whole server for
+       * up to twelve seconds, because every libsql call holds the event loop.
+       *
+       * On 15 September that was the login that "never works". Every press of Sign in succeeded —
+       * thirteen `login.success` rows in two minutes, the password right each time — but he pressed
+       * about every thirteen seconds, each five-second gap let the next heavy step start, and his
+       * next press landed inside it. The sign-in page itself measured 0.2s on one request and 12s on
+       * the next; the page it redirects to never arrived before he pressed again, and each press
+       * cancelled the navigation before it. Worst straight after a restart, when nothing is cached
+       * and every step does real work — which is when he comes back to log in.
+       *
+       * With the same ninety seconds, anybody using the site stops the warm-up at the next step and
+       * it does not resume until they have been gone a minute and a half.
+       */
+      await warmHeld(() => isIdle(IDLE_SECONDS));
     } catch {
       // A reading that fails to warm is computed by its next reader.
     }
@@ -345,7 +365,14 @@ export async function register() {
       const { getSettings } = await import("./lib/settings");
       const s = await getSettings();
       if (!s.pioneer_sql_server || !s.pioneer_sql_user) return;
-      const today = new Date().toISOString().slice(0, 10);
+      /*
+       * Local, like the hour on the line above. This was the UTC date, so from 7pm Central the
+       * guard saw tomorrow, started the pull that evening and stamped tomorrow done — and the eight
+       * o'clock run was skipped every morning. See the note in scripts/pioneer-pull.ts, which writes
+       * the markers this reads and must stay on the same clock.
+       */
+      const { todayIso } = await import("./lib/dates");
+      const today = todayIso();
       const catalogueDue = new Date().getDay() === 1 || !s.pioneer_pull_catalogue_on;
       if (s.pioneer_pull_on_hand_on === today && s.pioneer_pull_claims_on === today && s.pioneer_pull_invoices_on === today && s.pioneer_pull_retail_on === today && !catalogueDue) return;
       const { spawn } = await import("node:child_process");

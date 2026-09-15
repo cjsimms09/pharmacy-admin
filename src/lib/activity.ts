@@ -9,22 +9,47 @@
  * So heavy work waits for a gap. A pharmacy computer is idle almost all of the time, and a
  * backup that runs ninety seconds after the last page load rather than during one is worth
  * exactly as much.
+ *
+ * ── Three faults that made "the login never works", fixed 15 September ──
+ *
+ * 1. **The sign-in page did not count as somebody using the site.** `noteRequest` was called only
+ *    from the signed-in layout. A person on /login pressing Sign in was invisible, so every heavy
+ *    job treated the site as empty and ran while they tried to get in. Measured after the first
+ *    fix went live: the sign-in page answered in 12–18 milliseconds five times running, then took
+ *    25.8 seconds, while it was being requested every three seconds. The login page and the login
+ *    action now note a request.
+ *
+ * 2. **A restart assumed nobody was there.** `lastRequestAt` began at 0, which `isIdle` read as
+ *    "idle" — so sixty seconds after every restart the warm-up started, and restarts happen during
+ *    the working day, when a deploy has just thrown somebody out and they are coming back to sign
+ *    in. This file's own principle is "when in doubt, do not start", and with nothing observed
+ *    there is nothing but doubt. The clock now starts at the moment this module is first loaded.
+ *
+ * 3. **The clock may not have been the same clock in both places.** The scheduler in
+ *    instrumentation.ts and the pages are compiled as separate bundles, and a module-level
+ *    variable is not guaranteed to be one variable across them — a page could record activity in
+ *    one copy while the scheduler read another that never changed. Nobody had shown that it was
+ *    shared, and "probably" is not good enough for the thing that decides whether the site is
+ *    usable. It lives on `globalThis` now, the way the database connection already does.
  */
 
-let lastRequestAt = 0;
+type Clock = { __pharmacyLastRequestAt?: number };
+const g = globalThis as typeof globalThis & Clock;
 
-/** Called on every page render. Cheap on purpose — it is on the hot path. */
+/* First load counts as activity: with nothing observed yet, the site is not assumed empty. */
+if (g.__pharmacyLastRequestAt === undefined) g.__pharmacyLastRequestAt = Date.now();
+
+/** Called on every page render, and on a sign-in attempt. Cheap on purpose — it is on the hot path. */
 export function noteRequest(): void {
-  lastRequestAt = Date.now();
+  g.__pharmacyLastRequestAt = Date.now();
 }
 
 /** True when nothing has been served for this many seconds. */
 export function isIdle(seconds: number, now = Date.now()): boolean {
-  if (lastRequestAt === 0) return true;
-  return now - lastRequestAt >= seconds * 1000;
+  return now - (g.__pharmacyLastRequestAt ?? now) >= seconds * 1000;
 }
 
 /** How long since the last page, for diagnostics. */
-export function secondsSinceRequest(now = Date.now()): number | null {
-  return lastRequestAt === 0 ? null : Math.round((now - lastRequestAt) / 1000);
+export function secondsSinceRequest(now = Date.now()): number {
+  return Math.round((now - (g.__pharmacyLastRequestAt ?? now)) / 1000);
 }

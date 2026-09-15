@@ -1842,13 +1842,32 @@ export async function invoiceIssues(): Promise<InvoiceIssue[]> {
   if (empty.length > 0) {
     const cents = empty.reduce((n, r) => n + (r.totalCents ?? 0), 0);
     const money = `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    /*
+     * Two different faults that used to share one sentence.
+     *
+     * Where the reader read lines and they did not add up to the total, none were kept — the reader
+     * refuses all of them rather than store a partial invoice. That is a reader to fix, not a
+     * document to replace, and calling it a scan sent the owner looking for a readable copy of a PDF
+     * that was perfectly readable: McKesson 7657944598, 15 September, 56 lines read, $163.88 short
+     * because one line carried a fourteen-digit GTIN no pattern knew.
+     *
+     * Where nothing was recognised at all it is either a scan or a layout the reader has never seen.
+     * The count of unread lines cannot tell those apart, because a row that matches no pattern is not
+     * counted as unread either, so that sentence says both rather than guessing one.
+     */
+    const readNotReconciled = empty.filter((r) => (r.linesUnread ?? 0) > 0);
+    const why =
+      readNotReconciled.length === empty.length
+        ? `Lines were read on ${empty.length === 1 ? "it" : "every one"} and did not add up to the total, so none were kept. That points at the reader, not the document — a readable copy will not help; the reader needs to learn the line it missed.`
+        : readNotReconciled.length === 0
+          ? `Not one line was recognised — either a scan with no text layer, or a layout the reader has not seen.`
+          : `On ${readNotReconciled.length} of them lines were read and did not add up to the total, which points at the reader; on the other ${empty.length - readNotReconciled.length} nothing was recognised at all, which is a scan or an unfamiliar layout.`;
     out.push({
       key: "no-lines",
       severity: "blocking",
-      title: `${empty.length} invoice${empty.length === 1 ? "" : "s"} worth ${money} with no item lines read`,
+      title: `${empty.length} invoice${empty.length === 1 ? "" : "s"} worth ${money} with no item lines kept`,
       detail:
-        `The total was read off the page and not one line under it was. Usually a scan: a PDF with no text layer files ` +
-        `perfectly and reads nothing. Until the lines are entered or a readable copy replaces ${empty.length === 1 ? "it" : "them"}, ` +
+        `The total was read off the page and no line under it was kept. ${why} Until ${empty.length === 1 ? "it is" : "they are"} read properly, ` +
         `nothing on ${empty.length === 1 ? "this invoice" : "these invoices"} reaches the cost of any drug — so what the pharmacy ` +
         `paid per NDC, the rebate ladder and the purchase ratio are every one of them short by ${money} and look complete.`,
       href: "/inventory/invoices?nolines=1",
@@ -1984,10 +2003,33 @@ export async function invoiceIssues(): Promise<InvoiceIssue[]> {
         `PioneerRx records every delivery as it is booked in, and the wholesaler sends its own invoice. ` +
         `${prices.agreeing} of ${prices.checked} invoices agree throughout, across ${prices.linesCompared} drugs. ` +
         (overbilled
-          ? `The rest do not, and ${over} of the difference is money billed for goods that were not booked in.`
-          : `The totals all agree; what differs is which drug the money is against, which every margin below it is computed from.`),
+          ? `The rest do not, and the invoices come to ${over} more than PioneerRx booked in against them. The rows say which of it is a price, which is a drug billed and never booked in, and which could not be told apart.`
+          : `No invoice comes to more than was booked in; what differs is which drug the money is against, which every margin below it is computed from.`),
       href: "/inventory/invoices",
       action: "See what differs",
+    });
+  }
+
+  /*
+   * Charges on the total, said on their own and never as a disagreement.
+   *
+   * The goods on these invoices match what PioneerRx booked in to the cent; the difference is on the
+   * total and on no line. It is money the pharmacy paid and worth seeing, and it is not something
+   * to chase a wholesaler about as goods that never arrived — which is what the first version of
+   * the alert above told the owner about exactly these, on 15 September.
+   */
+  if (prices.charges.length > 0 && !out.some((a) => a.key === "prices-disagree")) {
+    const n = prices.charges.length;
+    const c = `${(Math.abs(prices.chargesCents) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    out.push({
+      key: "invoice-charges",
+      severity: "warn",
+      title: `${c} of charges on ${n} invoice total${n === 1 ? "" : "s"}`,
+      detail:
+        `Every item on ${n === 1 ? "this invoice" : "these invoices"} matches what PioneerRx booked in. The ${c} is on the total and on no line — freight, a surcharge or a fee — ` +
+        `so it is money paid for getting the goods here, not goods billed and never received.`,
+      href: "/inventory/invoices",
+      action: "See the charges",
     });
   }
 

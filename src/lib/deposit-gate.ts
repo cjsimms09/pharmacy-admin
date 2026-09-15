@@ -132,3 +132,63 @@ export function gateDeposit(held: BankedReceipt[], incoming: IncomingReceipt): G
   }
   return { bank: true };
 }
+
+/**
+ * A bank statement line and the receipt already banked for the same deposit.
+ *
+ * `gateDeposit` stops two automatic feeds banking one deposit. It deliberately does not argue with a
+ * bank statement: "typed by a person: the bank statement is the record". But the bank statement is
+ * not only typed — `readBankStatement` banks every deposit line, with no source key, and so every
+ * deposit the payer payment report or the Health Mart Atlas EFT notice had already banked would have
+ * been banked again. Found on 15 September before any statement had been read; September then held
+ * $250,562.16 of third-party receipts that the first statement would have doubled.
+ *
+ * The bank being the record is exactly why a bank line should **confirm** a receipt rather than add
+ * one: the receipt says a deposit happened, the statement proves it did, and it is one deposit.
+ *
+ * ── The match, and why it ignores the description ──
+ *
+ * The exact amount, within `DEPOSIT_WINDOW_DAYS`, one receipt to one line. It does not require the
+ * payer on the bank line to match the payer on the receipt, and that is deliberate. Health Mart Atlas
+ * money is sent by McKesson, a bank line may say MCKESSON, PROVIDERPAY or nothing useful, and McKesson
+ * is on the supplier register so the line may even have been placed as a rebate. Requiring the names
+ * to agree would miss the confirmation and bank the deposit twice — the worse of the two errors. A
+ * matching payer is still preferred where more than one receipt qualifies.
+ *
+ * One-to-one through `claimed`, so a statement that genuinely shows two deposits of the same amount
+ * confirms one receipt and banks the other — the gate's own principle that the bank is not overruled.
+ * Where more than one unclaimed receipt qualifies and the payer does not settle it, nothing is guessed:
+ * the line is for a person.
+ *
+ * Pure.
+ */
+export type HeldForBank = { id: string; amountCents: number; receivedOn: string | null; payer: string | null; reference?: string | null };
+
+export type BankDepositMatch =
+  | { kind: "confirms"; receipt: HeldForBank; why: string }
+  | { kind: "ambiguous"; candidates: HeldForBank[]; why: string }
+  | { kind: "none" };
+
+export function matchHeldDeposit(
+  held: HeldForBank[],
+  line: { amountCents: number; on: string; payer: string | null },
+  claimed: Set<string>,
+): BankDepositMatch {
+  const candidates = held.filter((h) => !claimed.has(h.id) && h.amountCents === line.amountCents && withinWindow(h.receivedOn, line.on));
+  if (candidates.length === 0) return { kind: "none" };
+  const describe = (h: HeldForBank) =>
+    `already banked as ${money(h.amountCents)}${h.payer ? ` from ${h.payer}` : ""}${h.reference ? ` (${h.reference})` : ""}${h.receivedOn ? ` on ${h.receivedOn}` : ""}`;
+  let pick = candidates;
+  if (candidates.length > 1 && line.payer) {
+    const named = candidates.filter((h) => h.payer && head(h.payer) === head(line.payer));
+    if (named.length > 0) pick = named;
+  }
+  if (pick.length === 1) {
+    return { kind: "confirms", receipt: pick[0], why: `The statement confirms a deposit ${describe(pick[0])}. Nothing new is banked.` };
+  }
+  return {
+    kind: "ambiguous",
+    candidates: pick,
+    why: `${pick.length} deposits of ${money(line.amountCents)} are already banked within ${DEPOSIT_WINDOW_DAYS} days of ${line.on}, and nothing on the line says which this is. Nothing is banked; it needs a person.`,
+  };
+}

@@ -7,6 +7,7 @@ import { db, dbReady, schema } from "@/db";
 import { newId, randomToken } from "./crypto";
 import { audit } from "./audit";
 import { loginAllowed, WINDOW_MINUTES } from "./login-throttle";
+import { noteRequest } from "./activity";
 
 const COOKIE = "pa_session";
 const SESSION_HOURS = 8;
@@ -52,6 +53,8 @@ export async function requireManager(): Promise<CurrentUser> {
 }
 
 export async function login(username: string, password: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  /* A sign-in attempt is the plainest evidence there is that a person is here. See activity.ts. */
+  noteRequest();
   await dbReady;
   const name = username.trim().toLowerCase();
 
