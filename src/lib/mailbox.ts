@@ -5,6 +5,7 @@ import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { readPostageEmail } from "./postage-email";
 import { bankEftNotice } from "./health-mart-eft-store";
+import { bankCardBatch } from "./card-batch-store";
 import { readZip, guessType } from "./zip-read";
 import { bookPostage } from "./expenses";
 import { eq, like } from "drizzle-orm";
@@ -486,6 +487,35 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
                 routedAs: "payer_payments",
                 routeResult: eft.says,
                 reason: eft.says,
+              });
+              result.stored++;
+              await client.messageFlagsAdd(String(uid), ["\\Seen"], { uid: true });
+              continue;
+            }
+
+            /*
+             * The daily credit card batch report: counter takings, carried in HTML the filer declines.
+             *
+             * Read from the declined attachments rather than by widening what gets filed, because the
+             * batch figures are what matters and the summary is kept as the document. Banked as cash
+             * only; the accrual account already has this revenue. See card-batch.ts.
+             */
+            const card = await bankCardBatch(
+              { subject, from, messageId, receivedAt, attachments: expanded.map((a) => ({ filename: a.filename, content: a.content as Buffer })) },
+              { userName: ctx.userName ?? "Automatic check" },
+            );
+            if (card) {
+              await db.insert(schema.inboxItems).values({
+                id: newId(),
+                messageId,
+                receivedAt,
+                fromAddress: from,
+                subject,
+                status: "stored",
+                routedAs: "card_batch",
+                /* A batch whose totals do not agree is money not banked: shown as held, never as passed over. */
+                routeResult: card.refused ? `Held, nothing stored: ${card.says}` : card.says,
+                reason: card.says,
               });
               result.stored++;
               await client.messageFlagsAdd(String(uid), ["\\Seen"], { uid: true });
