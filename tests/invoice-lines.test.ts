@@ -200,7 +200,7 @@ describe("a front-end UPC is not an NDC", () => {
 /**
  * A fourteen-digit GTIN, printed unhyphenated with spaces before the item number.
  *
- * McKesson invoice 7657944598, 15 September 2026, $10,044.80. The pattern knew the 5-4-2 NDC and
+ * McKesson invoice 7000000008, 15 September 2026, $10,044.80. The pattern knew the 5-4-2 NDC and
  * the 6-5 UPC and nothing else, so this line failed on its first character — and because no other
  * format claimed it, it vanished without being counted as unreadable. The other fifty-six came to
  * $163.88 under the total, the all-or-nothing rule refused all of them, and the site reported the
@@ -326,7 +326,7 @@ describe("the NDC column's own length, on IPD and ParMed runs", () => {
  */
 describe("the same item, written two ways", () => {
   test("the same ten digits padded in different places", () => {
-    /* Aspercreme, McKesson 7656840418: UPC 041167-05877 carries 4116705877. The FDA lists it as
+    /* Aspercreme, McKesson 7000000009: UPC 041167-05877 carries 4116705877. The FDA lists it as
        41167-0587-07; the counter booked 41167-0058-77. One tube of cream, $5.84, both sides. */
     assert.ok(sameDrugCode("41167058707", "41167005877"));
     /* Ricola, the same invoice: 036602-07917 against 36602-0079-17. */
@@ -334,7 +334,7 @@ describe("the same item, written two ways", () => {
   });
 
   test("a UPC with its prefix still on, against the NDC it stands for", () => {
-    /* Florastor and the Pulmoneb nebuliser, McKesson 7657098065. The FDA lists neither, so
+    /* Florastor and the Pulmoneb nebuliser, McKesson 7000000010. The FDA lists neither, so
        ndcFromUpc keeps the digits it was handed — prefix and all. */
     assert.ok(sameDrugCode("70414200024", "04142000024"));
     assert.ok(sameDrugCode("88530400178", "85304000178"));

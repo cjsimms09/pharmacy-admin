@@ -382,7 +382,7 @@ describe("a wholesaler's bill on file twice", () => {
   });
 
   test("the same number twice is one purchase counted twice", () => {
-    const t = invoicesFiledTwice([inv("7656141698", 100_000), inv("7656141698", 100_000)]);
+    const t = invoicesFiledTwice([inv("7000000002", 100_000), inv("7000000002", 100_000)]);
     assert.equal(t.length, 1);
     assert.equal(t[0].copies, 2);
     assert.equal(t[0].overCents, 100_000, "the first is the bill; the second is money the month carries twice");

@@ -11,24 +11,24 @@ import { placeLine } from "../src/lib/bank-statement";
  */
 describe("what each line on the bank statement is", () => {
   test("a McKesson ACH names the payment its accounts-payable report calls a check number", () => {
-    const m = readBankDescriptor("MCKESSON DRUG/AUTO ACH ACH07172717 WEST WICHITA FAM PHCY", -12_142_915);
+    const m = readBankDescriptor("MCKESSON DRUG/AUTO ACH ACH00000002 WEST WICHITA FAM PHCY", -12_142_915);
     assert.equal(m.kind, "wholesaler_ach");
     assert.equal(m.counterparty, "Mckesson");
     assert.equal(m.lands, "cost_of_goods");
-    /* The bank says ACH07172717; the report says CKACH07172717. That is the tie. */
-    assert.equal(m.matchTo?.reference, "CKACH07172717");
+    /* The bank says ACH00000002; the report says CKACH00000002. That is the tie. */
+    assert.equal(m.matchTo?.reference, "CKACH00000002");
   });
 
   test("the scan turning O into 0 and l into 1 does not lose the reference", () => {
-    /* "ACHO71886O5" is how the scan rendered ACH07188605. */
-    const m = readBankDescriptor("MCKESSON DRUG/AUTO ACH ACHO71886O5 WEST WICHITA TAM PHCY", -12_964_533);
-    assert.equal(m.matchTo?.reference, "CKACH07188605");
+    /* "ACHOOOOOOO3" is how the scan rendered ACH00000003: the scan turns each 0 into a capital O. */
+    const m = readBankDescriptor("MCKESSON DRUG/AUTO ACH ACHOOOOOOO3 WEST WICHITA TAM PHCY", -12_964_533);
+    assert.equal(m.matchTo?.reference, "CKACH00000003");
   });
 
   test("a McKesson debit is a caution, not a certainty — it depends on their report having arrived", () => {
     /* Certain only where the accounts-payable report exists. The ACH match below says so; this does not. */
-    assert.equal(wouldDoubleCount("MCKESSON DRUG/AUTO ACH ACH07208859 WEST WICHITA TAM PHCY", -12_786_129), false);
-    assert.match(readBankDescriptor("MCKESSON DRUG/AUTO ACH ACH07208859 WEST WICHITA TAM PHCY", -12_786_129).mayAlreadyBeCounted ?? "", /cash cost of goods/);
+    assert.equal(wouldDoubleCount("MCKESSON DRUG/AUTO ACH ACH00000004 WEST WICHITA TAM PHCY", -12_786_129), false);
+    assert.match(readBankDescriptor("MCKESSON DRUG/AUTO ACH ACH00000004 WEST WICHITA TAM PHCY", -12_786_129).mayAlreadyBeCounted ?? "", /cash cost of goods/);
   });
 
   test("Heartland on the way out is the card fees the account keeps reporting missing", () => {
@@ -94,7 +94,7 @@ describe("what each line on the bank statement is", () => {
   });
 
   test("the same payer taking money back is not a cost", () => {
-    const m = readBankDescriptor("PROVIDERPAY/AUTO SHA ACH ACHO72O4662 WEST WICHITA FAMILY PH", -63_558);
+    const m = readBankDescriptor("PROVIDERPAY/AUTO SHA ACH ACHOOOOOOO5 WEST WICHITA FAMILY PH", -63_558);
     assert.equal(m.kind, "psao_recoupment");
     assert.equal(m.lands, "revenue");
   });
@@ -127,21 +127,21 @@ describe("what each line on the bank statement is", () => {
  */
 describe("placing a wholesaler ACH against the invoices inside it", () => {
   const settled = [
-    { supplier: "Mckesson", invoiceNumber: "7656141694", checkNumber: "CKACH07227740", netCents: 6_388 },
-    { supplier: "Mckesson", invoiceNumber: "7656141698", checkNumber: "CKACH07227740", netCents: 1_390_246 },
-    { supplier: "Mckesson", invoiceNumber: "7657345034", checkNumber: null, netCents: 2_211_856 },
+    { supplier: "Mckesson", invoiceNumber: "7000000001", checkNumber: "CKACH00000001", netCents: 6_388 },
+    { supplier: "Mckesson", invoiceNumber: "7000000002", checkNumber: "CKACH00000001", netCents: 1_390_246 },
+    { supplier: "Mckesson", invoiceNumber: "7000000003", checkNumber: null, netCents: 2_211_856 },
   ];
   const ctx = { payers: [], suppliers: [{ id: "s1", name: "Mckesson" }], vendors: [], unpaidBills: [], unpaidInvoices: [], settled };
-  const line = (cents: number) => ({ on: "2026-09-07", description: "MCKESSON DRUG/AUTO ACH ACH07227740 WEST WICHITA FAM PHCY", amountCents: cents, key: "k" });
+  const line = (cents: number) => ({ on: "2026-09-07", description: "MCKESSON DRUG/AUTO ACH ACH00000001 WEST WICHITA FAM PHCY", amountCents: cents, key: "k" });
 
   test("the debit names every invoice it covers", () => {
     const p = placeLine(line(-1_396_634), ctx);
     assert.equal(p.kind, "settles_ach");
     if (p.kind !== "settles_ach") return;
-    assert.equal(p.reference, "CKACH07227740");
-    assert.deepEqual(p.invoices, ["7656141694", "7656141698"]);
+    assert.equal(p.reference, "CKACH00000001");
+    assert.deepEqual(p.invoices, ["7000000001", "7000000002"]);
     /* The invoice not yet taken is not in it. */
-    assert.ok(!p.invoices.includes("7657345034"));
+    assert.ok(!p.invoices.includes("7000000003"));
     assert.match(p.why, /comes to exactly this debit/);
   });
 
@@ -186,7 +186,7 @@ describe("the PSAO, and the drugs sold to the practice", () => {
   });
 
   test("the PSAO taking money back reduces revenue rather than adding a cost", () => {
-    const m = readBankDescriptor("PROVIDERPAY/AUTO SHA ACH ACHO72O4662 WEST WICHITA FAMILY PH", -63_558);
+    const m = readBankDescriptor("PROVIDERPAY/AUTO SHA ACH ACHOOOOOOO5 WEST WICHITA FAMILY PH", -63_558);
     assert.equal(m.kind, "psao_recoupment");
     assert.equal(m.lands, "revenue");
   });
@@ -280,7 +280,7 @@ describe("naming a cheque by what it is for", () => {
   });
 
   test("a line that is not a cheque is left to the ordinary rules", () => {
-    const p = placeLine({ on: "2026-09-18", description: "MCKESSON DRUG/AUTO ACH ACH07227740", amountCents: -262_544, key: "x" }, ctx);
+    const p = placeLine({ on: "2026-09-18", description: "MCKESSON DRUG/AUTO ACH ACH00000001", amountCents: -262_544, key: "x" }, ctx);
     assert.notEqual(p.kind, "confirms_standing");
   });
 });

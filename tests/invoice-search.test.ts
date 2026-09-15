@@ -7,7 +7,7 @@ import { matchesText } from "../src/lib/invoices";
  *
  * Filing them correctly is what the regulation asks for; finding them is what makes anybody use
  * the system between inspections. The questions people actually have are "when did we last buy
- * oxycodone", "what did McKesson send in March", and "where is 7656147109" — and an archive that
+ * oxycodone", "what did McKesson send in March", and "where is 7000000011" — and an archive that
  * only knows the number on the front of each document can answer one of those three.
  */
 const invoice = {

@@ -9,21 +9,21 @@ import { cashCostOfGoods, cashPortionsOf, countedTwiceInCash, type SettledLine }
  * the month, because it was counting invoice dates and calling that cash.
  */
 const settled: SettledLine[] = [
-  { supplier: "Mckesson", invoiceNumber: "7656141694", netCents: 6_388, clearingDate: "2026-09-07", checkNumber: "CKACH07227740" },
-  { supplier: "Mckesson", invoiceNumber: "7656141698", netCents: 1_390_246, clearingDate: "2026-09-07", checkNumber: "CKACH07227740" },
+  { supplier: "Mckesson", invoiceNumber: "7000000001", netCents: 6_388, clearingDate: "2026-09-07", checkNumber: "CKACH00000001" },
+  { supplier: "Mckesson", invoiceNumber: "7000000002", netCents: 1_390_246, clearingDate: "2026-09-07", checkNumber: "CKACH00000001" },
   /* Billed, due on the 15th, and still sitting in the bank. */
-  { supplier: "Mckesson", invoiceNumber: "7657345034", netCents: 2_211_856, clearingDate: null, checkNumber: null },
+  { supplier: "Mckesson", invoiceNumber: "7000000003", netCents: 2_211_856, clearingDate: null, checkNumber: null },
 ];
 
 const invoices = [
   /* McKesson's own invoices must never be added on top of their statement. */
-  { supplier: "Mckesson", invoiceNumber: "7657345034", invoiceDate: "2026-09-11", totalCents: 2_211_856 },
+  { supplier: "Mckesson", invoiceNumber: "7000000003", invoiceDate: "2026-09-11", totalCents: 2_211_856 },
   { supplier: "IPC", invoiceNumber: "11497543", invoiceDate: "2026-09-10", totalCents: 21_639 },
 ];
 
 const receiving = [
   /* A McKesson delivery whose invoice never arrived by email. The statement has it; this must not. */
-  { supplier: "McKesson", invoiceNumber: "7656519321", invoiceDate: "2026-09-08", totalCents: 858_988 },
+  { supplier: "McKesson", invoiceNumber: "7000000004", invoiceDate: "2026-09-08", totalCents: 858_988 },
   /* An IPD delivery with no invoice, from a supplier nobody sends a statement for. */
   { supplier: "IPD", invoiceNumber: "99001", invoiceDate: "2026-09-05", totalCents: 50_000 },
 ];
@@ -67,7 +67,7 @@ describe("cash cost of goods, once the wholesaler's own ledger arrives", () => {
   });
 
   test("the sentence names the ACH, so a bank line can be found by it", () => {
-    assert.match(r.says, /CKACH07227740 on 2026-09-07 covering 2 invoices/);
+    assert.match(r.says, /CKACH00000001 on 2026-09-07 covering 2 invoices/);
     assert.match(r.says, /IPC, whose payments this site cannot see/);
   });
 
@@ -99,9 +99,9 @@ describe("nothing reaches the cash figure twice", () => {
     /* If the coverage rule were ever removed, this is what it would look like. */
     const leak = countedTwiceInCash({
       month: "2026-09",
-      settled: [{ supplier: "Mckesson", invoiceNumber: "7656141694", netCents: 6_388, clearingDate: "2026-09-07", checkNumber: "CK1" }],
+      settled: [{ supplier: "Mckesson", invoiceNumber: "7000000001", netCents: 6_388, clearingDate: "2026-09-07", checkNumber: "CK1" }],
       /* Same invoice, same supplier, but spelled as an uncovered one so it slips into the second bucket. */
-      invoices: [{ supplier: "Mckesson Drug Co", invoiceNumber: "7656141694", invoiceDate: "2026-09-04", totalCents: 6_388 }],
+      invoices: [{ supplier: "Mckesson Drug Co", invoiceNumber: "7000000001", invoiceDate: "2026-09-04", totalCents: 6_388 }],
       receiving: [],
     });
     assert.equal(leak.length, 1);
