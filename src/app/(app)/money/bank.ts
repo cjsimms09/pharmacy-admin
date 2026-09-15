@@ -17,6 +17,8 @@ import { parseCents } from "@/lib/money";
 import { addCashReceipt, categories, saveExpense, seedCategories, unpaid, vendors } from "@/lib/expenses";
 import { allSuppliers } from "@/lib/suppliers-registry";
 import { CARD_STATEMENT_BILL } from "@/lib/card-statement";
+import { readBankDescriptor } from "@/lib/bank-descriptors";
+import { paymentFromBankDebit } from "@/lib/supplier-payments";
 
 /** The two systems spell one wholesaler several ways; compared with the noise removed, as cash-cogs.ts does. */
 const fold = (s: string | null | undefined) => (s ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -241,7 +243,10 @@ async function placeStatementLines(
     }
     fresh.push(l);
   }
-  const placed = placeLines(fresh, await matchContext());
+  const ctx = await matchContext();
+  const placed = placeLines(fresh, ctx);
+  /* The pharmacy's own account number with each supplier, which is how two wholesalers of the same name are told apart. */
+  const supplierAccounts = Object.fromEntries(ctx.suppliers.map((s) => [s.name, s.accountNumber ?? null]));
 
   /*
    * The receipts already banked for the statement's dates, so a deposit line confirms one instead of
@@ -362,8 +367,30 @@ async function placeStatementLines(
       invoices += open.length;
       why = `${placement.why} ${open.length} of the ${placement.invoices.length} invoices were on file and are marked paid ${line.on}.`;
     } else {
-      if (placement.kind === "settles_ach" || placement.kind === "facilitator_unmatched" || placement.kind === "rebate_part") placedAs = "unplaced";
-      unplaced++;
+      /*
+       * A debit to a wholesaler with no payment on file, offered to the invoices' own due dates.
+       *
+       * Parmed takes one ACH for a fortnight of invoices, so no invoice equals the debit and this line could only ever
+       * sit unplaced. The invoices print the day they are due (invoice-due-date.ts) and the bank prints the money, so
+       * where the invoices due that day come to the debit exactly, `paymentFromBankDebit` writes the payment with its
+       * allocations and this line confirms it. Where they do not, it writes nothing and says what it saw: the supplier's
+       * own payment page settles it. A supplier whose ledger the site reads is refused there, because that ledger
+       * already says what each ACH covered.
+       */
+      const meaning = placement.kind === "unplaced" && line.amountCents < 0 ? readBankDescriptor(line.description, line.amountCents, { supplierAccounts }) : null;
+      const supplierPaid = meaning && (meaning.kind === "wholesaler_payment" || meaning.kind === "wholesaler_ach") ? meaning.counterparty : null;
+      const made = supplierPaid
+        ? await paymentFromBankDebit({ supplier: supplierPaid, on: line.on, amountCents: -line.amountCents, bankLineKey: line.key, reference: meaning?.matchTo?.reference ?? null }, { name: user.name, id: user.id })
+        : null;
+      if (made?.ok) {
+        placedAs = "already_counted";
+        why = made.says;
+        invoices++;
+      } else {
+        if (placement.kind === "settles_ach" || placement.kind === "facilitator_unmatched" || placement.kind === "rebate_part") placedAs = "unplaced";
+        if (made && !made.ok) why = `${why} ${made.why}.`;
+        unplaced++;
+      }
     }
     await db.insert(schema.bankLines).values({
       id: newId(),
