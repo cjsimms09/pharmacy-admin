@@ -71,11 +71,22 @@ export function chooseClaimForRemittance(candidates: ClaimCandidate[], line: Rem
    * the day it was billed, the claim the day it was filled. Insisting on every field at once threw
    * those away as unmatched, and money sitting against nothing is money nobody chases.
    */
+  /*
+   * Never a different fill. The two loosest levels used to ignore the date altogether, so a payment for April's fill of a
+   * monthly prescription attached itself to September's refill whenever April's claim was not on the site — 709 payments,
+   * $65,829.59, received before the claim they settled had even been filled (measured 15 September). A refill is a
+   * different claim. A day or three either way is the memo counting the day it was billed; a month is another fill.
+   */
+  const nearDate = (r: ClaimCandidate) => {
+    if (line.dateFilled === null) return true;
+    const gap = Math.abs(Date.parse(`${r.dateFilled}T00:00:00Z`) - Date.parse(`${line.dateFilled}T00:00:00Z`));
+    return Number.isFinite(gap) && gap <= 3 * 86_400_000;
+  };
   const levels: ((r: ClaimCandidate) => boolean)[] = [
     (r) => (line.fillNumber === null || r.fillNumber === line.fillNumber) && (line.dateFilled === null || r.dateFilled === line.dateFilled) && (line.ndc11 === null || r.ndc11 === line.ndc11),
     (r) => (line.dateFilled === null || r.dateFilled === line.dateFilled) && (line.ndc11 === null || r.ndc11 === line.ndc11),
-    (r) => line.ndc11 === null || r.ndc11 === line.ndc11,
-    () => true,
+    (r) => nearDate(r) && (line.ndc11 === null || r.ndc11 === line.ndc11),
+    (r) => nearDate(r),
   ];
 
   for (const fits of levels) {

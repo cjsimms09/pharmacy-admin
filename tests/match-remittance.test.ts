@@ -108,3 +108,15 @@ describe("three payers", () => {
     assert.equal(chooseClaimForRemittance([primary, secondary, third], { ...line, bin: "610455", amountCents: 6_000 }).claim?.id, "primary");
   });
 });
+
+describe("a payment never settles a different fill of the same prescription", () => {
+  const claim = (id: string, dateFilled: string) => ({ id, fillNumber: null, dateFilled, ndc11: "00000000001", bin: "610011", remitCents: 1_000 });
+  test("REGRESSION: April's payment does not attach to September's refill when April's claim is not on file", () => {
+    const c = chooseClaimForRemittance([claim("sep", "2026-09-10")], { fillNumber: null, dateFilled: "2026-04-10", ndc11: "00000000001", amountCents: 1_000, bin: "610011" });
+    assert.equal(c.claim, null);
+  });
+  test("a remittance a day or two off the fill date still finds its claim", () => {
+    const c = chooseClaimForRemittance([claim("sep", "2026-09-10")], { fillNumber: null, dateFilled: "2026-09-11", ndc11: null, amountCents: 1_000, bin: null });
+    assert.equal(c.claim?.id, "sep");
+  });
+});
