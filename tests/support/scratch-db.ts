@@ -18,15 +18,25 @@ import { migrate } from "drizzle-orm/libsql/migrator";
  * So each takes a scratch file, migrated from the same folder the real database is, and removes it
  * afterwards. `DATABASE_PATH` is read when `src/db` is first imported, so this has to run before
  * that import — every caller uses a dynamic import inside the hook for exactly that reason.
+ *
+ * Copied from the suite's own migrated database where there is one (`scripts/test.mjs` migrates one before the run and
+ * names it in `PHARMACY_TEST_TEMPLATE_DB`). Four test files migrating 124 migrations at once, each against its own new
+ * file, is what made whole files fail and pass again alone — two different files on two runs of 15 September. A copy is
+ * one file operation and cannot race. The migrator stays as the fallback, so a file run on its own still works.
  */
 export async function useScratchDb(): Promise<() => void> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pharmacy-admin-test-"));
   const file = path.join(dir, "test.db");
   process.env.DATABASE_PATH = file;
 
-  const client = createClient({ url: `file:${file}` });
-  await migrate(drizzle(client), { migrationsFolder: "./drizzle" });
-  client.close();
+  const template = process.env.PHARMACY_TEST_TEMPLATE_DB;
+  if (template && fs.existsSync(template)) {
+    fs.copyFileSync(template, file);
+  } else {
+    const client = createClient({ url: `file:${file}` });
+    await migrate(drizzle(client), { migrationsFolder: "./drizzle" });
+    client.close();
+  }
 
   return () => {
     try {

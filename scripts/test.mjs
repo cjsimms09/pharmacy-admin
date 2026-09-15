@@ -18,7 +18,12 @@ import os from "node:os";
 import path from "node:path";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pharmacy-admin-suite-"));
-const env = { ...process.env, DATABASE_PATH: path.join(dir, "suite.db") };
+const suiteDb = path.join(dir, "suite.db");
+/*
+ * The same migrated file is also the template every test that wants its own database copies (tests/support/scratch-db.ts).
+ * Four of them running the migrator at once is what made whole files fail and pass again when run alone.
+ */
+const env = { ...process.env, DATABASE_PATH: suiteDb, PHARMACY_TEST_TEMPLATE_DB: suiteDb };
 const tsx = path.join("node_modules", "tsx", "dist", "cli.mjs");
 
 let status = 1;
