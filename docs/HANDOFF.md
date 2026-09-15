@@ -8,6 +8,13 @@ file is how they talk.
 
 ## Open items
 
+### From 1 — 15 September, before the edit: `money/bank.ts` (A's), `bank-statement.ts` — the Stamps.com El Segundo charge books itself as postage
+
+**Written before touching bank.ts.** The owner: the $40.99 "Stamps.com El Segundo CA" charge "is mailing". No confirmation
+email comes for it, so the bank line is its only door. `placeLine`: a Stamps.com debit naming El Segundo with no postage bill
+places as a new kind `books_bill` (category Postage and shipping); `bank.ts` saves that bill dated and paid on the bank date,
+keyed `BANK|<line key>` so a statement read twice books it once. The $100 WASHINGTON DC top-ups keep needing their confirmation.
+
 ### From 1 — 15 September, before the edit: `expense-categories.ts`, `profit-and-loss.ts` (A's) — a "PSAO fees" offset, and DIR "missing" asks about DIR only
 
 **Written before touching A's files.** Session 2's AccessHealth origination fees (approved as a revenue offset like DIR)
