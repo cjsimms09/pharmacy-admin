@@ -235,6 +235,17 @@ So, before shipping a screen:
   a slot that has ever been applied is burned. Always take a fresh one.**
 - `npx tsc --noEmit -p tsconfig.json` and `npm test` before every commit. Tests are the thing that
   has caught the most real bugs here, including in work done the same hour.
+- **Read the test result before pushing, never in the same command.** On 15 September a push ran in
+  the same line as `npm test`, and went out on a failure nobody had read yet.
+- **`npm test` runs four files at a time, on purpose.** This machine has 7.4 GB and, with the site
+  running, under 1 GB free; the runner's default of one per core (seven) ran it out of memory and a
+  heavy test file — `pioneer-sql.test.ts`, which loads the SQL Server driver — was killed mid-run
+  and reported as a failure with no error text. It passed alone, in pairs, and at four at a time, in
+  the same fifty seconds. A gate that fails at random teaches everyone to ignore red, which is how a
+  real failure gets pushed. Do not raise the number without measuring free memory first.
+- **Deploying:** the `netstat` check must decide, not print. A line that says "nobody on it"
+  whatever it found was read instead of the two live connections above it, and the site was taken
+  down while he was in it.
 
 ## What to tell him
 
