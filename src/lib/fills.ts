@@ -104,6 +104,8 @@ export type FillPayer = {
   remitCents: number;
   /** The part of `remitCents` a manufacturer voucher pays, not the plan. Nought where there is none. */
   evoucherCents: number;
+  /** The claim row this payer's figures come from: what a payment matched to it settles (payer-owed.ts). */
+  claimId?: string;
   /** What the patient was left owing after this payer adjudicated. */
   copayCents: number;
 };
@@ -381,6 +383,7 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
       name: r.pbmName ?? r.payerLabel,
       remitCents: r.remitCents ?? 0,
       evoucherCents: r.evoucherCents ?? 0,
+      claimId: r.id,
       /*
        * The patient's residual, from the column that actually carries it.
        *

@@ -106,6 +106,8 @@ export async function owedRows(range?: { from?: string; to?: string }): Promise<
         name: p.name ?? null,
         dateFilled: f.dateFilled,
         cents: planCents,
+        claimId: p.claimId ?? null,
+        portion: "primary",
         /*
          * Asked of the plan register rather than taken off the fill. `Fill.cashPlan` is true when
          * the whole fill was cash-priced; a coordinated fill can carry one cash plan and one that
@@ -114,7 +116,7 @@ export async function owedRows(range?: { from?: string; to?: string }): Promise<
         cashPlan: cashPlanFor(p.bin, p.pcn, plans) !== null,
       });
       if (voucherCents > 0) {
-        receivables.push({ bin: null, name: voucherProgrammeFor(p.bin), dateFilled: f.dateFilled, cents: voucherCents, cashPlan: false });
+        receivables.push({ bin: null, name: voucherProgrammeFor(p.bin), dateFilled: f.dateFilled, cents: voucherCents, cashPlan: false, claimId: p.claimId ?? null, portion: "secondary" });
       }
     }
   }
@@ -125,8 +127,10 @@ export async function owedRows(range?: { from?: string; to?: string }): Promise<
      * the same claim settles the plan, as before. On a claim with no voucher, nothing changes.
      */
     ...(p.source === "copay_card" && (p.claimVoucher ?? 0) > 0
-      ? { bin: null, payer: voucherProgrammeFor(p.claimBin) }
-      : { bin: p.claimBin, payer: p.claimPayer ?? p.payer }),
+      ? { bin: null, payer: voucherProgrammeFor(p.claimBin), portion: "secondary" as const }
+      : { bin: p.claimBin, payer: p.claimPayer ?? p.payer, portion: "primary" as const }),
+    /* The claim it settled: a payment settles that claim's own share and no other (payer-owed.ts). */
+    claimId: p.claimId,
     cents: p.amountCents,
     receivedOn: p.receivedOn,
     /*

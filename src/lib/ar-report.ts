@@ -1,7 +1,7 @@
 import { SITE_STARTS_ON, isOutOfBooks, monthIsOutOfBooks } from "./books-start";
 import { daysBetween, pad } from "./dates";
 import { formatCents } from "./money";
-import { payerKey, type OwedSummary, type PayerLine, type Receivable, type Received } from "./payer-owed";
+import { payerKey, type FeeOwed, type OwedSummary, type PayerLine, type Receivable, type Received } from "./payer-owed";
 
 /**
  * A month's accounts receivable, as at the last day of it.
@@ -204,8 +204,31 @@ export type Ageing = {
  * the band of the fill it came from. Everything else goes to `unagedCents`. On the day this was
  * written that is every payer on the list, because no payer 835 has ever reached this pharmacy.
  */
-export function ageOutstanding(receivables: Receivable[], lines: PayerLine[], asAt: string): Ageing {
+export function ageOutstanding(receivables: Receivable[], linesOrSummary: PayerLine[] | OwedSummary, asAt: string): Ageing {
   const bands: Record<AgeBand, number> = { "0-30": 0, "31-60": 0, "61-90": 0, "91+": 0 };
+  if (!Array.isArray(linesOrSummary)) {
+    /*
+     * Claim by claim, which is what the claim ids make exact. Each share's outstanding is its own billed less what was
+     * matched to that same claim and part, so it sits in the band of its own fill; a payer that has part-paid is aged
+     * as precisely as one that has paid nothing. Only shares with no claim id, from a payer that has sent something,
+     * are left unaged — nothing then says which of its claims the money covered.
+     */
+    const summary = linesOrSummary;
+    const cash = new Set(summary.lines.filter((l) => l.state === "cashPlan").map((l) => l.key));
+    for (const c of summary.claimBalances) {
+      if (cash.has(c.payerKey) || c.outstandingCents <= 0) continue;
+      bands[ageBandOf(c.dateFilled, asAt)] += c.outstandingCents;
+    }
+    const unagedKeys = new Set(summary.unaged.map((u) => u.payerKey));
+    for (const r of receivables) {
+      const k = payerKey(r.bin, r.name);
+      if (r.claimId || r.cents <= 0 || cash.has(k) || unagedKeys.has(k)) continue;
+      bands[ageBandOf(r.dateFilled, asAt)] += r.cents;
+    }
+    const unaged = summary.unaged.filter((u) => !cash.has(u.payerKey));
+    return { bands, unagedCents: unaged.reduce((n, u) => n + u.cents, 0), unagedPayers: unaged.length };
+  }
+  const lines = linesOrSummary;
   const ageable = new Set(
     lines.filter((l) => l.state !== "cashPlan" && l.outstandingCents > 0 && l.receivedCents === 0).map((l) => l.key),
   );
@@ -247,6 +270,9 @@ export type ArReport = {
   outstandingCents: number;
   ageing: Ageing;
   unattached: { count: number; cents: number };
+  /** Fees networks charge the pharmacy (negative remits): owed by it, in no figure above. */
+  feesOwed: FeeOwed[];
+  feesOwedCents: number;
   nothingHasArrived: boolean;
   says: string;
 };
@@ -285,6 +311,8 @@ export function arReport(
     outstandingCents,
     ageing: { bands: { "0-30": 0, "31-60": 0, "61-90": 0, "91+": 0 }, unagedCents: 0, unagedPayers: 0 },
     unattached: summary.unattached,
+    feesOwed: summary.feesOwed ?? [],
+    feesOwedCents: (summary.feesOwed ?? []).reduce((n, f) => n + f.cents, 0),
     nothingHasArrived: summary.nothingHasArrived,
     says: "",
   };
@@ -352,12 +380,23 @@ export function arReportText(r: ArReport, pharmacy: string): string {
   if (r.ageing.unagedCents > 0) {
     out.push(
       `  ${"Cannot be aged".padEnd(24)} ${formatCents(r.ageing.unagedCents)}`,
-      `      ${r.ageing.unagedPayers} payer${r.ageing.unagedPayers === 1 ? " has" : "s have"} part-paid. What arrived is summed against the payer`,
-      "      rather than matched to particular claims, so nothing on file says which of its",
-      "      prescriptions the money covered. The balance is real; the age of it is not knowable.",
+      `      ${r.ageing.unagedPayers} payer${r.ageing.unagedPayers === 1 ? " has" : "s have"} part-paid on claims this site could not tie a payment to,`,
+      "      so nothing on file says which of those prescriptions the money covered. The balance is",
+      "      real; the age of it is not knowable.",
     );
   }
   out.push("");
+
+  if (r.feesOwed.length > 0) {
+    out.push(...rule("FEES OWED BY THE PHARMACY"));
+    out.push(
+      `  ${formatCents(r.feesOwedCents)} across ${r.feesOwed.reduce((n, f) => n + f.claims, 0)} claim${r.feesOwed.reduce((n, f) => n + f.claims, 0) === 1 ? "" : "s"}: discount networks charging the pharmacy for the claim`,
+      "  (a negative remit). Owed by the pharmacy, not to it, so in none of the figures above and",
+      "  never set against another claim:",
+    );
+    for (const f of r.feesOwed) out.push(`    ${f.name}${f.bin ? ` (BIN ${f.bin})` : ""} · ${f.claims} claim${f.claims === 1 ? "" : "s"} · ${formatCents(f.cents)}`);
+    out.push("");
+  }
 
   if (r.cashPlans.length > 0) {
     out.push(...rule("NOT RECEIVABLES"));
@@ -421,6 +460,9 @@ export function arReportCsv(r: ArReport): string {
     );
   }
   rows.push(["Total", "", r.lines.reduce((n, l) => n + l.claims, 0), dollars(r.billedCents), dollars(r.receivedCents), dollars(r.outstandingCents), "", "", cell(`As at ${r.asAt}`)].join(","));
+  for (const f of r.feesOwed) {
+    rows.push([cell(`${f.name} — fee owed by the pharmacy`), cell(f.bin ?? ""), f.claims, "", "", dollars(-f.cents), "", "", cell("A network's charge (negative remit): not a receivable, not in the total")].join(","));
+  }
   return rows.join("\r\n") + "\r\n";
 }
 

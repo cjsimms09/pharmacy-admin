@@ -320,11 +320,11 @@ export default async function ArReportPage({
                       <td>
                         Cannot be aged
                         <div className="mt-0.5 max-w-xl text-xs leading-snug text-ink-3">
-                          {r.ageing.unagedPayers} payer{r.ageing.unagedPayers === 1 ? " has" : "s have"} part-paid. What
-                          arrived is summed against the payer rather than matched to particular claims, so nothing on
-                          file says which of its prescriptions the money covered. The balance is real; the age of it is
-                          not something this pharmacy knows, and a column that guessed would be worse than one that
-                          says so.
+                          {r.ageing.unagedPayers} payer{r.ageing.unagedPayers === 1 ? " has" : "s have"} part-paid on
+                          claims no payment could be tied to, so nothing on file says which of those prescriptions the
+                          money covered. Every other balance above is aged claim by claim. The balance is real; the age
+                          of it is not something this pharmacy knows, and a column that guessed would be worse than one
+                          that says so.
                         </div>
                       </td>
                       <td className="text-right tabular-nums">{formatCents(r.ageing.unagedCents)}</td>
@@ -346,6 +346,26 @@ export default async function ArReportPage({
                 out in silence: a figure that quietly differs between two documents is discovered later and assumed to
                 be a fault.
               </p>
+            </Card>
+          )}
+
+          {r.feesOwed.length > 0 && (
+            <Card title="Fees owed by the pharmacy" className="mt-4 print-block">
+              <p className="text-sm leading-relaxed text-ink-2">
+                <span className="font-medium text-ink">{formatCents(r.feesOwedCents)}</span> across{" "}
+                {r.feesOwed.reduce((n, f) => n + f.claims, 0)} claims: discount networks charging the pharmacy for the
+                claim, which arrives as a negative remit. It is owed by the pharmacy, not to it, so it is in none of the
+                figures above and is never set against another claim&apos;s balance.
+              </p>
+              <ul className="mt-2 text-sm text-ink-2">
+                {r.feesOwed.map((f) => (
+                  <li key={f.key}>
+                    {f.name}
+                    {f.bin ? ` (BIN ${f.bin})` : ""} · {f.claims} claim{f.claims === 1 ? "" : "s"} ·{" "}
+                    <span className="tabular-nums">{formatCents(f.cents)}</span>
+                  </li>
+                ))}
+              </ul>
             </Card>
           )}
 
