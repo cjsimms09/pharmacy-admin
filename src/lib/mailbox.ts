@@ -1022,6 +1022,11 @@ export async function importRecognised(
       } else {
         routeResult = `Recognised as a payer payment report but nothing was banked: ${r.why}`;
       }
+    } else if (cls.kind === "sales_by_payment") {
+      const { fileSalesByPayment } = await import("./sales-by-payment-store");
+      const r = await fileSalesByPayment({ text: buf.toString("utf8"), documentId: filed?.documentId ?? null }, { userName: ctx.userName ?? "mailbox-sweep" });
+      routeResult = r.refused ? `Held, nothing stored: ${r.says}` : r.says;
+      imported = r.stored;
     } else if (cls.kind === "accrual_sales") {
       /*
        * Recognised, kept, and honestly described as not yet counted.
